@@ -1,0 +1,3 @@
+# Names in this project are long on purpose (they are spelled out in full), so lines may be longer
+# than rustfmt's default of 100 columns.
+max_width = 120

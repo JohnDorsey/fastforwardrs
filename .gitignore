@@ -1,0 +1,26 @@
+# Build output. (Cargo.lock is kept: this is a program, not a library, so everyone builds with the same versions.)
+/target/
+
+# Pictures the opt-in screenshot tests write, and any videos or projects made while trying the program out
+/screenshots/
+*.exporting.*
+
+# Rust tooling
+**/*.rs.bk
+*.pdb
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code: personal settings stay out of the repository (shared ones in .claude/settings.json do not)
+.claude/settings.local.json
