@@ -121,6 +121,22 @@ impl VideoTrack {
         (0..self.clips.len()).filter_map(|clip_index| self.placement_of_clip(clip_index))
     }
 
+    /// The clips as they are from `timeline_frame` on: the clip that frame is in, cut so that it
+    /// starts there (at its own speed, so its frames are exactly the ones that follow), then every
+    /// clip after it. Empty if there is no such frame.
+    pub fn clips_from(&self, timeline_frame: TimelineFrameIndex) -> Vec<Clip> {
+        let Some(location) = self.locate(timeline_frame) else {
+            return Vec::new();
+        };
+        let clip_in_which_it_is = self.clips[location.clip_index];
+        let rest_of_that_clip = clip_in_which_it_is
+            .split_before_source_frame(location.source_frame)
+            .map_or(clip_in_which_it_is, |(_before, from_the_frame_on)| from_the_frame_on);
+        let mut clips = vec![rest_of_that_clip];
+        clips.extend_from_slice(&self.clips[location.clip_index + 1..]);
+        clips
+    }
+
     /// What is shown at `timeline_frame`, or `None` if that is past the end of the timeline.
     pub fn locate(&self, timeline_frame: TimelineFrameIndex) -> Option<TimelineLocation> {
         if timeline_frame.value() >= self.total_frame_count {
@@ -228,6 +244,19 @@ mod tests {
         .unwrap()
     }
 
+    fn described_clips(clips: &[Clip]) -> Vec<(u64, u64, u32)> {
+        clips
+            .iter()
+            .map(|clip| {
+                (
+                    clip.first_source_frame().value(),
+                    clip.end_source_frame().value(),
+                    clip.speed_factor().value(),
+                )
+            })
+            .collect()
+    }
+
     fn described(track: &VideoTrack) -> Vec<(u64, u64, u32)> {
         track
             .clips()
@@ -240,6 +269,75 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn the_clips_from_the_first_frame_are_all_of_them() {
+        let track = VideoTrack::new(vec![clip(0, 100, 1), clip(100, 400, 3), clip(400, 450, 1)]);
+        assert_eq!(track.clips_from(timeline_frame(0)), track.clips());
+    }
+
+    #[test]
+    fn the_clips_from_the_first_frame_of_a_clip_start_with_that_clip_whole() {
+        let track = VideoTrack::new(vec![clip(0, 100, 1), clip(100, 400, 3), clip(400, 450, 1)]);
+        // Clip 1 starts at timeline frame 100 (clip 0 is 100 frames long).
+        assert_eq!(
+            described_clips(&track.clips_from(timeline_frame(100))),
+            vec![(100, 400, 3), (400, 450, 1)]
+        );
+    }
+
+    #[test]
+    fn the_clips_from_the_middle_of_a_clip_start_with_the_rest_of_it_at_the_same_speed() {
+        let track = VideoTrack::new(vec![clip(0, 100, 1), clip(100, 400, 3), clip(400, 450, 1)]);
+        // Timeline frame 130 is 30 frames into clip 1, whose frames show source frames 100, 103, ...,
+        // so source frame 190. The rest of the clip is source frames 190 up to 400.
+        assert_eq!(
+            described_clips(&track.clips_from(timeline_frame(130))),
+            vec![(190, 400, 3), (400, 450, 1)]
+        );
+        // And the same inside a normal speed clip.
+        assert_eq!(
+            described_clips(&track.clips_from(timeline_frame(40))),
+            vec![(40, 100, 1), (100, 400, 3), (400, 450, 1)]
+        );
+    }
+
+    #[test]
+    fn the_frames_from_a_position_on_are_exactly_the_timeline_from_there_on() {
+        let mut random = DeterministicRandomNumbers::with_seed(7);
+        for _ in 0..200 {
+            let mut clips = Vec::new();
+            let mut next_first = 0;
+            for _ in 0..(1 + random.next_below(6)) {
+                let length = 1 + random.next_below(300);
+                clips.push(clip(next_first, next_first + length, 1 + random.next_below(12) as u32));
+                next_first += length;
+            }
+            let track = VideoTrack::new(clips);
+            let from = random.next_below(track.total_frame_count());
+
+            let shown: Vec<u64> = track
+                .clips_from(timeline_frame(from))
+                .iter()
+                .flat_map(|clip| {
+                    (0..clip.timeline_frame_count())
+                        .map(|offset| clip.source_frame_at_timeline_offset(offset).unwrap().value())
+                })
+                .collect();
+            let expected: Vec<u64> = (from..track.total_frame_count())
+                .map(|frame| track.locate(timeline_frame(frame)).unwrap().source_frame.value())
+                .collect();
+            assert_eq!(shown, expected, "from timeline frame {from} of {:?}", described(&track));
+        }
+    }
+
+    #[test]
+    fn there_are_no_clips_from_a_position_past_the_end() {
+        let track = VideoTrack::new(vec![clip(0, 100, 1)]);
+        assert!(track.clips_from(timeline_frame(100)).is_empty());
+        assert!(track.clips_from(timeline_frame(5000)).is_empty());
+        assert!(VideoTrack::default().clips_from(timeline_frame(0)).is_empty());
     }
 
     #[test]

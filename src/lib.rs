@@ -8,6 +8,8 @@
 //!   been split into, the speed of each clip, and all of the timeline arithmetic. It is pure
 //!   logic with no file, process or user-interface code in it.
 //! * [`project_file`] saves and loads a project as pretty, human-readable JSON.
+//! * [`settings_file`] does the same for the global settings, in the operating system's folder
+//!   for programs' settings.
 //! * [`media`] runs the ffmpeg tools: probing videos, decoding preview frames, making timeline
 //!   thumbnails and exporting.
 //! * [`speed_indicator`] draws and positions the fast-forward symbol, for the preview and the
@@ -17,10 +19,12 @@
 #![forbid(unsafe_code)]
 
 pub mod application;
+mod atomic_file;
 pub mod media;
 pub mod playback;
 pub mod project;
 pub mod project_file;
+pub mod settings_file;
 pub mod speed_indicator;
 
 #[cfg(test)]

@@ -9,6 +9,8 @@
 
 #![allow(dead_code)] // Each test file uses a different part of this module.
 
+pub mod speakers;
+
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -127,6 +129,15 @@ impl Journey {
         }
     }
 
+    /// Goes on drawing frames, as a window that is open does, for `duration` of real time.
+    pub fn keep_drawing_for(&mut self, duration: Duration) {
+        let started = Instant::now();
+        while started.elapsed() < duration {
+            self.harness.step();
+            std::thread::sleep(Duration::from_millis(4));
+        }
+    }
+
     /// Draws a few frames, so that whatever the last action set going has been carried out.
     pub fn settle(&mut self) {
         self.harness.run_steps(3);
@@ -199,6 +210,17 @@ impl Journey {
             self.move_pointer_to(from + (to - from) * (step as f32 / steps as f32));
         }
         self.press_or_release(to, button, false);
+        self.settle();
+    }
+
+    /// Ticks (or unticks) a setting by its label in the global settings window, which is opened
+    /// from the Edit menu.
+    pub fn change_global_setting(&mut self, label: &str) {
+        self.harness.get_by_label("Edit").click();
+        self.settle();
+        self.harness.get_by_label("Global settings").click();
+        self.settle();
+        self.harness.get_by_label(label).click();
         self.settle();
     }
 

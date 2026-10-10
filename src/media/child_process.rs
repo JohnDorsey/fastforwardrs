@@ -1,8 +1,9 @@
 //! Small helpers shared by everything that runs ffmpeg or ffprobe.
 
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 /// On Windows, asks for a child process to be started without opening a console window.
@@ -27,6 +28,60 @@ pub(super) fn background_command(program: &Path) -> Command {
         command.creation_flags(WINDOWS_CREATE_NO_WINDOW_FLAG);
     }
     command
+}
+
+/// What a reading thread calls, once the tool's output has ended, to get what the tool said on its
+/// error stream (which is collected in the background while it runs).
+pub(super) type ErrorOutputWhenFinished = Box<dyn FnOnce() -> String + Send>;
+
+/// A tool running in the background whose standard output is read, as it arrives, by a thread of
+/// its own that turns it into events (decoded pictures, thumbnails, samples of sound...). The
+/// events wait in a channel of limited size: when it is full the reading thread waits, so the
+/// tool, which is much faster than playback, does not race ahead and use up the memory.
+///
+/// Dropping this stops the tool.
+pub(super) struct StreamingTool<Event> {
+    child: Child,
+    events: Receiver<Event>,
+}
+
+impl<Event: Send + 'static> StreamingTool<Event> {
+    /// Starts `command` with its standard output and error piped, and runs `read_events` on a new
+    /// thread. `read_events` is given the tool's output, the way to send events (up to
+    /// `buffered_event_count` can wait to be collected), and the way to get the tool's error output
+    /// at the end. It should end when the output does, or when sending fails (nobody wants more).
+    pub(super) fn start(
+        mut command: Command,
+        buffered_event_count: usize,
+        read_events: impl FnOnce(ChildStdout, SyncSender<Event>, ErrorOutputWhenFinished) + Send + 'static,
+    ) -> io::Result<Self> {
+        let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        let (Some(standard_output), Some(standard_error)) = (child.stdout.take(), child.stderr.take()) else {
+            let _ = child.kill();
+            return Err(io::Error::other("the program's pipes were not created"));
+        };
+        let (sender, events) = mpsc::sync_channel(buffered_event_count);
+        let error_output_collector = collect_error_output_in_background(standard_error);
+        thread::spawn(move || {
+            let error_output_when_finished: ErrorOutputWhenFinished =
+                Box::new(move || error_output_collector.join().unwrap_or_default());
+            read_events(standard_output, sender, error_output_when_finished);
+        });
+        Ok(Self { child, events })
+    }
+
+    /// The next event, if one is ready. Never waits.
+    pub(super) fn try_next_event(&self) -> Option<Event> {
+        self.events.try_recv().ok()
+    }
+}
+
+impl<Event> Drop for StreamingTool<Event> {
+    fn drop(&mut self) {
+        // Stopping the tool closes its output, which ends the reading thread.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 /// Reads a tool's error output in the background until it ends, keeping only the end of it, and

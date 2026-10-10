@@ -76,6 +76,8 @@ pub struct FilterGraphSpecification {
     pub picture_height_in_pixels: u32,
     /// Whether the source video has sound to cut up and speed up.
     pub source_has_audio: bool,
+    /// Whether the sound of sped-up clips is left out (replaced by silence of the same length).
+    pub mute_sped_up_clips: bool,
     /// For each speed factor that shows the symbol: where it goes. The symbol pictures are given
     /// to ffmpeg as inputs 1, 2, ... in the order of this map (input 0 is the source video).
     pub indicator_overlays: BTreeMap<SpeedFactor, IndicatorOverlay>,
@@ -90,12 +92,46 @@ pub struct FilterGraph {
     pub audio_output_label: Option<&'static str>,
 }
 
+/// What the graph of the sound alone is built from. This is for when only the sound is wanted,
+/// such as the live preview's; the export's graph has the very same sound in it.
+#[derive(Clone, Debug)]
+pub struct AudioGraphSpecification {
+    pub frame_rate: FrameRate,
+    pub clips: Vec<ClipToExport>,
+    /// Whether the sound of sped-up clips is left out (replaced by silence of the same length).
+    pub mute_sped_up_clips: bool,
+}
+
+/// A filter graph that makes only sound.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AudioGraph {
+    pub text: String,
+    pub output_label: &'static str,
+}
+
+/// Builds the filter graph of the sound alone. The source video (with its sound) is ffmpeg input 0.
+pub fn build_audio_graph(specification: &AudioGraphSpecification) -> AudioGraph {
+    AudioGraph {
+        text: audio_statements(
+            specification.frame_rate,
+            &specification.clips,
+            specification.mute_sped_up_clips,
+        )
+        .join(";"),
+        output_label: AUDIO_OUTPUT_LABEL,
+    }
+}
+
 /// Builds the filter graph. The source video is ffmpeg input 0; the symbol pictures follow as
 /// inputs 1, 2, ... in the order of `specification.indicator_overlays`.
 pub fn build_filter_graph(specification: &FilterGraphSpecification) -> FilterGraph {
     let mut statements = video_statements(specification);
     let audio_output_label = specification.source_has_audio.then(|| {
-        statements.extend(audio_statements(specification));
+        statements.extend(audio_statements(
+            specification.frame_rate,
+            &specification.clips,
+            specification.mute_sped_up_clips,
+        ));
         AUDIO_OUTPUT_LABEL
     });
     FilterGraph {
@@ -193,18 +229,20 @@ fn video_statements(specification: &FilterGraphSpecification) -> Vec<String> {
     statements
 }
 
-fn audio_statements(specification: &FilterGraphSpecification) -> Vec<String> {
-    let frame_rate = specification.frame_rate;
-    let clip_count = specification.clips.len();
+fn audio_statements(frame_rate: FrameRate, clips: &[ClipToExport], mute_sped_up_clips: bool) -> Vec<String> {
+    let clip_count = clips.len();
     let source_labels = numbered_labels("clip_source_audio", clip_count);
     let mut statements = vec![statement(&["0:a:0"], &format!("asplit={clip_count}"), &source_labels)];
 
     let mut finished_clip_labels = Vec::with_capacity(clip_count);
-    for (clip_number, clip) in specification.clips.iter().enumerate() {
+    for (clip_number, clip) in clips.iter().enumerate() {
         let (sound_start, sound_end) = audio_cut_times(frame_rate, clip);
         let exact_length = format_seconds(frame_rate.seconds_at_frame(clip.timeline_frame_count()));
         let mut filters = format!("atrim=start={sound_start}:end={sound_end},asetpts=PTS-STARTPTS");
-        if is_too_short_to_speed_up(frame_rate, clip) {
+        let wanted_silent = mute_sped_up_clips && clip.speed_factor.is_accelerated();
+        if wanted_silent || is_too_short_to_speed_up(frame_rate, clip) {
+            // Silence of the right length: the sound is made inaudible, and the padding and the
+            // cut below make it exactly as long as the clip's pictures.
             filters.push_str(",volume=0");
         } else {
             for tempo in audio_tempo_filters(clip.speed_factor) {
@@ -330,6 +368,7 @@ mod tests {
             picture_width_in_pixels: 320,
             picture_height_in_pixels: 180,
             source_has_audio,
+            mute_sped_up_clips: false,
             indicator_overlays: BTreeMap::new(),
         }
     }
@@ -466,6 +505,72 @@ mod tests {
             graph.contains("apad=whole_dur=0.100000000,atrim=end=0.100000000"),
             "{graph}"
         );
+    }
+
+    #[test]
+    fn muted_sped_up_clips_get_silence_of_the_same_length_and_the_others_keep_their_sound() {
+        let unmuted = build_filter_graph(&specification(vec![clip(0, 150, 1), clip(150, 330, 3)], true));
+        let mut muted_specification = specification(vec![clip(0, 150, 1), clip(150, 330, 3)], true);
+        muted_specification.mute_sped_up_clips = true;
+        let muted = build_filter_graph(&muted_specification);
+
+        let unmuted_sound = &statements_of(&unmuted)[5..];
+        let muted_sound = &statements_of(&muted)[5..];
+        assert_eq!(
+            muted_sound[..2],
+            unmuted_sound[..2],
+            "the normal speed clip is as it was"
+        );
+        assert_eq!(
+            muted_sound[2],
+            "[clip_source_audio_1]atrim=start=5.000000000:end=11.000000000,asetpts=PTS-STARTPTS,volume=0,apad=whole_dur=2.000000000,atrim=end=2.000000000,asetpts=PTS-STARTPTS[finished_sound_1]",
+            "the sped up clip is silent, and as long as its pictures"
+        );
+        assert_eq!(muted_sound[3], unmuted_sound[3], "and they are joined as before");
+        assert_eq!(
+            statements_of(&muted)[..5],
+            statements_of(&unmuted)[..5],
+            "the pictures are untouched"
+        );
+    }
+
+    #[test]
+    fn muting_changes_nothing_when_no_clip_is_sped_up() {
+        let clips = vec![clip(0, 150, 1), clip(150, 300, 1)];
+        let mut muted_specification = specification(clips.clone(), true);
+        muted_specification.mute_sped_up_clips = true;
+        assert_eq!(
+            build_filter_graph(&muted_specification),
+            build_filter_graph(&specification(clips, true))
+        );
+    }
+
+    #[test]
+    fn the_sound_graph_on_its_own_is_exactly_the_sound_part_of_the_whole_graph() {
+        for mute_sped_up_clips in [false, true] {
+            let clips = vec![
+                clip(0, 150, 1),
+                clip(150, 330, 3),
+                clip(330, 331, 40),
+                clip(331, 600, 1),
+            ];
+            let mut whole = specification(clips.clone(), true);
+            whole.mute_sped_up_clips = mute_sped_up_clips;
+            let whole_graph = build_filter_graph(&whole);
+            // The pictures take a statement to resample and split, one for each clip, and two to
+            // join and renumber; all the rest is sound.
+            let video_statement_count = 1 + clips.len() + 2;
+            let whole_sound = statements_of(&whole_graph)[video_statement_count..].join(";");
+
+            let sound_only = build_audio_graph(&AudioGraphSpecification {
+                frame_rate: whole.frame_rate,
+                clips,
+                mute_sped_up_clips,
+            });
+
+            assert_eq!(sound_only.text, whole_sound, "muted: {mute_sped_up_clips}");
+            assert_eq!(Some(sound_only.output_label), whole_graph.audio_output_label);
+        }
     }
 
     #[test]

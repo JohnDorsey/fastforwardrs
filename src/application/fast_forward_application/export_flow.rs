@@ -54,7 +54,7 @@ impl FastForwardApplication {
         let Some(toolchain) = self.toolchain.clone() else {
             return;
         };
-        let plan = match plan_export(&self.project) {
+        let plan = match plan_export(&self.project, self.effective_settings()) {
             Ok(plan) => plan,
             Err(error) => {
                 self.show_message("There is nothing to export", error.to_string());

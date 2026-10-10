@@ -7,33 +7,16 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::media::export::{ExportError, ExportEvent, ExportResult, VideoExport, plan_export};
-use fastforwardrs::media::{FfmpegToolchain, probe_video};
-use fastforwardrs::project::{
-    Project, SourceVideo, SourceVideoIdentifier, SourceVideoLink, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex,
-};
+use fastforwardrs::project::{Project, Settings, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
 use fastforwardrs::speed_indicator::indicator_for_frame;
 use support::{
-    RandomNumbers, TestVideo, TestVideoSpecification, counter_video, decode_video, expected_source_frames,
-    scratch_directory, stream_durations, test_video,
+    RandomNumbers, TestVideo, TestVideoSpecification, counter_video, decode_video, decoded_sound, edited,
+    expected_source_frames, loudness, project_for, scratch_directory, stream_durations, test_video,
 };
 
 const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(180);
-
-/// A project made from `video`, as the editor would make it when the video is imported.
-fn project_for(toolchain: &FfmpegToolchain, video: &TestVideo) -> Project {
-    let mut project = Project::empty();
-    project
-        .import_source_video(SourceVideo {
-            identifier: SourceVideoIdentifier::new(1),
-            link: SourceVideoLink::from_absolute_path(video.path.clone()),
-            properties: probe_video(toolchain, &video.path).expect("the test video can be probed"),
-        })
-        .unwrap();
-    // Keep the symbol clear of the frame number strip along the top of the test pictures.
-    project.set_speed_indicator_layout(SpeedIndicatorLayout::new(0.05, 0.6, 0.2));
-    project
-}
 
 struct ExportOutcome {
     result: ExportResult,
@@ -41,7 +24,17 @@ struct ExportOutcome {
 }
 
 fn export_and_wait(toolchain: &FfmpegToolchain, project: &Project, source: &Path, destination: &Path) -> ExportOutcome {
-    let plan = plan_export(project).expect("the project can be exported");
+    export_and_wait_with(toolchain, project, Settings::DEFAULT, source, destination)
+}
+
+fn export_and_wait_with(
+    toolchain: &FfmpegToolchain,
+    project: &Project,
+    settings: Settings,
+    source: &Path,
+    destination: &Path,
+) -> ExportOutcome {
+    let plan = plan_export(project, settings).expect("the project can be exported");
     let export = VideoExport::start(toolchain, &plan, source, destination, Arc::new(|| {})).expect("the export starts");
     wait_for_export(&export)
 }
@@ -67,20 +60,6 @@ fn wait_for_export(export: &VideoExport) -> ExportOutcome {
             }
         }
     }
-}
-
-/// Splits the project at each timeline frame (counted on the timeline as it is when the split
-/// is made) and sets each clip's speed, as a user would.
-fn edited(mut project: Project, split_frames: &[u64], speeds: &[u32]) -> Project {
-    for &frame in split_frames {
-        project.split_at(TimelineFrameIndex::new(frame)).unwrap();
-    }
-    for (clip_index, &speed) in speeds.iter().enumerate() {
-        project
-            .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
-            .unwrap();
-    }
-    project
 }
 
 #[test]
@@ -156,7 +135,7 @@ fn random_edits_always_export_exactly_the_frames_the_project_describes() {
             ExportResult::Completed,
             "seed {seed}: clips {:?}\ngraph: {}",
             project.video_track().clips(),
-            plan_export(&project).unwrap().filter_graph.text
+            plan_export(&project, Settings::DEFAULT).unwrap().filter_graph.text
         );
         let frame_numbers = decode_video(&toolchain, &destination, 320, 180).frame_numbers();
         assert_eq!(
@@ -325,27 +304,11 @@ fn the_sound_of_every_clip_is_really_there_not_silence() {
         ExportResult::Completed
     );
 
-    // Decode the sound to 32-bit floats and measure how loud each half is.
-    let output = std::process::Command::new(toolchain.ffmpeg_path())
-        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
-        .arg(&destination)
-        .args(["-vn", "-f", "f32le", "-ac", "1", "-ar", "48000", "-"])
-        .output()
-        .unwrap();
-    let samples: Vec<f32> = output
-        .stdout
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|bytes| f32::from_le_bytes(*bytes))
-        .collect();
-    let loudness = |range: std::ops::Range<usize>| {
-        let part = &samples[range];
-        (part.iter().map(|sample| sample * sample).sum::<f32>() / part.len() as f32).sqrt()
-    };
+    // Measure how loud each part is.
+    let samples = decoded_sound(&toolchain, &destination, 1, 48_000);
     // The first clip is 10 s (300 frames at 30 fps); the second is 300 frames at 4x = 2.5 s.
-    let first_clip_loudness = loudness(48_000..48_000 * 9);
-    let second_clip_loudness = loudness(48_000 * 10 + 4_800..48_000 * 12);
+    let first_clip_loudness = loudness(&samples[48_000..48_000 * 9]);
+    let second_clip_loudness = loudness(&samples[48_000 * 10 + 4_800..48_000 * 12]);
     assert!(
         first_clip_loudness > 0.05,
         "the normal speed clip sounds silent: {first_clip_loudness}"
@@ -354,6 +317,44 @@ fn the_sound_of_every_clip_is_really_there_not_silence() {
         second_clip_loudness > 0.05,
         "the sped up clip sounds silent: {second_clip_loudness}"
     );
+}
+
+#[test]
+fn with_sped_up_clips_muted_those_clips_are_silent_and_the_others_still_have_their_sound() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    // Clips: 0..300 at 1x (10 s), 300..600 at 4x (2.5 s).
+    let project = edited(project_for(&toolchain, &video), &[300], &[1, 4]);
+    let scratch = scratch_directory();
+    let settings = Settings {
+        mute_sped_up_clips: true,
+        ..Settings::DEFAULT
+    };
+
+    let destination = scratch.path().join("muted.mp4");
+    let outcome = export_and_wait_with(&toolchain, &project, settings, &video.path, &destination);
+    assert_eq!(outcome.result, ExportResult::Completed);
+
+    let samples = decoded_sound(&toolchain, &destination, 1, 48_000);
+    let first_clip = loudness(&samples[48_000..48_000 * 9]);
+    let sped_up_clip = loudness(&samples[48_000 * 10 + 4_800..48_000 * 12]);
+    assert!(first_clip > 0.05, "the normal speed clip keeps its sound: {first_clip}");
+    assert!(sped_up_clip < 0.001, "the sped up clip is silent: {sped_up_clip}");
+    // Silence is as long as the picture: nothing shifted.
+    let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
+    assert!((video_seconds.unwrap() - 12.5).abs() < 0.01, "{video_seconds:?}");
+    assert!((audio_seconds.unwrap() - 12.5).abs() < 0.05, "{audio_seconds:?}");
+    // The pictures are exactly what they are with the sound on.
+    assert_eq!(
+        decode_video(&toolchain, &destination, 320, 180).frame_numbers(),
+        expected_source_frames(&project)
+    );
+
+    // And with the setting off the very same project has sound in the sped up clip.
+    let with_sound = scratch.path().join("with_sound.mp4");
+    export_and_wait(&toolchain, &project, &video.path, &with_sound);
+    let samples = decoded_sound(&toolchain, &with_sound, 1, 48_000);
+    assert!(loudness(&samples[48_000 * 10 + 4_800..48_000 * 12]) > 0.05);
 }
 
 /// Whether any pixel inside the symbol's place on the picture is bright white.
@@ -490,7 +491,7 @@ fn a_project_with_a_hundred_and_fifty_clips_exports_even_though_its_graph_cannot
             .set_clip_speed(clip_index, SpeedFactor::new(1 + (clip_index as u32 % 4)).unwrap())
             .unwrap();
     }
-    let plan = plan_export(&project).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     assert!(
         plan.filter_graph.text.len() > 32_768,
         "the graph must be too long for a Windows command line: {} characters",
@@ -708,7 +709,7 @@ fn exporting_over_the_source_video_is_refused_before_anything_is_touched() {
     let source_copy = scratch.path().join("source.mp4");
     std::fs::copy(&video.path, &source_copy).unwrap();
     let project = project_for(&toolchain, &video);
-    let plan = plan_export(&project).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let original_bytes = std::fs::read(&source_copy).unwrap();
 
     for destination in [source_copy.clone(), scratch.path().join(".").join("source.mp4")] {
@@ -797,7 +798,7 @@ fn cancelling_stops_the_export_and_leaves_no_file_and_an_existing_file_untouched
     let scratch = scratch_directory();
     let destination = scratch.path().join("cancelled.mp4");
     std::fs::write(&destination, b"the user's earlier export").unwrap();
-    let plan = plan_export(&project).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let export = VideoExport::start(&toolchain, &plan, &video.path, &destination, Arc::new(|| {})).unwrap();
 
     std::thread::sleep(Duration::from_millis(400));
@@ -834,7 +835,7 @@ fn dropping_a_running_export_cancels_it() {
     let project = project_for(&toolchain, &video);
     let scratch = scratch_directory();
     let destination = scratch.path().join("dropped.mp4");
-    let plan = plan_export(&project).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let export = VideoExport::start(&toolchain, &plan, &video.path, &destination, Arc::new(|| {})).unwrap();
     std::thread::sleep(Duration::from_millis(300));
 

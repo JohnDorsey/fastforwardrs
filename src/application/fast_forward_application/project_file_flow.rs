@@ -63,7 +63,7 @@ impl FastForwardApplication {
         match write_project_file(&self.project, &path) {
             Ok(()) => {
                 self.project_file_path = Some(path);
-                self.has_unsaved_changes = false;
+                self.note_everything_is_saved();
             }
             Err(error) => self.show_message("The project could not be saved", error.to_string()),
         }
@@ -100,7 +100,7 @@ impl FastForwardApplication {
         self.timeline_view.reset();
         self.project = project;
         self.project_file_path = project_file_path;
-        self.has_unsaved_changes = false;
+        self.note_everything_is_saved();
         self.source_status = SourceStatus::NoVideo;
         self.missing_source_warning_open = false;
         let frame_rate = self.frame_rate();

@@ -15,6 +15,7 @@ use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
 use egui::{PointerButton, vec2};
+use egui_kittest::kittest::Queryable;
 use fastforwardrs::media::FfmpegToolchain;
 use journey::Journey;
 
@@ -127,4 +128,38 @@ fn write_screenshots_of_the_missing_video_warning() {
     reopened.wait_until_idle();
 
     save(&mut reopened, &folder, "5_missing_video_warning");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_edit_menu_and_the_settings_windows() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.cut_at_frame(60);
+
+    journey.harness.get_by_label("Edit").click();
+    save(&mut journey, &folder, "6_edit_menu");
+
+    // The global settings, with autosave ticked.
+    journey.harness.get_by_label("Global settings").click();
+    journey.settle();
+    journey.harness.get_by_label("Autosave").click();
+    save(&mut journey, &folder, "7_global_settings_with_autosave_on");
+
+    // The project's settings next to them: all of them follow the global ones (so are greyed out,
+    // with autosave shown as on), then one of them is let go of.
+    journey.harness.get_by_label("Edit").click();
+    journey.settle();
+    journey.harness.get_by_label("Project settings").click();
+    save(&mut journey, &folder, "8_both_windows_the_project_follows_everything");
+    journey
+        .harness
+        .get_all_by_label("Use global setting")
+        .nth(1)
+        .unwrap()
+        .click();
+    save(&mut journey, &folder, "9_the_project_has_a_setting_of_its_own");
 }

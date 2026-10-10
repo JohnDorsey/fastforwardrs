@@ -6,6 +6,7 @@
 //! own. All of the code that depends on that choice lives in this module, so it could be replaced
 //! by a different video backend without touching the rest of the editor.
 
+mod audio_stream;
 mod child_process;
 pub mod export;
 mod ffmpeg_toolchain;
@@ -15,6 +16,9 @@ mod video_probe;
 
 use std::sync::Arc;
 
+pub use audio_stream::{
+    AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, audio_stream_arguments,
+};
 pub use ffmpeg_toolchain::{FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE, FfmpegToolchain, FfmpegVersion, ToolchainError};
 pub use frame_stream::{
     DecodedFrame, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, frame_stream_arguments,

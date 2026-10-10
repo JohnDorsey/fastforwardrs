@@ -61,6 +61,17 @@ fn supports_encoder(toolchain: &FfmpegToolchain, encoder_name: &str) -> bool {
         .any(|line| line.split_whitespace().nth(1) == Some(encoder_name))
 }
 
+/// The ffmpeg option that reads a filter graph from the file named after it. A graph for a project
+/// with many clips is far longer than a command line allows, so it is always given in a file.
+/// (ffmpeg 7 replaced `-filter_complex_script <file>` with `-/filter_complex <file>`.)
+pub(crate) fn filter_graph_file_option(toolchain: &FfmpegToolchain) -> &'static str {
+    if toolchain.reads_filter_graph_files_with_slash_prefix() {
+        "-/filter_complex"
+    } else {
+        "-filter_complex_script"
+    }
+}
+
 /// The complete ffmpeg command line for an export.
 pub fn export_arguments(
     toolchain: &FfmpegToolchain,
@@ -77,15 +88,7 @@ pub fn export_arguments(
         arguments.push(symbol_picture.clone().into());
     }
 
-    // ffmpeg 7 replaced "-filter_complex_script <file>" with "-/filter_complex <file>".
-    arguments.push(
-        if toolchain.reads_filter_graph_files_with_slash_prefix() {
-            "-/filter_complex"
-        } else {
-            "-filter_complex_script"
-        }
-        .into(),
-    );
+    arguments.push(filter_graph_file_option(toolchain).into());
     arguments.push(files.filter_graph_file.clone().into());
 
     arguments.push("-map".into());

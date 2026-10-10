@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::atomic_file::write_file_atomically;
 use crate::project::{
     Clip, InconsistentProject, Project, ProjectSettings, SourceVideo, SourceVideoLink, SourceVideoProperties,
     SpeedIndicatorLayout, VideoTrack,
@@ -57,11 +58,9 @@ pub fn read_project_file(path: &Path) -> Result<Project, ProjectFileError> {
     project_from_json_text(&text)
 }
 
-/// Saves a project to a file, replacing any file already there.
-///
-/// The new contents are written to a temporary file next to the destination and then renamed
-/// over it, so a failure part-way (a full disk, say) can never leave an existing project file
-/// half-written.
+/// Saves a project to a file, replacing any file already there. The new contents are written to a
+/// temporary file next to the destination and then renamed over it, so a failure part-way can
+/// never leave an existing project file half-written.
 pub fn write_project_file(project: &Project, destination: &Path) -> Result<(), ProjectFileError> {
     let could_not_write = |source: io::Error| ProjectFileError::CouldNotWrite {
         path: destination.to_owned(),
@@ -72,20 +71,7 @@ pub fn write_project_file(project: &Project, destination: &Path) -> Result<(), P
         .parent()
         .ok_or_else(|| could_not_write(io::Error::other("the destination has no containing folder")))?;
     let text = project_to_json_text(project, project_directory)?;
-
-    let mut temporary_name = absolute_destination
-        .file_name()
-        .ok_or_else(|| could_not_write(io::Error::other("the destination has no file name")))?
-        .to_owned();
-    temporary_name.push(".saving");
-    let temporary_path = project_directory.join(temporary_name);
-
-    fs::write(&temporary_path, text).map_err(could_not_write)?;
-    if let Err(source) = fs::rename(&temporary_path, &absolute_destination) {
-        let _ = fs::remove_file(&temporary_path);
-        return Err(could_not_write(source));
-    }
-    Ok(())
+    write_file_atomically(&absolute_destination, &text).map_err(could_not_write)
 }
 
 /// Turns JSON text into a project, checking that it really is a project file this version can

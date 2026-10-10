@@ -13,8 +13,12 @@ mod plan;
 mod progress;
 mod runner;
 
+pub(crate) use command::filter_graph_file_option;
 pub use command::{ExportFiles, VideoEncoder, export_arguments};
-pub use filter_graph::{ClipToExport, FilterGraph, FilterGraphSpecification, IndicatorOverlay, build_filter_graph};
-pub use plan::{ExportPlan, ExportPlanError, SymbolInput, plan_export};
+pub use filter_graph::{
+    AudioGraph, AudioGraphSpecification, ClipToExport, FilterGraph, FilterGraphSpecification, IndicatorOverlay,
+    build_audio_graph, build_filter_graph,
+};
+pub use plan::{ExportPlan, ExportPlanError, SymbolInput, clips_to_export, plan_export};
 pub use progress::frames_written_in_progress_line;
 pub use runner::{ExportError, ExportEvent, ExportResult, VideoExport};

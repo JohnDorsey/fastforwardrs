@@ -12,8 +12,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::project::Project;
+use fastforwardrs::media::{FfmpegToolchain, probe_video};
+use fastforwardrs::project::{
+    Project, SourceVideo, SourceVideoIdentifier, SourceVideoLink, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex,
+};
 
 /// Set this to `1` to make the tests fail (instead of skipping themselves) when ffmpeg is missing.
 pub const REQUIRE_FFMPEG_ENVIRONMENT_VARIABLE: &str = "FASTFORWARDRS_REQUIRE_FFMPEG";
@@ -62,6 +64,10 @@ pub struct TestVideoSpecification {
     pub frame_rate: &'static str,
     pub duration_in_seconds: u32,
     pub with_audio: bool,
+    /// What the sound is. `None` is a steady 440 Hz tone. Otherwise an `aevalsrc` expression of the
+    /// time `t` in seconds, such as `0.3*sin(2*PI*(300+200*floor(t))*t)`, a tone that is a different
+    /// pitch for each second, so that a test can tell from the sound where in the video it is.
+    pub audio_expression: Option<&'static str>,
     /// A filter applied to the numbered picture (for example to set a pixel shape, or to drop
     /// frames and so make the frame rate variable).
     pub extra_video_filter: Option<&'static str>,
@@ -80,6 +86,7 @@ impl TestVideoSpecification {
         frame_rate: "30",
         duration_in_seconds: 20,
         with_audio: true,
+        audio_expression: None,
         extra_video_filter: None,
         container: "mp4",
         extra_output_arguments: &[],
@@ -157,10 +164,17 @@ fn generate_video(toolchain: &FfmpegToolchain, specification: &TestVideoSpecific
         ])
         .arg(picture);
     if specification.with_audio {
-        command.args(["-f", "lavfi", "-i"]).arg(format!(
-            "sine=frequency=440:sample_rate=48000:duration={}",
-            specification.duration_in_seconds
-        ));
+        let sound_source = match specification.audio_expression {
+            Some(expression) => format!(
+                "aevalsrc=exprs={expression}:sample_rate=48000:duration={}",
+                specification.duration_in_seconds
+            ),
+            None => format!(
+                "sine=frequency=440:sample_rate=48000:duration={}",
+                specification.duration_in_seconds
+            ),
+        };
+        command.args(["-f", "lavfi", "-i"]).arg(sound_source);
     }
     // Lossless H.264 with a keyframe every second: exact pixels, and cheap seeking.
     command.args([
@@ -211,6 +225,35 @@ pub fn frame_number_in_picture(
         }
     }
     frame_number
+}
+
+/// A project made from `video`, as the editor would make it when the video is imported.
+pub fn project_for(toolchain: &FfmpegToolchain, video: &TestVideo) -> Project {
+    let mut project = Project::empty();
+    project
+        .import_source_video(SourceVideo {
+            identifier: SourceVideoIdentifier::new(1),
+            link: SourceVideoLink::from_absolute_path(video.path.clone()),
+            properties: probe_video(toolchain, &video.path).expect("the test video can be probed"),
+        })
+        .unwrap();
+    // Keep the symbol clear of the frame number strip along the top of the test pictures.
+    project.set_speed_indicator_layout(SpeedIndicatorLayout::new(0.05, 0.6, 0.2));
+    project
+}
+
+/// Splits the project at each timeline frame (counted on the timeline as it is when the split
+/// is made) and sets each clip's speed, as a user would.
+pub fn edited(mut project: Project, split_frames: &[u64], speeds: &[u32]) -> Project {
+    for &frame in split_frames {
+        project.split_at(TimelineFrameIndex::new(frame)).unwrap();
+    }
+    for (clip_index, &speed) in speeds.iter().enumerate() {
+        project
+            .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
+            .unwrap();
+    }
+    project
 }
 
 /// What the finished video must show, straight from the project: the source frame number of each
@@ -277,6 +320,46 @@ pub fn decode_video(
         height_in_pixels,
         pictures: output.stdout.chunks(picture_size).map(<[u8]>::to_vec).collect(),
     }
+}
+
+/// The sound of the file at `path` as 32-bit floating point samples, `channels` interleaved
+/// channels at `sample_rate` samples per second.
+pub fn decoded_sound(toolchain: &FfmpegToolchain, path: &Path, channels: u32, sample_rate: u32) -> Vec<f32> {
+    let output = Command::new(toolchain.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
+        .arg(path)
+        .args(["-vn", "-f", "f32le", "-ac"])
+        .arg(channels.to_string())
+        .args(["-ar"])
+        .arg(sample_rate.to_string())
+        .arg("-")
+        .output()
+        .expect("could not run ffmpeg to decode sound");
+    assert!(
+        output.status.success(),
+        "decoding the sound of {path:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    floating_point_samples(&output.stdout)
+}
+
+/// Reads bytes of little-endian 32-bit floating point samples (as ffmpeg's `f32le` writes them).
+pub fn floating_point_samples(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|sample| f32::from_le_bytes(*sample))
+        .collect()
+}
+
+/// How loud `samples` are on the whole: their root mean square. A silent stretch is 0, and the test
+/// videos' sine wave is about 0.35.
+pub fn loudness(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
 }
 
 /// How long each stream of a media file is, in seconds: `(video, audio)`.

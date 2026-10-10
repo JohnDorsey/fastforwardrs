@@ -7,16 +7,14 @@
 
 use std::io::{self, Read};
 use std::path::Path;
-use std::process::{Child, Stdio};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
+use std::sync::mpsc::SyncSender;
 
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, ImageFormat};
 use thiserror::Error;
 
 use super::UserInterfaceWakeUp;
-use super::child_process::{background_command, collect_error_output_in_background};
+use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::frame_stream::DecodedFrame;
 use crate::project::{FrameRate, SourceFrameIndex};
@@ -25,6 +23,10 @@ use crate::project::{FrameRate, SourceFrameIndex};
 const JPEG_QUALITY: u8 = 85;
 
 const RGB_BYTES_PER_PIXEL: usize = 3;
+
+/// How many thumbnails may wait to be collected before making them pauses. They are small, and
+/// the window collects every one that is ready each time it is drawn.
+const THUMBNAILS_BUFFERED_AHEAD: usize = 256;
 
 /// The size of a picture in pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,8 +177,7 @@ pub enum ThumbnailEvent {
 /// A running ffmpeg process that makes one thumbnail for every second of a video, in the
 /// background. Dropping it stops ffmpeg.
 pub struct ThumbnailExtraction {
-    child: Child,
-    events: Receiver<ThumbnailEvent>,
+    tool: StreamingTool<ThumbnailEvent>,
 }
 
 impl ThumbnailExtraction {
@@ -191,45 +192,29 @@ impl ThumbnailExtraction {
         if size.width_in_pixels == 0 || size.height_in_pixels == 0 {
             return Err(ThumbnailError::EmptyPicture);
         }
-        let mut child = background_command(toolchain.ffmpeg_path())
-            .args(thumbnail_arguments(video_path, size))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(ThumbnailError::CouldNotStart)?;
-        let (Some(standard_output), Some(standard_error)) = (child.stdout.take(), child.stderr.take()) else {
-            let _ = child.kill();
-            return Err(ThumbnailError::CouldNotStart(io::Error::other(
-                "the extractor's pipes were not created",
-            )));
-        };
-
-        let (sender, events) = mpsc::channel();
-        let error_output_collector = collect_error_output_in_background(standard_error);
-        thread::spawn(move || {
-            let error_output_when_finished = move || error_output_collector.join().unwrap_or_default();
-            read_thumbnails(standard_output, size, &sender, &wake_up, error_output_when_finished);
-        });
-        Ok(Self { child, events })
+        let mut command = background_command(toolchain.ffmpeg_path());
+        command.args(thumbnail_arguments(video_path, size));
+        let tool = StreamingTool::start(
+            command,
+            THUMBNAILS_BUFFERED_AHEAD,
+            move |standard_output, sender, error_output_when_finished| {
+                read_thumbnails(standard_output, size, &sender, &wake_up, error_output_when_finished);
+            },
+        )
+        .map_err(ThumbnailError::CouldNotStart)?;
+        Ok(Self { tool })
     }
 
     /// The next event, if one is ready. Never waits.
     pub fn try_next_event(&self) -> Option<ThumbnailEvent> {
-        self.events.try_recv().ok()
-    }
-}
-
-impl Drop for ThumbnailExtraction {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.tool.try_next_event()
     }
 }
 
 fn read_thumbnails(
     mut standard_output: impl Read,
     size: PictureSize,
-    sender: &Sender<ThumbnailEvent>,
+    sender: &SyncSender<ThumbnailEvent>,
     wake_up: &UserInterfaceWakeUp,
     error_output_when_finished: impl FnOnce() -> String,
 ) {
@@ -433,7 +418,7 @@ mod tests {
     fn whole_thumbnails_are_read_in_order_numbered_by_second() {
         let size = size(2, 1);
         let bytes: Vec<u8> = (0..18).collect(); // three 6-byte pictures
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(16);
         read_thumbnails(
             &bytes[..],
             size,

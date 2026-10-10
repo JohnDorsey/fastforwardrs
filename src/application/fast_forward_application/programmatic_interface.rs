@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::{FastForwardApplication, OpeningPurpose, SourceStatus};
-use crate::playback::SuppliedPicture;
-use crate::project::{Project, TimelineFrameIndex};
+use crate::playback::{AudioSinkOpener, SuppliedPicture};
+use crate::project::{Project, Settings, TimelineFrameIndex};
 
 impl FastForwardApplication {
     /// Uses the video at `path` as the project's video, as choosing it in the Import dialog does:
@@ -72,6 +72,17 @@ impl FastForwardApplication {
         }
     }
 
+    /// The settings that are the same for every project.
+    pub fn global_settings(&self) -> Settings {
+        self.global_settings
+    }
+
+    /// The settings in effect for the project being edited: its own where it has set them, the
+    /// global ones everywhere else.
+    pub fn settings_in_effect(&self) -> Settings {
+        self.effective_settings()
+    }
+
     /// The current frame of the timeline.
     pub fn current_frame(&self) -> TimelineFrameIndex {
         let total_frames = self.project.video_track().total_frame_count();
@@ -80,6 +91,23 @@ impl FastForwardApplication {
 
     pub fn is_playing(&self) -> bool {
         self.clock.is_playing()
+    }
+
+    /// Plays the preview's sound through the speakers `open_speakers` makes (when sound is first
+    /// needed). Until this is called there is no sound: a program that is only being tested, or
+    /// driven by a script, must not make noise.
+    pub fn play_sound_through(&mut self, open_speakers: AudioSinkOpener) {
+        self.audio_supplier.play_through(open_speakers);
+    }
+
+    /// Whether the preview's sound is being decoded and played right now.
+    pub fn sound_is_running(&self) -> bool {
+        self.audio_supplier.is_running()
+    }
+
+    /// What last went wrong with the preview's sound, if anything has.
+    pub fn sound_problem(&self) -> Option<&str> {
+        self.audio_supplier.last_problem()
     }
 
     /// The latest picture the preview has, which may be a moment older than the current frame.

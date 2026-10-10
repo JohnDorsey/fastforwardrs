@@ -6,37 +6,54 @@
 //! * this file: the state, starting up, and the loop that runs once for each frame drawn;
 //! * `drawing`: laying out the window (the menu bar, the preview, the timeline);
 //! * `command_execution`: what each [`Command`] does;
+//! * `dialog_flow`: messages, questions, the export's progress and the missing-video warning;
 //! * `source_video_flow`: finding, opening and relinking the source video;
 //! * `project_file_flow`: new, load and save;
-//! * `export_flow`: exporting and its progress.
+//! * `settings_flow`: the settings in effect, and keeping the global ones in their file;
+//! * `autosave`: noting unsaved changes, and saving them by itself when the setting is on;
+//! * `export_flow`: exporting and its progress;
+//! * `programmatic_interface`: what the window does, without its file dialogs, and a look at the
+//!   state afterwards (for tests, and for scripting).
 
+mod autosave;
 mod command_execution;
+mod dialog_flow;
 mod drawing;
 mod export_flow;
 #[cfg(test)]
 mod interaction_tests;
 mod programmatic_interface;
 mod project_file_flow;
+mod settings_flow;
+#[cfg(test)]
+mod settings_tests;
 mod source_video_flow;
+#[cfg(test)]
+mod test_window;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use egui::{Context, ViewportCommand};
+use egui::Context;
 
 use super::background::BackgroundTask;
 use super::commands::Command;
-use super::dialogs::{AfterConfirmation, Dialog, DialogAnswer, MissingSourceWarning};
+use super::dialogs::Dialog;
 use super::keyboard;
 use super::opening::OpeningOutcome;
+use super::settings_windows::{self, SettingsWindowsOpen};
 use super::textures::Textures;
 use super::theme;
 use super::timeline_panel::TimelineViewState;
 use crate::media::export::VideoExport;
 use crate::media::{FfmpegToolchain, ThumbnailExtraction, ThumbnailStrip, ToolchainError, UserInterfaceWakeUp};
-use crate::playback::{FfmpegPictureStreamStarter, PictureSupplier, PlaybackClock, wanted_picture};
-use crate::project::{FrameRate, Project, TimelineFrameIndex};
+use crate::playback::{
+    AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter, PictureSupplier,
+    PlaybackClock, opener_of_the_default_speakers, wanted_picture,
+};
+use crate::project::{FrameRate, Project, Settings, TimelineFrameIndex};
+use crate::settings_file::default_settings_file_path;
 
 /// The frame rate used (for the timecode and the clock) while the project has no video to take one from.
 fn frame_rate_without_a_video() -> FrameRate {
@@ -103,10 +120,20 @@ pub struct FastForwardApplication {
     /// Where the project was last saved or loaded from.
     project_file_path: Option<PathBuf>,
     has_unsaved_changes: bool,
+    /// When the project last changed in a way that has not been saved; see [`autosave`]. `None`
+    /// when nothing is waiting to be autosaved.
+    last_unsaved_change_at: Option<Instant>,
+    /// The settings that are the same for every project.
+    global_settings: Settings,
+    /// Where the global settings are kept. `None` keeps them only while the program runs.
+    global_settings_path: Option<PathBuf>,
+    settings_windows_open: SettingsWindowsOpen,
     source_status: SourceStatus,
     opening: Option<OpeningTask>,
     clock: PlaybackClock,
     picture_supplier: PictureSupplier<FfmpegPictureStreamStarter>,
+    /// Plays the sound of the preview. It is silent until given speakers to play through.
+    audio_supplier: AudioSupplier<FfmpegAudioStreamStarter>,
     thumbnails: ThumbnailState,
     textures: Textures,
     timeline_view: TimelineViewState,
@@ -120,10 +147,17 @@ pub struct FastForwardApplication {
 }
 
 impl FastForwardApplication {
-    /// Starts the editor in the window `creation_context` belongs to. If `project_to_open` is given
-    /// (the path of a project file, as when one is opened from the command line) it is loaded.
+    /// Starts the editor in the window `creation_context` belongs to, with the global settings
+    /// kept in their usual file. If `project_to_open` is given (the path of a project file, as when
+    /// one is opened from the command line) it is loaded.
     pub fn new(creation_context: &eframe::CreationContext<'_>, project_to_open: Option<PathBuf>) -> Self {
         let mut application = Self::with_context(&creation_context.egui_ctx, FfmpegToolchain::locate());
+        if let Some(settings_path) = default_settings_file_path() {
+            application.keep_global_settings_in(settings_path);
+        }
+        application
+            .audio_supplier
+            .play_through(opener_of_the_default_speakers());
         if let Some(path) = project_to_open {
             application.load_project(path);
         }
@@ -131,6 +165,8 @@ impl FastForwardApplication {
     }
 
     /// An editor drawing into `context`, using `toolchain` (or reporting that ffmpeg is missing).
+    /// The global settings are the defaults and are not kept in any file; see
+    /// [`Self::keep_global_settings_in`].
     pub fn with_context(context: &Context, toolchain: Result<FfmpegToolchain, ToolchainError>) -> Self {
         context.set_visuals(egui::Visuals::dark());
         let wake_up: UserInterfaceWakeUp = {
@@ -154,10 +190,15 @@ impl FastForwardApplication {
                 toolchain.clone(),
                 Arc::clone(&wake_up),
             )),
+            audio_supplier: AudioSupplier::new(FfmpegAudioStreamStarter::new(toolchain.clone(), Arc::clone(&wake_up))),
             toolchain,
             project: Project::empty(),
             project_file_path: None,
             has_unsaved_changes: false,
+            last_unsaved_change_at: None,
+            global_settings: Settings::DEFAULT,
+            global_settings_path: None,
+            settings_windows_open: SettingsWindowsOpen::default(),
             source_status: SourceStatus::NoVideo,
             opening: None,
             clock: PlaybackClock::new(frame_rate_without_a_video()),
@@ -212,6 +253,7 @@ impl FastForwardApplication {
         if is_playing {
             context.request_repaint();
         }
+        self.update_the_sound(now, total_frames);
 
         FrameState {
             current_frame,
@@ -220,6 +262,28 @@ impl FastForwardApplication {
             is_playing,
             preview_is_up_to_date: report.shows_the_wanted_picture,
         }
+    }
+
+    /// Starts, keeps in step, or stops the sound of the preview: it plays while the video plays.
+    fn update_the_sound(&mut self, now: Instant, total_frames: u64) {
+        let clock = ClockReading {
+            frame: self.clock.position(now, total_frames),
+            seconds: self.clock.position_in_seconds(now, total_frames),
+            is_playing: self.clock.is_playing(),
+        };
+        let mute_sped_up_clips = self.effective_settings().mute_sped_up_clips;
+        // There is sound to play when the video can be read and has some.
+        let content = match (&self.source_status, self.project.source_videos().first()) {
+            (SourceStatus::Available { path }, Some(video)) if video.properties.has_audio => Some(AudioContent {
+                video_path: path,
+                frame_rate: video.properties.frame_rate,
+                source_frame_count: video.properties.total_frame_count,
+                track: self.project.video_track(),
+                mute_sped_up_clips,
+            }),
+            _ => None,
+        };
+        self.audio_supplier.update(content, clock, now);
     }
 
     /// Turns the keyboard into commands (see [`keyboard`]), unless something is in the way.
@@ -231,76 +295,6 @@ impl FastForwardApplication {
             context,
             frame_state.current_frame,
         ));
-    }
-
-    /// Asks before closing the window if there are unsaved changes (there is no autosave).
-    fn handle_close_request(&mut self, context: &Context) {
-        let close_requested = context.input(|input| input.viewport().close_requested());
-        if close_requested && self.has_unsaved_changes && !self.close_confirmed {
-            context.send_viewport_cmd(ViewportCommand::CancelClose);
-            self.pause_playback_for_dialog();
-            self.dialog = Some(Dialog::ConfirmDiscardChanges {
-                then: AfterConfirmation::CloseWindow,
-            });
-        }
-    }
-
-    /// Shows the dialog and the warnings, and acts on what the user does to them.
-    fn show_dialogs(&mut self, context: &Context) {
-        if let Some(export) = &self.export
-            && super::dialogs::show_export_progress(context, export.frames_written, export.total_frames)
-        {
-            export.export.cancel();
-        }
-        if let Some(dialog) = self.dialog.clone() {
-            match super::dialogs::show_dialog(context, &dialog) {
-                DialogAnswer::StillOpen => {}
-                DialogAnswer::Dismissed => self.dialog = None,
-                DialogAnswer::Confirmed => {
-                    self.dialog = None;
-                    if let Dialog::ConfirmDiscardChanges { then } = dialog {
-                        self.has_unsaved_changes = false;
-                        self.carry_on_after_confirmation(context, then);
-                    }
-                }
-            }
-        }
-        if let SourceStatus::Unavailable { reason } = &self.source_status {
-            let warning = MissingSourceWarning {
-                last_known_path: self
-                    .project
-                    .source_videos()
-                    .first()
-                    .map(|video| video.link.absolute_path.display().to_string())
-                    .unwrap_or_default(),
-                reason: reason.clone(),
-            };
-            let mut open = self.missing_source_warning_open;
-            let choose = super::dialogs::show_missing_source_warning(context, &warning, &mut open);
-            self.missing_source_warning_open = open;
-            if choose {
-                self.import_video();
-            }
-        }
-    }
-
-    fn carry_on_after_confirmation(&mut self, context: &Context, then: AfterConfirmation) {
-        match then {
-            AfterConfirmation::NewProject => self.start_new_project(),
-            AfterConfirmation::LoadProject => self.choose_and_load_project(),
-            AfterConfirmation::CloseWindow => {
-                self.close_confirmed = true;
-                context.send_viewport_cmd(ViewportCommand::Close);
-            }
-        }
-    }
-
-    /// Makes room for a message the user has to read.
-    fn show_message(&mut self, title: impl Into<String>, text: impl Into<String>) {
-        self.dialog = Some(Dialog::Message {
-            title: title.into(),
-            text: text.into(),
-        });
     }
 }
 
@@ -325,10 +319,18 @@ impl FastForwardApplication {
         let mut commands = Vec::new();
         self.collect_keyboard_commands(&context, &frame_state, &mut commands);
         self.draw(ui, &frame_state, &mut commands);
+        settings_windows::show(
+            &context,
+            &mut self.settings_windows_open,
+            self.project.settings(),
+            self.global_settings,
+            &mut commands,
+        );
         self.show_dialogs(&context);
         for command in commands {
             self.execute(command, now, &context);
         }
+        self.autosave_when_quiet_for_long_enough(&context, now);
 
         self.textures.forget_thumbnails_not_used_this_frame();
     }

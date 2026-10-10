@@ -98,7 +98,7 @@ impl FastForwardApplication {
                 };
                 match self.project.import_source_video(video) {
                     Ok(()) => {
-                        self.has_unsaved_changes = true;
+                        self.note_unsaved_change();
                         self.clock.reset_for_frame_rate(properties.frame_rate);
                         self.timeline_view.reset();
                         self.source_is_now_available(path, properties);
@@ -121,7 +121,7 @@ impl FastForwardApplication {
                 let link = self.link_to(&path);
                 match self.project.relink_source_video(identifier, link, properties) {
                     Ok(relinked) => {
-                        self.has_unsaved_changes = true;
+                        self.note_unsaved_change();
                         self.source_is_now_available(path, properties);
                         if relinked.total_frame_count_before != relinked.total_frame_count_after {
                             self.show_message(

@@ -1,4 +1,4 @@
-//! The menu bar, which has one menu: File.
+//! The menu bar, which has two menus: File and Edit.
 
 use egui::{MenuBar, Ui};
 
@@ -18,9 +18,9 @@ pub struct MenuAvailability {
 
 /// Draws the menu bar and adds a command for the item chosen.
 pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Command>) {
+    let idle = !availability.busy;
     MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            let idle = !availability.busy;
             if ui.add_enabled(idle, egui::Button::new("New project")).clicked() {
                 commands.push(Command::NewProject);
             }
@@ -45,6 +45,14 @@ pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Com
                 .clicked()
             {
                 commands.push(Command::ExportVideo);
+            }
+        });
+        ui.menu_button("Edit", |ui| {
+            if ui.add_enabled(idle, egui::Button::new("Project settings")).clicked() {
+                commands.push(Command::ShowProjectSettings);
+            }
+            if ui.add_enabled(idle, egui::Button::new("Global settings")).clicked() {
+                commands.push(Command::ShowGlobalSettings);
             }
         });
     });

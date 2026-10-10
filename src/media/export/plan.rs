@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::filter_graph::{ClipToExport, FilterGraph, FilterGraphSpecification, IndicatorOverlay, build_filter_graph};
-use crate::project::{FrameRate, Project, SpeedFactor};
+use crate::project::{Clip, FrameRate, Project, Settings, SpeedFactor};
 use crate::speed_indicator::{IndicatorPicture, indicator_for_frame};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -48,8 +48,29 @@ pub struct ExportPlan {
     pub has_audio: bool,
 }
 
+/// The clips as ffmpeg is asked to make them: cut short to the frames the source video has, with
+/// those that have none left out.
+///
+/// Frames the source video does not have cannot be made. Asking ffmpeg for them would make the
+/// sound (which is padded to each clip's planned length) run on past the end of the picture. This
+/// only matters when a project has been pointed at a shorter video than the one it was edited on.
+pub fn clips_to_export(clips: &[Clip], source_frame_count: u64) -> Vec<ClipToExport> {
+    clips
+        .iter()
+        .filter_map(|clip| {
+            let first_source_frame = clip.first_source_frame().value();
+            let end_source_frame = clip.end_source_frame().value().min(source_frame_count);
+            (first_source_frame < end_source_frame).then_some(ClipToExport {
+                first_source_frame,
+                end_source_frame,
+                speed_factor: clip.speed_factor(),
+            })
+        })
+        .collect()
+}
+
 /// Plans the export of `project`.
-pub fn plan_export(project: &Project) -> Result<ExportPlan, ExportPlanError> {
+pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, ExportPlanError> {
     let [source_video] = project.source_videos() else {
         return Err(if project.source_videos().is_empty() {
             ExportPlanError::NothingToExport
@@ -65,23 +86,7 @@ pub fn plan_export(project: &Project) -> Result<ExportPlan, ExportPlanError> {
     let picture_width_in_pixels = even(properties.display_width_in_pixels);
     let picture_height_in_pixels = even(properties.display_height_in_pixels);
 
-    // Frames the source video does not have cannot be exported. Asking ffmpeg for them would make
-    // the sound (which is padded to each clip's planned length) run on past the end of the picture,
-    // so each clip is cut short to the frames that exist, and a clip with none is left out.
-    let clips: Vec<ClipToExport> = project
-        .video_track()
-        .clips()
-        .iter()
-        .filter_map(|clip| {
-            let first_source_frame = clip.first_source_frame().value();
-            let end_source_frame = clip.end_source_frame().value().min(properties.total_frame_count);
-            (first_source_frame < end_source_frame).then_some(ClipToExport {
-                first_source_frame,
-                end_source_frame,
-                speed_factor: clip.speed_factor(),
-            })
-        })
-        .collect();
+    let clips = clips_to_export(project.video_track().clips(), properties.total_frame_count);
     if clips.is_empty() {
         return Err(ExportPlanError::EverythingIsPastTheEndOfTheSourceVideo {
             source_frame_count: properties.total_frame_count,
@@ -122,6 +127,7 @@ pub fn plan_export(project: &Project) -> Result<ExportPlan, ExportPlanError> {
         picture_width_in_pixels,
         picture_height_in_pixels,
         source_has_audio: properties.has_audio,
+        mute_sped_up_clips: settings.mute_sped_up_clips,
         indicator_overlays,
     };
     let filter_graph = build_filter_graph(&specification);
@@ -180,7 +186,7 @@ mod tests {
     #[test]
     fn a_project_without_a_video_cannot_be_exported() {
         assert_eq!(
-            plan_export(&Project::empty()).unwrap_err(),
+            plan_export(&Project::empty(), Settings::DEFAULT).unwrap_err(),
             ExportPlanError::NothingToExport
         );
     }
@@ -197,7 +203,10 @@ mod tests {
                 properties: empty_properties,
             })
             .unwrap();
-        assert_eq!(plan_export(&project).unwrap_err(), ExportPlanError::NothingToExport);
+        assert_eq!(
+            plan_export(&project, Settings::DEFAULT).unwrap_err(),
+            ExportPlanError::NothingToExport
+        );
     }
 
     #[test]
@@ -213,7 +222,10 @@ mod tests {
             SpeedIndicatorLayout::DEFAULT,
         )
         .unwrap();
-        assert_eq!(plan_export(&project).unwrap_err(), ExportPlanError::SeveralSourceVideos);
+        assert_eq!(
+            plan_export(&project, Settings::DEFAULT).unwrap_err(),
+            ExportPlanError::SeveralSourceVideos
+        );
     }
 
     #[test]
@@ -221,7 +233,7 @@ mod tests {
         let mut project = project_with_video(320, 180, false);
         project.split_at(TimelineFrameIndex::new(100)).unwrap();
         project.set_clip_speed(1, SpeedFactor::new(4).unwrap()).unwrap();
-        let plan = plan_export(&project).unwrap();
+        let plan = plan_export(&project, Settings::DEFAULT).unwrap();
         assert_eq!(plan.total_frame_count, 100 + 50);
         assert_eq!(plan.frame_rate, FrameRate::new(30, 1).unwrap());
     }
@@ -247,7 +259,7 @@ mod tests {
 
     #[test]
     fn a_project_on_its_own_video_leaves_nothing_out() {
-        let plan = plan_export(&project_with_video(320, 180, true)).unwrap();
+        let plan = plan_export(&project_with_video(320, 180, true), Settings::DEFAULT).unwrap();
         assert_eq!(plan.total_frame_count, 300);
         assert_eq!(plan.frames_left_out_past_the_end_of_the_source, 0);
     }
@@ -259,7 +271,7 @@ mod tests {
         let project = project_on_a_replacement_video_of(130);
         assert_eq!(project.video_track().total_frame_count(), 100 + 25 + 100);
 
-        let plan = plan_export(&project).unwrap();
+        let plan = plan_export(&project, Settings::DEFAULT).unwrap();
 
         assert_eq!(
             plan.total_frame_count,
@@ -293,7 +305,7 @@ mod tests {
     fn the_plan_shows_exactly_the_frames_of_the_clips_that_the_source_video_has() {
         for frame_count in [1, 50, 99, 100, 101, 130, 200, 201, 299, 300, 1000] {
             let project = project_on_a_replacement_video_of(frame_count);
-            let plan = plan_export(&project).unwrap();
+            let plan = plan_export(&project, Settings::DEFAULT).unwrap();
 
             // What the finished video must show, found one frame at a time: every frame of every
             // clip, if the source video has the source frame it stands for.
@@ -334,7 +346,7 @@ mod tests {
     fn a_video_with_none_of_the_frames_the_clips_need_cannot_be_exported() {
         // (A real video with no frames cannot be opened at all; the plan must cope anyway.)
         assert_eq!(
-            plan_export(&project_on_a_replacement_video_of(0)).unwrap_err(),
+            plan_export(&project_on_a_replacement_video_of(0), Settings::DEFAULT).unwrap_err(),
             ExportPlanError::EverythingIsPastTheEndOfTheSourceVideo { source_frame_count: 0 }
         );
     }
@@ -342,19 +354,19 @@ mod tests {
     #[test]
     fn a_speed_only_used_by_clips_that_are_left_out_gets_no_symbol_picture() {
         // The 4x clip (100..200) is wholly past the end of a video of 100 frames.
-        let plan = plan_export(&project_on_a_replacement_video_of(100)).unwrap();
+        let plan = plan_export(&project_on_a_replacement_video_of(100), Settings::DEFAULT).unwrap();
         assert!(plan.symbol_inputs.is_empty());
         assert_eq!(plan.total_frame_count, 100);
     }
 
     #[test]
     fn odd_picture_sizes_are_rounded_down_to_even_ones() {
-        let plan = plan_export(&project_with_video(321, 181, false)).unwrap();
+        let plan = plan_export(&project_with_video(321, 181, false), Settings::DEFAULT).unwrap();
         assert_eq!(
             (plan.picture_width_in_pixels, plan.picture_height_in_pixels),
             (320, 180)
         );
-        let plan = plan_export(&project_with_video(1, 1, false)).unwrap();
+        let plan = plan_export(&project_with_video(1, 1, false), Settings::DEFAULT).unwrap();
         assert_eq!((plan.picture_width_in_pixels, plan.picture_height_in_pixels), (2, 2));
     }
 
@@ -370,7 +382,7 @@ mod tests {
                 .set_clip_speed(clip_index, SpeedFactor::new(factor).unwrap())
                 .unwrap();
         }
-        let plan = plan_export(&project).unwrap();
+        let plan = plan_export(&project, Settings::DEFAULT).unwrap();
         let speeds: Vec<u32> = plan
             .symbol_inputs
             .iter()
@@ -392,7 +404,12 @@ mod tests {
     fn a_project_with_no_accelerated_clips_needs_no_symbol_pictures() {
         let mut project = project_with_video(1280, 720, false);
         project.split_at(TimelineFrameIndex::new(100)).unwrap();
-        assert!(plan_export(&project).unwrap().symbol_inputs.is_empty());
+        assert!(
+            plan_export(&project, Settings::DEFAULT)
+                .unwrap()
+                .symbol_inputs
+                .is_empty()
+        );
     }
 
     #[test]
@@ -400,7 +417,7 @@ mod tests {
         let mut project = project_with_video(1920, 1080, false);
         project.set_speed_indicator_layout(SpeedIndicatorLayout::new(0.1, 0.2, 0.1));
         project.set_clip_speed(0, SpeedFactor::new(4).unwrap()).unwrap();
-        let plan = plan_export(&project).unwrap();
+        let plan = plan_export(&project, Settings::DEFAULT).unwrap();
         assert_eq!(plan.symbol_inputs[0].picture.height_in_pixels, 108);
         assert!(
             plan.filter_graph.text.contains("overlay=x=192:y=216:format=auto"),
@@ -410,16 +427,39 @@ mod tests {
     }
 
     #[test]
+    fn the_mute_setting_reaches_the_graph_and_only_changes_the_sound_of_sped_up_clips() {
+        let mut project = project_with_video(320, 180, true);
+        project.split_at(TimelineFrameIndex::new(100)).unwrap();
+        project.set_clip_speed(1, SpeedFactor::new(4).unwrap()).unwrap();
+        let muting = Settings {
+            mute_sped_up_clips: true,
+            ..Settings::DEFAULT
+        };
+
+        let loud = plan_export(&project, Settings::DEFAULT).unwrap().filter_graph.text;
+        let quiet = plan_export(&project, muting).unwrap().filter_graph.text;
+
+        assert!(loud.contains("atempo=4"), "{loud}");
+        assert!(!quiet.contains("atempo"), "{quiet}");
+        assert!(quiet.contains("volume=0"), "{quiet}");
+        assert_eq!(
+            loud.matches("setpts=").count(),
+            quiet.matches("setpts=").count(),
+            "the pictures are the same"
+        );
+    }
+
+    #[test]
     fn sound_is_part_of_the_plan_only_when_the_source_has_it() {
         assert!(
-            plan_export(&project_with_video(320, 180, true))
+            plan_export(&project_with_video(320, 180, true), Settings::DEFAULT)
                 .unwrap()
                 .filter_graph
                 .audio_output_label
                 .is_some()
         );
         assert!(
-            plan_export(&project_with_video(320, 180, false))
+            plan_export(&project_with_video(320, 180, false), Settings::DEFAULT)
                 .unwrap()
                 .filter_graph
                 .audio_output_label

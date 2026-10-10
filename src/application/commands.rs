@@ -2,7 +2,7 @@
 //! pushing a [`Command`]); one place afterwards decides what to do about each, so that no drawing
 //! code ever has to change the project while it is still being drawn from.
 
-use crate::project::{SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
+use crate::project::{ProjectSettings, Settings, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
 
 /// Something the user has asked for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -13,6 +13,15 @@ pub enum Command {
     NewProject,
     ImportVideo,
     ExportVideo,
+
+    // The Edit menu.
+    ShowProjectSettings,
+    ShowGlobalSettings,
+
+    /// The project's own settings were changed in the project settings window.
+    SetProjectSettings(ProjectSettings),
+    /// The global settings were changed in the global settings window.
+    SetGlobalSettings(Settings),
 
     // The play buttons.
     Pause,

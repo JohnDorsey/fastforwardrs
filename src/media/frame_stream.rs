@@ -9,14 +9,12 @@
 use std::ffi::OsString;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::process::{Child, Stdio};
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::thread;
+use std::sync::mpsc::SyncSender;
 
 use thiserror::Error;
 
 use super::UserInterfaceWakeUp;
-use super::child_process::{background_command, collect_error_output_in_background};
+use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use crate::project::{FrameRate, SourceFrameIndex, SpeedFactor};
 
@@ -71,8 +69,7 @@ pub enum FrameStreamError {
 /// A running ffmpeg process that delivers decoded frames in the background. Dropping the stream
 /// stops ffmpeg.
 pub struct FrameStream {
-    child: Child,
-    events: Receiver<FrameStreamEvent>,
+    tool: StreamingTool<FrameStreamEvent>,
 }
 
 impl FrameStream {
@@ -86,49 +83,32 @@ impl FrameStream {
         if request.picture_width_in_pixels == 0 || request.picture_height_in_pixels == 0 {
             return Err(FrameStreamError::EmptyPicture);
         }
-        let mut child = background_command(toolchain.ffmpeg_path())
-            .args(frame_stream_arguments(request))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(FrameStreamError::CouldNotStart)?;
-        let (Some(standard_output), Some(standard_error)) = (child.stdout.take(), child.stderr.take()) else {
-            let _ = child.kill();
-            return Err(FrameStreamError::CouldNotStart(io::Error::other(
-                "the decoder's pipes were not created",
-            )));
-        };
-
-        let (sender, events) = mpsc::sync_channel(FRAMES_BUFFERED_AHEAD);
+        let mut command = background_command(toolchain.ffmpeg_path());
+        command.args(frame_stream_arguments(request));
         let frame_size = FrameSize {
             width_in_pixels: request.picture_width_in_pixels,
             height_in_pixels: request.picture_height_in_pixels,
         };
-        let error_output_collector = collect_error_output_in_background(standard_error);
-        thread::spawn(move || {
-            let error_output_when_finished = move || error_output_collector.join().unwrap_or_default();
-            read_frames(
-                standard_output,
-                frame_size,
-                &sender,
-                &wake_up,
-                error_output_when_finished,
-            );
-        });
-        Ok(Self { child, events })
+        let tool = StreamingTool::start(
+            command,
+            FRAMES_BUFFERED_AHEAD,
+            move |standard_output, sender, error_output_when_finished| {
+                read_frames(
+                    standard_output,
+                    frame_size,
+                    &sender,
+                    &wake_up,
+                    error_output_when_finished,
+                );
+            },
+        )
+        .map_err(FrameStreamError::CouldNotStart)?;
+        Ok(Self { tool })
     }
 
     /// The next event, if one is ready. Never waits.
     pub fn try_next_event(&self) -> Option<FrameStreamEvent> {
-        self.events.try_recv().ok()
-    }
-}
-
-impl Drop for FrameStream {
-    fn drop(&mut self) {
-        // Stopping ffmpeg closes its output, which ends the reading thread.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.tool.try_next_event()
     }
 }
 
@@ -232,6 +212,8 @@ fn half_a_frame_in_seconds(frame_rate: FrameRate) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use super::*;
 
     fn request(first_source_frame: u64, source_frame_count: u64, speed_factor: u32) -> FrameStreamRequest {

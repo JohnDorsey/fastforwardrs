@@ -59,6 +59,25 @@ impl PlaybackClock {
         TimelineFrameIndex::new(position.min(last_frame))
     }
 
+    /// The time into the timeline at `now`, in seconds, more exactly than the whole frame that
+    /// [`Self::position`] gives (which is where that frame begins). While playing it moves on
+    /// smoothly with the real time, up to the start of the last frame, where playing stops. This
+    /// is what the sound is kept in step with.
+    pub fn position_in_seconds(&self, now: Instant, total_frame_count: u64) -> f64 {
+        let last_frame_seconds = self.frame_rate.seconds_at_frame(total_frame_count.saturating_sub(1));
+        let seconds = match self.state {
+            ClockState::Paused { position } => self.frame_rate.seconds_at_frame(position),
+            ClockState::Playing {
+                started_at,
+                started_position,
+            } => {
+                self.frame_rate.seconds_at_frame(started_position)
+                    + now.saturating_duration_since(started_at).as_secs_f64()
+            }
+        };
+        seconds.min(last_frame_seconds)
+    }
+
     /// Brings the clock up to date: if playing has gone past the last frame, playing stops there.
     /// Returns whether it stopped just now.
     pub fn stop_at_the_end(&mut self, now: Instant, total_frame_count: u64) -> bool {
@@ -175,6 +194,70 @@ mod tests {
         assert_eq!(position(&clock, after(start, 34)), 1);
         assert_eq!(position(&clock, after(start, 1000)), 30);
         assert_eq!(position(&clock, after(start, 10_000)), 300);
+    }
+
+    #[test]
+    fn the_time_in_seconds_is_exact_where_the_frame_is_only_whole() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.play(start, TOTAL_FRAMES);
+        assert_eq!(clock.position_in_seconds(start, TOTAL_FRAMES), 0.0);
+        let at_half_a_frame = clock.position_in_seconds(after(start, 16), TOTAL_FRAMES);
+        assert!((at_half_a_frame - 0.016).abs() < 1e-9, "{at_half_a_frame}");
+        assert_eq!(
+            position(&clock, after(start, 16)),
+            0,
+            "while the frame is still the first"
+        );
+        let after_a_second = clock.position_in_seconds(after(start, 1000), TOTAL_FRAMES);
+        assert!((after_a_second - 1.0).abs() < 1e-9, "{after_a_second}");
+    }
+
+    #[test]
+    fn the_time_in_seconds_starts_from_wherever_playing_started_and_a_paused_clock_stands_still() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.seek(start, TimelineFrameIndex::new(90), TOTAL_FRAMES);
+        assert_eq!(
+            clock.position_in_seconds(after(start, 5000), TOTAL_FRAMES),
+            3.0,
+            "paused at 3 s"
+        );
+        clock.play(start, TOTAL_FRAMES);
+        let later = clock.position_in_seconds(after(start, 500), TOTAL_FRAMES);
+        assert!((later - 3.5).abs() < 1e-9, "{later}");
+        clock.pause(after(start, 500), TOTAL_FRAMES);
+        let paused_at = clock.position_in_seconds(after(start, 9000), TOTAL_FRAMES);
+        assert_eq!(paused_at, clock.position_in_seconds(after(start, 500), TOTAL_FRAMES));
+        assert_eq!(
+            paused_at,
+            3.5 - (3.5 * 30.0 % 1.0) / 30.0,
+            "a paused clock is on a whole frame"
+        );
+    }
+
+    #[test]
+    fn the_time_in_seconds_never_goes_past_the_start_of_the_last_frame() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.play(start, 90);
+        let seconds = clock.position_in_seconds(after(start, 60_000), 90);
+        assert!((seconds - 89.0 / 30.0).abs() < 1e-9, "{seconds}");
+        assert_eq!(
+            clock.position_in_seconds(start, 0),
+            0.0,
+            "with nothing to play it is zero"
+        );
+    }
+
+    #[test]
+    fn the_time_in_seconds_agrees_with_the_frame_at_a_fractional_frame_rate() {
+        let start = Instant::now();
+        let mut clock = clock(30000, 1001);
+        clock.play(start, 1_000_000);
+        let seconds = clock.position_in_seconds(after(start, 1001), 1_000_000);
+        assert!((seconds - 1.001).abs() < 1e-9);
+        assert_eq!(clock.position(after(start, 1001), 1_000_000).value(), 30);
     }
 
     #[test]

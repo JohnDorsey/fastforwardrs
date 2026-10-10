@@ -16,6 +16,7 @@ mod opening;
 mod preview_panel;
 mod scrub_bar;
 mod scrub_slider;
+mod settings_windows;
 mod speed_slider;
 mod textures;
 mod theme;
