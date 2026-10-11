@@ -1,7 +1,8 @@
 //! The box at the left of each track: the track's title, which can be changed by typing in it, and
-//! the settings gear that opens the box with the settings of everything on the track.
+//! the settings gear that opens the box with the settings of everything on the track. Right-clicking
+//! the box (or its title) opens a menu with Delete track.
 
-use egui::{CornerRadius, Rect, Sense, TextEdit, Ui, UiBuilder, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Button, CornerRadius, Rect, Sense, TextEdit, Ui, UiBuilder, WidgetInfo, WidgetType, pos2, vec2};
 
 use super::TimelineViewState;
 use super::icons::draw_gear;
@@ -19,22 +20,55 @@ const TITLE_HEIGHT: f32 = 26.0;
 /// How far the title and the gear keep from the edges of the box, in points.
 const MARGIN: f32 = 8.0;
 
+/// How tall the box has to be to hold the title and the gear: the taller of the two. (The least a
+/// track can be is just taller than this, which a test checks.)
+#[cfg(test)]
+pub const CONTENT_HEIGHT: f32 = if GEAR_BUTTON_SIZE > TITLE_HEIGHT {
+    GEAR_BUTTON_SIZE
+} else {
+    TITLE_HEIGHT
+};
+
 /// The name the gear's button is known by to screen readers (and the tests): it says which track.
 pub fn gear_label(track_title: &str) -> String {
     format!("Settings of {track_title}")
 }
 
-/// Draws the box of `track` in `header_rectangle`, and adds a command when its title is typed in.
+/// What the menu of the box of a track offers to delete.
+pub const DELETE_TRACK_LABEL: &str = "Delete track";
+
+/// The menu that opens when the box of `track` is right-clicked.
+fn show_the_menu(ui: &mut Ui, track: &Track, can_delete: bool, commands: &mut Vec<Command>) {
+    let item = ui.add_enabled(can_delete, Button::new(DELETE_TRACK_LABEL));
+    if item.clicked() {
+        commands.push(Command::DeleteTrack(track.id()));
+        ui.close();
+    }
+    if !can_delete {
+        item.on_disabled_hover_text("A project always has a track");
+    }
+}
+
+/// Draws the box of `track` in `header_rectangle`, and adds a command when its title is typed in or
+/// the track is deleted from the menu (`can_delete` says whether it may be: not the last one).
 pub(super) fn show(
     ui: &mut Ui,
     header_rectangle: Rect,
     track: &Track,
-    can_edit: bool,
+    (can_edit, can_delete): (bool, bool),
     state: &mut TimelineViewState,
     commands: &mut Vec<Command>,
 ) {
     ui.painter()
         .rect_filled(header_rectangle, CornerRadius::same(10), theme::TRACK_HEADER_BACKGROUND);
+    // The whole box senses the right button (under the title and the gear, which are put over it).
+    // It takes no clicks of the left: it is only there for the menu.
+    let background = ui.interact(
+        header_rectangle,
+        ui.id().with(("track header", track.id())),
+        if can_edit { Sense::CLICK } else { Sense::hover() },
+    );
+    background.context_menu(|ui| show_the_menu(ui, track, can_delete, commands));
     let middle_y = header_rectangle.center().y;
 
     let gear_rectangle = Rect::from_center_size(
@@ -57,6 +91,7 @@ pub(super) fn show(
     );
     title_response
         .widget_info(|| WidgetInfo::text_edit(can_edit, track.title(), title.clone(), "The title of the track"));
+    title_response.context_menu(|ui| show_the_menu(ui, track, can_delete, commands));
     if title != track.title() {
         commands.push(Command::SetTrackTitle {
             track: track.id(),

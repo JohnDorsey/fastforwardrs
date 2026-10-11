@@ -10,13 +10,14 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
+use egui::{Key, Modifiers, PointerButton, vec2};
 use egui_kittest::kittest::Queryable;
 use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::project::{Clip, Project, SourceMediaIdentifier, TimelineFrameIndex};
 use journey::Journey;
 use support::{
-    TestVideoSpecification, counter_video, decode_video, expected_source_frames, is_black, scratch_directory,
-    stream_durations, test_video,
+    TestVideoSpecification, counter_video, decode_video, expected_source_frames, is_black, red_and_blue_picture,
+    scratch_directory, stream_durations, test_video,
 };
 
 /// The size of the pictures the test videos are exported at.
@@ -478,12 +479,14 @@ fn a_shorter_replacement_video_keeps_the_edits_and_the_export_is_black_where_the
         );
     }
 
-    // ...the message says how much of the project is black...
+    // ...the message says how much of the project is missing a picture...
     let (_, text) = reopened.application().message_showing().expect("the export finished");
     let black = timeline_frames - frames_that_exist as u64;
     assert!(
-        text.contains(&format!("{black} frames of the project are black")),
-        "{black} frames are black: {text}"
+        text.contains(&format!(
+            "{black} frames of the project are missing the picture of a video"
+        )),
+        "{black} frames are missing a picture: {text}"
     );
 
     // ...and the sound is as long as the picture.
@@ -859,4 +862,143 @@ fn a_video_with_another_frame_rate_than_the_projects_cannot_be_imported_and_the_
         "nothing was added"
     );
     assert_eq!(journey.application().project().sources().len(), 1);
+}
+
+#[test]
+fn importing_a_file_is_an_edit_that_undo_takes_back_and_redo_puts_back_with_its_pictures_still_there() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 20 seconds at 30 frames a second
+    let mut journey = Journey::start(&toolchain);
+    assert!(!journey.application().can_undo(), "nothing has been done yet");
+
+    journey.import(&video.path);
+    assert_eq!(journey.clips(), vec![(0, 600, 1)]);
+    assert!(journey.application().can_undo(), "the import is an edit");
+
+    // Undoing takes the video off the timeline again, and the project back to what it was.
+    journey.press_key_with(Modifiers::COMMAND, Key::Z);
+    assert_eq!(journey.clips(), Vec::new());
+    assert!(journey.application().project().sources().is_empty());
+    assert!(!journey.application().can_undo());
+    assert!(journey.application().can_redo());
+
+    // Redoing brings the clip back, with the file still open and its pictures still made.
+    journey.press_key_with(Modifiers::COMMAND, Key::Y);
+    assert_eq!(journey.clips(), vec![(0, 600, 1)]);
+    assert_eq!(journey.application().project().sources().len(), 1);
+    assert!(journey.application().every_source_file_is_available());
+    assert_eq!(journey.application().thumbnail_progress(THE_VIDEO), (20, 20));
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    assert_eq!(journey.frame_number_in_the_preview(), 0);
+}
+
+/// Draws frames until the pictures the timeline wanted have been made. (The first frames after a
+/// change are when it says what it wants.)
+fn wait_for_the_finer_thumbnails(journey: &mut Journey) {
+    for _ in 0..3 {
+        journey.wait_until_idle();
+        journey.settle();
+    }
+    assert_eq!(
+        journey.application().finer_thumbnails_still_wanted(THE_VIDEO),
+        0,
+        "everything the timeline wanted has been made"
+    );
+}
+
+#[test]
+fn a_short_track_and_a_zoomed_in_timeline_get_finer_thumbnails_made_for_what_is_on_screen_only() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 20 seconds, 640 by 360
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    assert_eq!(
+        journey.application().finer_thumbnails_made(THE_VIDEO),
+        0,
+        "at the normal size and zoom the picture of every second is all there is need of"
+    );
+
+    // Half as tall a track has pictures half as wide, which are half a second apart.
+    let boundary = journey.boundary_under_the_track(0);
+    journey.drag(PointerButton::Primary, boundary, boundary - vec2(0.0, 52.0));
+    assert!((journey.strip_of_track(0).height() - 52.0).abs() < 0.5);
+    wait_for_the_finer_thumbnails(&mut journey);
+    let after_shortening = journey.application().finer_thumbnails_made(THE_VIDEO);
+    assert!(
+        (4..=60).contains(&after_shortening),
+        "pictures were made for the part on screen, and no more than that: {after_shortening}"
+    );
+
+    // Zooming in a lot (the pointer over the strip) makes the pictures a quarter of a second apart or less.
+    let over_the_strip = journey.point_on_the_track_at_frame(0);
+    journey.scroll_the_wheel(over_the_strip, vec2(0.0, 150.0), Modifiers::COMMAND);
+    wait_for_the_finer_thumbnails(&mut journey);
+    let after_zooming = journey.application().finer_thumbnails_made(THE_VIDEO);
+    assert!(
+        after_zooming > after_shortening,
+        "zooming in needed pictures of a finer level too: {after_shortening}, then {after_zooming}"
+    );
+    assert!(
+        after_zooming < 20 * 16,
+        "and still not for the whole video: {after_zooming} of the {} there could be",
+        20 * 16
+    );
+}
+
+#[test]
+fn a_picture_imported_from_a_file_is_decoded_for_the_preview_put_in_front_of_the_video_and_drawn_in_the_export() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    // A picture twice as wide as it is tall, red on its left half and blue on its right.
+    let picture_file = red_and_blue_picture(&toolchain, scratch.path(), "red_and_blue.png", 64, 32);
+    let mut journey = Journey::importing(&toolchain, &video.path);
+
+    journey.import(&picture_file);
+
+    let picture_source = SourceMediaIdentifier::new(2);
+    assert!(
+        journey.application().image_file_is_decoded(picture_source),
+        "the picture was decoded for the preview"
+    );
+    let project = journey.application().project();
+    assert_eq!(project.tracks().len(), 2, "on a track of its own, in front");
+    let picture = project.tracks()[0].entries()[0]
+        .clip()
+        .as_image()
+        .expect("a picture clip");
+    assert_eq!(picture.source(), picture_source);
+    assert_eq!(
+        picture.duration_in_frames(),
+        150,
+        "five seconds at 30 frames per second"
+    );
+
+    // Exported: the 64 by 32 picture is fitted into the 320 by 180 one, 320 across and 160 down with 10
+    // above it and 10 below, so its left half is red and its right half is blue over the video.
+    let exported_to = scratch.path().join("with_a_picture.mp4");
+    export_to(&mut journey, &exported_to);
+    let decoded = decode_video(&toolchain, &exported_to, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(decoded.pictures.len(), 600);
+    let at = |x: usize, y: usize| {
+        let first = (y * VIDEO_WIDTH as usize + x) * 3;
+        let picture = &decoded.pictures[75];
+        [picture[first], picture[first + 1], picture[first + 2]]
+    };
+    let [red, green, blue] = at(60, 90);
+    assert!(
+        red > 200 && green < 60 && blue < 60,
+        "red on the left: {red} {green} {blue}"
+    );
+    let [red, green, blue] = at(260, 90);
+    assert!(
+        blue > 200 && red < 60 && green < 60,
+        "blue on the right: {red} {green} {blue}"
+    );
+    // After its five seconds the picture is gone and the video is all there is.
+    let later = &decoded.pictures[200];
+    let first = (90 * VIDEO_WIDTH as usize + 60) * 3;
+    assert!(
+        !(later[first] > 200 && later[first + 1] < 60 && later[first + 2] < 60),
+        "the picture is not there at frame 200"
+    );
 }

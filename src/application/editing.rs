@@ -96,6 +96,25 @@ pub fn delete_clip_keeping_the_picture(
     keeping_the_picture(project, current_frame, |project| project.delete_clip(clip))
 }
 
+/// Makes the project what `earlier` is (see [`Project::restore`]), as undoing and redoing do, and
+/// returns where the current frame has to move to so that the picture on screen stays the same: so
+/// that undoing an edit that moved clips along the timeline puts the current frame back where it
+/// was. If the picture is gone the current frame stays where it is, but never goes beyond the end
+/// of the timeline.
+pub fn restore_keeping_the_picture(
+    project: &mut Project,
+    current_frame: TimelineFrameIndex,
+    earlier: Project,
+) -> TimelineFrameIndex {
+    match keeping_the_picture::<std::convert::Infallible>(project, current_frame, |project| {
+        project.restore(earlier);
+        Ok(())
+    }) {
+        Ok(frame) => frame,
+        Err(never) => match never {},
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -338,5 +357,41 @@ mod tests {
             set_clip_speed_keeping_the_picture(&mut project, frame(100), behind_clip, SpeedFactor::new(10).unwrap())
                 .unwrap();
         assert_eq!(moved, frame(100), "the picture seen did not move");
+    }
+
+    #[test]
+    fn undoing_a_speed_change_puts_the_current_frame_back_where_it_was() {
+        let mut project = project_with_clips_at(&[200, 400]);
+        let before = project.clone();
+        let current = frame(450);
+        let first_clip = clip(&project, 0);
+        let moved = set_clip_speed_keeping_the_picture(&mut project, current, first_clip, SpeedFactor::new(4).unwrap())
+            .unwrap();
+        assert_eq!(moved, frame(300));
+
+        let restored = restore_keeping_the_picture(&mut project, moved, before.clone());
+
+        assert_eq!(project, before);
+        assert_eq!(
+            restored, current,
+            "the same picture is on screen, which is where it was"
+        );
+    }
+
+    #[test]
+    fn restoring_a_project_in_which_the_picture_is_gone_keeps_the_current_frame_inside_the_timeline() {
+        let mut project = project_with_clips_at(&[200, 400]);
+        let restored = restore_keeping_the_picture(&mut project, frame(450), Project::empty());
+        assert_eq!(restored, frame(0), "there is no timeline at all, so the first frame");
+
+        let mut project = project_with_clips_at(&[200, 400]);
+        let shorter = {
+            let mut shorter = project.clone();
+            let last = clip(&shorter, 2);
+            shorter.delete_clip(last).unwrap();
+            shorter
+        };
+        let restored = restore_keeping_the_picture(&mut project, frame(500), shorter);
+        assert_eq!(restored, frame(399), "the last frame of what is left");
     }
 }

@@ -267,3 +267,205 @@ fn write_screenshots_of_many_tracks_and_missing_files() {
     reopened.right_click(missing_clip);
     save(&mut reopened, &folder, "21_the_box_of_a_clip_whose_file_is_missing");
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_zoom_and_track_heights() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let sound = pulsing_sound(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.cut_at_frame(120);
+    journey.move_playhead_to_frame(0);
+    journey.import(&sound);
+    journey.move_playhead_to_frame(60);
+    save(&mut journey, &folder, "20_the_normal_zoom_and_height");
+
+    // A tall video track, 50% taller than a new one, and a short sound track (as short as it goes).
+    let boundary = journey.boundary_under_the_track(1);
+    journey.drag(egui::PointerButton::Primary, boundary, boundary + egui::vec2(0.0, 80.0));
+    let boundary = journey.boundary_under_the_track(0);
+    journey.drag(
+        egui::PointerButton::Primary,
+        boundary,
+        boundary - egui::vec2(0.0, 150.0),
+    );
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "21_a_tall_video_track_and_a_short_sound_track");
+
+    // The video track made short too: the pictures get narrower and are taken more often.
+    let boundary = journey.boundary_under_the_track(1);
+    journey.drag(
+        egui::PointerButton::Primary,
+        boundary,
+        boundary - egui::vec2(0.0, 140.0),
+    );
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "22_both_tracks_short");
+
+    // Zoomed out far: labels in minutes; then zoomed in far: a mark for every frame.
+    let over_the_strip = journey.point_on_the_strip_at_frame(1, 60);
+    journey.scroll_the_wheel(over_the_strip, egui::vec2(0.0, -300.0), egui::Modifiers::COMMAND);
+    save(&mut journey, &folder, "23_zoomed_out");
+    journey.scroll_the_wheel(over_the_strip, egui::vec2(0.0, 1500.0), egui::Modifiers::COMMAND);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "24_zoomed_all_the_way_in");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_turned_and_resized_videos_and_text() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.move_playhead_to_frame(60);
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    save(&mut journey, &folder, "30_the_video_before_anything_is_done_to_it");
+
+    // A text object, turned by dragging round from just outside one of its corners.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 0);
+    journey.replace_text_in_the_field_showing("Text", "A caption, turned");
+    journey.harness.get_by_label("Close window").click();
+    journey.settle();
+    save(&mut journey, &folder, "31_the_text_selected_with_its_corners");
+    let handle = |journey: &Journey, which: &str| {
+        journey
+            .rectangle_of(&format!("Resize handle at the {which} corner"))
+            .center()
+    };
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    let outside = bottom_right + (bottom_right - middle).normalized() * 18.0;
+    let turned = |point: egui::Pos2, degrees: f32| {
+        let (sine, cosine) = degrees.to_radians().sin_cos();
+        let offset = point - middle;
+        middle + egui::vec2(offset.x * cosine - offset.y * sine, offset.x * sine + offset.y * cosine)
+    };
+    journey.drag(egui::PointerButton::Primary, outside, turned(outside, -12.0));
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "32_the_text_turned");
+
+    // The video, picked by a click on it, made smaller by a corner, moved, and turned.
+    let beside_the_text = journey.rectangle_of("Video, clip 0 of track 0").center() - egui::vec2(0.0, 120.0);
+    journey.click(beside_the_text);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "33_the_video_picked");
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    journey.drag(
+        egui::PointerButton::Primary,
+        bottom_right,
+        top_left + (bottom_right - top_left) * 0.6,
+    );
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "34_the_video_made_smaller");
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    journey.drag(egui::PointerButton::Primary, middle, middle + egui::vec2(60.0, 10.0));
+    journey.wait_until_idle();
+    let (top_right, bottom_left) = (handle(&journey, "top right"), handle(&journey, "bottom left"));
+    let middle = top_right + (bottom_left - top_right) * 0.5;
+    let outside = top_right + (top_right - middle).normalized() * 18.0;
+    let turned_about = |point: egui::Pos2, degrees: f32| {
+        let (sine, cosine) = degrees.to_radians().sin_cos();
+        let offset = point - middle;
+        middle + egui::vec2(offset.x * cosine - offset.y * sine, offset.x * sine + offset.y * cosine)
+    };
+    journey.drag(egui::PointerButton::Primary, outside, turned_about(outside, 20.0));
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "35_the_video_moved_and_turned");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_picture_on_the_timeline_and_the_preview() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let picture_file = folder.join("a_picture_800x400.png");
+    if !picture_file.exists() {
+        let status = Command::new(toolchain.ffmpeg_path())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
+            .args(["-f", "lavfi", "-i", "testsrc=size=800x400:rate=1"])
+            .args(["-frames:v", "1"])
+            .arg(&picture_file)
+            .status()
+            .expect("could not run ffmpeg");
+        assert!(status.success());
+    }
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.move_playhead_to_frame(30);
+    journey.import(&picture_file);
+    journey.move_playhead_to_frame(60);
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    save(&mut journey, &folder, "40_a_picture_imported_in_front_of_a_video");
+
+    // Picked on the preview, made smaller by a corner, moved and turned.
+    let corner = |journey: &Journey, which: &str| {
+        journey
+            .rectangle_of(&format!("Resize handle at the {which} corner"))
+            .center()
+    };
+    let picture_on_the_preview = journey.rectangle_of("Picture, clip 0 of track 1").center();
+    journey.click(picture_on_the_preview);
+    let (top_left, bottom_right) = (corner(&journey, "top left"), corner(&journey, "bottom right"));
+    journey.drag(
+        egui::PointerButton::Primary,
+        bottom_right,
+        top_left + (bottom_right - top_left) * 0.45,
+    );
+    journey.wait_until_idle();
+    let (top_left, bottom_right) = (corner(&journey, "top left"), corner(&journey, "bottom right"));
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    journey.drag(egui::PointerButton::Primary, middle, middle + egui::vec2(120.0, 60.0));
+    journey.wait_until_idle();
+    let (top_right, bottom_left) = (corner(&journey, "top right"), corner(&journey, "bottom left"));
+    let middle = top_right + (bottom_left - top_right) * 0.5;
+    let outside = top_right + (top_right - middle).normalized() * 18.0;
+    let (sine, cosine) = (-25.0f32).to_radians().sin_cos();
+    let offset = outside - middle;
+    journey.drag(
+        egui::PointerButton::Primary,
+        outside,
+        middle + egui::vec2(offset.x * cosine - offset.y * sine, offset.x * sine + offset.y * cosine),
+    );
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "41_the_picture_made_smaller_moved_and_turned");
+
+    // Its box on the timeline.
+    let on_the_picture_clip = journey.point_on_the_strip_at_frame(0, 90);
+    journey.right_click(on_the_picture_clip);
+    save(&mut journey, &folder, "42_the_box_of_a_picture_clip");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_video_of_another_shape_over_one_that_fills_the_picture() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let landscape = colourful_video(&toolchain, &folder);
+    let portrait = folder.join("portrait_16_seconds.mp4");
+    if !portrait.exists() {
+        let status = Command::new(toolchain.ffmpeg_path())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
+            .args(["-f", "lavfi", "-i", "testsrc=size=360x640:rate=30:duration=16"])
+            .args([
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-g", "30",
+            ])
+            .arg(&portrait)
+            .status()
+            .expect("could not run ffmpeg");
+        assert!(status.success());
+    }
+    let mut journey = Journey::importing(&toolchain, &landscape);
+    journey.import(&portrait);
+    journey.move_playhead_to_frame(60);
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    save(&mut journey, &folder, "50_a_tall_video_in_front_of_a_wide_one");
+}

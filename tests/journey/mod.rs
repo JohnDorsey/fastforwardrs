@@ -253,6 +253,34 @@ impl Journey {
         self.settle();
     }
 
+    /// Turns the mouse wheel by `delta` points (positive is up) with the pointer at `position` and
+    /// `modifiers` held (Ctrl zooms the timeline), and lets the smooth scrolling that follows play out.
+    pub fn scroll_the_wheel(&mut self, position: Pos2, delta: egui::Vec2, modifiers: Modifiers) {
+        self.move_pointer_to(position);
+        self.harness.event(Event::ModifiersChanged(modifiers));
+        self.harness.step();
+        self.harness.event(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        });
+        for _ in 0..31 {
+            self.harness.step();
+        }
+        self.harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        self.harness.step();
+        self.settle();
+    }
+
+    /// Where the boundary under the title box of the track at `position` is: a place to drag it
+    /// from to make the track taller or shorter.
+    pub fn boundary_under_the_track(&self, position: usize) -> Pos2 {
+        let strip = self.strip_of_track(position);
+        // Below the strip's gap's middle, at the left of the strips where the title box is.
+        Pos2::new(strip.left() - 100.0, strip.bottom() + 3.0)
+    }
+
     /// Presses `button` at `from`, moves in small steps to `to`, and lets go there.
     pub fn drag(&mut self, button: PointerButton, from: Pos2, to: Pos2) {
         self.move_pointer_to(from);
@@ -359,6 +387,13 @@ impl Journey {
     /// Presses and lets go of a key, and draws a few frames.
     pub fn press_key(&mut self, key: Key) {
         self.harness.key_press(key);
+        self.harness.step();
+        self.settle();
+    }
+
+    /// Presses and lets go of a key with `modifiers` held down, and draws a few frames.
+    pub fn press_key_with(&mut self, modifiers: Modifiers, key: Key) {
+        self.harness.key_press_modifiers(modifiers, key);
         self.harness.step();
         self.settle();
     }

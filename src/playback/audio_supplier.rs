@@ -9,8 +9,15 @@
 //! * a small difference later on (the playhead stepped by an arrow key, a hiccup) is put right the
 //!   same way: sound that is late is skipped, and sound that is early is held back by a little
 //!   silence;
-//! * a big difference (the playhead was moved a long way) or a change to what the sound is made of
-//!   (a clip was sped up) makes it start again from the playhead;
+//! * a big difference (the playhead was moved a long way) makes it start again from the playhead;
+//! * a change to what the sound is made of (a clip was sped up, a volume was changed) makes the
+//!   sound again from the playhead, but the sound that was playing is not stopped while that is
+//!   being done, which takes a moment: the new stream is a *replacement*, which takes over from the
+//!   old one a little way ahead of the speakers, with the one fading into the other, as soon as it
+//!   has sound to give. (Stopping the old sound first would leave a gap in the sound of all the
+//!   tracks for as long as the new one took to start, over and over again while a slider is dragged.)
+//!   Only one replacement is made at a time, and one that is made for what the sound was a moment
+//!   ago is still used: the next one is started once it has taken over;
 //! * when the video is not playing there is no sound, and nothing is running.
 
 use std::collections::HashMap;
@@ -51,6 +58,15 @@ pub const LONGEST_START_UP_TO_CATCH_UP_WITH_IN_SECONDS: f64 = 3.0;
 /// and a person holding down an arrow key moves the playhead on every key repeat.)
 pub const MINIMUM_TIME_BETWEEN_STREAM_STARTS: Duration = Duration::from_millis(100);
 
+/// When a replacement stream takes over from the one that has been playing, this much of the sound
+/// that is waiting at the speakers is left to play as it is, in seconds: the speakers go on
+/// playing while the join is made, and must not run out before it is.
+pub const SECONDS_OF_OLD_SOUND_KEPT_WHEN_TAKING_OVER: f64 = 0.005;
+
+/// How long the old sound fades out, and the new fades in, in seconds, so that the join is not
+/// heard as a click.
+pub const SECONDS_TO_FADE_WHEN_TAKING_OVER: f64 = 0.010;
+
 /// After something fails (the speakers or ffmpeg could not be started) it is not tried again for
 /// this long, so that a failure that will not go away does not cost anything every frame.
 pub const MINIMUM_TIME_BETWEEN_FAILED_ATTEMPTS: Duration = Duration::from_secs(2);
@@ -65,6 +81,11 @@ pub trait AudioSink {
     fn clear(&mut self);
     /// How many moments of sound are waiting to be played.
     fn queued_moment_count(&self) -> u64;
+    /// Takes the sound that is waiting after its first `keep_moments`, and puts `new_sound` (whole
+    /// moments, interleaved by channel) in its place, with the old sound fading out and the new
+    /// fading in over the first `fade_moments`. See [`crate::playback::splice_waiting_sound`]. The
+    /// speakers must go on playing what is kept while this is done.
+    fn replace_waiting_sound(&mut self, keep_moments: u64, fade_moments: u64, new_sound: &[f32]);
     /// Whether the speakers still work (a sound device can be unplugged while it is in use).
     fn is_working(&self) -> bool {
         true
@@ -154,8 +175,8 @@ impl AudioContent<'_> {
             for entry in track.entries() {
                 let media = match entry.clip() {
                     Clip::Video(media) | Clip::Audio(media) => media,
-                    // Text has no sound, and where it is changes nothing but the gaps (hashed below).
-                    Clip::Text(_) => continue,
+                    // Text and pictures have no sound, and where they are changes nothing but the gaps (hashed below).
+                    Clip::Image(_) | Clip::Text(_) => continue,
                 };
                 entry.id().hash(&mut hasher);
                 entry.gap_before_frames().hash(&mut hasher);
@@ -225,6 +246,9 @@ pub struct AudioSupplier<Starter: AudioStreamStarter> {
     open_sink: Option<AudioSinkOpener>,
     sink: Option<Box<dyn AudioSink>>,
     running: Option<RunningStream<Starter::Stream>>,
+    /// A stream that is being got ready to take over from `running`, which goes on being heard
+    /// until it has sound to give. There is only one, and only while there is a `running`.
+    replacement: Option<RunningStream<Starter::Stream>>,
     last_stream_start_at: Option<Instant>,
     last_failed_speakers_attempt_at: Option<Instant>,
     last_failed_stream_attempt_at: Option<Instant>,
@@ -239,6 +263,7 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
             open_sink: None,
             sink: None,
             running: None,
+            replacement: None,
             last_stream_start_at: None,
             last_failed_speakers_attempt_at: None,
             last_failed_stream_attempt_at: None,
@@ -283,26 +308,32 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
             return;
         }
         let signature = content.signature();
-        if self
-            .running
-            .as_ref()
-            .is_some_and(|running| running.signature != signature)
-        {
-            self.stop();
-        }
-        if self.running.is_none() {
-            self.start(&content, signature, clock, now);
+        match &self.running {
+            None => {
+                if let StartOutcome::Started(stream) = self.start_stream(&content, signature, clock, now) {
+                    self.running = Some(stream);
+                }
+            }
+            // What is heard has changed: the sound is made again, and takes over when it is ready.
+            Some(running) if running.signature != signature && self.replacement.is_none() => {
+                self.start_replacement(&content, signature, clock, now);
+            }
+            Some(_) => {}
         }
         if self.feed_the_speakers(clock) == SoundIs::TooFarOff {
-            // Started again from the playhead as soon as it is allowed (see below).
+            // Started again from the playhead as soon as it is allowed (see `start_stream`).
             self.stop();
-            self.start(&content, signature, clock, now);
+            if let StartOutcome::Started(stream) = self.start_stream(&content, signature, clock, now) {
+                self.running = Some(stream);
+            }
         }
+        self.take_over_if_the_replacement_has_sound(clock);
     }
 
-    /// Stops the sound at once. (If nothing was running there is nothing to stop, and the speakers
-    /// are left alone.)
+    /// Stops the sound at once, and drops any replacement for it. (If nothing was running there is
+    /// nothing to stop, and the speakers are left alone.)
     fn stop(&mut self) {
+        self.replacement = None;
         if self.running.take().is_some()
             && let Some(sink) = &mut self.sink
         {
@@ -337,28 +368,34 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         }
     }
 
-    /// Starts a stream of the sound from the playhead on, unless it is too soon after the last one.
-    fn start(&mut self, content: &AudioContent<'_>, signature: u64, clock: ClockReading, now: Instant) {
+    /// Makes a stream of the sound from the playhead on, unless it is too soon after the last one.
+    fn start_stream(
+        &mut self,
+        content: &AudioContent<'_>,
+        signature: u64,
+        clock: ClockReading,
+        now: Instant,
+    ) -> StartOutcome<Starter::Stream> {
         let Some(sink) = &self.sink else {
-            return;
+            return StartOutcome::NotNow;
         };
         if self
             .last_stream_start_at
             .is_some_and(|started_at| now.saturating_duration_since(started_at) < MINIMUM_TIME_BETWEEN_STREAM_STARTS)
         {
-            return;
+            return StartOutcome::NotNow;
         }
         if self
             .last_failed_stream_attempt_at
             .is_some_and(|failed_at| now.saturating_duration_since(failed_at) < MINIMUM_TIME_BETWEEN_FAILED_ATTEMPTS)
         {
-            return;
+            return StartOutcome::NotNow;
         }
         let plan = plan_sound(content.project, clock.frame, |source| {
             content.source_paths.contains_key(&source)
         });
         if plan.strips.is_empty() {
-            return;
+            return StartOutcome::NothingToPlay;
         }
         let source_identifiers: Vec<SourceMediaIdentifier> = sources_of_sound(&plan).into_iter().collect();
         let request = AudioStreamRequest {
@@ -371,19 +408,95 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         };
         match self.starter.start(&request) {
             Ok(stream) => {
-                self.running = Some(RunningStream {
+                self.last_stream_start_at = Some(now);
+                StartOutcome::Started(RunningStream {
                     stream,
                     signature,
                     origin_seconds: content.project.frame_rate().seconds_at_frame(clock.frame.value()),
                     moments_taken: 0,
                     has_caught_up: false,
                     finished: false,
-                });
-                self.last_stream_start_at = Some(now);
+                })
             }
             Err(error) => {
                 self.last_failed_stream_attempt_at = Some(now);
                 self.last_problem = Some(error.to_string());
+                StartOutcome::NotNow
+            }
+        }
+    }
+
+    /// Starts making the sound again, for what it is made of now, to take over from the sound that
+    /// is playing. If what it is made of now has nothing to hear in it, the sound that is playing
+    /// is stopped at once instead, because there is nothing to take over with.
+    fn start_replacement(&mut self, content: &AudioContent<'_>, signature: u64, clock: ClockReading, now: Instant) {
+        match self.start_stream(content, signature, clock, now) {
+            StartOutcome::Started(stream) => self.replacement = Some(stream),
+            StartOutcome::NothingToPlay => self.stop(),
+            StartOutcome::NotNow => {}
+        }
+    }
+
+    /// When the replacement has sound to give, makes it the stream that is heard: the first sound
+    /// of it that is not already over is joined on to the sound waiting at the speakers, a little
+    /// way along it.
+    fn take_over_if_the_replacement_has_sound(&mut self, clock: ClockReading) {
+        let (Some(replacement), Some(sink)) = (&mut self.replacement, &mut self.sink) else {
+            return;
+        };
+        let format = sink.format();
+        let moments_per_second = f64::from(format.sample_rate);
+        let channel_count = usize::from(format.channel_count);
+        let moments_kept = ((SECONDS_OF_OLD_SOUND_KEPT_WHEN_TAKING_OVER * moments_per_second).round() as u64)
+            .min(sink.queued_moment_count());
+        let moments_to_fade = (SECONDS_TO_FADE_WHEN_TAKING_OVER * moments_per_second).round() as u64;
+
+        loop {
+            match replacement.stream.try_next_event() {
+                None => return,
+                Some(AudioStreamEvent::Finished { error_output }) => {
+                    // It made no sound at all (or none that came in time): there is nothing to take over with.
+                    if let Some(error_output) = error_output {
+                        self.last_problem = Some(format!("the sound could not be decoded: {error_output}"));
+                    }
+                    self.replacement = None;
+                    return;
+                }
+                Some(AudioStreamEvent::Samples(samples)) => {
+                    // The sound is joined on right after the part of the old sound that is kept.
+                    let early_by = replacement.early_by(clock.seconds, moments_kept, moments_per_second);
+                    if replacement.is_too_far_off(early_by) {
+                        // Of no use any more: it is started again, from where the playhead is now, if the
+                        // sound still has to change.
+                        self.replacement = None;
+                        return;
+                    }
+                    let moments_in_chunk = (samples.len() / channel_count) as u64;
+                    replacement.moments_taken += moments_in_chunk;
+                    let moments_to_move = (early_by.abs() * moments_per_second) as u64;
+                    let new_sound = if early_by < -SMALLEST_DIFFERENCE_TO_CORRECT_IN_SECONDS {
+                        // Late: what should already have been heard is skipped.
+                        let moments_to_skip = moments_to_move.min(moments_in_chunk) as usize;
+                        if moments_to_skip as u64 >= moments_in_chunk {
+                            continue;
+                        }
+                        samples[moments_to_skip * channel_count..].to_vec()
+                    } else if early_by > SMALLEST_DIFFERENCE_TO_CORRECT_IN_SECONDS {
+                        // Early: a little silence holds it back until it is time.
+                        let mut held_back = vec![0.0; moments_to_move as usize * channel_count];
+                        held_back.extend_from_slice(&samples);
+                        held_back
+                    } else {
+                        samples
+                    };
+                    sink.replace_waiting_sound(moments_kept, moments_to_fade, &new_sound);
+                    if let Some(mut taken_over) = self.replacement.take() {
+                        taken_over.has_caught_up = true;
+                        // The stream that was playing is let go of here, which stops its decoder.
+                        self.running = Some(taken_over);
+                    }
+                    return;
+                }
             }
         }
     }
@@ -444,6 +557,15 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         }
         SoundIs::Fine
     }
+}
+
+/// What came of trying to make a stream of the sound.
+enum StartOutcome<Stream> {
+    Started(RunningStream<Stream>),
+    /// What the sound is made of has nothing to hear in it.
+    NothingToPlay,
+    /// It is too soon after the last one, or it failed; it is tried again later.
+    NotNow,
 }
 
 /// How the sound stands against the clock.

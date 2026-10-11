@@ -14,7 +14,7 @@ use crate::project::{Gain, SpeedFactor};
 /// A window showing a video of 90 frames cut into three clips of 30, all in view.
 fn window_with_three_clips() -> Window {
     let mut window = Window::showing(project_cut_into_three(90));
-    window.application_mut().has_unsaved_changes = false;
+    window.application_mut().note_everything_is_saved();
     window.settle();
     window
 }
@@ -168,6 +168,125 @@ fn the_speed_can_be_set_again_and_again_while_the_box_stays_open() {
 }
 
 #[test]
+fn the_box_stays_put_while_a_slider_in_it_is_dragged_even_though_the_clip_shrinks_away_beneath_it() {
+    // One clip of 10 seconds. Making it play 30 times faster leaves it a third of a second long,
+    // so its middle (which the box is over) moves a long way to the left while the speed slider is being dragged.
+    let mut window = Window::showing(project_of(300));
+    right_click_the_clip_at(&mut window, 0, 100);
+    let box_before = window
+        .application()
+        .timeline_view
+        .settings_box_rectangle()
+        .expect("drawn");
+    let slider = window.rectangle_of("Speed");
+    let at_the_left_end = Pos2::new(slider.left() + 2.0, slider.center().y);
+    let in_the_middle = Pos2::new(slider.center().x, slider.center().y);
+
+    window.drag_and_hold(at_the_left_end, in_the_middle, egui::PointerButton::Primary);
+
+    let box_during = window
+        .application()
+        .timeline_view
+        .settings_box_rectangle()
+        .expect("drawn");
+    assert_eq!(
+        (box_during.left(), box_during.top()),
+        (box_before.left(), box_before.top()),
+        "the box did not move while the button was down"
+    );
+    let speed = window.clips()[0].2;
+    assert!(
+        (10..=100).contains(&speed),
+        "the pointer is half way along a slider that goes from 1 to 1000 times, so a speed of about 30, and not {speed}"
+    );
+
+    // Letting go, the box goes back to what it is about.
+    window.release(in_the_middle, egui::PointerButton::Primary);
+    window.settle();
+    let box_after = window
+        .application()
+        .timeline_view
+        .settings_box_rectangle()
+        .expect("drawn");
+    let clip_middle = window.x_of_frame_on_the_strip(0, window.application().project().total_frame_count() / 2);
+    assert!(
+        box_after.left() <= clip_middle && clip_middle <= box_after.right(),
+        "over the clip again: {box_after:?} and the clip's middle is at {clip_middle}"
+    );
+}
+
+#[test]
+fn the_box_of_a_clip_that_is_one_of_several_selected_changes_all_of_them_in_one_step() {
+    let mut window = window_with_three_clips();
+    let first = window.middle_of_the_strip_at(0, 15);
+    window.click(first);
+    let last = window.middle_of_the_strip_at(0, 75);
+    window.click_with_control(last);
+
+    right_click_the_clip_at(&mut window, 0, 75);
+
+    assert_eq!(
+        window.application().selected_clips().len(),
+        2,
+        "right-clicking one of several selected clips leaves them selected"
+    );
+    assert!(
+        window.harness.query_by_label("2 clips").is_some(),
+        "the box says it is about both"
+    );
+    window.set_slider("Speed", 5.0);
+    window.set_slider("Gain", -6.0);
+    window.click(window.rectangle_of("Mute").center());
+    window.press_key(Key::Escape);
+
+    let project = window.application().project();
+    let state_of = |position: usize| {
+        let media = project.tracks()[0]
+            .placement_at_index(position)
+            .unwrap()
+            .clip
+            .as_media()
+            .copied()
+            .unwrap();
+        (media.speed().value(), media.gain().decibels(), media.is_muted())
+    };
+    assert_eq!(state_of(0), (5, -6.0, true));
+    assert_eq!(state_of(2), (5, -6.0, true));
+    assert_eq!(
+        state_of(1),
+        (1, 0.0, false),
+        "the clip that was not selected is as it was"
+    );
+
+    window.harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    window.settle();
+    window.harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    window.settle();
+    window.harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    window.settle();
+    assert!(
+        !window.application().can_undo(),
+        "the speed, the gain and the mute of both clips were three steps"
+    );
+    assert_eq!(window.clips(), vec![(0, 30, 1), (30, 60, 1), (60, 90, 1)]);
+}
+
+#[test]
+fn right_clicking_a_clip_that_is_not_selected_selects_only_it_and_its_box_is_about_it_alone() {
+    let mut window = window_with_three_clips();
+    let first = window.middle_of_the_strip_at(0, 15);
+    window.click(first);
+    let middle = window.middle_of_the_strip_at(0, 45);
+    window.click_with_control(middle);
+
+    right_click_the_clip_at(&mut window, 0, 75);
+
+    assert_eq!(window.application().selected_clips(), vec![window.clip(0, 2)]);
+    window.set_slider("Speed", 4.0);
+    assert_eq!(window.clips(), vec![(0, 30, 1), (30, 60, 1), (60, 90, 4)]);
+}
+
+#[test]
 fn the_gain_slider_sets_the_gain_of_the_clip_and_stays_within_thirty_decibels_either_way() {
     let mut window = window_with_three_clips();
     right_click_the_clip_at(&mut window, 0, 45);
@@ -239,14 +358,10 @@ fn when_the_track_has_its_own_speed_the_box_says_how_fast_the_clip_really_plays(
     );
 
     let track = window.application().project().tracks()[0].id();
-    window.application_mut().execute(
-        Command::SetTrackSpeed {
-            track,
-            speed_factor: SpeedFactor::new(2).unwrap(),
-        },
-        std::time::Instant::now(),
-        &egui::Context::default(),
-    );
+    window.do_this(Command::SetTrackSpeed {
+        track,
+        speed_factor: SpeedFactor::new(2).unwrap(),
+    });
     window.settle();
     assert!(
         window
@@ -326,11 +441,7 @@ fn the_box_goes_when_its_clip_does() {
     let mut window = window_with_three_clips();
     right_click_the_clip_at(&mut window, 0, 45);
     let clip = window.clip(0, 1);
-    window.application_mut().execute(
-        Command::DeleteClip(clip),
-        std::time::Instant::now(),
-        &egui::Context::default(),
-    );
+    window.do_this(Command::DeleteClips(vec![clip]));
     window.settle();
     assert!(!window.application().timeline_view.settings_box_is_open());
 }

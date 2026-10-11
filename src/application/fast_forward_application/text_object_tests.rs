@@ -196,7 +196,7 @@ fn the_window_has_the_words_the_font_the_size_the_colour_and_how_long_the_text_i
 #[test]
 fn typing_in_the_window_changes_the_words_of_the_text_object_and_marks_the_project_changed() {
     let mut window = window_with_a_text_object();
-    window.application_mut().has_unsaved_changes = false;
+    window.application_mut().note_everything_is_saved();
 
     window.replace_text_in_the_field_showing("Text", "Hello there");
 
@@ -324,11 +324,7 @@ fn right_clicking_a_text_clip_opens_its_window_and_not_a_box_of_settings() {
 fn the_window_goes_when_the_text_clip_is_deleted() {
     let mut window = window_with_a_text_object();
     let (location, _, _) = text_clip(&window, 0, 1);
-    window.application_mut().execute(
-        Command::DeleteClip(location),
-        std::time::Instant::now(),
-        &egui::Context::default(),
-    );
+    window.do_this(Command::DeleteClips(vec![location]));
     window.settle();
     assert!(window.harness.query_by_label(TEXT_WINDOW).is_none());
     assert_eq!(window.application().selected_clip(), None);
@@ -448,7 +444,7 @@ fn clicking_a_text_object_on_the_preview_selects_its_clip_and_double_clicking_op
     let (location, _, _) = text_clip(&window, 0, 1);
     window.harness.get_by_label("Close window").click();
     window.settle();
-    window.application_mut().selected_clip = None;
+    window.application_mut().selection.clear();
     window.settle();
     let body = window.rectangle_of(&text_object_label(location));
 

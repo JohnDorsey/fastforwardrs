@@ -12,6 +12,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, Stream};
 use thiserror::Error;
 
+use super::audio_splice::splice_waiting_sound;
 use super::audio_supplier::{AudioSink, AudioSinkOpener};
 use crate::media::AudioFormat;
 
@@ -113,6 +114,18 @@ impl AudioSink for DeviceAudioSink {
 
     fn queued_moment_count(&self) -> u64 {
         (lock(&self.queue).len() / usize::from(self.format.channel_count)) as u64
+    }
+
+    fn replace_waiting_sound(&mut self, keep_moments: u64, fade_moments: u64, new_sound: &[f32]) {
+        // The queue stays locked while the join is made, so the device cannot take sound out of the
+        // middle of it.
+        splice_waiting_sound(
+            &mut lock(&self.queue),
+            usize::from(self.format.channel_count),
+            keep_moments,
+            fade_moments,
+            new_sound,
+        );
     }
 
     fn is_working(&self) -> bool {

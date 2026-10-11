@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use fastforwardrs::media::AudioFormat;
-use fastforwardrs::playback::{AudioSink, AudioSinkOpener};
+use fastforwardrs::playback::{AudioSink, AudioSinkOpener, splice_waiting_sound};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 
@@ -21,6 +21,8 @@ struct Recording {
     /// What has been played, mono, one entry for every moment since `opened_at`.
     heard: Vec<f32>,
     times_cleared: usize,
+    /// How many times new sound was joined onto what was waiting (see `AudioSink::replace_waiting_sound`).
+    times_spliced: usize,
 }
 
 impl Recording {
@@ -59,6 +61,7 @@ impl RecordingSpeakers {
                 waiting: VecDeque::new(),
                 heard: Vec::new(),
                 times_cleared: 0,
+                times_spliced: 0,
             });
             Ok(Box::new(SpeakersInTheRoom {
                 speakers: speakers.clone(),
@@ -87,6 +90,11 @@ impl RecordingSpeakers {
 
     pub fn times_cleared(&self) -> usize {
         self.lock().as_ref().map_or(0, |recording| recording.times_cleared)
+    }
+
+    /// How many times a replacement for the sound took over from the sound that was playing.
+    pub fn times_spliced(&self) -> usize {
+        self.lock().as_ref().map_or(0, |recording| recording.times_spliced)
     }
 }
 
@@ -123,6 +131,14 @@ impl AudioSink for SpeakersInTheRoom {
         let recording = guard.as_mut().expect("open");
         recording.play_up_to_now();
         recording.waiting.len() as u64
+    }
+
+    fn replace_waiting_sound(&mut self, keep_moments: u64, fade_moments: u64, new_sound: &[f32]) {
+        let mut guard = self.speakers.lock();
+        let recording = guard.as_mut().expect("open");
+        recording.play_up_to_now();
+        splice_waiting_sound(&mut recording.waiting, 1, keep_moments, fade_moments, new_sound);
+        recording.times_spliced += 1;
     }
 }
 

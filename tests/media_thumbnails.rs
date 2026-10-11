@@ -5,7 +5,7 @@ mod support;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fastforwardrs::media::{FfmpegToolchain, PictureSize, ThumbnailEvent, ThumbnailExtraction};
+use fastforwardrs::media::{FfmpegToolchain, PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailRange};
 use support::{TestVideoSpecification, counter_video, frame_number_in_picture, scratch_directory, test_video};
 
 const TIME_ALLOWED: Duration = Duration::from_secs(60);
@@ -22,13 +22,22 @@ fn extract_everything(
     video_path: &std::path::Path,
     size: PictureSize,
 ) -> ExtractionResult {
-    let extraction =
-        ThumbnailExtraction::start(toolchain, video_path, size, Arc::new(|| {})).expect("extraction should start");
+    extract_range(toolchain, video_path, size, ThumbnailRange::EVERY_SECOND)
+}
+
+fn extract_range(
+    toolchain: &FfmpegToolchain,
+    video_path: &std::path::Path,
+    size: PictureSize,
+    range: ThumbnailRange,
+) -> ExtractionResult {
+    let extraction = ThumbnailExtraction::start_range(toolchain, video_path, size, range, Arc::new(|| {}))
+        .expect("extraction should start");
     let started = Instant::now();
     let mut thumbnails = Vec::new();
     loop {
         match extraction.try_next_event() {
-            Some(ThumbnailEvent::Thumbnail { second, picture }) => {
+            Some(ThumbnailEvent::Thumbnail { index: second, picture }) => {
                 assert_eq!(picture.size(), size);
                 let decoded = picture.decompress().unwrap();
                 let frame_number = frame_number_in_picture(
@@ -84,6 +93,196 @@ fn makes_one_thumbnail_per_second_each_showing_the_frame_at_that_exact_second() 
         (0..20).map(|second| second * 30).collect::<Vec<u64>>(),
         "second k shows frame 30k"
     );
+}
+
+const SMALL: PictureSize = PictureSize {
+    width_in_pixels: 160,
+    height_in_pixels: 90,
+};
+
+/// The indexes and the source frames shown of the pictures that a range of the 20 second, 30 frames
+/// a second counter video gives.
+fn indexes_and_frames(toolchain: &FfmpegToolchain, range: ThumbnailRange) -> Vec<(usize, u64)> {
+    let video = counter_video(toolchain);
+    let result = extract_range(toolchain, &video.path, SMALL, range);
+    assert_eq!(result.error_output, None);
+    result
+        .thumbnails
+        .iter()
+        .map(|&(index, frame_number, _)| (index, frame_number))
+        .collect()
+}
+
+#[test]
+fn finer_thumbnails_from_the_start_are_two_or_four_or_eight_a_second_each_showing_the_frame_at_its_moment() {
+    let toolchain = toolchain_or_skip!();
+    // Two a second: 0 s, 0.5 s, 1 s, 1.5 s, 2 s are frames 0, 15, 30, 45 and 60.
+    assert_eq!(
+        indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level: 1,
+                first_index: 0,
+                count: Some(5)
+            }
+        ),
+        vec![(0, 0), (1, 15), (2, 30), (3, 45), (4, 60)]
+    );
+    // Eight a second: every 3.75 frames, each the frame that is on screen at its moment.
+    assert_eq!(
+        indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level: 3,
+                first_index: 0,
+                count: Some(5)
+            }
+        ),
+        vec![(0, 0), (1, 3), (2, 7), (3, 11), (4, 15)],
+        "at 0, 3.75, 7.5, 11.25 and 15 frames"
+    );
+}
+
+#[test]
+fn a_range_in_the_middle_of_the_video_starts_at_its_first_moment_whether_or_not_a_frame_starts_there() {
+    let toolchain = toolchain_or_skip!();
+    // Four a second, the 10th to the 13th: 2.5 s, 2.75 s, 3 s and 3.25 s, which are at 75, 82.5, 90 and
+    // 97.5 frames in. A frame starts at 2.5 s and at 3 s but not at the other moments, which are in the
+    // middle of frames 82 and 97.
+    assert_eq!(
+        indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level: 2,
+                first_index: 10,
+                count: Some(4)
+            }
+        ),
+        vec![(10, 75), (11, 82), (12, 90), (13, 97)]
+    );
+    // The same when the first moment is in the middle of a frame (2.75 s is in the middle of frame 82):
+    // that frame is the first picture, as it is on screen at that moment.
+    assert_eq!(
+        indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level: 2,
+                first_index: 11,
+                count: Some(3)
+            }
+        ),
+        vec![(11, 82), (12, 90), (13, 97)]
+    );
+    // The same pictures as when everything from the start is made: it does not matter where the range begins.
+    let from_the_start = indexes_and_frames(
+        &toolchain,
+        ThumbnailRange {
+            level: 2,
+            first_index: 0,
+            count: Some(16),
+        },
+    );
+    assert_eq!(from_the_start[10..14], [(10, 75), (11, 82), (12, 90), (13, 97)]);
+}
+
+#[test]
+fn a_picture_is_the_same_whichever_range_it_was_made_in() {
+    let toolchain = toolchain_or_skip!();
+    let everything: Vec<Vec<(usize, u64)>> = (0..=4)
+        .map(|level| {
+            indexes_and_frames(
+                &toolchain,
+                ThumbnailRange {
+                    level,
+                    first_index: 0,
+                    count: Some(16 << level),
+                },
+            )
+        })
+        .collect();
+    assert_eq!(everything[0].len(), 16);
+    assert_eq!(everything[4].len(), 256);
+    // A range of any level starting at any moment, long or short, gives the same pictures as those
+    // made from the start of the video (which have no seeking to go wrong). First some whose lead-in
+    // begins in the middle of a frame (such as 2.3125 s, which is 69.375 frames in): ffmpeg has to be
+    // told to pad the start of the pictures then, or it starts a slot late and all of them are one off.
+    for (level, first_index, count) in [(4u8, 41usize, 5usize), (3, 13, 4), (4, 77, 6)] {
+        let made = indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level,
+                first_index,
+                count: Some(count),
+            },
+        );
+        let expected = &everything[level as usize][first_index..first_index + count];
+        assert_eq!(
+            made, expected,
+            "{count} pictures of level {level} from number {first_index}"
+        );
+    }
+    let mut random = support::RandomNumbers::with_seed(5);
+    for _ in 0..14 {
+        let level = random.next_below(5) as u8;
+        let first_index = random.next_below(14 << level) as usize;
+        let count = 1 + random.next_below(1 + (2 << level)) as usize;
+        let made = indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level,
+                first_index,
+                count: Some(count),
+            },
+        );
+        let expected = &everything[level as usize][first_index..first_index + count];
+        assert_eq!(
+            made, expected,
+            "{count} pictures of level {level} from number {first_index}"
+        );
+    }
+}
+
+#[test]
+fn a_range_that_runs_past_the_end_of_the_video_has_only_the_pictures_that_there_are() {
+    let toolchain = toolchain_or_skip!();
+    // A 20 second video has pictures of every second from 0 to 19.
+    assert_eq!(
+        indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level: 0,
+                first_index: 18,
+                count: Some(10)
+            }
+        ),
+        vec![(18, 540), (19, 570)]
+    );
+    // And a range beyond the end has none, and ends all the same.
+    assert_eq!(
+        indexes_and_frames(
+            &toolchain,
+            ThumbnailRange {
+                level: 2,
+                first_index: 400,
+                count: Some(8)
+            }
+        ),
+        vec![]
+    );
+}
+
+#[test]
+fn a_range_has_no_more_pictures_than_it_asks_for() {
+    let toolchain = toolchain_or_skip!();
+    let pictures = indexes_and_frames(
+        &toolchain,
+        ThumbnailRange {
+            level: 1,
+            first_index: 6,
+            count: Some(3),
+        },
+    );
+    assert_eq!(pictures, vec![(6, 90), (7, 105), (8, 120)]);
 }
 
 #[test]

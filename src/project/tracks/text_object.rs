@@ -1,10 +1,13 @@
-//! Text that is shown over the picture for a while: what it says, how it looks, and where it is.
+//! Text that is shown over the picture for a while: what it says, how it looks, and where it is
+//! (an area of the picture, and how far that is turned: see [`super::placement`]).
 //!
 //! Like the fast-forward symbol, everything about where a text object is and how big it is is a
 //! fraction of the picture rather than a number of pixels, so that it lands in the same place
 //! whatever size the picture is shown or exported at.
 
 use thiserror::Error;
+
+use super::placement::{Angle, CanvasArea, Placement};
 
 /// A colour with transparency, as the picture's pixels have them: straight (not premultiplied).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -93,171 +96,6 @@ impl Default for FontSize {
     }
 }
 
-/// One of the four corners of a [`CanvasArea`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Corner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
-impl Corner {
-    pub const ALL: [Corner; 4] = [Self::TopLeft, Self::TopRight, Self::BottomLeft, Self::BottomRight];
-
-    /// The corner diagonally across.
-    pub fn opposite(self) -> Self {
-        match self {
-            Self::TopLeft => Self::BottomRight,
-            Self::TopRight => Self::BottomLeft,
-            Self::BottomLeft => Self::TopRight,
-            Self::BottomRight => Self::TopLeft,
-        }
-    }
-}
-
-/// A rectangle on the picture, as fractions of the picture's width and height: `(0, 0)` is the
-/// top left corner of the picture and `(1, 1)` the bottom right. It is always inside the picture
-/// and never smaller than [`Self::SMALLEST_SIDE_FRACTION`] each way.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CanvasArea {
-    left: f32,
-    top: f32,
-    width: f32,
-    height: f32,
-}
-
-impl CanvasArea {
-    pub const SMALLEST_SIDE_FRACTION: f32 = 0.02;
-
-    /// Along the bottom of the picture, where captions go.
-    pub const DEFAULT: CanvasArea = CanvasArea {
-        left: 0.1,
-        top: 0.74,
-        width: 0.8,
-        height: 0.16,
-    };
-
-    /// The area with this left edge, top edge, width and height. What does not fit is corrected:
-    /// the area is made at least as big as it may be, then not bigger than the picture, then moved
-    /// to be inside it. (A value that is not a number counts as the default one.)
-    pub fn new(left: f32, top: f32, width: f32, height: f32) -> Self {
-        let width = sanitised(width, Self::SMALLEST_SIDE_FRACTION, 1.0, Self::DEFAULT.width);
-        let height = sanitised(height, Self::SMALLEST_SIDE_FRACTION, 1.0, Self::DEFAULT.height);
-        let left = sanitised(left, 0.0, 1.0 - width, Self::DEFAULT.left.min(1.0 - width));
-        let top = sanitised(top, 0.0, 1.0 - height, Self::DEFAULT.top.min(1.0 - height));
-        Self {
-            left,
-            top,
-            width,
-            height,
-        }
-    }
-
-    pub fn left(&self) -> f32 {
-        self.left
-    }
-
-    pub fn top(&self) -> f32 {
-        self.top
-    }
-
-    pub fn width(&self) -> f32 {
-        self.width
-    }
-
-    pub fn height(&self) -> f32 {
-        self.height
-    }
-
-    pub fn right(&self) -> f32 {
-        self.left + self.width
-    }
-
-    pub fn bottom(&self) -> f32 {
-        self.top + self.height
-    }
-
-    /// Where `corner` is, as fractions of the picture's width and height.
-    pub fn corner_position(&self, corner: Corner) -> (f32, f32) {
-        match corner {
-            Corner::TopLeft => (self.left, self.top),
-            Corner::TopRight => (self.right(), self.top),
-            Corner::BottomLeft => (self.left, self.bottom()),
-            Corner::BottomRight => (self.right(), self.bottom()),
-        }
-    }
-
-    /// The same area moved by this many picture widths and heights, as far as the picture allows:
-    /// it is stopped at the edges, and keeps its size.
-    #[must_use]
-    pub fn moved_by(&self, across: f32, down: f32) -> Self {
-        let across = if across.is_nan() { 0.0 } else { across };
-        let down = if down.is_nan() { 0.0 } else { down };
-        Self {
-            left: (self.left + across).clamp(0.0, 1.0 - self.width),
-            top: (self.top + down).clamp(0.0, 1.0 - self.height),
-            ..*self
-        }
-    }
-
-    /// The area after `corner` is dragged to the place `(x, y)` (as fractions of the picture): the
-    /// corner diagonally across stays where it is. The corner cannot go outside the picture or
-    /// past the corner that is staying, and the area cannot become smaller than
-    /// [`Self::SMALLEST_SIDE_FRACTION`].
-    #[must_use]
-    pub fn with_corner_dragged_to(&self, corner: Corner, x: f32, y: f32) -> Self {
-        let (current_x, current_y) = self.corner_position(corner);
-        let x = if x.is_nan() { current_x } else { x };
-        let y = if y.is_nan() { current_y } else { y };
-        if x == current_x && y == current_y {
-            // Not a drag at all. Working the area out again could change it by a rounding error,
-            // which would count as an edit every time the window is drawn during a drag that stands still.
-            return *self;
-        }
-        let (fixed_x, fixed_y) = self.corner_position(corner.opposite());
-        let (new_left, new_right) = ordered_edges(fixed_x, x, corner_is_on_the_left(corner));
-        let (new_top, new_bottom) = ordered_edges(fixed_y, y, corner_is_at_the_top(corner));
-        Self::new(new_left, new_top, new_right - new_left, new_bottom - new_top)
-    }
-}
-
-impl Default for CanvasArea {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
-fn corner_is_on_the_left(corner: Corner) -> bool {
-    matches!(corner, Corner::TopLeft | Corner::BottomLeft)
-}
-
-fn corner_is_at_the_top(corner: Corner) -> bool {
-    matches!(corner, Corner::TopLeft | Corner::TopRight)
-}
-
-/// The two edges (smaller first) of a side whose fixed end is at `fixed` and whose moving end has
-/// been dragged to `dragged`. The moving end is the smaller one if `moving_end_is_the_smaller`. It
-/// stops at the picture's edge, and at the smallest side length from the fixed end.
-fn ordered_edges(fixed: f32, dragged: f32, moving_end_is_the_smaller: bool) -> (f32, f32) {
-    let smallest = CanvasArea::SMALLEST_SIDE_FRACTION;
-    if moving_end_is_the_smaller {
-        let moving = dragged.clamp(0.0, (fixed - smallest).max(0.0));
-        (moving, fixed)
-    } else {
-        let moving = dragged.clamp((fixed + smallest).min(1.0), 1.0);
-        (fixed, moving)
-    }
-}
-
-fn sanitised(value: f32, smallest: f32, largest: f32, fallback: f32) -> f32 {
-    if value.is_nan() {
-        fallback
-    } else {
-        value.clamp(smallest, largest.max(smallest))
-    }
-}
-
 /// Text, shown over the picture.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextObject {
@@ -267,17 +105,34 @@ pub struct TextObject {
     pub font_family: String,
     pub font_size: FontSize,
     pub colour: TextColour,
-    /// Where on the picture the text goes. What does not fit in it is cut off.
+    /// Where on the picture the text goes, before it is turned. What does not fit in it is cut off.
     pub area: CanvasArea,
+    /// How far the area, and the text in it, is turned about the middle of the area.
+    pub rotation: Angle,
 }
 
 impl TextObject {
     /// What a new text object says, until it is changed.
     pub const NEW_TEXT: &'static str = "Text";
+
+    /// Where the text is on the picture: its area, and how far that is turned.
+    pub fn placement(&self) -> Placement {
+        Placement::new(self.area, self.rotation)
+    }
+
+    /// The same text, looking the same, put at `placement`.
+    #[must_use]
+    pub fn with_placement(&self, placement: Placement) -> Self {
+        Self {
+            area: placement.area,
+            rotation: placement.rotation,
+            ..self.clone()
+        }
+    }
 }
 
 impl Default for TextObject {
-    /// A new text object: a short placeholder, white, in the default font, along the bottom.
+    /// A new text object: a short placeholder, white, in the default font, along the bottom, upright.
     fn default() -> Self {
         Self {
             text: Self::NEW_TEXT.to_owned(),
@@ -285,6 +140,7 @@ impl Default for TextObject {
             font_size: FontSize::DEFAULT,
             colour: TextColour::WHITE,
             area: CanvasArea::DEFAULT,
+            rotation: Angle::ZERO,
         }
     }
 }
@@ -346,14 +202,6 @@ impl TextClip {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::DeterministicRandomNumbers;
-
-    fn assert_area_is_valid(area: CanvasArea) {
-        assert!(area.left() >= 0.0 && area.top() >= 0.0, "{area:?}");
-        assert!(area.right() <= 1.0 + 1e-6 && area.bottom() <= 1.0 + 1e-6, "{area:?}");
-        assert!(area.width() >= CanvasArea::SMALLEST_SIDE_FRACTION - 1e-6, "{area:?}");
-        assert!(area.height() >= CanvasArea::SMALLEST_SIDE_FRACTION - 1e-6, "{area:?}");
-    }
 
     fn assert_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() < 1e-5, "{actual} is not {expected}");
@@ -388,158 +236,6 @@ mod tests {
     }
 
     #[test]
-    fn an_area_that_fits_is_kept_exactly() {
-        let area = CanvasArea::new(0.25, 0.5, 0.5, 0.25);
-        assert_eq!(
-            (area.left(), area.top(), area.width(), area.height()),
-            (0.25, 0.5, 0.5, 0.25)
-        );
-        assert_eq!((area.right(), area.bottom()), (0.75, 0.75));
-    }
-
-    #[test]
-    fn an_area_that_does_not_fit_is_corrected_rather_than_refused() {
-        // Too big: made as big as the picture.
-        assert_eq!(CanvasArea::new(0.3, 0.3, 5.0, 5.0), CanvasArea::new(0.0, 0.0, 1.0, 1.0));
-        // Sticking out: moved back in, keeping its size.
-        let moved_in = CanvasArea::new(0.9, 0.9, 0.3, 0.2);
-        assert_close(moved_in.left(), 0.7);
-        assert_close(moved_in.top(), 0.8);
-        // Too small: made the smallest.
-        let tiny = CanvasArea::new(0.0, 0.0, 0.0, -1.0);
-        assert_eq!(
-            (tiny.width(), tiny.height()),
-            (CanvasArea::SMALLEST_SIDE_FRACTION, CanvasArea::SMALLEST_SIDE_FRACTION)
-        );
-        // Not numbers: the default area.
-        assert_eq!(
-            CanvasArea::new(f32::NAN, f32::NAN, f32::NAN, f32::NAN),
-            CanvasArea::DEFAULT
-        );
-        for odd in [f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN] {
-            assert_area_is_valid(CanvasArea::new(odd, odd, odd, odd));
-        }
-    }
-
-    #[test]
-    fn the_default_area_is_itself_valid_and_survives_being_made_again() {
-        let default = CanvasArea::DEFAULT;
-        assert_area_is_valid(default);
-        assert_eq!(
-            CanvasArea::new(default.left(), default.top(), default.width(), default.height()),
-            default
-        );
-    }
-
-    #[test]
-    fn moving_an_area_keeps_its_size_and_stops_at_the_edges_of_the_picture() {
-        let area = CanvasArea::new(0.2, 0.2, 0.4, 0.3);
-        let moved = area.moved_by(0.1, -0.05);
-        assert_close(moved.left(), 0.3);
-        assert_close(moved.top(), 0.15);
-        assert_eq!((moved.width(), moved.height()), (area.width(), area.height()));
-
-        let pushed_into_the_corner = area.moved_by(5.0, 5.0);
-        assert_close(pushed_into_the_corner.right(), 1.0);
-        assert_close(pushed_into_the_corner.bottom(), 1.0);
-        let pushed_the_other_way = area.moved_by(-5.0, -5.0);
-        assert_eq!((pushed_the_other_way.left(), pushed_the_other_way.top()), (0.0, 0.0));
-        assert_eq!(area.moved_by(f32::NAN, f32::NAN), area, "not a number is no movement");
-    }
-
-    #[test]
-    fn dragging_a_corner_moves_that_corner_and_leaves_the_opposite_one_where_it_was() {
-        let area = CanvasArea::new(0.2, 0.3, 0.4, 0.3); // right = 0.6, bottom = 0.6
-        for corner in Corner::ALL {
-            let (fixed_x, fixed_y) = area.corner_position(corner.opposite());
-            let dragged = area.with_corner_dragged_to(corner, 0.45, 0.5);
-            assert_area_is_valid(dragged);
-            let (still_x, still_y) = dragged.corner_position(corner.opposite());
-            assert_close(still_x, fixed_x);
-            assert_close(still_y, fixed_y);
-        }
-        let bottom_right = area.with_corner_dragged_to(Corner::BottomRight, 0.9, 0.8);
-        assert_eq!(
-            (bottom_right.left(), bottom_right.top()),
-            (area.left(), area.top()),
-            "the top left corner stays"
-        );
-        assert_close(bottom_right.right(), 0.9);
-        assert_close(bottom_right.bottom(), 0.8);
-        let top_left = area.with_corner_dragged_to(Corner::TopLeft, 0.1, 0.05);
-        assert_close(top_left.left(), 0.1);
-        assert_close(top_left.top(), 0.05);
-        assert_close(top_left.right(), area.right());
-        assert_close(top_left.bottom(), area.bottom());
-    }
-
-    #[test]
-    fn dragging_a_corner_cannot_leave_the_picture_or_cross_the_opposite_corner() {
-        let area = CanvasArea::new(0.2, 0.3, 0.4, 0.3);
-        let past_the_picture = area.with_corner_dragged_to(Corner::BottomRight, 9.0, 9.0);
-        assert_close(past_the_picture.right(), 1.0);
-        assert_close(past_the_picture.bottom(), 1.0);
-        // Dragging the bottom right corner up and to the left of the top left one makes it as
-        // small as it can be, still with the top left corner where it was.
-        let crossed = area.with_corner_dragged_to(Corner::BottomRight, 0.0, 0.0);
-        assert_close(crossed.left(), area.left());
-        assert_close(crossed.top(), area.top());
-        assert_close(crossed.width(), CanvasArea::SMALLEST_SIDE_FRACTION);
-        assert_close(crossed.height(), CanvasArea::SMALLEST_SIDE_FRACTION);
-        assert_eq!(
-            area.with_corner_dragged_to(Corner::TopLeft, f32::NAN, f32::NAN),
-            area,
-            "not a number: the corner stays"
-        );
-    }
-
-    /// Regression test: a corner that was "dragged" to where it already was came back a rounding
-    /// error different, so a drag that stood still looked like an edit on every frame.
-    #[test]
-    fn dragging_a_corner_to_where_it_is_changes_nothing_not_even_by_a_rounding_error() {
-        for area in [
-            CanvasArea::new(0.2, 0.3, 0.4, 0.3),
-            CanvasArea::DEFAULT,
-            CanvasArea::new(0.123_456, 0.654_321, 0.111_111, 0.222_222),
-        ] {
-            for corner in Corner::ALL {
-                let (x, y) = area.corner_position(corner);
-                assert_eq!(
-                    area.with_corner_dragged_to(corner, x, y),
-                    area,
-                    "{corner:?} of {area:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn whatever_is_dragged_wherever_the_area_stays_valid_and_the_opposite_corner_stays() {
-        let mut random = DeterministicRandomNumbers::with_seed(11);
-        for _ in 0..2000 {
-            let unit = |random: &mut DeterministicRandomNumbers| random.next_below(10_001) as f32 / 10_000.0;
-            let area = CanvasArea::new(
-                unit(&mut random),
-                unit(&mut random),
-                unit(&mut random),
-                unit(&mut random),
-            );
-            assert_area_is_valid(area);
-            let corner = Corner::ALL[random.next_below(4) as usize];
-            let x = unit(&mut random) * 3.0 - 1.0;
-            let y = unit(&mut random) * 3.0 - 1.0;
-            let dragged = area.with_corner_dragged_to(corner, x, y);
-            assert_area_is_valid(dragged);
-            let before = area.corner_position(corner.opposite());
-            let after = dragged.corner_position(corner.opposite());
-            assert!(
-                (before.0 - after.0).abs() < 1e-4 && (before.1 - after.1).abs() < 1e-4,
-                "{area:?} dragged at {corner:?} to ({x}, {y}) became {dragged:?}"
-            );
-        }
-    }
-
-    #[test]
     fn a_new_text_object_says_text_in_white_along_the_bottom_in_the_default_font() {
         let object = TextObject::default();
         assert_eq!(object.text, "Text");
@@ -548,6 +244,38 @@ mod tests {
         assert_eq!(object.area, CanvasArea::DEFAULT);
         assert_eq!(object.font_size, FontSize::DEFAULT);
         assert!(object.area.top() > 0.5, "along the bottom half");
+    }
+
+    #[test]
+    fn a_new_text_object_is_not_turned() {
+        assert_eq!(TextObject::default().rotation, Angle::ZERO);
+    }
+
+    #[test]
+    fn the_place_of_a_text_object_is_its_area_and_how_far_that_is_turned_and_it_can_be_put_somewhere_else() {
+        let object = TextObject {
+            text: "Hello".to_owned(),
+            area: CanvasArea::new(0.2, 0.3, 0.4, 0.2),
+            rotation: Angle::from_degrees(30.0),
+            ..TextObject::default()
+        };
+        assert_eq!(
+            object.placement(),
+            Placement::new(CanvasArea::new(0.2, 0.3, 0.4, 0.2), Angle::from_degrees(30.0))
+        );
+
+        let elsewhere = Placement::new(CanvasArea::new(0.5, 0.5, 0.1, 0.1), Angle::from_degrees(-45.0));
+        let moved = object.with_placement(elsewhere);
+        assert_eq!(moved.placement(), elsewhere);
+        assert_eq!(
+            TextObject {
+                area: object.area,
+                rotation: object.rotation,
+                ..moved
+            },
+            object,
+            "only where it is changed, not what it says or how it looks"
+        );
     }
 
     #[test]

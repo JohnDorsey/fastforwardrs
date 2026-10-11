@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 use super::gain::Gain;
+use super::placement::Placement;
 use crate::project::{SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
 /// A run of whole frames from a source file, played at a single speed.
@@ -16,6 +17,10 @@ use crate::project::{SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 ///
 /// The speed that counts is the clip's own speed times the speed of the track it is on, so the
 /// arithmetic that depends on it takes that speed (the *effective* speed) as an argument.
+///
+/// A video clip is also somewhere on the picture. Until it is moved, resized or turned it has no
+/// [`Placement`] of its own and is fitted inside the picture, as big as it can be and in the middle
+/// (see [`crate::project::fit_inside_picture`]). A sound clip is never on the picture.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MediaClip {
     source: SourceMediaIdentifier,
@@ -24,6 +29,7 @@ pub struct MediaClip {
     speed: SpeedFactor,
     gain: Gain,
     muted: bool,
+    placement: Option<Placement>,
 }
 
 /// Returned when a clip would contain no frames.
@@ -58,6 +64,7 @@ impl MediaClip {
             speed,
             gain: Gain::UNCHANGED,
             muted: false,
+            placement: None,
         })
     }
 
@@ -87,9 +94,20 @@ impl MediaClip {
         self.muted
     }
 
+    /// Where the clip is on the picture, or `None` if it has not been placed: then it is fitted
+    /// inside the picture.
+    pub fn placement(&self) -> Option<Placement> {
+        self.placement
+    }
+
     #[must_use]
     pub fn with_speed(&self, speed: SpeedFactor) -> Self {
         Self { speed, ..*self }
+    }
+
+    #[must_use]
+    pub fn with_placement(&self, placement: Option<Placement>) -> Self {
+        Self { placement, ..*self }
     }
 
     #[must_use]
@@ -165,6 +183,7 @@ impl MediaClip {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::tracks::placement::{Angle, CanvasArea};
 
     fn speed(factor: u32) -> SpeedFactor {
         SpeedFactor::new(factor).unwrap()
@@ -194,6 +213,60 @@ mod tests {
         let clip = clip(0, 10, 1);
         assert_eq!(clip.gain(), Gain::UNCHANGED);
         assert!(!clip.is_muted());
+    }
+
+    fn somewhere() -> Placement {
+        Placement::new(CanvasArea::new(0.2, 0.3, 0.4, 0.3), Angle::from_degrees(20.0))
+    }
+
+    #[test]
+    fn a_new_clip_is_not_placed_on_the_picture_which_means_it_is_fitted_inside_it() {
+        assert_eq!(clip(0, 10, 1).placement(), None);
+    }
+
+    #[test]
+    fn a_clip_can_be_placed_and_unplaced_and_that_changes_nothing_else_about_it() {
+        let original = clip(100, 400, 4).with_gain(Gain::from_decibels(-6.0)).with_muted(true);
+        let placed = original.with_placement(Some(somewhere()));
+        assert_eq!(placed.placement(), Some(somewhere()));
+        assert_eq!(placed.with_placement(None), original);
+        assert_eq!(
+            (
+                placed.source(),
+                placed.first_source_frame(),
+                placed.end_source_frame(),
+                placed.speed()
+            ),
+            (
+                original.source(),
+                original.first_source_frame(),
+                original.end_source_frame(),
+                original.speed()
+            )
+        );
+        assert_eq!(
+            (placed.gain(), placed.is_muted()),
+            (original.gain(), original.is_muted())
+        );
+    }
+
+    #[test]
+    fn changing_the_speed_the_gain_or_the_muting_keeps_where_the_clip_is_on_the_picture() {
+        let placed = clip(0, 100, 1).with_placement(Some(somewhere()));
+        assert_eq!(placed.with_speed(speed(3)).placement(), Some(somewhere()));
+        assert_eq!(
+            placed.with_gain(Gain::from_decibels(3.0)).placement(),
+            Some(somewhere())
+        );
+        assert_eq!(placed.with_muted(true).placement(), Some(somewhere()));
+    }
+
+    #[test]
+    fn both_halves_of_a_cut_clip_are_where_the_clip_was_on_the_picture() {
+        let placed = clip(100, 400, 1).with_placement(Some(somewhere()));
+        let (first_half, second_half) = placed.split_before_source_frame(SourceFrameIndex::new(240)).unwrap();
+        assert_eq!(first_half.placement(), Some(somewhere()));
+        assert_eq!(second_half.placement(), Some(somewhere()));
     }
 
     #[test]

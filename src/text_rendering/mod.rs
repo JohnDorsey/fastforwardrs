@@ -127,11 +127,10 @@ pub fn area_size_in_pixels(
     picture_width_in_pixels: u32,
     picture_height_in_pixels: u32,
 ) -> (u32, u32) {
-    let width = (object.area.width() * picture_width_in_pixels as f32).round().max(1.0) as u32;
-    let height = (object.area.height() * picture_height_in_pixels as f32)
-        .round()
-        .max(1.0) as u32;
-    (width, height)
+    let pixels = object
+        .area
+        .in_pixels((picture_width_in_pixels, picture_height_in_pixels));
+    (pixels.width, pixels.height)
 }
 
 /// How opaque a bit of a letter is when `covered` of the pixel is covered by the letter (0 to 255)

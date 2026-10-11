@@ -17,13 +17,13 @@ use thiserror::Error;
 
 use crate::atomic_file::write_file_atomically;
 use crate::project::{
-    CanvasArea, Clip, FontSize, MediaClip, Project, ProjectSettings, SourceAudioProperties, SourceMedia,
-    SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip,
-    TextObject, Track, TrackId,
+    Angle, CanvasArea, Clip, FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings,
+    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaLink, SourceMediaProperties,
+    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track, TrackHeight, TrackId,
 };
 use document::{
-    CanvasAreaDocument, ClipDocument, ColourDocument, ProjectDocument, ProjectSettingsDocument, SourceDocument,
-    SpeedIndicatorDocument, TrackDocument,
+    CanvasAreaDocument, ClipDocument, ColourDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument,
+    SourceDocument, SpeedIndicatorDocument, TrackDocument,
 };
 use legacy::LegacyProjectDocument;
 pub use relative_path::relative_path_between;
@@ -33,8 +33,12 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 
 /// The version of the file layout this build writes. It also reads every older version: versions
 /// 1 and 2 had a list of videos and a single video track (and version 1 no `settings`) where
-/// version 3 has a list of source files and a list of tracks.
-pub const FILE_FORMAT_VERSION: u32 = 3;
+/// version 3 has a list of source files and a list of tracks, and version 4 added the height of
+/// the row of each track on the timeline (a file of version 3 has none: its tracks are of the
+/// normal height), pictures, and where a video, a picture or a text is on the picture and how far
+/// it is turned (a file of version 3 has none of those: every video is fitted inside the picture
+/// and every text is upright).
+pub const FILE_FORMAT_VERSION: u32 = 4;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -198,6 +202,20 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
                 duration_in_microseconds,
             },
         ),
+        SourceDocument::Image {
+            identifier,
+            absolute_path,
+            relative_path,
+            display_width_in_pixels,
+            display_height_in_pixels,
+        } => SourceMedia::image(
+            identifier,
+            link_from(absolute_path, relative_path),
+            SourceImageProperties {
+                display_width_in_pixels,
+                display_height_in_pixels,
+            },
+        ),
     }
 }
 
@@ -212,12 +230,18 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
             speed_factor,
             gain_decibels,
             muted,
+            placement,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
                 .map_err(|error| error.to_string())?;
             Ok((
                 gap_before_frames,
-                Clip::Video(media.with_gain(gain_decibels).with_muted(muted)),
+                Clip::Video(
+                    media
+                        .with_gain(gain_decibels)
+                        .with_muted(muted)
+                        .with_placement(placement.map(placement_from_document)),
+                ),
             ))
         }
         ClipDocument::Audio {
@@ -236,6 +260,18 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
                 Clip::Audio(media.with_gain(gain_decibels).with_muted(muted)),
             ))
         }
+        ClipDocument::Image {
+            gap_before_frames,
+            source_identifier,
+            duration_in_frames,
+            placement,
+        } => {
+            let image = ImageClip::new(source_identifier, duration_in_frames).map_err(|error| error.to_string())?;
+            Ok((
+                gap_before_frames,
+                Clip::Image(image.with_placement(placement.map(placement_from_document))),
+            ))
+        }
         ClipDocument::Text {
             gap_before_frames,
             duration_in_frames,
@@ -244,22 +280,51 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
             font_size_fraction_of_frame_height,
             colour,
             area,
+            rotation_degrees,
         } => {
             let object = TextObject {
                 text,
                 font_family,
                 font_size: FontSize::from_fraction_of_picture_height(font_size_fraction_of_frame_height),
                 colour: colour.0,
-                area: CanvasArea::new(
-                    area.left_fraction_of_frame_width,
-                    area.top_fraction_of_frame_height,
-                    area.width_fraction_of_frame_width,
-                    area.height_fraction_of_frame_height,
-                ),
+                area: area_from_document(&area),
+                rotation: Angle::from_degrees(rotation_degrees),
             };
             let clip = TextClip::new(object, duration_in_frames).map_err(|error| error.to_string())?;
             Ok((gap_before_frames, Clip::Text(clip)))
         }
+    }
+}
+
+fn area_from_document(area: &CanvasAreaDocument) -> CanvasArea {
+    CanvasArea::new(
+        area.left_fraction_of_frame_width,
+        area.top_fraction_of_frame_height,
+        area.width_fraction_of_frame_width,
+        area.height_fraction_of_frame_height,
+    )
+}
+
+fn area_document_of(area: CanvasArea) -> CanvasAreaDocument {
+    CanvasAreaDocument {
+        left_fraction_of_frame_width: area.left(),
+        top_fraction_of_frame_height: area.top(),
+        width_fraction_of_frame_width: area.width(),
+        height_fraction_of_frame_height: area.height(),
+    }
+}
+
+fn placement_from_document(placement: PlacementDocument) -> Placement {
+    Placement::new(
+        area_from_document(&placement.area),
+        Angle::from_degrees(placement.rotation_degrees),
+    )
+}
+
+fn placement_document_of(placement: Placement) -> PlacementDocument {
+    PlacementDocument {
+        area: area_document_of(placement.area),
+        rotation_degrees: placement.rotation.degrees(),
     }
 }
 
@@ -286,6 +351,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .with_gain(track.gain_decibels)
             .with_speed(track.speed_factor)
             .with_muted(track.muted)
+            .with_height(TrackHeight::from_points(track.height_in_points))
             .with_clips(clips),
         );
     }
@@ -369,6 +435,13 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                     relative_path,
                     duration_in_microseconds: audio.duration_in_microseconds,
                 },
+                SourceMediaProperties::Image(image) => SourceDocument::Image {
+                    identifier: source.identifier,
+                    absolute_path,
+                    relative_path,
+                    display_width_in_pixels: image.display_width_in_pixels,
+                    display_height_in_pixels: image.display_height_in_pixels,
+                },
             })
         })
         .collect::<Result<Vec<_>, ProjectFileError>>()?;
@@ -381,6 +454,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
             gain_decibels: track.gain(),
             speed_factor: track.speed(),
             muted: track.is_muted(),
+            height_in_points: track.height().points(),
             clips: track
                 .entries()
                 .iter()
@@ -419,6 +493,7 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
             speed_factor: media.speed(),
             gain_decibels: media.gain(),
             muted: media.is_muted(),
+            placement: media.placement().map(placement_document_of),
         },
         Clip::Audio(media) => ClipDocument::Audio {
             gap_before_frames,
@@ -429,6 +504,12 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
             gain_decibels: media.gain(),
             muted: media.is_muted(),
         },
+        Clip::Image(image) => ClipDocument::Image {
+            gap_before_frames,
+            source_identifier: image.source(),
+            duration_in_frames: image.duration_in_frames(),
+            placement: image.placement().map(placement_document_of),
+        },
         Clip::Text(text) => ClipDocument::Text {
             gap_before_frames,
             duration_in_frames: text.duration_in_frames(),
@@ -436,12 +517,8 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
             font_family: text.object.font_family.clone(),
             font_size_fraction_of_frame_height: text.object.font_size.fraction_of_picture_height(),
             colour: ColourDocument(text.object.colour),
-            area: CanvasAreaDocument {
-                left_fraction_of_frame_width: text.object.area.left(),
-                top_fraction_of_frame_height: text.object.area.top(),
-                width_fraction_of_frame_width: text.object.area.width(),
-                height_fraction_of_frame_height: text.object.area.height(),
-            },
+            area: area_document_of(text.object.area),
+            rotation_degrees: text.object.rotation.degrees(),
         },
     }
 }

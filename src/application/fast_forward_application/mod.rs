@@ -20,12 +20,22 @@
 mod autosave;
 #[cfg(test)]
 mod clip_box_tests;
+#[cfg(test)]
+mod clip_drag_tests;
+#[cfg(test)]
+mod clip_look_tests;
 mod command_execution;
 mod dialog_flow;
 mod drawing;
 mod export_flow;
 #[cfg(test)]
+mod file_question_tests;
+#[cfg(test)]
 mod interaction_tests;
+#[cfg(test)]
+mod picture_tests;
+#[cfg(test)]
+mod preview_layer_tests;
 mod programmatic_interface;
 mod project_file_flow;
 #[cfg(test)]
@@ -39,7 +49,13 @@ mod test_window;
 #[cfg(test)]
 mod text_object_tests;
 #[cfg(test)]
+mod track_height_tests;
+#[cfg(test)]
 mod track_tests;
+#[cfg(test)]
+mod undo_tests;
+#[cfg(test)]
+mod zoom_tests;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -51,8 +67,11 @@ use egui::Context;
 use super::background::BackgroundTask;
 use super::commands::Command;
 use super::dialogs::Dialog;
+use super::file_chooser::{FileChooser, NativeFileChooser, RefusingFileChooser};
+use super::history::History;
 use super::keyboard::{self, KeyboardState};
 use super::opening::OpeningOutcome;
+use super::selection::Selection;
 use super::settings_windows::{self, SettingsWindowsOpen};
 use super::textures::Textures;
 use super::theme;
@@ -60,15 +79,16 @@ use super::timeline_panel::TimelineViewState;
 use crate::composition::{PicturePlan, plan_pictures};
 use crate::media::export::VideoExport;
 use crate::media::{
-    FfmpegToolchain, ThumbnailExtraction, ThumbnailStrip, ToolchainError, UserInterfaceWakeUp, Waveform,
-    WaveformExtraction,
+    FfmpegToolchain, FinerThumbnails, ThumbnailExtraction, ThumbnailLibrary, ToolchainError, UserInterfaceWakeUp,
+    Waveform, WaveformExtraction,
 };
 use crate::playback::{
-    AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter, PictureSupplier,
-    PlaybackClock, PreviewSetup, PreviewVideo, WantedPicture, opener_of_the_default_speakers, preview_picture_size,
-    wanted_picture,
+    AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
+    PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PicturesReport, PlaybackClock, PreviewPictures, PreviewSetup,
+    PreviewVideo, opener_of_the_default_speakers, preview_picture_size, wanted_pictures,
 };
 use crate::project::{ClipLocation, FrameRate, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
+use crate::rgba_picture::RgbaPicture;
 use crate::settings_file::default_settings_file_path;
 use crate::text_rendering::LazyTextRenderer;
 
@@ -104,17 +124,20 @@ struct RunningExport {
     export: VideoExport,
     frames_written: u64,
     total_frames: u64,
-    /// Frames of the finished video that are black only because a video the project is made from
-    /// has fewer pictures than its clips need.
-    frames_black: u64,
+    /// Frames of the finished video that are missing the picture of a video only because a video the
+    /// project is made from has fewer pictures than its clips need.
+    frames_missing_a_picture: u64,
     destination: PathBuf,
 }
 
 /// The thumbnail pictures of a source video, and the work of making them.
 #[derive(Default)]
 struct ThumbnailState {
-    strip: ThumbnailStrip,
+    library: ThumbnailLibrary,
+    /// Making the picture of every second of the whole video, which is done once, when it is opened.
     extraction: Option<ThumbnailExtraction>,
+    /// Making finer pictures of the stretch of the video that the timeline shows.
+    finer: FinerThumbnails,
 }
 
 /// The shape of the sound of a source sound file, and the work of making it.
@@ -124,6 +147,15 @@ struct WaveformState {
     extraction: Option<WaveformExtraction>,
 }
 
+/// The decoded picture of an image file, and the work of decoding it.
+#[derive(Default)]
+struct PictureState {
+    /// Decoding the picture, which is done once, when the file is opened.
+    load: Option<BackgroundTask<Result<RgbaPicture, String>>>,
+    /// The picture, once it is decoded.
+    picture: Option<RgbaPicture>,
+}
+
 /// What the editor knows while it runs about one source file of the project.
 struct SourceFileState {
     status: SourceStatus,
@@ -131,6 +163,8 @@ struct SourceFileState {
     thumbnails: ThumbnailState,
     /// The waveform for the timeline, for a sound file.
     waveform: WaveformState,
+    /// The picture, for an image file.
+    picture: PictureState,
 }
 
 impl SourceFileState {
@@ -139,6 +173,7 @@ impl SourceFileState {
             status,
             thumbnails: ThumbnailState::default(),
             waveform: WaveformState::default(),
+            picture: PictureState::default(),
         }
     }
 
@@ -147,6 +182,11 @@ impl SourceFileState {
             SourceStatus::Available { path } => Some(path),
             _ => None,
         }
+    }
+
+    /// Where the file is, if it can be used.
+    fn status_path(&self) -> Option<PathBuf> {
+        self.path_if_available().map(std::path::Path::to_owned)
     }
 }
 
@@ -158,10 +198,8 @@ struct FrameState {
     is_playing: bool,
     /// What the picture is made of, at every frame of the timeline.
     picture_plan: PicturePlan,
-    /// The picture of a video that the preview needs for the current frame, if it needs one.
-    wanted_picture: Option<WantedPicture>,
-    /// Whether the preview has exactly the picture for the current frame.
-    preview_is_up_to_date: bool,
+    /// Which of the pictures of videos that the preview needs for the current frame it has exactly.
+    pictures_report: PicturesReport,
 }
 
 pub struct FastForwardApplication {
@@ -169,7 +207,11 @@ pub struct FastForwardApplication {
     project: Project,
     /// Where the project was last saved or loaded from.
     project_file_path: Option<PathBuf>,
-    has_unsaved_changes: bool,
+    /// The edits that can be undone, and the ones that were undone.
+    history: History,
+    /// Whether something that is not in the history was changed since the project was saved: a
+    /// setting of the project, or the place a file was found.
+    unsaved_change_outside_history: bool,
     /// When the project last changed in a way that has not been saved; see [`autosave`]. `None`
     /// when nothing is waiting to be autosaved.
     last_unsaved_change_at: Option<Instant>,
@@ -182,15 +224,16 @@ pub struct FastForwardApplication {
     source_files: HashMap<SourceMediaIdentifier, SourceFileState>,
     /// Source files that are being looked for and opened, in the background.
     openings: Vec<OpeningTask>,
-    /// The clip that was clicked, which Delete deletes and S cuts.
-    selected_clip: Option<ClipLocation>,
+    /// The clips that were clicked, which Delete deletes and S cuts.
+    selection: Selection,
     /// The text clip whose text object the pop-up window is editing, if the window is open.
     text_window_open: Option<ClipLocation>,
     text_renderer: LazyTextRenderer,
     /// The fonts the computer has, once they are known.
     font_families: Option<Vec<String>>,
     clock: PlaybackClock,
-    picture_supplier: PictureSupplier<FfmpegPictureStreamStarter>,
+    /// Gets the pictures of the videos that are seen, a stream of them for each track.
+    preview_pictures: PreviewPictures<FfmpegPictureStreamStarter>,
     /// Plays the sound of the preview. It is silent until given speakers to play through.
     audio_supplier: AudioSupplier<FfmpegAudioStreamStarter>,
     textures: Textures,
@@ -201,6 +244,8 @@ pub struct FastForwardApplication {
     export: Option<RunningExport>,
     /// Set once the user has agreed to close the window with unsaved changes.
     close_confirmed: bool,
+    /// What asks the person which file to open or where to save one.
+    file_chooser: Box<dyn FileChooser>,
     wake_up: UserInterfaceWakeUp,
 }
 
@@ -210,6 +255,7 @@ impl FastForwardApplication {
     /// one is opened from the command line) it is loaded.
     pub fn new(creation_context: &eframe::CreationContext<'_>, project_to_open: Option<PathBuf>) -> Self {
         let mut application = Self::with_context(&creation_context.egui_ctx, FfmpegToolchain::locate());
+        application.file_chooser = Box::new(NativeFileChooser);
         if let Some(settings_path) = default_settings_file_path() {
             application.keep_global_settings_in(settings_path);
         }
@@ -224,7 +270,9 @@ impl FastForwardApplication {
 
     /// An editor drawing into `context`, using `toolchain` (or reporting that ffmpeg is missing).
     /// The global settings are the defaults and are not kept in any file; see
-    /// [`Self::keep_global_settings_in`].
+    /// [`Self::keep_global_settings_in`]. It has no one to ask for files: reaching a file dialog
+    /// is a failure (the editor is given a file chooser that panics when asked), and what a dialog would have chosen is given
+    /// to the editor directly (see the programmatic interface).
     pub fn with_context(context: &Context, toolchain: Result<FfmpegToolchain, ToolchainError>) -> Self {
         context.set_visuals(egui::Visuals::dark());
         let wake_up: UserInterfaceWakeUp = {
@@ -245,7 +293,7 @@ impl FastForwardApplication {
 
         let project = Project::empty();
         Self {
-            picture_supplier: PictureSupplier::new(FfmpegPictureStreamStarter::new(
+            preview_pictures: PreviewPictures::new(FfmpegPictureStreamStarter::new(
                 toolchain.clone(),
                 Arc::clone(&wake_up),
             )),
@@ -254,14 +302,15 @@ impl FastForwardApplication {
             clock: PlaybackClock::new(project.frame_rate()),
             project,
             project_file_path: None,
-            has_unsaved_changes: false,
+            history: History::new(),
+            unsaved_change_outside_history: false,
             last_unsaved_change_at: None,
             global_settings: Settings::DEFAULT,
             global_settings_path: None,
             settings_windows_open: SettingsWindowsOpen::default(),
             source_files: HashMap::new(),
             openings: Vec::new(),
-            selected_clip: None,
+            selection: Selection::empty(),
             text_window_open: None,
             text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),
             font_families: None,
@@ -271,6 +320,7 @@ impl FastForwardApplication {
             missing_sources_warning_open: false,
             export: None,
             close_confirmed: false,
+            file_chooser: Box::new(RefusingFileChooser),
             wake_up,
         }
     }
@@ -315,8 +365,13 @@ impl FastForwardApplication {
         let is_playing = self.clock.is_playing();
 
         let picture_plan = plan_pictures(&self.project, |source| self.source_is_available(source));
-        let wanted = wanted_picture(&picture_plan, current_frame);
-        let report = self.picture_supplier.supply(wanted, is_playing, now);
+        let look_ahead_frames = if is_playing {
+            PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY
+        } else {
+            0
+        };
+        let wanted = wanted_pictures(&picture_plan, current_frame, look_ahead_frames);
+        let report = self.preview_pictures.supply(&wanted, is_playing, now);
         if let Some(wait) = report.ask_again_in {
             context.request_repaint_after(wait);
         }
@@ -331,19 +386,13 @@ impl FastForwardApplication {
             frame_rate: self.project.frame_rate(),
             is_playing,
             picture_plan,
-            wanted_picture: wanted,
-            preview_is_up_to_date: report.shows_the_wanted_picture,
+            pictures_report: report,
         }
     }
 
     /// Lets go of a selection, and of a text window, that are about a clip that is not there any more.
     fn forget_what_is_gone_from_the_project(&mut self) {
-        if self
-            .selected_clip
-            .is_some_and(|clip| self.project.placement_of(clip).is_none())
-        {
-            self.selected_clip = None;
-        }
+        self.selection.forget_clips_that_are_gone(&self.project);
         if self.text_window_open.is_some_and(|clip| {
             self.project
                 .placement_of(clip)
@@ -385,8 +434,8 @@ impl FastForwardApplication {
                 videos,
             }
         });
-        if self.picture_supplier.setup() != wanted_setup.as_ref() {
-            self.picture_supplier.set_setup(wanted_setup);
+        if self.preview_pictures.setup() != wanted_setup.as_ref() {
+            self.preview_pictures.set_setup(wanted_setup);
         }
     }
 
@@ -410,22 +459,28 @@ impl FastForwardApplication {
 
     /// Turns the keyboard into commands (see [`keyboard`]), unless something is in the way.
     fn collect_keyboard_commands(&self, context: &Context, frame_state: &FrameState, commands: &mut Vec<Command>) {
-        // With nothing on the timeline there is nothing the keys could do anything to.
-        if self.is_blocked() || frame_state.total_frames == 0 {
+        if self.is_blocked() {
             return;
         }
-        let selected_clip_at_the_current_frame = self.selected_clip.filter(|clip| {
-            self.project
-                .placement_of(*clip)
-                .is_some_and(|placement| placement.contains(frame_state.current_frame))
-        });
+        let selected_clips_at_the_current_frame = self
+            .selection
+            .iter()
+            .filter(|clip| {
+                self.project
+                    .placement_of(*clip)
+                    .is_some_and(|placement| placement.contains(frame_state.current_frame))
+            })
+            .collect();
         commands.extend(keyboard::commands_for_the_keys_pressed(
             context,
             KeyboardState {
                 current_frame: frame_state.current_frame,
                 is_playing: frame_state.is_playing,
-                selected_clip: self.selected_clip,
-                selected_clip_at_the_current_frame,
+                timeline_is_empty: frame_state.total_frames == 0,
+                selected_clips: self.selection.to_vec(),
+                selected_clips_at_the_current_frame,
+                can_undo: self.history.can_undo(),
+                can_redo: self.history.can_redo(),
                 a_box_with_controls_is_open: self.timeline_view.settings_box_is_open()
                     || self.text_window_open.is_some(),
             },
@@ -454,6 +509,7 @@ impl FastForwardApplication {
         let mut commands = Vec::new();
         self.collect_keyboard_commands(&context, &frame_state, &mut commands);
         self.draw(ui, &frame_state, &mut commands);
+        self.ask_for_finer_thumbnails();
         settings_windows::show(
             &context,
             &mut self.settings_windows_open,
@@ -463,9 +519,7 @@ impl FastForwardApplication {
         );
         self.show_text_object_window(&context, &frame_state, &mut commands);
         self.show_dialogs(&context);
-        for command in commands {
-            self.execute(command, now, &context);
-        }
+        self.execute_all(commands, now, &context);
         self.autosave_when_quiet_for_long_enough(&context, now);
 
         self.textures.forget_thumbnails_not_used_this_frame();

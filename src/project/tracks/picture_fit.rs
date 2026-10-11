@@ -1,9 +1,12 @@
 //! Fitting a video of one shape into a picture of another.
 //!
 //! The finished picture has the shape of the project's first video. A video of another shape is
-//! made as big as it can be while fitting inside, keeping its shape, and put in the middle; the
-//! rest is black. The live preview and the export both work this out here, so that they place
-//! the video in exactly the same way.
+//! made as big as it can be while fitting inside, keeping its shape, and put in the middle; what
+//! is not covered shows what is behind it (black, if there is nothing). The live preview and the
+//! export both work this out here, so that they place the video in exactly the same way. Until a
+//! video is moved, resized or turned, this is where it is (see [`fitted_placement`]).
+
+use super::placement::{Angle, CanvasArea, Placement};
 
 /// Where a video goes in the picture, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +81,27 @@ pub fn fit_inside_picture(
 /// nothing is made empty).
 fn even(size: u64) -> u64 {
     if size < 2 { size } else { size & !1 }
+}
+
+/// Where a video that is shown `video_size` pixels (width, height) is on a picture `picture_size`
+/// pixels, as long as it has not been moved: the fit (see [`fit_inside_picture`]) as fractions of
+/// the picture, not turned. At the size of the picture the place comes out in the very same
+/// pixels as the fit, and at any other size it is the same place.
+pub fn fitted_placement(video_size: (u32, u32), picture_size: (u32, u32)) -> Placement {
+    let fit = fit_inside_picture(video_size.0, video_size.1, picture_size.0, picture_size.1);
+    if fit.fills(picture_size.0, picture_size.1) {
+        return Placement::upright(CanvasArea::new(0.0, 0.0, 1.0, 1.0));
+    }
+    let (picture_width, picture_height) = (picture_size.0.max(1) as f32, picture_size.1.max(1) as f32);
+    Placement::new(
+        CanvasArea::new(
+            fit.left_in_pixels as f32 / picture_width,
+            fit.top_in_pixels as f32 / picture_height,
+            fit.width_in_pixels as f32 / picture_width,
+            fit.height_in_pixels as f32 / picture_height,
+        ),
+        Angle::ZERO,
+    )
 }
 
 #[cfg(test)]
@@ -181,6 +205,83 @@ mod tests {
                 "{video:?}: {fitted:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_video_of_the_shape_of_the_picture_is_placed_over_all_of_it_and_not_turned() {
+        for (video, picture) in [
+            ((1920, 1080), (1920, 1080)),
+            ((3840, 2160), (1280, 720)),
+            ((500, 500), (64, 64)),
+        ] {
+            assert_eq!(
+                fitted_placement(video, picture),
+                Placement::upright(CanvasArea::new(0.0, 0.0, 1.0, 1.0)),
+                "{video:?} in {picture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_video_of_another_shape_is_placed_in_the_middle_where_the_fit_puts_it_as_fractions_of_the_picture() {
+        // 9:16 in 1920x1080: 608 wide and the whole height, 656 pixels from the left.
+        let placement = fitted_placement((1080, 1920), (1920, 1080));
+        assert_eq!(placement.rotation, Angle::ZERO);
+        assert!((placement.area.left() - 656.0 / 1920.0).abs() < 1e-6);
+        assert!((placement.area.width() - 608.0 / 1920.0).abs() < 1e-6);
+        assert_eq!((placement.area.top(), placement.area.height()), (0.0, 1.0));
+    }
+
+    /// The export lays the video over the picture at the pixels of the place rounded, and the
+    /// preview draws it at the fractions: they must be the pixels of the fit, whatever the sizes.
+    #[test]
+    fn the_place_is_the_pixels_of_the_fit_once_it_is_rounded_to_pixels_again() {
+        for video in [
+            (1920, 1080),
+            (1080, 1920),
+            (1000, 1000),
+            (1280, 720),
+            (720, 1280),
+            (4096, 2160),
+            (100, 400),
+        ] {
+            for picture in [
+                (1920, 1080),
+                (1080, 1920),
+                (640, 360),
+                (1000, 1000),
+                (3840, 2160),
+                (1280, 722),
+            ] {
+                let fit = fit(video, picture);
+                let placement = fitted_placement(video, picture);
+                let in_pixels = |fraction: f32, size: u32| (fraction * size as f32).round() as u32;
+                assert_eq!(
+                    (
+                        in_pixels(placement.area.left(), picture.0),
+                        in_pixels(placement.area.top(), picture.1),
+                        in_pixels(placement.area.width(), picture.0),
+                        in_pixels(placement.area.height(), picture.1),
+                    ),
+                    (
+                        fit.left_in_pixels,
+                        fit.top_in_pixels,
+                        fit.width_in_pixels,
+                        fit.height_in_pixels
+                    ),
+                    "{video:?} in {picture:?}"
+                );
+            }
+        }
+    }
+
+    /// A place is never narrower than a fiftieth of the picture (see [`CanvasArea`]), so a video that
+    /// is far thinner than that is placed that wide, which shows it stretched. Nobody films that.
+    #[test]
+    fn a_video_a_thousand_times_as_tall_as_it_is_wide_is_placed_no_thinner_than_a_place_can_be() {
+        let placement = fitted_placement((3, 1000), (1920, 1080));
+        assert_eq!(placement.area.width(), CanvasArea::SMALLEST_SIDE_FRACTION);
+        assert_eq!(placement.area.height(), 1.0);
     }
 
     #[test]

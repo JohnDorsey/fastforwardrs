@@ -5,15 +5,16 @@
 //! of sound (see [`crate::composition`]), so it knows nothing about tracks or clips: it only turns
 //! those into filters.
 //!
-//! **Pictures** ([`pictures`]). Each source video is first made into the size of the picture and
-//! resampled to the project's constant frame rate (`fps` with `round=near`), so that it has exactly
-//! one picture for every frame of the timeline, however its own timestamps are stored: Matroska
-//! files round them to milliseconds, and screen recordings from phones have a variable frame rate.
-//! After that a section is simply a range of picture numbers (`trim` by frame number), of which an
-//! accelerated one keeps every `speed_factor`th, starting with the first (`select`). No boundary
-//! depends on a timestamp, so none can be lost or duplicated by rounding. Stretches with no video
-//! are black. Still pictures (the fast-forward symbol, text) are laid over (`overlay`), and all
-//! the sections are joined together (`concat`).
+//! **Pictures** ([`pictures`]). Each source video is first resampled to the project's constant
+//! frame rate (`fps` with `round=near`), so that it has exactly one picture for every frame of the
+//! timeline, however its own timestamps are stored: Matroska files round them to milliseconds, and
+//! screen recordings from phones have a variable frame rate. After that a section's video is
+//! simply a range of picture numbers (`trim` by frame number), of which an accelerated one keeps
+//! every `speed_factor`th, starting with the first (`select`), scaled to where it is on the
+//! picture. No boundary depends on a timestamp, so none can be lost or duplicated by rounding.
+//! Each section is black with its layers (videos, and still pictures such as the fast-forward
+//! symbol and text, each of which may be turned) laid over it (`overlay`), the one at the back
+//! first, and all the sections are joined together (`concat`).
 //!
 //! **Sound** ([`sound`]). The sound of every source is first made into one fixed kind (48000
 //! moments a second, stereo). Then for every clip the matching sound is cut out (`atrim`), sped up
@@ -26,7 +27,7 @@ mod sound;
 
 use crate::project::{FrameRate, SpedUpClipSound};
 
-pub use pictures::{OverlayToExport, SectionToExport, SourceToExport, VideoToExport};
+pub use pictures::{LayerContentToExport, LayerToExport, PlaceToExport, SectionToExport, VideoToExport};
 pub use sound::{SoundClipToExport, SoundItemToExport, SoundStripToExport};
 
 /// The name of the video the graph makes.
@@ -46,10 +47,8 @@ pub struct PictureGraphSpecification {
     /// formats cannot make odd sizes.
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
-    /// The source files, which are ffmpeg inputs 0, 1, ... in this order. (Still pictures to lay
-    /// over the picture are the inputs after these.)
-    pub sources: Vec<SourceToExport>,
-    /// The stretches of the picture, in order.
+    /// The stretches of the picture, in order. (The source files are ffmpeg inputs 0, 1, ..., and
+    /// the still pictures to lay over the picture are the inputs after these.)
     pub sections: Vec<SectionToExport>,
 }
 
@@ -153,13 +152,21 @@ mod tests {
     fn picture_section(first: u64, end: u64, factor: u32) -> SectionToExport {
         SectionToExport {
             frame_count: (end - first).div_ceil(u64::from(factor)),
-            video: Some(VideoToExport {
-                source_input: 0,
-                first_source_frame: first,
-                end_source_frame: end,
-                speed_factor: speed(factor),
-            }),
-            overlays: Vec::new(),
+            layers: vec![LayerToExport {
+                content: LayerContentToExport::Video(VideoToExport {
+                    source_input: 0,
+                    first_source_frame: first,
+                    end_source_frame: end,
+                    speed_factor: speed(factor),
+                }),
+                place: PlaceToExport {
+                    left_in_pixels: 0,
+                    top_in_pixels: 0,
+                    width_in_pixels: 320,
+                    height_in_pixels: 180,
+                    turn_in_degrees: 0.0,
+                },
+            }],
         }
     }
 
@@ -189,9 +196,6 @@ mod tests {
                 frame_rate,
                 picture_width_in_pixels: 320,
                 picture_height_in_pixels: 180,
-                sources: vec![SourceToExport {
-                    display_size_in_pixels: Some((320, 180)),
-                }],
                 sections: clips
                     .iter()
                     .map(|&(first, end, factor)| picture_section(first, end, factor))

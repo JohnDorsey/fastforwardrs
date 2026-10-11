@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::project::tracks::{ClipKind, ClipLocation};
-use crate::project::{SourceAudioProperties, SourceVideoProperties};
+use crate::project::{SourceAudioProperties, SourceImageProperties, SourceVideoProperties};
 
 fn frame_rate(frames_per_second: u32) -> FrameRate {
     FrameRate::from_whole_frames_per_second(frames_per_second).unwrap()
@@ -40,6 +40,17 @@ fn audio_source(identifier: u32, seconds: u64) -> SourceMedia {
         link(&format!("{identifier}.mp3")),
         SourceAudioProperties {
             duration_in_microseconds: seconds * 1_000_000,
+        },
+    )
+}
+
+fn picture_source(identifier: u32, width: u32, height: u32) -> SourceMedia {
+    SourceMedia::image(
+        SourceMediaIdentifier::new(identifier),
+        link(&format!("{identifier}.png")),
+        SourceImageProperties {
+            display_width_in_pixels: width,
+            display_height_in_pixels: height,
         },
     )
 }
@@ -520,12 +531,12 @@ fn cutting_with_a_clip_named_cuts_only_that_clip_and_only_where_it_is() {
     };
 
     assert!(
-        project.split_at(frame(10), Some(sound)).is_empty(),
+        project.split_at(frame(10), Some(&[sound])).is_empty(),
         "the sound is not at frame 10"
     );
     assert_eq!(project.track(video_track).unwrap().entries().len(), 1);
 
-    let cut = project.split_at(frame(100), Some(sound));
+    let cut = project.split_at(frame(100), Some(&[sound]));
     assert_eq!(cut.len(), 1);
     assert_eq!(cut[0].0, sound_track);
     assert_eq!(project.track(sound_track).unwrap().entries().len(), 2);
@@ -594,6 +605,108 @@ fn changes_to_a_clip_or_a_track_go_to_the_one_named_and_a_name_that_is_not_there
 }
 
 #[test]
+fn a_track_can_be_made_taller_or_shorter_and_one_that_is_not_there_is_an_error() {
+    let mut project = project_with_a_video(300);
+    let track = project.tracks()[0].id();
+    assert_eq!(project.track(track).unwrap().height(), TrackHeight::DEFAULT);
+    let others_before = project.clone();
+
+    project.set_track_height(track, TrackHeight::from_points(60.0)).unwrap();
+    assert_eq!(project.track(track).unwrap().height().points(), 60.0);
+    project
+        .set_track_height(track, TrackHeight::from_points(10_000.0))
+        .unwrap();
+    assert_eq!(
+        project.track(track).unwrap().height().points(),
+        TrackHeight::LARGEST_IN_POINTS,
+        "as tall as a track can be"
+    );
+    // Nothing but the height changed.
+    project.set_track_height(track, TrackHeight::DEFAULT).unwrap();
+    assert_eq!(project, others_before);
+
+    assert_eq!(
+        project.set_track_height(TrackId::new(99), TrackHeight::DEFAULT),
+        Err(EditError::UnknownTrack {
+            track: TrackId::new(99)
+        })
+    );
+}
+
+#[test]
+fn restoring_an_earlier_copy_brings_back_the_heights_of_the_tracks() {
+    let mut project = project_with_a_video(300);
+    let track = project.tracks()[0].id();
+    let before = project.clone();
+    project.set_track_height(track, TrackHeight::from_points(50.0)).unwrap();
+
+    project.restore(before);
+
+    assert_eq!(project.track(track).unwrap().height(), TrackHeight::DEFAULT);
+}
+
+#[test]
+fn clips_on_different_tracks_can_be_moved_in_one_go() {
+    let mut project = project_with_a_video(300);
+    project.import_source(audio_source(2, 10), frame(0)).unwrap();
+    let on_the_sound_track = first_clip_location(&project, 0);
+    let on_the_video_track = first_clip_location(&project, 1);
+
+    project
+        .move_clips(&[(on_the_sound_track, frame(40)), (on_the_video_track, frame(25))])
+        .unwrap();
+
+    assert_eq!(
+        project.placement_of(on_the_sound_track).unwrap().first_timeline_frame,
+        frame(40)
+    );
+    assert_eq!(
+        project.placement_of(on_the_video_track).unwrap().first_timeline_frame,
+        frame(25)
+    );
+    assert_eq!(
+        project.total_frame_count(),
+        340,
+        "the 10 second sound, which now starts at frame 40, ends last"
+    );
+}
+
+#[test]
+fn if_one_clip_cannot_be_moved_none_is_and_the_project_is_as_it_was() {
+    let mut project = project_with_a_video(300);
+    project.split_at(frame(100), None);
+    project.import_source(audio_source(2, 10), frame(0)).unwrap();
+    let on_the_sound_track = first_clip_location(&project, 0);
+    let first_part_of_the_video = first_clip_location(&project, 1);
+    let before = project.clone();
+
+    // The sound can go where it is asked to, but the first part of the video would be on the second.
+    let result = project.move_clips(&[(on_the_sound_track, frame(40)), (first_part_of_the_video, frame(150))]);
+
+    assert_eq!(
+        result,
+        Err(EditError::Clip(ClipEditError::WouldOverlap {
+            clip: first_part_of_the_video.clip
+        })),
+        "it is the one that would end up on the other that is named"
+    );
+    assert_eq!(project, before, "not even the sound moved");
+
+    let nowhere = ClipLocation {
+        track: TrackId::new(99),
+        clip: ClipId::new(0),
+    };
+    assert_eq!(
+        project.move_clips(&[(on_the_sound_track, frame(40)), (nowhere, frame(1))]),
+        Err(EditError::UnknownTrack {
+            track: TrackId::new(99)
+        })
+    );
+    assert_eq!(project, before);
+    assert_eq!(project.move_clips(&[]), Ok(()), "moving nothing is allowed");
+}
+
+#[test]
 fn text_is_added_to_a_track_and_changed_through_its_location() {
     let mut project = project_with_a_video(300);
     let front = project.add_track_in_front();
@@ -621,7 +734,7 @@ fn text_is_added_to_a_track_and_changed_through_its_location() {
         project.placement_of(location).unwrap().clip.as_text().unwrap().object,
         object
     );
-    assert_eq!(project.set_text_duration(location, 10).unwrap(), 10);
+    assert_eq!(project.set_clip_duration(location, 10).unwrap(), 10);
 
     let video_clip = first_clip_location(&project, 1);
     assert_eq!(
@@ -640,6 +753,286 @@ fn text_is_added_to_a_track_and_changed_through_its_location() {
             .is_none(),
         "the video is there"
     );
+}
+
+#[test]
+fn a_clip_is_put_somewhere_on_the_picture_through_its_location_and_only_that_clip_changes() {
+    let mut project = project_with_a_video(300);
+    let front = project.add_track_in_front();
+    let (text, _) = project
+        .insert_text(front, frame(30), TextObject::default(), 90)
+        .unwrap();
+    let video = first_clip_location(&project, 1);
+    let somewhere = Placement::new(CanvasArea::new(0.1, 0.2, 0.3, 0.3), Angle::from_degrees(-30.0));
+
+    project.set_clip_placement(video, somewhere).unwrap();
+    assert_eq!(project.placement_of(video).unwrap().clip.placement(), Some(somewhere));
+    assert_eq!(
+        project.placement_of(text).unwrap().clip.placement(),
+        Some(TextObject::default().placement()),
+        "the text did not move"
+    );
+    project.set_clip_placement(text, somewhere).unwrap();
+    assert_eq!(project.placement_of(text).unwrap().clip.placement(), Some(somewhere));
+
+    assert_eq!(
+        project.set_clip_placement(
+            ClipLocation {
+                track: TrackId::new(99),
+                clip: video.clip
+            },
+            somewhere
+        ),
+        Err(EditError::UnknownTrack {
+            track: TrackId::new(99)
+        })
+    );
+}
+
+#[test]
+fn a_sound_cannot_be_put_on_the_picture() {
+    let mut project = Project::empty();
+    project.import_source(audio_source(1, 10), frame(0)).unwrap();
+    let sound = first_clip_location(&project, 0);
+    let before = project.clone();
+    assert_eq!(
+        project.set_clip_placement(sound, Placement::default()),
+        Err(EditError::Clip(ClipEditError::NotOnThePicture { clip: sound.clip }))
+    );
+    assert_eq!(project, before);
+}
+
+// --- pictures ---
+
+#[test]
+fn a_picture_is_put_on_an_empty_track_shown_for_five_seconds_at_the_frame_asked_for() {
+    let mut project = Project::empty();
+    let outcome = project.import_source(picture_source(1, 800, 600), frame(10)).unwrap();
+    assert!(!outcome.created_track, "the empty track there was");
+    let location = ClipLocation {
+        track: outcome.track,
+        clip: outcome.clip.expect("a picture makes a clip"),
+    };
+    let placement = project.placement_of(location).unwrap();
+    assert_eq!(placement.clip.kind(), ClipKind::Image);
+    assert_eq!(
+        (
+            placement.first_timeline_frame.value(),
+            placement.end_timeline_frame.value()
+        ),
+        (10, 10 + 150),
+        "5 seconds at the 30 frames per second of a project that has no video"
+    );
+    assert_eq!(
+        placement.clip.placement(),
+        None,
+        "fitted inside the picture until it is put somewhere"
+    );
+}
+
+#[test]
+fn a_picture_is_shown_for_five_seconds_of_the_frame_rate_of_the_project_it_is_in() {
+    let mut project = project_with_a_video(1000); // 30 frames per second
+    let mut other = Project::empty();
+    other
+        .import_source(
+            SourceMedia::video(
+                SourceMediaIdentifier::new(1),
+                link("1.mp4"),
+                SourceVideoProperties {
+                    frame_rate: FrameRate::new(25, 1).unwrap(),
+                    total_frame_count: 100,
+                    display_width_in_pixels: 640,
+                    display_height_in_pixels: 360,
+                    has_audio: false,
+                },
+            ),
+            frame(0),
+        )
+        .unwrap();
+    for (project, frames) in [(&mut project, 150), (&mut other, 125)] {
+        let outcome = project.import_source(picture_source(7, 100, 100), frame(0)).unwrap();
+        assert!(
+            outcome.created_track,
+            "the video is on the only track, so there is a new one"
+        );
+        let location = ClipLocation {
+            track: outcome.track,
+            clip: outcome.clip.unwrap(),
+        };
+        assert_eq!(project.placement_of(location).unwrap().timeline_frame_count(), frames);
+    }
+}
+
+#[test]
+fn a_picture_does_not_give_the_project_a_frame_rate_or_a_picture_size() {
+    let mut project = Project::empty();
+    project.import_source(picture_source(1, 800, 600), frame(0)).unwrap();
+    assert_eq!(project.frame_rate(), FRAME_RATE_WITHOUT_A_VIDEO);
+    assert_eq!(project.picture_size(), PICTURE_SIZE_WITHOUT_A_VIDEO);
+    // A video that comes later still gives the project its own.
+    let mut with_video_first = project_with_a_video(100);
+    with_video_first
+        .import_source(picture_source(2, 10, 10), frame(0))
+        .unwrap();
+    assert_eq!(with_video_first.picture_size(), (1280, 720));
+}
+
+#[test]
+fn a_clip_cannot_be_made_from_a_file_of_the_wrong_kind() {
+    let sources = vec![picture_source(1, 100, 100), video_source(2, 30, 100)];
+    let picture_clip_of = |identifier| Clip::Image(ImageClip::new(SourceMediaIdentifier::new(identifier), 30).unwrap());
+    let ok = Project::from_parts(
+        sources.clone(),
+        vec![track_with(0, vec![(0, picture_clip_of(1))])],
+        SpeedIndicatorLayout::DEFAULT,
+    );
+    assert!(ok.is_ok());
+    let wrong = Project::from_parts(
+        sources.clone(),
+        vec![track_with(0, vec![(0, picture_clip_of(2))])],
+        SpeedIndicatorLayout::DEFAULT,
+    );
+    assert!(matches!(
+        wrong,
+        Err(InconsistentProject::ClipUsesSourceOfTheWrongKind { .. })
+    ));
+    let video_from_a_picture = Project::from_parts(
+        sources.clone(),
+        vec![track_with(0, vec![(0, video_clip(1, 0, 10))])],
+        SpeedIndicatorLayout::DEFAULT,
+    );
+    assert!(matches!(
+        video_from_a_picture,
+        Err(InconsistentProject::ClipUsesSourceOfTheWrongKind { .. })
+    ));
+    let unknown = Project::from_parts(
+        vec![video_source(2, 30, 100)],
+        vec![track_with(0, vec![(0, picture_clip_of(9))])],
+        SpeedIndicatorLayout::DEFAULT,
+    );
+    assert!(matches!(
+        unknown,
+        Err(InconsistentProject::ClipUsesUnknownSource { .. })
+    ));
+}
+
+#[test]
+fn how_long_a_picture_is_shown_for_can_be_set_and_how_long_a_video_lasts_cannot() {
+    let mut project = project_with_a_video(300);
+    let outcome = project.import_source(picture_source(2, 100, 100), frame(0)).unwrap();
+    let picture = ClipLocation {
+        track: outcome.track,
+        clip: outcome.clip.unwrap(),
+    };
+    assert_eq!(project.set_clip_duration(picture, 20).unwrap(), 20);
+    assert_eq!(project.placement_of(picture).unwrap().timeline_frame_count(), 20);
+    assert_eq!(
+        project.set_clip_duration(picture, 9000).unwrap(),
+        9000,
+        "nothing is after it on its track"
+    );
+
+    let video = first_clip_location(&project, 1);
+    assert_eq!(
+        project.set_clip_duration(video, 20),
+        Err(EditError::Clip(ClipEditError::LastsAsLongAsItsFile {
+            clip: video.clip
+        }))
+    );
+}
+
+#[test]
+fn a_picture_can_be_replaced_by_another_picture_but_not_by_a_video() {
+    let mut project = Project::empty();
+    project.import_source(picture_source(1, 100, 100), frame(0)).unwrap();
+    let again = project.relink_source(
+        SourceMediaIdentifier::new(1),
+        link("elsewhere.png"),
+        SourceMediaProperties::Image(SourceImageProperties {
+            display_width_in_pixels: 300,
+            display_height_in_pixels: 200,
+        }),
+    );
+    assert_eq!(
+        again,
+        Ok(RelinkOutcome {
+            frame_count_before: 1,
+            frame_count_after: 1
+        })
+    );
+    assert_eq!(
+        project
+            .source(SourceMediaIdentifier::new(1))
+            .unwrap()
+            .properties
+            .display_size_in_pixels(),
+        Some((300, 200))
+    );
+    let video = video_source(1, 30, 100);
+    assert!(matches!(
+        project.relink_source(SourceMediaIdentifier::new(1), video.link, video.properties),
+        Err(RelinkError::DifferentKind { .. })
+    ));
+}
+
+// --- deleting a track ---
+
+#[test]
+fn a_track_is_deleted_with_all_its_clips_and_the_others_stay_as_they_were_in_the_same_order() {
+    let mut project = project_with_a_video(300);
+    let middle = project.add_track_in_front();
+    let (text, _) = project
+        .insert_text(middle, frame(10), TextObject::default(), 30)
+        .unwrap();
+    let front = project.add_track_in_front();
+    let before: Vec<TrackId> = project.tracks().iter().map(Track::id).collect();
+    assert_eq!(before, vec![front, middle, TrackId::new(0)]);
+
+    project.delete_track(middle).unwrap();
+
+    let after: Vec<TrackId> = project.tracks().iter().map(Track::id).collect();
+    assert_eq!(after, vec![front, TrackId::new(0)]);
+    assert!(project.placement_of(text).is_none(), "its clips went with it");
+    assert_eq!(
+        project.total_frame_count(),
+        300,
+        "what is on the other tracks is where it was"
+    );
+    assert_eq!(project.sources().len(), 1, "the files are still part of the project");
+}
+
+#[test]
+fn a_track_that_was_deleted_is_not_given_to_a_track_made_afterwards() {
+    let mut project = project_with_a_video(300);
+    let deleted = project.add_track_in_front();
+    project.delete_track(deleted).unwrap();
+    let made_afterwards = project.add_track_in_front();
+    assert_ne!(
+        made_afterwards, deleted,
+        "so nothing that remembered the old one finds the new"
+    );
+}
+
+#[test]
+fn the_only_track_and_a_track_that_is_not_there_cannot_be_deleted_and_nothing_changes() {
+    let mut project = project_with_a_video(300);
+    let before = project.clone();
+    let only = project.tracks()[0].id();
+    assert_eq!(
+        project.delete_track(only),
+        Err(EditError::CannotDeleteTheOnlyTrack { track: only })
+    );
+    assert_eq!(project, before);
+    project.add_track_in_front();
+    let with_two = project.clone();
+    assert_eq!(
+        project.delete_track(TrackId::new(99)),
+        Err(EditError::UnknownTrack {
+            track: TrackId::new(99)
+        })
+    );
+    assert_eq!(project, with_two);
 }
 
 #[test]
@@ -665,4 +1058,85 @@ fn what_a_project_has_set_for_itself_is_kept_when_it_is_changed() {
     let layout = SpeedIndicatorLayout::new(0.5, 0.5, 0.2);
     project.set_speed_indicator_layout(layout);
     assert_eq!(project.speed_indicator_layout(), layout);
+}
+
+// --- going back to an earlier copy ---
+
+#[test]
+fn restoring_an_earlier_copy_brings_back_its_tracks_clips_and_files() {
+    let mut project = project_with_a_video(300);
+    let before = project.clone();
+    project.split_at(frame(100), None);
+    project.add_track_in_front();
+    project.import_source(audio_source(2, 4), frame(0)).unwrap();
+    assert_ne!(project, before);
+
+    project.restore(before.clone());
+
+    assert_eq!(project, before);
+    assert_eq!(
+        project.sources().len(),
+        1,
+        "the sound file is no longer one of the project's"
+    );
+}
+
+#[test]
+fn restoring_leaves_the_settings_of_the_project_as_they_are_now() {
+    let mut project = project_with_a_video(300);
+    let before = project.clone();
+    project.split_at(frame(100), None);
+    let changed_settings = ProjectSettings {
+        autosave: Some(true),
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
+    };
+    project.set_settings(changed_settings);
+
+    project.restore(before);
+
+    assert_eq!(
+        project.settings(),
+        changed_settings,
+        "undoing an edit does not undo a setting"
+    );
+    assert_eq!(project.tracks()[0].entries().len(), 1, "but the cut is undone");
+}
+
+#[test]
+fn restoring_keeps_where_a_file_is_now_when_the_earlier_copy_knew_it_somewhere_else() {
+    let mut project = project_with_a_video(300);
+    let before = project.clone();
+    project.split_at(frame(100), None);
+    // The file was chosen again after the cut: it is somewhere else, and is longer.
+    let properties = SourceMediaProperties::Video(SourceVideoProperties {
+        total_frame_count: 400,
+        ..*video_source(1, 30, 300).properties.video().unwrap()
+    });
+    project
+        .relink_source(SourceMediaIdentifier::new(1), link("moved/1.mp4"), properties)
+        .unwrap();
+
+    project.restore(before);
+
+    let source = project.source(SourceMediaIdentifier::new(1)).unwrap();
+    assert_eq!(source.link, link("moved/1.mp4"), "the file is where it was found");
+    assert_eq!(source.properties, properties);
+    assert_eq!(project.tracks()[0].entries().len(), 1, "and the cut is undone");
+}
+
+#[test]
+fn restoring_a_copy_with_a_file_the_project_has_since_lost_brings_it_back_where_it_was() {
+    let mut project = Project::empty();
+    let before_the_import = project.clone();
+    project.import_source(video_source(1, 30, 300), frame(0)).unwrap();
+    let with_the_import = project.clone();
+
+    project.restore(before_the_import);
+    assert!(project.sources().is_empty());
+    project.restore(with_the_import.clone());
+
+    assert_eq!(
+        project, with_the_import,
+        "undoing the import and redoing it gives it back as it was"
+    );
 }

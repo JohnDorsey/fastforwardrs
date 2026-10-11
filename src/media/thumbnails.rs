@@ -1,5 +1,8 @@
 //! The small pictures that make up the video track: one frame for every second of the source
-//! video, made once in the background and kept in memory as compressed JPEGs.
+//! video, made once in the background and kept in memory as compressed JPEGs, and finer ones (two
+//! or four or more for every second) made later for the stretch of the video that is on screen
+//! when the timeline is zoomed in or a track is short, so that the pictures on a clip are never
+//! stretched or cropped to make up for their number.
 //!
 //! Keeping them compressed is what lets a long video fit: an hour of thumbnails is a few tens of
 //! megabytes as JPEG, but hundreds of megabytes as raw pixels. Only the handful of thumbnails that
@@ -18,6 +21,15 @@ use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::frame_stream::DecodedFrame;
 use crate::project::{FrameRate, SourceFrameIndex};
+
+/// The most pictures that one run of ffmpeg is asked for when finer ones are made for the part of the
+/// video that is on screen.
+pub const MOST_FINER_THUMBNAILS_AT_ONCE: usize = 48;
+
+/// How much earlier than its first moment a range of pictures is started from, in seconds. The
+/// frame that is on screen at a moment began before it, and ffmpeg throws away what comes before
+/// the place it was asked to start at, so without this the first picture would be of the next frame.
+const LEAD_IN_IN_SECONDS: f64 = 0.25;
 
 /// A good balance of size and quality for pictures this small.
 const JPEG_QUALITY: u8 = 85;
@@ -128,6 +140,89 @@ pub fn thumbnail_second_for_source_frame(frame_rate: FrameRate, source_frame: So
     frame_rate.seconds_at_frame(source_frame.value()).round() as usize
 }
 
+/// Which picture of a video: the `index`th of those that are made `2^level` for every second of it.
+/// Level 0 is the picture of every whole second, so index 3 of level 0 is at 3 seconds; index 3 of
+/// level 2 (four to a second) is at three quarters of a second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ThumbnailKey {
+    pub level: u8,
+    pub index: usize,
+}
+
+impl ThumbnailKey {
+    /// How many pictures of level `level` are made for each second of the video.
+    pub fn pictures_per_second(level: u8) -> f64 {
+        f64::from(1u32 << u32::from(level.min(30)))
+    }
+
+    /// The picture of level `level` whose moment is nearest `seconds` into the video.
+    pub fn nearest(level: u8, seconds: f64) -> Self {
+        Self {
+            level,
+            index: (seconds.max(0.0) * Self::pictures_per_second(level)).round() as usize,
+        }
+    }
+
+    /// The moment of the video this picture stands for, in seconds.
+    pub fn seconds(self) -> f64 {
+        self.index as f64 / Self::pictures_per_second(self.level)
+    }
+}
+
+/// The finest level of pictures that is any use at `frame_rate`: the one with at most one picture
+/// for every frame, so that no two of them are of the same frame.
+pub fn finest_thumbnail_level(frame_rate: FrameRate) -> u8 {
+    frame_rate.frames_per_second().max(1.0).log2().floor() as u8
+}
+
+/// The coarsest level whose pictures are at least as close together as `seconds_between_pictures`
+/// (never finer than [`finest_thumbnail_level`]). Pictures that are shown this far apart on the
+/// timeline need pictures of this level to be told apart.
+pub fn thumbnail_level_for_spacing(seconds_between_pictures: f64, frame_rate: FrameRate) -> u8 {
+    let finest = finest_thumbnail_level(frame_rate);
+    if seconds_between_pictures.is_nan() || seconds_between_pictures <= 0.0 {
+        return finest;
+    }
+    let level = (-seconds_between_pictures.log2())
+        .ceil()
+        .max(0.0)
+        .min(f64::from(finest));
+    level as u8
+}
+
+/// Which pictures of a video to make: `count` of those of level `level` from the `first_index`th on,
+/// or all of them from there to the end of the video if `count` is `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThumbnailRange {
+    pub level: u8,
+    pub first_index: usize,
+    pub count: Option<usize>,
+}
+
+impl ThumbnailRange {
+    /// One picture for every second of the whole video.
+    pub const EVERY_SECOND: Self = Self {
+        level: 0,
+        first_index: 0,
+        count: None,
+    };
+
+    /// How many pictures before the first one ffmpeg is asked to make as well, and that are thrown
+    /// away, so that the first one is right (see [`LEAD_IN_IN_SECONDS`]).
+    fn lead_in(self) -> usize {
+        let pictures = (LEAD_IN_IN_SECONDS * ThumbnailKey::pictures_per_second(self.level)).ceil() as usize;
+        pictures.min(self.first_index)
+    }
+
+    /// The keys of the pictures in the range, if it has a count.
+    pub fn keys(self) -> impl Iterator<Item = ThumbnailKey> {
+        (self.first_index..self.first_index.saturating_add(self.count.unwrap_or(0))).map(move |index| ThumbnailKey {
+            level: self.level,
+            index,
+        })
+    }
+}
+
 /// All the thumbnails made so far for one source video, indexed by second.
 #[derive(Clone, Debug, Default)]
 pub struct ThumbnailStrip {
@@ -168,37 +263,57 @@ impl ThumbnailStrip {
 /// What a running thumbnail extraction reports.
 #[derive(Debug)]
 pub enum ThumbnailEvent {
-    /// The thumbnail for the given whole second of the source video.
-    Thumbnail { second: usize, picture: CompressedPicture },
+    /// The thumbnail with this number among those of its level, which for the pictures of every
+    /// second is the second of the source video it is at.
+    Thumbnail { index: usize, picture: CompressedPicture },
     /// Extraction has ended. `error_output` holds ffmpeg's complaint if it ended in an error.
     Finished { error_output: Option<String> },
 }
 
-/// A running ffmpeg process that makes one thumbnail for every second of a video, in the
-/// background. Dropping it stops ffmpeg.
+/// A running ffmpeg process that makes thumbnails of a video, in the background: one for every
+/// second of it, or finer ones for a part. Dropping it stops ffmpeg.
 pub struct ThumbnailExtraction {
     tool: StreamingTool<ThumbnailEvent>,
 }
 
 impl ThumbnailExtraction {
-    /// Starts making thumbnails of `size` for the video at `video_path`. The `wake_up` callback is
-    /// called each time something new is waiting.
+    /// Starts making a thumbnail of `size` for every second of the video at `video_path`. The
+    /// `wake_up` callback is called each time something new is waiting.
     pub fn start(
         toolchain: &FfmpegToolchain,
         video_path: &Path,
         size: PictureSize,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, ThumbnailError> {
+        Self::start_range(toolchain, video_path, size, ThumbnailRange::EVERY_SECOND, wake_up)
+    }
+
+    /// Starts making the thumbnails of `range` (see [`ThumbnailRange`]).
+    pub fn start_range(
+        toolchain: &FfmpegToolchain,
+        video_path: &Path,
+        size: PictureSize,
+        range: ThumbnailRange,
+        wake_up: UserInterfaceWakeUp,
+    ) -> Result<Self, ThumbnailError> {
         if size.width_in_pixels == 0 || size.height_in_pixels == 0 {
             return Err(ThumbnailError::EmptyPicture);
         }
+        let lead_in = range.lead_in();
         let mut command = background_command(toolchain.ffmpeg_path());
-        command.args(thumbnail_arguments(video_path, size));
+        command.args(thumbnail_range_arguments(video_path, size, range));
         let tool = StreamingTool::start(
             command,
             THUMBNAILS_BUFFERED_AHEAD,
             move |standard_output, sender, error_output_when_finished| {
-                read_thumbnails(standard_output, size, &sender, &wake_up, error_output_when_finished);
+                read_thumbnails(
+                    standard_output,
+                    size,
+                    (range.first_index - lead_in, lead_in),
+                    &sender,
+                    &wake_up,
+                    error_output_when_finished,
+                );
             },
         )
         .map_err(ThumbnailError::CouldNotStart)?;
@@ -211,9 +326,12 @@ impl ThumbnailExtraction {
     }
 }
 
+/// Reads the pictures ffmpeg makes and sends them on. The first picture is number `first_index`, and
+/// the first `skipped` of them are not sent.
 fn read_thumbnails(
     mut standard_output: impl Read,
     size: PictureSize,
+    (first_index, skipped): (usize, usize),
     sender: &SyncSender<ThumbnailEvent>,
     wake_up: &UserInterfaceWakeUp,
     error_output_when_finished: impl FnOnce() -> String,
@@ -221,13 +339,16 @@ fn read_thumbnails(
     let frame_byte_count = size.width_in_pixels as usize * size.height_in_pixels as usize * RGB_BYTES_PER_PIXEL;
     let mut rgb_pixels = vec![0u8; frame_byte_count];
     let mut compression_failure: Option<String> = None;
-    for second in 0.. {
+    for index in first_index.. {
         if standard_output.read_exact(&mut rgb_pixels).is_err() {
             break;
         }
+        if index - first_index < skipped {
+            continue;
+        }
         match CompressedPicture::from_rgb_pixels(&rgb_pixels, size) {
             Ok(picture) => {
-                if sender.send(ThumbnailEvent::Thumbnail { second, picture }).is_err() {
+                if sender.send(ThumbnailEvent::Thumbnail { index, picture }).is_err() {
                     return;
                 }
                 wake_up();
@@ -246,23 +367,54 @@ fn read_thumbnails(
 }
 
 /// The ffmpeg command line that makes one thumbnail per second.
-///
-/// `fps=1:round=up` is what makes thumbnail `k` the frame that is on screen at exactly `k`
-/// seconds (the default rounding picks a frame from the middle of the second instead).
 pub fn thumbnail_arguments(video_path: &Path, size: PictureSize) -> Vec<std::ffi::OsString> {
+    thumbnail_range_arguments(video_path, size, ThumbnailRange::EVERY_SECOND)
+}
+
+/// The ffmpeg command line that makes the thumbnails of `range`.
+///
+/// `fps=...:round=up` is what makes each thumbnail the frame that is on screen at exactly its
+/// moment (the default rounding picks a frame from the middle of the interval instead). A range
+/// that does not start at the start of the video begins by seeking to a little before its first
+/// moment: ffmpeg throws away what comes before the place it seeks to, and when that is in the
+/// middle of a frame the first picture it makes is of the frame after the one on screen (measured,
+/// with a duplicate of it in front). So the pictures from there to the first moment are made too, and
+/// thrown away by the one that reads them.
+pub fn thumbnail_range_arguments(
+    video_path: &Path,
+    size: PictureSize,
+    range: ThumbnailRange,
+) -> Vec<std::ffi::OsString> {
     use std::ffi::OsString;
-    let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]
+    let pictures_per_second = ThumbnailKey::pictures_per_second(range.level);
+    let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
         .map(OsString::from)
         .to_vec();
+    let lead_in = range.lead_in();
+    let first_made = range.first_index - lead_in;
+    if first_made > 0 {
+        // (A whole number divided by a power of two is exact as a decimal number.)
+        arguments.extend([
+            OsString::from("-ss"),
+            OsString::from((first_made as f64 / pictures_per_second).to_string()),
+        ]);
+    }
+    arguments.push(OsString::from("-i"));
     arguments.push(video_path.into());
     arguments.extend(["-an", "-sn", "-dn", "-vf"].map(OsString::from));
     arguments.push(
         format!(
-            "fps=1:round=up,scale={}:{}:flags=area,format=rgb24",
+            "fps={pictures_per_second}:round=up,scale={}:{}:flags=area,format=rgb24",
             size.width_in_pixels, size.height_in_pixels
         )
         .into(),
     );
+    if let Some(count) = range.count {
+        arguments.extend([
+            OsString::from("-frames:v"),
+            OsString::from((count + lead_in).to_string()),
+        ]);
+    }
     arguments.extend(["-f", "rawvideo", "pipe:1"].map(OsString::from));
     arguments
 }
@@ -414,6 +566,191 @@ mod tests {
         );
     }
 
+    // --- the finer pictures ---
+
+    fn frame_rate(frames_per_second: u32) -> FrameRate {
+        FrameRate::new(frames_per_second, 1).unwrap()
+    }
+
+    #[test]
+    fn a_picture_is_at_its_index_divided_by_the_pictures_there_are_for_each_second() {
+        for (level, index, seconds) in [(0, 3, 3.0), (1, 3, 1.5), (2, 3, 0.75), (3, 12, 1.5), (4, 0, 0.0)] {
+            assert_eq!(ThumbnailKey { level, index }.seconds(), seconds, "{level} {index}");
+        }
+        assert_eq!(ThumbnailKey::pictures_per_second(0), 1.0);
+        assert_eq!(ThumbnailKey::pictures_per_second(5), 32.0);
+    }
+
+    #[test]
+    fn the_nearest_picture_to_a_moment_is_the_one_whose_moment_is_nearest() {
+        assert_eq!(ThumbnailKey::nearest(0, 2.4), ThumbnailKey { level: 0, index: 2 });
+        assert_eq!(
+            ThumbnailKey::nearest(0, 2.5),
+            ThumbnailKey { level: 0, index: 3 },
+            "halves round up"
+        );
+        assert_eq!(ThumbnailKey::nearest(2, 2.6), ThumbnailKey { level: 2, index: 10 });
+        assert_eq!(ThumbnailKey::nearest(2, 2.63), ThumbnailKey { level: 2, index: 11 });
+        assert_eq!(
+            ThumbnailKey::nearest(3, -4.0),
+            ThumbnailKey { level: 3, index: 0 },
+            "not before the start"
+        );
+    }
+
+    #[test]
+    fn the_finest_pictures_worth_making_are_not_more_than_one_for_every_frame() {
+        for (frames_per_second, level) in [(1, 0), (2, 1), (24, 4), (25, 4), (30, 4), (50, 5), (60, 5), (120, 6)] {
+            assert_eq!(
+                finest_thumbnail_level(frame_rate(frames_per_second)),
+                level,
+                "{frames_per_second}"
+            );
+        }
+        assert_eq!(finest_thumbnail_level(FrameRate::new(30000, 1001).unwrap()), 4);
+    }
+
+    #[test]
+    fn pictures_are_as_fine_as_the_spacing_of_the_pictures_on_the_timeline_asks_for() {
+        let level_for = |seconds: f64| thumbnail_level_for_spacing(seconds, frame_rate(30));
+        assert_eq!(level_for(60.0), 0, "far apart: the pictures of every second do");
+        assert_eq!(level_for(1.0), 0);
+        assert_eq!(level_for(0.99), 1);
+        assert_eq!(level_for(0.5), 1);
+        assert_eq!(level_for(0.49), 2);
+        assert_eq!(level_for(0.25), 2);
+        assert_eq!(level_for(0.154), 3);
+        assert_eq!(level_for(0.125), 3);
+        assert_eq!(level_for(0.12), 4);
+        assert_eq!(level_for(0.0001), 4, "never finer than one for every frame");
+        assert_eq!(level_for(0.0), 4);
+        assert_eq!(level_for(f64::NAN), 4);
+        assert_eq!(thumbnail_level_for_spacing(0.0001, frame_rate(60)), 5);
+    }
+
+    #[test]
+    fn a_range_is_made_from_a_little_before_its_first_moment_and_the_pictures_before_it_are_thrown_away() {
+        let range = |level, first_index, count| ThumbnailRange {
+            level,
+            first_index,
+            count,
+        };
+        assert_eq!(
+            range(2, 10, Some(4)).lead_in(),
+            1,
+            "a quarter of a second is one picture of four a second"
+        );
+        assert_eq!(range(4, 40, Some(4)).lead_in(), 4, "and four of sixteen");
+        assert_eq!(range(0, 7, None).lead_in(), 1);
+        assert_eq!(
+            range(3, 1, Some(2)).lead_in(),
+            1,
+            "no earlier than the start of the video"
+        );
+        assert_eq!(range(3, 0, Some(2)).lead_in(), 0);
+        assert_eq!(
+            range(2, 10, Some(4)).keys().collect::<Vec<_>>(),
+            (10..14)
+                .map(|index| ThumbnailKey { level: 2, index })
+                .collect::<Vec<_>>()
+        );
+    }
+
+    fn arguments_for(range: ThumbnailRange) -> Vec<String> {
+        thumbnail_range_arguments(Path::new("holiday.mp4"), size(160, 90), range)
+            .into_iter()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn the_command_line_of_a_range_in_the_middle_seeks_to_its_lead_in_and_asks_for_the_lead_in_as_well() {
+        // Four a second, from the 10th, 4 of them: from 2.25 s (the 9th), 5 pictures.
+        assert_eq!(
+            arguments_for(ThumbnailRange {
+                level: 2,
+                first_index: 10,
+                count: Some(4)
+            }),
+            [
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-ss",
+                "2.25",
+                "-i",
+                "holiday.mp4",
+                "-an",
+                "-sn",
+                "-dn",
+                "-vf",
+                "fps=4:round=up,scale=160:90:flags=area,format=rgb24",
+                "-frames:v",
+                "5",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_range_that_starts_at_the_start_has_no_seeking_and_no_padding() {
+        let arguments = arguments_for(ThumbnailRange {
+            level: 3,
+            first_index: 0,
+            count: Some(5),
+        });
+        assert!(!arguments.contains(&"-ss".to_owned()), "{arguments:?}");
+        assert!(arguments.contains(&"fps=8:round=up,scale=160:90:flags=area,format=rgb24".to_owned()));
+        assert_eq!(
+            arguments[arguments.iter().position(|argument| argument == "-frames:v").unwrap() + 1],
+            "5"
+        );
+    }
+
+    #[test]
+    fn a_range_without_a_count_goes_to_the_end_of_the_video() {
+        let arguments = arguments_for(ThumbnailRange {
+            level: 0,
+            first_index: 5,
+            count: None,
+        });
+        assert!(!arguments.contains(&"-frames:v".to_owned()), "{arguments:?}");
+        assert!(
+            arguments.contains(&"-ss".to_owned()) && arguments.contains(&"4".to_owned()),
+            "{arguments:?}"
+        );
+    }
+
+    #[test]
+    fn the_pictures_before_the_first_wanted_are_read_and_not_sent() {
+        let size = size(2, 1);
+        let bytes: Vec<u8> = (0..24).collect(); // four 6-byte pictures, the first two of which are not wanted
+        let (sender, receiver) = std::sync::mpsc::sync_channel(16);
+        read_thumbnails(
+            &bytes[..],
+            size,
+            (8, 2),
+            &sender,
+            &crate::media::do_nothing_when_woken(),
+            String::new,
+        );
+        let indexes: Vec<usize> = receiver
+            .try_iter()
+            .filter_map(|event| match event {
+                ThumbnailEvent::Thumbnail { index, .. } => Some(index),
+                ThumbnailEvent::Finished { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            indexes,
+            vec![10, 11],
+            "the pictures are numbered from the first one made"
+        );
+    }
+
     #[test]
     fn whole_thumbnails_are_read_in_order_numbered_by_second() {
         let size = size(2, 1);
@@ -422,6 +759,7 @@ mod tests {
         read_thumbnails(
             &bytes[..],
             size,
+            (0, 0),
             &sender,
             &crate::media::do_nothing_when_woken(),
             String::new,
@@ -430,7 +768,7 @@ mod tests {
         assert_eq!(events.len(), 4);
         for (expected_second, event) in events[..3].iter().enumerate() {
             match event {
-                ThumbnailEvent::Thumbnail { second, .. } => assert_eq!(*second, expected_second),
+                ThumbnailEvent::Thumbnail { index, .. } => assert_eq!(*index, expected_second),
                 other => panic!("unexpected event {other:?}"),
             }
         }

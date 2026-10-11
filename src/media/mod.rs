@@ -10,9 +10,11 @@ mod audio_stream;
 mod child_process;
 pub mod export;
 mod ffmpeg_toolchain;
+mod finer_thumbnails;
 mod frame_stream;
-mod picture_fit;
+mod picture_decoder;
 mod source_probe;
+mod thumbnail_library;
 mod thumbnails;
 mod waveform;
 
@@ -22,16 +24,19 @@ pub use audio_stream::{
     AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, audio_stream_arguments,
 };
 pub use ffmpeg_toolchain::{FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE, FfmpegToolchain, FfmpegVersion, ToolchainError};
+pub use finer_thumbnails::FinerThumbnails;
 pub use frame_stream::{
     DecodedFrame, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, frame_stream_arguments,
 };
-pub use picture_fit::{PictureFit, fit_inside_picture};
+pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
 pub use source_probe::{
     ProbeError, probe_source_media, probe_video, properties_from_probe_output, source_properties_from_probe_output,
 };
+pub use thumbnail_library::{ThumbnailLibrary, plan_finer_thumbnails};
 pub use thumbnails::{
-    CompressedPicture, PictureSize, ThumbnailError, ThumbnailEvent, ThumbnailExtraction, ThumbnailStrip,
-    thumbnail_arguments, thumbnail_second_for_source_frame,
+    CompressedPicture, MOST_FINER_THUMBNAILS_AT_ONCE, PictureSize, ThumbnailError, ThumbnailEvent, ThumbnailExtraction,
+    ThumbnailKey, ThumbnailRange, ThumbnailStrip, finest_thumbnail_level, thumbnail_arguments,
+    thumbnail_level_for_spacing, thumbnail_range_arguments, thumbnail_second_for_source_frame,
 };
 pub use waveform::{PEAKS_PER_SECOND, Waveform, WaveformError, WaveformEvent, WaveformExtraction, waveform_arguments};
 

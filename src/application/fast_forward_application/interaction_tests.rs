@@ -5,10 +5,12 @@
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 
-use super::test_window::{VIDEO, WINDOW_SIZE, Window, project_of};
+use super::test_window::{VIDEO, WINDOW_SIZE, Window, project_of, window_inside_a_sped_up_clip};
 use super::{SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::dialogs::{AfterConfirmation, Dialog};
+use crate::application::preview_panel::catcher_id;
+use crate::application::timeline_panel::rows_area_id;
 use crate::project::{FrameRate, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
 
 #[test]
@@ -118,14 +120,14 @@ fn the_play_buttons_and_the_time_are_there_with_stop_first_then_play_then_pause(
 #[test]
 fn left_clicking_a_clip_selects_it_and_changes_nothing_else() {
     let mut window = Window::showing(project_of(300));
-    assert!(!window.application().has_unsaved_changes);
+    assert!(!window.application().has_unsaved_changes());
     assert_eq!(window.application().selected_clip(), None);
 
     window.click(window.middle_of_the_track_at(75) + vec2(1.0, 0.0));
 
     assert_eq!(window.application().selected_clip(), Some(window.clip(0, 0)));
     assert_eq!(window.clips(), vec![(0, 300, 1)], "cutting is done with the S key only");
-    assert!(!window.application().has_unsaved_changes, "selecting is not an edit");
+    assert!(!window.application().has_unsaved_changes(), "selecting is not an edit");
     assert_eq!(
         window.current_frame(),
         0,
@@ -145,11 +147,11 @@ fn pressing_s_twice_at_the_same_frame_cuts_only_once() {
 fn pressing_s_where_it_is_already_cut_does_nothing() {
     let mut window = Window::showing(project_of(300));
     window.cut_at_frame(75);
-    window.application_mut().has_unsaved_changes = false;
+    window.application_mut().note_everything_is_saved();
     // Frame 75 is the first frame of the second clip, so cutting there again changes nothing.
     window.press_key(Key::S);
     assert_eq!(window.clips(), vec![(0, 75, 1), (75, 300, 1)]);
-    assert!(!window.application().has_unsaved_changes);
+    assert!(!window.application().has_unsaved_changes());
 }
 
 #[test]
@@ -191,7 +193,7 @@ fn the_arrow_keys_move_the_playhead_one_frame_at_a_time_while_paused() {
         "moving does not start playing"
     );
     assert!(
-        !window.application().has_unsaved_changes,
+        !window.application().has_unsaved_changes(),
         "moving the playhead is not an edit"
     );
 }
@@ -272,10 +274,15 @@ fn the_ruler_is_a_strip_of_the_same_width_directly_above_the_first_track() {
     assert_eq!(ruler.left(), track.left());
     assert_eq!(ruler.right(), track.right());
     assert_eq!(ruler.bottom(), track.top(), "no gap between them");
+    assert_eq!(
+        ruler.height(),
+        crate::application::theme::TOP_ROW_HEIGHT,
+        "as tall as the row above the tracks, which the button that adds a track is in too"
+    );
+    let button = window.rectangle_of(crate::application::timeline_panel::ADD_TRACK_LABEL);
     assert!(
-        ruler.height() > 8.0 && ruler.height() < 40.0,
-        "a small strip: {}",
-        ruler.height()
+        button.top() >= ruler.top() && button.bottom() <= ruler.bottom(),
+        "the button is level with the ruler: {button:?} {ruler:?}"
     );
 }
 
@@ -286,7 +293,7 @@ fn clicking_the_ruler_moves_the_playhead_to_that_frame() {
     window.click(window.point_on_the_ruler_at(75));
 
     assert_eq!(window.current_frame(), 75);
-    assert!(!window.application().has_unsaved_changes, "that is not an edit");
+    assert!(!window.application().has_unsaved_changes(), "that is not an edit");
     assert_eq!(window.clips(), vec![(0, 300, 1)], "and it does not cut");
 }
 
@@ -405,17 +412,43 @@ fn the_red_line_of_the_playhead_goes_along_with_the_strips_when_they_are_scrolle
 #[test]
 fn the_s_key_cuts_at_the_current_frame_and_does_not_move_it() {
     let mut window = Window::showing(project_of(300));
-    assert!(!window.application().has_unsaved_changes);
+    assert!(!window.application().has_unsaved_changes());
     window.move_current_frame_to(120);
 
     window.press_key(Key::S);
 
     assert_eq!(window.clips(), vec![(0, 120, 1), (120, 300, 1)]);
     assert!(
-        window.application().has_unsaved_changes,
+        window.application().has_unsaved_changes(),
         "a cut is an edit that is not saved yet"
     );
     assert_eq!(window.current_frame(), 120, "cutting does not move the current frame");
+}
+
+#[test]
+fn the_tab_key_does_not_stop_where_there_is_nothing_to_do_by_keyboard() {
+    // The preview and the empty room of the timeline take every click and drag, but cannot be seen to
+    // have the focus, and Space (which plays) would be taken for a click on them as well.
+    let mut window = Window::showing(project_of(300));
+    let places_with_nothing_to_do = [catcher_id(), rows_area_id()];
+    let mut places_it_stopped_at = Vec::new();
+    for _ in 0..40 {
+        window.press_key(Key::Tab);
+        let focused = window.harness.ctx.memory(|memory| memory.focused());
+        assert!(
+            !focused.is_some_and(|id| places_with_nothing_to_do.contains(&id)),
+            "the focus is at a place that has nothing to do for the keyboard: {focused:?}"
+        );
+        if let Some(id) = focused
+            && !places_it_stopped_at.contains(&id)
+        {
+            places_it_stopped_at.push(id);
+        }
+    }
+    assert!(
+        places_it_stopped_at.len() >= 3,
+        "(it did go to the places that do have something to do: {places_it_stopped_at:?})"
+    );
 }
 
 #[test]
@@ -507,7 +540,7 @@ fn the_s_key_does_nothing_with_no_video() {
     let mut window = Window::showing(Project::empty());
     window.press_key(Key::S);
     assert!(window.application().project.has_no_clips());
-    assert!(!window.application().has_unsaved_changes);
+    assert!(!window.application().has_unsaved_changes());
 }
 
 fn project_cut_into_three() -> Window {
@@ -520,7 +553,7 @@ fn project_cut_into_three() -> Window {
         .application_mut()
         .project
         .split_at(TimelineFrameIndex::new(600), None);
-    window.application_mut().has_unsaved_changes = false;
+    window.application_mut().note_everything_is_saved();
     window.settle();
     window
 }
@@ -549,20 +582,13 @@ fn changing_the_speed_of_an_earlier_clip_keeps_the_picture_that_was_on_screen() 
     assert_eq!(source_frame_shown(&window), SourceFrameIndex::new(330));
 
     let first_clip = window.clip(0, 0);
-    let now = std::time::Instant::now();
-    let context = egui::Context::default();
-    window.application_mut().execute(
-        Command::SetClipSpeed {
-            clip: first_clip,
-            speed_factor: SpeedFactor::new(10).unwrap(),
-        },
-        now,
-        &context,
-    );
-    window.settle();
+    window.do_this(Command::SetClipSpeed {
+        clip: first_clip,
+        speed_factor: SpeedFactor::new(10).unwrap(),
+    });
 
     assert_eq!(window.clips()[0], (0, 300, 10));
-    assert!(window.application().has_unsaved_changes);
+    assert!(window.application().has_unsaved_changes());
     assert_eq!(
         source_frame_shown(&window),
         SourceFrameIndex::new(330),
@@ -743,7 +769,7 @@ fn the_import_item_is_available_whatever_state_the_files_of_the_project_are_in()
 fn asking_for_a_new_project_with_unsaved_changes_asks_first_and_cancelling_keeps_everything() {
     let mut window = Window::showing(project_of(300));
     window.cut_at_frame(75);
-    assert!(window.application().has_unsaved_changes);
+    assert!(window.application().has_unsaved_changes());
 
     window
         .application_mut()
@@ -755,7 +781,7 @@ fn asking_for_a_new_project_with_unsaved_changes_asks_first_and_cancelling_keeps
     window.settle();
     assert!(window.harness.query_by_label("Discard unsaved changes?").is_none());
     assert_eq!(window.clips(), vec![(0, 75, 1), (75, 300, 1)], "nothing was discarded");
-    assert!(window.application().has_unsaved_changes);
+    assert!(window.application().has_unsaved_changes());
 }
 
 #[test]
@@ -815,25 +841,8 @@ fn a_click_outside_the_discard_question_means_no_and_keeps_the_changes() {
     window.click(Pos2::new(5.0, 400.0));
 
     assert!(window.application().dialog.is_none());
-    assert!(window.application().has_unsaved_changes);
+    assert!(window.application().has_unsaved_changes());
     assert_eq!(window.clips().len(), 2, "nothing was discarded");
-}
-
-fn window_inside_a_sped_up_clip() -> Window {
-    let mut window = Window::showing(project_of(300));
-    let clip = window.clip(0, 0);
-    window
-        .application_mut()
-        .project
-        .set_clip_speed(clip, SpeedFactor::new(4).unwrap())
-        .unwrap();
-    let now = std::time::Instant::now();
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(10), 75);
-    window.settle();
-    window
 }
 
 #[test]
@@ -885,7 +894,7 @@ fn dragging_the_symbol_moves_it_for_the_whole_project() {
         before.height_fraction_of_frame_height(),
         "moving does not resize"
     );
-    assert!(window.application().has_unsaved_changes);
+    assert!(window.application().has_unsaved_changes());
 }
 
 #[test]

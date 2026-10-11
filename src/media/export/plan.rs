@@ -5,14 +5,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use thiserror::Error;
 
 use super::filter_graph::{
-    FilterGraph, FilterGraphSpecification, OverlayToExport, PictureGraphSpecification, SectionToExport,
-    SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport, SourceToExport, VideoToExport,
-    build_filter_graph,
+    FilterGraph, FilterGraphSpecification, LayerContentToExport, LayerToExport, PictureGraphSpecification,
+    PlaceToExport, SectionToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
+    VideoToExport, build_filter_graph,
 };
-use crate::composition::{PictureSection, SoundItem, SoundPlan, plan_pictures, plan_sound};
+use crate::composition::{LayerContent, PictureSection, SoundItem, SoundPlan, plan_pictures, plan_sound};
 use crate::project::{
-    ClipLocation, FrameRate, Project, Settings, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextObject,
-    TimelineFrameIndex,
+    ClipLocation, FrameRate, Placement, Project, Settings, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor,
+    TextObject, TimelineFrameIndex,
 };
 use crate::rgba_picture::RgbaPicture;
 use crate::speed_indicator::indicator_for_frame;
@@ -50,10 +50,10 @@ pub struct ExportPlan {
     pub frame_rate: FrameRate,
     /// How many frames the finished video will have; used to show progress.
     pub total_frame_count: u64,
-    /// How many frames of the finished video are black only because a video file has fewer pictures
-    /// than its clips need. That only happens when the project was pointed at a shorter video than
-    /// the one it was edited on (which keeps every edit).
-    pub frames_black_for_lack_of_pictures: u64,
+    /// How many frames of the finished video are missing the picture of a video, only because the
+    /// video file has fewer pictures than its clips need. That only happens when the project was
+    /// pointed at a shorter video than the one it was edited on (which keeps every edit).
+    pub frames_missing_a_picture: u64,
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
     pub has_audio: bool,
@@ -63,8 +63,7 @@ pub struct ExportPlan {
 #[derive(Clone, Copy)]
 struct StillPicturePlace {
     picture_input: usize,
-    left_in_pixels: u32,
-    top_in_pixels: u32,
+    place: PlaceToExport,
 }
 
 /// Plans the export of `project`. `render_text` makes the picture of a text object for a finished
@@ -86,8 +85,16 @@ pub fn plan_export(
 
     // The files ffmpeg reads: every one that a picture or a sound is made from.
     let mut used_sources = sources_of_sound(&sound);
-    for section in &pictures.sections {
-        used_sources.extend(section.video.map(|video| video.source));
+    for layer in pictures.sections.iter().flat_map(|section| &section.layers) {
+        match &layer.content {
+            LayerContent::Video(video) => {
+                used_sources.insert(video.source);
+            }
+            LayerContent::Image { source } => {
+                used_sources.insert(*source);
+            }
+            LayerContent::Text(_) => {}
+        }
     }
     let source_files: Vec<SourceMediaIdentifier> = used_sources.into_iter().collect();
     let input_of_source: HashMap<SourceMediaIdentifier, usize> = source_files
@@ -95,24 +102,17 @@ pub fn plan_export(
         .enumerate()
         .map(|(input, identifier)| (*identifier, input))
         .collect();
-    let sources: Vec<SourceToExport> = source_files
-        .iter()
-        .map(|identifier| SourceToExport {
-            display_size_in_pixels: project
-                .source(*identifier)
-                .and_then(|source| source.properties.video())
-                .map(|video| (video.display_width_in_pixels, video.display_height_in_pixels)),
-        })
-        .collect();
 
-    // The still pictures: a symbol for every speed that shows one, and every text object that is seen.
+    // The still pictures: a symbol for every speed that shows one (the speed of the video that is in
+    // front), and every text object that is seen.
+    let picture_size = (picture_width_in_pixels, picture_height_in_pixels);
     let mut still_pictures: Vec<StillPictureInput> = Vec::new();
     let mut symbol_places: BTreeMap<SpeedFactor, StillPicturePlace> = BTreeMap::new();
     let accelerated_speeds: BTreeSet<SpeedFactor> = pictures
         .sections
         .iter()
-        .filter_map(|section| section.video)
-        .map(|video| video.speed)
+        .filter_map(PictureSection::front_video)
+        .map(|(_, video)| video.speed)
         .filter(|speed| speed.is_accelerated())
         .collect();
     for speed_factor in accelerated_speeds {
@@ -126,8 +126,13 @@ pub fn plan_export(
             speed_factor,
             StillPicturePlace {
                 picture_input: source_files.len() + still_pictures.len(),
-                left_in_pixels: indicator.left_in_pixels,
-                top_in_pixels: indicator.top_in_pixels,
+                place: PlaceToExport {
+                    left_in_pixels: indicator.left_in_pixels,
+                    top_in_pixels: indicator.top_in_pixels,
+                    width_in_pixels: indicator.picture.width_in_pixels,
+                    height_in_pixels: indicator.picture.height_in_pixels,
+                    turn_in_degrees: 0.0,
+                },
             },
         );
         still_pictures.push(StillPictureInput {
@@ -136,24 +141,25 @@ pub fn plan_export(
         });
     }
     let mut text_places: HashMap<ClipLocation, StillPicturePlace> = HashMap::new();
-    for text in pictures.sections.iter().flat_map(|section| &section.texts) {
-        if text_places.contains_key(&text.clip) {
+    for layer in pictures.sections.iter().flat_map(|section| &section.layers) {
+        let LayerContent::Text(object) = &layer.content else {
+            continue;
+        };
+        if text_places.contains_key(&layer.clip) {
             continue;
         }
-        let picture = render_text(&text.object, picture_width_in_pixels, picture_height_in_pixels);
-        let area = text.object.area;
-        let left = (area.left() * picture_width_in_pixels as f32).round() as u32;
-        let top = (area.top() * picture_height_in_pixels as f32).round() as u32;
+        // The picture of the text is of the text upright in its area, which is as many pixels as the
+        // place is, and is turned, if it is, when it is laid over.
+        let picture = render_text(object, picture_width_in_pixels, picture_height_in_pixels);
         text_places.insert(
-            text.clip,
+            layer.clip,
             StillPicturePlace {
                 picture_input: source_files.len() + still_pictures.len(),
-                left_in_pixels: left.min(picture_width_in_pixels.saturating_sub(picture.width_in_pixels)),
-                top_in_pixels: top.min(picture_height_in_pixels.saturating_sub(picture.height_in_pixels)),
+                place: place_to_export(layer.placement, picture_size),
             },
         );
         still_pictures.push(StillPictureInput {
-            kind: StillPictureKind::Text(text.clip),
+            kind: StillPictureKind::Text(layer.clip),
             picture,
         });
     }
@@ -161,14 +167,13 @@ pub fn plan_export(
     let sections: Vec<SectionToExport> = pictures
         .sections
         .iter()
-        .map(|section| section_to_export(section, &input_of_source, &symbol_places, &text_places))
+        .map(|section| section_to_export(section, picture_size, &input_of_source, &symbol_places, &text_places))
         .collect();
     let specification = FilterGraphSpecification {
         pictures: PictureGraphSpecification {
             frame_rate: pictures.frame_rate,
             picture_width_in_pixels,
             picture_height_in_pixels,
-            sources,
             sections,
         },
         sound: sound_graph_specification(&sound, &source_files, settings.sped_up_clip_sound),
@@ -181,7 +186,7 @@ pub fn plan_export(
         still_pictures,
         frame_rate: pictures.frame_rate,
         total_frame_count: pictures.total_frame_count,
-        frames_black_for_lack_of_pictures: pictures.frames_black_for_lack_of_pictures,
+        frames_missing_a_picture: pictures.frames_missing_a_picture,
         picture_width_in_pixels,
         picture_height_in_pixels,
     })
@@ -243,32 +248,66 @@ pub fn sound_graph_specification(
     }
 }
 
+/// Where `placement` is on a picture `picture_size` pixels across and down.
+fn place_to_export(placement: Placement, picture_size: (u32, u32)) -> PlaceToExport {
+    let pixels = placement.area.in_pixels(picture_size);
+    PlaceToExport {
+        left_in_pixels: pixels.left,
+        top_in_pixels: pixels.top,
+        width_in_pixels: pixels.width,
+        height_in_pixels: pixels.height,
+        turn_in_degrees: placement.rotation.degrees(),
+    }
+}
+
 fn section_to_export(
     section: &PictureSection,
+    picture_size: (u32, u32),
     input_of_source: &HashMap<SourceMediaIdentifier, usize>,
     symbol_places: &BTreeMap<SpeedFactor, StillPicturePlace>,
     text_places: &HashMap<ClipLocation, StillPicturePlace>,
 ) -> SectionToExport {
-    let overlay = |place: &StillPicturePlace| OverlayToExport {
-        picture_input: place.picture_input,
-        left_in_pixels: place.left_in_pixels,
-        top_in_pixels: place.top_in_pixels,
+    let still = |place: &StillPicturePlace| LayerToExport {
+        content: LayerContentToExport::Still {
+            picture_input: place.picture_input,
+            scaled_to_its_place: false,
+        },
+        place: place.place,
     };
-    // The symbol belongs to the video, so it goes right over it, and the text goes over both.
-    let symbol = section
-        .video
-        .and_then(|video| symbol_places.get(&video.speed))
-        .map(overlay);
-    let texts = section.texts.iter().map(|text| overlay(&text_places[&text.clip]));
+    // The symbol belongs to the video that is in front, so it goes right over it, and what is
+    // in front of that video goes over both.
+    let clip_of_the_front_video = section.front_video().map(|(layer, _)| layer.clip);
+    let mut layers = Vec::with_capacity(section.layers.len() + 1);
+    for layer in &section.layers {
+        match &layer.content {
+            LayerContent::Video(video) => layers.push(LayerToExport {
+                content: LayerContentToExport::Video(VideoToExport {
+                    source_input: input_of_source[&video.source],
+                    first_source_frame: video.first_source_frame,
+                    end_source_frame: video.end_source_frame,
+                    speed_factor: video.speed,
+                }),
+                place: place_to_export(layer.placement, picture_size),
+            }),
+            LayerContent::Image { source } => layers.push(LayerToExport {
+                content: LayerContentToExport::Still {
+                    picture_input: input_of_source[source],
+                    scaled_to_its_place: true,
+                },
+                place: place_to_export(layer.placement, picture_size),
+            }),
+            LayerContent::Text(_) => layers.push(still(&text_places[&layer.clip])),
+        }
+        if Some(layer.clip) == clip_of_the_front_video
+            && let Some((_, video)) = section.front_video()
+            && let Some(symbol) = symbol_places.get(&video.speed)
+        {
+            layers.push(still(symbol));
+        }
+    }
     SectionToExport {
         frame_count: section.timeline_frame_count(),
-        video: section.video.map(|video| VideoToExport {
-            source_input: input_of_source[&video.source],
-            first_source_frame: video.first_source_frame,
-            end_source_frame: video.end_source_frame,
-            speed_factor: video.speed,
-        }),
-        overlays: symbol.into_iter().chain(texts).collect(),
+        layers,
     }
 }
 

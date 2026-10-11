@@ -3,7 +3,7 @@
 use egui::{Button, MenuBar, Ui};
 
 use super::commands::Command;
-use super::keyboard::DESELECT_KEY;
+use super::keyboard::{DESELECT_KEY, REDO_SHORTCUT, UNDO_SHORTCUT};
 
 /// What decides which menu items can be used.
 pub struct MenuAvailability {
@@ -13,6 +13,9 @@ pub struct MenuAvailability {
     pub can_export: bool,
     /// Whether a clip is selected, so that there is something to deselect.
     pub has_selection: bool,
+    /// Whether there is an edit to undo, and one that was undone to redo.
+    pub can_undo: bool,
+    pub can_redo: bool,
     /// Whether something is going on (such as an export) that makes the other items wait.
     pub busy: bool,
 }
@@ -45,6 +48,15 @@ pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Com
             }
         });
         ui.menu_button("Edit", |ui| {
+            let undo = Button::new("Undo").shortcut_text(ui.ctx().format_shortcut(&UNDO_SHORTCUT));
+            if ui.add_enabled(idle && availability.can_undo, undo).clicked() {
+                commands.push(Command::Undo);
+            }
+            let redo = Button::new("Redo").shortcut_text(ui.ctx().format_shortcut(&REDO_SHORTCUT));
+            if ui.add_enabled(idle && availability.can_redo, redo).clicked() {
+                commands.push(Command::Redo);
+            }
+            ui.separator();
             let deselect = Button::new("Deselect").shortcut_text(ui.ctx().format_shortcut(&DESELECT_SHORTCUT));
             if ui.add_enabled(idle && availability.has_selection, deselect).clicked() {
                 commands.push(Command::Deselect);

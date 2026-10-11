@@ -11,12 +11,14 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::{FastForwardApplication, SourceFileState, SourceStatus};
+use crate::application::commands::Command;
+use crate::application::file_chooser::ScriptedFileChooser;
 use crate::application::theme;
 use crate::application::timeline_panel::{gear_label, strip_label};
 use crate::media::ToolchainError;
 use crate::project::{
     ClipLocation, FrameRate, Project, SourceAudioProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
-    SourceVideoProperties, TimelineFrameIndex,
+    SourceVideoProperties, SpeedFactor, TimelineFrameIndex,
 };
 
 pub(super) const WINDOW_SIZE: [f32; 2] = [1280.0, 820.0];
@@ -85,6 +87,44 @@ pub(super) fn project_with_a_video_and_a_sound(video_frames: u64, sound_seconds:
     project
 }
 
+/// A window showing the editor with its one clip sped up four times, the playhead inside it.
+pub(super) fn window_inside_a_sped_up_clip() -> Window {
+    let mut window = Window::showing(project_of(300));
+    let clip = window.clip(0, 0);
+    window
+        .application_mut()
+        .project
+        .set_clip_speed(clip, SpeedFactor::new(4).unwrap())
+        .unwrap();
+    let now = std::time::Instant::now();
+    window
+        .application_mut()
+        .clock
+        .seek(now, TimelineFrameIndex::new(10), 75);
+    window.settle();
+    window
+}
+
+/// What the window is told when `button` goes down with the pointer at `position`.
+pub(super) fn button_pressed_at(position: Pos2, button: PointerButton) -> Event {
+    Event::PointerButton {
+        pos: position,
+        button,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+/// What the window is told when `button` comes up with the pointer at `position`.
+pub(super) fn button_released_at(position: Pos2, button: PointerButton) -> Event {
+    Event::PointerButton {
+        pos: position,
+        button,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }
+}
+
 /// A window showing the editor, and a way to use it like a person.
 pub(super) struct Window {
     pub(super) harness: Harness<'static, FastForwardApplication>,
@@ -121,7 +161,9 @@ impl Window {
                 application,
             );
         harness.run();
-        Self { harness }
+        let mut window = Self { harness };
+        window.settle();
+        window
     }
 
     pub(super) fn application(&self) -> &FastForwardApplication {
@@ -132,8 +174,24 @@ impl Window {
         self.harness.state_mut()
     }
 
+    /// Makes the editor ask `chooser` for files, in place of the one that fails when it is asked.
+    pub(super) fn use_file_chooser(&mut self, chooser: &ScriptedFileChooser) {
+        self.application_mut().file_chooser = Box::new(chooser.clone());
+    }
+
+    /// Lets a few frames of the window go by, and then as many more as it takes for everything to
+    /// stop moving. (The timeline panel grows and shrinks over a few frames when what is in it
+    /// changes size, as when a track is added, and the things in it move with it.)
     pub(super) fn settle(&mut self) {
+        const MOST_EXTRA_FRAMES_TO_WAIT: usize = 12;
         self.harness.run_steps(3);
+        for _ in 0..MOST_EXTRA_FRAMES_TO_WAIT {
+            let before = self.harness.query_by_label("Ruler").map(|ruler| ruler.rect());
+            self.harness.step();
+            if before == self.harness.query_by_label("Ruler").map(|ruler| ruler.rect()) {
+                break;
+            }
+        }
     }
 
     pub(super) fn rectangle_of(&self, label: &str) -> Rect {
@@ -148,22 +206,21 @@ impl Window {
     }
 
     pub(super) fn press(&mut self, position: Pos2, button: PointerButton) {
-        self.harness.event(Event::PointerButton {
-            pos: position,
-            button,
-            pressed: true,
-            modifiers: Modifiers::NONE,
-        });
+        self.harness.event(button_pressed_at(position, button));
         self.harness.step();
     }
 
     pub(super) fn release(&mut self, position: Pos2, button: PointerButton) {
-        self.harness.event(Event::PointerButton {
-            pos: position,
-            button,
-            pressed: false,
-            modifiers: Modifiers::NONE,
-        });
+        self.harness.event(button_released_at(position, button));
+        self.harness.step();
+    }
+
+    /// Gives the window all of `events` in a single frame, as a real window gets what happened
+    /// between two frames: the tap of a finger on a touch screen, or a click right after the pointer
+    /// was moved, has the move and the press in the same frame. (`move_pointer_to`, `press` and the
+    /// rest give each event a frame of its own, and so does `harness.event` followed by `step`.)
+    pub(super) fn all_in_one_frame(&mut self, events: impl IntoIterator<Item = Event>) {
+        self.harness.input_mut().events.extend(events);
         self.harness.step();
     }
 
@@ -173,6 +230,25 @@ impl Window {
 
     pub(super) fn right_click(&mut self, position: Pos2) {
         self.click_with(position, PointerButton::Secondary);
+    }
+
+    /// Clicks with the control key (Command on a Mac) held down.
+    pub(super) fn click_with_control(&mut self, position: Pos2) {
+        self.harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+        self.harness.step();
+        self.move_pointer_to(position);
+        for pressed in [true, false] {
+            self.harness.event(Event::PointerButton {
+                pos: position,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::COMMAND,
+            });
+            self.harness.step();
+        }
+        self.harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        self.harness.step();
+        self.settle();
     }
 
     /// Clicks twice in a row, quickly enough to be a double click.
@@ -189,6 +265,28 @@ impl Window {
         self.move_pointer_to(position);
         self.press(position, button);
         self.release(position, button);
+        self.settle();
+    }
+
+    /// Turns the mouse wheel by `delta` points (negative is down) with the pointer at `position`
+    /// and `modifiers` held, and lets the smooth scrolling that follows play out.
+    pub(super) fn scroll_the_wheel(&mut self, position: Pos2, delta: egui::Vec2, modifiers: Modifiers) {
+        self.move_pointer_to(position);
+        // The keys are held for as long as the wheel is turned, which is for as long as the smooth
+        // scrolling that one turn of it makes lasts.
+        self.harness.event(Event::ModifiersChanged(modifiers));
+        self.harness.step();
+        self.harness.event(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        });
+        for _ in 0..31 {
+            self.harness.step();
+        }
+        self.harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        self.harness.step();
         self.settle();
     }
 
@@ -347,21 +445,38 @@ impl Window {
         )
     }
 
+    /// Every shape that was drawn in the last frame, in the order they were drawn. (Shapes that
+    /// were grouped are listed one by one.)
+    pub(super) fn shapes_drawn(&self) -> Vec<&Shape> {
+        fn add_to<'a>(shape: &'a Shape, shapes: &mut Vec<&'a Shape>) {
+            match shape {
+                Shape::Vec(inner) => inner.iter().for_each(|shape| add_to(shape, shapes)),
+                other => shapes.push(other),
+            }
+        }
+        let mut shapes = Vec::new();
+        for clipped in &self.harness.output().shapes {
+            add_to(&clipped.shape, &mut shapes);
+        }
+        shapes
+    }
+
     /// Where on the screen the red line of the playhead was drawn in the last frame (as the x it is
     /// at), or `None` if it was not drawn, which is when the current frame is scrolled out of view.
     pub(super) fn x_of_the_drawn_playhead(&self) -> Option<f32> {
-        fn red_line_in(shape: &Shape) -> Option<f32> {
-            match shape {
-                Shape::LineSegment { points, stroke } if stroke.color == theme::PLAYHEAD => Some(points[0].x),
-                Shape::Vec(shapes) => shapes.iter().find_map(red_line_in),
-                _ => None,
-            }
-        }
-        self.harness
-            .output()
-            .shapes
-            .iter()
-            .find_map(|clipped| red_line_in(&clipped.shape))
+        self.shapes_drawn().into_iter().find_map(|shape| match shape {
+            Shape::LineSegment { points, stroke } if stroke.color == theme::PLAYHEAD => Some(points[0].x),
+            _ => None,
+        })
+    }
+
+    /// Does what `command` asks, as the window does with the commands that what a person does in it
+    /// gives (they are one edit of the history, if they change the project), and lets the window
+    /// settle.
+    pub(super) fn do_this(&mut self, command: Command) {
+        self.application_mut()
+            .execute_all(vec![command], std::time::Instant::now(), &egui::Context::default());
+        self.settle();
     }
 
     /// Makes the current frame `frame`, as if the playhead had been moved there.

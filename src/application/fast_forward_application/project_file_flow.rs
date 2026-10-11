@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{FastForwardApplication, OpeningPurpose};
+use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::project::Project;
 use crate::project_file::{read_project_file, write_project_file};
 
@@ -20,12 +21,20 @@ impl FastForwardApplication {
     /// Asks which project file to load, and loads it.
     pub(super) fn choose_and_load_project(&mut self) {
         self.pause_playback_for_dialog();
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("Load a project")
-            .add_filter("Project files", &[PROJECT_FILE_EXTENSION])
-            .add_filter("All files", &["*"])
-            .pick_file()
-        else {
+        let Some(path) = self.file_chooser.choose_a_file_to_open(&FileQuestion {
+            title: "Load a project",
+            suggested_file_name: None,
+            kinds: &[
+                FileKind {
+                    name: "Project files",
+                    extensions: &[PROJECT_FILE_EXTENSION],
+                },
+                FileKind {
+                    name: "All files",
+                    extensions: &["*"],
+                },
+            ],
+        }) else {
             return;
         };
         self.load_project(path);
@@ -75,11 +84,15 @@ impl FastForwardApplication {
             .first()
             .and_then(|source| source.link.absolute_path.file_stem())
             .map_or_else(|| "project".to_owned(), |stem| stem.to_string_lossy().into_owned());
-        let path = rfd::FileDialog::new()
-            .set_title("Save the project")
-            .set_file_name(format!("{first_file_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}"))
-            .add_filter("Project files", &[PROJECT_FILE_EXTENSION])
-            .save_file()?;
+        let suggested_file_name = format!("{first_file_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}");
+        let path = self.file_chooser.choose_where_to_save(&FileQuestion {
+            title: "Save the project",
+            suggested_file_name: Some(&suggested_file_name),
+            kinds: &[FileKind {
+                name: "Project files",
+                extensions: &[PROJECT_FILE_EXTENSION],
+            }],
+        })?;
         Some(if path.extension().is_none() {
             path.with_extension(PROJECT_FILE_EXTENSION)
         } else {
@@ -91,13 +104,14 @@ impl FastForwardApplication {
     pub(super) fn replace_project(&mut self, project: Project, project_file_path: Option<PathBuf>) {
         self.openings.clear();
         self.source_files.clear();
-        self.selected_clip = None;
+        self.selection.clear();
         self.text_window_open = None;
-        self.picture_supplier.set_setup(None);
+        self.preview_pictures.set_setup(None);
         self.textures.clear();
         self.timeline_view.reset();
         self.project = project;
         self.project_file_path = project_file_path;
+        self.history.reset();
         self.note_everything_is_saved();
         self.missing_sources_warning_open = false;
         self.clock.reset_for_frame_rate(self.project.frame_rate());

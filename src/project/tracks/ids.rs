@@ -46,8 +46,9 @@ impl fmt::Display for ClipId {
     }
 }
 
-/// One clip of a project: which track it is on, and which clip of that track it is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// One clip of a project: which track it is on, and which clip of that track it is. (Ordered by
+/// track and then by clip, which is only a way of keeping a set of them in a steady order.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClipLocation {
     pub track: TrackId,
     pub clip: ClipId,

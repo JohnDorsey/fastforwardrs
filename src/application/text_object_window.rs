@@ -5,6 +5,7 @@
 use egui::{ComboBox, Context, DragValue, Id, TextEdit, Window, pos2};
 
 use super::commands::Command;
+use super::duration_control::shown_for;
 use crate::project::{ClipLocation, FontSize, FrameRate, TextColour, TextObject};
 
 /// How wide the box for the words is, in points.
@@ -112,27 +113,12 @@ pub fn show(context: &Context, content: &TextWindowContent<'_>, open: &mut bool,
                 }
             });
 
-            ui.horizontal(|ui| {
-                let label = ui.label("Shown for");
-                let mut seconds = content.frame_rate.seconds_at_frame(content.duration_in_frames);
-                if ui
-                    .add(
-                        DragValue::new(&mut seconds)
-                            .range(0.0..=3600.0)
-                            .speed(0.05)
-                            .max_decimals(2)
-                            .suffix(" s"),
-                    )
-                    .labelled_by(label.id)
-                    .changed()
-                {
-                    let frames = content.frame_rate.nearest_frame_to_seconds(seconds).max(1);
-                    commands.push(Command::SetTextDuration {
-                        clip: content.clip,
-                        frames,
-                    });
-                }
-            });
+            if let Some(frames) = shown_for(ui, content.frame_rate, content.duration_in_frames) {
+                commands.push(Command::SetClipDuration {
+                    clip: content.clip,
+                    frames,
+                });
+            }
 
             if &object != content.object {
                 commands.push(Command::SetTextObject {

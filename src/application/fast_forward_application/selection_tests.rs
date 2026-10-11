@@ -6,12 +6,12 @@ use egui_kittest::kittest::Queryable;
 
 use super::test_window::{Window, project_cut_into_three, project_of, project_with_a_video_and_a_sound};
 use crate::application::dialogs::Dialog;
-use crate::project::{ClipKind, TimelineFrameIndex};
+use crate::project::{ClipKind, TextObject, TimelineFrameIndex};
 
 /// A window showing a video of 90 frames cut into three clips of 30 (so that all of it is in view).
 fn window_with_three_clips() -> Window {
     let mut window = Window::showing(project_cut_into_three(90));
-    window.application_mut().has_unsaved_changes = false;
+    window.application_mut().note_everything_is_saved();
     window.settle();
     window
 }
@@ -116,16 +116,10 @@ fn the_selection_stays_on_the_clip_when_other_clips_are_changed_around_it() {
     let selected = window.application().selected_clip();
     // Speed up the first clip: the selected one moves earlier on the timeline, and is still the selected one.
     let first = window.clip(0, 0);
-    let now = std::time::Instant::now();
-    window.application_mut().execute(
-        crate::application::commands::Command::SetClipSpeed {
-            clip: first,
-            speed_factor: crate::project::SpeedFactor::new(5).unwrap(),
-        },
-        now,
-        &egui::Context::default(),
-    );
-    window.settle();
+    window.do_this(crate::application::commands::Command::SetClipSpeed {
+        clip: first,
+        speed_factor: crate::project::SpeedFactor::new(5).unwrap(),
+    });
     assert_eq!(window.application().selected_clip(), selected);
     assert_eq!(window.clips()[2], (60, 90, 1));
 }
@@ -296,4 +290,107 @@ fn clicking_a_sound_clip_selects_it_like_any_other() {
     let selected = window.application().selected_clip().unwrap();
     let project = window.application().project();
     assert_eq!(project.placement_of(selected).unwrap().clip.kind(), ClipKind::Audio);
+}
+
+// --- several clips at once ---
+
+#[test]
+fn control_click_adds_a_clip_to_the_selection_and_control_click_on_a_selected_clip_takes_it_out_again() {
+    let mut window = window_with_three_clips();
+    select_the_clip_at(&mut window, 0, 15);
+    let point = window.middle_of_the_strip_at(0, 75);
+    window.click_with_control(point);
+    assert_eq!(
+        window.application().selected_clips(),
+        vec![window.clip(0, 0), window.clip(0, 2)]
+    );
+    assert_eq!(
+        window.application().selected_clip(),
+        None,
+        "there is no single selected clip now"
+    );
+
+    let point = window.middle_of_the_strip_at(0, 15);
+    window.click_with_control(point);
+    assert_eq!(window.application().selected_clips(), vec![window.clip(0, 2)]);
+    assert!(!window.application().has_unsaved_changes(), "selecting is not an edit");
+}
+
+#[test]
+fn clicking_a_clip_without_control_selects_only_that_clip_whatever_was_selected() {
+    let mut window = window_with_three_clips();
+    select_the_clip_at(&mut window, 0, 15);
+    let point = window.middle_of_the_strip_at(0, 45);
+    window.click_with_control(point);
+    assert_eq!(window.application().selected_clips().len(), 2);
+    select_the_clip_at(&mut window, 0, 75);
+    assert_eq!(window.application().selected_clips(), vec![window.clip(0, 2)]);
+}
+
+#[test]
+fn clicking_an_empty_part_of_a_track_deselects_all_the_clips() {
+    let mut window = window_with_three_clips();
+    select_the_clip_at(&mut window, 0, 15);
+    let point = window.middle_of_the_strip_at(0, 45);
+    window.click_with_control(point);
+    let past_the_end = window.middle_of_the_strip_at(0, 140);
+    window.click(past_the_end);
+    assert!(window.application().selected_clips().is_empty());
+}
+
+#[test]
+fn delete_takes_all_the_selected_clips_off_their_tracks_and_undo_brings_them_all_back_in_one_step() {
+    let mut window = window_with_three_clips();
+    select_the_clip_at(&mut window, 0, 15);
+    let point = window.middle_of_the_strip_at(0, 75);
+    window.click_with_control(point);
+
+    window.press_key(Key::Delete);
+
+    assert_eq!(window.clips(), vec![(30, 60, 1)], "only the middle clip is left");
+    assert!(window.application().selected_clips().is_empty());
+
+    window.harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    window.settle();
+    assert_eq!(
+        window.clips(),
+        vec![(0, 30, 1), (30, 60, 1), (60, 90, 1)],
+        "one undo brings both back"
+    );
+    assert_eq!(window.application().selected_clips().len(), 2, "and selects them again");
+}
+
+#[test]
+fn s_cuts_all_the_selected_clips_that_are_at_the_current_frame_and_no_others() {
+    // A video, a sound over it, and a text over both: all three are at frame 45.
+    let mut project = project_with_a_video_and_a_sound(90, 3);
+    let text_track = project.add_track_in_front();
+    project
+        .insert_text(text_track, TimelineFrameIndex::new(30), TextObject::default(), 60)
+        .unwrap();
+    let mut window = Window::showing(project);
+    // The tracks, front to back: the text, the sound, the video.
+    select_the_clip_at(&mut window, 2, 20); // the video
+    let point = window.middle_of_the_strip_at(1, 20);
+    window.click_with_control(point); // and the sound
+    window.move_current_frame_to(45);
+
+    window.press_key(Key::S);
+
+    assert_eq!(
+        window.clips_of_track(2),
+        vec![(0, 45, 1), (45, 90, 1)],
+        "the video was cut"
+    );
+    assert_eq!(window.clips_of_track(1).len(), 2, "and the sound");
+    assert_eq!(
+        window.application().project().tracks()[0].entries().len(),
+        1,
+        "but not the text, which was not selected"
+    );
+    assert_eq!(
+        window.application().selected_clips().len(),
+        2,
+        "both are still selected"
+    );
 }

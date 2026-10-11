@@ -8,15 +8,17 @@ use egui::{Frame, Margin, Ui};
 use super::{FastForwardApplication, FrameState, SourceFileState};
 use crate::application::commands::Command;
 use crate::application::menu_bar::{self, MenuAvailability};
-use crate::application::preview_panel::{self, PreviewContent, VideoInThePicture};
+use crate::application::preview_panel::{
+    self, PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
+};
 use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
 use crate::application::{scrub_bar, theme};
-use crate::composition::VisibleText;
+use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
 use crate::media::thumbnail_second_for_source_frame;
-use crate::playback::{FfmpegPictureStreamStarter, PictureSupplier};
-use crate::project::{ClipLocation, Project, SourceMediaIdentifier, SourceMediaKind};
+use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
+use crate::project::{ClipLocation, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
 
 impl FastForwardApplication {
     /// Draws the whole window, adding to `commands` whatever the user asks for with it.
@@ -59,7 +61,7 @@ impl FastForwardApplication {
                         project: &self.project,
                         geometry,
                         current_frame: frame_state.current_frame,
-                        selected_clip: self.selected_clip,
+                        selection: &self.selection,
                         source_looks: &source_looks,
                         can_edit,
                     },
@@ -73,8 +75,8 @@ impl FastForwardApplication {
 
         let content = preview_content(
             &self.project,
-            &self.picture_supplier,
-            self.selected_clip,
+            &self.preview_pictures,
+            self.selection.single(),
             frame_state,
             &source_looks,
         );
@@ -85,14 +87,15 @@ impl FastForwardApplication {
             });
     }
 
-    /// The scale of the strips, from the shape of the finished picture.
+    /// The scale the strips start at, from the shape of the finished picture. (The user can zoom in
+    /// and out from it: see [`crate::application::timeline_panel::TimelineViewState::geometry`].)
     pub(super) fn timeline_geometry(&self) -> TimelineGeometry {
         let (picture_width, picture_height) = self.project.picture_size();
         TimelineGeometry::for_picture(
             self.project.frame_rate(),
             picture_width,
             picture_height,
-            theme::TRACK_HEIGHT,
+            TrackHeight::DEFAULT_IN_POINTS,
         )
     }
 
@@ -103,68 +106,111 @@ impl FastForwardApplication {
             can_export: self.toolchain.is_some()
                 && !self.project.has_no_clips()
                 && self.sources_in_use_that_are_not_available().is_empty(),
-            has_selection: self.selected_clip.is_some(),
+            has_selection: !self.selection.is_empty(),
+            can_undo: self.history.can_undo(),
+            can_redo: self.history.can_redo(),
             busy: self.export.is_some() || !self.openings.is_empty() || self.dialog.is_some(),
         }
     }
 }
 
-/// What the preview shows. The picture is the one for the current frame whenever it is ready.
+/// What the preview shows: every video and text object that is seen at the current frame, one over
+/// another. The picture of a video is the one for the current frame whenever it is ready.
 /// While it is not, a playing video keeps its last picture (a sharp one that is a moment old
 /// looks better than a blurry one), but a video that is being moved around shows the
 /// enlarged thumbnail at once and swaps in the sharp picture when it arrives.
 fn preview_content<'a>(
     project: &Project,
-    picture_supplier: &'a PictureSupplier<FfmpegPictureStreamStarter>,
+    preview_pictures: &'a PreviewPictures<FfmpegPictureStreamStarter>,
     selected_clip: Option<ClipLocation>,
     frame_state: &'a FrameState,
     source_looks: &HashMap<SourceMediaIdentifier, SourceLook<'a>>,
 ) -> PreviewContent<'a> {
     let section = frame_state.picture_plan.section_at(frame_state.current_frame);
-    let texts: &[VisibleText] = section.map_or(&[], |section| section.texts.as_slice());
-
-    let video = match &frame_state.wanted_picture {
-        None => VideoInThePicture::None,
-        Some(wanted) => {
-            let supplied_picture = picture_supplier.picture();
-            let thumbnail = source_looks
-                .get(&wanted.source)
-                .and_then(|look| look.thumbnails)
-                .map(|strip| {
-                    (
-                        strip,
-                        thumbnail_second_for_source_frame(frame_state.frame_rate, wanted.source_frame),
-                    )
-                })
-                .filter(|(strip, second)| strip.picture_for_second(*second).is_some());
-            let up_to_date = frame_state.preview_is_up_to_date;
-            let moved_around = !up_to_date && !frame_state.is_playing;
-            match (supplied_picture, thumbnail) {
-                (_, Some((strip, second))) if moved_around => VideoInThePicture::Thumbnail {
-                    source: wanted.source,
-                    second,
-                    strip,
+    let layers = section.map_or_else(Vec::new, |section| {
+        section
+            .layers
+            .iter()
+            .map(|layer| PreviewLayer {
+                clip: layer.clip,
+                placement: layer.placement,
+                content: match &layer.content {
+                    LayerContent::Text(object) => PreviewLayerContent::Text(object),
+                    LayerContent::Image { source } => PreviewLayerContent::Image {
+                        source: *source,
+                        picture: source_looks.get(source).and_then(|look| look.picture),
+                    },
+                    LayerContent::Video(video) => PreviewLayerContent::Video(video_in_the_picture(
+                        section,
+                        layer,
+                        video,
+                        preview_pictures,
+                        frame_state,
+                        source_looks,
+                    )),
                 },
-                (Some(picture), _) => VideoInThePicture::Picture(picture),
-                (None, Some((strip, second))) => VideoInThePicture::Thumbnail {
-                    source: wanted.source,
-                    second,
-                    strip,
-                },
-                (None, None) => VideoInThePicture::Waiting,
-            }
-        }
-    };
+            })
+            .collect()
+    });
     PreviewContent {
         picture_size: (frame_state.total_frames > 0).then(|| project.picture_size()),
-        video,
-        accelerated_speed: section
-            .and_then(|section| section.video)
-            .map(|video| video.speed)
-            .filter(|speed_factor| speed_factor.is_accelerated()),
+        layers,
+        symbol: section
+            .and_then(PictureSection::front_video)
+            .filter(|(_, video)| video.speed.is_accelerated())
+            .map(|(layer, video)| SymbolOnThePreview {
+                over: layer.clip,
+                speed: video.speed,
+            }),
         indicator_layout: project.speed_indicator_layout(),
-        texts,
         selected_clip,
+    }
+}
+
+/// What shows where the video of `layer` is, in `section`, at the current frame.
+fn video_in_the_picture<'a>(
+    section: &PictureSection,
+    layer: &Layer,
+    video: &VisibleVideo,
+    preview_pictures: &'a PreviewPictures<FfmpegPictureStreamStarter>,
+    frame_state: &FrameState,
+    source_looks: &HashMap<SourceMediaIdentifier, SourceLook<'a>>,
+) -> VideoInThePicture<'a> {
+    let track = layer.clip.track;
+    // (A picture of another video, that this track had before, is not shown in its place.)
+    let supplied_picture = preview_pictures
+        .picture_of(track)
+        .filter(|picture| picture.source == video.source);
+    let source_frame = section
+        .source_frame_at(video, frame_state.current_frame)
+        .map(SourceFrameIndex::new);
+    let thumbnail = source_frame.and_then(|source_frame| {
+        source_looks
+            .get(&video.source)
+            .and_then(|look| look.thumbnails)
+            .map(|library| {
+                (
+                    library,
+                    thumbnail_second_for_source_frame(frame_state.frame_rate, source_frame),
+                )
+            })
+            .filter(|(library, second)| library.every_second().picture_for_second(*second).is_some())
+    });
+    let up_to_date = frame_state.pictures_report.shows_the_wanted_picture_of(track);
+    let moved_around = !up_to_date && !frame_state.is_playing;
+    match (supplied_picture, thumbnail) {
+        (_, Some((library, second))) if moved_around => VideoInThePicture::Thumbnail {
+            source: video.source,
+            second,
+            library,
+        },
+        (Some(picture), _) => VideoInThePicture::Picture(picture),
+        (None, Some((library, second))) => VideoInThePicture::Thumbnail {
+            source: video.source,
+            second,
+            library,
+        },
+        (None, None) => VideoInThePicture::Waiting,
     }
 }
 
@@ -183,7 +229,11 @@ fn source_looks_of<'a>(
                 is_available,
                 thumbnails: state
                     .filter(|_| source.kind() == SourceMediaKind::Video)
-                    .map(|state| &state.thumbnails.strip),
+                    .map(|state| &state.thumbnails.library),
+                picture: state
+                    .filter(|_| source.kind() == SourceMediaKind::Image)
+                    .and_then(|state| state.picture.picture.as_ref()),
+                picture_size_in_pixels: source.properties.display_size_in_pixels().unwrap_or((1, 1)),
                 waveform: state
                     .filter(|_| source.kind() == SourceMediaKind::Audio)
                     .map(|state| &state.waveform.waveform),
@@ -205,7 +255,7 @@ mod tests {
 
     use super::*;
     use crate::composition::plan_pictures;
-    use crate::playback::wanted_picture;
+    use crate::playback::PicturesReport;
     use crate::project::{
         Clip, FrameRate, MediaClip, SourceFrameIndex, SourceMedia, SourceMediaLink, SourceVideoProperties, SpeedFactor,
         SpeedIndicatorLayout, TimelineFrameIndex, Track, TrackId,
@@ -249,12 +299,13 @@ mod tests {
             total_frames: project.total_frame_count(),
             frame_rate: project.frame_rate(),
             is_playing: false,
-            wanted_picture: wanted_picture(&picture_plan, current_frame),
             picture_plan,
-            preview_is_up_to_date: false,
+            pictures_report: PicturesReport::default(),
         };
-        let supplier = PictureSupplier::new(FfmpegPictureStreamStarter::new(None, Arc::new(|| {})));
-        preview_content(project, &supplier, None, &frame_state, &HashMap::new()).accelerated_speed
+        let pictures = PreviewPictures::new(FfmpegPictureStreamStarter::new(None, Arc::new(|| {})));
+        preview_content(project, &pictures, None, &frame_state, &HashMap::new())
+            .symbol
+            .map(|symbol| symbol.speed)
     }
 
     #[test]

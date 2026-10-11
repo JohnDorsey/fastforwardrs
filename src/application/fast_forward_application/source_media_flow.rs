@@ -1,23 +1,27 @@
-//! Finding, opening and replacing the project's source files (videos and sounds), and making the
-//! pictures and waveforms the timeline shows for them.
+//! Finding, opening and replacing the project's source files (videos, sounds and pictures), and
+//! making the pictures and waveforms the timeline shows for them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use super::{
-    FastForwardApplication, OpeningPurpose, OpeningTask, SourceFileState, SourceStatus, ThumbnailState, WaveformState,
+    FastForwardApplication, OpeningPurpose, OpeningTask, PictureState, SourceFileState, SourceStatus, ThumbnailState,
+    WaveformState,
 };
 use crate::application::background::{BackgroundTask, TaskStatus};
 use crate::application::dialogs::MissingSource;
+use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::application::opening::{OpeningOutcome, open_first_that_works};
 use crate::application::theme;
 use crate::media::{
-    PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailStrip, WaveformEvent, WaveformExtraction,
-    probe_source_media,
+    PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailKey, ThumbnailLibrary, WaveformEvent,
+    WaveformExtraction, decode_picture, probe_source_media, size_to_decode_at,
 };
+use crate::playback::preview_picture_size;
 use crate::project::{
-    SourceMedia, SourceMediaIdentifier, SourceMediaKind, SourceMediaLink, SourceMediaProperties, SourceVideoProperties,
+    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
+    SourceVideoProperties,
 };
 use crate::project_file::relative_path_between;
 
@@ -26,15 +30,21 @@ const VIDEO_FILE_EXTENSIONS: [&str; 12] = [
     "mp4", "mkv", "mov", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg", "ts", "mts",
 ];
 
+/// How many finer pictures of one video are kept before the ones that are not on screen are let go of.
+const MOST_FINER_THUMBNAILS_KEPT: usize = 4000;
+
 /// ...and for a sound.
 const SOUND_FILE_EXTENSIONS: [&str; 10] = ["mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "aiff"];
 
+/// ...and for a picture. (A GIF is not one: ffprobe says it is a video, and so does the program.)
+const PICTURE_FILE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"];
+
 impl FastForwardApplication {
-    /// Asks the user for a video or a sound file and puts all of it on the timeline, at the current
-    /// frame: on the front-most track that has nothing on it, or on a new track in front.
+    /// Asks the user for a video, a sound or a picture and puts all of it on the timeline, at the
+    /// current frame: on the front-most track that has nothing on it, or on a new track in front.
     pub(super) fn import_file(&mut self) {
         self.pause_playback_for_dialog();
-        if let Some(path) = ask_for_a_media_file("Choose a video or a sound") {
+        if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound or a picture") {
             self.start_opening(OpeningPurpose::ImportNewSource, vec![path]);
         }
     }
@@ -46,7 +56,7 @@ impl FastForwardApplication {
             return;
         }
         self.pause_playback_for_dialog();
-        if let Some(path) = ask_for_a_media_file("Choose the file again") {
+        if let Some(path) = self.ask_for_a_media_file("Choose the file again") {
             self.start_opening(OpeningPurpose::RelinkMissingSource(identifier), vec![path]);
         }
     }
@@ -82,7 +92,9 @@ impl FastForwardApplication {
     pub(super) fn collect_finished_background_work(&mut self) {
         self.collect_opening_results();
         self.collect_thumbnails();
+        self.collect_finer_thumbnails();
         self.collect_waveforms();
+        self.collect_pictures();
         self.collect_export_events();
     }
 
@@ -165,10 +177,15 @@ impl FastForwardApplication {
         };
         let frame_rate_before = self.project.frame_rate();
         let total_frames = self.project.total_frame_count();
-        let current_frame = self.clock.position(Instant::now(), total_frames);
+        let now = Instant::now();
+        let current_frame = self.clock.position(now, total_frames);
+        let project_before = self.project.clone();
         match self.project.import_source(source, current_frame) {
             Ok(_) => {
-                self.note_unsaved_change();
+                // Importing is an edit like any other: undoing it takes the file off the timeline again.
+                self.history
+                    .record_change(project_before, self.selection.to_vec(), None, now, false);
+                self.note_the_project_was_edited(now);
                 // The first video decides the frame rate of the whole project.
                 if self.project.frame_rate() != frame_rate_before {
                     self.clock.reset_for_frame_rate(self.project.frame_rate());
@@ -193,10 +210,7 @@ impl FastForwardApplication {
             return;
         };
         if source.properties.kind() != properties.kind() {
-            let (expected, found) = match source.properties.kind() {
-                SourceMediaKind::Video => ("a video", "a sound file"),
-                SourceMediaKind::Audio => ("a sound file", "a video"),
-            };
+            let (expected, found) = (source.properties.kind().description(), properties.kind().description());
             self.mark_source_unavailable(
                 identifier,
                 format!(
@@ -251,6 +265,62 @@ impl FastForwardApplication {
         match properties {
             SourceMediaProperties::Video(video) => self.start_thumbnails(identifier, &path, video),
             SourceMediaProperties::Audio(_) => self.start_waveform(identifier, &path),
+            SourceMediaProperties::Image(image) => self.start_loading_the_picture(identifier, &path, image),
+        }
+    }
+
+    /// Starts decoding the picture of an image file, at the size it is drawn at most: no bigger than
+    /// the picture of the preview.
+    fn start_loading_the_picture(
+        &mut self,
+        identifier: SourceMediaIdentifier,
+        path: &Path,
+        properties: SourceImageProperties,
+    ) {
+        let (picture_width, picture_height) = self.project.picture_size();
+        let largest = preview_picture_size(picture_width, picture_height);
+        let size = size_to_decode_at(
+            (properties.display_width_in_pixels, properties.display_height_in_pixels),
+            largest,
+        );
+        let Some(state) = self.source_files.get_mut(&identifier) else {
+            return;
+        };
+        state.picture = PictureState::default();
+        let Some(toolchain) = self.toolchain.clone() else {
+            return;
+        };
+        let path = path.to_owned();
+        state.picture.load = Some(BackgroundTask::start(Arc::clone(&self.wake_up), move || {
+            decode_picture(&toolchain, &path, size).map_err(|error| error.to_string())
+        }));
+    }
+
+    /// Picks up the pictures that have been decoded since the last frame.
+    fn collect_pictures(&mut self) {
+        let mut problems = Vec::new();
+        for state in self.source_files.values_mut() {
+            let Some(load) = &state.picture.load else {
+                continue;
+            };
+            match load.status() {
+                TaskStatus::Pending => {}
+                TaskStatus::Finished(Ok(picture)) => {
+                    state.picture.picture = Some(picture);
+                    state.picture.load = None;
+                }
+                TaskStatus::Finished(Err(problem)) => {
+                    problems.push(problem);
+                    state.picture.load = None;
+                }
+                TaskStatus::Lost => {
+                    problems.push("the program that decodes pictures stopped unexpectedly".to_owned());
+                    state.picture.load = None;
+                }
+            }
+        }
+        if let Some(problem) = problems.into_iter().next() {
+            self.show_message("The picture could not be drawn", problem);
         }
     }
 
@@ -263,8 +333,8 @@ impl FastForwardApplication {
             return;
         };
         state.thumbnails = ThumbnailState {
-            strip: ThumbnailStrip::with_room_for(seconds_of_video),
-            extraction: None,
+            library: ThumbnailLibrary::with_room_for(seconds_of_video),
+            ..ThumbnailState::default()
         };
         let Some(toolchain) = &self.toolchain else { return };
         let size = PictureSize::thumbnail_for(
@@ -305,7 +375,10 @@ impl FastForwardApplication {
             let mut finished = false;
             while let Some(event) = extraction.try_next_event() {
                 match event {
-                    ThumbnailEvent::Thumbnail { second, picture } => state.thumbnails.strip.insert(second, picture),
+                    ThumbnailEvent::Thumbnail { index, picture } => state
+                        .thumbnails
+                        .library
+                        .insert(ThumbnailKey { level: 0, index }, picture),
                     ThumbnailEvent::Finished { error_output } => {
                         problems.extend(error_output);
                         finished = true;
@@ -319,6 +392,59 @@ impl FastForwardApplication {
         }
         if let Some(problem) = problems.into_iter().next() {
             self.show_message("The pictures for the timeline could not all be made", problem);
+        }
+    }
+
+    /// Tells each video which of its finer pictures the timeline wanted, and did not have, when it
+    /// was drawn (see [`crate::application::textures::Textures::take_finer_thumbnails_wanted`]).
+    pub(super) fn ask_for_finer_thumbnails(&mut self) {
+        let mut wanted = self.textures.take_finer_thumbnails_wanted();
+        for (identifier, state) in &mut self.source_files {
+            state
+                .thumbnails
+                .finer
+                .set_wanted(wanted.remove(identifier).unwrap_or_default());
+        }
+    }
+
+    /// Takes in the finer pictures that have been made, and starts making the next ones that are
+    /// wanted: one run of pictures at a time, and not while the pictures of every second are still
+    /// being made, which come first.
+    fn collect_finer_thumbnails(&mut self) {
+        for (identifier, state) in &mut self.source_files {
+            let thumbnails = &mut state.thumbnails;
+            thumbnails.finer.collect_into(&mut thumbnails.library);
+            thumbnails
+                .finer
+                .keep_within(&mut thumbnails.library, MOST_FINER_THUMBNAILS_KEPT);
+            if thumbnails.finer.is_running() || thumbnails.extraction.is_some() {
+                continue;
+            }
+            let (Some(toolchain), Some(path), Some(video)) = (
+                &self.toolchain,
+                state.status_path(),
+                self.project
+                    .source(*identifier)
+                    .and_then(|source| source.properties.video()),
+            ) else {
+                continue;
+            };
+            let thumbnails = &mut state.thumbnails;
+            let Some(range) = thumbnails.finer.next_run(&thumbnails.library) else {
+                continue;
+            };
+            let size = PictureSize::thumbnail_for(
+                video.display_width_in_pixels,
+                video.display_height_in_pixels,
+                theme::THUMBNAIL_HEIGHT_IN_PIXELS,
+            );
+            // (If ffmpeg cannot be started the pictures are simply not made: they were asked for, so
+            // they are not asked for again, and the coarser ones stay on show.)
+            if let Ok(extraction) =
+                ThumbnailExtraction::start_range(toolchain, &path, size, range, Arc::clone(&self.wake_up))
+            {
+                thumbnails.finer.start(range, extraction);
+            }
         }
     }
 
@@ -381,19 +507,41 @@ impl FastForwardApplication {
             relative_path,
         }
     }
-}
 
-fn ask_for_a_media_file(title: &str) -> Option<PathBuf> {
-    let everything_we_know: Vec<&str> = VIDEO_FILE_EXTENSIONS
-        .iter()
-        .chain(SOUND_FILE_EXTENSIONS.iter())
-        .copied()
-        .collect();
-    rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter("Video and sound files", &everything_we_know)
-        .add_filter("Video files", &VIDEO_FILE_EXTENSIONS)
-        .add_filter("Sound files", &SOUND_FILE_EXTENSIONS)
-        .add_filter("All files", &["*"])
-        .pick_file()
+    /// Asks which video, sound or picture file to use, offering all the kinds there are first.
+    /// `None` if none was chosen.
+    fn ask_for_a_media_file(&self, title: &str) -> Option<PathBuf> {
+        let everything_we_know: Vec<&str> = VIDEO_FILE_EXTENSIONS
+            .iter()
+            .chain(SOUND_FILE_EXTENSIONS.iter())
+            .chain(PICTURE_FILE_EXTENSIONS.iter())
+            .copied()
+            .collect();
+        self.file_chooser.choose_a_file_to_open(&FileQuestion {
+            title,
+            suggested_file_name: None,
+            kinds: &[
+                FileKind {
+                    name: "Video, sound and picture files",
+                    extensions: &everything_we_know,
+                },
+                FileKind {
+                    name: "Video files",
+                    extensions: &VIDEO_FILE_EXTENSIONS,
+                },
+                FileKind {
+                    name: "Sound files",
+                    extensions: &SOUND_FILE_EXTENSIONS,
+                },
+                FileKind {
+                    name: "Picture files",
+                    extensions: &PICTURE_FILE_EXTENSIONS,
+                },
+                FileKind {
+                    name: "All files",
+                    extensions: &["*"],
+                },
+            ],
+        })
+    }
 }

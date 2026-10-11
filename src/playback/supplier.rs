@@ -18,6 +18,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::wanted::{UpcomingVideo, WantedPicture};
@@ -61,6 +62,7 @@ pub trait PictureStreamStarter {
 
 /// The starter that runs ffmpeg. Without ffmpeg (`None`) every start fails with a clear message,
 /// so that the rest of the editor keeps working without a preview.
+#[derive(Clone)]
 pub struct FfmpegPictureStreamStarter {
     toolchain: Option<Arc<FfmpegToolchain>>,
     wake_up: UserInterfaceWakeUp,
@@ -84,6 +86,11 @@ impl PictureStreamStarter for FfmpegPictureStreamStarter {
         }
     }
 }
+
+/// The serial number the next picture supplied will get. It is counted once for all suppliers, so
+/// that no two pictures ever have the same, though they were supplied by different suppliers or by
+/// one that was made again since (a track's picture is kept on the graphics card by its serial number).
+static NEXT_SERIAL_NUMBER: AtomicU64 = AtomicU64::new(1);
 
 /// A video the preview can show pictures of.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,8 +118,8 @@ pub struct SuppliedPicture {
     /// Which source frame this is a picture of.
     pub source_frame: SourceFrameIndex,
     pub frame: DecodedFrame,
-    /// Different for every picture ever supplied, so the screen code can tell cheaply whether
-    /// there is a new picture to upload.
+    /// Different for every picture ever supplied (by any supplier), so the screen code can tell
+    /// cheaply whether there is a new picture to upload.
     pub serial_number: u64,
 }
 
@@ -195,7 +202,6 @@ pub struct PictureSupplier<Starter: PictureStreamStarter> {
     current_stream: Option<RunningStream<Starter::Stream>>,
     upcoming_stream: Option<RunningStream<Starter::Stream>>,
     picture: Option<SuppliedPicture>,
-    next_serial_number: u64,
     last_stream_start: Option<Instant>,
     /// The picture that a stream ended without delivering, so that it is not asked for again and
     /// again forever.
@@ -211,7 +217,6 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             current_stream: None,
             upcoming_stream: None,
             picture: None,
-            next_serial_number: 1,
             last_stream_start: None,
             could_not_deliver: None,
             last_problem: None,
@@ -364,9 +369,8 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 source: stream.source,
                 source_frame: stream.source_frame_of_picture(taken_number),
                 frame,
-                serial_number: self.next_serial_number,
+                serial_number: NEXT_SERIAL_NUMBER.fetch_add(1, Ordering::Relaxed),
             });
-            self.next_serial_number += 1;
         }
     }
 

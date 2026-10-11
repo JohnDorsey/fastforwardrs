@@ -44,19 +44,29 @@ impl FastForwardApplication {
         &self.project
     }
 
-    /// Whether the project has changes that have not been saved (there is no autosave).
-    pub fn has_unsaved_changes(&self) -> bool {
-        self.has_unsaved_changes
-    }
-
     /// The file the project was last saved to or loaded from.
     pub fn project_file_path(&self) -> Option<&Path> {
         self.project_file_path.as_deref()
     }
 
-    /// The clip that is selected, if one is.
+    /// The clip that is selected, if exactly one is.
     pub fn selected_clip(&self) -> Option<ClipLocation> {
-        self.selected_clip
+        self.selection.single()
+    }
+
+    /// The clips that are selected.
+    pub fn selected_clips(&self) -> Vec<ClipLocation> {
+        self.selection.to_vec()
+    }
+
+    /// Whether there is an edit that undoing would take back.
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    /// Whether there is an edit that was undone, which redoing would do again.
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
     }
 
     /// Whether the source file `identifier` has been found and opens.
@@ -78,16 +88,26 @@ impl FastForwardApplication {
         self.missing_sources_warning_open && !self.missing_sources().is_empty()
     }
 
-    /// Whether a file is being opened, thumbnails or waveforms are being made, the fonts for the text
-    /// are being loaded, or an export is running.
+    /// Whether a file is being opened, thumbnails, waveforms or pictures are being made, the fonts for
+    /// the text are being loaded, or an export is running.
     pub fn is_working_in_the_background(&self) -> bool {
         !self.openings.is_empty()
             || self.export.is_some()
             || self.text_renderer.is_loading()
-            || self
-                .source_files
-                .values()
-                .any(|state| state.thumbnails.extraction.is_some() || state.waveform.extraction.is_some())
+            || self.source_files.values().any(|state| {
+                state.thumbnails.extraction.is_some()
+                    || state.thumbnails.finer.is_running()
+                    || state.waveform.extraction.is_some()
+                    || state.picture.load.is_some()
+            })
+    }
+
+    /// Whether the picture of the image file `identifier` has been decoded for drawing, which takes a
+    /// moment after the file is opened.
+    pub fn image_file_is_decoded(&self, identifier: SourceMediaIdentifier) -> bool {
+        self.source_files
+            .get(&identifier)
+            .is_some_and(|state| state.picture.picture.is_some())
     }
 
     /// The title and text of the message the user has to read, if one is showing.
@@ -136,19 +156,46 @@ impl FastForwardApplication {
         self.audio_supplier.last_problem()
     }
 
-    /// The latest picture the preview has, which may be a moment older than the current frame.
+    /// The latest picture the preview has of the video that is in front (of the front-most track that
+    /// has one), which may be a moment older than the current frame.
     pub fn preview_picture(&self) -> Option<&SuppliedPicture> {
-        self.picture_supplier.picture()
+        self.project
+            .tracks()
+            .iter()
+            .find_map(|track| self.preview_pictures.picture_of(track.id()))
     }
 
     /// How many thumbnails of the video `identifier` have been made, and how many there will be.
     pub fn thumbnail_progress(&self, identifier: SourceMediaIdentifier) -> (usize, usize) {
         self.source_files.get(&identifier).map_or((0, 0), |state| {
             (
-                state.thumbnails.strip.made_count(),
-                state.thumbnails.strip.second_count(),
+                state.thumbnails.library.every_second().made_count(),
+                state.thumbnails.library.every_second().second_count(),
             )
         })
+    }
+
+    /// How many finer thumbnails (more than one for every second) of the video `identifier` have
+    /// been made so far.
+    pub fn finer_thumbnails_made(&self, identifier: SourceMediaIdentifier) -> usize {
+        self.source_files
+            .get(&identifier)
+            .map_or(0, |state| state.thumbnails.library.finer_count())
+    }
+
+    /// How many finer thumbnails of the video `identifier` the timeline wanted, and did not have,
+    /// when it was last drawn.
+    pub fn finer_thumbnails_still_wanted(&self, identifier: SourceMediaIdentifier) -> usize {
+        self.source_files
+            .get(&identifier)
+            .map_or(0, |state| state.thumbnails.finer.wanted_count())
+    }
+
+    /// How many runs of ffmpeg have been started to make finer thumbnails of the video `identifier`.
+    pub fn finer_thumbnail_runs_started(&self, identifier: SourceMediaIdentifier) -> usize {
+        self.source_files
+            .get(&identifier)
+            .map_or(0, |state| state.thumbnails.finer.runs_started())
     }
 
     /// How many peaks of the waveform of the sound file `identifier` have been made.
@@ -162,6 +209,10 @@ impl FastForwardApplication {
     /// begins, in points. This is negative or beyond the strips' width for a frame that has been
     /// scrolled out of view.
     pub fn strip_offset_of_frame(&self, frame: TimelineFrameIndex) -> f32 {
-        (self.timeline_geometry().x_of_frame(frame.value()) - self.timeline_view.scroll_offset) as f32
+        (self
+            .timeline_view
+            .geometry(self.timeline_geometry())
+            .x_of_frame(frame.value())
+            - self.timeline_view.scroll_offset) as f32
     }
 }

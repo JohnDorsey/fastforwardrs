@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::project::{
-    CanvasArea, ClipLocation, FrameRate, Gain, SETTINGS, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor,
-    TextColour, TimelineFrameIndex,
+    Angle, CanvasArea, ClipLocation, FrameRate, Gain, Placement, SETTINGS, SourceImageProperties,
+    SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TimelineFrameIndex, TrackHeight,
 };
 
 fn video_properties() -> SourceVideoProperties {
@@ -70,7 +70,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 3,
+  "file_format_version": 4,
   "sources": [
     {
       "kind": "video",
@@ -331,10 +331,61 @@ fn an_earlier_file_with_a_clip_that_has_no_frames_is_rejected_and_the_clip_is_na
 fn an_earlier_file_is_saved_in_the_current_layout_and_that_loads_to_the_same_project() {
     let loaded = project_from_json_text(VERSION_2_TEXT).unwrap();
     let text = saved(&loaded);
-    assert!(text.contains("\"file_format_version\": 3"), "{text}");
+    assert!(text.contains("\"file_format_version\": 4"), "{text}");
     assert!(text.contains("\"tracks\""), "{text}");
     assert!(!text.contains("video_track"), "{text}");
     assert_same_content(&project_from_json_text(&text).unwrap(), &loaded);
+}
+
+// --- the height of a track ---
+
+#[test]
+fn a_track_of_another_height_is_saved_with_it_and_comes_back_and_one_of_the_normal_height_has_none_in_the_file() {
+    let mut project = edited_project(link_to_missing_video());
+    let normal_text = saved(&project);
+    assert!(!normal_text.contains("height_in_points"), "{normal_text}");
+
+    let track = project.tracks()[0].id();
+    project.set_track_height(track, TrackHeight::from_points(64.0)).unwrap();
+    let text = saved(&project);
+    assert!(text.contains("\"height_in_points\": 64.0"), "{text}");
+
+    let loaded = project_from_json_text(&text).unwrap();
+    assert_eq!(loaded.tracks()[0].height().points(), 64.0);
+    assert_same_content(&loaded, &project);
+}
+
+#[test]
+fn a_file_of_version_3_has_no_heights_and_its_tracks_are_of_the_normal_height() {
+    let text = valid_text_with("\"file_format_version\": 4", "\"file_format_version\": 3");
+    let project = project_from_json_text(&text).unwrap();
+    assert!(
+        project
+            .tracks()
+            .iter()
+            .all(|track| track.height() == TrackHeight::DEFAULT)
+    );
+    assert_eq!(
+        project.tracks()[0].entries().len(),
+        3,
+        "and everything else is read as before"
+    );
+}
+
+#[test]
+fn a_height_in_a_file_that_is_out_of_range_is_brought_to_the_nearest_one_that_is_allowed() {
+    for (written, allowed) in [
+        ("1000.0", TrackHeight::LARGEST_IN_POINTS),
+        ("1.0", TrackHeight::SMALLEST_IN_POINTS),
+        ("-20.0", TrackHeight::SMALLEST_IN_POINTS),
+    ] {
+        let text = valid_text_with(
+            "\"muted\": false,",
+            &format!("\"muted\": false,\n      \"height_in_points\": {written},"),
+        );
+        let project = project_from_json_text(&text).unwrap();
+        assert_eq!(project.tracks()[0].height().points(), allowed, "{written}");
+    }
 }
 
 // --- round trips ---
@@ -476,12 +527,12 @@ fn json_that_is_not_a_fastforwardrs_project_is_rejected() {
 #[test]
 fn a_project_from_a_newer_version_is_refused_rather_than_misread() {
     let error = project_from_json_text(&valid_text_with(
-        "\"file_format_version\": 3",
         "\"file_format_version\": 4",
+        "\"file_format_version\": 5",
     ))
     .unwrap_err();
     assert!(
-        matches!(error, ProjectFileError::NewerFileFormat { found: 4, supported: 3 }),
+        matches!(error, ProjectFileError::NewerFileFormat { found: 5, supported: 4 }),
         "{error:?}"
     );
 }
@@ -642,11 +693,24 @@ fn project_with_everything() -> Project {
                 font_size: FontSize::from_points(54.0),
                 colour: TextColour::new(255, 200, 0, 128),
                 area: CanvasArea::new(0.25, 0.5, 0.5, 0.125),
+                rotation: Angle::from_degrees(-12.5),
             },
             90,
         )
         .unwrap();
+    let placed_video = ClipLocation {
+        track: project.tracks()[2].id(),
+        clip: project.tracks()[2].entries()[1].id(),
+    };
     project
+        .set_clip_placement(placed_video, a_place_for_the_video())
+        .unwrap();
+    project
+}
+
+/// Where the second video clip of [`project_with_everything`] is on the picture.
+fn a_place_for_the_video() -> Placement {
+    Placement::new(CanvasArea::new(0.125, 0.25, 0.5, 0.375), Angle::from_degrees(30.0))
 }
 
 #[test]
@@ -683,7 +747,141 @@ fn tracks_sound_files_text_gaps_and_settings_all_survive_a_trip_through_text() {
     assert_eq!(caption.duration_in_frames(), 90);
     assert_eq!(loaded.tracks()[0].entries()[0].gap_before_frames(), 120);
     assert_eq!(caption.object.area, CanvasArea::new(0.25, 0.5, 0.5, 0.125));
+    assert_eq!(caption.object.rotation, Angle::from_degrees(-12.5));
     assert!((caption.object.font_size.points() - 54.0).abs() < 0.01);
+    let video_clips: Vec<_> = loaded.tracks()[2]
+        .entries()
+        .iter()
+        .map(|entry| entry.clip().placement())
+        .collect();
+    assert_eq!(
+        video_clips,
+        vec![None, Some(a_place_for_the_video()), None],
+        "only the video that was moved says where it is"
+    );
+}
+
+#[test]
+fn a_text_that_is_turned_says_by_how_much_and_one_that_is_not_says_nothing_about_it() {
+    let turned = saved(&project_with_everything());
+    assert!(turned.contains("\"rotation_degrees\": -12.5"), "{turned}");
+
+    let mut upright_project = project_with_everything();
+    let caption = ClipLocation {
+        track: upright_project.tracks()[0].id(),
+        clip: upright_project.tracks()[0].entries()[0].id(),
+    };
+    let area = upright_project
+        .placement_of(caption)
+        .unwrap()
+        .clip
+        .placement()
+        .unwrap()
+        .area;
+    upright_project
+        .set_clip_placement(caption, Placement::upright(area))
+        .unwrap();
+    let upright = saved(&upright_project);
+    let captions_part = upright.split("\"kind\": \"text\"").nth(1).unwrap();
+    let captions_part = captions_part.split("\"kind\"").next().unwrap();
+    assert!(!captions_part.contains("rotation_degrees"), "{captions_part}");
+}
+
+#[test]
+fn a_video_that_was_placed_says_where_and_how_far_turned_and_one_that_was_not_says_nothing_about_it() {
+    let text = saved(&project_with_everything());
+    let placement_part = text.split("\"placement\"").nth(1).expect("one video is placed");
+    for expected in [
+        "\"left_fraction_of_frame_width\": 0.125",
+        "\"top_fraction_of_frame_height\": 0.25",
+        "\"width_fraction_of_frame_width\": 0.5",
+        "\"height_fraction_of_frame_height\": 0.375",
+        "\"rotation_degrees\": 30.0",
+    ] {
+        assert!(
+            placement_part.contains(expected),
+            "{expected} is not in {placement_part}"
+        );
+    }
+    assert_eq!(
+        text.matches("\"placement\"").count(),
+        1,
+        "the other videos are not placed"
+    );
+
+    let without = saved(&edited_project(link_to_missing_video()));
+    assert!(!without.contains("placement"), "{without}");
+    assert!(!without.contains("rotation"), "{without}");
+}
+
+#[test]
+fn a_placed_video_that_is_not_turned_is_written_without_an_angle() {
+    let mut project = edited_project(link_to_missing_video());
+    let video = clip_number(&project, 1);
+    project
+        .set_clip_placement(video, Placement::upright(CanvasArea::new(0.1, 0.1, 0.5, 0.5)))
+        .unwrap();
+    let text = saved(&project);
+    assert!(text.contains("\"placement\""), "{text}");
+    assert!(!text.contains("rotation_degrees"), "{text}");
+    let loaded = project_from_json_text(&text).unwrap();
+    assert_eq!(
+        loaded.tracks()[0].entries()[1].clip().placement(),
+        Some(Placement::upright(CanvasArea::new(0.1, 0.1, 0.5, 0.5)))
+    );
+}
+
+#[test]
+fn files_written_before_clips_could_be_turned_or_placed_are_read_as_upright_and_fitted() {
+    // Take the angle and the place out of a file that has them, which is what an older file looks like.
+    let mut document: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
+    let mut taken_out = 0;
+    for track in document["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_array_mut().unwrap() {
+            let clip = clip.as_object_mut().unwrap();
+            taken_out += usize::from(clip.remove("rotation_degrees").is_some());
+            taken_out += usize::from(clip.remove("placement").is_some());
+        }
+    }
+    assert_eq!(
+        taken_out, 2,
+        "the angle of the caption and the place of the video were there to be taken out"
+    );
+
+    let loaded = project_from_json_text(&document.to_string()).unwrap();
+
+    let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
+    assert_eq!(caption.object.rotation, Angle::ZERO);
+    assert!(
+        loaded.tracks()[2]
+            .entries()
+            .iter()
+            .all(|entry| entry.clip().placement().is_none()),
+        "every video is fitted inside the picture"
+    );
+}
+
+#[test]
+fn an_angle_that_is_more_than_a_turn_is_brought_back_into_the_range_not_rejected() {
+    let text = saved(&project_with_everything()).replace("\"rotation_degrees\": -12.5", "\"rotation_degrees\": 347.5");
+    let loaded = project_from_json_text(&text).unwrap();
+    let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
+    assert!(
+        (caption.object.rotation.degrees() - -12.5).abs() < 1e-3,
+        "{:?}",
+        caption.object.rotation
+    );
+}
+
+#[test]
+fn a_misspelt_field_of_a_placement_is_reported() {
+    let text = saved(&project_with_everything()).replace(
+        "\"placement\": {",
+        "\"placement\": {
+ \"rotaton_degrees\": 3.0,",
+    );
+    let reason = reason_for_unreadable_project(&text);
+    assert!(reason.contains("rotaton_degrees"), "{reason}");
 }
 
 #[test]
@@ -717,6 +915,117 @@ fn a_text_clip_is_written_with_its_words_font_size_colour_and_place() {
         "\"duration_in_microseconds\": 12500000",
     ] {
         assert!(text.contains(expected), "{expected} is not in {text}");
+    }
+}
+
+// --- pictures ---
+
+/// A project with a video and, on a track in front of it, a picture, which was put somewhere if `placed`.
+fn project_with_a_picture(placed: bool) -> Project {
+    let mut project = edited_project(link_to_missing_video());
+    project
+        .import_source(
+            SourceMedia::image(
+                SourceMediaIdentifier::new(2),
+                SourceMediaLink {
+                    absolute_path: PathBuf::from("/pictures/logo.png"),
+                    relative_path: Some(PathBuf::from("../pictures/logo.png")),
+                },
+                SourceImageProperties {
+                    display_width_in_pixels: 640,
+                    display_height_in_pixels: 480,
+                },
+            ),
+            frame(100),
+        )
+        .unwrap();
+    let picture = ClipLocation {
+        track: project.tracks()[0].id(),
+        clip: project.tracks()[0].entries()[0].id(),
+    };
+    if placed {
+        project
+            .set_clip_placement(
+                picture,
+                Placement::new(CanvasArea::new(0.5, 0.125, 0.25, 0.25), Angle::from_degrees(-20.0)),
+            )
+            .unwrap();
+    }
+    project
+}
+
+#[test]
+fn a_picture_and_where_it_is_survive_a_trip_through_text() {
+    let project = project_with_a_picture(true);
+    let loaded = project_from_json_text(&saved(&project)).unwrap();
+
+    assert_same_content(&loaded, &project);
+    let picture = loaded.tracks()[0].entries()[0].clip().as_image().unwrap();
+    assert_eq!(picture.source(), SourceMediaIdentifier::new(2));
+    assert_eq!(picture.duration_in_frames(), 150);
+    assert_eq!(
+        picture.placement(),
+        Some(Placement::new(
+            CanvasArea::new(0.5, 0.125, 0.25, 0.25),
+            Angle::from_degrees(-20.0)
+        ))
+    );
+    assert_eq!(loaded.tracks()[0].entries()[0].gap_before_frames(), 100);
+    assert_eq!(
+        loaded
+            .source(SourceMediaIdentifier::new(2))
+            .unwrap()
+            .properties
+            .display_size_in_pixels(),
+        Some((640, 480))
+    );
+}
+
+#[test]
+fn a_picture_is_written_with_its_file_its_size_and_how_long_it_is_shown_for() {
+    let text = saved(&project_with_a_picture(true));
+    for expected in [
+        "\"kind\": \"image\"",
+        "\"absolute_path\": \"/pictures/logo.png\"",
+        "\"relative_path\": \"../pictures/logo.png\"",
+        "\"display_width_in_pixels\": 640",
+        "\"display_height_in_pixels\": 480",
+        "\"source_identifier\": 2",
+        "\"duration_in_frames\": 150",
+        "\"rotation_degrees\": -20.0",
+    ] {
+        assert!(text.contains(expected), "{expected} is not in {text}");
+    }
+}
+
+#[test]
+fn a_picture_that_was_not_put_anywhere_says_nothing_about_where() {
+    let text = saved(&project_with_a_picture(false));
+    // (The source of the picture comes first, then its clip, and the clip is the first of the clips.)
+    let picture_part = text
+        .split("\"kind\": \"image\"")
+        .nth(2)
+        .expect("the clip of the picture");
+    assert!(!picture_part.contains("placement"), "{picture_part}");
+    assert!(!text.contains("rotation_degrees"), "{text}");
+}
+
+#[test]
+fn a_picture_that_is_shown_for_no_time_or_that_uses_a_file_that_is_not_a_picture_is_rejected() {
+    let no_time =
+        saved(&project_with_a_picture(true)).replace("\"duration_in_frames\": 150", "\"duration_in_frames\": 0");
+    match project_from_json_text(&no_time).unwrap_err() {
+        ProjectFileError::InvalidProject { reason } => {
+            assert!(reason.contains("clip number 1 of track number 1"), "{reason}")
+        }
+        other => panic!("unexpected error {other:?}"),
+    }
+    // The picture's clip pointed at the video, which is source number 1.
+    let wrong_file =
+        saved(&project_with_a_picture(true)).replace("\"source_identifier\": 2", "\"source_identifier\": 1");
+    match project_from_json_text(&wrong_file).unwrap_err() {
+        ProjectFileError::InvalidProject { reason } => assert!(reason.contains("not the kind of file"), "{reason}"),
+        other => panic!("unexpected error {other:?}"),
     }
 }
 
@@ -798,4 +1107,36 @@ fn the_names_of_clips_and_tracks_are_made_up_afresh_when_a_project_is_loaded_and
     let mut next = loaded.clone();
     let new_track = next.add_track_in_front();
     assert!(loaded.tracks().iter().all(|track| track.id() != new_track));
+}
+
+// --- the documentation ---
+
+/// The JSON of the example in the README: the first block of code that is JSON.
+fn the_example_in_the_readme() -> String {
+    let readme = include_str!("../../README.md").replace("\r\n", "\n");
+    let start = readme
+        .find("```json\n")
+        .expect("the README has an example of a project file")
+        + "```json\n".len();
+    let length = readme[start..].find("\n```").expect("the example ends");
+    readme[start..start + length].to_owned()
+}
+
+#[test]
+fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_it_says_it_has() {
+    let project = project_from_json_text(&the_example_in_the_readme()).unwrap();
+
+    assert_eq!(project.sources().len(), 3, "a video, a sound and a picture");
+    assert_eq!(project.tracks().len(), 2);
+    assert_eq!(project.tracks()[0].height().points(), 80.0);
+    let caption = project.tracks()[0].entries()[0].clip().as_text().unwrap();
+    assert_eq!(caption.object.rotation, Angle::from_degrees(-12.5));
+    let picture = project.tracks()[0].entries()[1].clip().as_image().unwrap();
+    assert_eq!(picture.source(), SourceMediaIdentifier::new(3));
+    assert_eq!(picture.placement().unwrap().rotation, Angle::from_degrees(20.0));
+    assert_eq!(project.tracks()[1].entries().len(), 3);
+    // And what the program writes for it is what the example shows (the same project, whichever way it is told).
+    let written = saved(&project);
+    let again = project_from_json_text(&written).unwrap();
+    assert_eq!(saved(&again), written);
 }

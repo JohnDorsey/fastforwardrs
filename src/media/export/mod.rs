@@ -17,9 +17,9 @@ mod runner;
 pub(crate) use command::filter_graph_file_option;
 pub use command::{ExportFiles, VideoEncoder, export_arguments};
 pub use filter_graph::{
-    AudioGraph, FilterGraph, FilterGraphSpecification, OverlayToExport, PictureGraphSpecification, SectionToExport,
-    SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport, SourceToExport, VideoToExport,
-    build_audio_graph, build_filter_graph,
+    AudioGraph, FilterGraph, FilterGraphSpecification, LayerContentToExport, LayerToExport, PictureGraphSpecification,
+    PlaceToExport, SectionToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
+    VideoToExport, build_audio_graph, build_filter_graph,
 };
 pub use plan::{
     ExportPlan, ExportPlanError, StillPictureInput, StillPictureKind, plan_export, sound_graph_specification,

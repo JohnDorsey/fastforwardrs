@@ -1,4 +1,5 @@
-//! The files a project is made from (videos, and sound files), and how the project finds them again.
+//! The files a project is made from (videos, sound files and pictures), and how the project finds
+//! them again.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -97,11 +98,33 @@ impl SourceAudioProperties {
     }
 }
 
+/// What the project needs to remember about a picture (a photograph, a logo) so that it can still
+/// lay out the picture while the file itself is missing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourceImageProperties {
+    /// The size of the picture as it is shown: after the file's own turning (if it says it is on
+    /// its side) and the shape of its pixels have been applied.
+    pub display_width_in_pixels: u32,
+    pub display_height_in_pixels: u32,
+}
+
 /// What kind of file a source is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceMediaKind {
     Video,
     Audio,
+    Image,
+}
+
+impl SourceMediaKind {
+    /// What a file of this kind is called, with its "a", for saying in a message.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Video => "a video",
+            Self::Audio => "a sound file",
+            Self::Image => "a picture",
+        }
+    }
 }
 
 /// What a project knows about a source file besides where it is.
@@ -109,6 +132,7 @@ pub enum SourceMediaKind {
 pub enum SourceMediaProperties {
     Video(SourceVideoProperties),
     Audio(SourceAudioProperties),
+    Image(SourceImageProperties),
 }
 
 impl SourceMediaProperties {
@@ -116,31 +140,45 @@ impl SourceMediaProperties {
         match self {
             Self::Video(_) => SourceMediaKind::Video,
             Self::Audio(_) => SourceMediaKind::Audio,
+            Self::Image(_) => SourceMediaKind::Image,
         }
     }
 
-    /// The properties of the picture, if the file is a video.
+    /// The properties of the video, if the file is a video.
     pub fn video(&self) -> Option<&SourceVideoProperties> {
         match self {
             Self::Video(video) => Some(video),
+            Self::Audio(_) | Self::Image(_) => None,
+        }
+    }
+
+    /// How big the picture of the file is as it is shown, for a file that has one (a video, or an
+    /// image).
+    pub fn display_size_in_pixels(&self) -> Option<(u32, u32)> {
+        match self {
+            Self::Video(video) => Some((video.display_width_in_pixels, video.display_height_in_pixels)),
+            Self::Image(image) => Some((image.display_width_in_pixels, image.display_height_in_pixels)),
             Self::Audio(_) => None,
         }
     }
 
-    /// Whether the file has sound to play: a sound file always has, a video may.
+    /// Whether the file has sound to play: a sound file always has, a video may, a picture never.
     pub fn has_sound(&self) -> bool {
         match self {
             Self::Video(video) => video.has_audio,
             Self::Audio(_) => true,
+            Self::Image(_) => false,
         }
     }
 
     /// How many frames the file has, counted at the project's `frame_rate`. (A video always runs
-    /// at the project's frame rate, so for it this is its own number of frames.)
+    /// at the project's frame rate, so for it this is its own number of frames, and a picture is a
+    /// single one.)
     pub fn frame_count_at(&self, frame_rate: FrameRate) -> u64 {
         match self {
             Self::Video(video) => video.total_frame_count,
             Self::Audio(audio) => audio.frame_count_at(frame_rate),
+            Self::Image(_) => 1,
         }
     }
 }
@@ -168,6 +206,14 @@ impl SourceMedia {
             identifier,
             link,
             properties: SourceMediaProperties::Audio(properties),
+        }
+    }
+
+    pub fn image(identifier: SourceMediaIdentifier, link: SourceMediaLink, properties: SourceImageProperties) -> Self {
+        Self {
+            identifier,
+            link,
+            properties: SourceMediaProperties::Image(properties),
         }
     }
 
@@ -277,5 +323,59 @@ mod tests {
             (SourceMediaKind::Video, SourceMediaKind::Audio)
         );
         assert!(video.video().is_some() && audio.video().is_none());
+    }
+
+    #[test]
+    fn a_picture_has_a_size_and_no_sound_and_counts_as_one_frame_whatever_the_frame_rate() {
+        let picture = SourceMediaProperties::Image(SourceImageProperties {
+            display_width_in_pixels: 800,
+            display_height_in_pixels: 600,
+        });
+        assert_eq!(picture.kind(), SourceMediaKind::Image);
+        assert_eq!(picture.display_size_in_pixels(), Some((800, 600)));
+        assert!(picture.video().is_none());
+        assert!(!picture.has_sound());
+        for frames_per_second in [24, 30, 60] {
+            assert_eq!(
+                picture.frame_count_at(FrameRate::from_whole_frames_per_second(frames_per_second).unwrap()),
+                1
+            );
+        }
+        let sound = SourceMediaProperties::Audio(SourceAudioProperties {
+            duration_in_microseconds: 1,
+        });
+        assert_eq!(sound.display_size_in_pixels(), None, "a sound has no picture");
+    }
+
+    #[test]
+    fn the_display_size_of_a_video_is_the_size_of_its_picture_after_turning_and_pixel_shape() {
+        let video = SourceMediaProperties::Video(SourceVideoProperties {
+            frame_rate: FrameRate::from_whole_frames_per_second(25).unwrap(),
+            total_frame_count: 5,
+            display_width_in_pixels: 720,
+            display_height_in_pixels: 1280,
+            has_audio: false,
+        });
+        assert_eq!(video.display_size_in_pixels(), Some((720, 1280)));
+    }
+
+    #[test]
+    fn each_kind_of_file_is_described_in_words_with_its_article() {
+        assert_eq!(SourceMediaKind::Video.description(), "a video");
+        assert_eq!(SourceMediaKind::Audio.description(), "a sound file");
+        assert_eq!(SourceMediaKind::Image.description(), "a picture");
+    }
+
+    #[test]
+    fn a_picture_made_into_a_source_is_a_picture() {
+        let source = SourceMedia::image(
+            SourceMediaIdentifier::new(5),
+            SourceMediaLink::from_absolute_path(PathBuf::from("/pictures/logo.png")),
+            SourceImageProperties {
+                display_width_in_pixels: 64,
+                display_height_in_pixels: 64,
+            },
+        );
+        assert_eq!(source.kind(), SourceMediaKind::Image);
     }
 }

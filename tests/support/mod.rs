@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use fastforwardrs::media::{FfmpegToolchain, probe_video};
+use fastforwardrs::media::{FfmpegToolchain, probe_source_media, probe_video};
 use fastforwardrs::project::{
     Clip, ClipLocation, MediaClip, Project, SourceAudioProperties, SourceFrameIndex, SourceMedia,
     SourceMediaIdentifier, SourceMediaLink, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex, Track, TrackId,
@@ -365,6 +365,55 @@ pub fn project_with_a_video_and_a_tone_file(toolchain: &FfmpegToolchain) -> Proj
     project
 }
 
+/// A project of the counter video's first 60 frames with, on a track in front of it, a picture file
+/// (twice as wide as it is tall, red on its left half and blue on its right half) from timeline frame
+/// `first_frame` on, shown for `frames` frames. The picture file is made in `folder`.
+pub fn project_with_a_picture_over_a_video(
+    toolchain: &FfmpegToolchain,
+    folder: &Path,
+    first_frame: u64,
+    frames: u64,
+) -> (Project, ClipLocation) {
+    let video = counter_video(toolchain);
+    let mut project = project_with_tracks_of_videos(
+        toolchain,
+        &[&video],
+        &[(
+            0,
+            &[ClipOfTheVideo {
+                gap_before_frames: 0,
+                first_source_frame: 0,
+                end_source_frame: 60,
+                speed: 1,
+            }],
+        )],
+    );
+    let path = red_and_blue_picture(toolchain, folder, "red_and_blue.png", 64, 32);
+    let properties = probe_source_media(toolchain, &path).expect("the picture can be probed");
+    let imported = project
+        .import_source(
+            SourceMedia {
+                identifier: SourceMediaIdentifier::new(2),
+                link: SourceMediaLink::from_absolute_path(path),
+                properties,
+            },
+            TimelineFrameIndex::new(first_frame),
+        )
+        .unwrap();
+    assert!(
+        imported.created_track,
+        "the picture goes on a track of its own, in front"
+    );
+    let picture = ClipLocation {
+        track: imported.track,
+        clip: imported.clip.expect("a picture file makes a clip"),
+    };
+    project
+        .set_clip_duration(picture, frames)
+        .expect("a picture can be shown for any length of time");
+    (project, picture)
+}
+
 /// How strong the tone of `frequency_in_hertz` is in `samples` (mono, `sample_rate` a second): the
 /// size of the sine wave of that frequency that they contain, found with the Goertzel method. For a
 /// pure tone of amplitude `a` this is about `a`; for a sound without that tone it is near 0.
@@ -452,13 +501,65 @@ pub fn transparent_text_picture(
     picture_width_in_pixels: u32,
     picture_height_in_pixels: u32,
 ) -> fastforwardrs::rgba_picture::RgbaPicture {
-    let width = (object.area.width() * picture_width_in_pixels as f32).round() as u32;
-    let height = (object.area.height() * picture_height_in_pixels as f32).round() as u32;
+    let (width, height) =
+        fastforwardrs::text_rendering::area_size_in_pixels(object, picture_width_in_pixels, picture_height_in_pixels);
     fastforwardrs::rgba_picture::RgbaPicture {
         width_in_pixels: width,
         height_in_pixels: height,
         rgba_pixels: vec![0; (width * height * 4) as usize],
     }
+}
+
+/// What stands in for the picture of a text object in tests of what the export does to where it is
+/// and how it is turned (the real renderer needs fonts): the text's area with its left half red and
+/// its right half blue, all of it opaque, so that where each half goes shows which way it was turned.
+pub fn red_then_blue_text_picture(
+    object: &fastforwardrs::project::TextObject,
+    picture_width_in_pixels: u32,
+    picture_height_in_pixels: u32,
+) -> fastforwardrs::rgba_picture::RgbaPicture {
+    let (width, height) =
+        fastforwardrs::text_rendering::area_size_in_pixels(object, picture_width_in_pixels, picture_height_in_pixels);
+    let mut rgba_pixels = Vec::with_capacity((width * height * 4) as usize);
+    for _row in 0..height {
+        for column in 0..width {
+            rgba_pixels.extend_from_slice(if column < width / 2 {
+                &[255, 0, 0, 255]
+            } else {
+                &[0, 0, 255, 255]
+            });
+        }
+    }
+    fastforwardrs::rgba_picture::RgbaPicture {
+        width_in_pixels: width,
+        height_in_pixels: height,
+        rgba_pixels,
+    }
+}
+
+/// Makes a picture file of `width` by `height` pixels whose left half is red and whose right half
+/// is blue, with ffmpeg, as `name` (what kind of file it is is told by how it ends) in `folder`.
+pub fn red_and_blue_picture(
+    toolchain: &FfmpegToolchain,
+    folder: &Path,
+    name: &str,
+    width: u32,
+    height: u32,
+) -> PathBuf {
+    let path = folder.join(name);
+    let half = width / 2;
+    let status = Command::new(toolchain.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
+        .args(["-f", "lavfi", "-i"])
+        .arg(format!(
+            "color=c=blue:s={width}x{height},drawbox=x=0:y=0:w={half}:h={height}:color=red:t=fill"
+        ))
+        .args(["-frames:v", "1"])
+        .arg(&path)
+        .status()
+        .expect("could not run ffmpeg");
+    assert!(status.success(), "ffmpeg could not make {name}");
+    path
 }
 
 /// A scratch folder that is removed when dropped.

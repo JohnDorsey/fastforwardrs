@@ -1,4 +1,4 @@
-//! The exact shape of a project file on disk (the current version, 3).
+//! The exact shape of a project file on disk (the current version, 4).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::project::{
-    FrameRate, Gain, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
+    FrameRate, Gain, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TrackHeight,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,6 +63,13 @@ pub(super) enum SourceDocument {
         relative_path: Option<String>,
         duration_in_microseconds: u64,
     },
+    Image {
+        identifier: SourceMediaIdentifier,
+        absolute_path: String,
+        relative_path: Option<String>,
+        display_width_in_pixels: u32,
+        display_height_in_pixels: u32,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,7 +80,19 @@ pub(super) struct TrackDocument {
     /// How much faster than normal everything on the track plays, on top of each clip's own speed.
     pub speed_factor: SpeedFactor,
     pub muted: bool,
+    /// How tall the row of the track is on the timeline. Left out for a track of the normal
+    /// height, and in the files of versions before 4, which had no heights.
+    #[serde(default = "normal_height_in_points", skip_serializing_if = "is_the_normal_height")]
+    pub height_in_points: f32,
     pub clips: Vec<ClipDocument>,
+}
+
+fn normal_height_in_points() -> f32 {
+    TrackHeight::DEFAULT_IN_POINTS
+}
+
+fn is_the_normal_height(points: &f32) -> bool {
+    TrackHeight::from_points(*points).is_default()
 }
 
 /// One clip on a track, with how many frames of empty time come before it.
@@ -92,6 +111,10 @@ pub(super) enum ClipDocument {
         gain_decibels: Gain,
         #[serde(default, skip_serializing_if = "is_false")]
         muted: bool,
+        /// Where the video is on the picture, if it was moved, resized or turned. Left out for a
+        /// video that is simply fitted inside the picture.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<PlacementDocument>,
     },
     Audio {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -105,6 +128,16 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "is_false")]
         muted: bool,
     },
+    Image {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        source_identifier: SourceMediaIdentifier,
+        duration_in_frames: u64,
+        /// Where the picture is on the screen, if it was moved, resized or turned. Left out for a
+        /// picture that is simply fitted inside the picture.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<PlacementDocument>,
+    },
     Text {
         #[serde(default, skip_serializing_if = "is_zero")]
         gap_before_frames: u64,
@@ -115,6 +148,9 @@ pub(super) enum ClipDocument {
         font_size_fraction_of_frame_height: f32,
         colour: ColourDocument,
         area: CanvasAreaDocument,
+        /// How far the area is turned, clockwise. Left out for a text that is upright.
+        #[serde(default, skip_serializing_if = "is_not_turned")]
+        rotation_degrees: f32,
     },
 }
 
@@ -128,6 +164,20 @@ fn is_no_gain(gain: &Gain) -> bool {
 
 fn is_false(flag: &bool) -> bool {
     !*flag
+}
+
+fn is_not_turned(degrees: &f32) -> bool {
+    *degrees == 0.0
+}
+
+/// Where something is on the picture: a rectangle, and how far it is turned about its middle.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PlacementDocument {
+    pub area: CanvasAreaDocument,
+    /// How far the area is turned, clockwise. Left out when it is not.
+    #[serde(default, skip_serializing_if = "is_not_turned")]
+    pub rotation_degrees: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

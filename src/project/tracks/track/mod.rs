@@ -16,6 +16,7 @@
 
 mod editing;
 mod layout;
+mod moving;
 #[cfg(test)]
 mod tests;
 
@@ -24,6 +25,7 @@ pub use editing::{ClipEditError, InsertError, SplitError, SplitOutcome};
 use super::clip::Clip;
 use super::gain::Gain;
 use super::ids::{ClipId, TrackId};
+use super::track_height::TrackHeight;
 use crate::project::{SourceFrameIndex, SpeedFactor, TimelineFrameIndex};
 
 /// A clip on a track, and where it is in relation to the clip before it.
@@ -57,6 +59,9 @@ pub struct Track {
     gain: Gain,
     speed: SpeedFactor,
     muted: bool,
+    /// How tall the track's row is on the timeline. (A way of looking at the track, not part of
+    /// what it plays: it is saved with the project because it is something that was arranged.)
+    height: TrackHeight,
     entries: Vec<TrackEntry>,
     /// The number the next new clip of this track is given (see [`ClipId`]).
     next_clip_number: u32,
@@ -130,6 +135,7 @@ impl Track {
             gain: Gain::UNCHANGED,
             speed: SpeedFactor::NORMAL,
             muted: false,
+            height: TrackHeight::DEFAULT,
             entries: Vec::new(),
             next_clip_number: 0,
             first_timeline_frames: Vec::new(),
@@ -172,6 +178,12 @@ impl Track {
         self
     }
 
+    #[must_use]
+    pub fn with_height(mut self, height: TrackHeight) -> Self {
+        self.height = height;
+        self
+    }
+
     pub fn id(&self) -> TrackId {
         self.id
     }
@@ -191,6 +203,10 @@ impl Track {
 
     pub fn is_muted(&self) -> bool {
         self.muted
+    }
+
+    pub fn height(&self) -> TrackHeight {
+        self.height
     }
 
     pub fn entries(&self) -> &[TrackEntry] {

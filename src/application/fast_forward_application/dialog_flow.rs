@@ -18,7 +18,7 @@ impl FastForwardApplication {
             return;
         }
         self.autosave_now();
-        if self.has_unsaved_changes && !self.close_confirmed {
+        if self.has_unsaved_changes() && !self.close_confirmed {
             context.send_viewport_cmd(ViewportCommand::CancelClose);
             self.pause_playback_for_dialog();
             self.dialog = Some(Dialog::ConfirmDiscardChanges {

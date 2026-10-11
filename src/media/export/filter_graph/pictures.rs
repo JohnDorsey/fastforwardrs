@@ -1,22 +1,21 @@
-//! The picture half of the filter graph: the video of each section, black where there is none, the
-//! still pictures laid over them, and all of it joined in order.
+//! The picture half of the filter graph: each section is black with its layers laid over it, the
+//! one at the back first, and all of the sections are joined in order.
+//!
+//! A layer is a piece of a video or a still picture (the fast-forward symbol, a text object), and
+//! it is somewhere on the picture: the box it fills, and how far that is turned about its middle.
+//! A video is cut, and made to play at its speed, and only then scaled to its box (so that the
+//! pictures that a sped-up clip drops are never scaled). A layer that is turned is made into a
+//! picture with clear corners, the size of the smallest picture the turned box fits in, and that
+//! is laid over with its middle where the box's middle is.
 
 use std::collections::BTreeMap;
 
-use super::{PictureGraphSpecification, VIDEO_OUTPUT_LABEL, numbered_labels, renumber_pictures_filter, statement};
-use crate::media::fit_inside_picture;
+use super::{
+    PictureGraphSpecification, VIDEO_OUTPUT_LABEL, format_number, numbered_labels, renumber_pictures_filter, statement,
+};
 use crate::project::{FrameRate, SpeedFactor};
 
 const JOINED_VIDEO_LABEL: &str = "joined_video";
-
-/// A source file the graph reads pictures from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SourceToExport {
-    /// How big the picture is as it is shown (after rotation and the shape of its pixels), for a
-    /// video; `None` for a file that has no pictures. A video of another shape than the finished
-    /// picture is fitted inside it.
-    pub display_size_in_pixels: Option<(u32, u32)>,
-}
 
 /// The video that is seen during a section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,23 +28,51 @@ pub struct VideoToExport {
     pub speed_factor: SpeedFactor,
 }
 
-/// A still picture laid over the picture of a section.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OverlayToExport {
-    /// Which of the graph's inputs the picture is.
-    pub picture_input: usize,
+/// Where a layer goes on the finished picture, in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaceToExport {
+    /// The box the layer fills, before it is turned.
     pub left_in_pixels: u32,
     pub top_in_pixels: u32,
+    pub width_in_pixels: u32,
+    pub height_in_pixels: u32,
+    /// How far the box is turned about its middle, clockwise.
+    pub turn_in_degrees: f32,
+}
+
+impl PlaceToExport {
+    fn is_turned(&self) -> bool {
+        self.turn_in_degrees != 0.0
+    }
+}
+
+/// What a layer is made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerContentToExport {
+    /// A piece of a video, which is scaled to the box of the layer.
+    Video(VideoToExport),
+    /// A still picture: a picture that was made (the fast-forward symbol, text), which is the size
+    /// of the box of the layer already, or a picture from a file, which is scaled to it.
+    Still {
+        /// Which of the graph's inputs the picture is.
+        picture_input: usize,
+        scaled_to_its_place: bool,
+    },
+}
+
+/// A layer of the picture of a section.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LayerToExport {
+    pub content: LayerContentToExport,
+    pub place: PlaceToExport,
 }
 
 /// A stretch of the finished picture.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SectionToExport {
     pub frame_count: u64,
-    /// The video that is seen, or `None` for black.
-    pub video: Option<VideoToExport>,
-    /// The still pictures over it, the one at the back first.
-    pub overlays: Vec<OverlayToExport>,
+    /// What is seen over black, the layer at the back first. None at all is black.
+    pub layers: Vec<LayerToExport>,
 }
 
 pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> Vec<String> {
@@ -55,43 +82,39 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
     let sections = &specification.sections;
     let mut statements = Vec::new();
 
-    // Each source video is made the size of the picture and the frame rate of the project once, and
-    // then split into a copy for every section that uses it. Scale first and resample second:
-    // resampling a variable frame rate video repeats pictures to fill the gaps, and repeating an
-    // already scaled picture costs nothing.
-    let mut sections_using_each_source: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    // Each source video is resampled to the frame rate of the project once, and then split into a
+    // copy for every layer that uses it. Resampling a variable frame rate video repeats pictures to
+    // fill the gaps, and a picture that is repeated costs nothing until it is scaled, which is done
+    // later, to only the pictures that are kept.
+    let mut layers_using_each_source: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
     for (section_number, section) in sections.iter().enumerate() {
-        if let Some(video) = section.video {
-            sections_using_each_source
-                .entry(video.source_input)
-                .or_default()
-                .push(section_number);
+        for (layer_number, layer) in section.layers.iter().enumerate() {
+            if let LayerContentToExport::Video(video) = layer.content {
+                layers_using_each_source
+                    .entry(video.source_input)
+                    .or_default()
+                    .push((section_number, layer_number));
+            }
         }
     }
-    for (source_input, section_numbers) in &sections_using_each_source {
-        let display_size = specification
-            .sources
-            .get(*source_input)
-            .and_then(|source| source.display_size_in_pixels);
-        let copy_labels: Vec<String> = section_numbers
+    for (source_input, layers) in &layers_using_each_source {
+        let copy_labels: Vec<String> = layers
             .iter()
-            .map(|section_number| format!("clip_source_video_{section_number}"))
+            .map(|(section_number, layer_number)| format!("clip_source_video_{section_number}_{layer_number}"))
             .collect();
         statements.push(statement(
             &[&format!("{source_input}:v:0")],
-            &format!(
-                "{},fps={frame_rate}:round=near,split={}",
-                fit_filters(display_size, width, height),
-                section_numbers.len()
-            ),
+            &format!("fps={frame_rate}:round=near,split={}", layers.len()),
             &copy_labels,
         ));
     }
 
     // A still picture can only be used once as it is, so each place it is laid over gets a copy.
     let mut copies_needed: BTreeMap<usize, usize> = BTreeMap::new();
-    for overlay in sections.iter().flat_map(|section| &section.overlays) {
-        *copies_needed.entry(overlay.picture_input).or_default() += 1;
+    for layer in sections.iter().flat_map(|section| &section.layers) {
+        if let LayerContentToExport::Still { picture_input, .. } = layer.content {
+            *copies_needed.entry(picture_input).or_default() += 1;
+        }
     }
     let mut unused_copies: BTreeMap<usize, Vec<String>> = BTreeMap::new();
     for (picture_input, count) in copies_needed {
@@ -108,45 +131,108 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
     let mut finished_section_labels = Vec::with_capacity(sections.len());
     for (section_number, section) in sections.iter().enumerate() {
         let finished_label = format!("finished_clip_{section_number}");
-        let base_label = if section.overlays.is_empty() {
-            finished_label.clone()
-        } else {
-            format!("clip_picture_{section_number}")
+        let layers = &section.layers;
+
+        // The picture to lay the layers over: a video at the back that is not turned is that
+        // picture itself (put on black where it does not reach), and otherwise it is black.
+        let back_video = layers.first().and_then(|first| match first.content {
+            LayerContentToExport::Video(video) if !first.place.is_turned() => Some((video, first.place)),
+            _ => None,
+        });
+        let (mut current_label, first_layer_to_lay_over) = match back_video {
+            Some((video, place)) => {
+                let label = if layers.len() == 1 {
+                    finished_label.clone()
+                } else {
+                    format!("clip_picture_{section_number}")
+                };
+                statements.push(statement(
+                    &[&format!("clip_source_video_{section_number}_0")],
+                    &format!(
+                        "{},{}",
+                        cut_and_retime_filters(frame_rate, &video),
+                        fit_to_place_filters(place, width, height)
+                    ),
+                    &[&label],
+                ));
+                (label, 1)
+            }
+            None => {
+                let label = if layers.is_empty() {
+                    finished_label.clone()
+                } else {
+                    format!("clip_picture_{section_number}")
+                };
+                statements.push(statement(
+                    &[],
+                    &format!(
+                        "color=c=black:s={width}x{height}:r={frame_rate},format=yuv420p,setsar=1,trim=end_frame={},{}",
+                        section.frame_count,
+                        renumber_pictures_filter(frame_rate)
+                    ),
+                    &[&label],
+                ));
+                (label, 0)
+            }
         };
-        match section.video {
-            Some(video) => statements.push(statement(
-                &[&format!("clip_source_video_{section_number}")],
-                &cut_and_retime_filters(frame_rate, &video),
-                &[&base_label],
-            )),
-            None => statements.push(statement(
-                &[],
-                &format!(
-                    "color=c=black:s={width}x{height}:r={frame_rate},format=yuv420p,setsar=1,trim=end_frame={},{}",
-                    section.frame_count,
-                    renumber_pictures_filter(frame_rate)
-                ),
-                &[&base_label],
-            )),
-        }
-        let mut current_label = base_label;
-        for (overlay_number, overlay) in section.overlays.iter().enumerate() {
-            let copy_label = unused_copies
-                .get_mut(&overlay.picture_input)
-                .and_then(Vec::pop)
-                .expect("a copy was made for every place a still picture is laid over");
-            let is_last = overlay_number + 1 == section.overlays.len();
+
+        for (layer_number, layer) in layers.iter().enumerate().skip(first_layer_to_lay_over) {
+            let layer_label = match layer.content {
+                LayerContentToExport::Video(video) => {
+                    let label = format!("clip_layer_{section_number}_{layer_number}");
+                    let mut filters = format!(
+                        "{},scale={}:{},setsar=1",
+                        cut_and_retime_filters(frame_rate, &video),
+                        layer.place.width_in_pixels,
+                        layer.place.height_in_pixels
+                    );
+                    if layer.place.is_turned() {
+                        filters.push_str(&format!(",{}", turn_filters(layer.place)));
+                    }
+                    statements.push(statement(
+                        &[&format!("clip_source_video_{section_number}_{layer_number}")],
+                        &filters,
+                        &[&label],
+                    ));
+                    label
+                }
+                LayerContentToExport::Still {
+                    picture_input,
+                    scaled_to_its_place,
+                } => {
+                    let copy_label = unused_copies
+                        .get_mut(&picture_input)
+                        .and_then(Vec::pop)
+                        .expect("a copy was made for every place a still picture is laid over");
+                    let mut filters = Vec::new();
+                    if scaled_to_its_place {
+                        filters.push(format!(
+                            "scale={}:{},setsar=1",
+                            layer.place.width_in_pixels, layer.place.height_in_pixels
+                        ));
+                    }
+                    if layer.place.is_turned() {
+                        filters.push(turn_filters(layer.place));
+                    }
+                    if filters.is_empty() {
+                        copy_label
+                    } else {
+                        let label = format!("clip_layer_{section_number}_{layer_number}");
+                        statements.push(statement(&[&copy_label], &filters.join(","), &[&label]));
+                        label
+                    }
+                }
+            };
+            let is_last = layer_number + 1 == layers.len();
             let next_label = if is_last {
                 finished_label.clone()
             } else {
-                format!("clip_picture_{section_number}_with_{}", overlay_number + 1)
+                format!("clip_picture_{section_number}_with_{layer_number}")
             };
+            let (left, top) = left_and_top_when_turned(layer.place);
             statements.push(statement(
-                &[&current_label, &copy_label],
-                &format!(
-                    "overlay=x={}:y={}:format=auto",
-                    overlay.left_in_pixels, overlay.top_in_pixels
-                ),
+                &[&current_label, &layer_label],
+                &format!("overlay=x={left}:y={top}:format=auto"),
                 &[&next_label],
             ));
             current_label = next_label;
@@ -171,22 +257,22 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
     statements
 }
 
-/// The filters that make a source video the size of the finished picture, with square pixels. A
-/// video that is shown at the size of the picture, or at another size of the same shape, is simply
-/// scaled to it. One of another shape is scaled to fit inside, and put in the middle of black.
-fn fit_filters(display_size: Option<(u32, u32)>, picture_width: u32, picture_height: u32) -> String {
-    let scaled_to_the_picture = format!("scale={picture_width}:{picture_height},setsar=1");
-    let Some((display_width, display_height)) = display_size else {
-        return scaled_to_the_picture;
-    };
-    let fit = fit_inside_picture(display_width, display_height, picture_width, picture_height);
-    if fit.fills(picture_width, picture_height) {
-        return scaled_to_the_picture;
+/// The filters that scale a picture to the box of `place` with square pixels, and, if the box is
+/// not all of the picture, put it in its place on black.
+fn fit_to_place_filters(place: PlaceToExport, picture_width: u32, picture_height: u32) -> String {
+    let scaled = format!("scale={}:{},setsar=1", place.width_in_pixels, place.height_in_pixels);
+    let fills_the_picture = place.left_in_pixels == 0
+        && place.top_in_pixels == 0
+        && place.width_in_pixels == picture_width
+        && place.height_in_pixels == picture_height;
+    if fills_the_picture {
+        scaled
+    } else {
+        format!(
+            "{scaled},pad={picture_width}:{picture_height}:{}:{}",
+            place.left_in_pixels, place.top_in_pixels
+        )
     }
-    format!(
-        "scale={}:{},setsar=1,pad={picture_width}:{picture_height}:{}:{}",
-        fit.width_in_pixels, fit.height_in_pixels, fit.left_in_pixels, fit.top_in_pixels
-    )
 }
 
 /// The filters that cut `video` out of the resampled source and make it play at its speed: take
@@ -203,6 +289,51 @@ fn cut_and_retime_filters(frame_rate: FrameRate, video: &VideoToExport) -> Strin
     }
     filters.push_str(&format!(",{}", renumber_pictures_filter(frame_rate)));
     filters
+}
+
+/// The filters that turn a picture the size of `place`'s box about its middle, by the angle of
+/// `place`, into a picture just big enough to hold it, with what is not the picture clear.
+fn turn_filters(place: PlaceToExport) -> String {
+    let (width, height) = size_when_turned(place.width_in_pixels, place.height_in_pixels, place.turn_in_degrees);
+    let radians = f64::from(place.turn_in_degrees).to_radians();
+    format!(
+        "format=rgba,rotate=a={}:ow={width}:oh={height}:c=black@0",
+        format_number(radians)
+    )
+}
+
+/// How big the picture is that a picture `width` by `height` pixels, turned by `degrees`, fits in:
+/// in whole pixels, and even ones so that the middle stays where it was.
+fn size_when_turned(width: u32, height: u32, degrees: f32) -> (u32, u32) {
+    let (sine, cosine) = f64::from(degrees).to_radians().sin_cos();
+    let (width, height) = (f64::from(width), f64::from(height));
+    // (A turn that is a whole quarter must not come out a pixel too big because of a rounding error.)
+    let whole_even_pixels = |size: f64| {
+        let whole = (size - 1e-6).ceil().max(1.0) as u32;
+        whole + whole % 2
+    };
+    (
+        whole_even_pixels(width * cosine.abs() + height * sine.abs()),
+        whole_even_pixels(width * sine.abs() + height * cosine.abs()),
+    )
+}
+
+/// Where the top left corner of the picture that [`turn_filters`] makes goes, so that its middle
+/// is where the middle of the box of `place` is. (The box itself, if it is not turned.) It can be
+/// outside the picture, when what is turned reaches past the edge.
+fn left_and_top_when_turned(place: PlaceToExport) -> (i32, i32) {
+    let left = i64::from(place.left_in_pixels);
+    let top = i64::from(place.top_in_pixels);
+    if !place.is_turned() {
+        return (left as i32, top as i32);
+    }
+    let (width, height) = size_when_turned(place.width_in_pixels, place.height_in_pixels, place.turn_in_degrees);
+    let middle_x = left as f64 + f64::from(place.width_in_pixels) / 2.0;
+    let middle_y = top as f64 + f64::from(place.height_in_pixels) / 2.0;
+    (
+        (middle_x - f64::from(width) / 2.0).round() as i32,
+        (middle_y - f64::from(height) / 2.0).round() as i32,
+    )
 }
 
 #[cfg(test)]

@@ -16,8 +16,7 @@ use thiserror::Error;
 use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
-use super::picture_fit::fit_inside_picture;
-use crate::project::{FrameRate, SourceFrameIndex, SpeedFactor};
+use crate::project::{FrameRate, SourceFrameIndex, SpeedFactor, fit_inside_picture};
 
 /// How many decoded pictures may wait to be shown before decoding pauses. Small, because each
 /// picture is several megabytes and the decoder is much faster than playback.
@@ -36,12 +35,28 @@ pub struct FrameStreamRequest {
     /// `N` only every `N`th of them is delivered.
     pub source_frame_count: u64,
     pub speed_factor: SpeedFactor,
-    /// How big the video's picture is as it is shown. If it is not the shape of the delivered
-    /// pictures it is fitted inside them, with black round it.
+    /// How big the video's picture is as it is shown.
     pub video_display_size_in_pixels: (u32, u32),
-    /// The size every delivered picture is.
+    /// The size of the finished picture of the preview. The video is delivered as big as it can be
+    /// inside it, in its own shape: see [`Self::delivered_size`].
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
+}
+
+impl FrameStreamRequest {
+    /// The size every delivered picture is: the video as big as it can be inside the finished
+    /// picture, in its own shape. There is no black round it: where it goes on the finished picture
+    /// is for whoever draws it to say (it can be turned, made smaller, moved), so it is delivered as
+    /// the picture it is.
+    pub fn delivered_size(&self) -> (u32, u32) {
+        let fit = fit_inside_picture(
+            self.video_display_size_in_pixels.0,
+            self.video_display_size_in_pixels.1,
+            self.picture_width_in_pixels,
+            self.picture_height_in_pixels,
+        );
+        (fit.width_in_pixels, fit.height_in_pixels)
+    }
 }
 
 /// One decoded picture, as RGBA bytes (four per pixel, row by row, top row first).
@@ -89,9 +104,10 @@ impl FrameStream {
         }
         let mut command = background_command(toolchain.ffmpeg_path());
         command.args(frame_stream_arguments(request));
+        let (delivered_width, delivered_height) = request.delivered_size();
         let frame_size = FrameSize {
-            width_in_pixels: request.picture_width_in_pixels,
-            height_in_pixels: request.picture_height_in_pixels,
+            width_in_pixels: delivered_width,
+            height_in_pixels: delivered_height,
         };
         let tool = StreamingTool::start(
             command,
@@ -189,26 +205,12 @@ pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
     if request.speed_factor.is_accelerated() {
         filters.push_str(&format!(",select='not(mod(n,{}))'", request.speed_factor.value()));
     }
-    let fit = fit_inside_picture(
-        request.video_display_size_in_pixels.0,
-        request.video_display_size_in_pixels.1,
-        request.picture_width_in_pixels,
-        request.picture_height_in_pixels,
-    );
+    let (delivered_width, delivered_height) = request.delivered_size();
     filters.push_str(&format!(
-        ",setpts=N*{}/({}*TB),scale={}:{}:flags=fast_bilinear",
+        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags=fast_bilinear,format=rgba",
         frame_rate.denominator(),
         frame_rate.numerator(),
-        fit.width_in_pixels,
-        fit.height_in_pixels,
     ));
-    if !fit.fills(request.picture_width_in_pixels, request.picture_height_in_pixels) {
-        filters.push_str(&format!(
-            ",pad={}:{}:{}:{}",
-            request.picture_width_in_pixels, request.picture_height_in_pixels, fit.left_in_pixels, fit.top_in_pixels
-        ));
-    }
-    filters.push_str(",format=rgba");
 
     let mut arguments: Vec<OsString> = Vec::new();
     arguments.extend(["-hide_banner", "-loglevel", "error", "-nostdin", "-ss"].map(OsString::from));
@@ -344,15 +346,48 @@ mod tests {
     }
 
     #[test]
-    fn a_video_of_another_shape_is_fitted_inside_the_picture_and_put_in_the_middle_of_black() {
+    fn a_video_of_another_shape_is_delivered_as_big_as_fits_inside_the_picture_in_its_own_shape_with_no_black_round_it()
+    {
         let mut upright = request(0, 100, 1);
         upright.video_display_size_in_pixels = (720, 1280);
-        // 9:16 in 640x360: as tall as the picture, 202.5 wide, which is made 202 (even); centred.
+        // 9:16 in 640x360: as tall as the picture, 202.5 wide, which is made 202 (even).
         let filters = filters_of(&upright);
         assert!(
-            filters.ends_with(",scale=202:360:flags=fast_bilinear,pad=640:360:218:0,format=rgba"),
+            filters.ends_with(",scale=202:360:flags=fast_bilinear,format=rgba"),
             "{filters}"
         );
+        assert!(
+            !filters.contains("pad"),
+            "where it goes on the picture is for the drawing to say"
+        );
+        assert_eq!(upright.delivered_size(), (202, 360));
+    }
+
+    #[test]
+    fn what_is_delivered_is_the_fit_of_the_video_in_the_picture_whatever_the_shapes() {
+        for video in [(1280, 720), (720, 1280), (1000, 1000), (3840, 1080), (320, 180)] {
+            for picture in [(640, 360), (360, 640), (500, 500), (64, 36)] {
+                let mut request = request(0, 100, 1);
+                request.video_display_size_in_pixels = video;
+                request.picture_width_in_pixels = picture.0;
+                request.picture_height_in_pixels = picture.1;
+                let (width, height) = request.delivered_size();
+                let fit = fit_inside_picture(video.0, video.1, picture.0, picture.1);
+                assert_eq!(
+                    (width, height),
+                    (fit.width_in_pixels, fit.height_in_pixels),
+                    "{video:?} in {picture:?}"
+                );
+                assert!(
+                    width <= picture.0 && height <= picture.1,
+                    "{video:?} in {picture:?}: {width}x{height}"
+                );
+                assert!(
+                    filters_of(&request).contains(&format!("scale={width}:{height}:")),
+                    "{video:?} in {picture:?}"
+                );
+            }
+        }
     }
 
     use crate::media::do_nothing_when_woken;

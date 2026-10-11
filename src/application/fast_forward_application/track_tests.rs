@@ -1,7 +1,7 @@
 //! Tests of the tracks: their title boxes, the round button that adds one, the order they are in,
 //! and the settings of a track in the box that opens above its gear.
 
-use egui::{Key, Pos2, Rect};
+use egui::{Key, Modifiers, Pos2, Rect};
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::test_window::{Window, project_of, project_with_a_video_and_a_sound};
@@ -49,19 +49,24 @@ fn a_new_project_has_one_track_called_track_0_with_a_title_box_and_a_gear_at_its
 }
 
 #[test]
-fn the_big_round_button_is_under_the_last_track_and_big_and_round() {
+fn the_big_round_button_is_above_the_title_box_of_the_top_track_and_big_and_round() {
     let window = Window::showing(project_of(300));
     let button = window.rectangle_of(ADD_TRACK_LABEL);
+    let title_box = window.title_box_of_track(0);
     let strip = window.strip_of_track(0);
     assert!(
-        button.top() >= strip.bottom(),
-        "under the list of tracks: {button:?} {strip:?}"
+        button.bottom() <= title_box.top(),
+        "above the top track's title box: {button:?} {title_box:?}"
+    );
+    assert!(
+        (button.center().x - title_box.center().x).abs() < 40.0 && button.center().x < strip.left(),
+        "over the title boxes, at the left of the strips: {button:?}"
     );
     assert!(button.width() >= 32.0, "big: {}", button.width());
     assert!((button.width() - button.height()).abs() < 0.5, "round: {button:?}");
     assert!(
-        button.center().x < strip.left(),
-        "it is under the title boxes, at the left: {button:?}"
+        window.rectangle_of("Ruler").bottom() <= strip.top(),
+        "and it is in the row of the ruler, which is over the strips"
     );
 }
 
@@ -95,8 +100,8 @@ fn tracks_higher_in_the_list_are_higher_on_the_screen() {
     );
     let button = window.rectangle_of(ADD_TRACK_LABEL);
     assert!(
-        button.top() >= window.strip_of_track(2).bottom(),
-        "and the button is under the last"
+        button.bottom() <= window.title_box_of_track(0).top(),
+        "and the button is over the first, which is at the top"
     );
 }
 
@@ -136,12 +141,77 @@ fn with_more_tracks_than_fit_the_rows_scroll_and_the_button_can_still_be_pressed
     let first = window.strip_of_track(0);
     let ruler = window.rectangle_of("Ruler");
     assert_eq!(first.top(), ruler.bottom());
+    let slider_along_the_bottom = window.rectangle_of("Position in the video");
     assert!(
-        button.top() - first.top() < 4.0 * crate::application::theme::TRACK_HEIGHT,
+        slider_along_the_bottom.top() - first.top() < 4.0 * crate::project::TrackHeight::DEFAULT_IN_POINTS,
         "at most a few tracks are shown at once"
     );
     add_a_track(&mut window);
     assert_eq!(window.application().project().tracks().len(), 8);
+    assert_eq!(
+        window.rectangle_of(ADD_TRACK_LABEL),
+        button,
+        "the button stays where it is, above the rows that scroll"
+    );
+}
+
+#[test]
+fn alt_and_the_wheel_scroll_the_rows_up_and_down_and_the_wheel_alone_scrolls_the_strips_along() {
+    let mut window = Window::showing(project_of(900));
+    for _ in 0..6 {
+        add_a_track(&mut window);
+    }
+    let strip_top_before = window.strip_of_track(0).top();
+    let horizontal_before = window.application().timeline_view.scroll_offset;
+    let over_the_strips = window.strip_of_track(0).center();
+
+    window.scroll_the_wheel(over_the_strips, egui::vec2(0.0, -150.0), Modifiers::ALT);
+
+    assert!(
+        window.strip_of_track(0).top() < strip_top_before - 50.0,
+        "the rows moved up: {} then {}",
+        strip_top_before,
+        window.strip_of_track(0).top()
+    );
+    assert_eq!(
+        window.application().timeline_view.scroll_offset,
+        horizontal_before,
+        "and the strips did not scroll along"
+    );
+
+    // Back up again, with the pointer over the title boxes this time (the first row has been scrolled
+    // out of sight, so it is the column of boxes just under the ruler that is used).
+    let over_the_title_boxes = Pos2::new(
+        window.rectangle_of(ADD_TRACK_LABEL).center().x,
+        window.rectangle_of("Ruler").bottom() + 40.0,
+    );
+    window.scroll_the_wheel(over_the_title_boxes, egui::vec2(0.0, 400.0), Modifiers::ALT);
+    assert_eq!(window.strip_of_track(0).top(), strip_top_before, "all the way back");
+
+    // The wheel by itself still scrolls along and not up and down.
+    window.scroll_the_wheel(over_the_strips, egui::vec2(0.0, -150.0), Modifiers::NONE);
+    assert!(window.application().timeline_view.scroll_offset > horizontal_before);
+    assert_eq!(
+        window.strip_of_track(0).top(),
+        strip_top_before,
+        "the rows did not move"
+    );
+}
+
+#[test]
+fn rows_that_are_scrolled_down_with_alt_and_the_wheel_stop_at_the_last_one() {
+    let mut window = Window::showing(project_of(300));
+    for _ in 0..6 {
+        add_a_track(&mut window);
+    }
+    let over_the_strips = window.strip_of_track(0).center();
+    window.scroll_the_wheel(over_the_strips, egui::vec2(0.0, -100_000.0), Modifiers::ALT);
+    let last_strip = window.strip_of_track(6);
+    let slider_along_the_bottom = window.rectangle_of("Position in the video");
+    assert!(
+        last_strip.bottom() <= slider_along_the_bottom.top() + 1.0,
+        "the last row is fully shown: {last_strip:?}"
+    );
 }
 
 // --- the title ---
@@ -304,7 +374,8 @@ fn the_box_closes_on_a_click_outside_it_and_on_escape_and_when_the_gear_is_press
 
     window.click(gear);
     assert!(window.application().timeline_view.settings_box_is_open());
-    window.click(Pos2::new(640.0, 120.0));
+    // (Beside the picture, so that it is not a click on the video, which would select it.)
+    window.click(Pos2::new(40.0, 120.0));
     assert!(
         !window.application().timeline_view.settings_box_is_open(),
         "a click outside closes it"
@@ -377,6 +448,125 @@ fn the_box_goes_when_its_track_does_not_exist_any_more() {
     window.click(window.gear_of_track(0).center());
     assert!(window.application().timeline_view.settings_box_is_open());
     window.application_mut().start_empty_project();
+    window.settle();
+    assert!(!window.application().timeline_view.settings_box_is_open());
+}
+
+// --- deleting a track ---
+
+const DELETE_TRACK: &str = "Delete track";
+
+fn right_click_the_title_box_of_track(window: &mut Window, position: usize) {
+    let title_box = window.title_box_of_track(position);
+    window.right_click(title_box.center());
+}
+
+/// A window with a video of 300 frames on the track behind and a sound file (shorter) on the one in front.
+fn window_with_a_video_and_a_sound() -> Window {
+    Window::showing(project_with_a_video_and_a_sound(300, 5))
+}
+
+#[test]
+fn right_clicking_the_title_box_of_a_track_offers_to_delete_it_and_choosing_that_takes_it_and_its_clips_away() {
+    let mut window = window_with_a_video_and_a_sound();
+    let sound_track = window.application().project().tracks()[0].id();
+    assert_eq!(window.application().project().tracks().len(), 2);
+    window.application_mut().note_everything_is_saved();
+
+    right_click_the_title_box_of_track(&mut window, 0);
+    assert!(
+        window.harness.query_by_label(DELETE_TRACK).is_some(),
+        "the menu offers it"
+    );
+    assert_eq!(
+        window.application().project().tracks().len(),
+        2,
+        "opening the menu changes nothing"
+    );
+    window.harness.get_by_label(DELETE_TRACK).click();
+    window.settle();
+
+    let tracks = window.application().project().tracks();
+    assert_eq!(tracks.len(), 1);
+    assert_ne!(
+        tracks[0].id(),
+        sound_track,
+        "the one in front is gone, the video track is left"
+    );
+    assert!(window.application().has_unsaved_changes());
+    assert!(window.harness.query_by_label(DELETE_TRACK).is_none(), "the menu closed");
+}
+
+#[test]
+fn the_box_beside_the_title_and_the_gear_has_the_same_menu() {
+    let mut window = window_with_a_video_and_a_sound();
+    let title_box = window.title_box_of_track(0);
+    let gear = window.gear_of_track(0);
+    // Between the title and the gear there is only the box itself.
+    let between = Pos2::new((title_box.right() + gear.left()) / 2.0, title_box.center().y);
+    window.right_click(between);
+    assert!(window.harness.query_by_label(DELETE_TRACK).is_some());
+}
+
+#[test]
+fn the_only_track_cannot_be_deleted_so_the_menu_item_is_there_but_cannot_be_used() {
+    let mut window = Window::showing(project_of(300));
+    right_click_the_title_box_of_track(&mut window, 0);
+    let item = window.harness.get_by_label(DELETE_TRACK);
+    assert!(item.accesskit_node().is_disabled(), "disabled");
+    window.harness.get_by_label(DELETE_TRACK).click();
+    window.settle();
+    assert_eq!(window.application().project().tracks().len(), 1);
+}
+
+#[test]
+fn deleting_a_track_is_one_step_of_the_history_and_undoing_it_brings_back_the_track_and_its_clips() {
+    let mut window = window_with_a_video_and_a_sound();
+    let before = window.application().project().clone();
+
+    right_click_the_title_box_of_track(&mut window, 0);
+    window.harness.get_by_label(DELETE_TRACK).click();
+    window.settle();
+    assert_eq!(window.application().project().tracks().len(), 1);
+
+    window.do_this(crate::application::commands::Command::Undo);
+    assert_eq!(window.application().project(), &before, "everything is as it was");
+    window.do_this(crate::application::commands::Command::Redo);
+    assert_eq!(window.application().project().tracks().len(), 1);
+}
+
+#[test]
+fn what_was_selected_on_a_deleted_track_is_not_selected_any_more_and_the_playhead_stays_in_range() {
+    let mut window = window_with_a_video_and_a_sound();
+    // The sound is 5 seconds, the video 10: the playhead at the end of the video is past what is left.
+    let sound = window.clip(0, 0);
+    let video = window.clip(1, 0);
+    window.do_this(crate::application::commands::Command::Select {
+        clips: vec![sound, video],
+        change: crate::application::selection::SelectionChange::Replace,
+    });
+    assert_eq!(window.application().selected_clips().len(), 2);
+
+    right_click_the_title_box_of_track(&mut window, 0);
+    window.harness.get_by_label(DELETE_TRACK).click();
+    window.settle();
+
+    assert_eq!(
+        window.application().selected_clips(),
+        vec![video],
+        "only what is still there"
+    );
+}
+
+#[test]
+fn deleting_a_track_closes_the_settings_box_that_was_about_it() {
+    let mut window = window_with_a_video_and_a_sound();
+    window.click(window.gear_of_track(0).center());
+    assert!(window.application().timeline_view.settings_box_is_open());
+    // Commands can come from anywhere, as the key does (here the menu is not open at the same time).
+    window.do_this(crate::application::commands::Command::DeleteTrack(
+        window.application().project().tracks()[0].id(),
+    ));
     window.settle();
     assert!(!window.application().timeline_view.settings_box_is_open());
 }

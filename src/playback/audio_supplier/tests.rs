@@ -11,10 +11,11 @@ use std::rc::Rc;
 
 use super::*;
 use crate::media::export::{SoundClipToExport, SoundItemToExport};
+use crate::playback::splice_waiting_sound;
 use crate::project::SourceMediaProperties;
 use crate::project::{
-    FrameRate, MediaClip, SourceFrameIndex, SourceMedia, SourceMediaLink, SourceVideoProperties, SpeedFactor,
-    SpeedIndicatorLayout, Track, TrackId,
+    ClipLocation, FrameRate, Gain, MediaClip, SourceFrameIndex, SourceMedia, SourceMediaLink, SourceVideoProperties,
+    SpeedFactor, SpeedIndicatorLayout, Track, TrackId,
 };
 
 const SAMPLE_RATE: u32 = 48_000;
@@ -29,6 +30,11 @@ struct SpeakerState {
     /// Everything that has been played, one entry for each sample.
     played: Vec<f32>,
     times_cleared: usize,
+    /// How many moments the speakers were asked to play when nothing was waiting: a gap in the sound.
+    underrun_moments: u64,
+    /// Every time new sound was joined onto what was waiting: how much was kept, how long the
+    /// fade was, and how many moments of new sound there were.
+    splices: Vec<(u64, u64, usize)>,
     /// Set to make the speakers report that they no longer work.
     broken: bool,
 }
@@ -55,6 +61,15 @@ impl AudioSink for FakeSpeakers {
 
     fn queued_moment_count(&self) -> u64 {
         (self.state.borrow().waiting.len() / usize::from(self.format.channel_count)) as u64
+    }
+
+    fn replace_waiting_sound(&mut self, keep_moments: u64, fade_moments: u64, new_sound: &[f32]) {
+        let channel_count = usize::from(self.format.channel_count);
+        let mut state = self.state.borrow_mut();
+        state
+            .splices
+            .push((keep_moments, fade_moments, new_sound.len() / channel_count));
+        splice_waiting_sound(&mut state.waiting, channel_count, keep_moments, fade_moments, new_sound);
     }
 
     fn is_working(&self) -> bool {
@@ -188,6 +203,18 @@ fn project_of_clips(clips: &[(u64, u64, u32)]) -> Project {
     Project::from_parts(vec![video], vec![track], SpeedIndicatorLayout::DEFAULT).unwrap()
 }
 
+/// The same project as `project_of_clips(&[(0, 600, 1)])` but with its clip `decibels` louder, which
+/// is a change to what is heard that leaves the sound as long as it was.
+fn project_with_a_clip_that_is_louder_by(decibels: f32) -> Project {
+    let mut project = project_of_clips(&[(0, 600, 1)]);
+    let location = ClipLocation {
+        track: project.tracks()[0].id(),
+        clip: project.tracks()[0].placement_at_index(0).unwrap().id,
+    };
+    project.set_clip_gain(location, Gain::from_decibels(decibels)).unwrap();
+    project
+}
+
 /// The first clip of the first track of the sound a request asks for.
 fn first_sound_clip(request: &AudioStreamRequest) -> SoundClipToExport {
     match request.sound.strips[0].items[0] {
@@ -277,6 +304,8 @@ impl Bench {
     fn play(&self, moments: usize) {
         let channel_count = usize::from(self.channel_count);
         let mut state = self.speakers.borrow_mut();
+        let moments_waiting = state.waiting.len() / channel_count;
+        state.underrun_moments += moments.saturating_sub(moments_waiting) as u64;
         for _ in 0..(moments * channel_count).min(state.waiting.len()) {
             let sample = state.waiting.pop_front().unwrap();
             state.played.push(sample);
@@ -576,6 +605,191 @@ fn a_change_to_what_the_sound_is_made_of_starts_it_again_even_though_the_clock_i
 
     assert!(bench.stream(0).was_stopped.get());
     assert_eq!(bench.streams_started(), 2);
+}
+
+// --- editing while the video plays ---
+
+#[test]
+fn an_edit_while_playing_leaves_the_old_sound_playing_until_the_new_is_ready_and_then_joins_it_without_a_gap() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    assert_eq!(bench.streams_started(), 1);
+
+    // A volume is changed, and the sound that is made for that takes a while to produce anything.
+    bench.starter.decoded_at_the_start.set(0);
+    bench.speakers.borrow_mut().underrun_moments = 0;
+    let times_cleared_before = bench.speakers.borrow().times_cleared;
+    bench.project = project_with_a_clip_that_is_louder_by(6.0);
+    let clock = bench.play_steadily(clock, 0.25);
+
+    assert_eq!(
+        bench.streams_started(),
+        2,
+        "the sound for the edited project is being made"
+    );
+    assert!(!bench.stream(0).was_stopped.get(), "the old sound goes on while it is");
+    assert_eq!(bench.speakers.borrow().underrun_moments, 0, "with no gap in it");
+    assert_eq!(
+        bench.speakers.borrow().times_cleared,
+        times_cleared_before,
+        "and nothing thrown away"
+    );
+
+    // The new sound arrives. The replacement was started where the playhead was 0.25 s ago, so its
+    // first moments are late and are skipped, and it joins in step with the clock.
+    let replacement_started_at = 3.0 + 1.0;
+    bench.stream(1).decoded_moments.set(u64::MAX / 4);
+    let clock = bench.play_steadily(clock, 0.5);
+
+    assert!(bench.stream(0).was_stopped.get(), "the old stream has been let go of");
+    assert_eq!(bench.streams_started(), 2);
+    assert_eq!(bench.speakers.borrow().underrun_moments, 0, "no gap at the join either");
+    assert_eq!(bench.speakers.borrow().times_cleared, times_cleared_before);
+    let splices = bench.speakers.borrow().splices.clone();
+    assert_eq!(splices.len(), 1, "joined once: {splices:?}");
+    assert_eq!(
+        (splices[0].0, splices[0].1),
+        (
+            (SECONDS_OF_OLD_SOUND_KEPT_WHEN_TAKING_OVER * f64::from(SAMPLE_RATE)).round() as u64,
+            (SECONDS_TO_FADE_WHEN_TAKING_OVER * f64::from(SAMPLE_RATE)).round() as u64
+        ),
+        "a little of the old sound is kept, and it fades into the new"
+    );
+
+    // What is heard at the end is the new stream's sound, and it is where the clock says.
+    let played = bench.played();
+    let expected = (clock - replacement_started_at) * f64::from(SAMPLE_RATE);
+    let last = f64::from(*played.last().unwrap());
+    assert!(
+        (last - expected).abs() < 2500.0,
+        "the sound at the end is at moment {last} of the new stream, near {expected}"
+    );
+    let tail = &played[played.len() - 4000..];
+    assert_consecutive(tail, "the new sound is steady once it has taken over");
+}
+
+#[test]
+fn edits_that_keep_coming_make_the_sound_catch_up_every_so_often_and_it_never_has_a_gap() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let mut clock = bench.play_steadily(3.0, 1.0);
+    bench.speakers.borrow_mut().underrun_moments = 0;
+    let streams_before = bench.streams_started();
+
+    // A slider is dragged for two seconds: what the sound is made of is different in every frame.
+    for step in 0..120 {
+        bench.project = project_with_a_clip_that_is_louder_by(step as f32 * 0.1);
+        clock = bench.play_steadily(clock, 1.0 / 60.0);
+    }
+
+    let new_streams = bench.streams_started() - streams_before;
+    assert!(
+        new_streams >= 8,
+        "the sound is made again every so often: {new_streams} times in 2 s"
+    );
+    assert!(
+        new_streams <= 21,
+        "but never more often than every 100 milliseconds: {new_streams} times in 2 s"
+    );
+    assert_eq!(bench.speakers.borrow().underrun_moments, 0, "and there is never a gap");
+}
+
+#[test]
+fn a_replacement_that_arrives_hopelessly_late_is_dropped_and_the_old_sound_goes_on_with_another_one_made() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    bench.starter.decoded_at_the_start.set(0);
+    bench.speakers.borrow_mut().underrun_moments = 0;
+    bench.project = project_with_a_clip_that_is_louder_by(6.0);
+    let clock = bench.play_steadily(clock, 4.0);
+    assert_eq!(bench.streams_started(), 2, "the replacement is still being waited for");
+
+    // Its first sound comes four seconds late: of no use. The next one is quick.
+    bench.starter.decoded_at_the_start.set(u64::MAX / 4);
+    bench.stream(1).decoded_moments.set(u64::MAX / 4);
+    bench.play_steadily(clock, 0.5);
+
+    assert!(
+        bench.stream(1).was_stopped.get(),
+        "the replacement that was too late is let go of"
+    );
+    assert_eq!(bench.streams_started(), 3, "and another is made");
+    assert!(bench.stream(0).was_stopped.get(), "which took over");
+    assert_eq!(
+        bench.speakers.borrow().underrun_moments,
+        0,
+        "through all of it the sound did not stop"
+    );
+}
+
+#[test]
+fn an_edit_that_leaves_nothing_to_hear_silences_the_sound_at_once() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    let times_cleared_before = bench.speakers.borrow().times_cleared;
+
+    // The only clip is muted.
+    let mut muted = project_of_clips(&[(0, 600, 1)]);
+    let location = ClipLocation {
+        track: muted.tracks()[0].id(),
+        clip: muted.tracks()[0].placement_at_index(0).unwrap().id,
+    };
+    muted.set_clip_muted(location, true).unwrap();
+    bench.project = muted;
+    bench.let_time_pass(A_FRAME_OF_THE_WINDOW);
+    bench.update_playing_at(clock);
+
+    assert_eq!(bench.waiting_moments(), 0, "nothing is left waiting at the speakers");
+    assert_eq!(bench.speakers.borrow().times_cleared, times_cleared_before + 1);
+    assert!(bench.stream(0).was_stopped.get());
+    assert!(!bench.supplier.is_running());
+}
+
+#[test]
+fn moving_the_playhead_a_long_way_while_a_replacement_is_being_made_starts_everything_again_from_there() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    bench.starter.decoded_at_the_start.set(0);
+    bench.project = project_with_a_clip_that_is_louder_by(6.0);
+    let clock = bench.play_steadily(clock, 0.2);
+    assert_eq!(bench.streams_started(), 2);
+
+    bench.starter.decoded_at_the_start.set(u64::MAX / 4);
+    bench.let_time_pass(A_FRAME_OF_THE_WINDOW);
+    bench.update_playing_at(clock + 10.0);
+    bench.let_time_pass(MINIMUM_TIME_BETWEEN_STREAM_STARTS);
+    bench.update_playing_at(clock + 10.1);
+
+    assert!(bench.stream(0).was_stopped.get());
+    assert!(
+        bench.stream(1).was_stopped.get(),
+        "the replacement was for a place the playhead has left"
+    );
+    assert_eq!(bench.streams_started(), 3);
+    let request = bench.starter.requests.borrow()[2].clone();
+    assert_eq!(
+        first_sound_clip(&request).first_source_frame,
+        frame_rate().frame_at_seconds(clock + 10.0),
+        "from where the playhead is now"
+    );
+}
+
+#[test]
+fn pausing_while_a_replacement_is_being_made_lets_go_of_it_too() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    bench.starter.decoded_at_the_start.set(0);
+    bench.project = project_with_a_clip_that_is_louder_by(6.0);
+    let clock = bench.play_steadily(clock, 0.2);
+    bench.update_paused_at(clock);
+    assert!(bench.stream(0).was_stopped.get());
+    assert!(bench.stream(1).was_stopped.get());
+    assert!(!bench.supplier.is_running());
 }
 
 #[test]

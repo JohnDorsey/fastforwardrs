@@ -6,7 +6,9 @@ use super::{Room, Track, TrackEntry};
 use crate::project::tracks::clip::Clip;
 use crate::project::tracks::gain::Gain;
 use crate::project::tracks::ids::ClipId;
+use crate::project::tracks::placement::Placement;
 use crate::project::tracks::text_object::{TextClip, TextObject};
+use crate::project::tracks::track_height::TrackHeight;
 use crate::project::{SpeedFactor, TimelineFrameIndex};
 
 /// The result of cutting a clip in two.
@@ -33,6 +35,12 @@ pub enum ClipEditError {
     NotAMediaClip { clip: ClipId },
     #[error("{clip} is not a text object, so this does not apply to it")]
     NotATextClip { clip: ClipId },
+    #[error("{clip} is a sound, which is not on the picture, so this does not apply to it")]
+    NotOnThePicture { clip: ClipId },
+    #[error("{clip} lasts as long as the part of its video or sound it is made from, so this does not apply to it")]
+    LastsAsLongAsItsFile { clip: ClipId },
+    #[error("{clip} would be on top of another clip there")]
+    WouldOverlap { clip: ClipId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -54,6 +62,10 @@ impl Track {
 
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
+    }
+
+    pub fn set_height(&mut self, height: TrackHeight) {
+        self.height = height;
     }
 
     /// Makes everything on the track play `speed` times faster (on top of the clips' own speeds).
@@ -124,7 +136,7 @@ impl Track {
         let changed = match &self.entries[index].clip {
             Clip::Video(media) => Clip::Video(change(media)),
             Clip::Audio(media) => Clip::Audio(change(media)),
-            Clip::Text(_) => return Err(ClipEditError::NotAMediaClip { clip }),
+            Clip::Image(_) | Clip::Text(_) => return Err(ClipEditError::NotAMediaClip { clip }),
         };
         self.entries[index].clip = changed;
         self.reposition(&anchors);
@@ -155,7 +167,7 @@ impl Track {
     }
 
     /// Changes what the text clip `clip` says and how it looks. (Its length is not touched: see
-    /// [`Self::set_text_duration`].)
+    /// [`Self::set_clip_duration`].)
     pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
         let Clip::Text(text) = &mut self.entries[index].clip else {
@@ -165,23 +177,36 @@ impl Track {
         Ok(())
     }
 
-    /// Makes the text clip `clip` last `duration_in_frames` frames, or as long as there is room
-    /// for before the next clip if that is less (and at least one frame). Nothing else moves.
-    /// Returns how many frames it lasts now.
-    pub fn set_text_duration(&mut self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
+    /// Puts the clip `clip` (a video or a text object) at `placement` on the picture. Where it is on
+    /// the picture has nothing to do with when it is shown, so nothing on the track moves.
+    pub fn set_clip_placement(&mut self, clip: ClipId, placement: Placement) -> Result<(), ClipEditError> {
+        let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
+        let placed = self.entries[index]
+            .clip
+            .with_placement(placement)
+            .ok_or(ClipEditError::NotOnThePicture { clip })?;
+        self.entries[index].clip = placed;
+        Ok(())
+    }
+
+    /// Makes the clip `clip`, which is a text object or a picture, last `duration_in_frames`
+    /// frames, or as long as there is room for before the next clip if that is less (and at least
+    /// one frame). Nothing else moves. Returns how many frames it lasts now.
+    pub fn set_clip_duration(&mut self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
         let start = self.first_timeline_frames[index];
         let longest = self
             .first_timeline_frames
             .get(index + 1)
             .map_or(u64::MAX, |next_start| next_start - start);
-        let Clip::Text(text) = &mut self.entries[index].clip else {
-            return Err(ClipEditError::NotATextClip { clip });
-        };
+        let old_duration = self.entries[index]
+            .clip
+            .duration_in_frames_it_says()
+            .ok_or(ClipEditError::LastsAsLongAsItsFile { clip })?;
         let new_duration = duration_in_frames.clamp(1, longest);
-        if let Some(changed) = text.with_duration_in_frames(new_duration) {
-            let old_end = start + text.duration_in_frames();
-            *text = changed;
+        if let Some(changed) = self.entries[index].clip.with_duration_in_frames_it_says(new_duration) {
+            let old_end = start + old_duration;
+            self.entries[index].clip = changed;
             if let Some(next) = self.entries.get_mut(index + 1) {
                 // The next clip stays where it is, so the gap before it takes up the difference.
                 next.gap_before_frames = next.gap_before_frames + old_end - (start + new_duration);

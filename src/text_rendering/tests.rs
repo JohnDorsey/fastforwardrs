@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::*;
-use crate::project::{CanvasArea, FontSize, TextColour};
+use crate::project::{Angle, CanvasArea, FontSize, TextColour};
 
 /// One renderer for all the tests, because loading the computer's fonts is slow.
 fn shared_renderer() -> MutexGuard<'static, TextRenderer> {
@@ -35,6 +35,7 @@ fn text_object(text: &str, font_size_fraction: f32, area: CanvasArea) -> TextObj
         font_size: FontSize::from_fraction_of_picture_height(font_size_fraction),
         colour: TextColour::new(200, 40, 10, 255),
         area,
+        rotation: Angle::ZERO,
     }
 }
 

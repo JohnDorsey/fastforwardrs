@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::{FastForwardApplication, RunningExport};
+use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
-use crate::project::{Clip, SourceMediaIdentifier, TextObject};
+use crate::project::{SourceMediaIdentifier, TextObject};
 use crate::rgba_picture::RgbaPicture;
 use crate::text_rendering::area_size_in_pixels;
 
@@ -17,14 +18,14 @@ const DEFAULT_EXPORT_EXTENSION: &str = "mp4";
 
 /// What the message at the end of an export says. It says where the video went and, if a file the
 /// project is made from is shorter than the one it was edited on, what that cost.
-fn export_finished_text(destination: &std::path::Path, frames_black: u64) -> String {
+fn export_finished_text(destination: &std::path::Path, frames_missing_a_picture: u64) -> String {
     let saved = format!("The video was saved to {}", destination.display());
-    if frames_black == 0 {
+    if frames_missing_a_picture == 0 {
         saved
     } else {
         format!(
-            "{saved}\n\n{frames_black} frames of the project are black because a video the project is made from is \
-             not long enough for the clips that reach past its end."
+            "{saved}\n\n{frames_missing_a_picture} frames of the project are missing the picture of a video, because a video file \
+             the project is made from is not long enough for the clips that reach past its end."
         )
     }
 }
@@ -49,10 +50,7 @@ impl FastForwardApplication {
             .tracks()
             .iter()
             .flat_map(|track| track.entries())
-            .filter_map(|entry| match entry.clip() {
-                Clip::Video(media) | Clip::Audio(media) => Some(media.source()),
-                Clip::Text(_) => None,
-            })
+            .filter_map(|entry| entry.clip().source())
             .collect();
         in_use.sort();
         in_use.dedup();
@@ -124,7 +122,7 @@ impl FastForwardApplication {
                     export,
                     frames_written: 0,
                     total_frames: plan.total_frame_count,
-                    frames_black: plan.frames_black_for_lack_of_pictures,
+                    frames_missing_a_picture: plan.frames_missing_a_picture,
                     destination,
                 });
             }
@@ -139,12 +137,16 @@ impl FastForwardApplication {
             .first()
             .and_then(|source| source.link.absolute_path.file_stem())
             .map_or_else(|| "video".to_owned(), |stem| stem.to_string_lossy().into_owned());
-        let path = rfd::FileDialog::new()
-            .set_title("Export the video")
-            // Not the name of a source file, which exporting must never overwrite.
-            .set_file_name(format!("{first_file_name}_fastforward.{DEFAULT_EXPORT_EXTENSION}"))
-            .add_filter("Video files", &EXPORT_FILE_EXTENSIONS)
-            .save_file()?;
+        // Not the name of a source file, which exporting must never overwrite.
+        let suggested_file_name = format!("{first_file_name}_fastforward.{DEFAULT_EXPORT_EXTENSION}");
+        let path = self.file_chooser.choose_where_to_save(&FileQuestion {
+            title: "Export the video",
+            suggested_file_name: Some(&suggested_file_name),
+            kinds: &[FileKind {
+                name: "Video files",
+                extensions: &EXPORT_FILE_EXTENSIONS,
+            }],
+        })?;
         Some(if path.extension().is_none() {
             path.with_extension(DEFAULT_EXPORT_EXTENSION)
         } else {
@@ -167,11 +169,14 @@ impl FastForwardApplication {
         }
         let Some(result) = result else { return };
         let destination = running.destination.clone();
-        let frames_black = running.frames_black;
+        let frames_missing_a_picture = running.frames_missing_a_picture;
         self.export = None;
         match result {
             ExportResult::Completed => {
-                self.show_message("Export finished", export_finished_text(&destination, frames_black));
+                self.show_message(
+                    "Export finished",
+                    export_finished_text(&destination, frames_missing_a_picture),
+                );
             }
             ExportResult::Cancelled => {}
             ExportResult::Failed { reason } => self.show_message("The export failed", reason),
@@ -190,14 +195,17 @@ mod tests {
         let text = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 0);
         assert!(text.starts_with("The video was saved to "), "{text}");
         assert!(text.contains("holiday_fastforward.mp4"), "{text}");
-        assert!(!text.contains("black"), "nothing was left out: {text}");
+        assert!(!text.contains("missing"), "nothing was left out: {text}");
     }
 
     #[test]
-    fn the_message_says_how_many_frames_are_black_when_there_are_some() {
+    fn the_message_says_how_many_frames_are_missing_the_picture_of_a_video_when_there_are_some() {
         let text = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 417);
         assert!(text.contains("holiday_fastforward.mp4"), "{text}");
-        assert!(text.contains("417 frames of the project are black"), "{text}");
+        assert!(
+            text.contains("417 frames of the project are missing the picture of a video"),
+            "{text}"
+        );
     }
 
     #[test]

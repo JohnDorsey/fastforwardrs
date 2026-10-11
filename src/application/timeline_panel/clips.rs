@@ -5,6 +5,7 @@
 //!   video, side by side with no gaps;
 //! * a sound clip is the waveform of the sound, dark blue on pale violet;
 //! * a text clip is what the text says, on a teal background;
+//! * a picture clip is the picture, once, and the name of its file, on a violet background;
 //! * a clip whose file cannot be found is a dull red, with the name of the file.
 //!
 //! The selected clip has a bright outline.
@@ -12,12 +13,13 @@
 use egui::epaint::RectShape;
 use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Rect, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
+use super::bevel::{self, bevel_lines};
 use super::strip_view::StripView;
 use super::{SourceLook, TimelineContent};
 use crate::application::textures::Textures;
 use crate::application::theme;
-use crate::application::timeline_geometry::{TileLayout, WaveformColumn};
-use crate::media::{ThumbnailStrip, thumbnail_second_for_source_frame};
+use crate::application::timeline_geometry::{TileLayout, WaveformColumn, tile_width_for};
+use crate::media::ThumbnailLibrary;
 use crate::project::{Clip, ClipPlacement, SourceMediaIdentifier, Track};
 
 /// The part of a picture a tile shows: from the left edge to this fraction of the picture's width.
@@ -83,23 +85,16 @@ pub(super) fn rectangles_of(placement: &ClipPlacement<'_>, view: &StripView) -> 
     }
 }
 
-/// Fills the strip's background, which shows through between the clips.
+/// Fills the strip's background, which shows through between the clips, and draws the line along
+/// its top and its bottom. The strip is a view onto a track that goes on beyond what is in the
+/// window at either end, so it has square corners and no line down its sides: the only rounded
+/// corners are those of the clips, at the places where they really begin and end.
 pub(super) fn draw_background(painter: &Painter, strip_rectangle: Rect) {
-    painter.rect_filled(
-        strip_rectangle,
-        CornerRadius::same(theme::CLIP_CORNER_RADIUS),
-        theme::TRACK_BACKGROUND,
-    );
-}
-
-/// Draws the line around the strip.
-pub(super) fn draw_border(painter: &Painter, strip_rectangle: Rect) {
-    painter.rect_stroke(
-        strip_rectangle,
-        CornerRadius::same(theme::CLIP_CORNER_RADIUS),
-        Stroke::new(1.0, theme::TRACK_BORDER),
-        StrokeKind::Inside,
-    );
+    painter.rect_filled(strip_rectangle, 0.0, theme::TRACK_BACKGROUND);
+    let border = Stroke::new(1.0, theme::TRACK_BORDER);
+    for y in [strip_rectangle.top() + 0.5, strip_rectangle.bottom() - 0.5] {
+        painter.hline(strip_rectangle.x_range(), y, border);
+    }
 }
 
 /// Draws the clips of `track` that are in view of `view` (the view of its strip).
@@ -111,7 +106,18 @@ pub(super) fn draw_clips(
     view: &StripView,
     textures: &mut Textures,
 ) {
-    let tiles = view.geometry.visible_tiles(track, view.scroll_offset, view.width());
+    // A picture is as wide as one of the video is on a row as tall as the strip, which is not
+    // stretched nor cropped however tall or short the track is made.
+    let row_height = view.rectangle.height();
+    let tile_width_of = |source| {
+        content.source_looks.get(&source).map_or(0.0, |look| {
+            let (width, height) = look.picture_size_in_pixels;
+            tile_width_for(row_height, width, height)
+        })
+    };
+    let tiles = view
+        .geometry
+        .visible_tiles(track, tile_width_of, view.scroll_offset, view.width());
     for placement in track.placements() {
         let rectangles = rectangles_of(&placement, view);
         if rectangles.visible.width() <= 0.0 {
@@ -122,9 +128,8 @@ pub(super) fn draw_clips(
             Clip::Video(media) => {
                 let look = content.source_looks.get(&media.source());
                 match look {
-                    Some(look) if look.is_available => {
-                        let Some(thumbnails) = look.thumbnails else { continue };
-                        draw_video_clip(
+                    Some(look) if look.is_available => match look.thumbnails {
+                        Some(thumbnails) => draw_video_clip(
                             ui,
                             painter,
                             view,
@@ -132,8 +137,11 @@ pub(super) fn draw_clips(
                             media.source(),
                             thumbnails,
                             textures,
-                        );
-                    }
+                        ),
+                        None => {
+                            painter.rect_filled(rectangles.whole, corner_radius, theme::THUMBNAIL_PLACEHOLDER);
+                        }
+                    },
                     other => draw_missing_clip(painter, rectangles, corner_radius, other),
                 }
             }
@@ -153,12 +161,81 @@ pub(super) fn draw_clips(
                 }
                 other => draw_missing_clip(painter, rectangles, corner_radius, other),
             },
+            Clip::Image(image) => match content.source_looks.get(&image.source()) {
+                Some(look) if look.is_available => {
+                    painter.rect_filled(rectangles.whole, corner_radius, theme::IMAGE_CLIP_BACKGROUND);
+                    let picture_width =
+                        draw_picture_of_a_picture_clip(ui, painter, view, rectangles, image.source(), look, textures);
+                    draw_label_after(
+                        painter,
+                        rectangles,
+                        picture_width,
+                        &look.file_name,
+                        theme::IMAGE_CLIP_TEXT,
+                    );
+                }
+                other => draw_missing_clip(painter, rectangles, corner_radius, other),
+            },
             Clip::Text(text) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::TEXT_CLIP_BACKGROUND);
                 draw_label(painter, rectangles, &text.object.text, theme::TEXT_CLIP_TEXT);
             }
         }
+        draw_bevel(painter, rectangles, view);
     }
+}
+
+/// Gives a clip its raised look: light along its top and left edges, shade along its bottom and
+/// right edges (see [`bevel`]), so that its edges show whatever the colour of what it is made of.
+fn draw_bevel(painter: &Painter, rectangles: ClipRectangles, view: &StripView) {
+    let lines = bevel_lines(
+        rectangles.whole,
+        f32::from(theme::CLIP_CORNER_RADIUS),
+        view.rectangle.left(),
+        view.rectangle.right(),
+    );
+    for line in lines {
+        for run in line.runs {
+            painter.add(Shape::line(run, Stroke::new(bevel::LAYER_WIDTH, line.colour)));
+        }
+    }
+}
+
+/// Draws the picture of a picture clip once, at the left end of the clip (or of what can be seen of
+/// it), as wide as the picture is on a row as tall as the strip (and no wider than the clip). Returns
+/// how wide it is, which is nothing until the picture is decoded.
+fn draw_picture_of_a_picture_clip(
+    ui: &Ui,
+    painter: &Painter,
+    view: &StripView,
+    rectangles: ClipRectangles,
+    source: SourceMediaIdentifier,
+    look: &SourceLook<'_>,
+    textures: &mut Textures,
+) -> f32 {
+    let Some(picture) = look.picture else {
+        return 0.0;
+    };
+    let (width, height) = look.picture_size_in_pixels;
+    let picture_width = tile_width_for(view.rectangle.height(), width, height) as f32;
+    let tile = Rect::from_min_size(
+        pos2(rectangles.visible.left(), view.rectangle.top()),
+        vec2(picture_width, view.rectangle.height()),
+    )
+    .intersect(rectangles.visible);
+    if tile.width() > 0.0 {
+        let shown = if picture_width > 0.0 {
+            tile.width() / picture_width
+        } else {
+            1.0
+        };
+        let texture = textures.image_picture(ui.ctx(), source, picture);
+        painter.add(
+            RectShape::filled(tile, CornerRadius::ZERO, Color32::WHITE)
+                .with_texture(texture.id(), picture_part_up_to(shown)),
+        );
+    }
+    tile.width()
 }
 
 /// Draws the pictures of one video clip, which are the `tiles` it has in view of `view`.
@@ -168,7 +245,7 @@ fn draw_video_clip<'a>(
     view: &StripView,
     tiles: impl Iterator<Item = &'a TileLayout>,
     source: SourceMediaIdentifier,
-    thumbnails: &ThumbnailStrip,
+    thumbnails: &ThumbnailLibrary,
     textures: &mut Textures,
 ) {
     for tile in tiles {
@@ -177,8 +254,7 @@ fn draw_video_clip<'a>(
             vec2(tile.width as f32, view.rectangle.height()),
         );
         let corner_radius = corner_radius_of_tile(tile, theme::CLIP_CORNER_RADIUS);
-        let second = thumbnail_second_for_source_frame(view.geometry.frame_rate(), tile.source_frame);
-        let shape = match textures.thumbnail(ui.ctx(), source, thumbnails, second) {
+        let shape = match textures.thumbnail(ui.ctx(), source, thumbnails, tile.picture) {
             Some(texture) => RectShape::filled(tile_rectangle, corner_radius, Color32::WHITE)
                 .with_texture(texture.id(), picture_part_up_to(tile.fraction_of_picture_shown)),
             None => RectShape::filled(tile_rectangle, corner_radius, theme::THUMBNAIL_PLACEHOLDER),
@@ -239,6 +315,22 @@ fn draw_label(painter: &Painter, rectangles: ClipRectangles, text: &str, colour:
     );
 }
 
+/// Like [`draw_label`], but starting `space_taken` points in from the left edge of what can be seen
+/// of the clip: after what is already drawn there.
+fn draw_label_after(painter: &Painter, rectangles: ClipRectangles, space_taken: f32, text: &str, colour: Color32) {
+    let painter = painter.with_clip_rect(rectangles.visible);
+    painter.text(
+        pos2(
+            rectangles.visible.left() + space_taken + 12.0,
+            rectangles.visible.center().y,
+        ),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(14.0),
+        colour,
+    );
+}
+
 /// Draws the outline of the selected clip.
 pub(super) fn draw_selection_outline(painter: &Painter, rectangles: ClipRectangles) {
     painter.with_clip_rect(rectangles.visible.expand(2.0)).rect_stroke(
@@ -276,6 +368,7 @@ pub(super) fn draw_clip_boundaries(painter: &Painter, view: &StripView, track: &
 mod tests {
     use super::*;
     use crate::application::timeline_geometry::TimelineGeometry;
+    use crate::media::ThumbnailKey;
     use crate::project::{ClipId, SourceFrameIndex};
 
     fn tile(starts_clip: bool, ends_clip: bool) -> TileLayout {
@@ -286,6 +379,7 @@ mod tests {
             width: 100.0,
             fraction_of_picture_shown: 1.0,
             source_frame: SourceFrameIndex::new(0),
+            picture: ThumbnailKey { level: 0, index: 0 },
             starts_clip,
             ends_clip,
         }
@@ -328,9 +422,9 @@ mod tests {
     }
 
     #[test]
-    fn the_corners_of_clips_are_rounded_by_three_times_what_they_were() {
-        // Round 2 had a radius of 6 points; the request was for about three times as much.
-        assert_eq!(theme::CLIP_CORNER_RADIUS, 18);
+    fn the_corners_of_clips_are_rounded_half_as_much_again_as_in_the_last_round() {
+        // Round 2 had a radius of 6 points, round 3 three times that, and round 4 asked for about 50% more.
+        assert_eq!(theme::CLIP_CORNER_RADIUS, 27);
     }
 
     fn column(loudness: f32) -> WaveformColumn {

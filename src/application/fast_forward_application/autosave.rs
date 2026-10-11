@@ -16,15 +16,30 @@ use super::FastForwardApplication;
 const QUIET_TIME_BEFORE_AUTOSAVING: Duration = Duration::from_secs(2);
 
 impl FastForwardApplication {
-    /// Records that the project has been changed in a way that is not saved yet.
+    /// Whether the project has changes that have not been saved: edits that were made since it was
+    /// saved (undoing back to what was saved leaves none), or changes of what is not edited, such
+    /// as the project's settings.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.unsaved_change_outside_history || !self.history.is_saved()
+    }
+
+    /// Records that the project has been changed, in a way that is not an edit of the history (a
+    /// setting of the project, or the place a file was found), and is not saved yet.
     pub(super) fn note_unsaved_change(&mut self) {
-        self.has_unsaved_changes = true;
+        self.unsaved_change_outside_history = true;
         self.last_unsaved_change_at = Some(Instant::now());
+    }
+
+    /// Records that the project was edited, or that an edit was undone or redone, at `now`: it is
+    /// the history that knows whether that leaves anything unsaved.
+    pub(super) fn note_the_project_was_edited(&mut self, now: Instant) {
+        self.last_unsaved_change_at = Some(now);
     }
 
     /// Records that the project is as saved.
     pub(super) fn note_everything_is_saved(&mut self) {
-        self.has_unsaved_changes = false;
+        self.history.mark_saved();
+        self.unsaved_change_outside_history = false;
         self.last_unsaved_change_at = None;
     }
 
@@ -37,7 +52,7 @@ impl FastForwardApplication {
     /// This is for the moments when waiting is no good, such as before the program asks whether
     /// to throw changes away: with autosave on there is nothing to throw away.
     pub(super) fn autosave_now(&mut self) {
-        if !self.has_unsaved_changes || !self.autosave_can_save() {
+        if !self.has_unsaved_changes() || !self.autosave_can_save() {
             return;
         }
         let Some(path) = self.project_file_path.clone() else {
@@ -52,7 +67,7 @@ impl FastForwardApplication {
     /// Saves the project if autosave is on and the project has been left alone for long enough.
     /// If it is not time yet, asks the window to look again when it will be.
     pub(super) fn autosave_when_quiet_for_long_enough(&mut self, context: &Context, now: Instant) {
-        if !self.has_unsaved_changes || !self.autosave_can_save() {
+        if !self.has_unsaved_changes() || !self.autosave_can_save() {
             return;
         }
         let Some(changed_at) = self.last_unsaved_change_at else {

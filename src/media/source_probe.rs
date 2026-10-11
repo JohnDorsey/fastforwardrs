@@ -1,4 +1,4 @@
-//! Asking ffprobe what a file contains: a video, or a sound.
+//! Asking ffprobe what a file contains: a video, a sound, or a picture.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,9 @@ use thiserror::Error;
 
 use super::child_process::{background_command, end_of_error_output};
 use super::ffmpeg_toolchain::FfmpegToolchain;
-use crate::project::{FrameRate, SourceAudioProperties, SourceMediaProperties, SourceVideoProperties};
+use crate::project::{
+    FrameRate, SourceAudioProperties, SourceImageProperties, SourceMediaProperties, SourceVideoProperties,
+};
 
 #[derive(Debug, Error)]
 pub enum ProbeError {
@@ -37,7 +39,7 @@ pub fn probe_video(toolchain: &FfmpegToolchain, video_path: &Path) -> Result<Sou
 }
 
 /// Opens `path` with ffprobe and reports what the project needs to know about it, whether it is a
-/// video (a file with a picture) or a sound file (a file with only sound).
+/// picture (a still image), a video (a file with moving pictures) or a sound file (a file with only sound).
 pub fn probe_source_media(toolchain: &FfmpegToolchain, path: &Path) -> Result<SourceMediaProperties, ProbeError> {
     let probe_output_json = run_ffprobe(toolchain, path)?;
     source_properties_from_probe_output(&probe_output_json, |video_stream_index| {
@@ -110,13 +112,17 @@ pub fn properties_from_probe_output(
     video_properties(&parse_probe_output(probe_output_json)?, count_packets)
 }
 
-/// Like [`properties_from_probe_output`], but a file that has no video picture is a sound file if it
-/// has sound, and its properties are those of a sound.
+/// Like [`properties_from_probe_output`], but a file that is a still image has the properties of a
+/// picture, and a file that has no video picture is a sound file if it has sound, and its
+/// properties are those of a sound.
 pub fn source_properties_from_probe_output(
     probe_output_json: &str,
     count_packets: impl FnOnce(u32) -> Result<u64, ProbeError>,
 ) -> Result<SourceMediaProperties, ProbeError> {
     let probe_output = parse_probe_output(probe_output_json)?;
+    if probe_output.is_a_still_image() {
+        return image_properties(&probe_output).map(SourceMediaProperties::Image);
+    }
     match video_properties(&probe_output, count_packets) {
         Ok(video) => Ok(SourceMediaProperties::Video(video)),
         Err(ProbeError::NoVideoStream) => audio_properties(&probe_output).map(SourceMediaProperties::Audio),
@@ -126,6 +132,20 @@ pub fn source_properties_from_probe_output(
 
 fn parse_probe_output(probe_output_json: &str) -> Result<ProbeOutput, ProbeError> {
     serde_json::from_str(probe_output_json).map_err(|error| ProbeError::UnreadableAnswer(error.to_string()))
+}
+
+/// The size a picture is shown at, from the first of its streams that is a picture.
+fn image_properties(probe_output: &ProbeOutput) -> Result<SourceImageProperties, ProbeError> {
+    let picture_stream = probe_output
+        .streams
+        .iter()
+        .find(|stream| stream.is_video())
+        .ok_or(ProbeError::NoVideoStream)?;
+    let (display_width_in_pixels, display_height_in_pixels) = picture_stream.display_size()?;
+    Ok(SourceImageProperties {
+        display_width_in_pixels,
+        display_height_in_pixels,
+    })
 }
 
 /// How long a sound file lasts, from the first of its sound streams that says, or else from the
@@ -224,8 +244,26 @@ struct ProbeOutput {
     format: Option<ProbeFormat>,
 }
 
+impl ProbeOutput {
+    /// Whether the file is a still image (a PNG, a JPEG...) and not a video, which ffprobe says by
+    /// the kind of file it reads it as: `image2` for a file it knows by its extension, and a name
+    /// ending in `_pipe` (`png_pipe`, `webp_pipe`) for one it knows by what is in it. (A video
+    /// file of a single picture is still a video, and so is an animated GIF, whose format is `gif`.)
+    fn is_a_still_image(&self) -> bool {
+        self.format
+            .as_ref()
+            .and_then(|format| format.format_name.as_deref())
+            .is_some_and(|names| {
+                names
+                    .split(',')
+                    .any(|name| name == "image2" || name == "image2pipe" || name.ends_with("_pipe"))
+            })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ProbeFormat {
+    format_name: Option<String>,
     duration: Option<String>,
 }
 
@@ -589,6 +627,94 @@ mod tests {
             properties_from_probe_output("{}"),
             Err(ProbeError::NoVideoStream)
         ));
+    }
+
+    // --- pictures ---
+
+    /// What ffprobe prints (trimmed) for a PNG file of 800 by 600 pixels.
+    const PNG_FILE: &str = r#"{
+        "streams": [
+            { "index": 0, "codec_type": "video", "codec_name": "png", "width": 800, "height": 600,
+              "sample_aspect_ratio": "1:1", "r_frame_rate": "25/1", "avg_frame_rate": "0/0",
+              "disposition": { "default": 0, "attached_pic": 0 } }
+        ],
+        "format": { "format_name": "png_pipe", "duration": "N/A" }
+    }"#;
+
+    #[test]
+    fn a_png_file_is_a_picture_of_the_size_it_says() {
+        assert_eq!(
+            source_properties(PNG_FILE).unwrap(),
+            SourceMediaProperties::Image(SourceImageProperties {
+                display_width_in_pixels: 800,
+                display_height_in_pixels: 600
+            })
+        );
+    }
+
+    #[test]
+    fn a_jpeg_file_which_ffprobe_knows_by_its_extension_is_a_picture_too() {
+        let json = PNG_FILE.replace("png_pipe", "image2").replace("\"png\"", "\"mjpeg\"");
+        assert!(matches!(
+            source_properties(&json).unwrap(),
+            SourceMediaProperties::Image(_)
+        ));
+        for kind in ["jpeg_pipe", "webp_pipe", "bmp_pipe", "tiff_pipe", "image2pipe"] {
+            let json = PNG_FILE.replace("png_pipe", kind);
+            assert!(
+                matches!(source_properties(&json).unwrap(), SourceMediaProperties::Image(_)),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_video_of_a_single_picture_or_an_animated_gif_is_a_video_and_not_a_picture() {
+        let one_frame_video = r#"{ "streams": [
+            { "index": 0, "codec_type": "video", "width": 640, "height": 360, "avg_frame_rate": "30/1", "nb_frames": "1" } ],
+            "format": { "format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "0.033" } }"#;
+        assert!(matches!(
+            source_properties(one_frame_video).unwrap(),
+            SourceMediaProperties::Video(_)
+        ));
+        let gif = r#"{ "streams": [
+            { "index": 0, "codec_type": "video", "width": 100, "height": 100, "avg_frame_rate": "10/1", "nb_frames": "20" } ],
+            "format": { "format_name": "gif", "duration": "2.0" } }"#;
+        assert!(matches!(
+            source_properties(gif).unwrap(),
+            SourceMediaProperties::Video(_)
+        ));
+    }
+
+    #[test]
+    fn the_size_of_a_picture_is_the_size_it_is_shown_at_after_its_pixel_shape_and_turning() {
+        let non_square = PNG_FILE.replace("\"1:1\"", "\"2:1\"");
+        let SourceMediaProperties::Image(image) = source_properties(&non_square).unwrap() else {
+            panic!("a picture")
+        };
+        assert_eq!(
+            (image.display_width_in_pixels, image.display_height_in_pixels),
+            (1600, 600)
+        );
+        let turned = PNG_FILE.replace(
+            "\"disposition\"",
+            "\"side_data_list\": [ { \"rotation\": -90 } ], \"disposition\"",
+        );
+        let SourceMediaProperties::Image(image) = source_properties(&turned).unwrap() else {
+            panic!("a picture")
+        };
+        assert_eq!(
+            (image.display_width_in_pixels, image.display_height_in_pixels),
+            (600, 800)
+        );
+    }
+
+    #[test]
+    fn a_picture_file_with_no_size_or_no_stream_is_an_error() {
+        let no_size = r#"{ "streams": [ { "codec_type": "video" } ], "format": { "format_name": "png_pipe" } }"#;
+        assert!(matches!(source_properties(no_size), Err(ProbeError::NoVideoStream)));
+        let no_stream = r#"{ "streams": [], "format": { "format_name": "image2" } }"#;
+        assert!(matches!(source_properties(no_stream), Err(ProbeError::NoVideoStream)));
     }
 
     // --- sound files ---

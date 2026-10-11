@@ -29,16 +29,17 @@ pub use settings::{
     AnySetting, ProjectSettings, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
 };
 pub use source_media::{
-    SourceAudioProperties, SourceMedia, SourceMediaIdentifier, SourceMediaKind, SourceMediaLink, SourceMediaProperties,
-    SourceVideoProperties,
+    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaKind, SourceMediaLink,
+    SourceMediaProperties, SourceVideoProperties,
 };
 pub use speed_factor::{SpeedFactor, ZeroSpeedFactor};
 pub use speed_indicator_layout::SpeedIndicatorLayout;
 pub use timecode::format_timecode;
 pub use tracks::{
-    CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipLocation, ClipPlacement, Corner, EmptyClip, EmptyTextClip,
-    FontSize, Gain, InsertError, MediaClip, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track,
-    TrackEntry, TrackId,
+    Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipLocation, ClipPlacement, Corner, EmptyClip,
+    EmptyImageClip, EmptyTextClip, FontSize, Gain, ImageClip, InsertError, MediaClip, PictureDimensions, PictureFit,
+    PixelBox, Placement, PointOnThePicture, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track,
+    TrackEntry, TrackHeight, TrackId, fit_inside_picture, fitted_placement,
 };
 
 /// The frame rate of a project that has no video to take one from.
@@ -149,16 +150,14 @@ pub struct RelinkOutcome {
 pub enum EditError {
     #[error("the project has no {track}")]
     UnknownTrack { track: TrackId },
+    #[error("{track} is the only track, and a project always has a track")]
+    CannotDeleteTheOnlyTrack { track: TrackId },
     #[error(transparent)]
     Clip(#[from] ClipEditError),
 }
 
-fn kind_name(kind: SourceMediaKind) -> &'static str {
-    match kind {
-        SourceMediaKind::Video => "a video",
-        SourceMediaKind::Audio => "a sound file",
-    }
-}
+/// How many seconds a picture is shown for when it is put on a track, until it is changed.
+pub const SECONDS_A_NEW_PICTURE_IS_SHOWN_FOR: f64 = 5.0;
 
 impl Project {
     /// A project with no files and one empty track. It follows every global setting.
@@ -195,19 +194,20 @@ impl Project {
                 return Err(InconsistentProject::DuplicateTrack { track: track.id() });
             }
             for entry in track.entries() {
-                let Some(media) = entry.clip().as_media() else {
+                let Some(identifier) = entry.clip().source() else {
                     continue;
                 };
-                let source = sources
-                    .iter()
-                    .find(|source| source.identifier == media.source())
-                    .ok_or(InconsistentProject::ClipUsesUnknownSource {
+                let source = sources.iter().find(|source| source.identifier == identifier).ok_or(
+                    InconsistentProject::ClipUsesUnknownSource {
                         track: track.id(),
-                        identifier: media.source(),
-                    })?;
+                        identifier,
+                    },
+                )?;
                 let wanted_kind = match entry.clip() {
                     Clip::Video(_) => SourceMediaKind::Video,
-                    _ => SourceMediaKind::Audio,
+                    Clip::Audio(_) => SourceMediaKind::Audio,
+                    Clip::Image(_) => SourceMediaKind::Image,
+                    Clip::Text(_) => continue,
                 };
                 if source.kind() != wanted_kind {
                     return Err(InconsistentProject::ClipUsesSourceOfTheWrongKind {
@@ -350,6 +350,17 @@ impl Project {
         id
     }
 
+    /// Takes a track, and everything on it, out of the project. The files its clips were made from
+    /// stay part of the project. A project always has a track, so the last one cannot be deleted.
+    pub fn delete_track(&mut self, track: TrackId) -> Result<(), EditError> {
+        let position = self.track_position(track).ok_or(EditError::UnknownTrack { track })?;
+        if self.tracks.len() == 1 {
+            return Err(EditError::CannotDeleteTheOnlyTrack { track });
+        }
+        self.tracks.remove(position);
+        Ok(())
+    }
+
     /// Adds a file to the project and puts all of it on a track, starting at `at_frame`: on the
     /// front-most track that has nothing on it, or on a new track in front of all of them.
     pub fn import_source(
@@ -391,21 +402,32 @@ impl Project {
         let frame_count = match source.properties.video() {
             // The project's frame rate is the video's own, once it has been added.
             Some(video) => video.total_frame_count,
+            // A picture is shown for a while, as long as that is said to be (it has no length of its own).
+            None if kind == SourceMediaKind::Image => self
+                .frame_rate()
+                .nearest_frame_to_seconds(SECONDS_A_NEW_PICTURE_IS_SHOWN_FOR)
+                .max(1),
             None => source.properties.frame_count_at(self.frame_rate()),
         };
         self.sources.push(source);
 
-        let clip = MediaClip::new(
-            identifier,
-            SourceFrameIndex::new(0),
-            SourceFrameIndex::new(frame_count),
-            SpeedFactor::NORMAL,
-        )
-        .ok()
-        .map(|media| match kind {
-            SourceMediaKind::Video => Clip::Video(media),
-            SourceMediaKind::Audio => Clip::Audio(media),
-        });
+        let clip = match kind {
+            SourceMediaKind::Image => ImageClip::new(identifier, frame_count).ok().map(Clip::Image),
+            SourceMediaKind::Video | SourceMediaKind::Audio => MediaClip::new(
+                identifier,
+                SourceFrameIndex::new(0),
+                SourceFrameIndex::new(frame_count),
+                SpeedFactor::NORMAL,
+            )
+            .ok()
+            .map(|media| {
+                if kind == SourceMediaKind::Video {
+                    Clip::Video(media)
+                } else {
+                    Clip::Audio(media)
+                }
+            }),
+        };
         let clip_id = match clip {
             Some(clip) => self
                 .track_mut(track_id)
@@ -440,8 +462,8 @@ impl Project {
         if source.properties.kind() != properties.kind() {
             return Err(RelinkError::DifferentKind {
                 identifier,
-                expected: kind_name(source.properties.kind()),
-                chosen: kind_name(properties.kind()),
+                expected: source.properties.kind().description(),
+                chosen: properties.kind().description(),
             });
         }
         if let (Some(old), Some(new)) = (source.properties.video(), properties.video())
@@ -461,6 +483,25 @@ impl Project {
         Ok(outcome)
     }
 
+    /// Makes the project what `earlier` is, which is a copy of the project from before some edits
+    /// (or from after some that were undone), as undoing and redoing do. Two things are left as
+    /// they are now, because they are not what was edited:
+    ///
+    /// * the settings of the project, and
+    /// * where each source file is and what is known of it, for the files that `earlier` has too:
+    ///   a file may have been found, or chosen again, since the copy was made, and putting the old
+    ///   place back would lose it.
+    pub fn restore(&mut self, mut earlier: Project) {
+        for source in &mut earlier.sources {
+            if let Some(current) = self.source(source.identifier) {
+                source.link = current.link.clone();
+                source.properties = current.properties;
+            }
+        }
+        earlier.settings = self.settings;
+        *self = earlier;
+    }
+
     fn track_mut(&mut self, track: TrackId) -> Option<&mut Track> {
         self.tracks.iter_mut().find(|candidate| candidate.id() == track)
     }
@@ -470,21 +511,23 @@ impl Project {
     }
 
     /// Cuts the clips that are at `timeline_frame`, each in two, there. (A track that has nothing
-    /// there, or where a clip already starts there, is left alone.) With `only` given, only that
-    /// clip is cut, and only if it is at that frame. Returns what was cut.
+    /// there, or where a clip already starts there, is left alone.) With `only` given, only those
+    /// clips are cut, and only those of them that are at that frame. Returns what was cut.
     pub fn split_at(
         &mut self,
         timeline_frame: TimelineFrameIndex,
-        only: Option<ClipLocation>,
+        only: Option<&[ClipLocation]>,
     ) -> Vec<(TrackId, SplitOutcome)> {
         let mut cut = Vec::new();
         for track in &mut self.tracks {
             if let Some(only) = only {
-                let is_the_one = track.id() == only.track
-                    && track
-                        .placement_covering(timeline_frame)
-                        .is_some_and(|placement| placement.id == only.clip);
-                if !is_the_one {
+                let is_one_of_them = track.placement_covering(timeline_frame).is_some_and(|placement| {
+                    only.contains(&ClipLocation {
+                        track: track.id(),
+                        clip: placement.id,
+                    })
+                });
+                if !is_one_of_them {
                     continue;
                 }
             }
@@ -514,6 +557,32 @@ impl Project {
             .set_clip_muted(location.clip, muted)?)
     }
 
+    /// Moves clips so that each starts at the frame given for it, on its own track (see
+    /// [`Track::move_clips`]). Either all of them move or, if one of them cannot (a clip or a track is
+    /// not there, or the clips would be on top of one another), none does.
+    pub fn move_clips(&mut self, starts: &[(ClipLocation, TimelineFrameIndex)]) -> Result<(), EditError> {
+        let mut tracks_to_change: Vec<TrackId> = starts.iter().map(|(clip, _)| clip.track).collect();
+        tracks_to_change.sort_unstable();
+        tracks_to_change.dedup();
+        let mut changed = Vec::with_capacity(tracks_to_change.len());
+        for id in tracks_to_change {
+            let mut track = self.track(id).ok_or(EditError::UnknownTrack { track: id })?.clone();
+            let for_this_track: Vec<(ClipId, u64)> = starts
+                .iter()
+                .filter(|(clip, _)| clip.track == id)
+                .map(|(clip, start)| (clip.clip, start.value()))
+                .collect();
+            track.move_clips(&for_this_track)?;
+            changed.push(track);
+        }
+        for track in changed {
+            if let Some(slot) = self.track_mut(track.id()) {
+                *slot = track;
+            }
+        }
+        Ok(())
+    }
+
     /// Takes a clip off its track. See [`Track::delete_clip`] for what moves.
     pub fn delete_clip(&mut self, location: ClipLocation) -> Result<(), EditError> {
         Ok(self.track_mut_or_error(location.track)?.delete_clip(location.clip)?)
@@ -531,6 +600,12 @@ impl Project {
 
     pub fn set_track_muted(&mut self, track: TrackId, muted: bool) -> Result<(), EditError> {
         self.track_mut_or_error(track)?.set_muted(muted);
+        Ok(())
+    }
+
+    /// Makes the row of a track on the timeline taller or shorter.
+    pub fn set_track_height(&mut self, track: TrackId, height: TrackHeight) -> Result<(), EditError> {
+        self.track_mut_or_error(track)?.set_height(height);
         Ok(())
     }
 
@@ -562,12 +637,19 @@ impl Project {
             .set_text_object(location.clip, object)?)
     }
 
-    /// Makes a text clip last `frames` frames, or as long as there is room for if that is less.
-    /// Returns how long it lasts now.
-    pub fn set_text_duration(&mut self, location: ClipLocation, frames: u64) -> Result<u64, EditError> {
+    /// Puts a video or a text clip somewhere on the picture: where, how big and how far turned.
+    pub fn set_clip_placement(&mut self, location: ClipLocation, placement: Placement) -> Result<(), EditError> {
         Ok(self
             .track_mut_or_error(location.track)?
-            .set_text_duration(location.clip, frames)?)
+            .set_clip_placement(location.clip, placement)?)
+    }
+
+    /// Makes a text clip or a picture last `frames` frames, or as long as there is room for if that
+    /// is less. Returns how long it lasts now.
+    pub fn set_clip_duration(&mut self, location: ClipLocation, frames: u64) -> Result<u64, EditError> {
+        Ok(self
+            .track_mut_or_error(location.track)?
+            .set_clip_duration(location.clip, frames)?)
     }
 }
 

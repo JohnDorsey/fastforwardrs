@@ -259,6 +259,142 @@ fn moving_the_playhead_while_playing_makes_the_sound_jump_with_it() {
     );
 }
 
+/// A video whose sound is a steady 440 Hz tone, a tenth as loud as it can be.
+fn video_with_a_steady_tone(toolchain: &FfmpegToolchain) -> TestVideo {
+    test_video(
+        toolchain,
+        &TestVideoSpecification {
+            name: "steady_tone_20_seconds",
+            audio_expression: Some("0.1*sin(2*PI*440*t)"),
+            ..TestVideoSpecification::COUNTER
+        },
+    )
+}
+
+/// The loudest sample of `sound` (one entry for every 1/48000 of a second) between two times.
+fn loudest_between(sound: &[f32], from_seconds: f64, to_seconds: f64) -> f32 {
+    let moment = |seconds: f64| (seconds * f64::from(speakers::SAMPLE_RATE)) as usize;
+    sound[moment(from_seconds)..moment(to_seconds)]
+        .iter()
+        .fold(0.0, |loudest, sample| f32::max(loudest, sample.abs()))
+}
+
+/// The longest time, in seconds, between two times in which the speakers made no sound at all. (A
+/// steady tone passes through zero twice in every cycle, but never stays there.)
+fn longest_silence_between(sound: &[f32], from_seconds: f64, to_seconds: f64) -> f64 {
+    let moment = |seconds: f64| (seconds * f64::from(speakers::SAMPLE_RATE)) as usize;
+    let (mut longest, mut current) = (0, 0);
+    for sample in &sound[moment(from_seconds)..moment(to_seconds)] {
+        current = if sample.abs() < 0.0005 { current + 1 } else { 0 };
+        longest = longest.max(current);
+    }
+    longest as f64 / f64::from(speakers::SAMPLE_RATE)
+}
+
+#[test]
+fn changing_a_volume_while_playing_makes_the_sound_louder_and_does_not_interrupt_it() {
+    let toolchain = toolchain_or_skip!();
+    let video = video_with_a_steady_tone(&toolchain);
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    let speakers = RecordingSpeakers::new();
+    journey.application_mut().play_sound_through(speakers.opener());
+    journey.press_button("Play");
+    journey.keep_drawing_for(Duration::from_millis(1500));
+
+    // The volume of the clip is turned up by 12 dB (nearly four times as loud) with its box, as it
+    // plays; the sound is made again for that, and takes over from the sound that is playing.
+    journey.right_click(journey.strip_of_track(0).center());
+    let edited_at = Instant::now();
+    journey.set_slider("Gain", 12.0);
+    journey.keep_drawing_for(Duration::from_millis(1500));
+    let paused_at = Instant::now();
+    journey.press_button("Pause");
+    journey.keep_drawing_for(Duration::from_millis(100));
+
+    assert_eq!(journey.application().sound_problem(), None);
+    let sound = speakers.heard();
+    let opened_at = speakers.opened_at();
+    let seconds = |instant: Instant| instant.duration_since(opened_at).as_secs_f64();
+    let first_sound = sound
+        .iter()
+        .position(|sample| sample.abs() > 0.01)
+        .expect("something was heard") as f64
+        / f64::from(speakers::SAMPLE_RATE);
+
+    let silence = longest_silence_between(&sound, first_sound, seconds(paused_at) - 0.05);
+    assert!(
+        silence < 0.02,
+        "the sound stopped for {silence:.3} s somewhere between the start and the pause"
+    );
+    assert!(speakers.times_spliced() >= 1, "the new sound took over from the old");
+    assert_eq!(
+        speakers.times_cleared(),
+        1,
+        "the speakers were only cleared once, by the pause: not by the edit"
+    );
+
+    let before = loudest_between(&sound, seconds(edited_at) - 0.5, seconds(edited_at) - 0.1);
+    let after = loudest_between(&sound, seconds(paused_at) - 0.5, seconds(paused_at) - 0.1);
+    let ratio = f64::from(after) / f64::from(before);
+    assert!(
+        (ratio - 3.98).abs() < 0.5,
+        "12 dB is nearly four times as loud: it went from {before} to {after}, which is {ratio} times"
+    );
+}
+
+#[test]
+fn dragging_a_volume_slider_while_playing_changes_the_sound_as_it_goes_and_never_interrupts_it() {
+    let toolchain = toolchain_or_skip!();
+    let video = video_with_a_steady_tone(&toolchain);
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    let speakers = RecordingSpeakers::new();
+    journey.application_mut().play_sound_through(speakers.opener());
+    journey.press_button("Play");
+    journey.keep_drawing_for(Duration::from_millis(1000));
+    journey.right_click(journey.strip_of_track(0).center());
+
+    // The slider is moved a little in every frame for two seconds, from 0 dB up to 12 dB.
+    let dragged_from = Instant::now();
+    for step in 0..60 {
+        journey.set_slider("Gain", 12.0 * f64::from(step) / 59.0);
+        journey.keep_drawing_for(Duration::from_millis(30));
+    }
+    let dragged_until = Instant::now();
+    journey.keep_drawing_for(Duration::from_millis(600));
+    let paused_at = Instant::now();
+    journey.press_button("Pause");
+    journey.keep_drawing_for(Duration::from_millis(100));
+
+    assert_eq!(journey.application().sound_problem(), None);
+    let sound = speakers.heard();
+    let opened_at = speakers.opened_at();
+    let seconds = |instant: Instant| instant.duration_since(opened_at).as_secs_f64();
+    let first_sound = sound
+        .iter()
+        .position(|sample| sample.abs() > 0.01)
+        .expect("something was heard") as f64
+        / f64::from(speakers::SAMPLE_RATE);
+    let silence = longest_silence_between(&sound, first_sound, seconds(paused_at) - 0.05);
+    assert!(
+        silence < 0.02,
+        "the sound stopped for {silence:.3} s while the slider was dragged"
+    );
+    assert!(
+        speakers.times_spliced() >= 4,
+        "the sound was made again, and took over, several times as the slider moved: {} times",
+        speakers.times_spliced()
+    );
+
+    // The sound follows the slider: louder at the end of the drag than at the start of it.
+    let at_the_start = loudest_between(&sound, seconds(dragged_from) - 0.4, seconds(dragged_from) - 0.05);
+    let at_the_end = loudest_between(&sound, seconds(paused_at) - 0.45, seconds(paused_at) - 0.1);
+    assert!(
+        f64::from(at_the_end) > 3.0 * f64::from(at_the_start),
+        "nearly four times as loud at the end: {at_the_start} then {at_the_end}"
+    );
+    let _ = dragged_until;
+}
+
 #[test]
 fn the_whole_path_to_the_real_speakers_works_with_a_silent_video() {
     let toolchain = toolchain_or_skip!();

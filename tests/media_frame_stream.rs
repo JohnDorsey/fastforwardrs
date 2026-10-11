@@ -45,7 +45,7 @@ fn frame_numbers_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamReq
             Some(FrameStreamEvent::Frame(frame)) => {
                 assert_eq!(
                     (frame.width_in_pixels, frame.height_in_pixels),
-                    (request.picture_width_in_pixels, request.picture_height_in_pixels)
+                    request.delivered_size()
                 );
                 assert_eq!(
                     frame.rgba_pixels.len(),
@@ -162,7 +162,7 @@ fn first_picture_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamReq
 }
 
 #[test]
-fn a_video_of_another_shape_than_the_picture_is_fitted_inside_it_in_the_middle_with_black_round_it() {
+fn a_video_of_another_shape_than_the_picture_is_delivered_as_big_as_fits_inside_it_in_its_own_shape() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain); // 320x180
     let mut request = request_for(&video, 40, 4, 1);
@@ -171,24 +171,13 @@ fn a_video_of_another_shape_than_the_picture_is_fitted_inside_it_in_the_middle_w
 
     let frame = first_picture_delivered(&toolchain, &request);
 
-    // 16:9 in a square of 200: 200 wide and 112 tall, with 44 rows of black above and below.
+    // 16:9 in a square of 200: 200 wide and 112 tall, which is all of the picture there is: no black
+    // is put round it (where it goes on the picture is for whoever draws it to say).
     let (width, height) = (frame.width_in_pixels as usize, frame.height_in_pixels as usize);
-    assert_eq!((width, height), (200, 200));
-    let row = |number: usize| &frame.rgba_pixels[number * width * 4..(number + 1) * width * 4];
-    let is_black = |row: &[u8]| {
-        row.chunks(4)
-            .all(|pixel| pixel[0] <= 2 && pixel[1] <= 2 && pixel[2] <= 2)
-    };
-    for black_row in (0..44).chain(156..200) {
-        assert!(is_black(row(black_row)), "row {black_row} should be black");
-    }
-    assert!(
-        !(44..156).all(|number| is_black(row(number))),
-        "the video is in the middle"
-    );
-    // The middle is the picture of source frame 40, with its frame number strip along its top.
-    let middle: Vec<u8> = (44..156).flat_map(|number| row(number).to_vec()).collect();
-    assert_eq!(frame_number_in_picture(&middle, 200, 112, 4), 40);
+    assert_eq!((width, height), (200, 112));
+    assert_eq!(request.delivered_size(), (200, 112));
+    // It is the picture of source frame 40, with its frame number strip along its top.
+    assert_eq!(frame_number_in_picture(&frame.rgba_pixels, 200, 112, 4), 40);
 }
 
 #[test]
