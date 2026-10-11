@@ -26,9 +26,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[derive(Debug, Error)]
 pub enum ExportError {
     #[error(
-        "the export would overwrite the source video itself ({path}); choose a different name for the exported video"
+        "the export would overwrite one of the files the project is made from ({path}); choose a different name for the exported video"
     )]
-    DestinationIsTheSourceVideo { path: PathBuf },
+    DestinationIsASourceFile { path: PathBuf },
+    #[error("the export needs {needed} source files, but {given} were given")]
+    WrongNumberOfSourceFiles { needed: usize, given: usize },
     #[error("the export's working files could not be prepared: {0}")]
     CouldNotPrepare(#[source] io::Error),
     #[error("ffmpeg could not be started for the export: {0}")]
@@ -68,19 +70,29 @@ pub struct VideoExport {
 }
 
 impl VideoExport {
-    /// Starts exporting. The video is written to a temporary file beside `destination` and moved
-    /// into place only when it is complete, so a cancelled or failed export never damages a file
-    /// that is already at `destination`.
+    /// Starts exporting. `source_file_paths` are where the plan's source files are, in the order
+    /// the plan lists them ([`ExportPlan::source_files`]). The video is written to a temporary
+    /// file beside `destination` and moved into place only when it is complete, so a cancelled or
+    /// failed export never damages a file that is already at `destination`.
     pub fn start(
         toolchain: &FfmpegToolchain,
         plan: &ExportPlan,
-        source_video_path: &Path,
+        source_file_paths: &[PathBuf],
         destination: &Path,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, ExportError> {
-        if is_the_same_file(source_video_path, destination) {
-            return Err(ExportError::DestinationIsTheSourceVideo {
-                path: destination.to_owned(),
+        if source_file_paths.len() != plan.source_files.len() {
+            return Err(ExportError::WrongNumberOfSourceFiles {
+                needed: plan.source_files.len(),
+                given: source_file_paths.len(),
+            });
+        }
+        if let Some(source_file_path) = source_file_paths
+            .iter()
+            .find(|source_file_path| is_the_same_file(source_file_path, destination))
+        {
+            return Err(ExportError::DestinationIsASourceFile {
+                path: source_file_path.clone(),
             });
         }
 
@@ -89,7 +101,7 @@ impl VideoExport {
             .tempdir()
             .map_err(ExportError::CouldNotPrepare)?;
         let temporary_output = temporary_output_path(destination);
-        let files = write_working_files(&working_directory, plan, source_video_path, &temporary_output)?;
+        let files = write_working_files(&working_directory, plan, source_file_paths, &temporary_output)?;
         let arguments = export_arguments(toolchain, &files, &plan.filter_graph, VideoEncoder::choose(toolchain));
 
         let mut child = background_command(toolchain.ffmpeg_path())
@@ -231,10 +243,10 @@ fn lock(child: &Mutex<Child>) -> MutexGuard<'_, Child> {
     child.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Whether `destination` is the very file `source_video_path` (so that exporting would destroy
-/// the original video).
-fn is_the_same_file(source_video_path: &Path, destination: &Path) -> bool {
-    let Ok(canonical_source) = fs::canonicalize(source_video_path) else {
+/// Whether `destination` is the very file `source_file_path` (so that exporting would destroy
+/// the original).
+fn is_the_same_file(source_file_path: &Path, destination: &Path) -> bool {
+    let Ok(canonical_source) = fs::canonicalize(source_file_path) else {
         return false;
     };
     let canonical_destination = fs::canonicalize(destination).ok().or_else(|| {
@@ -262,30 +274,29 @@ fn temporary_output_path(destination: &Path) -> PathBuf {
     destination.with_file_name(name)
 }
 
-/// Saves the filter graph and the symbol pictures where ffmpeg can read them.
+/// Saves the filter graph and the still pictures where ffmpeg can read them.
 fn write_working_files(
     working_directory: &TempDir,
     plan: &ExportPlan,
-    source_video_path: &Path,
+    source_file_paths: &[PathBuf],
     output: &Path,
 ) -> Result<ExportFiles, ExportError> {
     let filter_graph_file = working_directory.path().join("filter_graph.txt");
     fs::write(&filter_graph_file, &plan.filter_graph.text).map_err(ExportError::CouldNotPrepare)?;
 
-    let mut symbol_pictures = Vec::with_capacity(plan.symbol_inputs.len());
-    for (number, symbol_input) in plan.symbol_inputs.iter().enumerate() {
-        let path = working_directory.path().join(format!("symbol_{number}.png"));
-        let png_bytes = symbol_input
+    let mut inputs = source_file_paths.to_vec();
+    for (number, still_picture) in plan.still_pictures.iter().enumerate() {
+        let path = working_directory.path().join(format!("still_picture_{number}.png"));
+        let png_bytes = still_picture
             .picture
             .to_png_bytes()
             .map_err(|error| ExportError::CouldNotPrepare(io::Error::other(error)))?;
         fs::write(&path, png_bytes).map_err(ExportError::CouldNotPrepare)?;
-        symbol_pictures.push(path);
+        inputs.push(path);
     }
 
     Ok(ExportFiles {
-        source_video: source_video_path.to_owned(),
-        symbol_pictures,
+        inputs,
         filter_graph_file,
         output: output.to_owned(),
     })

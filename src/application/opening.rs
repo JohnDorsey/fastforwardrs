@@ -1,27 +1,27 @@
-//! Finding out whether a source video can be used: trying the places it might be until one of
-//! them opens as a video.
+//! Finding out whether a source file can be used: trying the places it might be until one of
+//! them opens as a video or a sound.
 
 use std::path::{Path, PathBuf};
 
 use crate::media::ProbeError;
-use crate::project::SourceVideoProperties;
+use crate::project::SourceMediaProperties;
 
-/// What happened when a source video was looked for.
+/// What happened when a source file was looked for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum OpeningOutcome {
-    /// The video was found at `path` and opens.
+    /// The file was found at `path` and opens.
     Opened {
         path: PathBuf,
-        properties: SourceVideoProperties,
+        properties: SourceMediaProperties,
     },
     /// None of the places worked. `attempts` has each place tried and why it did not.
     Failed { attempts: Vec<(PathBuf, String)> },
 }
 
-/// Tries each of `candidates` in order, with `probe`, and uses the first that opens as a video.
+/// Tries each of `candidates` in order, with `probe`, and uses the first that opens as a video or a sound.
 pub fn open_first_that_works(
     candidates: &[PathBuf],
-    probe: impl Fn(&Path) -> Result<SourceVideoProperties, ProbeError>,
+    probe: impl Fn(&Path) -> Result<SourceMediaProperties, ProbeError>,
 ) -> OpeningOutcome {
     let mut attempts = Vec::new();
     for candidate in candidates {
@@ -48,6 +48,7 @@ fn reason_in_words(path: &Path, error: &ProbeError) -> String {
             format!("it could not be opened ({message})")
         }
         ProbeError::NoVideoStream => "it has no video in it".to_owned(),
+        ProbeError::NoVideoPictureOrSound => "it has no picture or sound in it".to_owned(),
         other => other.to_string(),
     }
 }
@@ -81,16 +82,16 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use crate::project::FrameRate;
+    use crate::project::{FrameRate, SourceVideoProperties};
 
-    fn properties() -> SourceVideoProperties {
-        SourceVideoProperties {
+    fn properties() -> SourceMediaProperties {
+        SourceMediaProperties::Video(SourceVideoProperties {
             frame_rate: FrameRate::new(30, 1).unwrap(),
             total_frame_count: 90,
             display_width_in_pixels: 320,
             display_height_in_pixels: 180,
             has_audio: false,
-        }
+        })
     }
 
     fn failure() -> ProbeError {
@@ -154,6 +155,27 @@ mod tests {
             panic!("expected a failure")
         };
         assert_eq!(attempts[0].1, "it has no video in it");
+
+        let outcome = open_first_that_works(std::slice::from_ref(&file), |_| Err(ProbeError::NoVideoPictureOrSound));
+        let OpeningOutcome::Failed { attempts } = outcome else {
+            panic!("expected a failure")
+        };
+        assert_eq!(attempts[0].1, "it has no picture or sound in it");
+    }
+
+    #[test]
+    fn a_sound_file_opens_as_well_as_a_video() {
+        let sound = SourceMediaProperties::Audio(crate::project::SourceAudioProperties {
+            duration_in_microseconds: 2_000_000,
+        });
+        let outcome = open_first_that_works(&[PathBuf::from("song.mp3")], |_| Ok(sound));
+        assert_eq!(
+            outcome,
+            OpeningOutcome::Opened {
+                path: PathBuf::from("song.mp3"),
+                properties: sound
+            }
+        );
     }
 
     #[test]

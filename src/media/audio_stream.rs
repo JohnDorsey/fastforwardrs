@@ -1,10 +1,11 @@
 //! Decoding the sound of the live preview.
 //!
 //! The preview's sound must be what the export will have. So a stream is told, in the editor's own
-//! terms, which clips to play (the timeline from where the playhead is, on), and it runs the very
-//! same filter graph that the export uses for its sound (see [`crate::media::export`]): every clip
-//! is cut out of the video's sound, sped up with the clip, and made exactly as long as the clip's
-//! pictures. What comes out is raw samples, ready to be played.
+//! terms, what the sound is (the sound of every track from where the playhead is, on: see
+//! [`crate::composition::plan_sound`]), and it runs the very same filter graph that the export uses
+//! for its sound (see [`crate::media::export`]): every clip is cut out of its file, sped up, given
+//! its volume and made exactly as long as its place on the timeline, and the tracks are mixed. What
+//! comes out is raw samples, ready to be played.
 
 use std::ffi::OsString;
 use std::fs;
@@ -17,9 +18,8 @@ use thiserror::Error;
 
 use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
-use super::export::{AudioGraph, AudioGraphSpecification, ClipToExport, build_audio_graph, filter_graph_file_option};
+use super::export::{AudioGraph, SoundGraphSpecification, build_audio_graph, filter_graph_file_option};
 use super::ffmpeg_toolchain::FfmpegToolchain;
-use crate::project::FrameRate;
 
 /// How many sets of samples may wait to be played before decoding pauses. The decoder is far
 /// faster than playback, and without a limit it would decode the whole rest of the video at once.
@@ -43,13 +43,11 @@ pub struct AudioFormat {
 /// What to decode.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioStreamRequest {
-    pub video_path: PathBuf,
-    pub frame_rate: FrameRate,
-    /// The clips to play, in order, from the first one's first frame. They are cut to what the
-    /// source video has (see [`crate::media::export::clips_to_export`]).
-    pub clips: Vec<ClipToExport>,
-    /// Whether sped-up clips are silent.
-    pub mute_sped_up_clips: bool,
+    /// The files the sound is made from, which are ffmpeg's inputs 0, 1, ... in this order.
+    pub source_files: Vec<PathBuf>,
+    /// What the sound is: the frame rate and length, what each track sounds like, and what the
+    /// sound of sped-up clips is like. Its clips name the files by their place in `source_files`.
+    pub sound: SoundGraphSpecification,
     pub format: AudioFormat,
 }
 
@@ -65,8 +63,8 @@ pub enum AudioStreamEvent {
 
 #[derive(Debug, Error)]
 pub enum AudioStreamError {
-    #[error("there is no sound to decode: the request has no clips")]
-    NoClips,
+    #[error("there is no sound to decode: the request has no sound in it")]
+    NoSound,
     #[error("ffmpeg could not be started to decode the sound: {0}")]
     CouldNotStart(#[source] io::Error),
     #[error("the sound's filter graph could not be written to a temporary file: {0}")]
@@ -89,14 +87,10 @@ impl AudioStream {
         request: &AudioStreamRequest,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, AudioStreamError> {
-        if request.clips.is_empty() {
-            return Err(AudioStreamError::NoClips);
+        if request.sound.strips.is_empty() {
+            return Err(AudioStreamError::NoSound);
         }
-        let graph = build_audio_graph(&AudioGraphSpecification {
-            frame_rate: request.frame_rate,
-            clips: request.clips.clone(),
-            mute_sped_up_clips: request.mute_sped_up_clips,
-        });
+        let graph = build_audio_graph(&request.sound);
         // The graph goes in a file: for a project with many clips it is longer than a command line.
         let graph_folder = tempfile::Builder::new()
             .prefix("fastforwardrs_preview_sound_")
@@ -200,10 +194,13 @@ pub fn audio_stream_arguments(
     graph: &AudioGraph,
     graph_file: &Path,
 ) -> Vec<OsString> {
-    let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]
+    let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
         .map(OsString::from)
         .to_vec();
-    arguments.push(request.video_path.clone().into());
+    for source_file in &request.source_files {
+        arguments.push("-i".into());
+        arguments.push(source_file.clone().into());
+    }
     arguments.push(filter_graph_file_option(toolchain).into());
     arguments.push(graph_file.into());
     arguments.push("-map".into());
@@ -222,7 +219,8 @@ mod tests {
 
     use super::*;
     use crate::media::do_nothing_when_woken;
-    use crate::project::SpeedFactor;
+    use crate::media::export::{SoundClipToExport, SoundItemToExport, SoundStripToExport};
+    use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 
     const STEREO: usize = 2;
 
@@ -346,14 +344,22 @@ mod tests {
 
     fn request() -> AudioStreamRequest {
         AudioStreamRequest {
-            video_path: PathBuf::from("holiday.mp4"),
-            frame_rate: FrameRate::new(30, 1).unwrap(),
-            clips: vec![ClipToExport {
-                first_source_frame: 0,
-                end_source_frame: 90,
-                speed_factor: SpeedFactor::NORMAL,
-            }],
-            mute_sped_up_clips: false,
+            source_files: vec![PathBuf::from("holiday.mp4")],
+            sound: SoundGraphSpecification {
+                frame_rate: FrameRate::new(30, 1).unwrap(),
+                total_frame_count: 90,
+                strips: vec![SoundStripToExport {
+                    items: vec![SoundItemToExport::Clip(SoundClipToExport {
+                        source_input: 0,
+                        first_source_frame: 0,
+                        end_source_frame: 90,
+                        speed_factor: SpeedFactor::NORMAL,
+                        timeline_frame_count: 90,
+                        loudness_factor: 1.0,
+                    })],
+                }],
+                sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+            },
             format: AudioFormat {
                 sample_rate: 44_100,
                 channel_count: 2,
@@ -426,14 +432,38 @@ mod tests {
     }
 
     #[test]
-    fn a_request_with_no_clips_is_refused_before_anything_is_started() {
+    fn every_source_file_is_an_input_in_order() {
+        let toolchain =
+            FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), Some(9));
+        let mut several = request();
+        several.source_files = ["a.mp4", "b.mp3"].map(PathBuf::from).to_vec();
+        let graph = AudioGraph {
+            text: String::new(),
+            output_label: "finished_audio",
+        };
+        let arguments = as_text(audio_stream_arguments(
+            &toolchain,
+            &several,
+            &graph,
+            Path::new("graph.txt"),
+        ));
+        let inputs: Vec<&String> = arguments
+            .windows(2)
+            .filter(|pair| pair[0] == "-i")
+            .map(|pair| &pair[1])
+            .collect();
+        assert_eq!(inputs, ["a.mp4", "b.mp3"]);
+    }
+
+    #[test]
+    fn a_request_with_no_sound_is_refused_before_anything_is_started() {
         let toolchain =
             FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), Some(9));
         let mut empty = request();
-        empty.clips.clear();
+        empty.sound.strips.clear();
         assert!(matches!(
             AudioStream::start(&toolchain, &empty, do_nothing_when_woken()),
-            Err(AudioStreamError::NoClips)
+            Err(AudioStreamError::NoSound)
         ));
     }
 }

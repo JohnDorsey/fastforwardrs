@@ -14,13 +14,14 @@ pub mod speakers;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use egui::accesskit::{Action, ActionData, ActionRequest, Role};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 use fastforwardrs::application::FastForwardApplication;
 use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::project::TimelineFrameIndex;
+use fastforwardrs::project::{Clip, TimelineFrameIndex};
 
 use crate::support::frame_number_in_picture;
 
@@ -67,14 +68,14 @@ impl Journey {
         journey
     }
 
-    /// Imports the video at `video_path` (what choosing it in the Import dialog does) and waits
-    /// until it is fully opened.
-    pub fn import(&mut self, video_path: &Path) {
-        self.application_mut().import_video_from(video_path.to_owned());
+    /// Imports the file at `path` (what choosing it in the Import dialog does) and waits until it
+    /// is fully opened. It goes on the timeline at the current frame.
+    pub fn import(&mut self, path: &Path) {
+        self.application_mut().import_file_from(path.to_owned());
         self.wait_until_idle();
         assert!(
-            self.application().source_video_is_available(),
-            "the video could not be imported: {:?}",
+            !self.application().project().sources().is_empty() && self.application().every_source_file_is_available(),
+            "the file could not be imported: {:?}",
             self.application().message_showing()
         );
     }
@@ -112,12 +113,10 @@ impl Journey {
         loop {
             self.harness.step();
             let application = self.application();
-            let wanted = application
-                .project()
-                .video_track()
-                .locate(application.current_frame())
-                .map(|location| location.source_frame);
-            let shown = application.preview_picture().map(|picture| picture.source_frame);
+            let wanted = self.the_video_in_front_at(application.current_frame());
+            let shown = application
+                .preview_picture()
+                .map(|picture| (picture.source, picture.source_frame));
             if wanted.is_some() && wanted == shown {
                 return;
             }
@@ -145,21 +144,66 @@ impl Journey {
 
     // --- looking ---
 
-    /// The clips of the video track, in order.
+    /// The clips of the front-most track that come from a file, in order.
     pub fn clips(&self) -> Vec<ClipSummary> {
-        self.application()
-            .project()
-            .video_track()
-            .clips()
-            .iter()
-            .map(|clip| {
+        self.clips_of_track(0)
+    }
+
+    /// The clips of the track at `position` in the list of tracks (0 is the front) that come from a
+    /// file, in order.
+    pub fn clips_of_track(&self, position: usize) -> Vec<ClipSummary> {
+        self.application().project().tracks()[position]
+            .placements()
+            .filter_map(|placement| placement.clip.as_media())
+            .map(|media| {
                 (
-                    clip.first_source_frame().value(),
-                    clip.end_source_frame().value(),
-                    clip.speed_factor().value(),
+                    media.first_source_frame().value(),
+                    media.end_source_frame().value(),
+                    media.speed().value(),
                 )
             })
             .collect()
+    }
+
+    /// Which file, and which frame of it, the video that is in front shows at timeline frame `frame`.
+    pub fn the_video_in_front_at(
+        &self,
+        frame: TimelineFrameIndex,
+    ) -> Option<(
+        fastforwardrs::project::SourceMediaIdentifier,
+        fastforwardrs::project::SourceFrameIndex,
+    )> {
+        self.application().project().tracks().iter().find_map(|track| {
+            let placement = track.placement_covering(frame)?;
+            let Clip::Video(media) = placement.clip else {
+                return None;
+            };
+            Some((media.source(), placement.source_frame_at(frame)?))
+        })
+    }
+
+    /// The frame of its file that the video that is in front shows at timeline frame `frame`.
+    pub fn source_frame_of_the_video_in_front_at(
+        &self,
+        frame: TimelineFrameIndex,
+    ) -> Option<fastforwardrs::project::SourceFrameIndex> {
+        self.the_video_in_front_at(frame).map(|(_, source_frame)| source_frame)
+    }
+
+    /// The timeline frame at which the picture that is `source_frame` of the file `source` is on
+    /// screen, in the clips of the front-most track.
+    pub fn timeline_frame_showing_source_frame(
+        &self,
+        source: fastforwardrs::project::SourceMediaIdentifier,
+        source_frame: fastforwardrs::project::SourceFrameIndex,
+    ) -> Option<TimelineFrameIndex> {
+        self.application().project().tracks()[0]
+            .placements()
+            .find_map(|placement| {
+                let media = placement.clip.as_media().filter(|media| media.source() == source)?;
+                let offset = media.timeline_offset_of_source_frame(placement.effective_speed, source_frame)?;
+                Some(TimelineFrameIndex::new(placement.first_timeline_frame.value() + offset))
+            })
     }
 
     /// The frame number written into the picture the preview shows (see the support module).
@@ -195,9 +239,17 @@ impl Journey {
     }
 
     pub fn click(&mut self, position: Pos2) {
+        self.click_with(position, PointerButton::Primary);
+    }
+
+    pub fn right_click(&mut self, position: Pos2) {
+        self.click_with(position, PointerButton::Secondary);
+    }
+
+    fn click_with(&mut self, position: Pos2, button: PointerButton) {
         self.move_pointer_to(position);
-        self.press_or_release(position, PointerButton::Primary, true);
-        self.press_or_release(position, PointerButton::Primary, false);
+        self.press_or_release(position, button, true);
+        self.press_or_release(position, button, false);
         self.settle();
     }
 
@@ -224,37 +276,55 @@ impl Journey {
         self.settle();
     }
 
+    /// Opens the global settings window and, in the drop-down list that shows `shown`, picks `option`.
+    pub fn choose_in_a_global_setting_dropdown(&mut self, shown: &str, option: &str) {
+        self.harness.get_by_label("Edit").click();
+        self.settle();
+        self.harness.get_by_label("Global settings").click();
+        self.settle();
+        self.harness.get_by_value(shown).click();
+        self.settle();
+        self.harness.get_by_label(option).click();
+        self.settle();
+    }
+
     /// Presses one of the buttons next to the time ("Pause", "Play" or "Stop").
     pub fn press_button(&mut self, label: &str) {
         self.harness.get_by_label(label).click();
         self.harness.step();
     }
 
-    // --- the video track and the slider ---
+    // --- the tracks and the slider ---
 
-    /// A point on the video track just inside timeline frame `frame`, which must be in view.
+    /// The strip of the track at `position` in the list of tracks (0 is the front).
+    pub fn strip_of_track(&self, position: usize) -> Rect {
+        let title = self.application().project().tracks()[position].title().to_owned();
+        self.rectangle_of(&format!("Strip of {title}"))
+    }
+
+    /// A point on the strip of the front-most track (the only one, while the project has only one)
+    /// just inside timeline frame `frame`, which must be in view.
     pub fn point_on_the_track_at_frame(&self, frame: u64) -> Pos2 {
-        let track = self.rectangle_of("Video track");
-        let offset = self
-            .application()
-            .video_track_offset_of_frame(TimelineFrameIndex::new(frame))
-            .expect("the project has a video");
-        let point = Pos2::new(track.left() + offset + 1.0, track.center().y);
+        self.point_on_the_strip_at_frame(0, frame)
+    }
+
+    /// A point on the strip of the track at `position` just inside timeline frame `frame`, which
+    /// must be in view.
+    pub fn point_on_the_strip_at_frame(&self, position: usize, frame: u64) -> Pos2 {
+        let strip = self.strip_of_track(position);
+        let offset = self.application().strip_offset_of_frame(TimelineFrameIndex::new(frame));
+        let point = Pos2::new(strip.left() + offset + 1.0, strip.center().y);
         assert!(
-            track.contains(point),
-            "frame {frame} is scrolled out of view: {point:?} is not in {track:?}"
+            strip.contains(point),
+            "frame {frame} is scrolled out of view: {point:?} is not in {strip:?}"
         );
         point
     }
 
-    /// A point on the ruler above the video track just inside timeline frame `frame`, which must
-    /// be in view.
+    /// A point on the ruler above the tracks just inside timeline frame `frame`, which must be in view.
     pub fn point_on_the_ruler_at_frame(&self, frame: u64) -> Pos2 {
         let ruler = self.rectangle_of("Ruler");
-        let offset = self
-            .application()
-            .video_track_offset_of_frame(TimelineFrameIndex::new(frame))
-            .expect("the project has a video");
+        let offset = self.application().strip_offset_of_frame(TimelineFrameIndex::new(frame));
         let point = Pos2::new(ruler.left() + offset + 1.0, ruler.center().y);
         assert!(
             ruler.contains(point),
@@ -263,8 +333,25 @@ impl Journey {
         point
     }
 
-    /// Moves the playhead to `frame` by clicking the ruler there.
+    /// Whether timeline frame `frame` is in the part of the timeline that can be seen.
+    pub fn frame_is_in_view(&self, frame: u64) -> bool {
+        let ruler = self.rectangle_of("Ruler");
+        let offset = self.application().strip_offset_of_frame(TimelineFrameIndex::new(frame));
+        ruler.contains(Pos2::new(ruler.left() + offset + 1.0, ruler.center().y))
+    }
+
+    /// Moves the playhead to `frame` by clicking the ruler there. If that place is out of view the
+    /// slider along the bottom is used first, to bring the view near it.
     pub fn move_playhead_to_frame(&mut self, frame: u64) {
+        if !self.frame_is_in_view(frame) {
+            let last_frame = self
+                .application()
+                .project()
+                .total_frame_count()
+                .saturating_sub(1)
+                .max(1);
+            self.click_the_scrub_slider_at((frame as f32 / last_frame as f32).clamp(0.0, 1.0));
+        }
         let point = self.point_on_the_ruler_at_frame(frame);
         self.click(point);
     }
@@ -276,18 +363,73 @@ impl Journey {
         self.settle();
     }
 
-    /// Cuts the video track at `frame` the way a person does: puts the playhead there (by clicking
-    /// the ruler) and presses S.
+    /// Cuts at `frame` the way a person does: puts the playhead there (by clicking the ruler) and
+    /// presses S.
     pub fn cut_at_frame(&mut self, frame: u64) {
         self.move_playhead_to_frame(frame);
         self.press_key(Key::S);
     }
 
-    /// Sets the speed of the clip that is showing `frame`, by pressing the right mouse button on
-    /// it there and dragging up `points_up` points.
-    pub fn drag_the_speed_slider_up(&mut self, frame: u64, points_up: f32) {
-        let press = self.point_on_the_track_at_frame(frame);
-        self.drag(PointerButton::Secondary, press, press - vec2(0.0, points_up));
+    /// Clicks the text field that shows `shown` and types `text` into it in place of what it has.
+    pub fn replace_text_in_the_field_showing(&mut self, shown: &str, text: &str) {
+        let field = |journey: &Self| {
+            [Role::TextInput, Role::MultilineTextInput]
+                .into_iter()
+                .flat_map(|role| journey.harness.query_all_by_role(role).collect::<Vec<_>>())
+                .find(|node| node.value().as_deref() == Some(shown))
+                .unwrap_or_else(|| panic!("no text field shows {shown:?}"))
+                .rect()
+        };
+        let centre = field(self).center();
+        self.click(centre);
+        self.harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        self.harness.step();
+        self.harness.event(Event::Text(text.to_owned()));
+        self.settle();
+    }
+
+    /// Sets a slider (found by its label) to `value`, the way a screen reader does.
+    pub fn set_slider(&mut self, label: &str, value: f64) {
+        let (target_node, target_tree) = self.harness.get_by_label(label).accesskit_node().locate();
+        self.harness.event(Event::AccessKitActionRequest(ActionRequest {
+            action: Action::SetValue,
+            target_tree,
+            target_node,
+            data: Some(ActionData::NumericValue(value)),
+        }));
+        self.settle();
+    }
+
+    /// Presses the round button that adds a track.
+    pub fn add_a_track(&mut self) {
+        let button = self.rectangle_of("Add a track");
+        self.click(button.center());
+    }
+
+    /// Makes a text object the way a person does: right-clicks the empty part of the strip of the
+    /// track at `position` where timeline frame `frame` is, and chooses New, then Text object.
+    pub fn make_a_text_object_at(&mut self, position: usize, frame: u64) {
+        let point = self.point_on_the_strip_at_frame(position, frame);
+        self.right_click(point);
+        self.harness.get_by_label_contains("New").click();
+        self.settle();
+        self.harness.get_by_label("Text object").click();
+        self.settle();
+    }
+
+    /// Opens the box of settings of the clip that is showing `frame` on the front-most track, by
+    /// right-clicking it there.
+    pub fn open_the_settings_of_the_clip_at(&mut self, frame: u64) {
+        let point = self.point_on_the_track_at_frame(frame);
+        self.right_click(point);
+    }
+
+    /// Sets the speed of the clip that is showing `frame` to `speed`: opens its box of settings,
+    /// sets the speed slider in it, and closes the box again (with the Escape key).
+    pub fn set_the_speed_of_the_clip_at(&mut self, frame: u64, speed: u32) {
+        self.open_the_settings_of_the_clip_at(frame);
+        self.set_slider("Speed", f64::from(speed));
+        self.press_key(Key::Escape);
     }
 
     /// Clicks the slider along the bottom of the window `fraction` of the way along it (0 is the

@@ -16,6 +16,7 @@ use thiserror::Error;
 use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
+use super::picture_fit::fit_inside_picture;
 use crate::project::{FrameRate, SourceFrameIndex, SpeedFactor};
 
 /// How many decoded pictures may wait to be shown before decoding pauses. Small, because each
@@ -35,7 +36,10 @@ pub struct FrameStreamRequest {
     /// `N` only every `N`th of them is delivered.
     pub source_frame_count: u64,
     pub speed_factor: SpeedFactor,
-    /// The size every delivered picture is scaled to.
+    /// How big the video's picture is as it is shown. If it is not the shape of the delivered
+    /// pictures it is fitted inside them, with black round it.
+    pub video_display_size_in_pixels: (u32, u32),
+    /// The size every delivered picture is.
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
 }
@@ -185,13 +189,26 @@ pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
     if request.speed_factor.is_accelerated() {
         filters.push_str(&format!(",select='not(mod(n,{}))'", request.speed_factor.value()));
     }
-    filters.push_str(&format!(
-        ",setpts=N*{}/({}*TB),scale={}:{}:flags=fast_bilinear,format=rgba",
-        frame_rate.denominator(),
-        frame_rate.numerator(),
+    let fit = fit_inside_picture(
+        request.video_display_size_in_pixels.0,
+        request.video_display_size_in_pixels.1,
         request.picture_width_in_pixels,
         request.picture_height_in_pixels,
+    );
+    filters.push_str(&format!(
+        ",setpts=N*{}/({}*TB),scale={}:{}:flags=fast_bilinear",
+        frame_rate.denominator(),
+        frame_rate.numerator(),
+        fit.width_in_pixels,
+        fit.height_in_pixels,
     ));
+    if !fit.fills(request.picture_width_in_pixels, request.picture_height_in_pixels) {
+        filters.push_str(&format!(
+            ",pad={}:{}:{}:{}",
+            request.picture_width_in_pixels, request.picture_height_in_pixels, fit.left_in_pixels, fit.top_in_pixels
+        ));
+    }
+    filters.push_str(",format=rgba");
 
     let mut arguments: Vec<OsString> = Vec::new();
     arguments.extend(["-hide_banner", "-loglevel", "error", "-nostdin", "-ss"].map(OsString::from));
@@ -223,6 +240,7 @@ mod tests {
             first_source_frame: SourceFrameIndex::new(first_source_frame),
             source_frame_count,
             speed_factor: SpeedFactor::new(speed_factor).unwrap(),
+            video_display_size_in_pixels: (1280, 720),
             picture_width_in_pixels: 640,
             picture_height_in_pixels: 360,
         }
@@ -313,6 +331,28 @@ mod tests {
         let filters = filters_of(&request);
         assert!(filters.contains("fps=30000/1001:round=near"), "{filters}");
         assert!(filters.contains("setpts=N*1001/(30000*TB)"), "{filters}");
+    }
+
+    #[test]
+    fn a_video_of_the_shape_of_the_picture_is_scaled_straight_to_it() {
+        let filters = filters_of(&request(0, 100, 1));
+        assert!(
+            filters.ends_with(",scale=640:360:flags=fast_bilinear,format=rgba"),
+            "{filters}"
+        );
+        assert!(!filters.contains("pad"), "{filters}");
+    }
+
+    #[test]
+    fn a_video_of_another_shape_is_fitted_inside_the_picture_and_put_in_the_middle_of_black() {
+        let mut upright = request(0, 100, 1);
+        upright.video_display_size_in_pixels = (720, 1280);
+        // 9:16 in 640x360: as tall as the picture, 202.5 wide, which is made 202 (even); centred.
+        let filters = filters_of(&upright);
+        assert!(
+            filters.ends_with(",scale=202:360:flags=fast_bilinear,pad=640:360:218:0,format=rgba"),
+            "{filters}"
+        );
     }
 
     use crate::media::do_nothing_when_woken;

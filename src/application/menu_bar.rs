@@ -1,17 +1,18 @@
 //! The menu bar, which has two menus: File and Edit.
 
-use egui::{MenuBar, Ui};
+use egui::{Button, MenuBar, Ui};
 
 use super::commands::Command;
+use super::keyboard::DESELECT_KEY;
 
 /// What decides which menu items can be used.
 pub struct MenuAvailability {
     /// Whether the project has anything that could be saved.
     pub can_save: bool,
-    /// Whether a video can be imported (the project has none, or its video is missing).
-    pub can_import: bool,
     /// Whether the project can be exported.
     pub can_export: bool,
+    /// Whether a clip is selected, so that there is something to deselect.
+    pub has_selection: bool,
     /// Whether something is going on (such as an export) that makes the other items wait.
     pub busy: bool,
 }
@@ -21,39 +22,43 @@ pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Com
     let idle = !availability.busy;
     MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if ui.add_enabled(idle, egui::Button::new("New project")).clicked() {
+            if ui.add_enabled(idle, Button::new("New project")).clicked() {
                 commands.push(Command::NewProject);
             }
             if ui
-                .add_enabled(idle && availability.can_save, egui::Button::new("Save project"))
+                .add_enabled(idle && availability.can_save, Button::new("Save project"))
                 .clicked()
             {
                 commands.push(Command::SaveProject);
             }
-            if ui.add_enabled(idle, egui::Button::new("Load project")).clicked() {
+            if ui.add_enabled(idle, Button::new("Load project")).clicked() {
                 commands.push(Command::LoadProject);
             }
-            let import = ui.add_enabled(idle && availability.can_import, egui::Button::new("Import"));
-            if import.clicked() {
-                commands.push(Command::ImportVideo);
-            }
-            if !availability.can_import {
-                import.on_disabled_hover_text("This version works with one video per project.");
+            if ui.add_enabled(idle, Button::new("Import")).clicked() {
+                commands.push(Command::ImportFile);
             }
             if ui
-                .add_enabled(idle && availability.can_export, egui::Button::new("Export"))
+                .add_enabled(idle && availability.can_export, Button::new("Export"))
                 .clicked()
             {
                 commands.push(Command::ExportVideo);
             }
         });
         ui.menu_button("Edit", |ui| {
-            if ui.add_enabled(idle, egui::Button::new("Project settings")).clicked() {
+            let deselect = Button::new("Deselect").shortcut_text(ui.ctx().format_shortcut(&DESELECT_SHORTCUT));
+            if ui.add_enabled(idle && availability.has_selection, deselect).clicked() {
+                commands.push(Command::Deselect);
+            }
+            ui.separator();
+            if ui.add_enabled(idle, Button::new("Project settings")).clicked() {
                 commands.push(Command::ShowProjectSettings);
             }
-            if ui.add_enabled(idle, egui::Button::new("Global settings")).clicked() {
+            if ui.add_enabled(idle, Button::new("Global settings")).clicked() {
                 commands.push(Command::ShowGlobalSettings);
             }
         });
     });
 }
+
+/// The key that deselects, as a shortcut for the menu to show.
+const DESELECT_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(egui::Modifiers::NONE, DESELECT_KEY);

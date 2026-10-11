@@ -1,13 +1,13 @@
 //! The windows that need an answer or a look from the user: messages, the question about throwing
-//! unsaved changes away, the progress of an export, and the warning that the source video must be
-//! chosen again.
+//! unsaved changes away, the progress of an export, the warning that source files must be chosen
+//! again, and the window a text object is edited in.
 
 use egui::{Context, ViewportCommand};
 
-use super::{FastForwardApplication, SourceStatus};
-use crate::application::dialogs::{
-    self, AfterConfirmation, Dialog, DialogAnswer, MissingSourceWarning, show_dialog, show_export_progress,
-};
+use super::{FastForwardApplication, FrameState};
+use crate::application::commands::Command;
+use crate::application::dialogs::{self, AfterConfirmation, Dialog, DialogAnswer, show_dialog, show_export_progress};
+use crate::application::text_object_window::{self, TextWindowContent};
 
 impl FastForwardApplication {
     /// Asks before closing the window if there are unsaved changes. (With autosave on and a file
@@ -47,22 +47,56 @@ impl FastForwardApplication {
                 }
             }
         }
-        if let SourceStatus::Unavailable { reason } = &self.source_status {
-            let warning = MissingSourceWarning {
-                last_known_path: self
-                    .project
-                    .source_videos()
-                    .first()
-                    .map(|video| video.link.absolute_path.display().to_string())
-                    .unwrap_or_default(),
-                reason: reason.clone(),
-            };
-            let mut open = self.missing_source_warning_open;
-            let choose = dialogs::show_missing_source_warning(context, &warning, &mut open);
-            self.missing_source_warning_open = open;
-            if choose {
-                self.import_video();
+        let missing = self.missing_sources();
+        if !missing.is_empty() && self.missing_sources_warning_open {
+            let mut open = self.missing_sources_warning_open;
+            let chosen = dialogs::show_missing_sources_warning(context, &missing, &mut open);
+            self.missing_sources_warning_open = open;
+            if let Some(identifier) = chosen {
+                self.relink_source(identifier);
             }
+        }
+    }
+
+    /// Shows the window the text object of the clip `text_window_open` is edited in, if it is open,
+    /// and adds a command for each change made in it.
+    pub(super) fn show_text_object_window(
+        &mut self,
+        context: &Context,
+        frame_state: &FrameState,
+        commands: &mut Vec<Command>,
+    ) {
+        let Some(clip) = self.text_window_open else {
+            return;
+        };
+        if self.font_families.is_none()
+            && let Some(renderer) = self.text_renderer.get_if_ready()
+        {
+            self.font_families = Some(renderer.font_family_names());
+        }
+        let Some(placement) = self.project.placement_of(clip) else {
+            self.text_window_open = None;
+            return;
+        };
+        let Some(text) = placement.clip.as_text() else {
+            self.text_window_open = None;
+            return;
+        };
+        let mut open = true;
+        text_object_window::show(
+            context,
+            &TextWindowContent {
+                clip,
+                object: &text.object,
+                duration_in_frames: text.duration_in_frames(),
+                frame_rate: frame_state.frame_rate,
+                font_families: self.font_families.as_deref(),
+            },
+            &mut open,
+            commands,
+        );
+        if !open {
+            self.text_window_open = None;
         }
     }
 

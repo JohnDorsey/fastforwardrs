@@ -6,8 +6,10 @@
 //! * this file: the state, starting up, and the loop that runs once for each frame drawn;
 //! * `drawing`: laying out the window (the menu bar, the preview, the timeline);
 //! * `command_execution`: what each [`Command`] does;
-//! * `dialog_flow`: messages, questions, the export's progress and the missing-video warning;
-//! * `source_video_flow`: finding, opening and relinking the source video;
+//! * `dialog_flow`: messages, questions, the export's progress, the missing-files warning and the
+//!   text object window;
+//! * `source_media_flow`: finding, opening and relinking the source files (videos and sounds),
+//!   and making the thumbnails and waveforms for the timeline;
 //! * `project_file_flow`: new, load and save;
 //! * `settings_flow`: the settings in effect, and keeping the global ones in their file;
 //! * `autosave`: noting unsaved changes, and saving them by itself when the setting is on;
@@ -16,6 +18,8 @@
 //!   state afterwards (for tests, and for scripting).
 
 mod autosave;
+#[cfg(test)]
+mod clip_box_tests;
 mod command_execution;
 mod dialog_flow;
 mod drawing;
@@ -24,13 +28,20 @@ mod export_flow;
 mod interaction_tests;
 mod programmatic_interface;
 mod project_file_flow;
+#[cfg(test)]
+mod selection_tests;
 mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
-mod source_video_flow;
+mod source_media_flow;
 #[cfg(test)]
 mod test_window;
+#[cfg(test)]
+mod text_object_tests;
+#[cfg(test)]
+mod track_tests;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -40,48 +51,48 @@ use egui::Context;
 use super::background::BackgroundTask;
 use super::commands::Command;
 use super::dialogs::Dialog;
-use super::keyboard;
+use super::keyboard::{self, KeyboardState};
 use super::opening::OpeningOutcome;
 use super::settings_windows::{self, SettingsWindowsOpen};
 use super::textures::Textures;
 use super::theme;
 use super::timeline_panel::TimelineViewState;
+use crate::composition::{PicturePlan, plan_pictures};
 use crate::media::export::VideoExport;
-use crate::media::{FfmpegToolchain, ThumbnailExtraction, ThumbnailStrip, ToolchainError, UserInterfaceWakeUp};
+use crate::media::{
+    FfmpegToolchain, ThumbnailExtraction, ThumbnailStrip, ToolchainError, UserInterfaceWakeUp, Waveform,
+    WaveformExtraction,
+};
 use crate::playback::{
     AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter, PictureSupplier,
-    PlaybackClock, opener_of_the_default_speakers, wanted_picture,
+    PlaybackClock, PreviewSetup, PreviewVideo, WantedPicture, opener_of_the_default_speakers, preview_picture_size,
+    wanted_picture,
 };
-use crate::project::{FrameRate, Project, Settings, TimelineFrameIndex};
+use crate::project::{ClipLocation, FrameRate, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
 use crate::settings_file::default_settings_file_path;
+use crate::text_rendering::LazyTextRenderer;
 
-/// The frame rate used (for the timecode and the clock) while the project has no video to take one from.
-fn frame_rate_without_a_video() -> FrameRate {
-    FrameRate::from_whole_frames_per_second(30).expect("30 frames per second is a frame rate")
-}
-
-/// Whether the project's source video can be used.
+/// Whether a source file of the project can be used.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SourceStatus {
-    /// The project has no video.
-    NoVideo,
-    /// The video is being looked for and opened.
+    /// The file is being looked for and opened.
     Opening,
-    /// The video is found and opens.
+    /// The file is found and opens.
     Available { path: PathBuf },
-    /// The video cannot be found or opened.
+    /// The file cannot be found or opened.
     Unavailable { reason: String },
 }
 
-/// Why a video is being looked for, which decides what happens when it is found.
+/// Why a file is being looked for, which decides what happens when it is found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OpeningPurpose {
-    /// A video was chosen for a project that has none: it becomes the project's video.
-    ImportIntoEmptyProject,
-    /// A video was chosen to replace the project's missing one. The edits are kept.
-    RelinkMissingVideo,
-    /// A project was just loaded and the places its video might be are being tried.
-    LocateForLoadedProject,
+    /// A file was chosen to be put on the timeline, at the current frame.
+    ImportNewSource,
+    /// A file was chosen to replace a source file of the project that cannot be found. The edits
+    /// are kept.
+    RelinkMissingSource(SourceMediaIdentifier),
+    /// A project was just loaded and the places one of its files might be are being tried.
+    LocateForLoadedProject(SourceMediaIdentifier),
 }
 
 struct OpeningTask {
@@ -93,15 +104,50 @@ struct RunningExport {
     export: VideoExport,
     frames_written: u64,
     total_frames: u64,
-    /// Frames of the timeline the export leaves out, for clips past the end of the source video.
-    frames_left_out: u64,
+    /// Frames of the finished video that are black only because a video the project is made from
+    /// has fewer pictures than its clips need.
+    frames_black: u64,
     destination: PathBuf,
 }
 
-/// The thumbnail pictures of the source video, and the work of making them.
+/// The thumbnail pictures of a source video, and the work of making them.
+#[derive(Default)]
 struct ThumbnailState {
     strip: ThumbnailStrip,
     extraction: Option<ThumbnailExtraction>,
+}
+
+/// The shape of the sound of a source sound file, and the work of making it.
+#[derive(Default)]
+struct WaveformState {
+    waveform: Waveform,
+    extraction: Option<WaveformExtraction>,
+}
+
+/// What the editor knows while it runs about one source file of the project.
+struct SourceFileState {
+    status: SourceStatus,
+    /// The pictures for the timeline, for a video.
+    thumbnails: ThumbnailState,
+    /// The waveform for the timeline, for a sound file.
+    waveform: WaveformState,
+}
+
+impl SourceFileState {
+    fn new(status: SourceStatus) -> Self {
+        Self {
+            status,
+            thumbnails: ThumbnailState::default(),
+            waveform: WaveformState::default(),
+        }
+    }
+
+    fn path_if_available(&self) -> Option<&std::path::Path> {
+        match &self.status {
+            SourceStatus::Available { path } => Some(path),
+            _ => None,
+        }
+    }
 }
 
 /// What was worked out at the start of a frame, which the drawing then uses.
@@ -110,6 +156,10 @@ struct FrameState {
     total_frames: u64,
     frame_rate: FrameRate,
     is_playing: bool,
+    /// What the picture is made of, at every frame of the timeline.
+    picture_plan: PicturePlan,
+    /// The picture of a video that the preview needs for the current frame, if it needs one.
+    wanted_picture: Option<WantedPicture>,
     /// Whether the preview has exactly the picture for the current frame.
     preview_is_up_to_date: bool,
 }
@@ -128,18 +178,26 @@ pub struct FastForwardApplication {
     /// Where the global settings are kept. `None` keeps them only while the program runs.
     global_settings_path: Option<PathBuf>,
     settings_windows_open: SettingsWindowsOpen,
-    source_status: SourceStatus,
-    opening: Option<OpeningTask>,
+    /// What is known about each of the project's source files while the program runs.
+    source_files: HashMap<SourceMediaIdentifier, SourceFileState>,
+    /// Source files that are being looked for and opened, in the background.
+    openings: Vec<OpeningTask>,
+    /// The clip that was clicked, which Delete deletes and S cuts.
+    selected_clip: Option<ClipLocation>,
+    /// The text clip whose text object the pop-up window is editing, if the window is open.
+    text_window_open: Option<ClipLocation>,
+    text_renderer: LazyTextRenderer,
+    /// The fonts the computer has, once they are known.
+    font_families: Option<Vec<String>>,
     clock: PlaybackClock,
     picture_supplier: PictureSupplier<FfmpegPictureStreamStarter>,
     /// Plays the sound of the preview. It is silent until given speakers to play through.
     audio_supplier: AudioSupplier<FfmpegAudioStreamStarter>,
-    thumbnails: ThumbnailState,
     textures: Textures,
     timeline_view: TimelineViewState,
     dialog: Option<Dialog>,
-    /// Whether the "source video not found" warning is showing.
-    missing_source_warning_open: bool,
+    /// Whether the "source files not found" warning is showing.
+    missing_sources_warning_open: bool,
     export: Option<RunningExport>,
     /// Set once the user has agreed to close the window with unsaved changes.
     close_confirmed: bool,
@@ -185,6 +243,7 @@ impl FastForwardApplication {
             ),
         };
 
+        let project = Project::empty();
         Self {
             picture_supplier: PictureSupplier::new(FfmpegPictureStreamStarter::new(
                 toolchain.clone(),
@@ -192,45 +251,53 @@ impl FastForwardApplication {
             )),
             audio_supplier: AudioSupplier::new(FfmpegAudioStreamStarter::new(toolchain.clone(), Arc::clone(&wake_up))),
             toolchain,
-            project: Project::empty(),
+            clock: PlaybackClock::new(project.frame_rate()),
+            project,
             project_file_path: None,
             has_unsaved_changes: false,
             last_unsaved_change_at: None,
             global_settings: Settings::DEFAULT,
             global_settings_path: None,
             settings_windows_open: SettingsWindowsOpen::default(),
-            source_status: SourceStatus::NoVideo,
-            opening: None,
-            clock: PlaybackClock::new(frame_rate_without_a_video()),
-            thumbnails: ThumbnailState {
-                strip: ThumbnailStrip::default(),
-                extraction: None,
-            },
+            source_files: HashMap::new(),
+            openings: Vec::new(),
+            selected_clip: None,
+            text_window_open: None,
+            text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),
+            font_families: None,
             textures: Textures::default(),
             timeline_view: TimelineViewState::default(),
             dialog: startup_dialog,
-            missing_source_warning_open: false,
+            missing_sources_warning_open: false,
             export: None,
             close_confirmed: false,
             wake_up,
         }
     }
 
-    /// The frame rate of the project's video, or a stand-in while there is no video.
-    fn frame_rate(&self) -> FrameRate {
-        self.project
-            .timeline_frame_rate()
-            .unwrap_or_else(frame_rate_without_a_video)
+    /// Whether the source file `identifier` has been found and opens.
+    fn source_is_available(&self, identifier: SourceMediaIdentifier) -> bool {
+        self.source_files
+            .get(&identifier)
+            .is_some_and(|state| state.path_if_available().is_some())
+    }
+
+    /// Where each source file that can be used is.
+    fn available_source_paths(&self) -> HashMap<SourceMediaIdentifier, PathBuf> {
+        self.source_files
+            .iter()
+            .filter_map(|(identifier, state)| Some((*identifier, state.path_if_available()?.to_owned())))
+            .collect()
     }
 
     /// Stops playback before a window opens that waits for an answer (a file dialog, say), so
     /// that the video does not carry on playing unseen behind it.
     fn pause_playback_for_dialog(&mut self) {
-        let total_frames = self.project.video_track().total_frame_count();
+        let total_frames = self.project.total_frame_count();
         self.clock.pause(Instant::now(), total_frames);
     }
 
-    /// Whether a dialog, an export or the opening of a video is in the way of editing.
+    /// Whether a dialog or an export is in the way of editing.
     fn is_blocked(&self) -> bool {
         self.dialog.is_some() || self.export.is_some()
     }
@@ -239,13 +306,16 @@ impl FastForwardApplication {
     /// finished, moving the clock on, and getting the preview picture.
     fn prepare_frame(&mut self, context: &Context, now: Instant) -> FrameState {
         self.collect_finished_background_work();
+        self.forget_what_is_gone_from_the_project();
+        self.synchronise_the_preview_with_the_project();
 
-        let total_frames = self.project.video_track().total_frame_count();
+        let total_frames = self.project.total_frame_count();
         self.clock.stop_at_the_end(now, total_frames);
         let current_frame = self.clock.position(now, total_frames);
         let is_playing = self.clock.is_playing();
 
-        let wanted = wanted_picture(self.project.video_track(), current_frame);
+        let picture_plan = plan_pictures(&self.project, |source| self.source_is_available(source));
+        let wanted = wanted_picture(&picture_plan, current_frame);
         let report = self.picture_supplier.supply(wanted, is_playing, now);
         if let Some(wait) = report.ask_again_in {
             context.request_repaint_after(wait);
@@ -258,9 +328,65 @@ impl FastForwardApplication {
         FrameState {
             current_frame,
             total_frames,
-            frame_rate: self.frame_rate(),
+            frame_rate: self.project.frame_rate(),
             is_playing,
+            picture_plan,
+            wanted_picture: wanted,
             preview_is_up_to_date: report.shows_the_wanted_picture,
+        }
+    }
+
+    /// Lets go of a selection, and of a text window, that are about a clip that is not there any more.
+    fn forget_what_is_gone_from_the_project(&mut self) {
+        if self
+            .selected_clip
+            .is_some_and(|clip| self.project.placement_of(clip).is_none())
+        {
+            self.selected_clip = None;
+        }
+        if self.text_window_open.is_some_and(|clip| {
+            self.project
+                .placement_of(clip)
+                .and_then(|placement| placement.clip.as_text())
+                .is_none()
+        }) {
+            self.text_window_open = None;
+        }
+    }
+
+    /// Tells the picture supplier which videos it can get pictures from, and how big the pictures
+    /// are, whenever that has changed (a file was found, or the project was replaced).
+    fn synchronise_the_preview_with_the_project(&mut self) {
+        let videos: Vec<PreviewVideo> = self
+            .project
+            .sources()
+            .iter()
+            .filter_map(|source| {
+                let video = source.properties.video()?;
+                Some(PreviewVideo {
+                    source: source.identifier,
+                    video_path: self
+                        .source_files
+                        .get(&source.identifier)?
+                        .path_if_available()?
+                        .to_owned(),
+                    display_size_in_pixels: (video.display_width_in_pixels, video.display_height_in_pixels),
+                })
+            })
+            .collect();
+        let wanted_setup = (!videos.is_empty()).then(|| {
+            let (picture_width, picture_height) = self.project.picture_size();
+            let (picture_width_in_pixels, picture_height_in_pixels) =
+                preview_picture_size(picture_width, picture_height);
+            PreviewSetup {
+                frame_rate: self.project.frame_rate(),
+                picture_width_in_pixels,
+                picture_height_in_pixels,
+                videos,
+            }
+        });
+        if self.picture_supplier.setup() != wanted_setup.as_ref() {
+            self.picture_supplier.set_setup(wanted_setup);
         }
     }
 
@@ -271,29 +397,38 @@ impl FastForwardApplication {
             seconds: self.clock.position_in_seconds(now, total_frames),
             is_playing: self.clock.is_playing(),
         };
-        let mute_sped_up_clips = self.effective_settings().mute_sped_up_clips;
-        // There is sound to play when the video can be read and has some.
-        let content = match (&self.source_status, self.project.source_videos().first()) {
-            (SourceStatus::Available { path }, Some(video)) if video.properties.has_audio => Some(AudioContent {
-                video_path: path,
-                frame_rate: video.properties.frame_rate,
-                source_frame_count: video.properties.total_frame_count,
-                track: self.project.video_track(),
-                mute_sped_up_clips,
-            }),
-            _ => None,
-        };
+        let sped_up_clip_sound = self.effective_settings().sped_up_clip_sound;
+        let source_paths = self.available_source_paths();
+        // There is sound to play when some file that can be read is there to make it from.
+        let content = (!source_paths.is_empty()).then_some(AudioContent {
+            project: &self.project,
+            source_paths: &source_paths,
+            sped_up_clip_sound,
+        });
         self.audio_supplier.update(content, clock, now);
     }
 
     /// Turns the keyboard into commands (see [`keyboard`]), unless something is in the way.
     fn collect_keyboard_commands(&self, context: &Context, frame_state: &FrameState, commands: &mut Vec<Command>) {
+        // With nothing on the timeline there is nothing the keys could do anything to.
         if self.is_blocked() || frame_state.total_frames == 0 {
             return;
         }
+        let selected_clip_at_the_current_frame = self.selected_clip.filter(|clip| {
+            self.project
+                .placement_of(*clip)
+                .is_some_and(|placement| placement.contains(frame_state.current_frame))
+        });
         commands.extend(keyboard::commands_for_the_keys_pressed(
             context,
-            frame_state.current_frame,
+            KeyboardState {
+                current_frame: frame_state.current_frame,
+                is_playing: frame_state.is_playing,
+                selected_clip: self.selected_clip,
+                selected_clip_at_the_current_frame,
+                a_box_with_controls_is_open: self.timeline_view.settings_box_is_open()
+                    || self.text_window_open.is_some(),
+            },
         ));
     }
 }
@@ -326,6 +461,7 @@ impl FastForwardApplication {
             self.global_settings,
             &mut commands,
         );
+        self.show_text_object_window(&context, &frame_state, &mut commands);
         self.show_dialogs(&context);
         for command in commands {
             self.execute(command, now, &context);

@@ -1,12 +1,15 @@
-//! The exact shape of a project file on disk.
+//! The exact shape of a project file on disk (the current version, 3).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
-//! between the two is where files from the outside world get validated.
+//! between the two is where files from the outside world get validated. (Files of earlier
+//! versions have their own types, in [`super::legacy`].)
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::{FrameRate, SourceFrameIndex, SourceVideoIdentifier, SpeedFactor};
+use crate::project::{
+    FrameRate, Gain, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -14,11 +17,11 @@ pub(super) struct ProjectDocument {
     /// Always [`super::FILE_FORMAT_NAME`]; lets us recognise (and refuse) other JSON files.
     pub file_format: String,
     pub file_format_version: u32,
-    pub source_videos: Vec<SourceVideoDocument>,
-    pub video_track: VideoTrackDocument,
+    pub sources: Vec<SourceDocument>,
+    /// The tracks, the one in front first.
+    pub tracks: Vec<TrackDocument>,
     pub speed_indicator: SpeedIndicatorDocument,
-    /// What the project has set for itself. Left out when it follows every global setting, and in
-    /// files from before there were settings.
+    /// What the project has set for itself. Left out when it follows every global setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<ProjectSettingsDocument>,
 }
@@ -31,38 +34,109 @@ pub(super) struct ProjectSettingsDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autosave: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sped_up_clip_sound: Option<SpedUpClipSound>,
+    /// What versions that could only mute or not mute wrote instead of `sped_up_clip_sound`. It is
+    /// read (when `sped_up_clip_sound` is not there) and never written.
+    #[serde(default, skip_serializing)]
     pub mute_sped_up_clips: Option<bool>,
 }
 
+/// A file the project is made from.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct SourceVideoDocument {
-    pub identifier: SourceVideoIdentifier,
-    pub absolute_path: String,
-    /// Relative to the folder that holds the project file. Always written with `/` separators so
-    /// that it means the same thing on every operating system.
-    pub relative_path: Option<String>,
-    pub frame_rate: FrameRate,
-    pub total_frame_count: u64,
-    pub display_width_in_pixels: u32,
-    pub display_height_in_pixels: u32,
-    pub has_audio: bool,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum SourceDocument {
+    Video {
+        identifier: SourceMediaIdentifier,
+        absolute_path: String,
+        /// Relative to the folder that holds the project file. Always written with `/` separators so
+        /// that it means the same thing on every operating system.
+        relative_path: Option<String>,
+        frame_rate: FrameRate,
+        total_frame_count: u64,
+        display_width_in_pixels: u32,
+        display_height_in_pixels: u32,
+        has_audio: bool,
+    },
+    Audio {
+        identifier: SourceMediaIdentifier,
+        absolute_path: String,
+        relative_path: Option<String>,
+        duration_in_microseconds: u64,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct VideoTrackDocument {
+pub(super) struct TrackDocument {
+    pub title: String,
+    pub gain_decibels: Gain,
+    /// How much faster than normal everything on the track plays, on top of each clip's own speed.
+    pub speed_factor: SpeedFactor,
+    pub muted: bool,
     pub clips: Vec<ClipDocument>,
 }
 
+/// One clip on a track, with how many frames of empty time come before it.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum ClipDocument {
+    Video {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        source_identifier: SourceMediaIdentifier,
+        first_source_frame: SourceFrameIndex,
+        /// The frame just after the clip's last frame.
+        end_source_frame: SourceFrameIndex,
+        speed_factor: SpeedFactor,
+        #[serde(default, skip_serializing_if = "is_no_gain")]
+        gain_decibels: Gain,
+        #[serde(default, skip_serializing_if = "is_false")]
+        muted: bool,
+    },
+    Audio {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        source_identifier: SourceMediaIdentifier,
+        first_source_frame: SourceFrameIndex,
+        end_source_frame: SourceFrameIndex,
+        speed_factor: SpeedFactor,
+        #[serde(default, skip_serializing_if = "is_no_gain")]
+        gain_decibels: Gain,
+        #[serde(default, skip_serializing_if = "is_false")]
+        muted: bool,
+    },
+    Text {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        duration_in_frames: u64,
+        text: String,
+        /// Empty for the program's own default font.
+        font_family: String,
+        font_size_fraction_of_frame_height: f32,
+        colour: ColourDocument,
+        area: CanvasAreaDocument,
+    },
+}
+
+fn is_zero(number: &u64) -> bool {
+    *number == 0
+}
+
+fn is_no_gain(gain: &Gain) -> bool {
+    gain.is_unchanged()
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ClipDocument {
-    pub source_video_identifier: SourceVideoIdentifier,
-    pub first_source_frame: SourceFrameIndex,
-    /// The frame just after the clip's last frame.
-    pub end_source_frame: SourceFrameIndex,
-    pub speed_factor: SpeedFactor,
+pub(super) struct CanvasAreaDocument {
+    pub left_fraction_of_frame_width: f32,
+    pub top_fraction_of_frame_height: f32,
+    pub width_fraction_of_frame_width: f32,
+    pub height_fraction_of_frame_height: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,4 +145,101 @@ pub(super) struct SpeedIndicatorDocument {
     pub left_fraction_of_frame_width: f32,
     pub top_fraction_of_frame_height: f32,
     pub height_fraction_of_frame_height: f32,
+}
+
+/// A colour, written as `#RRGGBBAA`: two hexadecimal digits each for red, green, blue and opacity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ColourDocument(pub TextColour);
+
+impl ColourDocument {
+    fn to_text(self) -> String {
+        let TextColour {
+            red,
+            green,
+            blue,
+            alpha,
+        } = self.0;
+        format!("#{red:02X}{green:02X}{blue:02X}{alpha:02X}")
+    }
+
+    fn from_text(text: &str) -> Result<Self, String> {
+        let digits = text
+            .strip_prefix('#')
+            .filter(|digits| digits.len() == 8 && digits.chars().all(|digit| digit.is_ascii_hexdigit()))
+            .ok_or_else(|| {
+                format!("\"{text}\" is not a colour; expected \"#RRGGBBAA\", such as \"#FFFFFFFF\" for white")
+            })?;
+        let part = |position: usize| {
+            u8::from_str_radix(&digits[position * 2..position * 2 + 2], 16).expect("the digits were checked")
+        };
+        Ok(Self(TextColour {
+            red: part(0),
+            green: part(1),
+            blue: part(2),
+            alpha: part(3),
+        }))
+    }
+}
+
+impl Serialize for ColourDocument {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_text())
+    }
+}
+
+impl<'de> Deserialize<'de> for ColourDocument {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::from_text(&text).map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_colour_is_written_as_hexadecimal_red_green_blue_and_opacity() {
+        assert_eq!(ColourDocument(TextColour::WHITE).to_text(), "#FFFFFFFF");
+        assert_eq!(ColourDocument(TextColour::new(1, 2, 255, 0)).to_text(), "#0102FF00");
+        assert_eq!(ColourDocument(TextColour::new(0, 0, 0, 128)).to_text(), "#00000080");
+    }
+
+    #[test]
+    fn a_colour_comes_back_exactly_in_either_case() {
+        for colour in [
+            TextColour::WHITE,
+            TextColour::new(0, 0, 0, 0),
+            TextColour::new(18, 52, 86, 120),
+            TextColour::new(255, 128, 1, 254),
+        ] {
+            let text = ColourDocument(colour).to_text();
+            assert_eq!(
+                ColourDocument::from_text(&text).unwrap(),
+                ColourDocument(colour),
+                "{text}"
+            );
+            assert_eq!(
+                ColourDocument::from_text(&text.to_lowercase()).unwrap(),
+                ColourDocument(colour)
+            );
+        }
+    }
+
+    #[test]
+    fn text_that_is_not_a_colour_is_refused_with_what_was_expected() {
+        for bad in [
+            "",
+            "FFFFFFFF",
+            "#FFFFFF",
+            "#FFFFFFFFF",
+            "#GGGGGGGG",
+            "#FFFFFF 0",
+            "white",
+            "#+FFFFFFF",
+        ] {
+            let reason = ColourDocument::from_text(bad).unwrap_err();
+            assert!(reason.contains("#RRGGBBAA"), "{bad:?}: {reason}");
+        }
+    }
 }

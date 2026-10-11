@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 
 use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::media::export::{ExportError, ExportEvent, ExportResult, VideoExport, plan_export};
-use fastforwardrs::project::{Project, Settings, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
+use fastforwardrs::project::{Project, Settings, SpedUpClipSound, SpeedFactor, SpeedIndicatorLayout};
 use fastforwardrs::speed_indicator::indicator_for_frame;
 use support::{
     RandomNumbers, TestVideo, TestVideoSpecification, counter_video, decode_video, decoded_sound, edited,
-    expected_source_frames, loudness, project_for, scratch_directory, stream_durations, test_video,
+    expected_source_frames, loudness, pitch_in_hertz, project_for, scratch_directory, stream_durations, test_video,
+    transparent_text_picture,
 };
 
 const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(180);
@@ -34,8 +35,9 @@ fn export_and_wait_with(
     source: &Path,
     destination: &Path,
 ) -> ExportOutcome {
-    let plan = plan_export(project, settings).expect("the project can be exported");
-    let export = VideoExport::start(toolchain, &plan, source, destination, Arc::new(|| {})).expect("the export starts");
+    let plan = plan_export(project, settings, &transparent_text_picture).expect("the project can be exported");
+    let export = VideoExport::start(toolchain, &plan, &[source.to_path_buf()], destination, Arc::new(|| {}))
+        .expect("the export starts");
     wait_for_export(&export)
 }
 
@@ -88,7 +90,7 @@ fn an_edited_project_exports_exactly_the_frames_its_clips_describe() {
     // All the splits are made before any speed is changed, so the timeline frames are source frames.
     let project = edited(project_for(&toolchain, &video), &[150, 330, 375], &[1, 3, 1, 5]);
     let expected = expected_source_frames(&project);
-    assert_eq!(expected.len() as u64, project.video_track().total_frame_count());
+    assert_eq!(expected.len() as u64, project.total_frame_count());
     let scratch = scratch_directory();
     let destination = scratch.path().join("edited.mp4");
 
@@ -116,14 +118,12 @@ fn random_edits_always_export_exactly_the_frames_the_project_describes() {
         let mut random = RandomNumbers::with_seed(seed);
         let mut project = project_for(&toolchain, &video);
         for _ in 0..8 {
-            let frame = random.next_below(project.video_track().total_frame_count());
-            let _ = project.split_at(TimelineFrameIndex::new(frame));
+            let frame = random.next_below(project.total_frame_count());
+            support::split(&mut project, frame);
         }
-        for clip_index in 0..project.video_track().clips().len() {
+        for clip_index in 0..support::clip_count(&project) {
             let speed = [1u32, 1, 2, 3, 4, 5, 7, 8, 16, 33][random.next_below(10) as usize];
-            project
-                .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
-                .unwrap();
+            support::set_clip_speed(&mut project, clip_index, speed);
         }
         let expected = expected_source_frames(&project);
         let destination = scratch.path().join(format!("random_{seed}.mp4"));
@@ -134,22 +134,20 @@ fn random_edits_always_export_exactly_the_frames_the_project_describes() {
             outcome.result,
             ExportResult::Completed,
             "seed {seed}: clips {:?}\ngraph: {}",
-            project.video_track().clips(),
-            plan_export(&project, Settings::DEFAULT).unwrap().filter_graph.text
+            project.tracks(),
+            plan_export(&project, Settings::DEFAULT, &transparent_text_picture)
+                .unwrap()
+                .filter_graph
+                .text
         );
         let frame_numbers = decode_video(&toolchain, &destination, 320, 180).frame_numbers();
         assert_eq!(
             frame_numbers.len(),
             expected.len(),
             "seed {seed}: clips {:?}",
-            project.video_track().clips()
+            project.tracks()
         );
-        assert_eq!(
-            frame_numbers,
-            expected,
-            "seed {seed}: clips {:?}",
-            project.video_track().clips()
-        );
+        assert_eq!(frame_numbers, expected, "seed {seed}: clips {:?}", project.tracks());
     }
 }
 
@@ -220,13 +218,13 @@ fn a_variable_frame_rate_source_exports_the_picture_nearest_in_time_to_every_slo
     );
     // 400 pictures in 20 seconds: the project runs at 20 frames per second.
     let mut project = project_for(&toolchain, &video);
-    assert_eq!(project.timeline_frame_rate().unwrap().frames_per_second(), 20.0);
-    assert_eq!(project.video_track().total_frame_count(), 400);
+    assert_eq!(project.frame_rate().frames_per_second(), 20.0);
+    assert_eq!(project.total_frame_count(), 400);
     // Clips: slots 0..100 at 1x (a static stretch), 100..300 at 4x, 300..400 at 1x.
     for frame in [100, 300] {
-        project.split_at(TimelineFrameIndex::new(frame)).unwrap();
+        support::split(&mut project, frame);
     }
-    project.set_clip_speed(1, SpeedFactor::new(4).unwrap()).unwrap();
+    support::set_clip_speed(&mut project, 1, 4);
     let scratch = scratch_directory();
     let destination = scratch.path().join("variable.mp4");
 
@@ -236,19 +234,12 @@ fn a_variable_frame_rate_source_exports_the_picture_nearest_in_time_to_every_slo
     let frame_numbers = decode_video(&toolchain, &destination, 320, 180).frame_numbers();
     assert_eq!(
         frame_numbers.len() as u64,
-        project.video_track().total_frame_count(),
+        project.total_frame_count(),
         "the video is as long as the timeline"
     );
     assert_eq!(frame_numbers.len(), 100 + 50 + 100);
     // Each picture is the one on screen (nearest in time) at the moment its timeline frame shows.
-    let source_slots: Vec<u64> = project
-        .video_track()
-        .placements()
-        .flat_map(|placement| {
-            (0..placement.clip.timeline_frame_count())
-                .map(move |offset| placement.clip.source_frame_at_timeline_offset(offset).unwrap().value())
-        })
-        .collect();
+    let source_slots: Vec<u64> = expected_source_frames(&project);
     for (timeline_frame, (&frame_number, &source_slot)) in frame_numbers.iter().zip(&source_slots).enumerate() {
         let nearest = kept_frames_nearest_to(source_slot as f64 / 20.0);
         assert!(
@@ -265,12 +256,10 @@ fn the_sound_stays_as_long_as_the_picture_however_the_clips_are_sped_up() {
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in [100, 190, 260, 300] {
-        project.split_at(TimelineFrameIndex::new(frame)).unwrap();
+        support::split(&mut project, frame);
     }
     for (clip_index, speed) in [1u32, 4, 1, 16, 3].into_iter().enumerate() {
-        project
-            .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
-            .unwrap();
+        support::set_clip_speed(&mut project, clip_index, speed);
     }
     let scratch = scratch_directory();
     let destination = scratch.path().join("sound.mp4");
@@ -278,7 +267,7 @@ fn the_sound_stays_as_long_as_the_picture_however_the_clips_are_sped_up() {
     let outcome = export_and_wait(&toolchain, &project, &video.path, &destination);
 
     assert_eq!(outcome.result, ExportResult::Completed);
-    let expected_seconds = project.video_track().total_frame_count() as f64 / 30.0;
+    let expected_seconds = project.total_frame_count() as f64 / 30.0;
     let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
     assert!(
         (video_seconds.unwrap() - expected_seconds).abs() < 0.01,
@@ -295,8 +284,8 @@ fn the_sound_of_every_clip_is_really_there_not_silence() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
-    project.split_at(TimelineFrameIndex::new(300)).unwrap();
-    project.set_clip_speed(1, SpeedFactor::new(4).unwrap()).unwrap();
+    support::split(&mut project, 300);
+    support::set_clip_speed(&mut project, 1, 4);
     let scratch = scratch_directory();
     let destination = scratch.path().join("sound_not_silent.mp4");
     assert_eq!(
@@ -327,7 +316,7 @@ fn with_sped_up_clips_muted_those_clips_are_silent_and_the_others_still_have_the
     let project = edited(project_for(&toolchain, &video), &[300], &[1, 4]);
     let scratch = scratch_directory();
     let settings = Settings {
-        mute_sped_up_clips: true,
+        sped_up_clip_sound: SpedUpClipSound::Mute,
         ..Settings::DEFAULT
     };
 
@@ -357,6 +346,54 @@ fn with_sped_up_clips_muted_those_clips_are_silent_and_the_others_still_have_the
     assert!(loudness(&samples[48_000 * 10 + 4_800..48_000 * 12]) > 0.05);
 }
 
+#[test]
+fn a_sped_up_clip_keeps_its_pitch_or_has_it_raised_as_the_setting_says_and_is_as_long_as_its_pictures() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    // Clips: 0..300 at 1x (10 s), 300..600 at 4x (2.5 s). The sound is a steady 440 Hz tone.
+    let project = edited(project_for(&toolchain, &video), &[300], &[1, 4]);
+    let scratch = scratch_directory();
+
+    for (sound, expected_pitch_in_the_fast_clip) in [
+        (SpedUpClipSound::MaintainPitch, 440.0),
+        (SpedUpClipSound::IncreasePitch, 4.0 * 440.0),
+    ] {
+        let settings = Settings {
+            sped_up_clip_sound: sound,
+            ..Settings::DEFAULT
+        };
+        let destination = scratch.path().join(format!("{sound:?}.mp4"));
+        let outcome = export_and_wait_with(&toolchain, &project, settings, &video.path, &destination);
+        assert_eq!(outcome.result, ExportResult::Completed, "{sound:?}");
+
+        let samples = decoded_sound(&toolchain, &destination, 1, 48_000);
+        let normal_clip = pitch_in_hertz(&samples[48_000..48_000 * 9], 48_000);
+        let fast_clip = pitch_in_hertz(&samples[48_000 * 10 + 4_800..48_000 * 12], 48_000);
+        assert!(
+            (normal_clip - 440.0).abs() < 10.0,
+            "{sound:?}: the normal clip is at {normal_clip} Hz"
+        );
+        assert!(
+            (fast_clip - expected_pitch_in_the_fast_clip).abs() < expected_pitch_in_the_fast_clip * 0.03,
+            "{sound:?}: the fast clip is at {fast_clip} Hz, expected {expected_pitch_in_the_fast_clip}"
+        );
+        assert!(
+            loudness(&samples[48_000 * 10 + 4_800..48_000 * 12]) > 0.05,
+            "{sound:?} is audible"
+        );
+        // Nothing shifted: the sound is as long as the pictures.
+        let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
+        assert!(
+            (video_seconds.unwrap() - 12.5).abs() < 0.01,
+            "{sound:?}: {video_seconds:?}"
+        );
+        assert!(
+            (audio_seconds.unwrap() - 12.5).abs() < 0.05,
+            "{sound:?}: {audio_seconds:?}"
+        );
+    }
+}
+
 /// Whether any pixel inside the symbol's place on the picture is bright white.
 fn symbol_is_visible(picture: &[u8], picture_width: u32, left: u32, top: u32, width: u32, height: u32) -> bool {
     (top..top + height).any(|y| {
@@ -373,12 +410,10 @@ fn only_accelerated_clips_show_the_fast_forward_symbol() {
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in [150, 330] {
-        project.split_at(TimelineFrameIndex::new(frame)).unwrap();
+        support::split(&mut project, frame);
     }
     for (clip_index, speed) in [1u32, 4, 1].into_iter().enumerate() {
-        project
-            .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
-            .unwrap();
+        support::set_clip_speed(&mut project, clip_index, speed);
     }
     let scratch = scratch_directory();
     let destination = scratch.path().join("symbols.mp4");
@@ -423,7 +458,7 @@ fn the_symbol_is_drawn_where_the_layout_says_and_nowhere_else() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
-    project.set_clip_speed(0, SpeedFactor::new(2).unwrap()).unwrap();
+    support::set_clip_speed(&mut project, 0, 2);
     project.set_speed_indicator_layout(SpeedIndicatorLayout::new(0.6, 0.55, 0.25));
     let scratch = scratch_directory();
     let destination = scratch.path().join("placed.mp4");
@@ -462,8 +497,8 @@ fn a_source_without_sound_exports_a_video_without_sound() {
         },
     );
     let mut project = project_for(&toolchain, &video);
-    project.split_at(TimelineFrameIndex::new(30)).unwrap();
-    project.set_clip_speed(1, SpeedFactor::new(2).unwrap()).unwrap();
+    support::split(&mut project, 30);
+    support::set_clip_speed(&mut project, 1, 2);
     let scratch = scratch_directory();
     let destination = scratch.path().join("silent.mp4");
 
@@ -483,15 +518,13 @@ fn a_project_with_a_hundred_and_fifty_clips_exports_even_though_its_graph_cannot
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in 1..150u64 {
-        project.split_at(TimelineFrameIndex::new(frame * 4)).unwrap();
+        support::split(&mut project, frame * 4);
     }
-    assert_eq!(project.video_track().clips().len(), 150);
+    assert_eq!(support::clip_count(&project), 150);
     for clip_index in 0..150 {
-        project
-            .set_clip_speed(clip_index, SpeedFactor::new(1 + (clip_index as u32 % 4)).unwrap())
-            .unwrap();
+        support::set_clip_speed(&mut project, clip_index, 1 + (clip_index as u32 % 4));
     }
-    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
     assert!(
         plan.filter_graph.text.len() > 32_768,
         "the graph must be too long for a Windows command line: {} characters",
@@ -518,14 +551,12 @@ fn clips_that_are_a_single_picture_long_never_cost_the_next_clip_its_first_frame
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in 1..40u64 {
-        project.split_at(TimelineFrameIndex::new(frame * 4)).unwrap();
+        support::split(&mut project, frame * 4);
     }
     // Clips of 4 frames: every other one at 4x (a single picture), the rest at normal speed.
-    for clip_index in 0..project.video_track().clips().len() {
+    for clip_index in 0..support::clip_count(&project) {
         let speed = if clip_index % 2 == 0 { 4 } else { 1 };
-        project
-            .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
-            .unwrap();
+        support::set_clip_speed(&mut project, clip_index, speed);
     }
     let expected = expected_source_frames(&project);
     let scratch = scratch_directory();
@@ -546,12 +577,10 @@ fn the_finished_video_has_the_exact_constant_frame_rate_whatever_the_clips() {
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in [3, 10, 50, 51, 200] {
-        project.split_at(TimelineFrameIndex::new(frame)).unwrap();
+        support::split(&mut project, frame);
     }
     for (clip_index, speed) in [7u32, 1, 3, 100, 2, 5].into_iter().enumerate() {
-        project
-            .set_clip_speed(clip_index, SpeedFactor::new(speed).unwrap())
-            .unwrap();
+        support::set_clip_speed(&mut project, clip_index, speed);
     }
     let scratch = scratch_directory();
     let destination = scratch.path().join("constant_rate.mp4");
@@ -578,7 +607,7 @@ fn the_finished_video_has_the_exact_constant_frame_rate_whatever_the_clips() {
         .split_whitespace()
         .map(|text| text.trim_end_matches(',').parse().unwrap())
         .collect();
-    assert_eq!(times.len() as u64, project.video_track().total_frame_count());
+    assert_eq!(times.len() as u64, project.total_frame_count());
     for (frame_number, &time) in times.iter().enumerate() {
         let expected_time = frame_number as f64 / 30.0;
         assert!(
@@ -596,8 +625,8 @@ fn a_file_name_with_unusual_characters_is_fine_for_source_and_destination() {
     let oddly_named_source = scratch.path().join("holiday #1 (final) - café & friends [2026].mp4");
     std::fs::copy(&video.path, &oddly_named_source).unwrap();
     let mut project = project_for(&toolchain, &video);
-    project.split_at(TimelineFrameIndex::new(100)).unwrap();
-    project.set_clip_speed(1, SpeedFactor::new(3).unwrap()).unwrap();
+    support::split(&mut project, 100);
+    support::set_clip_speed(&mut project, 1, 3);
     let destination = scratch.path().join("résumé of 'the' holiday; cut #2.mp4");
 
     let outcome = export_and_wait(&toolchain, &project, &oddly_named_source, &destination);
@@ -611,7 +640,7 @@ fn the_container_follows_the_destination_extension() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
-    project.set_clip_speed(0, SpeedFactor::new(10).unwrap()).unwrap();
+    support::set_clip_speed(&mut project, 0, 10);
     let scratch = scratch_directory();
     for extension in ["mkv", "mov"] {
         let destination = scratch.path().join(format!("container.{extension}"));
@@ -653,7 +682,7 @@ fn a_rotated_source_exports_upright_at_its_displayed_size() {
         specification: video.specification.clone(),
     };
     let mut project = project_for(&toolchain, &rotated_video);
-    project.set_clip_speed(0, SpeedFactor::new(20).unwrap()).unwrap();
+    support::set_clip_speed(&mut project, 0, 20);
     let destination = scratch.path().join("rotated_export.mp4");
 
     let outcome = export_and_wait(&toolchain, &project, &rotated, &destination);
@@ -709,13 +738,19 @@ fn exporting_over_the_source_video_is_refused_before_anything_is_touched() {
     let source_copy = scratch.path().join("source.mp4");
     std::fs::copy(&video.path, &source_copy).unwrap();
     let project = project_for(&toolchain, &video);
-    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
     let original_bytes = std::fs::read(&source_copy).unwrap();
 
     for destination in [source_copy.clone(), scratch.path().join(".").join("source.mp4")] {
-        let result = VideoExport::start(&toolchain, &plan, &source_copy, &destination, Arc::new(|| {}));
+        let result = VideoExport::start(
+            &toolchain,
+            &plan,
+            std::slice::from_ref(&source_copy),
+            &destination,
+            Arc::new(|| {}),
+        );
         assert!(
-            matches!(result, Err(ExportError::DestinationIsTheSourceVideo { .. })),
+            matches!(result, Err(ExportError::DestinationIsASourceFile { .. })),
             "{destination:?}"
         );
     }
@@ -760,7 +795,7 @@ fn a_successful_export_replaces_an_existing_file() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
-    project.set_clip_speed(0, SpeedFactor::new(50).unwrap()).unwrap();
+    support::set_clip_speed(&mut project, 0, 50);
     let scratch = scratch_directory();
     let destination = scratch.path().join("replaced.mp4");
     std::fs::write(&destination, b"old contents").unwrap();
@@ -798,8 +833,15 @@ fn cancelling_stops_the_export_and_leaves_no_file_and_an_existing_file_untouched
     let scratch = scratch_directory();
     let destination = scratch.path().join("cancelled.mp4");
     std::fs::write(&destination, b"the user's earlier export").unwrap();
-    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
-    let export = VideoExport::start(&toolchain, &plan, &video.path, &destination, Arc::new(|| {})).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let export = VideoExport::start(
+        &toolchain,
+        &plan,
+        std::slice::from_ref(&video.path),
+        &destination,
+        Arc::new(|| {}),
+    )
+    .unwrap();
 
     std::thread::sleep(Duration::from_millis(400));
     export.cancel();
@@ -835,8 +877,15 @@ fn dropping_a_running_export_cancels_it() {
     let project = project_for(&toolchain, &video);
     let scratch = scratch_directory();
     let destination = scratch.path().join("dropped.mp4");
-    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
-    let export = VideoExport::start(&toolchain, &plan, &video.path, &destination, Arc::new(|| {})).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let export = VideoExport::start(
+        &toolchain,
+        &plan,
+        std::slice::from_ref(&video.path),
+        &destination,
+        Arc::new(|| {}),
+    )
+    .unwrap();
     std::thread::sleep(Duration::from_millis(300));
 
     drop(export);

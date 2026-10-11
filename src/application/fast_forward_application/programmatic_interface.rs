@@ -8,20 +8,25 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use super::{FastForwardApplication, OpeningPurpose, SourceStatus};
+use super::{FastForwardApplication, OpeningPurpose};
 use crate::playback::{AudioSinkOpener, SuppliedPicture};
-use crate::project::{Project, Settings, TimelineFrameIndex};
+use crate::project::{ClipLocation, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
 
 impl FastForwardApplication {
-    /// Uses the video at `path` as the project's video, as choosing it in the Import dialog does:
-    /// it is imported when the project has none, or replaces the missing one (keeping all the
-    /// edits). Does nothing while the project's video is working.
+    /// Puts the video or sound file at `path` on the timeline at the current frame, as choosing it
+    /// in the Import dialog does.
     ///
-    /// The video is opened in the background; see [`Self::is_working_in_the_background`].
-    pub fn import_video_from(&mut self, path: PathBuf) {
-        if let Some(purpose) = self.purpose_of_importing() {
-            self.start_opening(purpose, vec![path]);
-        }
+    /// The file is opened in the background; see [`Self::is_working_in_the_background`].
+    pub fn import_file_from(&mut self, path: PathBuf) {
+        self.start_opening(OpeningPurpose::ImportNewSource, vec![path]);
+    }
+
+    /// Uses the file at `path` in place of the source file `identifier` of the project, as
+    /// choosing it after "Choose the file again" does. All the edits are kept.
+    ///
+    /// The file is opened in the background; see [`Self::is_working_in_the_background`].
+    pub fn relink_source_from(&mut self, identifier: SourceMediaIdentifier, path: PathBuf) {
+        self.start_opening(OpeningPurpose::RelinkMissingSource(identifier), vec![path]);
     }
 
     /// Loads the project file at `path`, as choosing it in the Load project dialog does.
@@ -29,7 +34,7 @@ impl FastForwardApplication {
         self.load_project(path);
     }
 
-    /// Starts a new, empty project, as the New project menu item does before it asks for a video.
+    /// Starts a new, empty project, as the New project menu item does before it asks for a file.
     pub fn start_empty_project(&mut self) {
         self.replace_project(Project::empty(), None);
     }
@@ -49,19 +54,40 @@ impl FastForwardApplication {
         self.project_file_path.as_deref()
     }
 
-    /// Whether the project's video has been found and opens.
-    pub fn source_video_is_available(&self) -> bool {
-        matches!(self.source_status, SourceStatus::Available { .. })
+    /// The clip that is selected, if one is.
+    pub fn selected_clip(&self) -> Option<ClipLocation> {
+        self.selected_clip
     }
 
-    /// Whether the warning that the source video must be chosen again is showing.
-    pub fn missing_source_warning_is_showing(&self) -> bool {
-        matches!(self.source_status, SourceStatus::Unavailable { .. }) && self.missing_source_warning_open
+    /// Whether the source file `identifier` has been found and opens.
+    pub fn source_file_is_available(&self, identifier: SourceMediaIdentifier) -> bool {
+        self.source_is_available(identifier)
     }
 
-    /// Whether a video is being opened, thumbnails are being made, or an export is running.
+    /// Whether every source file of the project has been found and opens. (A project with no
+    /// source files has every one of them.)
+    pub fn every_source_file_is_available(&self) -> bool {
+        self.project
+            .sources()
+            .iter()
+            .all(|source| self.source_is_available(source.identifier))
+    }
+
+    /// Whether the warning that source files must be chosen again is showing.
+    pub fn missing_sources_warning_is_showing(&self) -> bool {
+        self.missing_sources_warning_open && !self.missing_sources().is_empty()
+    }
+
+    /// Whether a file is being opened, thumbnails or waveforms are being made, the fonts for the text
+    /// are being loaded, or an export is running.
     pub fn is_working_in_the_background(&self) -> bool {
-        self.opening.is_some() || self.thumbnails.extraction.is_some() || self.export.is_some()
+        !self.openings.is_empty()
+            || self.export.is_some()
+            || self.text_renderer.is_loading()
+            || self
+                .source_files
+                .values()
+                .any(|state| state.thumbnails.extraction.is_some() || state.waveform.extraction.is_some())
     }
 
     /// The title and text of the message the user has to read, if one is showing.
@@ -85,7 +111,7 @@ impl FastForwardApplication {
 
     /// The current frame of the timeline.
     pub fn current_frame(&self) -> TimelineFrameIndex {
-        let total_frames = self.project.video_track().total_frame_count();
+        let total_frames = self.project.total_frame_count();
         self.clock.position(Instant::now(), total_frames)
     }
 
@@ -115,27 +141,27 @@ impl FastForwardApplication {
         self.picture_supplier.picture()
     }
 
-    /// How many thumbnails have been made, and how many there will be.
-    pub fn thumbnail_progress(&self) -> (usize, usize) {
-        (self.thumbnails.strip.made_count(), self.thumbnails.strip.second_count())
+    /// How many thumbnails of the video `identifier` have been made, and how many there will be.
+    pub fn thumbnail_progress(&self, identifier: SourceMediaIdentifier) -> (usize, usize) {
+        self.source_files.get(&identifier).map_or((0, 0), |state| {
+            (
+                state.thumbnails.strip.made_count(),
+                state.thumbnails.strip.second_count(),
+            )
+        })
     }
 
-    /// How far from the left edge of the video track, as it is drawn now, timeline frame `frame`
-    /// begins, in points. This is negative or beyond the track's width for a frame that has been
-    /// scrolled out of view. `None` while the project has no video.
-    pub fn video_track_offset_of_frame(&self, frame: TimelineFrameIndex) -> Option<f32> {
-        let geometry = self.timeline_geometry()?;
-        Some((geometry.x_of_frame(frame.value()) - self.timeline_view.scroll_offset) as f32)
+    /// How many peaks of the waveform of the sound file `identifier` have been made.
+    pub fn waveform_peak_count(&self, identifier: SourceMediaIdentifier) -> usize {
+        self.source_files
+            .get(&identifier)
+            .map_or(0, |state| state.waveform.waveform.peak_count())
     }
 
-    /// Which purpose a video chosen for import would serve, or `None` if the project's video is
-    /// working and none is wanted.
-    pub(super) fn purpose_of_importing(&self) -> Option<OpeningPurpose> {
-        match self.source_status {
-            SourceStatus::NoVideo => Some(OpeningPurpose::ImportIntoEmptyProject),
-            SourceStatus::Unavailable { .. } => Some(OpeningPurpose::RelinkMissingVideo),
-            // Only one video per project in this version, and it is working.
-            SourceStatus::Opening | SourceStatus::Available { .. } => None,
-        }
+    /// How far from the left edge of the strips, as they are drawn now, timeline frame `frame`
+    /// begins, in points. This is negative or beyond the strips' width for a frame that has been
+    /// scrolled out of view.
+    pub fn strip_offset_of_frame(&self, frame: TimelineFrameIndex) -> f32 {
+        (self.timeline_geometry().x_of_frame(frame.value()) - self.timeline_view.scroll_offset) as f32
     }
 }

@@ -13,18 +13,20 @@
 //!   (a clip was sped up) makes it start again from the playhead;
 //! * when the video is not playing there is no sound, and nothing is running.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::media::export::clips_to_export;
+use crate::composition::plan_sound;
+use crate::media::export::{sound_graph_specification, sources_of_sound};
 use crate::media::{
     AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain,
     UserInterfaceWakeUp,
 };
-use crate::project::{FrameRate, TimelineFrameIndex, VideoTrack};
+use crate::project::{Clip, Project, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex};
 
 /// How much sound is kept waiting at the speakers, in seconds. Enough to ride out a late frame of
 /// the window without a gap, and little enough that a change (pausing, say) is heard at once.
@@ -121,29 +123,49 @@ impl AudioStreamStarter for FfmpegAudioStreamStarter {
 /// What the sound is made of.
 #[derive(Clone, Copy)]
 pub struct AudioContent<'a> {
-    pub video_path: &'a Path,
-    pub frame_rate: FrameRate,
-    /// How many frames the source video has (clips cannot play beyond them).
-    pub source_frame_count: u64,
-    pub track: &'a VideoTrack,
-    pub mute_sped_up_clips: bool,
+    pub project: &'a Project,
+    /// Where each source file is that can be used. The sound of a file that is not here is left out.
+    pub source_paths: &'a HashMap<SourceMediaIdentifier, PathBuf>,
+    pub sped_up_clip_sound: SpedUpClipSound,
 }
 
 impl AudioContent<'_> {
     /// A number that is different whenever what the sound is made of is different, wherever the
     /// playhead is. (Equal numbers for different content are possible but astronomically unlikely,
-    /// and would only keep the old sound until the playhead is moved.)
+    /// and would only keep the old sound until the playhead is moved.) Only what is heard counts:
+    /// a change to text, or to where the picture is, leaves the sound as it is.
     fn signature(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
-        self.video_path.hash(&mut hasher);
-        self.frame_rate.numerator().hash(&mut hasher);
-        self.frame_rate.denominator().hash(&mut hasher);
-        self.source_frame_count.hash(&mut hasher);
-        self.mute_sped_up_clips.hash(&mut hasher);
-        for clip in self.track.clips() {
-            clip.first_source_frame().value().hash(&mut hasher);
-            clip.end_source_frame().value().hash(&mut hasher);
-            clip.speed_factor().value().hash(&mut hasher);
+        self.sped_up_clip_sound.hash(&mut hasher);
+        let frame_rate = self.project.frame_rate();
+        frame_rate.numerator().hash(&mut hasher);
+        frame_rate.denominator().hash(&mut hasher);
+        for source in self.project.sources() {
+            source.identifier.hash(&mut hasher);
+            source.properties.has_sound().hash(&mut hasher);
+            source.properties.frame_count_at(frame_rate).hash(&mut hasher);
+            self.source_paths.get(&source.identifier).hash(&mut hasher);
+        }
+        for track in self.project.tracks() {
+            track.id().hash(&mut hasher);
+            track.gain().decibels().to_bits().hash(&mut hasher);
+            track.speed().value().hash(&mut hasher);
+            track.is_muted().hash(&mut hasher);
+            for entry in track.entries() {
+                let media = match entry.clip() {
+                    Clip::Video(media) | Clip::Audio(media) => media,
+                    // Text has no sound, and where it is changes nothing but the gaps (hashed below).
+                    Clip::Text(_) => continue,
+                };
+                entry.id().hash(&mut hasher);
+                entry.gap_before_frames().hash(&mut hasher);
+                media.source().hash(&mut hasher);
+                media.first_source_frame().value().hash(&mut hasher);
+                media.end_source_frame().value().hash(&mut hasher);
+                media.speed().value().hash(&mut hasher);
+                media.gain().decibels().to_bits().hash(&mut hasher);
+                media.is_muted().hash(&mut hasher);
+            }
         }
         hasher.finish()
     }
@@ -332,15 +354,19 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         {
             return;
         }
-        let clips = clips_to_export(&content.track.clips_from(clock.frame), content.source_frame_count);
-        if clips.is_empty() {
+        let plan = plan_sound(content.project, clock.frame, |source| {
+            content.source_paths.contains_key(&source)
+        });
+        if plan.strips.is_empty() {
             return;
         }
+        let source_identifiers: Vec<SourceMediaIdentifier> = sources_of_sound(&plan).into_iter().collect();
         let request = AudioStreamRequest {
-            video_path: content.video_path.to_owned(),
-            frame_rate: content.frame_rate,
-            clips,
-            mute_sped_up_clips: content.mute_sped_up_clips,
+            source_files: source_identifiers
+                .iter()
+                .map(|identifier| content.source_paths[identifier].clone())
+                .collect(),
+            sound: sound_graph_specification(&plan, &source_identifiers, content.sped_up_clip_sound),
             format: sink.format(),
         };
         match self.starter.start(&request) {
@@ -348,7 +374,7 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
                 self.running = Some(RunningStream {
                     stream,
                     signature,
-                    origin_seconds: content.frame_rate.seconds_at_frame(clock.frame.value()),
+                    origin_seconds: content.project.frame_rate().seconds_at_frame(clock.frame.value()),
                     moments_taken: 0,
                     has_caught_up: false,
                     finished: false,

@@ -6,12 +6,12 @@ use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::test_window::{Window, project_of};
 use crate::application::dialogs::{AfterConfirmation, Dialog};
-use crate::project::{BOOLEAN_SETTINGS, ProjectSettings, Settings};
+use crate::project::{ProjectSettings, SETTINGS, SettingControlKind, Settings, SpedUpClipSound};
 use crate::project_file::read_project_file;
 use crate::settings_file::read_settings_file;
 
 const AUTOSAVE: &str = "Autosave";
-const MUTE_SPED_UP_CLIPS: &str = "Mute sped-up clips";
+const SPED_UP_CLIP_SOUND: &str = "Sound of sped-up clips";
 const USE_GLOBAL_SETTING: &str = "Use global setting";
 
 impl Window {
@@ -23,17 +23,36 @@ impl Window {
         self.settle();
     }
 
-    fn is_checked(&self, label: &str) -> bool {
-        self.harness.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
-    }
-
     fn is_disabled(&self, label: &str) -> bool {
         self.harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// Whether a drop-down list that shows `value` is greyed out. (A drop-down list is found by the
+    /// value it shows, which is where the screen reader tree puts it.)
+    fn dropdown_is_disabled(&self, value: &str) -> bool {
+        self.harness.get_by_value(value).accesskit_node().is_disabled()
     }
 
     /// Clicks the `number`th (from the top, counting from 0) of the checkboxes with this label.
     fn click_checkbox_number(&mut self, label: &str, number: usize) {
         self.harness.get_all_by_label(label).nth(number).unwrap().click();
+        self.settle();
+    }
+
+    /// Whether the control of a setting is greyed out: the checkbox, or the drop-down list, which
+    /// is found by the value it shows.
+    fn setting_is_greyed_out(&self, setting: &dyn crate::project::AnySetting, value_shown: &str) -> bool {
+        match setting.control() {
+            SettingControlKind::Checkbox => self.is_disabled(setting.label()),
+            SettingControlKind::Dropdown => self.dropdown_is_disabled(value_shown),
+        }
+    }
+
+    /// Opens the drop-down list that shows `shown` and picks `option` in it.
+    fn choose_from_the_dropdown_showing(&mut self, shown: &str, option: &str) {
+        self.harness.get_by_value(shown).click();
+        self.settle();
+        self.harness.get_by_label(option).click();
         self.settle();
     }
 }
@@ -46,22 +65,72 @@ fn assert_no_window_is_open(window: &Window) {
 // --- the global settings window ---
 
 #[test]
-fn the_global_settings_window_has_a_checkbox_for_each_setting_all_off_to_begin_with() {
+fn the_global_settings_window_has_a_control_for_each_setting_with_the_defaults_to_begin_with() {
     let mut window = Window::showing(project_of(300));
     assert_no_window_is_open(&window);
 
     window.open_from_the_edit_menu("Global settings");
 
     assert!(window.harness.query_by_label("Global settings").is_some());
-    for setting in BOOLEAN_SETTINGS {
-        assert!(!window.is_checked(setting.label), "{} starts off", setting.label);
-        assert!(!window.is_disabled(setting.label));
-    }
-    assert!(window.harness.query_by_label(AUTOSAVE).is_some());
-    assert!(window.harness.query_by_label(MUTE_SPED_UP_CLIPS).is_some());
+    assert!(!window.is_checked(AUTOSAVE), "autosave starts off");
+    assert!(!window.is_disabled(AUTOSAVE));
+    assert!(window.harness.query_by_label(SPED_UP_CLIP_SOUND).is_some());
+    assert!(
+        window.harness.query_by_value("Maintain pitch").is_some(),
+        "the drop-down list shows what is chosen: the sound keeps its pitch to begin with"
+    );
+    assert!(!window.dropdown_is_disabled("Maintain pitch"));
     assert!(
         window.harness.query_by_label(USE_GLOBAL_SETTING).is_none(),
         "that is only in the project's window"
+    );
+}
+
+#[test]
+fn the_dropdown_for_sped_up_clips_offers_mute_maintain_pitch_and_increase_pitch_in_that_order() {
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Global settings");
+
+    window.harness.get_by_value("Maintain pitch").click();
+    window.settle();
+
+    // The three choices are listed (the box itself shows the chosen one as its value, not as a label).
+    let heights: Vec<f32> = ["Mute", "Maintain pitch", "Increase pitch"]
+        .iter()
+        .map(|option| window.rectangle_of(option).top())
+        .collect();
+    assert!(
+        heights.windows(2).all(|pair| pair[0] < pair[1]),
+        "listed top to bottom in this order: {heights:?}"
+    );
+}
+
+#[test]
+fn choosing_a_sound_for_sped_up_clips_in_the_global_window_changes_the_global_setting_only() {
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Global settings");
+
+    window.choose_from_the_dropdown_showing("Maintain pitch", "Increase pitch");
+    assert_eq!(
+        window.application().global_settings().sped_up_clip_sound,
+        SpedUpClipSound::IncreasePitch
+    );
+    assert!(
+        window.harness.query_by_value("Increase pitch").is_some(),
+        "and the box shows it"
+    );
+
+    window.choose_from_the_dropdown_showing("Increase pitch", "Mute");
+    assert_eq!(
+        window.application().global_settings().sped_up_clip_sound,
+        SpedUpClipSound::Mute
+    );
+
+    window.choose_from_the_dropdown_showing("Mute", "Maintain pitch");
+    assert_eq!(window.application().global_settings(), Settings::DEFAULT);
+    assert!(
+        !window.application().has_unsaved_changes(),
+        "a global setting is not a change to the project"
     );
 }
 
@@ -74,8 +143,9 @@ fn ticking_a_global_setting_changes_it_and_unticking_changes_it_back() {
     window.settle();
     assert!(window.application().global_settings().autosave);
     assert!(window.is_checked(AUTOSAVE));
-    assert!(
-        !window.application().global_settings().mute_sped_up_clips,
+    assert_eq!(
+        window.application().global_settings().sped_up_clip_sound,
+        SpedUpClipSound::MaintainPitch,
         "the other is untouched"
     );
 
@@ -88,8 +158,11 @@ fn ticking_a_global_setting_changes_it_and_unticking_changes_it_back() {
 fn changing_a_global_setting_is_not_a_change_to_the_project() {
     let mut window = Window::showing(project_of(300));
     window.open_from_the_edit_menu("Global settings");
-    window.harness.get_by_label(MUTE_SPED_UP_CLIPS).click();
-    window.settle();
+    window.choose_from_the_dropdown_showing("Maintain pitch", "Mute");
+    assert_eq!(
+        window.application().global_settings().sped_up_clip_sound,
+        SpedUpClipSound::Mute
+    );
     assert!(!window.application().has_unsaved_changes());
 }
 
@@ -115,7 +188,7 @@ fn a_new_project_follows_every_global_setting_so_the_controls_are_greyed_out() {
 
     assert!(window.harness.query_by_label("Project settings").is_some());
     let follow_checkboxes = window.harness.get_all_by_label(USE_GLOBAL_SETTING).count();
-    assert_eq!(follow_checkboxes, BOOLEAN_SETTINGS.len(), "one next to each control");
+    assert_eq!(follow_checkboxes, SETTINGS.len(), "one next to each control");
     for number in 0..follow_checkboxes {
         let checkbox = window.harness.get_all_by_label(USE_GLOBAL_SETTING).nth(number).unwrap();
         assert_eq!(
@@ -123,8 +196,13 @@ fn a_new_project_follows_every_global_setting_so_the_controls_are_greyed_out() {
             Some(egui::accesskit::Toggled::True)
         );
     }
-    for setting in BOOLEAN_SETTINGS {
-        assert!(window.is_disabled(setting.label), "{} is greyed out", setting.label);
+    for setting in SETTINGS {
+        let shown_value = setting.option_labels()[setting.global_option(Settings::DEFAULT)];
+        assert!(
+            window.setting_is_greyed_out(setting, shown_value),
+            "{} is greyed out",
+            setting.label()
+        );
     }
     assert_eq!(
         window.application().project.settings(),
@@ -135,34 +213,39 @@ fn a_new_project_follows_every_global_setting_so_the_controls_are_greyed_out() {
 #[test]
 fn the_greyed_out_control_shows_the_global_value_that_is_being_used() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings.mute_sped_up_clips = true;
+    window.application_mut().global_settings.sped_up_clip_sound = SpedUpClipSound::IncreasePitch;
+    window.application_mut().global_settings.autosave = true;
 
     window.open_from_the_edit_menu("Project settings");
 
-    assert!(window.is_checked(MUTE_SPED_UP_CLIPS), "the global 'on' is shown");
-    assert!(window.is_disabled(MUTE_SPED_UP_CLIPS));
-    assert!(!window.is_checked(AUTOSAVE), "and the global 'off'");
+    assert!(
+        window.harness.query_by_value("Increase pitch").is_some(),
+        "the global choice is shown"
+    );
+    assert!(window.dropdown_is_disabled("Increase pitch"));
+    assert!(window.is_checked(AUTOSAVE), "and the global 'on'");
+    assert!(window.is_disabled(AUTOSAVE));
 }
 
 #[test]
 fn unticking_use_global_setting_frees_the_control_starting_at_the_global_value() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings.mute_sped_up_clips = true;
+    window.application_mut().global_settings.sped_up_clip_sound = SpedUpClipSound::Mute;
     window.open_from_the_edit_menu("Project settings");
     assert!(!window.application().has_unsaved_changes());
 
-    // The second row is "Mute sped-up clips".
+    // The second row is the sound of sped-up clips.
     window.click_checkbox_number(USE_GLOBAL_SETTING, 1);
 
     assert_eq!(
         window.application().project.settings(),
         ProjectSettings {
             autosave: None,
-            mute_sped_up_clips: Some(true),
+            sped_up_clip_sound: Some(SpedUpClipSound::Mute),
         },
         "the project now has its own setting, which starts as what the global one was"
     );
-    assert!(!window.is_disabled(MUTE_SPED_UP_CLIPS), "the control is free");
+    assert!(!window.dropdown_is_disabled("Mute"), "the control is free");
     assert!(window.is_disabled(AUTOSAVE), "the other one still follows");
     assert!(
         window.application().has_unsaved_changes(),
@@ -214,16 +297,19 @@ fn a_global_change_reaches_a_project_that_follows_and_not_one_that_has_its_own_v
     let mut window = Window::showing(project_of(300));
     window.application_mut().project.set_settings(ProjectSettings {
         autosave: Some(false),
-        mute_sped_up_clips: None,
+        sped_up_clip_sound: None,
     });
     window.open_from_the_edit_menu("Global settings");
     window.harness.get_by_label(AUTOSAVE).click();
-    window.harness.get_by_label(MUTE_SPED_UP_CLIPS).click();
-    window.settle();
+    window.choose_from_the_dropdown_showing("Maintain pitch", "Mute");
 
     let in_effect = window.application().settings_in_effect();
     assert!(!in_effect.autosave, "the project has its own 'off'");
-    assert!(in_effect.mute_sped_up_clips, "the project follows this one");
+    assert_eq!(
+        in_effect.sped_up_clip_sound,
+        SpedUpClipSound::Mute,
+        "the project follows this one"
+    );
 }
 
 #[test]
@@ -231,7 +317,7 @@ fn a_new_project_follows_the_global_settings_again_whatever_the_old_one_had_set(
     let mut window = Window::showing(project_of(300));
     window.application_mut().project.set_settings(ProjectSettings {
         autosave: Some(true),
-        mute_sped_up_clips: Some(true),
+        sped_up_clip_sound: Some(SpedUpClipSound::Mute),
     });
 
     window.application_mut().start_empty_project();
@@ -262,14 +348,13 @@ fn the_global_settings_are_saved_to_their_file_as_soon_as_they_change() {
     assert!(!path.exists(), "nothing is written until there is something to write");
 
     window.open_from_the_edit_menu("Global settings");
-    window.harness.get_by_label(MUTE_SPED_UP_CLIPS).click();
-    window.settle();
+    window.choose_from_the_dropdown_showing("Maintain pitch", "Increase pitch");
 
     assert_eq!(
         read_settings_file(&path).unwrap(),
         Settings {
             autosave: false,
-            mute_sped_up_clips: true
+            sped_up_clip_sound: SpedUpClipSound::IncreasePitch
         }
     );
 }
@@ -281,7 +366,7 @@ fn the_global_settings_are_loaded_from_their_file_when_the_program_starts() {
     crate::settings_file::write_settings_file(
         Settings {
             autosave: true,
-            mute_sped_up_clips: true,
+            sped_up_clip_sound: SpedUpClipSound::Mute,
         },
         &path,
     )
@@ -291,7 +376,10 @@ fn the_global_settings_are_loaded_from_their_file_when_the_program_starts() {
     window.application_mut().keep_global_settings_in(path);
 
     assert!(window.application().global_settings().autosave);
-    assert!(window.application().global_settings().mute_sped_up_clips);
+    assert_eq!(
+        window.application().global_settings().sped_up_clip_sound,
+        SpedUpClipSound::Mute
+    );
     assert!(window.application().message_showing().is_none());
 }
 
@@ -355,7 +443,7 @@ fn window_with_a_saved_project(folder: &tempfile::TempDir) -> (Window, std::path
 }
 
 fn clip_count_in_file(path: &std::path::Path) -> usize {
-    read_project_file(path).unwrap().video_track().clips().len()
+    read_project_file(path).unwrap().tracks()[0].entries().len()
 }
 
 #[test]
@@ -402,7 +490,7 @@ fn a_project_that_sets_autosave_for_itself_is_autosaved_even_though_the_global_o
     let (mut window, path) = window_with_a_saved_project(&folder);
     window.application_mut().project.set_settings(ProjectSettings {
         autosave: Some(true),
-        mute_sped_up_clips: None,
+        sped_up_clip_sound: None,
     });
 
     window.cut_at_frame(100);

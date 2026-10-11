@@ -6,6 +6,8 @@
 //! The parts that draw are kept thin.
 
 mod background;
+mod bubble;
+mod clicks;
 mod commands;
 mod dialogs;
 mod editing;
@@ -17,7 +19,7 @@ mod preview_panel;
 mod scrub_bar;
 mod scrub_slider;
 mod settings_windows;
-mod speed_slider;
+mod text_object_window;
 mod textures;
 mod theme;
 mod timeline_geometry;

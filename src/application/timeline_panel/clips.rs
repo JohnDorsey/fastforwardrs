@@ -1,16 +1,24 @@
-//! Drawing the clips of the video track: a strip of pictures taken from the video, one for every
-//! second of the finished video, side by side with no gaps, where each clip has its own corners
-//! rounded a little.
+//! Drawing the clips of a track. Each clip has its own corners rounded a little, and is drawn
+//! according to what it is made of:
+//!
+//! * a video clip is a row of pictures taken from the video, one for every second of the finished
+//!   video, side by side with no gaps;
+//! * a sound clip is the waveform of the sound, dark blue on pale violet;
+//! * a text clip is what the text says, on a teal background;
+//! * a clip whose file cannot be found is a dull red, with the name of the file.
+//!
+//! The selected clip has a bright outline.
 
 use egui::epaint::RectShape;
-use egui::{Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Rect, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use super::TimelineContent;
+use super::strip_view::StripView;
+use super::{SourceLook, TimelineContent};
 use crate::application::textures::Textures;
 use crate::application::theme;
-use crate::application::timeline_geometry::{TileLayout, TimelineGeometry};
-use crate::media::thumbnail_second_for_source_frame;
-use crate::project::VideoTrack;
+use crate::application::timeline_geometry::{TileLayout, WaveformColumn};
+use crate::media::{ThumbnailStrip, thumbnail_second_for_source_frame};
+use crate::project::{Clip, ClipPlacement, SourceMediaIdentifier, Track};
 
 /// The part of a picture a tile shows: from the left edge to this fraction of the picture's width.
 fn picture_part_up_to(fraction_of_width: f32) -> Rect {
@@ -31,45 +39,146 @@ pub(super) fn corner_radius_of_tile(tile: &TileLayout, radius: u8) -> CornerRadi
     }
 }
 
-/// Fills the strip's background, which shows through at the rounded corners.
-pub(super) fn draw_background(painter: &Painter, track_rectangle: Rect) {
+/// How loud a bar of the waveform is drawn: the quiet parts are made to stand out a little, so that
+/// a soft recording still shows its shape. (Silence stays silent.)
+fn displayed_height_of(loudness: f32) -> f32 {
+    loudness.clamp(0.0, 1.0).powf(0.6)
+}
+
+/// How tall the bar of the waveform for `column` is drawn, in points, on a clip that is
+/// `clip_height` tall: a bar is never less than a point tall unless the sound is silent.
+fn waveform_bar_height(column: &WaveformColumn, clip_height: f32) -> f32 {
+    if column.loudness <= 0.0 {
+        return 0.0;
+    }
+    let most = clip_height - 2.0 * WAVEFORM_MARGIN;
+    (displayed_height_of(column.loudness) * most).max(1.0)
+}
+
+/// How far the waveform keeps from the top and bottom of its clip, in points.
+const WAVEFORM_MARGIN: f32 = 8.0;
+
+/// Where on the screen a clip is, as far as it can be seen: its whole extent along the strip, and
+/// the same cut to the strip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ClipRectangles {
+    /// The whole clip, which may stretch far beyond the strip on either side.
+    pub whole: Rect,
+    /// The part of it that is in the strip.
+    pub visible: Rect,
+}
+
+/// Where the clip of `placement` is on the screen, seen through `view` (the view of the strip of
+/// the clip's track).
+pub(super) fn rectangles_of(placement: &ClipPlacement<'_>, view: &StripView) -> ClipRectangles {
+    let left = view.screen_x_of_frame(placement.first_timeline_frame.value());
+    let right = view.screen_x_of_frame(placement.end_timeline_frame.value());
+    let whole = Rect::from_min_max(
+        pos2(left, view.rectangle.top()),
+        pos2(right.max(left), view.rectangle.bottom()),
+    );
+    ClipRectangles {
+        whole,
+        visible: whole.intersect(view.rectangle),
+    }
+}
+
+/// Fills the strip's background, which shows through between the clips.
+pub(super) fn draw_background(painter: &Painter, strip_rectangle: Rect) {
     painter.rect_filled(
-        track_rectangle,
+        strip_rectangle,
         CornerRadius::same(theme::CLIP_CORNER_RADIUS),
         theme::TRACK_BACKGROUND,
     );
 }
 
 /// Draws the line around the strip.
-pub(super) fn draw_border(painter: &Painter, track_rectangle: Rect) {
+pub(super) fn draw_border(painter: &Painter, strip_rectangle: Rect) {
     painter.rect_stroke(
-        track_rectangle,
+        strip_rectangle,
         CornerRadius::same(theme::CLIP_CORNER_RADIUS),
         Stroke::new(1.0, theme::TRACK_BORDER),
         StrokeKind::Inside,
     );
 }
 
-/// Draws the pictures of the clips that are in view.
-pub(super) fn draw_tiles(
+/// Draws the clips of `track` that are in view of `view` (the view of its strip).
+pub(super) fn draw_clips(
     ui: &Ui,
     painter: &Painter,
+    track: &Track,
     content: &TimelineContent<'_>,
-    geometry: TimelineGeometry,
-    scroll_offset: f64,
+    view: &StripView,
     textures: &mut Textures,
-    track_rectangle: Rect,
 ) {
-    let view_width = f64::from(track_rectangle.width());
-    for tile in geometry.visible_tiles(content.project.video_track(), scroll_offset, view_width) {
-        let left = track_rectangle.left() + (tile.left - scroll_offset) as f32;
+    let tiles = view.geometry.visible_tiles(track, view.scroll_offset, view.width());
+    for placement in track.placements() {
+        let rectangles = rectangles_of(&placement, view);
+        if rectangles.visible.width() <= 0.0 {
+            continue;
+        }
+        let corner_radius = CornerRadius::same(theme::CLIP_CORNER_RADIUS);
+        match placement.clip {
+            Clip::Video(media) => {
+                let look = content.source_looks.get(&media.source());
+                match look {
+                    Some(look) if look.is_available => {
+                        let Some(thumbnails) = look.thumbnails else { continue };
+                        draw_video_clip(
+                            ui,
+                            painter,
+                            view,
+                            tiles.iter().filter(|tile| tile.clip == placement.id),
+                            media.source(),
+                            thumbnails,
+                            textures,
+                        );
+                    }
+                    other => draw_missing_clip(painter, rectangles, corner_radius, other),
+                }
+            }
+            Clip::Audio(media) => match content.source_looks.get(&media.source()) {
+                Some(look) if look.is_available => {
+                    painter.rect_filled(rectangles.whole, corner_radius, theme::SOUND_CLIP_BACKGROUND);
+                    if let Some(waveform) = look.waveform {
+                        let columns = view.geometry.waveform_columns(
+                            &placement,
+                            waveform,
+                            view.scroll_offset,
+                            view.width(),
+                            theme::WAVEFORM_COLUMN_WIDTH,
+                        );
+                        draw_waveform(painter, view, rectangles, &columns);
+                    }
+                }
+                other => draw_missing_clip(painter, rectangles, corner_radius, other),
+            },
+            Clip::Text(text) => {
+                painter.rect_filled(rectangles.whole, corner_radius, theme::TEXT_CLIP_BACKGROUND);
+                draw_label(painter, rectangles, &text.object.text, theme::TEXT_CLIP_TEXT);
+            }
+        }
+    }
+}
+
+/// Draws the pictures of one video clip, which are the `tiles` it has in view of `view`.
+fn draw_video_clip<'a>(
+    ui: &Ui,
+    painter: &Painter,
+    view: &StripView,
+    tiles: impl Iterator<Item = &'a TileLayout>,
+    source: SourceMediaIdentifier,
+    thumbnails: &ThumbnailStrip,
+    textures: &mut Textures,
+) {
+    for tile in tiles {
         let tile_rectangle = Rect::from_min_size(
-            pos2(left, track_rectangle.top()),
-            vec2(tile.width as f32, theme::TRACK_HEIGHT),
+            pos2(view.screen_x_of(tile.left), view.rectangle.top()),
+            vec2(tile.width as f32, view.rectangle.height()),
         );
-        let corner_radius = corner_radius_of_tile(&tile, theme::CLIP_CORNER_RADIUS);
-        let second = thumbnail_second_for_source_frame(geometry.frame_rate(), tile.source_frame);
-        let shape = match textures.thumbnail(ui.ctx(), content.thumbnails, second) {
+        let corner_radius = corner_radius_of_tile(tile, theme::CLIP_CORNER_RADIUS);
+        let second = thumbnail_second_for_source_frame(view.geometry.frame_rate(), tile.source_frame);
+        let shape = match textures.thumbnail(ui.ctx(), source, thumbnails, second) {
             Some(texture) => RectShape::filled(tile_rectangle, corner_radius, Color32::WHITE)
                 .with_texture(texture.id(), picture_part_up_to(tile.fraction_of_picture_shown)),
             None => RectShape::filled(tile_rectangle, corner_radius, theme::THUMBNAIL_PLACEHOLDER),
@@ -78,23 +187,80 @@ pub(super) fn draw_tiles(
     }
 }
 
-/// Draws a thin line where each clip after the first begins, light beside dark so that it shows
-/// up against any picture. The lines stop short of the top and bottom by the radius of the
-/// corners, so that they do not cover the notches where two clips' rounded corners meet.
-pub(super) fn draw_clip_boundaries(
+fn draw_missing_clip(
     painter: &Painter,
-    geometry: TimelineGeometry,
-    track: &VideoTrack,
-    scroll_offset: f64,
-    track_rectangle: Rect,
+    rectangles: ClipRectangles,
+    corner_radius: CornerRadius,
+    look: Option<&SourceLook<'_>>,
 ) {
-    for boundary in geometry.clip_boundaries(track) {
-        let x = track_rectangle.left() + (boundary - scroll_offset) as f32;
-        if x < track_rectangle.left() - 2.0 || x > track_rectangle.right() + 2.0 {
+    painter.rect_filled(rectangles.whole, corner_radius, theme::MISSING_CLIP_BACKGROUND);
+    let name = look.map_or("a file", |look| look.file_name.as_str());
+    draw_label(
+        painter,
+        rectangles,
+        &format!("{name} (not found)"),
+        theme::MISSING_CLIP_TEXT,
+    );
+}
+
+/// Draws the bars of a waveform, each as tall as the sound is loud, centred on the middle of the
+/// clip, side by side so that together they are one solid shape. (They are one mesh of rectangles,
+/// which is quick to draw however many there are, and has no faint seams between them.)
+fn draw_waveform(painter: &Painter, view: &StripView, rectangles: ClipRectangles, columns: &[WaveformColumn]) {
+    let middle = rectangles.whole.center().y;
+    let clip_height = rectangles.whole.height();
+    let mut mesh = Mesh::default();
+    for column in columns {
+        let height = waveform_bar_height(column, clip_height);
+        if height <= 0.0 {
             continue;
         }
-        let top = track_rectangle.top() + f32::from(theme::CLIP_CORNER_RADIUS);
-        let bottom = track_rectangle.bottom() - f32::from(theme::CLIP_CORNER_RADIUS);
+        let left = view.screen_x_of(column.left);
+        let bar = Rect::from_min_max(
+            pos2(left, middle - height / 2.0),
+            pos2(left + column.width as f32, middle + height / 2.0),
+        );
+        mesh.add_colored_rect(bar, theme::SOUND_CLIP_WAVEFORM);
+    }
+    painter.with_clip_rect(rectangles.visible).add(Shape::mesh(mesh));
+}
+
+/// Writes `text` (its first line) inside the clip, at its left edge, or at the left edge of the
+/// strip if the clip's start is scrolled out of view.
+fn draw_label(painter: &Painter, rectangles: ClipRectangles, text: &str, colour: Color32) {
+    let first_line = text.lines().next().unwrap_or("");
+    let painter = painter.with_clip_rect(rectangles.visible);
+    painter.text(
+        pos2(rectangles.visible.left() + 12.0, rectangles.visible.center().y),
+        Align2::LEFT_CENTER,
+        first_line,
+        FontId::proportional(14.0),
+        colour,
+    );
+}
+
+/// Draws the outline of the selected clip.
+pub(super) fn draw_selection_outline(painter: &Painter, rectangles: ClipRectangles) {
+    painter.with_clip_rect(rectangles.visible.expand(2.0)).rect_stroke(
+        rectangles.whole,
+        CornerRadius::same(theme::CLIP_CORNER_RADIUS),
+        Stroke::new(3.0, theme::SELECTION_OUTLINE),
+        StrokeKind::Inside,
+    );
+}
+
+/// Draws a thin line where each clip that touches the one before it begins, light beside dark so
+/// that it shows up against any picture. The lines stop short of the top and bottom by the radius
+/// of the corners, so that they do not cover the notches where two clips' rounded corners meet.
+pub(super) fn draw_clip_boundaries(painter: &Painter, view: &StripView, track: &Track) {
+    let strip_rectangle = view.rectangle;
+    for boundary in view.geometry.clip_boundaries(track) {
+        let x = view.screen_x_of(boundary);
+        if x < strip_rectangle.left() - 2.0 || x > strip_rectangle.right() + 2.0 {
+            continue;
+        }
+        let top = strip_rectangle.top() + f32::from(theme::CLIP_CORNER_RADIUS);
+        let bottom = strip_rectangle.bottom() - f32::from(theme::CLIP_CORNER_RADIUS);
         painter.line_segment(
             [pos2(x - 1.0, top), pos2(x - 1.0, bottom)],
             Stroke::new(1.0, theme::CLIP_BOUNDARY_LIGHT),
@@ -109,11 +275,13 @@ pub(super) fn draw_clip_boundaries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::SourceFrameIndex;
+    use crate::application::timeline_geometry::TimelineGeometry;
+    use crate::project::{ClipId, SourceFrameIndex};
 
     fn tile(starts_clip: bool, ends_clip: bool) -> TileLayout {
         TileLayout {
-            clip_index: 0,
+            clip: ClipId::new(0),
+            source: SourceMediaIdentifier::new(1),
             left: 0.0,
             width: 100.0,
             fraction_of_picture_shown: 1.0,
@@ -157,5 +325,72 @@ mod tests {
     #[test]
     fn a_clip_of_one_tile_has_all_four_corners_rounded() {
         assert_eq!(corner_radius_of_tile(&tile(true, true), 4), CornerRadius::same(4));
+    }
+
+    #[test]
+    fn the_corners_of_clips_are_rounded_by_three_times_what_they_were() {
+        // Round 2 had a radius of 6 points; the request was for about three times as much.
+        assert_eq!(theme::CLIP_CORNER_RADIUS, 18);
+    }
+
+    fn column(loudness: f32) -> WaveformColumn {
+        WaveformColumn {
+            left: 0.0,
+            width: 2.0,
+            loudness,
+        }
+    }
+
+    #[test]
+    fn silence_has_no_bar_and_any_sound_has_one_at_least_a_point_tall() {
+        assert_eq!(waveform_bar_height(&column(0.0), 104.0), 0.0);
+        assert_eq!(waveform_bar_height(&column(0.0001), 104.0), 1.0);
+    }
+
+    #[test]
+    fn the_loudest_sound_fills_the_clip_except_for_the_margins() {
+        assert_eq!(waveform_bar_height(&column(1.0), 104.0), 104.0 - 2.0 * WAVEFORM_MARGIN);
+    }
+
+    #[test]
+    fn louder_sound_is_never_drawn_shorter_and_soft_sound_is_made_to_show() {
+        let heights: Vec<f32> = (0..=20)
+            .map(|step| waveform_bar_height(&column(step as f32 / 20.0), 104.0))
+            .collect();
+        assert!(heights.windows(2).all(|pair| pair[0] <= pair[1]), "{heights:?}");
+        assert!(
+            heights[10] > 0.5 * heights[20],
+            "half as loud shows as more than half as tall"
+        );
+    }
+
+    #[test]
+    fn a_clip_is_where_its_frames_are_along_the_strip_and_only_the_part_in_view_is_visible() {
+        use crate::project::{MediaClip, SpeedFactor, TrackId};
+        let geometry = TimelineGeometry::for_picture(crate::project::FrameRate::new(30, 1).unwrap(), 1920, 1080, 90.0);
+        let media = MediaClip::new(
+            SourceMediaIdentifier::new(1),
+            SourceFrameIndex::new(0),
+            SourceFrameIndex::new(300),
+            SpeedFactor::NORMAL,
+        )
+        .unwrap();
+        let track = Track::new(TrackId::new(0), "track 0").with_clips([(30, Clip::Video(media))]);
+        let placement = track.placement_at_index(0).unwrap();
+        let strip = Rect::from_min_size(pos2(100.0, 50.0), vec2(500.0, 104.0));
+
+        let rectangles = rectangles_of(&placement, &StripView::new(geometry, 0.0, strip));
+        // 160 points a second: the clip starts one second in and lasts ten.
+        assert_eq!(rectangles.whole.left(), 100.0 + 160.0);
+        assert_eq!(rectangles.whole.width(), 1600.0);
+        assert_eq!(rectangles.visible.right(), strip.right());
+
+        let scrolled = rectangles_of(&placement, &StripView::new(geometry, 400.0, strip));
+        assert_eq!(scrolled.whole.left(), 100.0 + 160.0 - 400.0);
+        assert_eq!(
+            scrolled.visible.left(),
+            strip.left(),
+            "cut off at the left edge of the strip"
+        );
     }
 }

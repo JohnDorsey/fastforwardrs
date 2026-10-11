@@ -3,7 +3,7 @@
 //!
 //! * [`PlaybackClock`] says which timeline frame is current (it follows the real time while
 //!   playing).
-//! * [`wanted_picture`] says which picture of the source video that frame needs.
+//! * [`wanted_picture`] says which picture of which source video that frame needs.
 //! * [`PictureSupplier`] gets that picture, by running ffmpeg as little as it can.
 
 mod audio_device;
@@ -24,6 +24,6 @@ pub use picture_size::{LARGEST_PREVIEW_HEIGHT_IN_PIXELS, LARGEST_PREVIEW_WIDTH_I
 pub use supplier::{
     FfmpegPictureStreamStarter, MINIMUM_TIME_BETWEEN_STREAM_STARTS, MOST_PICTURES_TO_WAIT_FOR,
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PictureStream, PictureStreamStarter, PictureSupplier,
-    PreviewSource, SuppliedPicture, SupplyReport,
+    PreviewSetup, PreviewVideo, SuppliedPicture, SupplyReport,
 };
-pub use wanted::{UpcomingClip, WantedPicture, wanted_picture};
+pub use wanted::{UpcomingVideo, WantedPicture, wanted_picture};

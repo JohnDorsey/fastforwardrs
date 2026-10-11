@@ -1,12 +1,18 @@
-//! How the video track is laid out on the screen: where each frame is, which thumbnail pictures
-//! are visible, and where the view should scroll to. Plain numbers only; drawing is done elsewhere.
+//! How the tracks are laid out on the screen: where each frame is, which thumbnail pictures and
+//! which stretches of a sound's waveform are visible, and where the view should scroll to. Plain
+//! numbers only; drawing is done elsewhere.
 //!
-//! The track is a strip of pictures taken from the video, one for every second of the finished
-//! video, laid side by side with no gaps. Positions along it are measured in screen points from
-//! the start of the strip ("content" positions); the view is a window onto the strip that starts
-//! `scroll_offset` points along it.
+//! Every track is a strip as long as the finished video, and they all have the same scale, so
+//! that a frame is at the same distance along each of them. A video clip on a track is a row of
+//! pictures taken from the video, one for every second of the finished video, laid side by side
+//! with no gaps. Positions along a strip are measured in screen points from the start of the
+//! strip ("content" positions); the view is a window onto the strip that starts `scroll_offset`
+//! points along it.
 
-use crate::project::{FrameRate, SourceFrameIndex, TimelineFrameIndex, VideoTrack};
+use crate::media::Waveform;
+use crate::project::{
+    Clip, ClipId, ClipPlacement, FrameRate, SourceFrameIndex, SourceMediaIdentifier, TimelineFrameIndex, Track,
+};
 
 /// The finer ticks of the ruler (one for each tenth of a second) are left out when they would be
 /// closer together than this many points.
@@ -23,7 +29,9 @@ const WIDEST_SECOND_IN_POINTS: f64 = 480.0;
 /// One thumbnail picture on the strip, or the visible part of one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileLayout {
-    pub clip_index: usize,
+    pub clip: ClipId,
+    /// The video the picture of the tile is taken from.
+    pub source: SourceMediaIdentifier,
     /// Where the tile starts along the strip.
     pub left: f64,
     /// How much of the tile there is: a whole second's width, or less where a clip ends.
@@ -39,7 +47,17 @@ pub struct TileLayout {
     pub ends_clip: bool,
 }
 
-/// One mark of the ruler above the video track.
+/// One thin upright bar of the waveform of a sound clip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WaveformColumn {
+    /// Where the bar starts along the strip.
+    pub left: f64,
+    pub width: f64,
+    /// How loud the sound is in the bar: 0 for silence (or where the file has no sound), 1 for the loudest it can be.
+    pub loudness: f32,
+}
+
+/// One mark of the ruler above the tracks.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RulerTick {
     /// Where the mark is along the strip, in points.
@@ -55,7 +73,7 @@ pub enum RulerTickKind {
     Tenth,
 }
 
-/// The scale of the strip: how many points one second of the finished video takes up.
+/// The scale of the strips: how many points one second of the finished video takes up.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TimelineGeometry {
     frame_rate: FrameRate,
@@ -63,16 +81,16 @@ pub struct TimelineGeometry {
 }
 
 impl TimelineGeometry {
-    /// A strip whose pictures are `track_height` points tall and keep the shape of a video that is
-    /// shown `display_width_in_pixels` by `display_height_in_pixels`. Each picture is one second
-    /// wide, so the strip is that many points per second.
-    pub fn for_video(
+    /// Strips whose pictures are `track_height` points tall and keep the shape of a finished
+    /// picture that is `picture_width_in_pixels` by `picture_height_in_pixels`. Each picture is one
+    /// second wide, so the strips are that many points per second.
+    pub fn for_picture(
         frame_rate: FrameRate,
-        display_width_in_pixels: u32,
-        display_height_in_pixels: u32,
+        picture_width_in_pixels: u32,
+        picture_height_in_pixels: u32,
         track_height: f32,
     ) -> Self {
-        let shape = f64::from(display_width_in_pixels.max(1)) / f64::from(display_height_in_pixels.max(1));
+        let shape = f64::from(picture_width_in_pixels.max(1)) / f64::from(picture_height_in_pixels.max(1));
         let picture_width =
             (f64::from(track_height) * shape).clamp(NARROWEST_SECOND_IN_POINTS, WIDEST_SECOND_IN_POINTS);
         Self {
@@ -95,14 +113,16 @@ impl TimelineGeometry {
         self.x_of_frame(total_frame_count)
     }
 
-    /// The frame that is under position `x` along the strip, or `None` if `x` is before the start
-    /// or past the end.
-    pub fn frame_at_x(&self, x: f64, total_frame_count: u64) -> Option<TimelineFrameIndex> {
+    /// The frame that is under position `x` along the strip, wherever that is: past the end of the
+    /// timeline too, where the strips are empty. `None` only for a position before the start (or
+    /// that is not a number).
+    pub fn frame_at_x(&self, x: f64) -> Option<TimelineFrameIndex> {
         if x.is_nan() || x < 0.0 {
             return None;
         }
-        let frame_number = self.frame_rate.frame_at_seconds(x / self.points_per_second);
-        (frame_number < total_frame_count).then_some(TimelineFrameIndex::new(frame_number))
+        Some(TimelineFrameIndex::new(
+            self.frame_rate.frame_at_seconds(x / self.points_per_second),
+        ))
     }
 
     /// The frame the playhead goes to when the ruler is clicked at position `x` along the strip.
@@ -173,14 +193,17 @@ impl TimelineGeometry {
         scroll_offset.clamp(0.0, furthest)
     }
 
-    /// The thumbnail tiles that are in the view `view_width` wide that starts `scroll_offset`
-    /// along the strip. Every clip starts a fresh row of tiles at its left edge, each a second
-    /// wide, with the last one cut short where the clip ends.
-    pub fn visible_tiles(&self, track: &VideoTrack, scroll_offset: f64, view_width: f64) -> Vec<TileLayout> {
+    /// The thumbnail tiles of the video clips of `track` that are in the view `view_width` wide
+    /// that starts `scroll_offset` along the strip. Every clip starts a fresh row of tiles at its
+    /// left edge, each a second wide, with the last one cut short where the clip ends.
+    pub fn visible_tiles(&self, track: &Track, scroll_offset: f64, view_width: f64) -> Vec<TileLayout> {
         let view_left = scroll_offset;
         let view_right = scroll_offset + view_width;
         let mut tiles = Vec::new();
         for placement in track.placements() {
+            let Clip::Video(media) = placement.clip else {
+                continue;
+            };
             let clip_left = self.x_of_frame(placement.first_timeline_frame.value());
             let clip_right = self.x_of_frame(placement.end_timeline_frame.value());
             if clip_right <= view_left || clip_left >= view_right {
@@ -188,7 +211,7 @@ impl TimelineGeometry {
             }
             let first_tile = ((view_left.max(clip_left) - clip_left) / self.points_per_second).floor() as u64;
             let last_tile = ((view_right.min(clip_right) - clip_left) / self.points_per_second).ceil() as u64;
-            let clip_frame_count = placement.end_timeline_frame.value() - placement.first_timeline_frame.value();
+            let clip_frame_count = placement.timeline_frame_count();
             for tile_number in first_tile..last_tile {
                 let left = clip_left + tile_number as f64 * self.points_per_second;
                 let width = (left + self.points_per_second).min(clip_right) - left;
@@ -200,11 +223,14 @@ impl TimelineGeometry {
                     .frame_rate
                     .first_frame_in_whole_second(tile_number)
                     .min(clip_frame_count - 1);
-                let Some(source_frame) = placement.clip.source_frame_at_timeline_offset(offset_in_clip) else {
+                let Some(source_frame) =
+                    media.source_frame_at_timeline_offset(placement.effective_speed, offset_in_clip)
+                else {
                     continue;
                 };
                 tiles.push(TileLayout {
-                    clip_index: placement.clip_index,
+                    clip: placement.id,
+                    source: media.source(),
                     left,
                     width,
                     fraction_of_picture_shown: (width / self.points_per_second) as f32,
@@ -217,12 +243,64 @@ impl TimelineGeometry {
         tiles
     }
 
-    /// Where each boundary between two clips is along the strip, in order.
-    pub fn clip_boundaries(&self, track: &VideoTrack) -> Vec<f64> {
-        track
-            .placements()
-            .skip(1)
-            .map(|placement| self.x_of_frame(placement.first_timeline_frame.value()))
+    /// Where each boundary between two clips that touch is along the strip, in order. (Clips that
+    /// have empty time between them have no boundary: the empty time is between them.)
+    pub fn clip_boundaries(&self, track: &Track) -> Vec<f64> {
+        let placements: Vec<ClipPlacement<'_>> = track.placements().collect();
+        placements
+            .windows(2)
+            .filter(|pair| pair[0].end_timeline_frame == pair[1].first_timeline_frame)
+            .map(|pair| self.x_of_frame(pair[1].first_timeline_frame.value()))
+            .collect()
+    }
+
+    /// The bars of the waveform of the sound clip `placement`, the ones that are in the view
+    /// `view_width` wide that starts `scroll_offset` along the strip, each `column_width` points
+    /// wide, in order from left to right. A bar is as loud as the loudest sound in the stretch of
+    /// the file that it stands for, which is longer for a clip that plays faster.
+    pub fn waveform_columns(
+        &self,
+        placement: &ClipPlacement<'_>,
+        waveform: &Waveform,
+        scroll_offset: f64,
+        view_width: f64,
+        column_width: f64,
+    ) -> Vec<WaveformColumn> {
+        let Some(media) = placement.clip.as_media() else {
+            return Vec::new();
+        };
+        if column_width <= 0.0 || column_width.is_nan() {
+            return Vec::new();
+        }
+        let clip_left = self.x_of_frame(placement.first_timeline_frame.value());
+        let clip_right = self.x_of_frame(placement.end_timeline_frame.value());
+        let visible_left = clip_left.max(scroll_offset);
+        let visible_right = clip_right.min(scroll_offset + view_width);
+        if visible_right <= visible_left {
+            return Vec::new();
+        }
+        let speed = f64::from(placement.effective_speed.value());
+        let seconds_into_the_file_at_the_clip_start =
+            self.frame_rate.seconds_at_frame(media.first_source_frame().value());
+        let seconds_into_the_file_at =
+            |x: f64| seconds_into_the_file_at_the_clip_start + (x - clip_left) / self.points_per_second * speed;
+
+        // Bars are laid from the clip's left edge, so that they do not shimmer while the view scrolls.
+        let first_column = ((visible_left - clip_left) / column_width).floor() as u64;
+        let end_column = ((visible_right - clip_left) / column_width).ceil() as u64;
+        (first_column..end_column)
+            .map(|column| {
+                let left = clip_left + column as f64 * column_width;
+                let right = (left + column_width).min(clip_right);
+                let loudness = waveform
+                    .loudest_between(seconds_into_the_file_at(left), seconds_into_the_file_at(right))
+                    .map_or(0.0, |peak| f32::from(peak) / 255.0);
+                WaveformColumn {
+                    left,
+                    width: right - left,
+                    loudness,
+                }
+            })
             .collect()
     }
 }
@@ -230,7 +308,7 @@ impl TimelineGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::{Clip, SourceVideoIdentifier, SpeedFactor};
+    use crate::project::{MediaClip, SpeedFactor, TextClip, TextObject, TrackId};
 
     fn geometry_at(numerator: u32, denominator: u32, points_per_second: f64) -> TimelineGeometry {
         TimelineGeometry {
@@ -239,14 +317,23 @@ mod tests {
         }
     }
 
-    fn clip(first: u64, end: u64, speed: u32) -> Clip {
-        Clip::new(
-            SourceVideoIdentifier::new(1),
+    fn media(first: u64, end: u64, speed: u32) -> MediaClip {
+        MediaClip::new(
+            SourceMediaIdentifier::new(1),
             SourceFrameIndex::new(first),
             SourceFrameIndex::new(end),
             SpeedFactor::new(speed).unwrap(),
         )
         .unwrap()
+    }
+
+    fn clip(first: u64, end: u64, speed: u32) -> Clip {
+        Clip::Video(media(first, end, speed))
+    }
+
+    /// A track whose clips touch one another, the first one starting at the start of the timeline.
+    fn track_of(clips: Vec<Clip>) -> Track {
+        Track::new(TrackId::new(0), "track 0").with_clips(clips.into_iter().map(|clip| (0, clip)))
     }
 
     fn assert_close(actual: f64, expected: f64) {
@@ -255,13 +342,13 @@ mod tests {
 
     /// How wide one second of the finished video is, which at 30 frames per second is where frame
     /// 30 starts.
-    fn width_of_one_second(display_width: u32, display_height: u32, track_height: f32) -> f64 {
+    fn width_of_one_second(picture_width: u32, picture_height: u32, track_height: f32) -> f64 {
         let frame_rate = FrameRate::new(30, 1).unwrap();
-        TimelineGeometry::for_video(frame_rate, display_width, display_height, track_height).x_of_frame(30)
+        TimelineGeometry::for_picture(frame_rate, picture_width, picture_height, track_height).x_of_frame(30)
     }
 
     #[test]
-    fn pictures_keep_the_shape_of_the_video() {
+    fn pictures_keep_the_shape_of_the_finished_picture() {
         assert_close(width_of_one_second(1920, 1080, 90.0), 160.0);
         assert_close(width_of_one_second(1280, 720, 108.0), 192.0);
         assert_close(width_of_one_second(1000, 1000, 100.0), 100.0);
@@ -285,14 +372,16 @@ mod tests {
     }
 
     #[test]
-    fn a_position_along_the_strip_finds_the_frame_under_it() {
+    fn a_position_along_the_strip_finds_the_frame_under_it_even_past_the_end_of_the_timeline() {
+        // The strips are empty past the end of the timeline, and can be clicked there.
         let geometry = geometry_at(30, 1, 120.0);
-        let frame = |x: f64| geometry.frame_at_x(x, 300).map(TimelineFrameIndex::value);
+        let frame = |x: f64| geometry.frame_at_x(x).map(TimelineFrameIndex::value);
         assert_eq!(frame(0.0), Some(0));
         assert_eq!(frame(3.9), Some(0));
         assert_eq!(frame(4.0), Some(1));
         assert_eq!(frame(1199.9), Some(299));
-        assert_eq!(frame(1200.0), None, "the strip ends at 1200");
+        assert_eq!(frame(1200.0), Some(300), "where a timeline of 300 frames has ended");
+        assert_eq!(frame(120_000.0), Some(30_000));
         assert_eq!(frame(-0.1), None);
         assert_eq!(frame(f64::NAN), None);
     }
@@ -306,7 +395,7 @@ mod tests {
                 let end = geometry.x_of_frame(frame_number + 1);
                 for x in [start + 0.001, (start + end) / 2.0, end - 0.001] {
                     assert_eq!(
-                        geometry.frame_at_x(x, 2000).map(TimelineFrameIndex::value),
+                        geometry.frame_at_x(x).map(TimelineFrameIndex::value),
                         Some(frame_number),
                         "x = {x} at {numerator}/{denominator}"
                     );
@@ -344,9 +433,13 @@ mod tests {
         assert_close(geometry.clamp_scroll_offset(5000.0, 800.0, 600), 1200.0);
     }
 
-    fn two_clip_track() -> VideoTrack {
+    fn two_clip_track() -> Track {
         // Timeline at 30 fps: clip 0 is 100 frames (3.333 s), clip 1 is 200 source frames at 4x = 50 frames (1.667 s).
-        VideoTrack::new(vec![clip(0, 100, 1), clip(100, 300, 4)])
+        track_of(vec![clip(0, 100, 1), clip(100, 300, 4)])
+    }
+
+    fn clip_id(number: u32) -> ClipId {
+        ClipId::new(number)
     }
 
     #[test]
@@ -355,7 +448,7 @@ mod tests {
         let tiles = geometry.visible_tiles(&two_clip_track(), 0.0, 10_000.0);
 
         // Clip 0 is 333.33 points wide: tiles of 100, 100, 100 and 33.33.
-        let clip_zero: Vec<&TileLayout> = tiles.iter().filter(|tile| tile.clip_index == 0).collect();
+        let clip_zero: Vec<&TileLayout> = tiles.iter().filter(|tile| tile.clip == clip_id(0)).collect();
         assert_eq!(clip_zero.len(), 4);
         let lefts: Vec<f64> = clip_zero.iter().map(|tile| tile.left).collect();
         assert_eq!(lefts, vec![0.0, 100.0, 200.0, 300.0]);
@@ -370,7 +463,7 @@ mod tests {
         );
 
         // Clip 1 starts at x = 333.33 and is 166.67 wide: a whole tile and two thirds of another.
-        let clip_one: Vec<&TileLayout> = tiles.iter().filter(|tile| tile.clip_index == 1).collect();
+        let clip_one: Vec<&TileLayout> = tiles.iter().filter(|tile| tile.clip == clip_id(1)).collect();
         assert_eq!(clip_one.len(), 2);
         assert_close(clip_one[0].left, 333.333333);
         assert_close(clip_one[0].width, 100.0);
@@ -384,13 +477,10 @@ mod tests {
     fn the_tiles_of_a_clip_fill_it_exactly_with_no_gaps_or_overlaps() {
         for (numerator, denominator) in [(30, 1), (30000, 1001)] {
             let geometry = geometry_at(numerator, denominator, 137.0);
-            let track = VideoTrack::new(vec![clip(0, 250, 1), clip(250, 900, 3), clip(900, 913, 1)]);
+            let track = track_of(vec![clip(0, 250, 1), clip(250, 900, 3), clip(900, 913, 1)]);
             let tiles = geometry.visible_tiles(&track, 0.0, 1.0e6);
             for placement in track.placements() {
-                let clip_tiles: Vec<&TileLayout> = tiles
-                    .iter()
-                    .filter(|tile| tile.clip_index == placement.clip_index)
-                    .collect();
+                let clip_tiles: Vec<&TileLayout> = tiles.iter().filter(|tile| tile.clip == placement.id).collect();
                 let mut expected_left = geometry.x_of_frame(placement.first_timeline_frame.value());
                 for tile in &clip_tiles {
                     assert_close(tile.left, expected_left);
@@ -418,27 +508,32 @@ mod tests {
     fn a_view_beyond_the_strip_has_no_tiles_and_an_empty_track_has_none_either() {
         let geometry = geometry_at(30, 1, 100.0);
         assert!(geometry.visible_tiles(&two_clip_track(), 600.0, 400.0).is_empty());
-        assert!(geometry.visible_tiles(&VideoTrack::default(), 0.0, 400.0).is_empty());
+        assert!(geometry.visible_tiles(&track_of(vec![]), 0.0, 400.0).is_empty());
     }
 
     #[test]
     fn tile_pictures_never_come_from_beyond_the_end_of_their_clip() {
         let geometry = geometry_at(30, 1, 100.0);
         // A 10 frame clip: one cut-short tile whose picture is the clip's first frame.
-        let track = VideoTrack::new(vec![clip(500, 510, 1)]);
+        let track = track_of(vec![clip(500, 510, 1)]);
         let tiles = geometry.visible_tiles(&track, 0.0, 1000.0);
         assert_eq!(tiles.len(), 1);
         assert_eq!(tiles[0].source_frame, SourceFrameIndex::new(500));
+        assert_eq!(
+            tiles[0].source,
+            SourceMediaIdentifier::new(1),
+            "and it says which video it is from"
+        );
     }
 
     #[test]
     fn the_first_tile_of_a_clip_starts_it_and_the_last_ends_it() {
         let geometry = geometry_at(30, 1, 100.0);
         let tiles = geometry.visible_tiles(&two_clip_track(), 0.0, 10_000.0);
-        let flags = |clip_index: usize| -> Vec<(bool, bool)> {
+        let flags = |clip: u32| -> Vec<(bool, bool)> {
             tiles
                 .iter()
-                .filter(|tile| tile.clip_index == clip_index)
+                .filter(|tile| tile.clip == clip_id(clip))
                 .map(|tile| (tile.starts_clip, tile.ends_clip))
                 .collect()
         };
@@ -453,7 +548,7 @@ mod tests {
     #[test]
     fn a_clip_that_is_a_single_cut_short_tile_both_starts_and_ends() {
         let geometry = geometry_at(30, 1, 100.0);
-        let tiles = geometry.visible_tiles(&VideoTrack::new(vec![clip(0, 10, 1)]), 0.0, 1000.0);
+        let tiles = geometry.visible_tiles(&track_of(vec![clip(0, 10, 1)]), 0.0, 1000.0);
         assert_eq!((tiles[0].starts_clip, tiles[0].ends_clip), (true, true));
     }
 
@@ -551,14 +646,205 @@ mod tests {
     }
 
     #[test]
-    fn clip_boundaries_are_where_each_clip_after_the_first_begins() {
+    fn clip_boundaries_are_where_each_clip_that_touches_the_one_before_it_begins() {
         let geometry = geometry_at(30, 1, 100.0);
         let boundaries = geometry.clip_boundaries(&two_clip_track());
         assert_eq!(boundaries.len(), 1);
         assert_close(boundaries[0], 333.333333);
+        assert!(geometry.clip_boundaries(&track_of(vec![clip(0, 10, 1)])).is_empty());
+        assert!(geometry.clip_boundaries(&track_of(vec![])).is_empty());
+    }
+
+    #[test]
+    fn clips_with_empty_time_between_them_have_no_boundary() {
+        let geometry = geometry_at(30, 1, 100.0);
+        // Clip 0 is frames 0..30, then 15 empty frames, then clip 1 is frames 45..75, touching clip 2 (75..105).
+        let track = Track::new(TrackId::new(0), "track 0").with_clips([
+            (0, clip(0, 30, 1)),
+            (15, clip(30, 60, 1)),
+            (0, clip(60, 90, 1)),
+        ]);
+        let boundaries = geometry.clip_boundaries(&track);
+        assert_eq!(boundaries.len(), 1, "only where clips touch: {boundaries:?}");
+        assert_close(boundaries[0], 250.0); // frame 75 at 100 points a second
+    }
+
+    #[test]
+    fn tiles_are_made_for_video_clips_only_and_stay_where_the_clips_are() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let text = Clip::Text(TextClip::new(TextObject::default(), 60).unwrap());
+        let sound = Clip::Audio(media(0, 90, 1));
+        // A sound for 90 frames, then 30 empty frames, then a video clip of 60 frames, then a text of 60 frames.
+        let track = Track::new(TrackId::new(0), "track 0").with_clips([(0, sound), (30, clip(0, 60, 1)), (0, text)]);
+        let tiles = geometry.visible_tiles(&track, 0.0, 10_000.0);
+        assert_eq!(
+            tiles.len(),
+            2,
+            "two seconds of the video clip, nothing for the others: {tiles:?}"
+        );
+        assert!(tiles.iter().all(|tile| tile.clip == clip_id(1)));
+        assert_close(tiles[0].left, 400.0); // the video clip starts at frame 120
+        assert_close(tiles[1].left, 500.0);
+    }
+
+    #[test]
+    fn a_clip_plays_at_its_own_speed_times_the_speed_of_its_track_and_its_tiles_show_that() {
+        let geometry = geometry_at(30, 1, 100.0);
+        // 600 source frames at 3x on a track that plays at 2x: 100 timeline frames, six source frames each.
+        let track = Track::new(TrackId::new(0), "track 0")
+            .with_clips([(0, clip(0, 600, 3))])
+            .with_speed(SpeedFactor::new(2).unwrap());
+        let tiles = geometry.visible_tiles(&track, 0.0, 10_000.0);
+        let source_frames: Vec<u64> = tiles.iter().map(|tile| tile.source_frame.value()).collect();
+        assert_eq!(
+            source_frames,
+            vec![0, 180, 360, 540],
+            "a tile every second of the finished video, 180 source frames apart"
+        );
+    }
+
+    // --- waveform columns ---
+
+    /// A waveform in which every peak (a hundredth of a second) is as loud as its number, so that the
+    /// answer says which part of the file a column was made from.
+    fn ramp_waveform() -> Waveform {
+        Waveform::from_peaks((0..=255).collect::<Vec<u8>>().repeat(10))
+    }
+
+    fn sound_placement_track(first: u64, end: u64, speed: u32) -> Track {
+        Track::new(TrackId::new(0), "track 0").with_clips([(0, Clip::Audio(media(first, end, speed)))])
+    }
+
+    #[test]
+    fn the_columns_of_a_sound_clip_fill_it_exactly_from_its_left_edge() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let track = sound_placement_track(0, 90, 1); // 3 seconds: 300 points
+        let placement = track.placement_at_index(0).unwrap();
+        let columns = geometry.waveform_columns(&placement, &ramp_waveform(), 0.0, 10_000.0, 2.0);
+        assert_eq!(columns.len(), 150);
+        assert_close(columns[0].left, 0.0);
+        let mut expected_left = 0.0;
+        for column in &columns {
+            assert_close(column.left, expected_left);
+            expected_left += column.width;
+        }
+        assert_close(expected_left, 300.0);
+    }
+
+    #[test]
+    fn a_last_column_that_does_not_fit_is_cut_short_at_the_end_of_the_clip() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let track = sound_placement_track(0, 90, 1);
+        let placement = track.placement_at_index(0).unwrap();
+        let columns = geometry.waveform_columns(&placement, &ramp_waveform(), 0.0, 10_000.0, 7.0);
+        let last = columns.last().unwrap();
+        assert_close(last.left + last.width, 300.0);
+        assert!(last.width < 7.0);
+    }
+
+    #[test]
+    fn each_column_is_as_loud_as_the_part_of_the_file_it_stands_for() {
+        let geometry = geometry_at(30, 1, 100.0);
+        // The clip is the file's second second (source frames 30 to 90): columns start at 1.0 s into the file.
+        let track = sound_placement_track(30, 90, 1);
+        let placement = track.placement_at_index(0).unwrap();
+        let columns = geometry.waveform_columns(&placement, &ramp_waveform(), 0.0, 10_000.0, 10.0);
+        // 10 points is a tenth of a second: 10 peaks. The first column covers peaks 100..110, so its loudest is 109.
+        assert_eq!(columns[0].loudness, 109.0 / 255.0);
+        assert_eq!(columns[1].loudness, 119.0 / 255.0);
+    }
+
+    #[test]
+    fn a_sound_clip_that_plays_faster_stands_for_more_of_the_file_in_every_column() {
+        let geometry = geometry_at(30, 1, 100.0);
+        // 300 source frames at 5x: 60 timeline frames, 200 points. Ten points are a tenth of a second
+        // on the timeline, which is half a second of the file, 50 peaks: 0..50, so the loudest is 49.
+        let track = sound_placement_track(0, 300, 5);
+        let placement = track.placement_at_index(0).unwrap();
+        let columns = geometry.waveform_columns(&placement, &ramp_waveform(), 0.0, 10_000.0, 10.0);
+        assert_eq!(columns.len(), 20);
+        assert_eq!(columns[0].loudness, 49.0 / 255.0);
+        assert_eq!(columns[1].loudness, 99.0 / 255.0);
+    }
+
+    #[test]
+    fn a_track_that_plays_faster_has_the_same_effect_on_the_columns_as_a_clip_that_does() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let faster_clip = sound_placement_track(0, 300, 5);
+        let faster_track = sound_placement_track(0, 300, 1).with_speed(SpeedFactor::new(5).unwrap());
+        let columns_of = |track: &Track| {
+            let placement = track.placement_at_index(0).unwrap();
+            geometry.waveform_columns(&placement, &ramp_waveform(), 0.0, 10_000.0, 10.0)
+        };
+        assert_eq!(columns_of(&faster_clip), columns_of(&faster_track));
+    }
+
+    #[test]
+    fn only_the_columns_inside_the_view_are_made_and_they_do_not_move_when_the_view_does() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let track = sound_placement_track(0, 900, 1); // 30 seconds: 3000 points
+        let placement = track.placement_at_index(0).unwrap();
+        let waveform = ramp_waveform();
+        let whole = geometry.waveform_columns(&placement, &waveform, 0.0, 10_000.0, 4.0);
+        let in_view = geometry.waveform_columns(&placement, &waveform, 1001.0, 200.0, 4.0);
+        assert!(!in_view.is_empty() && in_view.len() < 60, "{}", in_view.len());
+        assert!(in_view.first().unwrap().left <= 1001.0);
+        assert!(in_view.last().unwrap().left + in_view.last().unwrap().width >= 1201.0);
+        for column in &in_view {
+            assert!(
+                whole.contains(column),
+                "the same column as when the whole clip is made: {column:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_view_beside_the_clip_has_no_columns() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let track = sound_placement_track(0, 90, 1);
+        let placement = track.placement_at_index(0).unwrap();
+        let waveform = ramp_waveform();
         assert!(
             geometry
-                .clip_boundaries(&VideoTrack::new(vec![clip(0, 10, 1)]))
+                .waveform_columns(&placement, &waveform, 400.0, 200.0, 4.0)
+                .is_empty()
+        );
+        assert!(
+            geometry
+                .waveform_columns(&placement, &waveform, 0.0, 0.0, 4.0)
+                .is_empty()
+        );
+        assert!(
+            geometry
+                .waveform_columns(&placement, &waveform, 0.0, 100.0, 0.0)
+                .is_empty()
+        );
+        assert!(
+            geometry
+                .waveform_columns(&placement, &waveform, 0.0, 100.0, f64::NAN)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn where_the_file_has_no_sound_yet_the_columns_are_silent() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let track = sound_placement_track(0, 90, 1);
+        let placement = track.placement_at_index(0).unwrap();
+        let columns = geometry.waveform_columns(&placement, &Waveform::default(), 0.0, 10_000.0, 10.0);
+        assert_eq!(columns.len(), 30);
+        assert!(columns.iter().all(|column| column.loudness == 0.0));
+    }
+
+    #[test]
+    fn a_text_clip_has_no_waveform() {
+        let geometry = geometry_at(30, 1, 100.0);
+        let track = Track::new(TrackId::new(0), "track 0")
+            .with_clips([(0, Clip::Text(TextClip::new(TextObject::default(), 60).unwrap()))]);
+        let placement = track.placement_at_index(0).unwrap();
+        assert!(
+            geometry
+                .waveform_columns(&placement, &ramp_waveform(), 0.0, 10_000.0, 4.0)
                 .is_empty()
         );
     }

@@ -2,8 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{FastForwardApplication, OpeningPurpose, SourceStatus, ThumbnailState};
-use crate::media::ThumbnailStrip;
+use super::{FastForwardApplication, OpeningPurpose};
 use crate::project::Project;
 use crate::project_file::{read_project_file, write_project_file};
 
@@ -12,10 +11,10 @@ use crate::project_file::{read_project_file, write_project_file};
 const PROJECT_FILE_EXTENSION: &str = "json";
 
 impl FastForwardApplication {
-    /// Starts an empty project and asks for the video it is to be made from.
+    /// Starts an empty project and asks for the first video or sound to put in it.
     pub(super) fn start_new_project(&mut self) {
         self.replace_project(Project::empty(), None);
-        self.import_video();
+        self.import_file();
     }
 
     /// Asks which project file to load, and loads it.
@@ -32,12 +31,12 @@ impl FastForwardApplication {
         self.load_project(path);
     }
 
-    /// Loads the project file at `path`, and starts looking for its video.
+    /// Loads the project file at `path`, and starts looking for its source files.
     pub(super) fn load_project(&mut self, path: PathBuf) {
         match read_project_file(&path) {
             Ok(project) => {
                 self.replace_project(project, Some(path));
-                self.locate_source_video_of_loaded_project();
+                self.locate_source_files_of_loaded_project();
             }
             Err(error) => self.show_message("The project could not be loaded", error.to_string()),
         }
@@ -70,15 +69,15 @@ impl FastForwardApplication {
     }
 
     fn ask_where_to_save_project(&self) -> Option<PathBuf> {
-        let video_name = self
+        let first_file_name = self
             .project
-            .source_videos()
+            .sources()
             .first()
-            .and_then(|video| video.link.absolute_path.file_stem())
+            .and_then(|source| source.link.absolute_path.file_stem())
             .map_or_else(|| "project".to_owned(), |stem| stem.to_string_lossy().into_owned());
         let path = rfd::FileDialog::new()
             .set_title("Save the project")
-            .set_file_name(format!("{video_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}"))
+            .set_file_name(format!("{first_file_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}"))
             .add_filter("Project files", &[PROJECT_FILE_EXTENSION])
             .save_file()?;
         Some(if path.extension().is_none() {
@@ -90,31 +89,32 @@ impl FastForwardApplication {
 
     /// Makes `project` the project being edited, forgetting everything about the previous one.
     pub(super) fn replace_project(&mut self, project: Project, project_file_path: Option<PathBuf>) {
-        self.opening = None;
-        self.thumbnails = ThumbnailState {
-            strip: ThumbnailStrip::default(),
-            extraction: None,
-        };
-        self.picture_supplier.set_source(None);
+        self.openings.clear();
+        self.source_files.clear();
+        self.selected_clip = None;
+        self.text_window_open = None;
+        self.picture_supplier.set_setup(None);
         self.textures.clear();
         self.timeline_view.reset();
         self.project = project;
         self.project_file_path = project_file_path;
         self.note_everything_is_saved();
-        self.source_status = SourceStatus::NoVideo;
-        self.missing_source_warning_open = false;
-        let frame_rate = self.frame_rate();
-        self.clock.reset_for_frame_rate(frame_rate);
+        self.missing_sources_warning_open = false;
+        self.clock.reset_for_frame_rate(self.project.frame_rate());
     }
 
-    /// Starts looking for the video of a project that has just been loaded: where the project
-    /// says it was, and then (as a backup) next to the project file.
-    fn locate_source_video_of_loaded_project(&mut self) {
-        let Some(video) = self.project.source_videos().first() else {
-            return;
-        };
+    /// Starts looking for the source files of a project that has just been loaded: where the
+    /// project says each was, and then (as a backup) relative to the project file.
+    fn locate_source_files_of_loaded_project(&mut self) {
         let project_directory = self.project_file_path.as_deref().and_then(Path::parent);
-        let candidates = video.link.candidate_paths(project_directory);
-        self.start_opening(OpeningPurpose::LocateForLoadedProject, candidates);
+        let wanted: Vec<_> = self
+            .project
+            .sources()
+            .iter()
+            .map(|source| (source.identifier, source.link.candidate_paths(project_directory)))
+            .collect();
+        for (identifier, candidates) in wanted {
+            self.start_opening(OpeningPurpose::LocateForLoadedProject(identifier), candidates);
+        }
     }
 }

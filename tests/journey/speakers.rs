@@ -126,12 +126,7 @@ impl AudioSink for SpeakersInTheRoom {
     }
 }
 
-/// How many times a second the sound `samples` goes up through zero, which for a pure tone is its
-/// pitch in hertz.
+/// The pitch in hertz of what was heard (see [`crate::support::pitch_in_hertz`]).
 pub fn pitch_in_hertz(samples: &[f32]) -> f64 {
-    let rising_crossings = samples
-        .windows(2)
-        .filter(|pair| pair[0] < 0.0 && pair[1] >= 0.0)
-        .count();
-    rising_crossings as f64 / (samples.len() as f64 / f64::from(SAMPLE_RATE))
+    crate::support::pitch_in_hertz(samples, SAMPLE_RATE)
 }

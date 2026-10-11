@@ -6,10 +6,16 @@ mod support;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fastforwardrs::media::export::{ExportResult, VideoExport, clips_to_export, plan_export};
+use fastforwardrs::composition::plan_sound;
+use fastforwardrs::media::export::{
+    ExportResult, VideoExport, plan_export, sound_graph_specification, sources_of_sound,
+};
 use fastforwardrs::media::{AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain};
-use fastforwardrs::project::{Project, Settings, TimelineFrameIndex};
-use support::{TestVideo, counter_video, decoded_sound, edited, loudness, project_for, scratch_directory};
+use fastforwardrs::project::{Project, Settings, SpedUpClipSound, TimelineFrameIndex};
+use support::{
+    counter_video, decoded_sound, edited, loudness, project_for, project_with_a_video_and_a_tone_file,
+    scratch_directory, tone_strength, transparent_text_picture,
+};
 
 const TIME_ALLOWED: Duration = Duration::from_secs(60);
 
@@ -19,16 +25,15 @@ const STEREO_AT_48000: AudioFormat = AudioFormat {
 };
 
 /// Asks for the sound of `project` from timeline frame `from_frame` on.
-fn request_for(project: &Project, video: &TestVideo, from_frame: u64, mute_sped_up_clips: bool) -> AudioStreamRequest {
-    let source_video = &project.source_videos()[0];
+fn request_for(project: &Project, from_frame: u64, sped_up_clip_sound: SpedUpClipSound) -> AudioStreamRequest {
+    let plan = plan_sound(project, TimelineFrameIndex::new(from_frame), |_| true);
+    let sources: Vec<_> = sources_of_sound(&plan).into_iter().collect();
     AudioStreamRequest {
-        video_path: video.path.clone(),
-        frame_rate: source_video.properties.frame_rate,
-        clips: clips_to_export(
-            &project.video_track().clips_from(TimelineFrameIndex::new(from_frame)),
-            source_video.properties.total_frame_count,
-        ),
-        mute_sped_up_clips,
+        source_files: sources
+            .iter()
+            .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
+            .collect(),
+        sound: sound_graph_specification(&plan, &sources, sped_up_clip_sound),
         format: STEREO_AT_48000,
     }
 }
@@ -63,7 +68,8 @@ fn the_sound_of_an_unedited_project_is_all_of_the_videos_sound_at_the_format_ask
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
 
-    let (samples, error_output) = everything_from(&toolchain, &request_for(&project, &video, 0, false));
+    let (samples, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
 
     assert_eq!(error_output, None);
     assert_eq!(
@@ -83,7 +89,7 @@ fn mono_at_another_rate_is_delivered_as_asked() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
-    let mut request = request_for(&project, &video, 0, false);
+    let mut request = request_for(&project, 0, SpedUpClipSound::MaintainPitch);
     request.format = AudioFormat {
         sample_rate: 44_100,
         channel_count: 1,
@@ -101,9 +107,10 @@ fn an_edited_timeline_sounds_as_long_as_it_looks_and_every_clip_has_sound() {
     let video = counter_video(&toolchain);
     // Clips: 0..300 at 1x (10 s), 300..420 at 4x (1 s), 420..600 at 1x (6 s).
     let project = edited(project_for(&toolchain, &video), &[300, 420], &[1, 4, 1]);
-    assert_eq!(project.video_track().total_frame_count(), 300 + 30 + 180);
+    assert_eq!(project.total_frame_count(), 300 + 30 + 180);
 
-    let (samples, error_output) = everything_from(&toolchain, &request_for(&project, &video, 0, false));
+    let (samples, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
 
     assert_eq!(error_output, None);
     let moments = samples.len() / 2;
@@ -123,7 +130,7 @@ fn with_sped_up_clips_muted_the_sped_up_clip_is_silent_and_everything_else_is_no
     let video = counter_video(&toolchain);
     let project = edited(project_for(&toolchain, &video), &[300, 420], &[1, 4, 1]);
 
-    let (samples, error_output) = everything_from(&toolchain, &request_for(&project, &video, 0, true));
+    let (samples, error_output) = everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::Mute));
 
     assert_eq!(error_output, None);
     assert!(
@@ -147,9 +154,10 @@ fn the_sound_from_the_start_of_a_clip_is_exactly_the_end_of_the_sound_from_the_s
     let video = counter_video(&toolchain);
     // Starting where a clip starts, nothing is cut mid-way, so the two can be compared sample by sample.
     let project = edited(project_for(&toolchain, &video), &[300, 420], &[1, 4, 1]);
-    let (whole, _) = everything_from(&toolchain, &request_for(&project, &video, 0, false));
+    let (whole, _) = everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
 
-    let (from_the_sped_up_clip, error_output) = everything_from(&toolchain, &request_for(&project, &video, 300, false));
+    let (from_the_sped_up_clip, error_output) =
+        everything_from(&toolchain, &request_for(&project, 300, SpedUpClipSound::MaintainPitch));
 
     assert_eq!(error_output, None);
     let start_in_whole = 300 * 48_000 / 30 * 2;
@@ -174,10 +182,11 @@ fn the_sound_from_the_middle_of_a_normal_speed_clip_is_the_end_of_the_sound_from
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
-    let (whole, _) = everything_from(&toolchain, &request_for(&project, &video, 0, false));
+    let (whole, _) = everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
 
     // Frame 450 is 15 seconds in.
-    let (from_the_middle, error_output) = everything_from(&toolchain, &request_for(&project, &video, 450, false));
+    let (from_the_middle, error_output) =
+        everything_from(&toolchain, &request_for(&project, 450, SpedUpClipSound::MaintainPitch));
 
     assert_eq!(error_output, None);
     let start_in_whole = 15 * 48_000 * 2;
@@ -200,7 +209,8 @@ fn from_the_middle_of_a_sped_up_clip_the_rest_of_the_clip_and_what_follows_is_th
     let project = edited(project_for(&toolchain, &video), &[300, 420], &[1, 4, 1]);
 
     // Timeline frame 315 is 15 frames into the sped up clip, which has 30: half a second remains.
-    let (samples, error_output) = everything_from(&toolchain, &request_for(&project, &video, 315, false));
+    let (samples, error_output) =
+        everything_from(&toolchain, &request_for(&project, 315, SpedUpClipSound::MaintainPitch));
 
     assert_eq!(error_output, None);
     let expected_moments = (15 + 180) * 48_000 / 30;
@@ -219,19 +229,17 @@ fn from_the_middle_of_a_sped_up_clip_the_rest_of_the_clip_and_what_follows_is_th
     );
 }
 
-#[test]
-fn the_preview_sound_is_the_sound_the_export_has_clip_for_clip() {
-    let toolchain = toolchain_or_skip!();
-    let video = counter_video(&toolchain);
-    let project = edited(
-        project_for(&toolchain, &video),
-        &[200, 350, 380, 500],
-        &[1, 3, 1, 25, 2],
-    );
+/// The sound of the video that exporting `project` makes, as stereo samples at 48000 a second.
+fn sound_of_the_export_of(toolchain: &FfmpegToolchain, project: &Project) -> Vec<f32> {
     let scratch = scratch_directory();
     let exported_path = scratch.path().join("exported.mp4");
-    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
-    let export = VideoExport::start(&toolchain, &plan, &video.path, &exported_path, Arc::new(|| {})).unwrap();
+    let plan = plan_export(project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let source_paths: Vec<_> = plan
+        .source_files
+        .iter()
+        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
+        .collect();
+    let export = VideoExport::start(toolchain, &plan, &source_paths, &exported_path, Arc::new(|| {})).unwrap();
     let started = Instant::now();
     loop {
         if let Some(fastforwardrs::media::export::ExportEvent::Finished(result)) = export.try_next_event() {
@@ -241,9 +249,22 @@ fn the_preview_sound_is_the_sound_the_export_has_clip_for_clip() {
         assert!(started.elapsed() < Duration::from_secs(120));
         std::thread::sleep(Duration::from_millis(5));
     }
-    let exported = decoded_sound(&toolchain, &exported_path, 2, 48_000);
+    decoded_sound(toolchain, &exported_path, 2, 48_000)
+}
 
-    let (previewed, error_output) = everything_from(&toolchain, &request_for(&project, &video, 0, false));
+#[test]
+fn the_preview_sound_is_the_sound_the_export_has_clip_for_clip() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let project = edited(
+        project_for(&toolchain, &video),
+        &[200, 350, 380, 500],
+        &[1, 3, 1, 25, 2],
+    );
+    let exported = sound_of_the_export_of(&toolchain, &project);
+
+    let (previewed, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
 
     assert_eq!(error_output, None);
     // The export is compressed (AAC) and the preview is not, so the two can differ slightly in
@@ -271,8 +292,8 @@ fn a_video_that_cannot_be_read_ends_the_stream_with_ffmpegs_complaint() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
-    let mut request = request_for(&project, &video, 0, false);
-    request.video_path = video.path.with_file_name("there_is_no_such_video.mp4");
+    let mut request = request_for(&project, 0, SpedUpClipSound::MaintainPitch);
+    request.source_files = vec![video.path.with_file_name("there_is_no_such_video.mp4")];
 
     let (samples, error_output) = everything_from(&toolchain, &request);
 
@@ -285,7 +306,7 @@ fn stopping_a_stream_early_is_quick_and_clean() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
-    let request = request_for(&project, &video, 0, false);
+    let request = request_for(&project, 0, SpedUpClipSound::MaintainPitch);
 
     let started = Instant::now();
     {
@@ -300,4 +321,94 @@ fn stopping_a_stream_early_is_quick_and_clean() {
         started.elapsed() < Duration::from_secs(10),
         "dropping the stream did not wait for the rest"
     );
+}
+
+/// How loud ffmpeg's `sine` source is, which is the sound of the test videos and tone files.
+const TONE_AMPLITUDE: f32 = 0.125;
+
+/// Stereo samples as one channel, the way ffmpeg mixes two channels into one: a mono sound that was
+/// given to both channels (each at 0.707 of its size) comes out as it was.
+fn mono_of(stereo: &[f32]) -> Vec<f32> {
+    stereo
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| (pair[0] + pair[1]) * std::f32::consts::FRAC_1_SQRT_2)
+        .collect()
+}
+
+/// How strong the tone of `hertz` is between `from_seconds` and `to_seconds` of a mono sound at 48000 a second.
+fn tone_between(mono: &[f32], hertz: f64, from_seconds: f64, to_seconds: f64) -> f32 {
+    let moment = |seconds: f64| (seconds * 48_000.0) as usize;
+    tone_strength(&mono[moment(from_seconds)..moment(to_seconds)], hertz, 48_000) as f32
+}
+
+fn assert_full_strength(strength: f32, context: &str) {
+    assert!(
+        (strength - TONE_AMPLITUDE).abs() < 0.1 * TONE_AMPLITUDE,
+        "{context}: {strength}"
+    );
+}
+
+#[test]
+fn the_preview_sound_of_a_video_and_a_sound_file_on_two_tracks_is_both_mixed_from_wherever_it_starts() {
+    let toolchain = toolchain_or_skip!();
+    // The video's 440 hertz tone for 10 seconds, and in front of it a 330 hertz file from 5 s to 9 s.
+    let project = project_with_a_video_and_a_tone_file(&toolchain);
+
+    let (from_the_start, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
+    assert_eq!(error_output, None);
+    let sound = mono_of(&from_the_start);
+    assert!(
+        sound.len().abs_diff(480_000) < 2 * 1024,
+        "ten seconds: {} moments",
+        sound.len()
+    );
+    assert_full_strength(tone_between(&sound, 440.0, 1.0, 4.0), "the video alone");
+    assert!(tone_between(&sound, 330.0, 1.0, 4.0) < 0.02, "the file has not begun");
+    assert_full_strength(tone_between(&sound, 440.0, 5.5, 8.5), "the video, with the file");
+    assert_full_strength(tone_between(&sound, 330.0, 5.5, 8.5), "the file, with the video");
+    assert!(tone_between(&sound, 330.0, 9.3, 9.9) < 0.02, "the file has ended");
+    assert_full_strength(tone_between(&sound, 440.0, 9.3, 9.9), "the video after the file");
+
+    // From seven seconds in, in the middle of the file: both at once, from the very start, then the video.
+    let (from_the_middle, error_output) =
+        everything_from(&toolchain, &request_for(&project, 210, SpedUpClipSound::MaintainPitch));
+    assert_eq!(error_output, None);
+    let rest = mono_of(&from_the_middle);
+    assert!(
+        rest.len().abs_diff(3 * 48_000) < 2 * 1024,
+        "three seconds are left: {} moments",
+        rest.len()
+    );
+    assert_full_strength(
+        tone_between(&rest, 330.0, 0.1, 1.9),
+        "the file is heard from the first moment",
+    );
+    assert_full_strength(tone_between(&rest, 440.0, 0.1, 1.9), "and the video");
+    assert!(
+        tone_between(&rest, 330.0, 2.3, 2.9) < 0.02,
+        "the file ends two seconds on"
+    );
+    assert_full_strength(tone_between(&rest, 440.0, 2.3, 2.9), "the video goes on");
+}
+
+#[test]
+fn the_preview_sound_of_two_tracks_is_the_sound_the_export_has_second_by_second() {
+    let toolchain = toolchain_or_skip!();
+    let project = project_with_a_video_and_a_tone_file(&toolchain);
+    let exported = sound_of_the_export_of(&toolchain, &project);
+    let (previewed, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
+    assert_eq!(error_output, None);
+    assert!((previewed.len() / 2).abs_diff(exported.len() / 2) < 2 * 1024);
+    for second in 0..9 {
+        let in_the_preview = loudness_of_stretch(&previewed, second as f64, 1.0);
+        let in_the_export = loudness_of_stretch(&exported, second as f64, 1.0);
+        assert!(
+            (in_the_preview - in_the_export).abs() < 0.03,
+            "second {second}: {in_the_preview} against {in_the_export}"
+        );
+    }
 }

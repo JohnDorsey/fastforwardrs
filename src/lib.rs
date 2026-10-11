@@ -20,12 +20,15 @@
 
 pub mod application;
 mod atomic_file;
+pub mod composition;
 pub mod media;
 pub mod playback;
 pub mod project;
 pub mod project_file;
+pub mod rgba_picture;
 pub mod settings_file;
 pub mod speed_indicator;
+pub mod text_rendering;
 
 #[cfg(test)]
 mod test_support;

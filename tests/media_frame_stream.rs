@@ -5,7 +5,7 @@ mod support;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fastforwardrs::media::{FfmpegToolchain, FrameStream, FrameStreamEvent, FrameStreamRequest};
+use fastforwardrs::media::{DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamEvent, FrameStreamRequest};
 use fastforwardrs::project::{FrameRate, SourceFrameIndex, SpeedFactor};
 use support::{
     TestVideo, TestVideoSpecification, counter_video, frame_number_in_picture, scratch_directory, test_video,
@@ -25,6 +25,10 @@ fn request_for(
         first_source_frame: SourceFrameIndex::new(first_source_frame),
         source_frame_count,
         speed_factor: SpeedFactor::new(speed_factor).unwrap(),
+        video_display_size_in_pixels: (
+            video.specification.width_in_pixels,
+            video.specification.height_in_pixels,
+        ),
         picture_width_in_pixels: video.specification.width_in_pixels,
         picture_height_in_pixels: video.specification.height_in_pixels,
     }
@@ -131,13 +135,60 @@ fn a_clip_that_runs_past_the_end_of_the_video_simply_ends_with_the_video() {
 fn pictures_are_scaled_to_the_requested_size_and_keep_their_frame_number() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
-    for (width, height) in [(160, 90), (640, 360), (200, 200)] {
+    // (All of the shape of the video, so that it fills the picture.)
+    for (width, height) in [(160, 90), (640, 360), (80, 45)] {
         let mut request = request_for(&video, 40, 4, 1);
         request.picture_width_in_pixels = width;
         request.picture_height_in_pixels = height;
         let (frame_numbers, _) = frame_numbers_delivered(&toolchain, &request);
         assert_eq!(frame_numbers, vec![40, 41, 42, 43], "scaled to {width}x{height}");
     }
+}
+
+/// The first picture a stream delivers.
+fn first_picture_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamRequest) -> DecodedFrame {
+    let stream = FrameStream::start(toolchain, request, Arc::new(|| {})).expect("the stream should start");
+    let started = Instant::now();
+    loop {
+        match stream.try_next_event() {
+            Some(FrameStreamEvent::Frame(frame)) => return frame,
+            Some(FrameStreamEvent::Finished { error_output }) => panic!("no picture came: {error_output:?}"),
+            None => {
+                assert!(started.elapsed() < TIME_ALLOWED_FOR_A_STREAM, "no picture came in time");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_video_of_another_shape_than_the_picture_is_fitted_inside_it_in_the_middle_with_black_round_it() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 320x180
+    let mut request = request_for(&video, 40, 4, 1);
+    request.picture_width_in_pixels = 200;
+    request.picture_height_in_pixels = 200;
+
+    let frame = first_picture_delivered(&toolchain, &request);
+
+    // 16:9 in a square of 200: 200 wide and 112 tall, with 44 rows of black above and below.
+    let (width, height) = (frame.width_in_pixels as usize, frame.height_in_pixels as usize);
+    assert_eq!((width, height), (200, 200));
+    let row = |number: usize| &frame.rgba_pixels[number * width * 4..(number + 1) * width * 4];
+    let is_black = |row: &[u8]| {
+        row.chunks(4)
+            .all(|pixel| pixel[0] <= 2 && pixel[1] <= 2 && pixel[2] <= 2)
+    };
+    for black_row in (0..44).chain(156..200) {
+        assert!(is_black(row(black_row)), "row {black_row} should be black");
+    }
+    assert!(
+        !(44..156).all(|number| is_black(row(number))),
+        "the video is in the middle"
+    );
+    // The middle is the picture of source frame 40, with its frame number strip along its top.
+    let middle: Vec<u8> = (44..156).flat_map(|number| row(number).to_vec()).collect();
+    assert_eq!(frame_number_in_picture(&middle, 200, 112, 4), 40);
 }
 
 #[test]

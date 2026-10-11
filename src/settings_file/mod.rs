@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::atomic_file::write_file_atomically;
-use crate::project::Settings;
+use crate::project::{Settings, SpedUpClipSound};
 use document::{SettingsDocument, SettingsValuesDocument};
 
 /// The value of the `file_format` field that marks a JSON file as fastforwardrs settings.
@@ -89,9 +89,12 @@ pub fn settings_from_json_text(text: &str) -> Result<Settings, String> {
     let values = document.settings;
     Ok(Settings {
         autosave: values.autosave.unwrap_or(Settings::DEFAULT.autosave),
-        mute_sped_up_clips: values
-            .mute_sped_up_clips
-            .unwrap_or(Settings::DEFAULT.mute_sped_up_clips),
+        sped_up_clip_sound: values
+            .sped_up_clip_sound
+            .or(values
+                .mute_sped_up_clips
+                .map(SpedUpClipSound::from_the_old_mute_setting))
+            .unwrap_or(Settings::DEFAULT.sped_up_clip_sound),
     })
 }
 
@@ -102,7 +105,8 @@ pub fn settings_to_json_text(settings: Settings) -> String {
         file_format_version: FILE_FORMAT_VERSION,
         settings: SettingsValuesDocument {
             autosave: Some(settings.autosave),
-            mute_sped_up_clips: Some(settings.mute_sped_up_clips),
+            sped_up_clip_sound: Some(settings.sped_up_clip_sound),
+            mute_sped_up_clips: None,
         },
     };
     let mut text = serde_json::to_string_pretty(&document).expect("settings can always be written as JSON");
@@ -113,12 +117,12 @@ pub fn settings_to_json_text(settings: Settings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::BOOLEAN_SETTINGS;
+    use crate::project::{SETTINGS, SpedUpClipSound};
 
-    fn everything_on() -> Settings {
+    fn everything_at_its_last_value() -> Settings {
         Settings {
             autosave: true,
-            mute_sped_up_clips: true,
+            sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
         }
     }
 
@@ -126,7 +130,7 @@ mod tests {
     fn the_json_has_the_documented_pretty_human_readable_shape() {
         let text = settings_to_json_text(Settings {
             autosave: true,
-            mute_sped_up_clips: false,
+            sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         });
         assert_eq!(
             text,
@@ -135,7 +139,7 @@ mod tests {
   "file_format_version": 1,
   "settings": {
     "autosave": true,
-    "mute_sped_up_clips": false
+    "sped_up_clip_sound": "maintain_pitch"
   }
 }
 "#
@@ -143,40 +147,74 @@ mod tests {
     }
 
     #[test]
-    fn every_setting_in_the_table_survives_a_trip_through_text_in_both_states() {
-        for setting in BOOLEAN_SETTINGS {
-            for chosen in [false, true] {
+    fn every_setting_in_the_table_survives_a_trip_through_text_in_every_state() {
+        for setting in SETTINGS {
+            for option in 0..setting.option_labels().len() {
                 let mut settings = Settings::DEFAULT;
-                *(setting.global)(&mut settings) = chosen;
+                setting.set_global_option(&mut settings, option);
                 let text = settings_to_json_text(settings);
                 assert_eq!(
                     settings_from_json_text(&text).unwrap(),
                     settings,
-                    "{} set to {chosen}\n{text}",
-                    setting.label
+                    "{} set to {}
+{text}",
+                    setting.label(),
+                    setting.option_labels()[option]
                 );
             }
         }
         // And all of them together.
         assert_eq!(
-            settings_from_json_text(&settings_to_json_text(everything_on())).unwrap(),
-            everything_on()
+            settings_from_json_text(&settings_to_json_text(everything_at_its_last_value())).unwrap(),
+            everything_at_its_last_value()
         );
     }
 
     #[test]
     fn a_setting_missing_from_the_file_gets_its_default_and_the_rest_are_kept() {
         let text = r#"{ "file_format": "fastforwardrs-settings", "file_format_version": 1,
-                        "settings": { "mute_sped_up_clips": true } }"#;
+                        "settings": { "sped_up_clip_sound": "mute" } }"#;
         assert_eq!(
             settings_from_json_text(text).unwrap(),
             Settings {
                 autosave: Settings::DEFAULT.autosave,
-                mute_sped_up_clips: true
+                sped_up_clip_sound: SpedUpClipSound::Mute
             }
         );
         let no_settings_at_all = r#"{ "file_format": "fastforwardrs-settings", "file_format_version": 1 }"#;
         assert_eq!(settings_from_json_text(no_settings_at_all).unwrap(), Settings::DEFAULT);
+    }
+
+    /// Regression test for the change from a yes-or-no setting to a choice of three: a settings file
+    /// written by the earlier version keeps meaning what it meant.
+    #[test]
+    fn the_old_yes_or_no_mute_setting_still_means_mute_or_the_sound_at_its_own_pitch() {
+        for (old_value, expected) in [
+            ("true", SpedUpClipSound::Mute),
+            ("false", SpedUpClipSound::MaintainPitch),
+        ] {
+            let text = format!(
+                r#"{{ "file_format": "fastforwardrs-settings", "file_format_version": 1,
+                    "settings": {{ "autosave": true, "mute_sped_up_clips": {old_value} }} }}"#
+            );
+            assert_eq!(
+                settings_from_json_text(&text).unwrap(),
+                Settings {
+                    autosave: true,
+                    sped_up_clip_sound: expected
+                },
+                "mute_sped_up_clips: {old_value}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_new_setting_wins_when_a_file_somehow_has_both_and_the_old_one_is_never_written_again() {
+        let text = r#"{ "file_format": "fastforwardrs-settings", "file_format_version": 1,
+                        "settings": { "sped_up_clip_sound": "increase_pitch", "mute_sped_up_clips": true } }"#;
+        let settings = settings_from_json_text(text).unwrap();
+        assert_eq!(settings.sped_up_clip_sound, SpedUpClipSound::IncreasePitch);
+        assert!(!settings_to_json_text(settings).contains("mute_sped_up_clips"));
     }
 
     #[test]
@@ -188,7 +226,7 @@ mod tests {
             settings_from_json_text(text).unwrap(),
             Settings {
                 autosave: true,
-                mute_sped_up_clips: false
+                sped_up_clip_sound: Settings::DEFAULT.sped_up_clip_sound
             }
         );
     }
@@ -223,9 +261,9 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("a new folder").join("settings.json");
 
-        write_settings_file(everything_on(), &path).unwrap();
+        write_settings_file(everything_at_its_last_value(), &path).unwrap();
 
-        assert_eq!(read_settings_file(&path).unwrap(), everything_on());
+        assert_eq!(read_settings_file(&path).unwrap(), everything_at_its_last_value());
         write_settings_file(Settings::DEFAULT, &path).unwrap();
         assert_eq!(
             read_settings_file(&path).unwrap(),

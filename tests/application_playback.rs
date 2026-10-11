@@ -137,14 +137,12 @@ fn record_for(journey: &mut Journey, how_long: Duration) -> Recording {
     while started.elapsed() < how_long {
         journey.harness.step();
         let application = journey.application();
-        let track = application.project().video_track();
-        let identifier = application.project().source_videos()[0].identifier;
         samples.push(Sample {
             since_playing_started: started.elapsed(),
             current_timeline_frame: application.current_frame().value(),
             shown_timeline_frame: application
                 .preview_picture()
-                .and_then(|picture| track.timeline_frame_showing_source_frame(identifier, picture.source_frame))
+                .and_then(|picture| journey.timeline_frame_showing_source_frame(picture.source, picture.source_frame))
                 .map(|frame| frame.value()),
         });
         std::thread::sleep(Duration::from_millis(4));
@@ -159,7 +157,7 @@ fn playing_from_the_start_through_a_change_of_speed_shows_every_picture_on_time(
     let mut journey = Journey::importing(&toolchain, &video.path);
     // The first three seconds at normal speed, the rest at 3x.
     journey.cut_at_frame(90);
-    journey.drag_the_speed_slider_up(140, 100.0);
+    journey.set_the_speed_of_the_clip_at(140, 3);
     assert_eq!(journey.clips(), vec![(0, 90, 1), (90, 600, 3)]);
 
     // The playhead is where the last cut was made: back to the start for the whole journey.

@@ -1,6 +1,7 @@
 //! Exact video frame rates.
 
 use std::fmt;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,15 @@ impl FrameRate {
     /// Creates a frame rate of a whole number of frames per second, such as 30 or 60.
     pub fn from_whole_frames_per_second(frames_per_second: u32) -> Result<Self, InvalidFrameRate> {
         Self::new(frames_per_second, 1)
+    }
+
+    /// A frame rate of a whole number of frames per second that is known not to be zero, so that
+    /// it can be made where an error cannot be handled: in a constant.
+    pub const fn from_non_zero_whole_frames_per_second(frames_per_second: NonZeroU32) -> Self {
+        Self {
+            numerator: frames_per_second.get(),
+            denominator: 1,
+        }
     }
 
     pub fn numerator(self) -> u32 {

@@ -11,8 +11,10 @@ mod child_process;
 pub mod export;
 mod ffmpeg_toolchain;
 mod frame_stream;
+mod picture_fit;
+mod source_probe;
 mod thumbnails;
-mod video_probe;
+mod waveform;
 
 use std::sync::Arc;
 
@@ -23,11 +25,15 @@ pub use ffmpeg_toolchain::{FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE, FfmpegToolchai
 pub use frame_stream::{
     DecodedFrame, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, frame_stream_arguments,
 };
+pub use picture_fit::{PictureFit, fit_inside_picture};
+pub use source_probe::{
+    ProbeError, probe_source_media, probe_video, properties_from_probe_output, source_properties_from_probe_output,
+};
 pub use thumbnails::{
     CompressedPicture, PictureSize, ThumbnailError, ThumbnailEvent, ThumbnailExtraction, ThumbnailStrip,
     thumbnail_arguments, thumbnail_second_for_source_frame,
 };
-pub use video_probe::{ProbeError, probe_video, properties_from_probe_output};
+pub use waveform::{PEAKS_PER_SECOND, Waveform, WaveformError, WaveformEvent, WaveformExtraction, waveform_arguments};
 
 /// A function that background work calls whenever it has something new for the user interface,
 /// so that the interface can wake up and show it. (The interface passes in a function that asks

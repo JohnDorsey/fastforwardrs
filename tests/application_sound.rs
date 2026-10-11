@@ -15,6 +15,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use fastforwardrs::media::FfmpegToolchain;
+use fastforwardrs::project::SpedUpClipSound;
 use journey::Journey;
 use journey::speakers::{self, RecordingSpeakers};
 use support::{TestVideo, TestVideoSpecification, test_video};
@@ -75,7 +76,7 @@ fn assert_pitch(heard: f64, expected: f64, context: &str) {
 fn play_the_edited_timeline_into(journey: &mut Journey, speakers: &RecordingSpeakers, seconds: f64) -> Heard {
     journey.application_mut().play_sound_through(speakers.opener());
     journey.cut_at_frame(90);
-    journey.drag_the_speed_slider_up(140, 100.0);
+    journey.set_the_speed_of_the_clip_at(140, 3);
     assert_eq!(journey.clips(), vec![(0, 90, 1), (90, 600, 3)]);
     journey.press_button("Stop");
     journey.settle();
@@ -178,12 +179,41 @@ fn pausing_silences_the_speakers_straight_away() {
 }
 
 #[test]
+fn with_the_pitch_raised_the_sped_up_clip_is_heard_three_times_higher_and_the_rest_is_as_it_was() {
+    let toolchain = toolchain_or_skip!();
+    let video = video_with_a_new_pitch_every_second(&toolchain);
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    journey.choose_in_a_global_setting_dropdown("Maintain pitch", "Increase pitch");
+    assert_eq!(
+        journey.application().settings_in_effect().sped_up_clip_sound,
+        SpedUpClipSound::IncreasePitch
+    );
+    let speakers = RecordingSpeakers::new();
+
+    let heard = play_the_edited_timeline_into(&mut journey, &speakers, 4.4);
+
+    assert_eq!(journey.application().sound_problem(), None);
+    assert_pitch(heard.pitch_at(1.5), 500.0, "the clip at normal speed keeps its sound");
+    // Without raising the pitch these would be 900, 1100 and 1300 Hz (see the first test).
+    for (seconds, expected) in [(3.17, 2700.0), (3.5, 3300.0), (3.83, 3900.0)] {
+        assert_pitch(
+            heard.pitch_at(seconds),
+            expected,
+            &format!("at {seconds} s of the timeline, in the sped up clip"),
+        );
+    }
+}
+
+#[test]
 fn with_sped_up_clips_muted_the_sound_stops_for_the_sped_up_clip_and_goes_on_for_the_rest() {
     let toolchain = toolchain_or_skip!();
     let video = video_with_a_new_pitch_every_second(&toolchain);
     let mut journey = Journey::importing(&toolchain, &video.path);
-    journey.change_global_setting("Mute sped-up clips");
-    assert!(journey.application().settings_in_effect().mute_sped_up_clips);
+    journey.choose_in_a_global_setting_dropdown("Maintain pitch", "Mute");
+    assert_eq!(
+        journey.application().settings_in_effect().sped_up_clip_sound,
+        SpedUpClipSound::Mute
+    );
     let speakers = RecordingSpeakers::new();
 
     let heard = play_the_edited_timeline_into(&mut journey, &speakers, 4.4);

@@ -1,7 +1,9 @@
 //! The windows that appear in the middle of the screen: messages, questions, the progress of an
-//! export, and the warning that the source video must be chosen again.
+//! export, and the warning that source files must be chosen again.
 
 use egui::{Align2, Context, Id, Modal, ProgressBar, RichText, Window, vec2};
+
+use crate::project::SourceMediaIdentifier;
 
 /// What to do once the user has agreed to throw away unsaved changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,21 +94,26 @@ pub fn show_export_progress(context: &Context, frames_written: u64, total_frames
     cancel_pressed
 }
 
-/// What the warning about a missing source video says.
+/// A source file that cannot be used, as the warning about missing files shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MissingSourceWarning {
-    /// Where the project last had its video.
+pub struct MissingSource {
+    pub identifier: SourceMediaIdentifier,
+    /// Where the project last had the file.
     pub last_known_path: String,
     /// Why it could not be used.
     pub reason: String,
 }
 
-/// Shows, in the middle of the window, that the source video must be chosen again. Unlike a
-/// dialog it does not block the rest of the program: edits can still be made. Closing it with its
-/// close button clears `open`. Returns whether "Choose the video" was pressed.
-pub fn show_missing_source_warning(context: &Context, warning: &MissingSourceWarning, open: &mut bool) -> bool {
-    let mut choose_pressed = false;
-    Window::new("Source video not found")
+/// Shows, in the middle of the window, that source files must be chosen again. Unlike a dialog it
+/// does not block the rest of the program: edits can still be made. Closing it with its close
+/// button clears `open`. Returns the file whose "Choose the file again" was pressed, if one was.
+pub fn show_missing_sources_warning(
+    context: &Context,
+    missing: &[MissingSource],
+    open: &mut bool,
+) -> Option<SourceMediaIdentifier> {
+    let mut chosen = None;
+    Window::new("Source files not found")
         .id(Id::new("missing source warning"))
         .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
         .collapsible(false)
@@ -114,19 +121,23 @@ pub fn show_missing_source_warning(context: &Context, warning: &MissingSourceWar
         .open(open)
         .show(context, |ui| {
             ui.set_width(DIALOG_WIDTH);
-            ui.label(
-                "The source video of this project can't be found or can't be opened, so it must be chosen again. \
-                 Your edits are all still here.",
-            );
-            ui.add_space(8.0);
-            ui.label(RichText::new(&warning.last_known_path).monospace().weak());
-            ui.label(RichText::new(&warning.reason).weak());
-            ui.add_space(8.0);
-            if ui.button("Choose the video").clicked() {
-                choose_pressed = true;
+            ui.label(if missing.len() == 1 {
+                "A file this project is made from can't be found or can't be opened, so it must be chosen again. \
+                 Your edits are all still here."
+            } else {
+                "Some of the files this project is made from can't be found or can't be opened, so they must be \
+                 chosen again. Your edits are all still here."
+            });
+            for source in missing {
+                ui.add_space(8.0);
+                ui.label(RichText::new(&source.last_known_path).monospace().weak());
+                ui.label(RichText::new(&source.reason).weak());
+                if ui.button("Choose the file again").clicked() {
+                    chosen = Some(source.identifier);
+                }
             }
         });
-    choose_pressed
+    chosen
 }
 
 #[cfg(test)]

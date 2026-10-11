@@ -112,17 +112,20 @@ impl Script {
     }
 }
 
-const VIDEO: SourceVideoIdentifier = SourceVideoIdentifier::new(1);
+const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
 
 fn supplier() -> (PictureSupplier<ScriptedStarter>, Script) {
     let script = Script::default();
     let mut supplier = PictureSupplier::new(ScriptedStarter(script.clone()));
-    supplier.set_source(Some(PreviewSource {
-        source_video_identifier: VIDEO,
-        video_path: PathBuf::from("holiday.mp4"),
+    supplier.set_setup(Some(PreviewSetup {
         frame_rate: FrameRate::new(30, 1).unwrap(),
         picture_width_in_pixels: 64,
         picture_height_in_pixels: 36,
+        videos: vec![PreviewVideo {
+            source: VIDEO,
+            video_path: PathBuf::from("holiday.mp4"),
+            display_size_in_pixels: (1280, 720),
+        }],
     }));
     (supplier, script)
 }
@@ -136,22 +139,22 @@ fn wanted_with(
     source_frame: u64,
     speed: u32,
     clip_end: u64,
-    pictures_left_in_clip: u64,
-    next_clip: Option<UpcomingClip>,
+    pictures_left: u64,
+    next_video: Option<UpcomingVideo>,
 ) -> WantedPicture {
     WantedPicture {
-        source_video_identifier: VIDEO,
+        source: VIDEO,
         source_frame: SourceFrameIndex::new(source_frame),
         speed_factor: SpeedFactor::new(speed).unwrap(),
-        clip_end_source_frame: SourceFrameIndex::new(clip_end),
-        pictures_left_in_clip,
-        next_clip,
+        range_end_source_frame: SourceFrameIndex::new(clip_end),
+        pictures_left,
+        next_video,
     }
 }
 
-fn upcoming(first: u64, end: u64, speed: u32) -> UpcomingClip {
-    UpcomingClip {
-        source_video_identifier: VIDEO,
+fn upcoming(first: u64, end: u64, speed: u32) -> UpcomingVideo {
+    UpcomingVideo {
+        source: VIDEO,
         first_source_frame: SourceFrameIndex::new(first),
         end_source_frame: SourceFrameIndex::new(end),
         speed_factor: SpeedFactor::new(speed).unwrap(),
@@ -186,6 +189,7 @@ fn the_first_request_starts_a_stream_at_the_wanted_picture_that_runs_to_the_end_
             first_source_frame: SourceFrameIndex::new(50),
             source_frame_count: 150,
             speed_factor: SpeedFactor::NORMAL,
+            video_display_size_in_pixels: (1280, 720),
             picture_width_in_pixels: 64,
             picture_height_in_pixels: 36,
         }]
@@ -437,7 +441,7 @@ fn a_stream_started_before_a_split_carries_on_across_the_split_without_restartin
 }
 
 #[test]
-fn near_the_end_of_a_clip_while_playing_the_next_clip_is_got_ready() {
+fn near_the_end_of_a_clip_while_playing_the_next_video_is_got_ready() {
     let (mut supplier, script) = supplier();
     let start = Instant::now();
     let next = Some(upcoming(200, 400, 4));
@@ -454,7 +458,7 @@ fn near_the_end_of_a_clip_while_playing_the_next_clip_is_got_ready() {
 }
 
 #[test]
-fn the_next_clip_is_got_ready_only_once() {
+fn the_next_video_is_got_ready_only_once() {
     let (mut supplier, script) = supplier();
     let start = Instant::now();
     let next = Some(upcoming(200, 400, 4));
@@ -469,7 +473,7 @@ fn the_next_clip_is_got_ready_only_once() {
 }
 
 #[test]
-fn crossing_into_the_next_clip_uses_the_stream_that_was_got_ready() {
+fn crossing_into_the_next_video_uses_the_stream_that_was_got_ready() {
     let (mut supplier, script) = supplier();
     let start = Instant::now();
     let next = Some(upcoming(200, 400, 4));
@@ -490,7 +494,7 @@ fn crossing_into_the_next_clip_uses_the_stream_that_was_got_ready() {
 }
 
 #[test]
-fn a_next_clip_the_current_stream_already_covers_is_not_started_separately() {
+fn a_next_video_the_current_stream_already_covers_is_not_started_separately() {
     let (mut supplier, script) = supplier();
     let start = Instant::now();
     // The stream runs from 50 to 200, and the clip after the one being shown starts at 150 with the
@@ -520,7 +524,7 @@ fn pausing_lets_go_of_the_stream_that_was_got_ready_and_playing_again_gets_it_re
 }
 
 #[test]
-fn paused_playback_never_gets_the_next_clip_ready() {
+fn paused_playback_never_gets_the_next_video_ready() {
     let (mut supplier, script) = supplier();
     let start = Instant::now();
     let next = Some(upcoming(200, 400, 4));
@@ -587,7 +591,7 @@ fn with_nothing_wanted_the_streams_are_dropped_but_the_last_picture_stays() {
 fn a_picture_of_a_video_the_preview_does_not_show_is_not_supplied() {
     let (mut supplier, script) = supplier();
     let mut other_video = wanted(50);
-    other_video.source_video_identifier = SourceVideoIdentifier::new(2);
+    other_video.source = SourceMediaIdentifier::new(2);
     let report = supplier.supply(Some(other_video), false, Instant::now());
     assert!(!report.shows_the_wanted_picture);
     assert_eq!(script.started_count(), 0);
@@ -602,10 +606,10 @@ fn changing_or_removing_the_source_forgets_everything() {
     supplier.supply(Some(wanted(50)), false, after(start, 10));
     assert!(supplier.picture().is_some());
 
-    supplier.set_source(None);
+    supplier.set_setup(None);
 
     assert!(supplier.picture().is_none());
-    assert!(supplier.source().is_none());
+    assert!(supplier.setup().is_none());
     let report = supplier.supply(Some(wanted(50)), false, after(start, 1000));
     assert!(!report.shows_the_wanted_picture);
     assert_eq!(script.started_count(), 1, "nothing was started without a source");

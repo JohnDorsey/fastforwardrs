@@ -1,4 +1,4 @@
-//! Asking ffprobe what a video file contains.
+//! Asking ffprobe what a file contains: a video, or a sound.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use super::child_process::{background_command, end_of_error_output};
 use super::ffmpeg_toolchain::FfmpegToolchain;
-use crate::project::{FrameRate, SourceVideoProperties};
+use crate::project::{FrameRate, SourceAudioProperties, SourceMediaProperties, SourceVideoProperties};
 
 #[derive(Debug, Error)]
 pub enum ProbeError {
@@ -20,6 +20,8 @@ pub enum ProbeError {
     UnreadableAnswer(String),
     #[error("the file contains no video picture")]
     NoVideoStream,
+    #[error("the file contains neither a video picture nor any sound")]
+    NoVideoPictureOrSound,
     #[error("the video's frame rate could not be determined")]
     UnknownFrameRate,
     #[error("the video's length could not be determined")]
@@ -28,6 +30,23 @@ pub enum ProbeError {
 
 /// Opens `video_path` with ffprobe and reports what the project needs to know about it.
 pub fn probe_video(toolchain: &FfmpegToolchain, video_path: &Path) -> Result<SourceVideoProperties, ProbeError> {
+    let probe_output_json = run_ffprobe(toolchain, video_path)?;
+    properties_from_probe_output(&probe_output_json, |video_stream_index| {
+        count_video_packets(toolchain, video_path, video_stream_index)
+    })
+}
+
+/// Opens `path` with ffprobe and reports what the project needs to know about it, whether it is a
+/// video (a file with a picture) or a sound file (a file with only sound).
+pub fn probe_source_media(toolchain: &FfmpegToolchain, path: &Path) -> Result<SourceMediaProperties, ProbeError> {
+    let probe_output_json = run_ffprobe(toolchain, path)?;
+    source_properties_from_probe_output(&probe_output_json, |video_stream_index| {
+        count_video_packets(toolchain, path, video_stream_index)
+    })
+}
+
+/// Runs ffprobe on `path` and returns the JSON it prints.
+fn run_ffprobe(toolchain: &FfmpegToolchain, path: &Path) -> Result<String, ProbeError> {
     let output = background_command(toolchain.ffprobe_path())
         .args([
             "-v",
@@ -38,18 +57,16 @@ pub fn probe_video(toolchain: &FfmpegToolchain, video_path: &Path) -> Result<Sou
             "-show_streams",
             "-i",
         ])
-        .arg(video_path)
+        .arg(path)
         .output()
         .map_err(ProbeError::CouldNotRunFfprobe)?;
     if !output.status.success() {
         return Err(ProbeError::CouldNotOpen {
-            path: video_path.to_owned(),
+            path: path.to_owned(),
             message: end_of_error_output(&output.stderr),
         });
     }
-    properties_from_probe_output(&String::from_utf8_lossy(&output.stdout), |video_stream_index| {
-        count_video_packets(toolchain, video_path, video_stream_index)
-    })
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Counts the packets (which is to say the frames) of one stream by reading through the file
@@ -90,9 +107,55 @@ pub fn properties_from_probe_output(
     probe_output_json: &str,
     count_packets: impl FnOnce(u32) -> Result<u64, ProbeError>,
 ) -> Result<SourceVideoProperties, ProbeError> {
-    let probe_output: ProbeOutput =
-        serde_json::from_str(probe_output_json).map_err(|error| ProbeError::UnreadableAnswer(error.to_string()))?;
+    video_properties(&parse_probe_output(probe_output_json)?, count_packets)
+}
 
+/// Like [`properties_from_probe_output`], but a file that has no video picture is a sound file if it
+/// has sound, and its properties are those of a sound.
+pub fn source_properties_from_probe_output(
+    probe_output_json: &str,
+    count_packets: impl FnOnce(u32) -> Result<u64, ProbeError>,
+) -> Result<SourceMediaProperties, ProbeError> {
+    let probe_output = parse_probe_output(probe_output_json)?;
+    match video_properties(&probe_output, count_packets) {
+        Ok(video) => Ok(SourceMediaProperties::Video(video)),
+        Err(ProbeError::NoVideoStream) => audio_properties(&probe_output).map(SourceMediaProperties::Audio),
+        Err(other) => Err(other),
+    }
+}
+
+fn parse_probe_output(probe_output_json: &str) -> Result<ProbeOutput, ProbeError> {
+    serde_json::from_str(probe_output_json).map_err(|error| ProbeError::UnreadableAnswer(error.to_string()))
+}
+
+/// How long a sound file lasts, from the first of its sound streams that says, or else from the
+/// file as a whole.
+fn audio_properties(probe_output: &ProbeOutput) -> Result<SourceAudioProperties, ProbeError> {
+    let sound_streams: Vec<&ProbeStream> = probe_output.streams.iter().filter(|stream| stream.is_audio()).collect();
+    if sound_streams.is_empty() {
+        return Err(ProbeError::NoVideoPictureOrSound);
+    }
+    let duration_in_seconds = sound_streams
+        .iter()
+        .filter_map(|stream| stream.duration.as_deref())
+        .chain(
+            probe_output
+                .format
+                .as_ref()
+                .and_then(|format| format.duration.as_deref()),
+        )
+        .find_map(|text| text.parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+        .ok_or(ProbeError::UnknownLength)?;
+    Ok(SourceAudioProperties {
+        duration_in_microseconds: (duration_in_seconds * 1_000_000.0).round() as u64,
+    })
+}
+
+fn video_properties(
+    probe_output: &ProbeOutput,
+    count_packets: impl FnOnce(u32) -> Result<u64, ProbeError>,
+) -> Result<SourceVideoProperties, ProbeError> {
     let video_stream = probe_output
         .streams
         .iter()
@@ -199,6 +262,10 @@ struct ProbeDisposition {
 impl ProbeStream {
     fn is_video(&self) -> bool {
         self.codec_type.as_deref() == Some("video")
+    }
+
+    fn is_audio(&self) -> bool {
+        self.codec_type.as_deref() == Some("audio")
     }
 
     /// An album-art picture attached to an audio file shows up as a one-frame "video" stream.
@@ -521,6 +588,110 @@ mod tests {
         assert!(matches!(
             properties_from_probe_output("{}"),
             Err(ProbeError::NoVideoStream)
+        ));
+    }
+
+    // --- sound files ---
+
+    fn source_properties(probe_output_json: &str) -> Result<SourceMediaProperties, ProbeError> {
+        source_properties_from_probe_output(probe_output_json, |_| Err(ProbeError::UnknownLength))
+    }
+
+    /// What ffprobe prints (trimmed) for a 12.5 second mono WAV file.
+    const SOUND_FILE: &str = r#"{
+        "streams": [
+            { "index": 0, "codec_type": "audio", "sample_rate": "48000", "channels": 1, "duration": "12.500000" }
+        ],
+        "format": { "duration": "12.500000" }
+    }"#;
+
+    #[test]
+    fn a_file_with_only_sound_is_a_sound_file_that_lasts_as_long_as_it_says() {
+        assert_eq!(
+            source_properties(SOUND_FILE).unwrap(),
+            SourceMediaProperties::Audio(SourceAudioProperties {
+                duration_in_microseconds: 12_500_000
+            })
+        );
+    }
+
+    #[test]
+    fn a_sound_file_that_does_not_state_the_length_of_its_sound_has_the_length_of_the_file() {
+        let json = r#"{ "streams": [ { "codec_type": "audio", "duration": "N/A" } ],
+            "format": { "duration": "3.250000" } }"#;
+        assert_eq!(
+            source_properties(json).unwrap(),
+            SourceMediaProperties::Audio(SourceAudioProperties {
+                duration_in_microseconds: 3_250_000
+            })
+        );
+    }
+
+    #[test]
+    fn a_sound_file_whose_length_is_unknown_or_nothing_is_an_error() {
+        for json in [
+            r#"{ "streams": [ { "codec_type": "audio" } ] }"#,
+            r#"{ "streams": [ { "codec_type": "audio", "duration": "0.000000" } ], "format": { "duration": "0" } }"#,
+            r#"{ "streams": [ { "codec_type": "audio", "duration": "-4" } ] }"#,
+        ] {
+            assert!(
+                matches!(source_properties(json), Err(ProbeError::UnknownLength)),
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sound_file_with_album_art_is_a_sound_file_and_not_a_video() {
+        let json = r#"{ "streams": [
+            { "codec_type": "audio", "sample_rate": "44100", "duration": "200.0" },
+            { "codec_type": "video", "width": 500, "height": 500, "avg_frame_rate": "90000/1",
+              "nb_frames": "1", "disposition": { "attached_pic": 1 } } ] }"#;
+        assert_eq!(
+            source_properties(json).unwrap(),
+            SourceMediaProperties::Audio(SourceAudioProperties {
+                duration_in_microseconds: 200_000_000
+            })
+        );
+    }
+
+    #[test]
+    fn a_file_with_a_picture_is_still_a_video_whether_or_not_it_also_has_sound() {
+        let properties = source_properties(ORDINARY_VIDEO_WITH_AUDIO).unwrap();
+        let expected = properties_from_probe_output(ORDINARY_VIDEO_WITH_AUDIO).unwrap();
+        assert_eq!(properties, SourceMediaProperties::Video(expected));
+        assert!(properties.has_sound());
+    }
+
+    #[test]
+    fn a_file_with_neither_picture_nor_sound_says_so() {
+        for json in [
+            "{}",
+            r#"{ "streams": [ { "codec_type": "subtitle" }, { "codec_type": "data" } ] }"#,
+        ] {
+            assert!(
+                matches!(source_properties(json), Err(ProbeError::NoVideoPictureOrSound)),
+                "{json}"
+            );
+        }
+    }
+
+    /// Regression guard: only a file with *no* video picture falls back to being a sound file. A
+    /// video that cannot be understood is reported as that, not quietly turned into its sound.
+    #[test]
+    fn a_video_that_cannot_be_understood_is_not_taken_for_a_sound_file_because_it_has_sound() {
+        let json = r#"{ "streams": [
+            { "codec_type": "video", "width": 640, "height": 360, "avg_frame_rate": "0/0", "r_frame_rate": "0/0",
+              "nb_frames": "100" },
+            { "codec_type": "audio", "duration": "5.0" } ] }"#;
+        assert!(matches!(source_properties(json), Err(ProbeError::UnknownFrameRate)));
+    }
+
+    #[test]
+    fn text_that_is_not_probe_output_is_unreadable_whatever_it_is_read_as() {
+        assert!(matches!(
+            source_properties("not json"),
+            Err(ProbeError::UnreadableAnswer(_))
         ));
     }
 }

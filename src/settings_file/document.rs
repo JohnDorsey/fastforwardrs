@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::project::SpedUpClipSound;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct SettingsDocument {
     /// Always [`super::FILE_FORMAT_NAME`]; lets us recognise (and refuse) other JSON files.
@@ -22,5 +24,9 @@ pub(super) struct SettingsValuesDocument {
     #[serde(default)]
     pub autosave: Option<bool>,
     #[serde(default)]
+    pub sped_up_clip_sound: Option<SpedUpClipSound>,
+    /// What versions that could only mute or not mute wrote instead of `sped_up_clip_sound`. It is
+    /// read (when `sped_up_clip_sound` is not there) and never written.
+    #[serde(default, skip_serializing)]
     pub mute_sped_up_clips: Option<bool>,
 }

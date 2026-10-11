@@ -5,13 +5,17 @@
 //! moments were played, skipped or held back.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
-use std::path::Path;
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use super::*;
-use crate::media::export::ClipToExport;
-use crate::project::{Clip, SourceFrameIndex, SourceVideoIdentifier, SpeedFactor};
+use crate::media::export::{SoundClipToExport, SoundItemToExport};
+use crate::project::SourceMediaProperties;
+use crate::project::{
+    FrameRate, MediaClip, SourceFrameIndex, SourceMedia, SourceMediaLink, SourceVideoProperties, SpeedFactor,
+    SpeedIndicatorLayout, Track, TrackId,
+};
 
 const SAMPLE_RATE: u32 = 48_000;
 const A_FRAME_OF_THE_WINDOW: Duration = Duration::from_micros(16_667);
@@ -143,34 +147,62 @@ struct Bench {
     supplier: AudioSupplier<FakeStarter>,
     starter: FakeStarter,
     speakers: Rc<RefCell<SpeakerState>>,
-    track: VideoTrack,
+    project: Project,
+    source_paths: HashMap<SourceMediaIdentifier, PathBuf>,
     now: Instant,
-    mute_sped_up_clips: bool,
-    source_frame_count: u64,
+    sped_up_clip_sound: SpedUpClipSound,
     channel_count: u16,
 }
 
-fn clip(first: u64, end: u64, speed: u32) -> Clip {
-    Clip::new(
-        SourceVideoIdentifier::new(1),
-        SourceFrameIndex::new(first),
-        SourceFrameIndex::new(end),
-        SpeedFactor::new(speed).unwrap(),
-    )
-    .unwrap()
-}
+const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
 
 fn frame_rate() -> FrameRate {
     FrameRate::new(30, 1).unwrap()
 }
 
+/// A project with a video of 600 frames (20 seconds) with sound, and one track holding clips of
+/// it one after another: each is the source frames `first` up to `end` at `speed`.
+fn project_of_clips(clips: &[(u64, u64, u32)]) -> Project {
+    let video = SourceMedia::video(
+        VIDEO,
+        SourceMediaLink::from_absolute_path(PathBuf::from("holiday.mp4")),
+        SourceVideoProperties {
+            frame_rate: frame_rate(),
+            total_frame_count: 600,
+            display_width_in_pixels: 320,
+            display_height_in_pixels: 180,
+            has_audio: true,
+        },
+    );
+    let clips = clips.iter().map(|&(first, end, speed)| {
+        let media = MediaClip::new(
+            VIDEO,
+            SourceFrameIndex::new(first),
+            SourceFrameIndex::new(end),
+            SpeedFactor::new(speed).unwrap(),
+        )
+        .unwrap();
+        (0, Clip::Video(media))
+    });
+    let track = Track::new(TrackId::new(0), "track 0").with_clips(clips);
+    Project::from_parts(vec![video], vec![track], SpeedIndicatorLayout::DEFAULT).unwrap()
+}
+
+/// The first clip of the first track of the sound a request asks for.
+fn first_sound_clip(request: &AudioStreamRequest) -> SoundClipToExport {
+    match request.sound.strips[0].items[0] {
+        SoundItemToExport::Clip(clip) => clip,
+        SoundItemToExport::Silence { .. } => panic!("the sound starts with silence"),
+    }
+}
+
 impl Bench {
     /// 20 seconds of video at 30 frames per second, as one clip, with mono sound at 48000 a second.
     fn new() -> Self {
-        Self::with(VideoTrack::new(vec![clip(0, 600, 1)]), 1)
+        Self::with(project_of_clips(&[(0, 600, 1)]), 1)
     }
 
-    fn with(track: VideoTrack, channel_count: u16) -> Self {
+    fn with(project: Project, channel_count: u16) -> Self {
         let starter = FakeStarter {
             requests: Rc::default(),
             streams: Rc::default(),
@@ -196,10 +228,10 @@ impl Bench {
             supplier,
             starter,
             speakers,
-            track,
+            project,
+            source_paths: HashMap::from([(VIDEO, PathBuf::from("holiday.mp4"))]),
             now: Instant::now(),
-            mute_sped_up_clips: false,
-            source_frame_count: 600,
+            sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
             channel_count,
         }
     }
@@ -223,11 +255,9 @@ impl Bench {
 
     fn update_at(&mut self, seconds: f64, is_playing: bool) {
         let content = AudioContent {
-            video_path: Path::new("holiday.mp4"),
-            frame_rate: frame_rate(),
-            source_frame_count: self.source_frame_count,
-            track: &self.track,
-            mute_sped_up_clips: self.mute_sped_up_clips,
+            project: &self.project,
+            source_paths: &self.source_paths,
+            sped_up_clip_sound: self.sped_up_clip_sound,
         };
         self.supplier
             .update(Some(content), Self::clock_at(seconds, is_playing), self.now);
@@ -327,25 +357,30 @@ fn nothing_runs_when_there_is_no_sound_to_play() {
 
 #[test]
 fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
-    let mut bench = Bench::with(VideoTrack::new(vec![clip(0, 300, 1), clip(300, 600, 3)]), 2);
-    bench.mute_sped_up_clips = true;
+    let mut bench = Bench::with(project_of_clips(&[(0, 300, 1), (300, 600, 3)]), 2);
+    bench.sped_up_clip_sound = SpedUpClipSound::Mute;
 
     // Timeline frame 320 is 20 frames into the second clip, which shows source frames 300, 303, ...
+    // (The clips make 300 frames and then 100, so there are 80 frames from there to the end.)
     bench.update_playing_at((320.0 + 0.1) / 30.0);
 
     assert_eq!(bench.streams_started(), 1);
     let request = bench.starter.requests.borrow()[0].clone();
-    assert_eq!(request.video_path, Path::new("holiday.mp4"));
-    assert_eq!(request.frame_rate, frame_rate());
+    assert_eq!(request.source_files, vec![PathBuf::from("holiday.mp4")]);
+    assert_eq!(request.sound.frame_rate, frame_rate());
+    assert_eq!(request.sound.total_frame_count, 80);
     assert_eq!(
-        request.clips,
-        vec![ClipToExport {
+        request.sound.strips[0].items,
+        vec![SoundItemToExport::Clip(SoundClipToExport {
+            source_input: 0,
             first_source_frame: 300 + 20 * 3,
             end_source_frame: 600,
-            speed_factor: SpeedFactor::new(3).unwrap()
-        }]
+            speed_factor: SpeedFactor::new(3).unwrap(),
+            timeline_frame_count: 80,
+            loudness_factor: 1.0,
+        })]
     );
-    assert!(request.mute_sped_up_clips);
+    assert_eq!(request.sound.sped_up_clip_sound, SpedUpClipSound::Mute);
     assert_eq!(
         request.format,
         AudioFormat {
@@ -355,13 +390,37 @@ fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
     );
 }
 
+/// A behaviour that changed when there came to be several tracks: a clip that reaches past the end
+/// of a source file that is shorter than it was edited on is not cut short (which would make the
+/// timeline shorter and put the other tracks out of step). It keeps its place, and what the file
+/// does not have is silence.
 #[test]
-fn clips_are_cut_short_to_a_source_video_that_is_shorter_than_they_need() {
+fn a_clip_that_is_longer_than_its_source_file_keeps_its_whole_place_on_the_timeline() {
     let mut bench = Bench::new();
-    bench.source_frame_count = 450;
+    let video = *bench.project.sources()[0].properties.video().unwrap();
+    let shorter = SourceVideoProperties {
+        total_frame_count: 450,
+        ..video
+    };
+    bench
+        .project
+        .relink_source(
+            VIDEO,
+            SourceMediaLink::from_absolute_path(PathBuf::from("holiday.mp4")),
+            SourceMediaProperties::Video(shorter),
+        )
+        .unwrap();
     bench.update_playing_at(0.0);
     let request = bench.starter.requests.borrow()[0].clone();
-    assert_eq!(request.clips[0].end_source_frame, 450);
+    let clip = first_sound_clip(&request);
+    assert_eq!(
+        (
+            clip.first_source_frame,
+            clip.end_source_frame,
+            clip.timeline_frame_count
+        ),
+        (0, 600, 600)
+    );
 }
 
 #[test]
@@ -498,7 +557,7 @@ fn moving_the_playhead_a_long_way_while_playing_starts_the_sound_again_from_ther
     assert_eq!(bench.streams_started(), 2);
     let request = bench.starter.requests.borrow()[1].clone();
     let expected_first_frame = frame_rate().frame_at_seconds(clock + 10.0);
-    assert_eq!(request.clips[0].first_source_frame, expected_first_frame);
+    assert_eq!(first_sound_clip(&request).first_source_frame, expected_first_frame);
 }
 
 #[test]
@@ -509,7 +568,7 @@ fn a_change_to_what_the_sound_is_made_of_starts_it_again_even_though_the_clock_i
     assert_eq!(bench.streams_started(), 1);
 
     // A clip is sped up (the playhead is in the first clip, which is now shorter and faster).
-    bench.track = VideoTrack::new(vec![clip(0, 300, 2), clip(300, 600, 1)]);
+    bench.project = project_of_clips(&[(0, 300, 2), (300, 600, 1)]);
     bench.let_time_pass(A_FRAME_OF_THE_WINDOW);
     bench.update_playing_at(clock);
     bench.let_time_pass(Duration::from_millis(150));
@@ -520,17 +579,23 @@ fn a_change_to_what_the_sound_is_made_of_starts_it_again_even_though_the_clock_i
 }
 
 #[test]
-fn muting_while_playing_starts_the_sound_again_without_the_sped_up_clips() {
-    let mut bench = Bench::with(VideoTrack::new(vec![clip(0, 300, 1), clip(300, 600, 3)]), 1);
-    bench.update_playing_at(1.0);
-    let clock = bench.play_steadily(1.0, 0.5);
+fn changing_what_sped_up_sound_is_like_while_playing_starts_the_sound_again_in_the_new_way() {
+    for (chosen, started_streams_so_far) in [(SpedUpClipSound::Mute, 2), (SpedUpClipSound::IncreasePitch, 2)] {
+        let mut bench = Bench::with(project_of_clips(&[(0, 300, 1), (300, 600, 3)]), 1);
+        bench.update_playing_at(1.0);
+        let clock = bench.play_steadily(1.0, 0.5);
 
-    bench.mute_sped_up_clips = true;
-    bench.let_time_pass(Duration::from_millis(150));
-    bench.update_playing_at(clock + 0.15);
+        bench.sped_up_clip_sound = chosen;
+        bench.let_time_pass(Duration::from_millis(150));
+        bench.update_playing_at(clock + 0.15);
 
-    assert_eq!(bench.streams_started(), 2);
-    assert!(bench.starter.requests.borrow()[1].mute_sped_up_clips);
+        assert_eq!(bench.streams_started(), started_streams_so_far, "{chosen:?}");
+        assert_eq!(
+            bench.starter.requests.borrow()[0].sound.sped_up_clip_sound,
+            SpedUpClipSound::MaintainPitch
+        );
+        assert_eq!(bench.starter.requests.borrow()[1].sound.sped_up_clip_sound, chosen);
+    }
 }
 
 #[test]
@@ -627,7 +692,10 @@ fn playing_again_after_a_pause_starts_a_new_stream_from_where_the_playhead_is() 
     bench.update_playing_at(3.5);
 
     assert_eq!(bench.streams_started(), 2);
-    assert_eq!(bench.starter.requests.borrow()[1].clips[0].first_source_frame, 105);
+    assert_eq!(
+        first_sound_clip(&bench.starter.requests.borrow()[1]).first_source_frame,
+        105
+    );
 }
 
 #[test]
@@ -768,13 +836,12 @@ fn without_any_speakers_given_there_is_no_sound_and_no_complaint() {
         fails: Rc::default(),
     };
     let mut supplier = AudioSupplier::new(starter.clone());
-    let track = VideoTrack::new(vec![clip(0, 600, 1)]);
+    let project = project_of_clips(&[(0, 600, 1)]);
+    let source_paths = HashMap::from([(VIDEO, PathBuf::from("holiday.mp4"))]);
     let content = AudioContent {
-        video_path: Path::new("holiday.mp4"),
-        frame_rate: frame_rate(),
-        source_frame_count: 600,
-        track: &track,
-        mute_sped_up_clips: false,
+        project: &project,
+        source_paths: &source_paths,
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };
     supplier.update(Some(content), Bench::clock_at(1.0, true), Instant::now());
     assert_eq!(starter.attempts.get(), 0);
@@ -813,7 +880,7 @@ fn speakers_that_stop_working_are_let_go_of_and_opened_again_a_little_later() {
 
 #[test]
 fn skipping_late_sound_never_splits_a_moment_so_the_channels_stay_together() {
-    let mut bench = Bench::with(VideoTrack::new(vec![clip(0, 600, 1)]), 2);
+    let mut bench = Bench::with(project_of_clips(&[(0, 600, 1)]), 2);
     bench.starter.decoded_at_the_start.set(0);
     bench.update_playing_at(3.0);
     bench.let_time_pass(Duration::from_millis(100));

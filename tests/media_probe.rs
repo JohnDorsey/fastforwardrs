@@ -4,8 +4,8 @@ mod support;
 
 use std::process::Command;
 
-use fastforwardrs::media::{ProbeError, probe_video};
-use fastforwardrs::project::FrameRate;
+use fastforwardrs::media::{ProbeError, probe_source_media, probe_video};
+use fastforwardrs::project::{FrameRate, SourceMediaProperties};
 use support::{TestVideoSpecification, counter_video, scratch_directory, test_video};
 
 #[test]
@@ -193,4 +193,45 @@ fn a_file_with_unusual_characters_in_its_name_can_be_probed() {
     let oddly_named = scratch.path().join("holiday #1 (final) - café & friends [2026].mp4");
     std::fs::copy(&video.path, &oddly_named).unwrap();
     assert_eq!(probe_video(&toolchain, &oddly_named).unwrap().total_frame_count, 600);
+}
+
+#[test]
+fn a_sound_file_is_probed_as_a_sound_that_lasts_as_long_as_it_does() {
+    let toolchain = toolchain_or_skip!();
+    let tone = support::tone_file(&toolchain, 440, 3);
+
+    let properties = probe_source_media(&toolchain, &tone).unwrap();
+
+    let SourceMediaProperties::Audio(sound) = properties else {
+        panic!("a tone is a sound, got {properties:?}")
+    };
+    let seconds = sound.duration_in_microseconds as f64 / 1_000_000.0;
+    assert!((seconds - 3.0).abs() < 0.05, "3 seconds of tone, probed as {seconds}");
+    assert!(properties.has_sound());
+}
+
+#[test]
+fn a_video_is_probed_as_a_video_by_the_probe_that_also_knows_sounds() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+
+    let properties = probe_source_media(&toolchain, &video.path).unwrap();
+
+    let SourceMediaProperties::Video(found) = properties else {
+        panic!("a video is a video, got {properties:?}")
+    };
+    assert_eq!(found, probe_video(&toolchain, &video.path).unwrap());
+}
+
+#[test]
+fn a_file_that_is_neither_is_reported_as_unopenable_by_the_probe_that_also_knows_sounds() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let not_media = folder.path().join("notes.wav");
+    std::fs::write(&not_media, "this is text").unwrap();
+
+    assert!(matches!(
+        probe_source_media(&toolchain, &not_media),
+        Err(ProbeError::CouldNotOpen { .. })
+    ));
 }

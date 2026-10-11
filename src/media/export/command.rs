@@ -10,9 +10,9 @@ use crate::media::ffmpeg_toolchain::FfmpegToolchain;
 /// The files an export hands to ffmpeg.
 #[derive(Clone, Debug)]
 pub struct ExportFiles {
-    pub source_video: PathBuf,
-    /// One picture file per fast-forward symbol, in the order they are inputs 1, 2, ...
-    pub symbol_pictures: Vec<PathBuf>,
+    /// The files ffmpeg reads, in the order they are its inputs 0, 1, ...: the source files, then
+    /// the still pictures (the fast-forward symbols and the text).
+    pub inputs: Vec<PathBuf>,
     /// The filter graph, saved in a file: for a project with many clips it is far longer than the
     /// command line allows.
     pub filter_graph_file: PathBuf,
@@ -79,13 +79,12 @@ pub fn export_arguments(
     graph: &FilterGraph,
     encoder: VideoEncoder,
 ) -> Vec<OsString> {
-    let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"]
+    let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
         .map(OsString::from)
         .to_vec();
-    arguments.push(files.source_video.clone().into());
-    for symbol_picture in &files.symbol_pictures {
+    for input in &files.inputs {
         arguments.push("-i".into());
-        arguments.push(symbol_picture.clone().into());
+        arguments.push(input.clone().into());
     }
 
     arguments.push(filter_graph_file_option(toolchain).into());
@@ -133,11 +132,11 @@ mod tests {
         FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), major_version)
     }
 
-    fn files(symbol_count: usize, output: &str) -> ExportFiles {
+    /// Files for an export that reads `holiday.mp4` and then `picture_count` still pictures.
+    fn files(picture_count: usize, output: &str) -> ExportFiles {
         ExportFiles {
-            source_video: PathBuf::from("holiday.mp4"),
-            symbol_pictures: (0..symbol_count)
-                .map(|number| PathBuf::from(format!("symbol_{number}.png")))
+            inputs: std::iter::once(PathBuf::from("holiday.mp4"))
+                .chain((0..picture_count).map(|number| PathBuf::from(format!("picture_{number}.png"))))
                 .collect(),
             filter_graph_file: PathBuf::from("graph.txt"),
             output: PathBuf::from(output),
@@ -160,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn a_complete_export_command_with_sound_and_symbols() {
+    fn a_complete_export_command_with_sound_and_still_pictures() {
         let arguments = as_text(export_arguments(
             &toolchain(Some(9)),
             &files(2, "out.mp4"),
@@ -178,9 +177,9 @@ mod tests {
                 "-i",
                 "holiday.mp4",
                 "-i",
-                "symbol_0.png",
+                "picture_0.png",
                 "-i",
-                "symbol_1.png",
+                "picture_1.png",
                 "-/filter_complex",
                 "graph.txt",
                 "-map",
@@ -207,6 +206,27 @@ mod tests {
                 "out.mp4",
             ]
         );
+    }
+
+    #[test]
+    fn every_input_is_read_with_its_own_dash_i_in_the_order_given() {
+        let files = ExportFiles {
+            inputs: ["a.mp4", "b.mp3", "c.png"].map(PathBuf::from).to_vec(),
+            filter_graph_file: PathBuf::from("graph.txt"),
+            output: PathBuf::from("out.mp4"),
+        };
+        let arguments = as_text(export_arguments(
+            &toolchain(Some(9)),
+            &files,
+            &graph(true),
+            VideoEncoder::Libx264,
+        ));
+        let inputs: Vec<&String> = arguments
+            .windows(2)
+            .filter(|pair| pair[0] == "-i")
+            .map(|pair| &pair[1])
+            .collect();
+        assert_eq!(inputs, ["a.mp4", "b.mp3", "c.png"]);
     }
 
     #[test]

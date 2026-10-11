@@ -32,6 +32,14 @@ impl SpeedFactor {
     pub fn is_accelerated(self) -> bool {
         self.value() > 1
     }
+
+    /// This speed and `other` applied one after the other: a clip at 3x on a track at 2x plays at
+    /// 6x. (A product too big for a number of this size is the biggest number there is.)
+    #[must_use]
+    pub fn times(self, other: SpeedFactor) -> SpeedFactor {
+        let product = self.value().saturating_mul(other.value());
+        SpeedFactor(NonZeroU32::new(product).expect("the product of two numbers that are not zero is not zero"))
+    }
 }
 
 impl Default for SpeedFactor {
@@ -76,6 +84,30 @@ mod tests {
         assert!(!SpeedFactor::new(1).unwrap().is_accelerated());
         assert!(SpeedFactor::new(2).unwrap().is_accelerated());
         assert!(SpeedFactor::new(1000).unwrap().is_accelerated());
+    }
+
+    #[test]
+    fn speeds_multiply_and_normal_speed_changes_nothing() {
+        let three = SpeedFactor::new(3).unwrap();
+        let two = SpeedFactor::new(2).unwrap();
+        assert_eq!(three.times(two), SpeedFactor::new(6).unwrap());
+        assert_eq!(two.times(three), three.times(two));
+        assert_eq!(three.times(SpeedFactor::NORMAL), three);
+        assert_eq!(SpeedFactor::NORMAL.times(SpeedFactor::NORMAL), SpeedFactor::NORMAL);
+        assert_eq!(
+            SpeedFactor::new(1000)
+                .unwrap()
+                .times(SpeedFactor::new(1000).unwrap())
+                .value(),
+            1_000_000
+        );
+    }
+
+    #[test]
+    fn a_product_too_big_to_hold_is_the_biggest_speed_and_never_zero_or_wrapped_round() {
+        let huge = SpeedFactor::new(u32::MAX).unwrap();
+        assert_eq!(huge.times(huge).value(), u32::MAX);
+        assert_eq!(huge.times(SpeedFactor::new(2).unwrap()).value(), u32::MAX);
     }
 
     #[test]

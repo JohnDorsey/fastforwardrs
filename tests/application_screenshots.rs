@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
-use egui::{PointerButton, vec2};
 use egui_kittest::kittest::Queryable;
 use fastforwardrs::media::FfmpegToolchain;
 use journey::Journey;
@@ -56,6 +55,23 @@ fn colourful_video(toolchain: &FfmpegToolchain, folder: &Path) -> PathBuf {
     path
 }
 
+/// A sound file of 10 seconds whose loudness rises and falls twice a second, so that its waveform
+/// has a shape to look at.
+fn pulsing_sound(toolchain: &FfmpegToolchain, folder: &Path) -> PathBuf {
+    let path = folder.join("pulsing_10_seconds.wav");
+    if !path.exists() {
+        let status = Command::new(toolchain.ffmpeg_path())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=10"])
+            .args(["-af", "tremolo=f=1.5:d=0.9,volume=7"])
+            .arg(&path)
+            .status()
+            .expect("could not run ffmpeg");
+        assert!(status.success());
+    }
+    path
+}
+
 fn save(journey: &mut Journey, folder: &Path, name: &str) {
     journey.settle();
     let picture = journey.harness.render().expect("the window could be drawn");
@@ -78,7 +94,7 @@ fn write_screenshots_of_the_window() {
     // Cut, and speed up the middle part.
     journey.cut_at_frame(60);
     journey.cut_at_frame(150);
-    journey.drag_the_speed_slider_up(105, 150.0);
+    journey.set_the_speed_of_the_clip_at(105, 10);
     journey.click_the_scrub_slider_at(0.1);
     journey.wait_for_the_preview_to_show_the_current_frame();
     save(&mut journey, &folder, "2_playhead_before_the_sped_up_clip");
@@ -88,20 +104,9 @@ fn write_screenshots_of_the_window() {
     journey.wait_for_the_preview_to_show_the_current_frame();
     save(&mut journey, &folder, "3_inside_the_sped_up_clip");
 
-    // The speed slider while it is being dragged (the button is held down).
-    let press = journey.point_on_the_track_at_frame(30);
-    journey.move_pointer_to(press);
-    journey.harness.event(egui::Event::PointerButton {
-        pos: press,
-        button: PointerButton::Secondary,
-        pressed: true,
-        modifiers: egui::Modifiers::NONE,
-    });
-    journey.harness.step();
-    for step in 1..=12 {
-        journey.move_pointer_to(press - vec2(0.0, 12.0 * step as f32));
-    }
-    save(&mut journey, &folder, "4_dragging_the_speed_slider");
+    // The box of settings of a clip, open above it.
+    journey.open_the_settings_of_the_clip_at(30);
+    save(&mut journey, &folder, "4_the_settings_of_a_clip");
 }
 
 #[test]
@@ -162,4 +167,103 @@ fn write_screenshots_of_the_edit_menu_and_the_settings_windows() {
         .unwrap()
         .click();
     save(&mut journey, &folder, "9_the_project_has_a_setting_of_its_own");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_tracks_sound_and_text() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let sound = pulsing_sound(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.cut_at_frame(120);
+
+    // A sound file goes on a track of its own, in front, and is drawn as its waveform.
+    journey.move_playhead_to_frame(0);
+    journey.import(&sound);
+    save(&mut journey, &folder, "10_a_video_and_a_sound_on_two_tracks");
+
+    // A third track, with a text object made from the menu that opens on an empty part of it.
+    journey.add_a_track();
+    let empty_part = journey.point_on_the_strip_at_frame(0, 60);
+    journey.right_click(empty_part);
+    save(&mut journey, &folder, "11_the_menu_on_an_empty_part_of_a_track");
+    journey.harness.get_by_label_contains("New").click();
+    journey.settle();
+    save(&mut journey, &folder, "12_the_new_menu_opened");
+    journey.harness.get_by_label("Text object").click();
+    journey.settle();
+    journey.replace_text_in_the_field_showing("Text", "Chapter one: the beach");
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "13_a_text_object_and_the_window_it_is_edited_in");
+
+    // The text object is selected, with a handle at each of its corners on the preview.
+    journey.harness.get_by_label("Close window").click();
+    journey.settle();
+    save(&mut journey, &folder, "14_the_text_object_selected_on_the_preview");
+
+    // The box of settings of a clip, above the clip, and the box of a track, above its gear.
+    journey.move_playhead_to_frame(30);
+    let on_the_video = journey.point_on_the_strip_at_frame(2, 60);
+    journey.right_click(on_the_video);
+    save(&mut journey, &folder, "15_the_settings_of_a_clip");
+    journey.press_key(egui::Key::Escape);
+    let gear = journey.rectangle_of("Settings of track 1").center();
+    journey.click(gear);
+    save(&mut journey, &folder, "16_the_settings_of_a_track");
+    journey.press_key(egui::Key::Escape);
+
+    // A clip that is selected has an outline.
+    let on_the_sound = journey.point_on_the_strip_at_frame(1, 90);
+    journey.click(on_the_sound);
+    save(&mut journey, &folder, "17_a_selected_clip");
+
+    // The project, for opening in the real program.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("demo.fastforwardrs.json"));
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_many_tracks_and_missing_files() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let sound = folder.join("pulsing_to_go_missing.wav");
+    std::fs::copy(pulsing_sound(&toolchain, &folder), &sound).unwrap();
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.import(&sound);
+    for _ in 0..5 {
+        journey.add_a_track();
+    }
+    journey.make_a_text_object_at(1, 30);
+    journey.wait_until_idle();
+    journey.harness.get_by_label("Close window").click();
+    save(&mut journey, &folder, "18_seven_tracks_the_rows_scroll");
+
+    // A project whose sound file cannot be found.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("missing_sound.fastforwardrs.json"));
+    drop(journey);
+    std::fs::remove_file(&sound).unwrap();
+    let mut reopened = Journey::start(&toolchain);
+    reopened
+        .application_mut()
+        .load_project_from(folder.join("missing_sound.fastforwardrs.json"));
+    reopened.wait_until_idle();
+    save(&mut reopened, &folder, "19_a_sound_file_that_cannot_be_found");
+
+    // Its clip says so, and its box offers to choose the file again. (Its track is below the
+    // others that are shown, so the rows are scrolled to it first, as a person would with the scroll bar.)
+    reopened.harness.get_by_label("Strip of track 1").scroll_to_me();
+    reopened.settle();
+    save(&mut reopened, &folder, "20_the_rows_scrolled_down_to_the_sound");
+    let missing_clip = reopened.point_on_the_strip_at_frame(5, 100);
+    reopened.right_click(missing_clip);
+    save(&mut reopened, &folder, "21_the_box_of_a_clip_whose_file_is_missing");
 }

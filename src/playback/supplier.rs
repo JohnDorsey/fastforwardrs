@@ -20,12 +20,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::wanted::{UpcomingClip, WantedPicture};
+use super::wanted::{UpcomingVideo, WantedPicture};
 use crate::media::{
     DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest,
     UserInterfaceWakeUp,
 };
-use crate::project::{FrameRate, SourceFrameIndex, SourceVideoIdentifier, SpeedFactor};
+use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
 /// New streams are not started more often than this. (Starting ffmpeg takes tens of milliseconds
 /// and a lot of processor time, and a person dragging a slider asks for a new picture on every
@@ -85,20 +85,29 @@ impl PictureStreamStarter for FfmpegPictureStreamStarter {
     }
 }
 
-/// The video the preview shows pictures of, and how big those pictures are.
+/// A video the preview can show pictures of.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreviewSource {
-    pub source_video_identifier: SourceVideoIdentifier,
+pub struct PreviewVideo {
+    pub source: SourceMediaIdentifier,
     pub video_path: PathBuf,
+    /// How big the video's picture is as it is shown, so that a video of another shape than the
+    /// preview's picture can be fitted inside it.
+    pub display_size_in_pixels: (u32, u32),
+}
+
+/// The videos the preview shows pictures of, and how big the pictures are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewSetup {
     pub frame_rate: FrameRate,
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
+    pub videos: Vec<PreviewVideo>,
 }
 
 /// The picture the preview can show right now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SuppliedPicture {
-    pub source_video_identifier: SourceVideoIdentifier,
+    pub source: SourceMediaIdentifier,
     /// Which source frame this is a picture of.
     pub source_frame: SourceFrameIndex,
     pub frame: DecodedFrame,
@@ -121,7 +130,7 @@ pub struct SupplyReport {
 /// A stream that has been started, with what is needed to know which pictures it will deliver.
 struct RunningStream<Stream> {
     stream: Stream,
-    source_video_identifier: SourceVideoIdentifier,
+    source: SourceMediaIdentifier,
     speed_factor: SpeedFactor,
     first_source_frame: u64,
     source_frame_count: u64,
@@ -132,10 +141,10 @@ struct RunningStream<Stream> {
 }
 
 impl<Stream> RunningStream<Stream> {
-    fn new(stream: Stream, source_video_identifier: SourceVideoIdentifier, request: &FrameStreamRequest) -> Self {
+    fn new(stream: Stream, source: SourceMediaIdentifier, request: &FrameStreamRequest) -> Self {
         Self {
             stream,
-            source_video_identifier,
+            source,
             speed_factor: request.speed_factor,
             first_source_frame: request.first_source_frame.value(),
             source_frame_count: request.source_frame_count,
@@ -147,11 +156,11 @@ impl<Stream> RunningStream<Stream> {
     /// Which of the stream's pictures (counting from 0) is `source_frame`, if it is one of them.
     fn picture_number_of(
         &self,
-        source_video_identifier: SourceVideoIdentifier,
+        source: SourceMediaIdentifier,
         speed_factor: SpeedFactor,
         source_frame: SourceFrameIndex,
     ) -> Option<u64> {
-        if source_video_identifier != self.source_video_identifier || speed_factor != self.speed_factor {
+        if source != self.source || speed_factor != self.speed_factor {
             return None;
         }
         let frame = source_frame.value();
@@ -173,7 +182,7 @@ impl<Stream> RunningStream<Stream> {
         if self.ended {
             return None;
         }
-        self.picture_number_of(wanted.source_video_identifier, wanted.speed_factor, wanted.source_frame)
+        self.picture_number_of(wanted.source, wanted.speed_factor, wanted.source_frame)
             .filter(|&picture_number| picture_number >= self.pictures_taken)
     }
 }
@@ -182,7 +191,7 @@ impl<Stream> RunningStream<Stream> {
 /// remembers the latest picture. See the module documentation.
 pub struct PictureSupplier<Starter: PictureStreamStarter> {
     starter: Starter,
-    source: Option<PreviewSource>,
+    setup: Option<PreviewSetup>,
     current_stream: Option<RunningStream<Starter::Stream>>,
     upcoming_stream: Option<RunningStream<Starter::Stream>>,
     picture: Option<SuppliedPicture>,
@@ -190,7 +199,7 @@ pub struct PictureSupplier<Starter: PictureStreamStarter> {
     last_stream_start: Option<Instant>,
     /// The picture that a stream ended without delivering, so that it is not asked for again and
     /// again forever.
-    could_not_deliver: Option<(SourceVideoIdentifier, SourceFrameIndex)>,
+    could_not_deliver: Option<(SourceMediaIdentifier, SourceFrameIndex)>,
     last_problem: Option<String>,
 }
 
@@ -198,7 +207,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
     pub fn new(starter: Starter) -> Self {
         Self {
             starter,
-            source: None,
+            setup: None,
             current_stream: None,
             upcoming_stream: None,
             picture: None,
@@ -209,19 +218,19 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         }
     }
 
-    /// Chooses the video pictures are made from (or none). Everything in progress is dropped.
-    pub fn set_source(&mut self, source: Option<PreviewSource>) {
+    /// Chooses the videos pictures are made from (or none). Everything in progress is dropped.
+    pub fn set_setup(&mut self, setup: Option<PreviewSetup>) {
         self.current_stream = None;
         self.upcoming_stream = None;
         self.picture = None;
         self.last_stream_start = None;
         self.could_not_deliver = None;
         self.last_problem = None;
-        self.source = source;
+        self.setup = setup;
     }
 
-    pub fn source(&self) -> Option<&PreviewSource> {
-        self.source.as_ref()
+    pub fn setup(&self) -> Option<&PreviewSetup> {
+        self.setup.as_ref()
     }
 
     /// The latest picture got, which may be older than the one wanted.
@@ -248,9 +257,9 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             return nothing_to_wait_for;
         };
         let source_matches = self
-            .source
+            .setup
             .as_ref()
-            .is_some_and(|source| source.source_video_identifier == wanted.source_video_identifier);
+            .is_some_and(|setup| setup.videos.iter().any(|video| video.source == wanted.source));
         if !source_matches {
             return nothing_to_wait_for;
         }
@@ -261,7 +270,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             self.get_the_wanted_picture(&wanted, now)
         };
         if is_playing {
-            self.get_the_next_clip_ready(&wanted);
+            self.get_the_next_video_ready(&wanted);
         } else {
             // Nothing is about to need it, so do not keep ffmpeg running for it.
             self.upcoming_stream = None;
@@ -273,10 +282,9 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
     }
 
     fn shows(&self, wanted: &WantedPicture) -> bool {
-        self.picture.as_ref().is_some_and(|picture| {
-            picture.source_video_identifier == wanted.source_video_identifier
-                && picture.source_frame == wanted.source_frame
-        })
+        self.picture
+            .as_ref()
+            .is_some_and(|picture| picture.source == wanted.source && picture.source_frame == wanted.source_frame)
     }
 
     /// Reads pictures from the right stream, starting a new one if none will do. Returns how long
@@ -305,7 +313,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
     /// Whether a stream has already been tried for this picture and ended (or could not start)
     /// without delivering it, so that trying again would only repeat the failure.
     fn is_known_to_be_undeliverable(&self, wanted: &WantedPicture) -> bool {
-        self.could_not_deliver == Some((wanted.source_video_identifier, wanted.source_frame))
+        self.could_not_deliver == Some((wanted.source, wanted.source_frame))
     }
 
     /// Makes the stream that was got ready in advance the current one, if the current stream will
@@ -342,7 +350,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 Some(FrameStreamEvent::Finished { error_output }) => {
                     stream.ended = true;
                     // The stream ended before it reached the picture that was wanted.
-                    self.could_not_deliver = Some((wanted.source_video_identifier, wanted.source_frame));
+                    self.could_not_deliver = Some((wanted.source, wanted.source_frame));
                     if let Some(error_output) = error_output {
                         self.last_problem = Some(error_output);
                     }
@@ -353,7 +361,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         }
         if let Some((taken_number, frame)) = latest_picture {
             self.picture = Some(SuppliedPicture {
-                source_video_identifier: stream.source_video_identifier,
+                source: stream.source,
                 source_frame: stream.source_frame_of_picture(taken_number),
                 frame,
                 serial_number: self.next_serial_number,
@@ -372,23 +380,23 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             }
         }
         let request = self.request_for(
-            wanted.source_video_identifier,
+            wanted.source,
             wanted.source_frame,
-            wanted.clip_end_source_frame,
+            wanted.range_end_source_frame,
             wanted.speed_factor,
         )?;
         self.last_stream_start = Some(now);
         self.upcoming_stream = None;
         match self.starter.start(&request) {
             Ok(stream) => {
-                self.current_stream = Some(RunningStream::new(stream, wanted.source_video_identifier, &request));
+                self.current_stream = Some(RunningStream::new(stream, wanted.source, &request));
                 if let Some(picture_number) = self.picture_number_in_current_stream(wanted) {
                     self.take_pictures_up_to(picture_number, wanted);
                 }
             }
             Err(error) => {
                 self.current_stream = None;
-                self.could_not_deliver = Some((wanted.source_video_identifier, wanted.source_frame));
+                self.could_not_deliver = Some((wanted.source, wanted.source_frame));
                 self.last_problem = Some(error.to_string());
             }
         }
@@ -396,64 +404,63 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
     }
 
     /// While near the end of a clip, starts the stream for the clip that follows.
-    fn get_the_next_clip_ready(&mut self, wanted: &WantedPicture) {
-        if self.upcoming_stream.is_some()
-            || wanted.pictures_left_in_clip > PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY
-        {
+    fn get_the_next_video_ready(&mut self, wanted: &WantedPicture) {
+        if self.upcoming_stream.is_some() || wanted.pictures_left > PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY {
             return;
         }
-        let Some(next_clip) = wanted.next_clip else { return };
+        let Some(next_video) = wanted.next_video else { return };
         // The stream being read may already run on into the next clip (when both have the same
         // speed and one clip was split in two after the stream started).
         let already_covered = self.current_stream.as_ref().is_some_and(|stream| {
             stream
                 .picture_number_of(
-                    next_clip.source_video_identifier,
-                    next_clip.speed_factor,
-                    next_clip.first_source_frame,
+                    next_video.source,
+                    next_video.speed_factor,
+                    next_video.first_source_frame,
                 )
                 .is_some()
         });
         if !already_covered {
-            self.start_upcoming_stream(&next_clip);
+            self.start_upcoming_stream(&next_video);
         }
     }
 
-    fn start_upcoming_stream(&mut self, next_clip: &UpcomingClip) {
+    fn start_upcoming_stream(&mut self, next_video: &UpcomingVideo) {
         let Some(request) = self.request_for(
-            next_clip.source_video_identifier,
-            next_clip.first_source_frame,
-            next_clip.end_source_frame,
-            next_clip.speed_factor,
+            next_video.source,
+            next_video.first_source_frame,
+            next_video.end_source_frame,
+            next_video.speed_factor,
         ) else {
             return;
         };
         if let Ok(stream) = self.starter.start(&request) {
-            self.upcoming_stream = Some(RunningStream::new(stream, next_clip.source_video_identifier, &request));
+            self.upcoming_stream = Some(RunningStream::new(stream, next_video.source, &request));
         }
     }
 
-    /// The request for a stream of the pictures of one clip, from `first_source_frame` to the
-    /// clip's end, or `None` if the video is not the one this supplier shows.
+    /// The request for a stream of the pictures of one stretch of video, from `first_source_frame`
+    /// to the end of the stretch, or `None` if the video is not one this supplier shows.
     fn request_for(
         &self,
-        source_video_identifier: SourceVideoIdentifier,
+        source: SourceMediaIdentifier,
         first_source_frame: SourceFrameIndex,
-        clip_end_source_frame: SourceFrameIndex,
+        range_end_source_frame: SourceFrameIndex,
         speed_factor: SpeedFactor,
     ) -> Option<FrameStreamRequest> {
-        let source = self
-            .source
-            .as_ref()
-            .filter(|source| source.source_video_identifier == source_video_identifier)?;
+        let setup = self.setup.as_ref()?;
+        let video = setup.videos.iter().find(|video| video.source == source)?;
         Some(FrameStreamRequest {
-            video_path: source.video_path.clone(),
-            frame_rate: source.frame_rate,
+            video_path: video.video_path.clone(),
+            frame_rate: setup.frame_rate,
             first_source_frame,
-            source_frame_count: clip_end_source_frame.value().saturating_sub(first_source_frame.value()),
+            source_frame_count: range_end_source_frame
+                .value()
+                .saturating_sub(first_source_frame.value()),
             speed_factor,
-            picture_width_in_pixels: source.picture_width_in_pixels,
-            picture_height_in_pixels: source.picture_height_in_pixels,
+            video_display_size_in_pixels: video.display_size_in_pixels,
+            picture_width_in_pixels: setup.picture_width_in_pixels,
+            picture_height_in_pixels: setup.picture_height_in_pixels,
         })
     }
 }

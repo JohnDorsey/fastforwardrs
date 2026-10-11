@@ -2,13 +2,11 @@
 //! and check what the project and the playback did. (The window and the ways of using it are in
 //! [`super::test_window`].)
 
-use std::path::PathBuf;
-
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 
-use super::SourceStatus;
-use super::test_window::{WINDOW_SIZE, Window, project_of};
+use super::test_window::{VIDEO, WINDOW_SIZE, Window, project_of};
+use super::{SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::dialogs::{AfterConfirmation, Dialog};
 use crate::project::{FrameRate, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
@@ -37,16 +35,64 @@ fn the_menu_bar_has_the_file_and_edit_menus_in_that_order_and_no_others() {
 }
 
 #[test]
-fn the_edit_menu_has_project_settings_then_global_settings() {
+fn the_edit_menu_has_deselect_then_project_settings_then_global_settings() {
     let mut window = Window::showing(project_of(300));
     window.harness.get_by_label("Edit").click();
     window.settle();
 
-    let items = ["Project settings", "Global settings"];
-    let heights: Vec<f32> = items.iter().map(|item| window.rectangle_of(item).top()).collect();
+    // (The item for Deselect has the key next to it, so it is found by what it starts with.)
+    let heights = [
+        window.harness.get_by_label_contains("Deselect").rect().top(),
+        window.rectangle_of("Project settings").top(),
+        window.rectangle_of("Global settings").top(),
+    ];
     assert!(
         heights.windows(2).all(|pair| pair[0] < pair[1]),
         "listed top to bottom in this order: {heights:?}"
+    );
+}
+
+#[test]
+fn the_deselect_item_shows_the_key_that_does_the_same_and_is_only_available_when_a_clip_is_selected() {
+    let mut window = Window::showing(project_of(300));
+    window.harness.get_by_label("Edit").click();
+    window.settle();
+    assert!(
+        window.harness.query_by_label_contains("Esc").is_some(),
+        "the key is shown next to the item"
+    );
+    assert!(
+        window
+            .harness
+            .get_by_label_contains("Deselect")
+            .accesskit_node()
+            .is_disabled(),
+        "nothing is selected: nothing to deselect"
+    );
+
+    // Close the menu, select the clip, and look again.
+    window.press_key(Key::Escape);
+    window.harness.get_by_label("Edit").click();
+    window.settle();
+    window.press_key(Key::Escape);
+    window.click(window.middle_of_the_track_at(150));
+    assert!(window.application().selected_clip().is_some());
+    window.harness.get_by_label("Edit").click();
+    window.settle();
+    assert!(
+        !window
+            .harness
+            .get_by_label_contains("Deselect")
+            .accesskit_node()
+            .is_disabled()
+    );
+
+    window.harness.get_by_label_contains("Deselect").click();
+    window.settle();
+    assert_eq!(
+        window.application().selected_clip(),
+        None,
+        "choosing the item deselects"
     );
 }
 
@@ -70,14 +116,16 @@ fn the_play_buttons_and_the_time_are_there_with_stop_first_then_play_then_pause(
 }
 
 #[test]
-fn left_clicking_the_video_track_does_nothing() {
+fn left_clicking_a_clip_selects_it_and_changes_nothing_else() {
     let mut window = Window::showing(project_of(300));
     assert!(!window.application().has_unsaved_changes);
+    assert_eq!(window.application().selected_clip(), None);
 
     window.click(window.middle_of_the_track_at(75) + vec2(1.0, 0.0));
 
+    assert_eq!(window.application().selected_clip(), Some(window.clip(0, 0)));
     assert_eq!(window.clips(), vec![(0, 300, 1)], "cutting is done with the S key only");
-    assert!(!window.application().has_unsaved_changes);
+    assert!(!window.application().has_unsaved_changes, "selecting is not an edit");
     assert_eq!(
         window.current_frame(),
         0,
@@ -217,10 +265,10 @@ fn the_arrow_keys_do_nothing_while_a_dialog_is_open() {
 }
 
 #[test]
-fn the_ruler_is_a_strip_of_the_same_width_directly_above_the_video_track() {
+fn the_ruler_is_a_strip_of_the_same_width_directly_above_the_first_track() {
     let window = Window::showing(project_of(300));
     let ruler = window.rectangle_of("Ruler");
-    let track = window.rectangle_of("Video track");
+    let track = window.strip_of_track(0);
     assert_eq!(ruler.left(), track.left());
     assert_eq!(ruler.right(), track.right());
     assert_eq!(ruler.bottom(), track.top(), "no gap between them");
@@ -315,6 +363,46 @@ fn moving_the_playhead_any_other_way_still_scrolls_the_strip_to_follow_it() {
 }
 
 #[test]
+fn the_red_line_of_the_playhead_is_drawn_where_the_current_frame_starts() {
+    let mut window = Window::showing(project_of(900));
+    window.move_current_frame_to(200);
+
+    let drawn = window
+        .x_of_the_drawn_playhead()
+        .expect("the current frame is in view, so the playhead is drawn");
+
+    // The line is put on a whole pixel, which moves it by half a point at the most.
+    let starts = window.x_of_frame_on_the_strip(0, 200);
+    assert!(
+        (drawn - starts).abs() <= 0.5,
+        "the line is at {drawn} and the frame starts at {starts}"
+    );
+}
+
+#[test]
+fn the_red_line_of_the_playhead_goes_along_with_the_strips_when_they_are_scrolled_and_is_not_drawn_out_of_view() {
+    let mut window = Window::showing(project_of(900));
+    window.move_current_frame_to(450);
+    let before = window.x_of_the_drawn_playhead().expect("in view to start with");
+
+    window.application_mut().timeline_view.scroll_offset += 300.0;
+    window.settle();
+    let after = window
+        .x_of_the_drawn_playhead()
+        .expect("still in view after scrolling by 300 points");
+    assert!(
+        ((before - after) - 300.0).abs() <= 1.0,
+        "scrolled 300 points along, the line moved from {before} to {after}"
+    );
+
+    // As far along as the strips go, which leaves the middle of the video far behind.
+    window.application_mut().timeline_view.scroll_offset = 100_000.0;
+    window.settle();
+    assert_eq!(window.x_of_the_drawn_playhead(), None);
+    assert_eq!(window.current_frame(), 450, "the current frame is where it was");
+}
+
+#[test]
 fn the_s_key_cuts_at_the_current_frame_and_does_not_move_it() {
     let mut window = Window::showing(project_of(300));
     assert!(!window.application().has_unsaved_changes);
@@ -343,11 +431,62 @@ fn the_s_key_cuts_even_when_a_button_has_the_keyboard_focus() {
 }
 
 #[test]
-fn the_space_bar_no_longer_cuts() {
+fn the_space_bar_does_not_cut() {
     let mut window = Window::showing(project_of(300));
     window.move_current_frame_to(60);
     window.press_key(Key::Space);
     assert_eq!(window.clips(), vec![(0, 300, 1)]);
+}
+
+#[test]
+fn the_space_bar_starts_playing_when_paused_and_pauses_when_playing() {
+    let mut window = Window::showing(project_of(300));
+    window.move_current_frame_to(60);
+    assert!(!window.application().clock.is_playing());
+
+    window.press_key(Key::Space);
+    assert!(window.application().clock.is_playing(), "space plays");
+
+    window.press_key(Key::Space);
+    assert!(!window.application().clock.is_playing(), "space pauses");
+    assert!(
+        window.current_frame() >= 60,
+        "pausing keeps the current frame (it is where playing had got to)"
+    );
+}
+
+#[test]
+fn the_space_bar_plays_again_from_the_start_when_the_end_has_been_reached() {
+    let mut window = Window::showing(project_of(300));
+    window.move_current_frame_to(299);
+    window.press_key(Key::Space);
+    assert!(window.application().clock.is_playing());
+    assert!(window.current_frame() < 299, "playing restarted from the first frame");
+}
+
+#[test]
+fn the_space_bar_plays_even_when_a_button_has_the_keyboard_focus() {
+    let mut window = Window::showing(project_of(300));
+    window.harness.get_by_label("File").focus();
+    window.settle();
+    window.press_key(Key::Space);
+    assert!(window.application().clock.is_playing());
+}
+
+#[test]
+fn the_space_bar_does_nothing_while_a_dialog_is_open_or_with_nothing_to_play() {
+    let mut window = Window::showing(project_of(300));
+    window.application_mut().dialog = Some(Dialog::Message {
+        title: "Note".into(),
+        text: "Read me".into(),
+    });
+    window.settle();
+    window.press_key(Key::Space);
+    assert!(!window.application().clock.is_playing());
+
+    let mut empty = Window::showing(Project::empty());
+    empty.press_key(Key::Space);
+    assert!(!empty.application().clock.is_playing());
 }
 
 #[test]
@@ -367,7 +506,7 @@ fn the_s_key_does_nothing_while_a_dialog_is_open() {
 fn the_s_key_does_nothing_with_no_video() {
     let mut window = Window::showing(Project::empty());
     window.press_key(Key::S);
-    assert!(window.application().project.video_track().is_empty());
+    assert!(window.application().project.has_no_clips());
     assert!(!window.application().has_unsaved_changes);
 }
 
@@ -376,167 +515,54 @@ fn project_cut_into_three() -> Window {
     window
         .application_mut()
         .project
-        .split_at(TimelineFrameIndex::new(300))
-        .unwrap();
+        .split_at(TimelineFrameIndex::new(300), None);
     window
         .application_mut()
         .project
-        .split_at(TimelineFrameIndex::new(600))
-        .unwrap();
+        .split_at(TimelineFrameIndex::new(600), None);
     window.application_mut().has_unsaved_changes = false;
     window.settle();
     window
 }
 
 #[test]
-fn dragging_the_right_mouse_button_up_on_a_clip_sets_how_fast_it_plays() {
+fn changing_the_speed_of_an_earlier_clip_keeps_the_picture_that_was_on_screen() {
     let mut window = project_cut_into_three();
-    // The middle clip (frames 300..600) starts at 10 s: well inside the first screenful? 10 s is
-    // 1849 points along the strip, so scroll first: put the current frame there.
-    let now = std::time::Instant::now();
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(450), 900);
-    window.settle();
-    let track = window.rectangle_of("Video track");
-    let press = Pos2::new(track.center().x, track.center().y);
-
-    // Dragging 200 points up is one tenfold on the slider (200 points per tenfold at most).
-    window.drag(press, press - vec2(0.0, 200.0), PointerButton::Secondary);
-
-    assert_eq!(window.clips(), vec![(0, 300, 1), (300, 600, 10), (600, 900, 1)]);
-    assert!(window.application().has_unsaved_changes);
-}
-
-#[test]
-fn a_shorter_drag_gives_a_smaller_speed_and_dragging_back_down_gives_normal_speed() {
-    let mut window = project_cut_into_three();
-    let now = std::time::Instant::now();
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(450), 900);
-    window.settle();
-    let track = window.rectangle_of("Video track");
-    let press = track.center();
-
-    // Halfway up a tenfold is the square root of ten: 3.16, which is the whole factor 3.
-    window.drag(press, press - vec2(0.0, 100.0), PointerButton::Secondary);
-    assert_eq!(window.clips()[1].2, 3);
-
-    // The slider starts at the clip's own speed (3x, which is 95 points up a tenfold), so dragging
-    // down by less than that only slows it a little...
-    window.drag(press, press + vec2(0.0, 60.0), PointerButton::Secondary);
-    assert_eq!(window.clips()[1].2, 2);
-
-    // ...and dragging down past the bottom gives normal speed.
-    window.drag(press, press + vec2(0.0, 150.0), PointerButton::Secondary);
-    assert_eq!(window.clips()[1].2, 1);
-}
-
-#[test]
-fn pressing_the_right_button_and_letting_go_without_moving_changes_nothing() {
-    let mut window = project_cut_into_three();
-    let now = std::time::Instant::now();
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(450), 900);
-    window.settle();
-    window
-        .application_mut()
-        .project
-        .set_clip_speed(1, SpeedFactor::new(5).unwrap())
-        .unwrap();
-    window.application_mut().has_unsaved_changes = false;
-    window.settle();
-    let press = window.rectangle_of("Video track").center();
-
-    window.drag(press, press, PointerButton::Secondary);
-
-    assert_eq!(window.clips()[1].2, 5);
-    assert!(!window.application().has_unsaved_changes);
-}
-
-#[test]
-fn the_slider_starts_at_the_speed_the_clip_already_has() {
-    let mut window = project_cut_into_three();
-    window
-        .application_mut()
-        .project
-        .set_clip_speed(1, SpeedFactor::new(10).unwrap())
-        .unwrap();
-    // The middle clip now takes the timeline from frame 300 to frame 330: go to the middle of it,
-    // so that it is the clip in the middle of the strip.
-    let now = std::time::Instant::now();
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(315), 630);
-    window.settle();
-    let press = window.rectangle_of("Video track").center();
-
-    // Another tenfold up from 10x is 100x.
-    window.drag(press, press - vec2(0.0, 200.0), PointerButton::Secondary);
-
-    assert_eq!(window.clips()[1].2, 100);
-}
-
-#[test]
-fn the_arrow_keys_change_the_speed_by_one_while_the_slider_is_up() {
-    let mut window = project_cut_into_three();
-    let now = std::time::Instant::now();
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(450), 900);
-    window.settle();
-    let press = window.rectangle_of("Video track").center();
-    let end = press - vec2(0.0, 200.0); // 10x
-
-    window.drag_and_hold(press, end, PointerButton::Secondary);
-    window.harness.key_press(Key::ArrowUp);
-    window.harness.step();
-    window.harness.key_press(Key::ArrowUp);
-    window.harness.step();
-    window.harness.key_press(Key::ArrowDown);
-    window.harness.step();
-    window.release(end, PointerButton::Secondary);
-    window.settle();
-
-    assert_eq!(window.clips()[1].2, 11, "10x, up twice and down once");
-}
-
-#[test]
-fn speeding_up_an_earlier_clip_keeps_the_picture_that_was_on_screen() {
-    let mut window = project_cut_into_three();
-    let now = std::time::Instant::now();
-    // The current frame is just inside the second clip: the strip scrolls so that the end of the
-    // first clip is on screen too.
-    window
-        .application_mut()
-        .clock
-        .seek(now, TimelineFrameIndex::new(330), 900);
-    window.settle();
+    // The current frame is just inside the second clip.
+    window.move_current_frame_to(330);
     let source_frame_shown = |window: &Window| {
         let current = TimelineFrameIndex::new(window.current_frame());
-        window
+        let (_, placement_frame) = window
             .application()
             .project
-            .video_track()
-            .locate(current)
-            .unwrap()
-            .source_frame
+            .tracks()
+            .iter()
+            .find_map(|track| {
+                track
+                    .placement_covering(current)
+                    .map(|placement| (track.id(), placement))
+            })
+            .map(|(track, placement)| (track, placement.source_frame_at(current).unwrap()))
+            .unwrap();
+        placement_frame
     };
     assert_eq!(source_frame_shown(&window), SourceFrameIndex::new(330));
 
-    // Speed the first clip up by pressing on its visible part, which is the left of the strip.
-    let track = window.rectangle_of("Video track");
-    let press = Pos2::new(track.left() + 100.0, track.center().y);
-    window.drag(press, press - vec2(0.0, 200.0), PointerButton::Secondary);
+    let first_clip = window.clip(0, 0);
+    let now = std::time::Instant::now();
+    let context = egui::Context::default();
+    window.application_mut().execute(
+        Command::SetClipSpeed {
+            clip: first_clip,
+            speed_factor: SpeedFactor::new(10).unwrap(),
+        },
+        now,
+        &context,
+    );
+    window.settle();
 
     assert_eq!(window.clips()[0], (0, 300, 10));
+    assert!(window.application().has_unsaved_changes);
     assert_eq!(
         source_frame_shown(&window),
         SourceFrameIndex::new(330),
@@ -618,15 +644,18 @@ fn the_buttons_do_nothing_when_there_is_no_video() {
 }
 
 #[test]
-fn the_warning_about_a_missing_video_is_in_the_middle_and_the_program_stays_usable() {
+fn the_warning_about_a_missing_file_is_in_the_middle_and_the_program_stays_usable() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().source_status = SourceStatus::Unavailable {
-        reason: "there is no file there".to_owned(),
-    };
-    window.application_mut().missing_source_warning_open = true;
+    window.application_mut().source_files.insert(
+        VIDEO,
+        SourceFileState::new(SourceStatus::Unavailable {
+            reason: "there is no file there".to_owned(),
+        }),
+    );
+    window.application_mut().missing_sources_warning_open = true;
     window.settle();
 
-    let warning = window.rectangle_of("Source video not found");
+    let warning = window.rectangle_of("Source files not found");
     let screen = Rect::from_min_size(Pos2::ZERO, vec2(WINDOW_SIZE[0], WINDOW_SIZE[1]));
     assert!(
         (warning.center().x - screen.center().x).abs() < 120.0,
@@ -637,7 +666,7 @@ fn the_warning_about_a_missing_video_is_in_the_middle_and_the_program_stays_usab
         "centred down: {warning:?}"
     );
     assert!(window.harness.query_by_label_contains("must be chosen again").is_some());
-    assert!(window.harness.query_by_label("Choose the video").is_some());
+    assert!(window.harness.query_by_label("Choose the file again").is_some());
 
     // Edits still work with the warning showing, and nothing is lost.
     window.cut_at_frame(75);
@@ -645,31 +674,68 @@ fn the_warning_about_a_missing_video_is_in_the_middle_and_the_program_stays_usab
 }
 
 #[test]
-fn the_import_item_is_only_available_when_the_video_is_missing_or_there_is_none() {
-    for (status, can_import) in [
-        (SourceStatus::NoVideo, true),
-        (
-            SourceStatus::Unavailable {
-                reason: "gone".to_owned(),
-            },
-            true,
-        ),
-        (
-            SourceStatus::Available {
-                path: PathBuf::from("holiday.mp4"),
-            },
-            false,
-        ),
-        (SourceStatus::Opening, false),
+fn the_warning_lists_every_missing_file_with_where_it_was_and_why_it_cannot_be_used() {
+    let mut project = project_of(300);
+    project
+        .import_source(super::test_window::sound_source(10), TimelineFrameIndex::new(0))
+        .unwrap();
+    let mut window = Window::showing(project);
+    for (identifier, reason) in [
+        (VIDEO, "there is no file there"),
+        (super::test_window::SOUND, "it is not a sound"),
+    ] {
+        window.application_mut().source_files.insert(
+            identifier,
+            SourceFileState::new(SourceStatus::Unavailable {
+                reason: reason.to_owned(),
+            }),
+        );
+    }
+    window.application_mut().missing_sources_warning_open = true;
+    window.settle();
+
+    assert!(window.harness.query_by_label_contains("holiday.mp4").is_some());
+    assert!(window.harness.query_by_label_contains("song.mp3").is_some());
+    assert!(window.harness.query_by_label("there is no file there").is_some());
+    assert!(window.harness.query_by_label("it is not a sound").is_some());
+    assert_eq!(window.harness.get_all_by_label("Choose the file again").count(), 2);
+    assert!(window.application().missing_sources_warning_is_showing());
+}
+
+#[test]
+fn the_warning_is_gone_when_the_file_is_there_and_does_not_come_back_by_itself() {
+    let mut window = Window::showing(project_of(300));
+    window.application_mut().missing_sources_warning_open = true;
+    window.settle();
+    assert!(
+        window.harness.query_by_label("Source files not found").is_none(),
+        "every file can be used: nothing to warn about"
+    );
+    assert!(!window.application().missing_sources_warning_is_showing());
+}
+
+#[test]
+fn the_import_item_is_available_whatever_state_the_files_of_the_project_are_in() {
+    for status in [
+        SourceStatus::Unavailable {
+            reason: "gone".to_owned(),
+        },
+        SourceStatus::Available {
+            path: std::path::PathBuf::from("holiday.mp4"),
+        },
+        SourceStatus::Opening,
     ] {
         let mut window = Window::showing(project_of(300));
-        window.application_mut().source_status = status.clone();
-        window.application_mut().missing_source_warning_open = false;
+        window
+            .application_mut()
+            .source_files
+            .insert(VIDEO, SourceFileState::new(status.clone()));
+        window.application_mut().missing_sources_warning_open = false;
         window.settle();
         window.harness.get_by_label("File").click();
         window.settle();
         let import = window.harness.get_by_label("Import");
-        assert_eq!(!import.accesskit_node().is_disabled(), can_import, "{status:?}");
+        assert!(!import.accesskit_node().is_disabled(), "{status:?}");
     }
 }
 
@@ -701,10 +767,13 @@ fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_i
     });
     window.settle();
 
-    // The speed slider of the track cannot be used behind the dialog.
+    // The clips of the track cannot be used behind the dialog.
     let on_the_track = window.middle_of_the_track_at(75);
-    window.drag(on_the_track, on_the_track - vec2(0.0, 200.0), PointerButton::Secondary);
-    assert_eq!(window.clips(), vec![(0, 300, 1)], "the drag did not reach the track");
+    window.right_click(on_the_track);
+    assert!(
+        !window.application().timeline_view.settings_box_is_open(),
+        "the click did not reach the clip"
+    );
 
     window.click(Pos2::new(5.0, 400.0));
     assert!(
@@ -712,9 +781,9 @@ fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_i
         "clicking outside a message closes it"
     );
 
-    // With the dialog gone, the same drag sets the speed.
-    window.drag(on_the_track, on_the_track - vec2(0.0, 200.0), PointerButton::Secondary);
-    assert_eq!(window.clips(), vec![(0, 300, 10)]);
+    // With the dialog gone, the same click opens the box of the clip.
+    window.right_click(on_the_track);
+    assert!(window.application().timeline_view.settings_box_is_open());
 }
 
 #[test]
@@ -752,10 +821,11 @@ fn a_click_outside_the_discard_question_means_no_and_keeps_the_changes() {
 
 fn window_inside_a_sped_up_clip() -> Window {
     let mut window = Window::showing(project_of(300));
+    let clip = window.clip(0, 0);
     window
         .application_mut()
         .project
-        .set_clip_speed(0, SpeedFactor::new(4).unwrap())
+        .set_clip_speed(clip, SpeedFactor::new(4).unwrap())
         .unwrap();
     let now = std::time::Instant::now();
     window
@@ -774,10 +844,11 @@ fn the_fast_forward_symbol_is_only_there_inside_sped_up_clips() {
         "normal speed"
     );
 
+    let clip = window.clip(0, 0);
     window
         .application_mut()
         .project
-        .set_clip_speed(0, SpeedFactor::new(4).unwrap())
+        .set_clip_speed(clip, SpeedFactor::new(4).unwrap())
         .unwrap();
     let now = std::time::Instant::now();
     window
@@ -879,7 +950,7 @@ fn a_changed_symbol_layout_is_remembered_in_the_project() {
 #[test]
 fn the_wheel_over_the_strip_scrolls_it_without_moving_the_current_frame() {
     let mut window = Window::showing(project_of(900));
-    let track = window.rectangle_of("Video track");
+    let track = window.strip_of_track(0);
     window.move_pointer_to(track.center());
     let scroll_before = window.application().timeline_view.scroll_offset;
 
