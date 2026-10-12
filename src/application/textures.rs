@@ -4,8 +4,9 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use egui::{ColorImage, Context, TextureHandle, TextureOptions};
+use egui::{ColorImage, Context, TextureHandle, TextureOptions, TextureWrapMode};
 
+use crate::application::timeline_panel::grain_of_the_racks as grain_image;
 use crate::media::{DecodedFrame, ThumbnailKey, ThumbnailLibrary};
 use crate::playback::SuppliedPicture;
 use crate::project::{SourceMediaIdentifier, SpeedFactor, TrackId};
@@ -41,6 +42,8 @@ pub struct Textures {
     symbols: HashMap<(u32, u32), TextureHandle>,
     text_pictures: HashMap<TextAppearance, TextureHandle>,
     image_pictures: HashMap<SourceMediaIdentifier, TextureHandle>,
+    /// The grain that the racks of keyframes are textured with, which is repeated across them.
+    rack_grain: Option<TextureHandle>,
 }
 
 impl Textures {
@@ -171,6 +174,21 @@ impl Textures {
                 &picture.rgba_pixels,
             );
             context.load_texture(format!("picture of file {source}"), image, TextureOptions::LINEAR)
+        })
+    }
+
+    /// The texture of the grain of the racks of keyframes, uploading it first if it has not been. It is repeated across what it
+    /// is put on, as small as it is, point for point.
+    pub fn rack_grain(&mut self, context: &Context) -> &TextureHandle {
+        self.rack_grain.get_or_insert_with(|| {
+            context.load_texture(
+                "grain of the racks of keyframes",
+                grain_image(),
+                TextureOptions {
+                    wrap_mode: TextureWrapMode::Repeat,
+                    ..TextureOptions::NEAREST
+                },
+            )
         })
     }
 

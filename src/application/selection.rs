@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::project::{ClipId, Project, TrackId};
+use crate::project::{ClipId, KeyframeId, Project, TrackId};
 
 /// One thing that can be selected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -16,6 +16,21 @@ pub enum SelectionItem {
     Clip(ClipId),
     /// A track itself, which is not all the clips on it.
     Track(TrackId),
+    /// A keyframe, in whichever rack it is.
+    Keyframe(KeyframeId),
+}
+
+impl SelectionItem {
+    /// Whether `project` has what this is of: the clip, the track, or the keyframe.
+    pub fn is_in(&self, project: &Project) -> bool {
+        match self {
+            Self::Clip(clip) => project.placement_of(*clip).is_some(),
+            Self::Track(track) => project.track(*track).is_some(),
+            Self::Keyframe(keyframe) => project
+                .located_rack(keyframe.rack())
+                .is_some_and(|located| located.rack.keyframe(*keyframe).is_some()),
+        }
+    }
 }
 
 /// The things that are selected.
@@ -68,18 +83,36 @@ impl Selection {
         self.items.contains(&SelectionItem::Track(track))
     }
 
+    /// Whether `keyframe` is selected.
+    pub fn contains_keyframe(&self, keyframe: KeyframeId) -> bool {
+        self.items.contains(&SelectionItem::Keyframe(keyframe))
+    }
+
     /// The selected clips, in the order of their ids (which is by the track they were made on, and then
     /// the order they were made in).
     pub fn iter(&self) -> impl Iterator<Item = ClipId> + '_ {
         self.items.iter().filter_map(|item| match item {
             SelectionItem::Clip(clip) => Some(*clip),
-            SelectionItem::Track(_) => None,
+            SelectionItem::Track(_) | SelectionItem::Keyframe(_) => None,
         })
     }
 
     /// The selected clips.
     pub fn to_vec(&self) -> Vec<ClipId> {
         self.iter().collect()
+    }
+
+    /// The selected keyframes, in the order of their ids (by the rack they are in, and then the order they were made in).
+    pub fn keyframes(&self) -> impl Iterator<Item = KeyframeId> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            SelectionItem::Keyframe(keyframe) => Some(*keyframe),
+            SelectionItem::Clip(_) | SelectionItem::Track(_) => None,
+        })
+    }
+
+    /// The selected keyframes.
+    pub fn keyframes_to_vec(&self) -> Vec<KeyframeId> {
+        self.keyframes().collect()
     }
 
     /// Everything that is selected, the clips first.
@@ -112,11 +145,6 @@ impl Selection {
         self.items.clear();
     }
 
-    /// Changes what is selected by `clips`, in the way `change` says.
-    pub fn change(&mut self, clips: impl IntoIterator<Item = ClipId>, change: SelectionChange) {
-        self.change_items(clips.into_iter().map(SelectionItem::Clip), change);
-    }
-
     /// Changes what is selected by `items`, in the way `change` says.
     pub fn change_items(&mut self, items: impl IntoIterator<Item = SelectionItem>, change: SelectionChange) {
         match change {
@@ -131,12 +159,9 @@ impl Selection {
         }
     }
 
-    /// Lets go of the clips and the tracks that `project` does not have (any more).
+    /// Lets go of the clips, the tracks and the keyframes that `project` does not have (any more).
     pub fn forget_what_is_gone(&mut self, project: &Project) {
-        self.items.retain(|item| match item {
-            SelectionItem::Clip(clip) => project.placement_of(*clip).is_some(),
-            SelectionItem::Track(track) => project.track(*track).is_some(),
-        });
+        self.items.retain(|item| item.is_in(project));
     }
 }
 
@@ -168,16 +193,19 @@ mod tests {
     #[test]
     fn replacing_selects_only_what_is_given() {
         let mut selection = Selection::from_clips([clip(0, 1), clip(0, 2)]);
-        selection.change([clip(1, 5)], SelectionChange::Replace);
+        selection.change_items([SelectionItem::Clip(clip(1, 5))], SelectionChange::Replace);
         assert_eq!(selection.to_vec(), vec![clip(1, 5)]);
-        selection.change([], SelectionChange::Replace);
+        selection.change_items([], SelectionChange::Replace);
         assert!(selection.is_empty());
     }
 
     #[test]
     fn toggling_selects_what_was_not_and_lets_go_of_what_was() {
         let mut selection = Selection::from_clips([clip(0, 1), clip(0, 2)]);
-        selection.change([clip(0, 2), clip(0, 3)], SelectionChange::Toggle);
+        selection.change_items(
+            [SelectionItem::Clip(clip(0, 2)), SelectionItem::Clip(clip(0, 3))],
+            SelectionChange::Toggle,
+        );
         assert_eq!(selection.to_vec(), vec![clip(0, 1), clip(0, 3)]);
     }
 
@@ -255,10 +283,112 @@ mod tests {
     fn replacing_lets_go_of_a_selected_track_and_a_track_replaces_the_clips() {
         let mut selection =
             Selection::from_items([SelectionItem::Track(TrackId::new(1)), SelectionItem::Clip(clip(0, 1))]);
-        selection.change([clip(0, 2)], SelectionChange::Replace);
+        selection.change_items([SelectionItem::Clip(clip(0, 2))], SelectionChange::Replace);
         assert_eq!(selection.to_items(), vec![SelectionItem::Clip(clip(0, 2))]);
         selection.change_items([SelectionItem::Track(TrackId::new(0))], SelectionChange::Replace);
         assert_eq!(selection.to_items(), vec![SelectionItem::Track(TrackId::new(0))]);
+    }
+
+    fn keyframe(rack: u32, number: u32) -> KeyframeId {
+        KeyframeId::new(crate::project::RackId::new(TrackId::new(0), rack), number)
+    }
+
+    #[test]
+    fn a_keyframe_can_be_selected_beside_clips_and_tracks_and_is_neither() {
+        let mut selection = Selection::from_clips([clip(0, 1)]);
+        selection.change_items(
+            [
+                SelectionItem::Keyframe(keyframe(0, 3)),
+                SelectionItem::Keyframe(keyframe(0, 1)),
+                SelectionItem::Track(TrackId::new(2)),
+            ],
+            SelectionChange::Toggle,
+        );
+
+        assert!(selection.contains_keyframe(keyframe(0, 3)) && !selection.contains_keyframe(keyframe(0, 2)));
+        assert_eq!(selection.to_vec(), vec![clip(0, 1)], "the clips are the clips");
+        assert_eq!(
+            selection.keyframes_to_vec(),
+            vec![keyframe(0, 1), keyframe(0, 3)],
+            "the keyframes are the keyframes, in the order of their names"
+        );
+        assert!(selection.contains_track(TrackId::new(2)));
+        assert_eq!(selection.items().count(), 4);
+        assert_eq!(selection.single(), None);
+        assert_eq!(selection.single_item(), None);
+    }
+
+    #[test]
+    fn a_keyframe_that_is_the_only_thing_selected_is_the_single_item_and_there_is_no_single_clip() {
+        let selection = Selection::from_items([SelectionItem::Keyframe(keyframe(1, 0))]);
+        assert_eq!(selection.single_item(), Some(SelectionItem::Keyframe(keyframe(1, 0))));
+        assert_eq!(selection.single(), None);
+        assert!(selection.to_vec().is_empty());
+    }
+
+    #[test]
+    fn toggling_a_keyframe_lets_go_of_it_when_it_is_selected_and_replacing_lets_go_of_the_rest() {
+        let mut selection =
+            Selection::from_items([SelectionItem::Keyframe(keyframe(0, 1)), SelectionItem::Clip(clip(0, 0))]);
+        selection.change_items([SelectionItem::Keyframe(keyframe(0, 1))], SelectionChange::Toggle);
+        assert_eq!(selection.to_items(), vec![SelectionItem::Clip(clip(0, 0))]);
+        selection.change_items([SelectionItem::Keyframe(keyframe(0, 2))], SelectionChange::Replace);
+        assert_eq!(selection.to_items(), vec![SelectionItem::Keyframe(keyframe(0, 2))]);
+    }
+
+    #[test]
+    fn a_keyframe_is_in_a_project_that_has_it_and_not_in_one_that_does_not() {
+        use crate::project::{AnimationTarget, PropertyId, TimelineFrameIndex};
+
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let (text, _) = project
+            .insert_text(
+                track,
+                TimelineFrameIndex::new(0),
+                crate::project::TextObject::default(),
+                30,
+            )
+            .unwrap();
+        let made = project
+            .add_keyframe(
+                AnimationTarget::Clip(text),
+                PropertyId::Rotation,
+                TimelineFrameIndex::new(3),
+            )
+            .unwrap()
+            .expect("a keyframe is made");
+
+        assert!(SelectionItem::Keyframe(made.keyframe).is_in(&project));
+        assert!(!SelectionItem::Keyframe(keyframe(7, 7)).is_in(&project), "no such rack");
+        assert!(
+            !SelectionItem::Keyframe(KeyframeId::new(made.rack, made.keyframe.number() + 1)).is_in(&project),
+            "no such keyframe in a rack that is there"
+        );
+
+        let mut selection = Selection::from_items([
+            SelectionItem::Keyframe(made.keyframe),
+            SelectionItem::Keyframe(keyframe(7, 7)),
+            SelectionItem::Clip(text),
+        ]);
+        selection.forget_what_is_gone(&project);
+        assert_eq!(
+            selection.to_items(),
+            vec![SelectionItem::Clip(text), SelectionItem::Keyframe(made.keyframe)]
+        );
+        project
+            .remove_keyframe(
+                AnimationTarget::Clip(text),
+                PropertyId::Rotation,
+                TimelineFrameIndex::new(3),
+            )
+            .unwrap();
+        selection.forget_what_is_gone(&project);
+        assert_eq!(
+            selection.to_items(),
+            vec![SelectionItem::Clip(text)],
+            "the keyframe was taken away"
+        );
     }
 
     #[test]

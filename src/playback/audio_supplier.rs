@@ -33,7 +33,9 @@ use crate::media::{
     AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain,
     UserInterfaceWakeUp,
 };
-use crate::project::{Clip, Project, PropertyId, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex};
+use crate::project::{
+    AnimationTarget, Clip, Project, PropertyId, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex,
+};
 
 /// How much sound is kept waiting at the speakers, in seconds. Enough to ride out a late frame of
 /// the window without a gap, and little enough that a change (pausing, say) is heard at once.
@@ -167,19 +169,22 @@ impl AudioContent<'_> {
             source.properties.frame_count_at(frame_rate).hash(&mut hasher);
             self.source_paths.get(&source.identifier).hash(&mut hasher);
         }
+        // (What is heard of every keyframe there is, wherever it is kept: a rack of the loudness of a clip in a drawer of another
+        // clip, or in a crate, changes the sound as much as one in the clip's own drawer.)
+        let animations = self.project.resolved_animations();
         for track in self.project.tracks() {
             track.id().hash(&mut hasher);
             track.gain().decibels().to_bits().hash(&mut hasher);
             track.speed().value().hash(&mut hasher);
             track.is_muted().hash(&mut hasher);
-            track
-                .animation()
+            animations
+                .of(AnimationTarget::Track(track.id()))
                 .hash_properties_into(&mut hasher, PropertyId::is_heard);
             for entry in track.entries() {
                 let media = match entry.clip() {
                     Clip::Video(media) | Clip::Audio(media) => media,
-                    // Text and pictures have no sound, and where they are changes nothing but the gaps (hashed below).
-                    Clip::Image(_) | Clip::Text(_) => continue,
+                    // Text, pictures and crates have no sound, and where they are changes nothing but the gaps (hashed below).
+                    Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) => continue,
                 };
                 entry.id().hash(&mut hasher);
                 entry.gap_before_frames().hash(&mut hasher);
@@ -189,8 +194,8 @@ impl AudioContent<'_> {
                 media.speed().value().hash(&mut hasher);
                 media.gain().decibels().to_bits().hash(&mut hasher);
                 media.is_muted().hash(&mut hasher);
-                entry
-                    .animation()
+                animations
+                    .of(AnimationTarget::Clip(entry.id()))
                     .hash_properties_into(&mut hasher, PropertyId::is_heard);
             }
         }

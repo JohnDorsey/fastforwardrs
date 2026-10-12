@@ -51,8 +51,10 @@ impl Track {
             entry.gap_before_frames = start - previous_end;
             let length = entry.clip.timeline_frame_count(track_speed);
             if length != anchor.length {
-                // The clip got longer or shorter: its keyframes are as far through it as they were.
-                entry.animation = entry.animation.rescaled(anchor.length, length);
+                // The clip got longer or shorter: the keyframes in its drawer are as far through it as they were.
+                entry.drawer = entry
+                    .drawer
+                    .with_each_rack_changed(|rack| rack.rescaled(anchor.length, length));
             }
             previous_end = start + length;
         }

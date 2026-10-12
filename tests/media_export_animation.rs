@@ -5,7 +5,7 @@ mod support;
 
 use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::project::{
-    AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, TextColour, TextObject,
+    Angle, AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, TextColour, TextObject,
     TimelineFrameIndex, with_placement_value,
 };
 use support::{
@@ -213,6 +213,58 @@ fn a_video_that_is_turned_by_keyframes_is_exported_as_far_turned_as_they_say() {
     assert!(
         mean_difference(&decoded.pictures[59], &upright) > 8.0,
         "the last picture is the video turned a quarter of a turn, not as it was"
+    );
+}
+
+/// Keyframes of 0, 360 and 720 degrees make a video go round twice: it is upright again at each whole turn (the pictures are
+/// compared with those of a video that was never turned, which is made in no way that has to do with turns) and upside down half
+/// way to the first of them, and turned in between.
+#[test]
+fn a_video_that_is_turned_round_twice_by_keyframes_is_upright_at_each_whole_turn_and_upside_down_half_way() {
+    let toolchain = toolchain_or_skip!();
+    let area = CanvasArea::new(0.25, 0.25, 0.5, 0.5);
+    let (mut project, clip) = project_with_a_video_at(&toolchain, area);
+    for (frame, degrees) in [(0, 0.0), (30, 360.0), (59, 720.0)] {
+        keyframe(
+            &mut project,
+            clip,
+            PropertyId::Rotation,
+            frame,
+            PropertyValue::Number(degrees),
+        );
+    }
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("going_round_twice.mp4");
+
+    export(&toolchain, &project, &destination);
+
+    let decoded = decode_video(&toolchain, &destination, WIDTH as u32, HEIGHT as u32);
+    assert_eq!(decoded.pictures.len(), 60);
+    let (never_turned, its_clip) = project_with_a_video_at(&toolchain, area);
+    for timeline_frame in [0, 30, 59] {
+        let upright = the_picture_made_without_keyframes(&toolchain, &never_turned, its_clip, timeline_frame as u64);
+        let difference = mean_difference(&decoded.pictures[timeline_frame], &upright);
+        assert!(
+            difference < SAME_PICTURE,
+            "frame {timeline_frame} is at a whole number of turns, so it is not turned: the pictures differ by {difference}"
+        );
+    }
+    // Half way to the first whole turn it is upside down: the same as the video turned half a turn and kept so.
+    let (mut turned_half_a_turn, half_turned_clip) = project_with_a_video_at(&toolchain, area);
+    turned_half_a_turn
+        .set_clip_placement(half_turned_clip, Placement::new(area, Angle::from_degrees(180.0)))
+        .unwrap();
+    let upside_down = the_picture_made_without_keyframes(&toolchain, &turned_half_a_turn, half_turned_clip, 15);
+    let difference = mean_difference(&decoded.pictures[15], &upside_down);
+    assert!(
+        difference < SAME_PICTURE,
+        "frame 15 is half a turn: the pictures differ by {difference}"
+    );
+    // And in between it is turned (a quarter of a turn from upright at about frame 7).
+    let upright_at_7 = the_picture_made_without_keyframes(&toolchain, &never_turned, its_clip, 7);
+    assert!(
+        mean_difference(&decoded.pictures[7], &upright_at_7) > 8.0,
+        "frame 7 is on its way round"
     );
 }
 

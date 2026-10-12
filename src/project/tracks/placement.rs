@@ -266,8 +266,10 @@ fn sanitised(value: f32, smallest: f32, largest: f32, fallback: f32) -> f32 {
     }
 }
 
-/// How far something is turned, in degrees, clockwise as it is seen on the screen. It is always
-/// more than -180 and at most 180: a turn of 270 degrees is a turn of -90.
+/// How far something is turned, in degrees, clockwise as it is seen on the screen. It may be any number of turns, and
+/// is kept as it was made: 720 degrees is two whole turns, which looks the same as none but is not the same thing between
+/// two keyframes (the picture goes round twice on the way). What it looks like, as an angle between -180 and 180, is
+/// [`Self::within_a_turn`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Angle {
     degrees: f32,
@@ -276,16 +278,13 @@ pub struct Angle {
 impl Angle {
     pub const ZERO: Angle = Angle { degrees: 0.0 };
 
-    /// The angle of `degrees` (which may be any number of turns): what is not a number is no angle at all.
+    /// The angle of `degrees`, which may be any number of turns: what is not a number is no angle at all.
     pub fn from_degrees(degrees: f32) -> Self {
-        if !degrees.is_finite() {
-            return Self::ZERO;
+        if degrees.is_finite() {
+            Self { degrees }
+        } else {
+            Self::ZERO
         }
-        let mut within_a_turn = degrees.rem_euclid(360.0);
-        if within_a_turn > 180.0 {
-            within_a_turn -= 360.0;
-        }
-        Self { degrees: within_a_turn }
     }
 
     pub fn degrees(self) -> f32 {
@@ -310,6 +309,22 @@ impl Angle {
     #[must_use]
     pub fn minus(self, other: Angle) -> Self {
         Self::from_degrees(self.degrees - other.degrees)
+    }
+
+    /// This angle as the one between -180 (not included) and 180 that points the same way.
+    #[must_use]
+    pub fn within_a_turn(self) -> Self {
+        let mut within_a_turn = self.degrees.rem_euclid(360.0);
+        if within_a_turn > 180.0 {
+            within_a_turn -= 360.0;
+        }
+        Self { degrees: within_a_turn }
+    }
+
+    /// The turn, the short way round, that takes `other` to this angle: between -180 (not included) and 180.
+    #[must_use]
+    pub fn shortest_turn_from(self, other: Angle) -> Self {
+        self.minus(other).within_a_turn()
     }
 
     /// The nearest angle that is a whole number of `step_degrees`.
@@ -994,9 +1009,31 @@ mod tests {
 
     // --- angles ---
 
+    /// An angle is kept as it was made, whatever number of turns it is. (It used to be brought back to between -180 and
+    /// 180. Two whole turns between two keyframes make a picture go round twice, which is not the same as not going round at
+    /// all, and the angle is what says which.)
     #[test]
-    fn an_angle_is_kept_between_minus_180_and_180_whatever_it_was_made_from() {
-        for (made_from, is) in [
+    fn an_angle_is_kept_as_it_was_made_whatever_number_of_turns_it_is() {
+        for degrees in [
+            0.0, 90.0, 180.0, -180.0, 181.0, 270.0, -270.0, 360.0, 725.0, -725.0, 36_000.0,
+        ] {
+            assert_eq!(Angle::from_degrees(degrees).degrees(), degrees);
+        }
+        for odd in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(Angle::from_degrees(odd), Angle::ZERO, "{odd}");
+        }
+        assert!(Angle::ZERO.is_zero() && !Angle::from_degrees(0.5).is_zero());
+        assert!(
+            !Angle::from_degrees(360.0).is_zero(),
+            "a whole turn is a turn, not none"
+        );
+        assert_close(Angle::from_degrees(180.0).radians(), std::f32::consts::PI);
+        assert_close(Angle::from_degrees(720.0).radians(), 4.0 * std::f32::consts::PI);
+    }
+
+    #[test]
+    fn what_an_angle_looks_like_is_the_angle_between_minus_180_and_180_that_points_the_same_way() {
+        for (made_from, looks_like) in [
             (0.0, 0.0),
             (90.0, 90.0),
             (180.0, 180.0),
@@ -1005,26 +1042,42 @@ mod tests {
             (270.0, -90.0),
             (-270.0, 90.0),
             (360.0, 0.0),
+            (720.0, 0.0),
             (725.0, 5.0),
             (-725.0, -5.0),
         ] {
-            assert_close(Angle::from_degrees(made_from).degrees(), is);
+            assert_close(Angle::from_degrees(made_from).within_a_turn().degrees(), looks_like);
         }
-        for odd in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            assert_eq!(Angle::from_degrees(odd), Angle::ZERO, "{odd}");
-        }
-        assert!(Angle::ZERO.is_zero() && !Angle::from_degrees(0.5).is_zero());
-        assert_close(Angle::from_degrees(180.0).radians(), std::f32::consts::PI);
     }
 
     #[test]
-    fn angles_add_and_subtract_going_round_the_circle() {
+    fn angles_add_and_subtract_without_going_round_the_circle() {
         let a = Angle::from_degrees(170.0);
         let b = Angle::from_degrees(30.0);
-        assert_close(a.plus(b).degrees(), -160.0);
+        assert_close(a.plus(b).degrees(), 200.0);
         assert_close(b.minus(a).degrees(), -140.0);
         assert_close(a.minus(b).degrees(), 140.0);
         assert_close(a.plus(Angle::from_degrees(-170.0)).degrees(), 0.0);
+        assert_close(
+            Angle::from_degrees(700.0).plus(Angle::from_degrees(100.0)).degrees(),
+            800.0,
+        );
+    }
+
+    #[test]
+    fn the_shortest_way_round_from_one_angle_to_another_is_never_more_than_half_a_turn() {
+        let from_to = |from: f32, to: f32| {
+            Angle::from_degrees(to)
+                .shortest_turn_from(Angle::from_degrees(from))
+                .degrees()
+        };
+        assert_close(from_to(170.0, -170.0), 20.0);
+        assert_close(from_to(-170.0, 170.0), -20.0);
+        assert_close(from_to(0.0, 90.0), 90.0);
+        assert_close(from_to(0.0, -90.0), -90.0);
+        assert_close(from_to(710.0, 20.0), 30.0);
+        assert_close(from_to(-710.0, 20.0), 10.0);
+        assert_close(from_to(0.0, 180.0), 180.0);
     }
 
     #[test]
@@ -1035,7 +1088,9 @@ mod tests {
         assert_close(snapped(-8.0), -15.0);
         assert_close(snapped(100.0), 105.0);
         assert_close(snapped(179.0), 180.0);
-        assert_close(snapped(-179.0), 180.0);
+        assert_close(snapped(-179.0), -180.0);
+        assert_close(snapped(725.0), 720.0);
+        assert_close(snapped(-725.0), -720.0);
         assert_close(Angle::from_degrees(33.3).snapped_to(0.0).degrees(), 33.3);
         assert_close(Angle::from_degrees(33.3).snapped_to(f32::NAN).degrees(), 33.3);
     }

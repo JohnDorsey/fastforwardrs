@@ -15,14 +15,19 @@
 //! Cutting is done with a key (see the `keyboard` module), not with the mouse.
 
 mod bevel;
-mod clip_dragging;
+mod clip_menu;
 mod clip_shape;
 mod clips;
 mod drawers;
 mod flash;
+mod grip_dots;
 mod header;
 mod icons;
+mod item_dragging;
 mod playhead;
+mod rack_dragging;
+mod rack_look;
+mod racks;
 mod rows;
 mod ruler;
 mod scrolling;
@@ -40,9 +45,16 @@ use egui::{Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, p
 
 // The names the parts of the timeline are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
-pub use drawers::drawer_button_label;
+pub use drawers::{drawer_button_label, track_drawer_button_label};
 #[cfg(test)]
-pub use header::TITLE_HEIGHT as HEIGHT_THE_TITLE_NEEDS;
+pub use grip_dots::{Arrangement as GripDotArrangement, VERTICES_PER_DOT as VERTICES_IN_A_GRIP_DOT};
+#[cfg(test)]
+pub use header::{HEIGHT_THE_BOX_NEEDS, TITLE_HEIGHT as HEIGHT_OF_THE_ROOM_FOR_A_TITLE};
+#[cfg(test)]
+pub use rack_dragging::NOT_ENOUGH_SPACE_MESSAGE;
+pub use rack_look::grain_image as grain_of_the_racks;
+#[cfg(test)]
+pub use racks::keyframe_label;
 #[cfg(test)]
 pub use strip::strip_label;
 pub use view_state::TimelineViewState;
@@ -57,7 +69,7 @@ use self::clips::rectangles_of;
 use self::scrolling::update_view;
 use self::view_state::{NewMenuTarget, RubberBand};
 use super::commands::Command;
-use super::selection::Selection;
+use super::selection::{Selection, SelectionItem};
 use super::textures::Textures;
 use super::theme;
 use super::timeline_geometry::TimelineGeometry;
@@ -123,7 +135,11 @@ pub fn show(
     if state.cut_flashes.update(context.input(|input| input.time)) {
         context.request_repaint();
     }
-    // The drawers that are sliding go on sliding, and those of clips that are gone are forgotten.
+    state.rack_labels.clear();
+    state.keyframe_grips.clear();
+    state.drop_targets.clear();
+    state.pointer_message = None;
+    // The drawers that are sliding go on sliding, and those of clips and tracks that are gone are forgotten.
     state.drawers.forget_what_is_gone(content.project);
     if state.drawers.advance(context.input(|input| input.stable_dt)) {
         context.request_repaint();
@@ -207,7 +223,8 @@ pub fn show(
     let rows = rows_scope.inner;
     let strip_views = rows.inner;
     ui.spacing_mut().item_spacing.y = previous_item_spacing;
-    clip_dragging::keep_dragging(ui, content, state, &strip_views, rows.inner_rect, commands);
+    item_dragging::keep_dragging(ui, content, state, &strip_views, rows.inner_rect, commands);
+    rack_dragging::keep_dragging(ui, content, state, &strip_views, commands);
     if content.can_edit {
         draw_a_rubber_band(ui, &rows_response, rows_area, &strip_views, content, state, commands);
     }
@@ -236,6 +253,8 @@ pub fn show(
         ruler_rectangle,
         content.current_frame,
     );
+    racks::draw_the_labels(&context, &state.rack_labels);
+    racks::draw_the_message_by_the_pointer(&context, state.pointer_message.as_deref());
     flash::draw_over(
         &ui.painter().with_clip_rect(rows.inner_rect),
         strip_views.iter().map(|(track, view)| (track.id(), view)),
@@ -270,7 +289,11 @@ fn draw_a_rubber_band(
         let adding = ui.input(|input| input.modifiers.command);
         state.rubber_band = Some(RubberBand {
             origin,
-            kept: if adding { content.selection.to_vec() } else { Vec::new() },
+            kept: if adding {
+                content.selection.to_items()
+            } else {
+                Vec::new()
+            },
         });
     }
     if response.dragged_by(PointerButton::Primary)
@@ -279,17 +302,26 @@ fn draw_a_rubber_band(
     {
         let rectangle = Rect::from_two_pos(band.origin, pointer);
         let mut selected = band.kept.clone();
+        let mut add = |item: SelectionItem| {
+            if !selected.contains(&item) {
+                selected.push(item);
+            }
+        };
         for (track, view) in strip_views {
             for placement in track.placements() {
                 let visible = rectangles_of(&placement, view).visible;
-                let location = placement.id;
-                if visible.width() > 0.0 && visible.intersects(rectangle) && !selected.contains(&location) {
-                    selected.push(location);
+                if visible.width() > 0.0 && visible.intersects(rectangle) {
+                    add(SelectionItem::Clip(placement.id));
                 }
             }
         }
-        commands.push(Command::Select {
-            clips: selected,
+        for (keyframe, grip) in &state.keyframe_grips {
+            if grip.intersects(rectangle) {
+                add(SelectionItem::Keyframe(*keyframe));
+            }
+        }
+        commands.push(Command::SelectItems {
+            items: selected,
             change: crate::application::selection::SelectionChange::Replace,
         });
         let painter = ui.painter().with_clip_rect(rows_area);

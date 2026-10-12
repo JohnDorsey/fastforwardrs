@@ -262,7 +262,7 @@ fn changing_an_animated_property_at_a_frame_puts_a_keyframe_there_and_the_proper
         Gain::UNCHANGED,
         "what the clip itself says is not touched"
     );
-    assert_eq!(clip.animation.keyframes_of(PropertyId::Gain).unwrap().len(), 2);
+    assert_eq!(clip.own_animation().keyframes_of(PropertyId::Gain).unwrap().len(), 2);
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn the_keyframes_of_a_clip_are_counted_from_its_first_frame_wherever_it_starts_o
     project.add_keyframe(target, PropertyId::Rotation, frame(140)).unwrap();
     let placement = project.placement_of(text).unwrap();
     let in_the_clip: Vec<u64> = placement
-        .animation
+        .own_animation()
         .keyframes_of(PropertyId::Rotation)
         .unwrap()
         .iter()
@@ -393,7 +393,7 @@ fn a_keyframe_cannot_be_made_where_the_clip_is_not_and_taking_one_away_there_is_
     );
     assert_eq!(
         project.set_property_at(target, PropertyId::Rotation, PropertyValue::Number(5.0), frame(10)),
-        Ok(()),
+        Ok(None),
         "a property that is not animated is changed wherever the playhead is"
     );
     assert_ne!(project, before);
@@ -442,30 +442,27 @@ fn what_a_text_object_says_can_be_animated_and_changes_at_the_keyframe() {
     );
 }
 
+/// (It used to go the short way round: the angle that was given was changed into the turn that was nearest the one before it.
+/// What is given is what it is now, so that there can be as many whole turns between two keyframes as are wanted.)
 #[test]
-fn a_turn_goes_the_short_way_round_even_past_half_a_turn() {
+fn a_turn_is_what_it_is_given_even_past_half_a_turn() {
     let (mut project, text, _) = a_project_with_a_text_object();
     let target = AnimationTarget::Clip(text);
     project
         .set_property_at(target, PropertyId::Rotation, PropertyValue::Number(170.0), frame(100))
         .unwrap();
     project.add_keyframe(target, PropertyId::Rotation, frame(100)).unwrap();
-    // The turn is chosen on the picture as -170 degrees, which is 20 degrees on from 170.
     project
         .set_property_at(target, PropertyId::Rotation, PropertyValue::Number(-170.0), frame(140))
         .unwrap();
     let at = |frame_number| project.property_value_at(target, PropertyId::Rotation, frame(frame_number));
-    assert_eq!(
-        at(140),
-        Some(PropertyValue::Number(190.0)),
-        "kept as the turn that is near the one before"
-    );
+    assert_eq!(at(140), Some(PropertyValue::Number(-170.0)), "kept as it was given");
     let Some(PropertyValue::Number(half_way)) = at(120) else {
         panic!()
     };
     assert!(
-        (half_way - 180.0).abs() < 0.01,
-        "half way it is half a turn, not through 0: {half_way}"
+        half_way.abs() < 0.01,
+        "half way it is through 0, 170 degrees back and 170 more: {half_way}"
     );
 }
 
@@ -575,5 +572,62 @@ fn the_keyframes_of_a_clip_are_part_of_what_makes_two_projects_equal() {
     assert_ne!(
         animated, plain,
         "or an edit of keyframes would not be an edit that can be undone"
+    );
+}
+
+// --- turning more than once ---
+
+#[test]
+fn keyframes_whole_turns_apart_make_a_clip_go_round_that_many_times_between_them() {
+    let mut project = project_with_a_video(300);
+    let clip = first_clip_location(&project, 0);
+    let target = AnimationTarget::Clip(clip);
+    for (at, degrees) in [(0, 0.0), (100, 720.0)] {
+        project.add_keyframe(target, PropertyId::Rotation, frame(at)).unwrap();
+        project
+            .set_property_at(target, PropertyId::Rotation, PropertyValue::Number(degrees), frame(at))
+            .unwrap();
+    }
+
+    for (at, degrees) in [
+        (0, 0.0),
+        (25, 180.0),
+        (50, 360.0),
+        (75, 540.0),
+        (100, 720.0),
+        (250, 720.0),
+    ] {
+        assert_eq!(
+            project.placement_at(clip, frame(at)).unwrap().rotation.degrees(),
+            degrees,
+            "at frame {at}"
+        );
+    }
+}
+
+#[test]
+fn what_is_typed_for_the_turn_of_a_keyframe_is_the_turn_it_has_and_does_not_go_the_short_way_round() {
+    let mut project = project_with_a_video(300);
+    let clip = first_clip_location(&project, 0);
+    let target = AnimationTarget::Clip(clip);
+    project.add_keyframe(target, PropertyId::Rotation, frame(0)).unwrap();
+    project
+        .set_property_at(target, PropertyId::Rotation, PropertyValue::Number(170.0), frame(0))
+        .unwrap();
+
+    // From 170 degrees to -170 is 340 degrees back, which is what was asked for, and not 20 on.
+    project.add_keyframe(target, PropertyId::Rotation, frame(60)).unwrap();
+    project
+        .set_property_at(target, PropertyId::Rotation, PropertyValue::Number(-170.0), frame(60))
+        .unwrap();
+
+    assert_eq!(
+        project.property_value_at(target, PropertyId::Rotation, frame(60)),
+        Some(PropertyValue::Number(-170.0))
+    );
+    assert_eq!(
+        project.property_value_at(target, PropertyId::Rotation, frame(30)),
+        Some(PropertyValue::Number(0.0)),
+        "half way between 170 and -170 the long way is 0"
     );
 }

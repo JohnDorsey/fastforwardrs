@@ -1,4 +1,4 @@
-//! Names for the tracks of a project and the clips on them that do not change when the project is
+//! Names for the tracks of a project and the clips, racks and keyframes on them that do not change when the project is
 //! edited, so that something can keep pointing at a clip (the selected one, say) while other
 //! clips are cut, deleted or moved along the timeline around it, or it is moved to another track.
 //!
@@ -57,5 +57,66 @@ impl fmt::Display for ClipId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // (Of the track it was made on, which is what makes it this clip and no other.)
         write!(formatter, "clip {} of {}", self.number, self.origin)
+    }
+}
+
+/// Tells the racks of one project apart (a rack holds the keyframes of one property, see [`super::rack::Rack`]), the same
+/// way [`ClipId`] does clips: the track the rack was made on, and which of the racks that track has made it is. A rack that
+/// is dragged to a drawer on another track keeps its id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RackId {
+    origin: TrackId,
+    number: u32,
+}
+
+impl RackId {
+    pub const fn new(origin: TrackId, number: u32) -> Self {
+        Self { origin, number }
+    }
+
+    /// The track the rack was made on, which is not the track it is on if it has been moved.
+    pub const fn origin(self) -> TrackId {
+        self.origin
+    }
+
+    /// Which of the racks made on its origin track this is.
+    pub const fn number(self) -> u32 {
+        self.number
+    }
+}
+
+impl fmt::Display for RackId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "rack {} of {}", self.number, self.origin)
+    }
+}
+
+/// Tells the keyframes of one project apart: the rack that has it, and which of the keyframes that rack has made it is. A
+/// keyframe keeps its id when it is moved to another frame, so that what points at it (the selection, a drag) goes on
+/// pointing at it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct KeyframeId {
+    rack: RackId,
+    number: u32,
+}
+
+impl KeyframeId {
+    pub const fn new(rack: RackId, number: u32) -> Self {
+        Self { rack, number }
+    }
+
+    /// The rack the keyframe is in.
+    pub const fn rack(self) -> RackId {
+        self.rack
+    }
+
+    pub const fn number(self) -> u32 {
+        self.number
+    }
+}
+
+impl fmt::Display for KeyframeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "keyframe {} of {}", self.number, self.rack)
     }
 }

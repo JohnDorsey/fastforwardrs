@@ -1,11 +1,15 @@
 //! Animating a property of a clip or of a track: what it is at a frame, whether and where it has keyframes, making one and
 //! taking one away, and changing the property at a frame.
 //!
-//! Frames here are frames of the timeline. (Those of a clip's keyframes are counted from the clip's first frame, which is
-//! worked out here.) A property that has no keyframes is what the clip or track says it is, as it always was; one that has
-//! keyframes is what they say at every frame, and changing it at a frame puts a keyframe there.
+//! Frames here are frames of the timeline. The keyframes of a property are in racks, in drawers, which may be anywhere:
+//! what they are all together is [`super::racks`]'s. A property that has no keyframes is what the clip or track says it
+//! is, as it always was; one that has keyframes is what they say at every frame, and changing it at a frame changes or
+//! makes the keyframe there.
+
+use std::fmt;
 
 use super::animation::{PropertyId, PropertyValue, placement_value, text_value, with_placement_value, with_text_value};
+use super::racks::NewKeyframe;
 use super::tracks::{Clip, ClipEditError, ClipId, ClipPlacement, Gain, Placement, TextObject, TrackId};
 use super::{EditError, Project, TimelineFrameIndex, fitted_placement};
 
@@ -14,6 +18,15 @@ use super::{EditError, Project, TimelineFrameIndex, fitted_placement};
 pub enum AnimationTarget {
     Clip(ClipId),
     Track(TrackId),
+}
+
+impl fmt::Display for AnimationTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Clip(clip) => clip.fmt(formatter),
+            Self::Track(track) => track.fmt(formatter),
+        }
+    }
 }
 
 impl Project {
@@ -47,7 +60,7 @@ impl Project {
                 )
             }
             Clip::Text(text) => Some(text.object.placement()),
-            Clip::Audio(_) => None,
+            Clip::Audio(_) | Clip::Crate(_) => None,
         }
     }
 
@@ -58,9 +71,8 @@ impl Project {
         let placement = self.placement_of(clip)?;
         let says = self.placement_on_the_picture(placement.clip)?;
         Some(
-            placement
-                .animation
-                .placement_at(says, frames_into_the_clip(&placement, timeline_frame)),
+            self.animation_of(AnimationTarget::Clip(clip))
+                .placement_at(says, the_frame_the_clip_is_at(&placement, timeline_frame)),
         )
     }
 
@@ -70,9 +82,8 @@ impl Project {
         let placement = self.placement_of(clip)?;
         let text = placement.clip.as_text()?;
         Some(
-            placement
-                .animation
-                .text_object_at(&text.object, frames_into_the_clip(&placement, timeline_frame)),
+            self.animation_of(AnimationTarget::Clip(clip))
+                .text_object_at(&text.object, the_frame_the_clip_is_at(&placement, timeline_frame)),
         )
     }
 
@@ -164,21 +175,9 @@ impl Project {
         Ok(self.placement_of(clip).ok_or(ClipEditError::UnknownClip { clip })?)
     }
 
-    /// Whether `property` of `target` has keyframes.
-    pub fn is_animated(&self, target: AnimationTarget, property: PropertyId) -> bool {
-        match target {
-            AnimationTarget::Clip(clip) => self
-                .placement_of(clip)
-                .is_some_and(|placement| placement.animation.is_animated(property)),
-            AnimationTarget::Track(track) => self
-                .track(track)
-                .is_some_and(|track| track.animation().is_animated(property)),
-        }
-    }
-
-    /// The value `property` of `target` has at `timeline_frame`: what its keyframes say if it has any, and otherwise what
-    /// it is. For a clip, a frame before it or after it is taken for its first or its last. `None` if there is no such clip
-    /// or track, or it does not have that property.
+    /// The value `property` of `target` has at `timeline_frame`: what its keyframes say if it has any, wherever they are
+    /// kept, and otherwise what it is. For a clip, a frame before it or after it is taken for its first or its last. `None`
+    /// if there is no such clip or track, or it does not have that property.
     pub fn property_value_at(
         &self,
         target: AnimationTarget,
@@ -191,10 +190,8 @@ impl Project {
                 if !property.applies_to_a_clip_of_kind(placement.clip.kind()) {
                     return None;
                 }
-                let frames_in = frames_into_the_clip(&placement, timeline_frame);
-                placement
-                    .animation
-                    .value_at(property, frames_in)
+                self.keyframes_of(target, property)
+                    .value_at(the_frame_the_clip_is_at(&placement, timeline_frame))
                     .or_else(|| self.static_value_of_a_clip(placement.clip, property))
             }
             AnimationTarget::Track(track) => {
@@ -202,37 +199,22 @@ impl Project {
                 if !property.applies_to_a_track() {
                     return None;
                 }
-                track
-                    .animation()
-                    .value_at(property, timeline_frame.value())
+                self.keyframes_of(target, property)
+                    .value_at(timeline_frame.value())
                     .or_else(|| self.static_value_of_a_track(track.id(), property))
             }
         }
     }
 
-    /// Whether `property` of `target` has a keyframe exactly at `timeline_frame`.
+    /// Whether `property` of `target` has a keyframe exactly at `timeline_frame`, in whichever rack.
     pub fn has_keyframe_at(
         &self,
         target: AnimationTarget,
         property: PropertyId,
         timeline_frame: TimelineFrameIndex,
     ) -> bool {
-        match target {
-            AnimationTarget::Clip(clip) => self.placement_of(clip).is_some_and(|placement| {
-                placement.offset_of(timeline_frame).is_some_and(|frames_in| {
-                    placement
-                        .animation
-                        .keyframes_of(property)
-                        .is_some_and(|keyframes| keyframes.at(frames_in).is_some())
-                })
-            }),
-            AnimationTarget::Track(track) => self.track(track).is_some_and(|track| {
-                track
-                    .animation()
-                    .keyframes_of(property)
-                    .is_some_and(|keyframes| keyframes.at(timeline_frame.value()).is_some())
-            }),
-        }
+        self.locate_the_keyframe_at(target, property, timeline_frame.value())
+            .is_some()
     }
 
     /// The frame of the last keyframe of `property` of `target` before `timeline_frame`, however far before.
@@ -242,7 +224,9 @@ impl Project {
         property: PropertyId,
         timeline_frame: TimelineFrameIndex,
     ) -> Option<TimelineFrameIndex> {
-        self.keyframe_frames_around(target, property, timeline_frame).0
+        self.keyframes_of(target, property)
+            .frame_before(timeline_frame.value())
+            .map(TimelineFrameIndex::new)
     }
 
     /// The frame of the first keyframe of `property` of `target` after `timeline_frame`, however far after.
@@ -252,119 +236,97 @@ impl Project {
         property: PropertyId,
         timeline_frame: TimelineFrameIndex,
     ) -> Option<TimelineFrameIndex> {
-        self.keyframe_frames_around(target, property, timeline_frame).1
-    }
-
-    /// The timeline frames of the keyframes of `property` of `target` that are before and after `timeline_frame`.
-    fn keyframe_frames_around(
-        &self,
-        target: AnimationTarget,
-        property: PropertyId,
-        timeline_frame: TimelineFrameIndex,
-    ) -> (Option<TimelineFrameIndex>, Option<TimelineFrameIndex>) {
-        match target {
-            AnimationTarget::Clip(clip) => {
-                let Some(placement) = self.placement_of(clip) else {
-                    return (None, None);
-                };
-                let Some(keyframes) = placement.animation.keyframes_of(property) else {
-                    return (None, None);
-                };
-                let first = placement.first_timeline_frame.value();
-                let frame = timeline_frame.value();
-                // A frame before the clip is before all of its keyframes (the first of them is after it, even one at the
-                // clip's first frame), and one after the clip is after them all.
-                let (before, after) = if frame < first {
-                    (None, keyframes.iter().next().map(|keyframe| keyframe.frame))
-                } else {
-                    (
-                        keyframes.frame_before(frame - first),
-                        keyframes.frame_after(frame - first),
-                    )
-                };
-                (
-                    before.map(|offset| TimelineFrameIndex::new(first + offset)),
-                    after.map(|offset| TimelineFrameIndex::new(first + offset)),
-                )
-            }
-            AnimationTarget::Track(track) => {
-                let Some(keyframes) = self
-                    .track(track)
-                    .and_then(|track| track.animation().keyframes_of(property))
-                else {
-                    return (None, None);
-                };
-                (
-                    keyframes
-                        .frame_before(timeline_frame.value())
-                        .map(TimelineFrameIndex::new),
-                    keyframes
-                        .frame_after(timeline_frame.value())
-                        .map(TimelineFrameIndex::new),
-                )
-            }
-        }
+        self.keyframes_of(target, property)
+            .frame_after(timeline_frame.value())
+            .map(TimelineFrameIndex::new)
     }
 
     /// Puts a keyframe at `timeline_frame` for `property` of `target`, with the value it has there now, so that the
-    /// property changes from there on when another keyframe has another value. (If it has one already, nothing changes.)
+    /// property changes from there on when another keyframe has another value. The keyframe is put in a rack in the drawer
+    /// of the clip or the track itself (a rack is made there if the drawer has none for the property), and the result says
+    /// where. (If the property has a keyframe there already, wherever it is, nothing changes and there is no result.)
     pub fn add_keyframe(
         &mut self,
         target: AnimationTarget,
         property: PropertyId,
         timeline_frame: TimelineFrameIndex,
-    ) -> Result<(), EditError> {
+    ) -> Result<Option<NewKeyframe>, EditError> {
         let value = self
             .property_value_at(target, property, timeline_frame)
             .ok_or_else(|| not_a_property_of(target, property))?;
+        if self.has_keyframe_at(target, property, timeline_frame) {
+            return Ok(None);
+        }
         self.put_keyframe(target, property, timeline_frame, value)
     }
 
-    /// Takes away the keyframe of `property` of `target` at `timeline_frame`, if there is one. If it was the last, the
-    /// property is not animated any more and stays what that keyframe said.
+    /// Takes away the keyframe of `property` of `target` at `timeline_frame`, from whichever rack it is in, if there is one.
+    /// If it was the last, the property is not animated any more and stays what that keyframe said.
     pub fn remove_keyframe(
         &mut self,
         target: AnimationTarget,
         property: PropertyId,
         timeline_frame: TimelineFrameIndex,
     ) -> Result<(), EditError> {
-        let removed = match target {
+        match target {
             AnimationTarget::Clip(clip) => {
-                let placement = self.the_placement_of_the_target(clip)?;
-                let Some(frames_in) = placement.offset_of(timeline_frame) else {
-                    return Ok(());
-                };
-                self.track_holding_mut_or_error(clip)?
-                    .remove_clip_keyframe(clip, property, frames_in)?
+                self.the_placement_of_the_target(clip)?;
             }
-            AnimationTarget::Track(track) => self
-                .track_mut_or_error(track)?
-                .remove_own_keyframe(property, timeline_frame),
+            AnimationTarget::Track(track) => {
+                self.track_mut_or_error(track)?;
+            }
+        }
+        let frame = timeline_frame.value();
+        let Some(removed_value) = self.keyframes_of(target, property).at(frame).cloned() else {
+            return Ok(());
         };
-        match removed {
-            Some(removed) if removed.was_the_last => self.set_static_value(target, property, &removed.value),
-            _ => Ok(()),
+        // (Each rack that has a keyframe there loses it, not only the one that counts: a keyframe that is left under it would
+        // show again.)
+        let racks_that_have_one: Vec<_> = self
+            .located_racks()
+            .filter(|located| located.rack.target() == target && located.rack.property() == property)
+            .filter_map(|located| {
+                let frame_in_the_rack = frame.checked_sub(located.start)?;
+                located
+                    .rack
+                    .at(frame_in_the_rack)
+                    .map(|_| (located.owner, located.rack.id(), frame_in_the_rack))
+            })
+            .collect();
+        for (owner, rack, frame_in_the_rack) in racks_that_have_one {
+            if let Some(drawer) = self.drawer_mut(owner) {
+                if let Some(rack) = drawer.rack_mut(rack) {
+                    rack.remove_at(frame_in_the_rack);
+                }
+                drawer.remove_the_racks_with_no_keyframes();
+            }
+        }
+        if self.is_animated(target, property) {
+            Ok(())
+        } else {
+            self.set_static_value(target, property, &removed_value)
         }
     }
 
     /// Makes `property` of `target` have `value` at `timeline_frame`: if it is animated by putting a keyframe there (in
-    /// place of the one there, if there is one), and if it is not by changing the property itself. (A rotation is
-    /// the turn that is nearest the one before it, however many turns that is, so that it goes the short way round.)
+    /// place of the one there, if there is one, wherever it is kept), and if it is not by changing the property itself. (A turn
+    /// is what it is given, however many turns that is: between two keyframes a clip goes round as often as they say.) The
+    /// result says where a keyframe was made, if one was.
     pub fn set_property_at(
         &mut self,
         target: AnimationTarget,
         property: PropertyId,
         value: PropertyValue,
         timeline_frame: TimelineFrameIndex,
-    ) -> Result<(), EditError> {
+    ) -> Result<Option<NewKeyframe>, EditError> {
         if !self.is_animated(target, property) {
-            return self.set_static_value(target, property, &value);
+            self.set_static_value(target, property, &value)?;
+            return Ok(None);
         }
-        let value = self.turned_the_short_way(target, property, value, timeline_frame);
         self.put_keyframe(target, property, timeline_frame, value)
     }
 
-    fn set_static_value(
+    pub(super) fn set_static_value(
         &mut self,
         target: AnimationTarget,
         property: PropertyId,
@@ -376,13 +338,27 @@ impl Project {
         }
     }
 
+    /// Gives `property` of `target` the keyframe `value` at `timeline_frame`: in place of the one there if there is one, in
+    /// whichever rack it is kept, and otherwise in a new keyframe in the rack of the drawer of the clip or the track itself.
     fn put_keyframe(
         &mut self,
         target: AnimationTarget,
         property: PropertyId,
         timeline_frame: TimelineFrameIndex,
         value: PropertyValue,
-    ) -> Result<(), EditError> {
+    ) -> Result<Option<NewKeyframe>, EditError> {
+        if let Some(location) = self.locate_the_keyframe_at(target, property, timeline_frame.value()) {
+            let changed = self
+                .drawer_mut(location.owner)
+                .and_then(|drawer| drawer.rack_mut(location.rack))
+                .map(|rack| rack.set(location.frame_in_the_rack, value))
+                .is_some_and(|result| result.is_ok());
+            return if changed {
+                Ok(None)
+            } else {
+                Err(not_a_property_of(target, property))
+            };
+        }
         match target {
             AnimationTarget::Clip(clip) => {
                 let placement = self.the_placement_of_the_target(clip)?;
@@ -396,14 +372,14 @@ impl Project {
                     })?;
                 self.track_holding_mut_or_error(clip)?
                     .set_clip_keyframe(clip, property, frames_in, value)?;
-                Ok(())
+                Ok(self.the_keyframe_that_is_in_the_drawer_of(target, property, frames_in))
             }
             AnimationTarget::Track(track) => {
                 if self
                     .track_mut_or_error(track)?
                     .set_own_keyframe(property, timeline_frame, value)
                 {
-                    Ok(())
+                    Ok(self.the_keyframe_that_is_in_the_drawer_of(target, property, timeline_frame.value()))
                 } else {
                     Err(EditError::NotAPropertyOfTheTrack { track, property })
                 }
@@ -411,64 +387,30 @@ impl Project {
         }
     }
 
-    /// `value`, if it is a rotation that is to be a keyframe at `timeline_frame` of an animated property, made the turn
-    /// that is nearest the keyframe before it (or if none is before, the one after).
-    fn turned_the_short_way(
+    /// The keyframe of `property` of `target` that is `frame_in_the_rack` frames into the rack in the drawer of `target`
+    /// itself, with where it is.
+    fn the_keyframe_that_is_in_the_drawer_of(
         &self,
         target: AnimationTarget,
         property: PropertyId,
-        value: PropertyValue,
-        timeline_frame: TimelineFrameIndex,
-    ) -> PropertyValue {
-        let PropertyValue::Number(degrees) = value else {
-            return value;
-        };
-        if property != PropertyId::Rotation {
-            return value;
-        }
-        let (before, after) = self.keyframe_frames_around(target, property, timeline_frame);
-        let reference = before
-            .or(after)
-            .and_then(|frame| self.keyframe_value_at(target, property, frame));
-        match reference {
-            Some(PropertyValue::Number(reference)) => {
-                let difference = (degrees - reference + 180.0).rem_euclid(360.0) - 180.0;
-                PropertyValue::Number(reference + difference)
-            }
-            _ => value,
-        }
-    }
-
-    /// The value of the keyframe of `property` of `target` that is at `timeline_frame`.
-    fn keyframe_value_at(
-        &self,
-        target: AnimationTarget,
-        property: PropertyId,
-        timeline_frame: TimelineFrameIndex,
-    ) -> Option<PropertyValue> {
-        match target {
-            AnimationTarget::Clip(clip) => {
-                let placement = self.placement_of(clip)?;
-                let frames_in = placement.offset_of(timeline_frame)?;
-                placement.animation.keyframes_of(property)?.at(frames_in).cloned()
-            }
-            AnimationTarget::Track(track) => self
-                .track(track)?
-                .animation()
-                .keyframes_of(property)?
-                .at(timeline_frame.value())
-                .cloned(),
-        }
+        frame_in_the_rack: u64,
+    ) -> Option<NewKeyframe> {
+        let rack = self.drawer_of(target)?.rack_for(target, property)?;
+        let keyframe = rack.at(frame_in_the_rack)?;
+        Some(NewKeyframe {
+            owner: target,
+            rack: rack.id(),
+            keyframe: rack.id_of(keyframe),
+        })
     }
 }
 
-/// How many frames into `placement` (a clip) `timeline_frame` is: a frame before it is taken for its first. (A frame after it
-/// is not cut back to its last: every keyframe of a clip is inside it, so a frame that is further than that has what the last
-/// keyframe says, which is what the last frame has.)
-fn frames_into_the_clip(placement: &ClipPlacement<'_>, timeline_frame: TimelineFrameIndex) -> u64 {
-    timeline_frame
-        .value()
-        .saturating_sub(placement.first_timeline_frame.value())
+/// The frame of the timeline that `placement` (a clip) is at when `timeline_frame` is asked about: that frame, or if it is
+/// before the clip the clip's first, or if it is after it the clip's last.
+fn the_frame_the_clip_is_at(placement: &ClipPlacement<'_>, timeline_frame: TimelineFrameIndex) -> u64 {
+    let first = placement.first_timeline_frame.value();
+    let last = placement.end_timeline_frame.value().saturating_sub(1).max(first);
+    timeline_frame.value().clamp(first, last)
 }
 
 fn not_a_property_of(target: AnimationTarget, property: PropertyId) -> EditError {

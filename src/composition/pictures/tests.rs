@@ -742,7 +742,7 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<
                     break;
                 }
             }
-            Clip::Audio(_) => {}
+            Clip::Audio(_) | Clip::Crate(_) => {}
         }
     }
     front_to_back.reverse();
@@ -933,4 +933,25 @@ fn the_front_most_video_is_the_last_of_the_video_layers_and_there_is_none_withou
 
     let only_text = plan(&project_of(vec![vec![(0, text(10))]]));
     assert!(only_text.sections[0].front_video().is_none());
+}
+
+// --- keyframe crates ---
+
+#[test]
+fn a_keyframe_crate_is_not_in_the_picture_and_does_not_cut_a_section_of_it_in_two() {
+    let without = project_of(vec![vec![], vec![(0, long_video(0, 100, 1))]]);
+    let mut with = without.clone();
+    let in_front = with.tracks()[0].id();
+    with.insert_crate(in_front, frame(30), 40).unwrap();
+    assert_eq!(
+        with.tracks()[0].entries().len(),
+        1,
+        "the crate is on the track in front"
+    );
+
+    assert_eq!(
+        plan_pictures(&with, |_| true),
+        plan_pictures(&without, |_| true),
+        "the picture is made of the video alone, in one piece"
+    );
 }

@@ -459,10 +459,7 @@ fn the_tab_key_does_not_stop_at_the_handles_of_the_selected_layer_either() {
     // The handles and the places to turn from take the mouse over everything, but have nothing to do for the keyboard.
     let mut window = Window::showing(project_of(300));
     let video = window.clip(0, 0);
-    window.do_this(Command::Select {
-        clips: vec![video],
-        change: SelectionChange::Replace,
-    });
+    window.do_this(Command::select_clips(vec![video], SelectionChange::Replace));
     let places_with_nothing_to_do: Vec<egui::Id> = Corner::ALL
         .into_iter()
         .flat_map(|corner| [corner_handle_id(video, corner), turn_place_id(video, corner)])

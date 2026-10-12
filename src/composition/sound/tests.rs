@@ -335,3 +335,19 @@ fn clips_keep_the_names_they_have_on_their_track() {
     let clip = first_clip(&plan(&project).strips[0]);
     assert_eq!(clip.clip, ClipId::new(TrackId::new(0), 0));
 }
+
+// --- keyframe crates ---
+
+#[test]
+fn a_keyframe_crate_makes_no_sound_and_has_no_strip_of_its_own() {
+    let without = project_of(vec![vec![], vec![(0, long_video(0, 100, 1))]]);
+    let mut with = without.clone();
+    let in_front = with.tracks()[0].id();
+    with.insert_crate(in_front, frame(30), 40).unwrap();
+
+    assert_eq!(
+        plan_sound(&with, frame(0), |_| true),
+        plan_sound(&without, frame(0), |_| true),
+        "the sound is the video's alone"
+    );
+}

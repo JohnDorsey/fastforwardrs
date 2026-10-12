@@ -15,9 +15,9 @@ impl TrackHeight {
     /// The height of a new track.
     pub const DEFAULT_IN_POINTS: f32 = 104.0;
 
-    /// The least a track can be: just taller than what the box at its left needs to hold the title
-    /// of the track. (A test of the application checks that it does fit.)
-    pub const SMALLEST_IN_POINTS: f32 = 30.0;
+    /// The least a track can be: just taller than what the box at its left needs to hold the grip dots on its top and
+    /// the title of the track. (A test of the application checks that it does fit.)
+    pub const SMALLEST_IN_POINTS: f32 = 44.0;
 
     /// The most a track can be: half as tall again as a new track.
     pub const LARGEST_IN_POINTS: f32 = 156.0;
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn a_height_between_the_limits_is_kept_exactly() {
-        for points in [30.0, 31.5, 60.0, 104.0, 155.9, 156.0] {
+        for points in [44.0, 45.5, 60.0, 104.0, 155.9, 156.0] {
             assert_eq!(TrackHeight::from_points(points).points(), points);
         }
     }

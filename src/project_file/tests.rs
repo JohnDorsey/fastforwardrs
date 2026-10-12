@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::project::{
-    Angle, CanvasArea, ClipId, FrameRate, Gain, Placement, PropertyId, PropertyValue, SETTINGS, SourceImageProperties,
-    SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TimelineFrameIndex, TrackHeight,
+    Angle, AnimationTarget, CanvasArea, Clip, ClipId, FrameRate, Gain, Placement, PropertyId, PropertyValue, SETTINGS,
+    SourceImageProperties, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TimelineFrameIndex,
+    TrackHeight,
 };
 
 fn video_properties() -> SourceVideoProperties {
@@ -67,7 +68,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 6,
+  "file_format_version": 7,
   "sources": [
     {
       "kind": "video",
@@ -187,7 +188,7 @@ fn every_setting_in_the_table_survives_a_trip_through_the_file_in_every_state() 
 }
 
 /// What the line that says the version looks like in a file of the version this build writes.
-pub(super) const CURRENT_VERSION_LINE: &str = "\"file_format_version\": 6";
+pub(super) const CURRENT_VERSION_LINE: &str = "\"file_format_version\": 7";
 
 /// Valid project text with one thing replaced, for the "bad file" tests below.
 pub(super) fn valid_text_with(replacing: &str, with: &str) -> String {
@@ -527,9 +528,9 @@ fn json_that_is_not_a_fastforwardrs_project_is_rejected() {
 #[test]
 fn a_project_from_a_newer_version_is_refused_rather_than_misread() {
     let error =
-        project_from_json_text(&valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 7")).unwrap_err();
+        project_from_json_text(&valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 8")).unwrap_err();
     assert!(
-        matches!(error, ProjectFileError::NewerFileFormat { found: 7, supported: 6 }),
+        matches!(error, ProjectFileError::NewerFileFormat { found: 8, supported: 7 }),
         "{error:?}"
     );
 }
@@ -914,15 +915,12 @@ fn files_written_before_clips_could_be_turned_or_placed_are_read_as_upright_and_
 }
 
 #[test]
-fn an_angle_that_is_more_than_a_turn_is_brought_back_into_the_range_not_rejected() {
+fn an_angle_that_is_more_than_a_turn_is_kept_as_it_is_and_written_as_it_is() {
     let text = saved(&project_with_everything()).replace("\"rotation_degrees\": -12.5", "\"rotation_degrees\": 347.5");
     let loaded = project_from_json_text(&text).unwrap();
     let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
-    assert!(
-        (caption.object.rotation.degrees() - -12.5).abs() < 1e-3,
-        "{:?}",
-        caption.object.rotation
-    );
+    assert_eq!(caption.object.rotation.degrees(), 347.5);
+    assert!(saved(&loaded).contains("\"rotation_degrees\": 347.5"));
 }
 
 #[test]
@@ -1224,18 +1222,49 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
     assert_eq!(picture.source(), SourceMediaIdentifier::new(3));
     assert_eq!(picture.placement().unwrap().rotation, Angle::from_degrees(20.0));
     assert_eq!(project.tracks()[1].entries().len(), 3);
-    // The keyframes the example shows: the caption fades in, and the first video gets quieter and moves.
-    let caption_animation = project.tracks()[0].entries()[0].animation();
-    assert_eq!(caption_animation.keyframes_of(PropertyId::Colour).unwrap().len(), 2);
-    let video_animation = project.tracks()[1].entries()[0].animation();
     assert_eq!(
-        video_animation.value_at(PropertyId::Gain, 30),
-        Some(PropertyValue::Number(-6.0))
+        project.tracks()[0].entries().len(),
+        3,
+        "a text, a picture and a keyframe crate"
     );
+    // The keyframes the example shows: the caption fades in, the first video moves, and the caption, while it is shown, makes
+    // the first video quieter (a rack of that, which is kept in the drawer of the caption).
+    let caption_animation = project.tracks()[0].entries()[0].own_animation();
+    assert_eq!(caption_animation.keyframes_of(PropertyId::Colour).unwrap().len(), 2);
+    let video = project.tracks()[1].entries()[0].id();
+    let video_animation = project.tracks()[1].entries()[0].own_animation();
     assert_eq!(
         video_animation.value_at(PropertyId::Position, 60),
         Some(PropertyValue::Pair(0.375, 0.5))
     );
+    assert!(
+        video_animation.keyframes_of(PropertyId::Gain).is_none(),
+        "the drawer of the video has no keyframes of its loudness"
+    );
+    let caption_drawer = project.tracks()[0].entries()[0].drawer();
+    assert_eq!(caption_drawer.len(), 2);
+    assert_eq!(
+        caption_drawer.racks()[1].target(),
+        AnimationTarget::Clip(video),
+        "the rack kept in the drawer of the caption is of the video"
+    );
+    assert_eq!(
+        project
+            .animation_of(AnimationTarget::Clip(video))
+            .value_at(PropertyId::Gain, 80),
+        Some(PropertyValue::Number(-6.0)),
+        "half way between frame 70 (0 dB) and frame 90 (-12 dB)"
+    );
+    // The crate, whose rack is of the track the video is on, and the rack of the track itself.
+    let crate_entry = &project.tracks()[0].entries()[2];
+    assert!(matches!(crate_entry.clip(), Clip::Crate(_)));
+    assert_eq!(
+        crate_entry.drawer().racks()[0].target(),
+        AnimationTarget::Track(project.tracks()[1].id())
+    );
+    assert_eq!(project.tracks()[1].drawer().len(), 1);
+    assert_eq!(project.tracks()[1].drawer().racks()[0].property(), PropertyId::Gain);
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
     // And what the program writes for it is what the example shows (the same project, whichever way it is told).
     let written = saved(&project);
     let again = project_from_json_text(&written).unwrap();

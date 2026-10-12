@@ -5,12 +5,16 @@
 //! being moved about, when a row is shown somewhere else for as long as it is moving: see [`super::track_reordering`].
 //! A track that is being dragged to another place in the list is drawn last, over the others, with a shadow
 //! under it.
+//!
+//! The drawers that are open hang below their rows over the rows that are under them, and do not make them move. So the
+//! rows are drawn from the last to the first, which puts what hangs from a row over the rows under it (and the tracks in
+//! front over those behind, which is what front means); the rows area has room under its last row for what hangs below it.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Shadow, Ui, pos2, vec2};
 
 use super::strip_view::StripView;
 use super::track_reordering::{follow_the_handles, plan_rows};
-use super::{TimelineContent, TimelineViewState, header, strip, track_resize};
+use super::{TimelineContent, TimelineViewState, drawers, header, strip, track_resize};
 use crate::application::commands::Command;
 use crate::application::textures::Textures;
 use crate::application::theme;
@@ -40,11 +44,8 @@ pub(super) fn show<'a>(
 ) -> Vec<(&'a Track, StripView)> {
     let tracks = content.project.tracks();
     let can_delete = tracks.len() > 1;
-    // A row is as tall as its track, and as the drawers that are open on it need under that.
-    let heights: Vec<f32> = tracks
-        .iter()
-        .map(|track| track.height().points() + state.drawers.extra_height_of(track))
-        .collect();
+    // A row is as tall as its track. (The drawers that are open hang below it, over what is under it.)
+    let heights: Vec<f32> = tracks.iter().map(|track| track.height().points()).collect();
     let laid_out: Vec<Rect> = heights
         .iter()
         .map(|height| {
@@ -52,6 +53,16 @@ pub(super) fn show<'a>(
                 .0
         })
         .collect();
+    // Room after the last row for what hangs below it, so that it can be scrolled to: as much as the drawer that reaches
+    // furthest down goes beyond the bottom of the last row.
+    if let Some(last_row) = laid_out.last() {
+        let furthest_down = tracks
+            .iter()
+            .zip(&laid_out)
+            .map(|(track, row)| row.bottom() + state.drawers.reach_under_the_row_of(track, content.project))
+            .fold(last_row.bottom(), f32::max);
+        ui.add_space(furthest_down - last_row.bottom());
+    }
 
     let rows_top = laid_out.first().map_or_else(|| ui.cursor().top(), |row| row.top());
     let planned = plan_rows(
@@ -73,7 +84,9 @@ pub(super) fn show<'a>(
     let dragged = state
         .track_reorder
         .and_then(|reorder| tracks.iter().position(|track| track.id() == reorder.track));
+    // (From the last row to the first, so that what hangs from a row is over the rows under it.)
     let drawing_order = (0..tracks.len())
+        .rev()
         .filter(|position| Some(*position) != dragged)
         .chain(dragged);
 
@@ -124,6 +137,14 @@ pub(super) fn show<'a>(
             rows_area_height,
             state,
             commands,
+        );
+        // (The button of the drawer of the track is over the boundary under the box, which it must be on top of.)
+        drawers::operate_the_button_of_a_track(
+            ui,
+            header_rectangle,
+            track,
+            handles.box_round_the_title.hovered() || handles.title.hovered(),
+            &mut state.drawers,
         );
     }
     tracks

@@ -15,7 +15,7 @@ use super::{FastForwardApplication, SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::file_chooser::ScriptedFileChooser;
 use crate::application::theme;
-use crate::application::timeline_panel::strip_label;
+use crate::application::timeline_panel::{GripDotArrangement, VERTICES_IN_A_GRIP_DOT, strip_label};
 use crate::media::ToolchainError;
 use crate::playback::{SpeakersLog, speakers_that_only_keep_a_log};
 use crate::project::{
@@ -491,6 +491,16 @@ impl Window {
         self.text_field_showing(&self.title_of_track(position)).rect()
     }
 
+    /// The whole box at the left of the track at `position`: the title in it has the same room again at each side, and
+    /// it is as tall as the strip.
+    pub(super) fn box_of_track(&self, position: usize) -> Rect {
+        let (title, strip) = (self.title_box_of_track(position), self.strip_of_track(position));
+        Rect::from_min_max(
+            Pos2::new(title.left() - 8.0, strip.top()),
+            Pos2::new(title.right() + 8.0, strip.bottom()),
+        )
+    }
+
     /// Where, on screen, the start of timeline frame `frame` is along the strip of the track at
     /// `position`, allowing for how far the strips have been scrolled.
     pub(super) fn x_of_frame_on_the_strip(&self, position: usize, frame: u64) -> f32 {
@@ -553,6 +563,21 @@ impl Window {
             add_to(clipped.clip_rect, &clipped.shape, &mut shapes);
         }
         shapes
+    }
+
+    /// The rectangle round each set of grip dots of `arrangement` that was drawn in the last frame, in the order they
+    /// were drawn. (Told by how many dots, which is how many vertices, they have: two arrangements that have as many
+    /// dots are not told apart.)
+    pub(super) fn grip_dots_drawn(&self, arrangement: GripDotArrangement) -> Vec<Rect> {
+        self.shapes_drawn()
+            .into_iter()
+            .filter_map(|shape| match shape {
+                Shape::Mesh(mesh) if mesh.vertices.len() == arrangement.count() * VERTICES_IN_A_GRIP_DOT => Some(
+                    Rect::from_points(&mesh.vertices.iter().map(|vertex| vertex.pos).collect::<Vec<_>>()),
+                ),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Where on the screen the red line of the playhead was drawn in the last frame (as the x it is

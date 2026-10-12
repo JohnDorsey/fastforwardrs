@@ -56,10 +56,7 @@ fn window_with_the_video_selected() -> (Window, ClipId) {
 }
 
 pub(super) fn select(window: &mut Window, clip: ClipId) {
-    window.do_this(Command::Select {
-        clips: vec![clip],
-        change: SelectionChange::Replace,
-    });
+    window.do_this(Command::select_clips(vec![clip], SelectionChange::Replace));
 }
 
 fn placement_of(window: &Window, clip: ClipId) -> Placement {
@@ -164,6 +161,43 @@ fn it_turns_from_where_it_was_grabbed_and_not_from_where_the_pointer_was_when_th
     window.move_pointer_to(turned_about(start, middle, 90.0));
     window.release(turned_about(start, middle, 90.0), PointerButton::Primary);
     assert_degrees(placement_of(&window, text).rotation, 90.0, "a quarter turn clockwise");
+}
+
+#[test]
+fn going_on_round_turns_it_past_half_a_turn_and_past_a_whole_one() {
+    let (mut window, text) = window_with_a_text_object_selected();
+    let middle = middle_of_the_layer(&window);
+    let start = just_outside(&window, Corner::TopRight, 18.0);
+    // The pointer goes round in steps of 70 degrees, each of which is the way round it is going.
+    window.drag_and_hold(start, turned_about(start, middle, 70.0), PointerButton::Primary);
+    for degrees in [140.0, 210.0, 280.0, 350.0, 420.0] {
+        window.move_pointer_to(turned_about(start, middle, degrees));
+    }
+    window.release(turned_about(start, middle, 420.0), PointerButton::Primary);
+
+    assert_degrees(
+        placement_of(&window, text).rotation,
+        420.0,
+        "a whole turn and a sixth clockwise",
+    );
+}
+
+#[test]
+fn going_round_the_other_way_for_more_than_a_whole_turn_turns_it_that_way() {
+    let (mut window, text) = window_with_a_text_object_selected();
+    let middle = middle_of_the_layer(&window);
+    let start = just_outside(&window, Corner::TopRight, 18.0);
+    window.drag_and_hold(start, turned_about(start, middle, -70.0), PointerButton::Primary);
+    for degrees in [-140.0, -210.0, -280.0, -350.0, -420.0] {
+        window.move_pointer_to(turned_about(start, middle, degrees));
+    }
+    window.release(turned_about(start, middle, -420.0), PointerButton::Primary);
+
+    assert_degrees(
+        placement_of(&window, text).rotation,
+        -420.0,
+        "a whole turn and a sixth back",
+    );
 }
 
 #[test]

@@ -235,19 +235,26 @@ fn a_track_is_selected_by_a_command_too_and_one_that_is_not_there_is_not() {
     let mut window = window_with_a_video_and_a_sound();
     let track = window.application().project().tracks()[1].id();
 
-    window.do_this(Command::SelectTrack {
-        track,
-        change: SelectionChange::Replace,
-    });
+    window.do_this(Command::select_track(track, SelectionChange::Replace));
     assert_eq!(window.application().selected_items(), vec![SelectionItem::Track(track)]);
 
-    window.do_this(Command::SelectTrack {
-        track: crate::project::TrackId::new(99),
-        change: SelectionChange::Replace,
-    });
+    window.do_this(Command::select_track(
+        crate::project::TrackId::new(99),
+        SelectionChange::Replace,
+    ));
     assert_eq!(
         window.application().selected_items(),
         vec![SelectionItem::Track(track)],
         "as it was"
+    );
+
+    window.do_this(Command::SelectItems {
+        items: vec![],
+        change: SelectionChange::Replace,
+    });
+    assert_eq!(
+        window.application().selected_items(),
+        vec![],
+        "asking for nothing is how a rectangle that goes round nothing lets go of what it had"
     );
 }

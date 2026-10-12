@@ -11,8 +11,11 @@
 
 mod animating;
 mod animation;
+mod duplicating;
 mod frame_index;
 mod frame_rate;
+mod rack_editing;
+mod racks;
 mod settings;
 mod source_media;
 mod speed_factor;
@@ -30,8 +33,11 @@ pub use animation::{
     Animation, Keyframe, Keyframes, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, PropertyId, PropertyValue,
     RemovedKeyframe, ValueKind, placement_value, text_value, with_placement_value, with_text_value,
 };
+pub use duplicating::{ClipSide, TrackSide};
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
+pub use rack_editing::{KeyframeMove, RackDestination};
+pub use racks::{DrawerExtent, KeyframeLocation, LocatedRack, NewKeyframe, ResolvedAnimations};
 pub use settings::{
     AnySetting, ProjectSettings, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
 };
@@ -43,9 +49,10 @@ pub use speed_factor::{SpeedFactor, ZeroSpeedFactor};
 pub use speed_indicator_layout::SpeedIndicatorLayout;
 pub use timecode::format_timecode;
 pub use tracks::{
-    Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner, EmptyClip,
-    EmptyImageClip, EmptyTextClip, FontSize, Gain, ImageClip, InsertError, MediaClip, PictureDimensions, PictureFit,
-    PixelBox, Placement, PointOnThePicture, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track,
+    Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner, CrateClip,
+    CutEdges, Drawer, EmptyClip, EmptyCrate, EmptyImageClip, EmptyTextClip, FontSize, Gain, ImageClip, InsertError,
+    KeyframeId, MediaClip, PictureDimensions, PictureFit, PixelBox, Placement, PointOnThePicture, Rack, RackCut,
+    RackEditError, RackId, RackKeyframe, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track,
     TrackEntry, TrackHeight, TrackId, fit_inside_picture, fitted_placement,
 };
 
@@ -88,6 +95,8 @@ pub enum InconsistentProject {
         track: TrackId,
         identifier: SourceMediaIdentifier,
     },
+    #[error("the racks of keyframes do not agree with what is in the project: {problems}")]
+    RacksAreWrong { problems: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -145,6 +154,23 @@ pub enum EditError {
     NotAPropertyOfTheTrack { track: TrackId, property: PropertyId },
     #[error(transparent)]
     Clip(#[from] ClipEditError),
+    #[error("the project has no {rack}")]
+    UnknownRack { rack: RackId },
+    #[error(transparent)]
+    Rack(#[from] RackEditError),
+    #[error("the keyframes would not all be at frames that the drawer they are to be in has")]
+    NoRoomForTheKeyframes,
+    #[error("the drawer of {owner} has a rack of {property:?} of the same thing already")]
+    TheDrawerHasARackForThatAlready {
+        owner: AnimationTarget,
+        property: PropertyId,
+    },
+    #[error("there is no room next to {clip} for a copy of it")]
+    NoRoomForACopy { clip: ClipId },
+    #[error(transparent)]
+    Insert(#[from] InsertError),
+    #[error(transparent)]
+    EmptyCrate(#[from] EmptyCrate),
 }
 
 /// How many seconds a picture is shown for when it is put on a track, until it is changed.
@@ -199,7 +225,7 @@ impl Project {
                     Clip::Video(_) => SourceMediaKind::Video,
                     Clip::Audio(_) => SourceMediaKind::Audio,
                     Clip::Image(_) => SourceMediaKind::Image,
-                    Clip::Text(_) => continue,
+                    Clip::Text(_) | Clip::Crate(_) => continue,
                 };
                 if source.kind() != wanted_kind {
                     return Err(InconsistentProject::ClipUsesSourceOfTheWrongKind {
@@ -215,14 +241,21 @@ impl Project {
             .max()
             .unwrap_or(0)
             .max(u32::try_from(tracks.len()).unwrap_or(u32::MAX));
-        Ok(Self {
+        let project = Self {
             sources,
             tracks,
             next_track_number,
             speed_indicator_layout,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
             frame_rate: None,
-        })
+        };
+        let problems = project.problems_with_the_racks();
+        if !problems.is_empty() {
+            return Err(InconsistentProject::RacksAreWrong {
+                problems: problems.join("; "),
+            });
+        }
+        Ok(project)
     }
 
     /// The same project with this frame rate chosen for it, or with none chosen (`None`), so that it
@@ -378,7 +411,14 @@ impl Project {
         if self.tracks.len() == 1 {
             return Err(EditError::CannotDeleteTheOnlyTrack { track });
         }
+        let clips_that_go = racks::ids_of_the_clips_on(&self.tracks[position]);
         self.tracks.remove(position);
+        // The racks in the drawers of the track and of its clips went with them. Those kept elsewhere that animated them
+        // would animate nothing.
+        self.remove_the_racks_that_animate(AnimationTarget::Track(track));
+        for clip in clips_that_go {
+            self.remove_the_racks_that_animate(AnimationTarget::Clip(clip));
+        }
         Ok(())
     }
 
@@ -541,26 +581,86 @@ impl Project {
     /// Cuts the clips that are at `timeline_frame`, each in two, there. (A track that has nothing
     /// there, or where a clip already starts there, is left alone.) With `only` given, only those
     /// clips are cut, and only those of them that are at that frame. Returns what was cut.
+    ///
+    /// What is in the drawer of a clip is cut with it (see [`Track::split_at_with_edges`]), and the keyframes that are of
+    /// the clip but are kept in other drawers go on being what the second half is animated by too: a copy of each of
+    /// their racks, of the second half, is put beside it.
     pub fn split_at(
         &mut self,
         timeline_frame: TimelineFrameIndex,
         only: Option<&[ClipId]>,
     ) -> Vec<(TrackId, SplitOutcome)> {
         let mut cut = Vec::new();
-        for track in &mut self.tracks {
+        for position in 0..self.tracks.len() {
             if let Some(only) = only {
-                let is_one_of_them = track
+                let is_one_of_them = self.tracks[position]
                     .placement_covering(timeline_frame)
                     .is_some_and(|placement| only.contains(&placement.id));
                 if !is_one_of_them {
                     continue;
                 }
             }
-            if let Ok(outcome) = track.split_at(timeline_frame) {
-                cut.push((track.id(), outcome));
+            if let Some(outcome) = self.split_the_clip_at(position, timeline_frame) {
+                cut.push((self.tracks[position].id(), outcome));
             }
         }
         cut
+    }
+
+    /// Cuts the clip that is at `timeline_frame` on the track at `position`, if there is one that is not cut there already.
+    fn split_the_clip_at(&mut self, position: usize, timeline_frame: TimelineFrameIndex) -> Option<SplitOutcome> {
+        let (clip, frames_in) = {
+            let placement = self.tracks[position].placement_covering(timeline_frame)?;
+            (
+                placement.id,
+                timeline_frame.value() - placement.first_timeline_frame.value(),
+            )
+        };
+        // What the property is at the edges of the cut, by all the keyframes there are for it wherever they are kept.
+        let edges: CutEdges = self.tracks[position]
+            .racks_cut_by(clip, frames_in)
+            .into_iter()
+            .map(|cut| {
+                let keyframes = self.keyframes_of(AnimationTarget::Clip(clip), cut.property);
+                let before = cut
+                    .keyframes_go_on_beyond
+                    .then(|| keyframes.value_at(timeline_frame.value().saturating_sub(1)))
+                    .flatten();
+                let after = cut
+                    .keyframes_come_from_before
+                    .then(|| keyframes.value_at(timeline_frame.value()))
+                    .flatten();
+                (cut.rack, (before, after))
+            })
+            .collect();
+        let outcome = self.tracks[position].split_at_with_edges(timeline_frame, &edges).ok()?;
+        self.animate_the_second_half_as_the_first_half_is(outcome);
+        Some(outcome)
+    }
+
+    /// The racks kept in other drawers than the clip's own that animate the first half of a clip that was cut (which is what
+    /// they animated) have a copy put beside them that animates the second half, so that it has what the whole had.
+    fn animate_the_second_half_as_the_first_half_is(&mut self, outcome: SplitOutcome) {
+        let first = AnimationTarget::Clip(outcome.first_half);
+        let second = AnimationTarget::Clip(outcome.second_half);
+        let racks_elsewhere: Vec<(AnimationTarget, Rack)> = self
+            .located_racks()
+            .filter(|located| located.rack.target() == first && located.owner != first)
+            .map(|located| (located.owner, located.rack.clone()))
+            .collect();
+        for (owner, rack) in racks_elsewhere {
+            let position = match owner {
+                AnimationTarget::Clip(clip) => self.track_position_holding(clip),
+                AnimationTarget::Track(track) => self.track_position(track),
+            };
+            let Some(position) = position else {
+                continue;
+            };
+            let copy = rack.copy_as(self.tracks[position].make_a_rack_id(), second);
+            if let Some(drawer) = self.drawer_mut(owner) {
+                drawer.push(copy);
+            }
+        }
     }
 
     /// Plays a video or sound clip at `speed` (on top of the speed of its track).
@@ -628,7 +728,7 @@ impl Project {
                 .map(|placement| ClipToArrange {
                     id: placement.id,
                     clip: placement.clip.clone(),
-                    animation: placement.animation.clone(),
+                    drawer: placement.drawer.clone(),
                     start: placement.first_timeline_frame.value(),
                     frames_it_lasted_before: placement.timeline_frame_count(),
                 })
@@ -640,7 +740,7 @@ impl Project {
                 clips.push(ClipToArrange {
                     id: departure.clip,
                     clip: leaving.clip.clone(),
-                    animation: leaving.animation.clone(),
+                    drawer: leaving.drawer.clone(),
                     start: departure.start,
                     frames_it_lasted_before: leaving.timeline_frame_count(),
                 });
@@ -655,9 +755,12 @@ impl Project {
         Ok(())
     }
 
-    /// Takes a clip off its track. See [`Track::delete_clip`] for what moves.
+    /// Takes a clip off its track. See [`Track::delete_clip`] for what moves. What was in its drawer goes with it, and the
+    /// racks kept elsewhere that animated it are taken away, because they would animate nothing.
     pub fn delete_clip(&mut self, clip: ClipId) -> Result<(), EditError> {
-        Ok(self.track_holding_mut_or_error(clip)?.delete_clip(clip)?)
+        self.track_holding_mut_or_error(clip)?.delete_clip(clip)?;
+        self.remove_the_racks_that_animate(AnimationTarget::Clip(clip));
+        Ok(())
     }
 
     pub fn set_track_title(&mut self, track: TrackId, title: impl Into<String>) -> Result<(), EditError> {
@@ -715,9 +818,32 @@ impl Project {
     }
 
     /// Makes a text clip or a picture last `frames` frames, or as long as there is room for if that
-    /// is less. Returns how long it lasts now.
+    /// is less. Returns how long it lasts now. What is in its drawer is shortened with it (see
+    /// [`Track::set_clip_duration_with_edges`]).
     pub fn set_clip_duration(&mut self, clip: ClipId, frames: u64) -> Result<u64, EditError> {
-        Ok(self.track_holding_mut_or_error(clip)?.set_clip_duration(clip, frames)?)
+        let position = self
+            .track_position_holding(clip)
+            .ok_or(ClipEditError::UnknownClip { clip })?;
+        let new_duration = self.tracks[position].duration_a_clip_would_be_given(clip, frames)?;
+        let first_frame = self.tracks[position]
+            .placement_of(clip)
+            .map_or(0, |placement| placement.first_timeline_frame.value());
+        // What the property is at the new end, by all the keyframes there are for it wherever they are kept.
+        let edges: CutEdges = self.tracks[position]
+            .racks_cut_by(clip, new_duration)
+            .into_iter()
+            .map(|cut| {
+                let at_the_end = cut
+                    .keyframes_go_on_beyond
+                    .then(|| {
+                        self.keyframes_of(AnimationTarget::Clip(clip), cut.property)
+                            .value_at(first_frame + new_duration - 1)
+                    })
+                    .flatten();
+                (cut.rack, (at_the_end, None))
+            })
+            .collect();
+        Ok(self.tracks[position].set_clip_duration_with_edges(clip, frames, &edges)?)
     }
 }
 
@@ -729,5 +855,11 @@ impl Default for Project {
 
 #[cfg(test)]
 mod animating_tests;
+#[cfg(test)]
+mod duplicating_tests;
+#[cfg(test)]
+mod rack_editing_tests;
+#[cfg(test)]
+mod racks_tests;
 #[cfg(test)]
 mod tests;

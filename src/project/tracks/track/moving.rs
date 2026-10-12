@@ -2,17 +2,17 @@
 
 use super::editing::ClipEditError;
 use super::{Track, TrackEntry};
-use crate::project::Animation;
 use crate::project::tracks::clip::Clip;
+use crate::project::tracks::drawer::Drawer;
 use crate::project::tracks::ids::ClipId;
 
-/// A clip that is to be put on a track: with its id, its keyframes, where it starts, and how long it lasted where
-/// it was (which is not how long it will last if it comes from a track that played at another speed).
+/// A clip that is to be put on a track: with its id, its drawer of racks of keyframes, where it starts, and how long it
+/// lasted where it was (which is not how long it will last if it comes from a track that played at another speed).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClipToArrange {
     pub id: ClipId,
     pub clip: Clip,
-    pub animation: Animation,
+    pub drawer: Drawer,
     pub start: u64,
     pub frames_it_lasted_before: u64,
 }
@@ -37,7 +37,7 @@ impl Track {
             .map(|(entry, start)| ClipToArrange {
                 id: entry.id,
                 clip: entry.clip.clone(),
-                animation: entry.animation.clone(),
+                drawer: entry.drawer.clone(),
                 start,
                 frames_it_lasted_before: entry.clip.timeline_frame_count(self.speed),
             })
@@ -65,9 +65,11 @@ impl Track {
             entries.push(TrackEntry {
                 id: arranged.id,
                 clip: arranged.clip,
-                // On a track that plays at another speed the clip lasts another time, and its keyframes are as far
-                // through it as they were.
-                animation: arranged.animation.rescaled(arranged.frames_it_lasted_before, length),
+                // On a track that plays at another speed the clip lasts another time, and the keyframes in its drawer
+                // are as far through it as they were.
+                drawer: arranged
+                    .drawer
+                    .with_each_rack_changed(|rack| rack.rescaled(arranged.frames_it_lasted_before, length)),
                 gap_before_frames,
             });
         }

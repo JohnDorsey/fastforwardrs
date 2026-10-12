@@ -4,7 +4,7 @@
 //! * **Space** plays the video, or pauses it while it is playing.
 //! * **S** cuts at the current frame: the selected clips that are there, and otherwise every clip
 //!   that is there, on every track.
-//! * **Delete** (or **Backspace**) takes the selected clips off their tracks.
+//! * **Delete** (or **Backspace**) takes the selected clips off their tracks, and the selected keyframes away.
 //! * **Escape** deselects.
 //! * **Ctrl+Z** undoes the latest edit, and **Ctrl+Y** (or **Ctrl+Shift+Z**) does it again.
 //! * **Left** and **Right** move the current frame back or forward by one frame, while paused or
@@ -17,7 +17,7 @@
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Popup};
 
 use super::commands::Command;
-use crate::project::{ClipId, TimelineFrameIndex};
+use crate::project::{ClipId, KeyframeId, TimelineFrameIndex};
 
 /// The key that plays and pauses.
 const PLAY_OR_PAUSE_KEY: Key = Key::Space;
@@ -43,6 +43,8 @@ pub struct KeyboardState {
     pub timeline_is_empty: bool,
     /// The selected clips.
     pub selected_clips: Vec<ClipId>,
+    /// The selected keyframes.
+    pub selected_keyframes: Vec<KeyframeId>,
     /// The selected clips that are at the current frame.
     pub selected_clips_at_the_current_frame: Vec<ClipId>,
     /// Whether there is an edit to undo, and one that was undone to redo.
@@ -93,6 +95,10 @@ pub fn commands_for_the_keys_pressed(context: &Context, state: KeyboardState) ->
             .map(|key| input.count_and_consume_key(Modifiers::NONE, key))
             .sum::<usize>()
             > 0;
+        // (The keyframes first: those that are in the drawers of the clips that go go with them.)
+        if delete_pressed && !state.selected_keyframes.is_empty() {
+            commands.push(Command::DeleteKeyframes(state.selected_keyframes.clone()));
+        }
         if delete_pressed && !state.selected_clips.is_empty() {
             commands.push(Command::DeleteClips(state.selected_clips.clone()));
         }
@@ -126,6 +132,7 @@ mod tests {
             current_frame: TimelineFrameIndex::new(40),
             is_playing: false,
             selected_clips: Vec::new(),
+            selected_keyframes: Vec::new(),
             selected_clips_at_the_current_frame: Vec::new(),
             timeline_is_empty: false,
             can_undo: false,
@@ -228,6 +235,33 @@ mod tests {
                 "{key:?} with nothing selected"
             );
         }
+    }
+
+    #[test]
+    fn delete_takes_away_the_selected_keyframes_before_the_selected_clips_go() {
+        let keyframe =
+            |number| KeyframeId::new(crate::project::RackId::new(crate::project::TrackId::new(0), 1), number);
+        let both = KeyboardState {
+            selected_clips: vec![location(2)],
+            selected_keyframes: vec![keyframe(0), keyframe(4)],
+            ..state()
+        };
+        assert_eq!(
+            pressing(Key::Delete, both),
+            vec![
+                Command::DeleteKeyframes(vec![keyframe(0), keyframe(4)]),
+                Command::DeleteClips(vec![location(2)])
+            ],
+            "the keyframes of the clips that go would go with them"
+        );
+        let only_keyframes = KeyboardState {
+            selected_keyframes: vec![keyframe(7)],
+            ..state()
+        };
+        assert_eq!(
+            pressing(Key::Backspace, only_keyframes),
+            vec![Command::DeleteKeyframes(vec![keyframe(7)])]
+        );
     }
 
     #[test]

@@ -19,9 +19,10 @@ impl Track {
         for (index, entry) in retimed.entries.iter_mut().enumerate() {
             let length_before = entry.clip.timeline_frame_count(self.speed);
             entry.clip = entry.clip.retimed(from, to);
-            entry.animation = entry
-                .animation
-                .rescaled(length_before, entry.clip.timeline_frame_count(self.speed));
+            let length_now = entry.clip.timeline_frame_count(self.speed);
+            entry.drawer = entry
+                .drawer
+                .with_each_rack_changed(|rack| rack.rescaled(length_before, length_now));
             let touches_the_one_before = index > 0 && entry.gap_before_frames == 0;
             let start = if touches_the_one_before {
                 previous_end
@@ -32,10 +33,10 @@ impl Track {
             entry.gap_before_frames = start - previous_end;
             previous_end = start + entry.clip.timeline_frame_count(self.speed);
         }
-        // What the track itself has animated is at the same moments of time as it was.
-        retimed.animation = self
-            .animation
-            .mapped_frames(|frame| from.convert_frame_count_to(frame, to));
+        // What is kept in the drawer of the track itself is at the same moments of time as it was.
+        retimed.drawer = self
+            .drawer
+            .with_each_rack_changed(|rack| rack.with_frames_mapped(|frame| from.convert_frame_count_to(frame, to)));
         retimed.rebuild_derived_values();
         retimed
     }

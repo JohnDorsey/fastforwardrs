@@ -6,9 +6,10 @@
 use egui::{ComboBox, DragValue, TextEdit, Ui};
 
 use super::animatable::{self, Animatable};
-use super::{PropertiesContent, clip_properties::kind_name, kind_box, placement_controls};
+use super::{PropertiesContent, kind_box, placement_controls};
 use crate::application::commands::Command;
 use crate::application::duration_control::shown_for;
+use crate::application::naming::kind_name;
 use crate::project::{ClipId, ClipKind, FontSize, PropertyId, TextClip, TextColour};
 
 /// How many lines of words show without scrolling.

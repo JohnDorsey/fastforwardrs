@@ -17,7 +17,10 @@ use crate::application::editing::{
 use crate::application::history::{EditKey, Restored};
 use crate::application::selection::{Selection, SelectionItem};
 use crate::playback::SoundEffect;
-use crate::project::{AnimationTarget, ClipId, FrameRate, SpeedFactor, TextObject, TimelineFrameIndex, TrackId};
+use crate::project::{
+    AnimationTarget, ClipId, ClipSide, EditError, FrameRate, SpeedFactor, TextObject, TimelineFrameIndex, TrackId,
+    TrackSide,
+};
 
 /// How long a text object lasts when it is made, in seconds (or less, if it would run into a clip).
 const SECONDS_A_NEW_TEXT_OBJECT_LASTS: f64 = 3.0;
@@ -93,20 +96,21 @@ impl FastForwardApplication {
                 self.clock.seek(now, TimelineFrameIndex::new(moved_frame), total_frames);
             }
 
-            Command::SelectTrack { track, change } => {
-                if self.project.track(track).is_some() {
-                    self.selection.change_items([SelectionItem::Track(track)], change);
-                }
-            }
-            Command::Select { clips, change } => {
-                let clips_that_exist = clips
+            Command::SelectItems { items, change } => {
+                let asked_for_something = !items.is_empty();
+                let items_that_exist = items
                     .into_iter()
-                    .filter(|clip| self.project.placement_of(*clip).is_some())
+                    .filter(|item| item.is_in(&self.project))
                     .collect::<Vec<_>>();
-                self.selection.change(clips_that_exist, change);
+                // (Asking for things that are not there is asking for nothing to change: it does not let go of what is
+                // selected. Asking for nothing at all does, as a rectangle that has come to go round nothing does.)
+                if !asked_for_something || !items_that_exist.is_empty() {
+                    self.selection.change_items(items_that_exist, change);
+                }
             }
             Command::SplitAt { frame, only } => self.split_at(frame, only, now),
             Command::DeleteClips(clips) => self.delete_clips(clips, now),
+            Command::DuplicateClips { clips, side } => self.duplicate_clips(clips, side),
             Command::MoveClips(starts) => {
                 // A move that cannot be made (clips would be on top of one another) is not made.
                 let _ = self.project.move_clips(&starts);
@@ -126,6 +130,7 @@ impl FastForwardApplication {
                 self.project.add_track_in_front();
             }
             Command::DeleteTrack(track) => self.delete_track(track, now),
+            Command::DuplicateTrack { track, side } => self.duplicate_track(track, side),
             Command::MoveTrack { track, to_position } => {
                 let _ = self.project.move_track(track, to_position);
             }
@@ -152,7 +157,10 @@ impl FastForwardApplication {
                 property,
                 frame,
             } => {
-                let _ = self.project.add_keyframe(target, property, frame);
+                // (The drawer the keyframe is in opens, so that it is seen where it is.)
+                if let Ok(Some(made)) = self.project.add_keyframe(target, property, frame) {
+                    self.timeline_view.open_the_drawer_of(made.owner);
+                }
             }
             Command::RemoveKeyframe {
                 target,
@@ -160,6 +168,23 @@ impl FastForwardApplication {
                 frame,
             } => {
                 let _ = self.project.remove_keyframe(target, property, frame);
+                self.selection.forget_what_is_gone(&self.project);
+            }
+            Command::MoveKeyframes(moves) => {
+                // Keyframes that cannot all be moved where they are asked to go are not moved.
+                let _ = self.project.move_keyframes(&moves);
+            }
+            Command::DeleteKeyframes(keyframes) => {
+                let _ = self.project.remove_keyframes(&keyframes);
+                self.selection.forget_what_is_gone(&self.project);
+            }
+            Command::MoveRack {
+                rack,
+                to,
+                shift_in_frames,
+            } => {
+                // A rack that cannot go where it is asked to is not moved.
+                let _ = self.project.move_rack(rack, to, shift_in_frames);
             }
 
             Command::SetSpeedIndicatorLayout(layout) => self.project.set_speed_indicator_layout(layout),
@@ -244,6 +269,40 @@ impl FastForwardApplication {
             self.selection.forget_what_is_gone(&self.project);
             let new_total_frames = self.project.total_frame_count();
             self.clock.seek(now, current_frame, new_total_frames);
+        }
+    }
+
+    /// Puts a copy of each of `clips` beside it, on `side` of it (see [`crate::project::Project::duplicate_clip`]), and selects
+    /// the copies, which are what is wanted next: to be seen, and to be moved or changed. A clip that has no room beside it is
+    /// not copied (and a clip that is not there is not either); when none of them can be because there is no room, the user is
+    /// told, and nothing changes.
+    fn duplicate_clips(&mut self, clips: Vec<ClipId>, side: ClipSide) {
+        let mut some_had_no_room = false;
+        let mut copies = Vec::new();
+        for clip in clips {
+            match self.project.duplicate_clip(clip, side) {
+                Ok(copy) => copies.push(copy),
+                Err(EditError::NoRoomForACopy { .. }) => some_had_no_room = true,
+                Err(_) => {}
+            }
+        }
+        if copies.is_empty() {
+            if some_had_no_room {
+                self.show_message(
+                    "There is no room for a copy there",
+                    "A copy is put right beside the clip, where nothing else is.",
+                );
+            }
+            return;
+        }
+        self.selection = Selection::from_clips(copies);
+    }
+
+    /// Puts a copy of `track` in front of it or behind it, as `side` says (see [`crate::project::Project::duplicate_track`]),
+    /// and selects the copy.
+    fn duplicate_track(&mut self, track: TrackId, side: TrackSide) {
+        if let Ok(copy) = self.project.duplicate_track(track, side) {
+            self.selection = Selection::from_items([SelectionItem::Track(copy)]);
         }
     }
 

@@ -9,7 +9,10 @@
 use std::collections::BTreeSet;
 
 use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, Track, TrackId};
-use crate::project::{FrameRate, Project, PropertyId, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex};
+use crate::project::{
+    AnimationTarget, FrameRate, Project, PropertyId, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor,
+    TimelineFrameIndex,
+};
 
 /// How loud a stretch of sound is at a frame of it: the loudness of the clip and of its track together.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,10 +129,11 @@ pub fn plan_sound(
 ) -> SoundPlan {
     let from = from.value();
     let total_frame_count = project.total_frame_count().saturating_sub(from);
+    let animations = project.resolved_animations();
     let strips = project
         .tracks()
         .iter()
-        .filter_map(|track| strip_of(project, track, from, &is_usable))
+        .filter_map(|track| strip_of(project, &animations, track, from, &is_usable))
         .collect();
     SoundPlan {
         frame_rate: project.frame_rate(),
@@ -140,6 +144,7 @@ pub fn plan_sound(
 
 fn strip_of(
     project: &Project,
+    animations: &ResolvedAnimations,
     track: &Track,
     from: u64,
     is_usable: &impl Fn(SourceMediaIdentifier) -> bool,
@@ -162,9 +167,10 @@ fn strip_of(
             .is_some_and(|source| source.properties.has_sound())
             && is_usable(media.source());
         if has_sound {
-            for stretch in stretches_heard_or_not(track, &placement, media, start, end) {
+            for stretch in stretches_heard_or_not(animations, track, &placement, media, start, end) {
                 if stretch.is_heard {
                     items.push(SoundItem::Clip(sound_clip_over(
+                        animations,
                         track,
                         &placement,
                         media,
@@ -202,28 +208,25 @@ struct Stretch {
 /// cut into by turning the mute switch of the clip or of the track on and off with keyframes. A clip that is not muted by
 /// keyframes is one stretch.
 fn stretches_heard_or_not(
+    animations: &ResolvedAnimations,
     track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
     start: u64,
     end: u64,
 ) -> Vec<Stretch> {
-    let clip_first_frame = placement.first_timeline_frame.value();
+    let clip_animation = animations.of(AnimationTarget::Clip(placement.id));
+    let track_animation = animations.of(AnimationTarget::Track(track.id()));
     let is_heard_at = |frame: u64| {
-        !placement
-            .animation
-            .is_muted_at(media.is_muted(), frame - clip_first_frame)
-            && !track.animation().is_muted_at(track.is_muted(), frame)
+        !clip_animation.is_muted_at(media.is_muted(), frame) && !track_animation.is_muted_at(track.is_muted(), frame)
     };
     // The switches only turn at a keyframe, and what is between two is what the earlier one says.
-    let frames_it_may_turn_at: BTreeSet<u64> = placement
-        .animation
+    let frames_it_may_turn_at: BTreeSet<u64> = clip_animation
         .keyframes_of(PropertyId::Muted)
         .into_iter()
-        .flat_map(|keyframes| keyframes.iter().map(|keyframe| clip_first_frame + keyframe.frame))
+        .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame))
         .chain(
-            track
-                .animation()
+            track_animation
                 .keyframes_of(PropertyId::Muted)
                 .into_iter()
                 .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame)),
@@ -253,6 +256,7 @@ fn stretches_heard_or_not(
 
 /// The sound of the clip `placement` (a clip of `track`) that is heard from `first_frame` up to `end_frame` of the timeline.
 fn sound_clip_over(
+    animations: &ResolvedAnimations,
     track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
@@ -272,36 +276,34 @@ fn sound_clip_over(
             .min(first_source_frame + (end_frame - first_frame) * speed),
         speed: placement.effective_speed,
         timeline_frame_count: end_frame - first_frame,
-        loudness: loudness_over(track, placement, media, first_frame, end_frame),
+        loudness: loudness_over(animations, track, placement, media, first_frame, end_frame),
     }
 }
 
 /// How loud the clip `placement` (a clip of `track`) is, together with its track, from `first_frame` up to `end_frame` of
 /// the timeline.
 fn loudness_over(
+    animations: &ResolvedAnimations,
     track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
     first_frame: u64,
     end_frame: u64,
 ) -> Loudness {
-    let clip_first_frame = placement.first_timeline_frame.value();
-    let clip_gain_keyframes = placement.animation.keyframes_of(PropertyId::Gain);
-    let track_gain_keyframes = track.animation().keyframes_of(PropertyId::Gain);
+    let clip_animation = animations.of(AnimationTarget::Clip(placement.id));
+    let track_animation = animations.of(AnimationTarget::Track(track.id()));
+    let clip_gain_keyframes = clip_animation.keyframes_of(PropertyId::Gain);
+    let track_gain_keyframes = track_animation.keyframes_of(PropertyId::Gain);
     if clip_gain_keyframes.is_none() && track_gain_keyframes.is_none() {
         return Loudness::Constant(media.gain().combined_linear_factor(track.gain()));
     }
     let decibels_at = |frame: u64| {
-        placement
-            .animation
-            .gain_at(media.gain(), frame - clip_first_frame)
-            .decibels()
-            + track.animation().gain_at(track.gain(), frame).decibels()
+        clip_animation.gain_at(media.gain(), frame).decibels() + track_animation.gain_at(track.gain(), frame).decibels()
     };
     // Both change evenly between their keyframes, so together they do between all the keyframes of both.
     let frames_it_may_bend_at: BTreeSet<u64> = clip_gain_keyframes
         .into_iter()
-        .flat_map(|keyframes| keyframes.iter().map(|keyframe| clip_first_frame + keyframe.frame))
+        .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame))
         .chain(
             track_gain_keyframes
                 .into_iter()

@@ -86,16 +86,13 @@ pub(super) fn show(
         |ui, _| {
             let label = ui.label("Rotation");
             let mut degrees = placement.rotation.degrees();
-            ui.add(
-                DragValue::new(&mut degrees)
-                    .range(-180.0..=180.0)
-                    .speed(0.5)
-                    .max_decimals(1)
-                    .suffix("°"),
-            )
-            .labelled_by(label.id)
-            .changed()
-            .then_some(PropertyValue::Number(degrees))
+            // (No limit: the turn is typed, or dragged, as far as it is wanted, which is as many whole turns as a clip is to
+            // go round between two keyframes. A turn of a degree for each point of the way the pointer is dragged is
+            // a whole turn in 360 points, and Shift held makes it a tenth of that, for exactness.)
+            ui.add(DragValue::new(&mut degrees).speed(1.0).max_decimals(1).suffix("°"))
+                .labelled_by(label.id)
+                .changed()
+                .then_some(PropertyValue::Number(degrees))
         },
     );
     if let Some(value) = rotation {

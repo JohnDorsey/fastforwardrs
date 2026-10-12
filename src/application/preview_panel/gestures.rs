@@ -35,15 +35,17 @@ const SMALLEST_CHANGE_OF_ANGLE_IN_DEGREES: f32 = 1e-3;
 #[derive(Clone, Copy)]
 struct Gesture {
     grab: Grab,
-    /// For turning a layer: where the turn began.
-    turn: Option<TurnBegun>,
+    /// For turning a layer: how far it has been turned.
+    turn: Option<Turning>,
 }
 
-/// What turning a layer remembers of where it began: which way the pointer was from the middle of the
-/// layer, and how far the layer was turned. (How far the pointer has gone round since is added to it.)
+/// What turning a layer remembers: which way the pointer was from the middle of the layer the last time, and how far the
+/// layer is turned. Each time the pointer is moved, the way it has gone round (the short way, which is the way it
+/// went when it is moved a little at a time) is added to how far the layer is turned, so that going on round turns it
+/// past half a turn and past a whole turn, as many times as the pointer goes round.
 #[derive(Clone, Copy)]
-struct TurnBegun {
-    direction_of_the_pointer: Angle,
+struct Turning {
+    last_direction_of_the_pointer: Angle,
     rotation_of_the_layer: Angle,
 }
 
@@ -60,10 +62,7 @@ pub(super) struct Pointing {
 
 /// The command that makes `clip` the only clip that is selected.
 fn select_only(clip: ClipId) -> Command {
-    Command::Select {
-        clips: vec![clip],
-        change: SelectionChange::Replace,
-    }
+    Command::select_clips(vec![clip], SelectionChange::Replace)
 }
 
 /// Does what the mouse is doing to the preview in this frame, by adding commands, and says what the
@@ -84,7 +83,7 @@ pub(super) fn handle(
     }
 
     let is_dragging = catchers.dragged_by(PointerButton::Primary);
-    let gesture = if is_dragging {
+    let mut gesture = if is_dragging {
         ui.data(|data| data.get_temp::<Option<Gesture>>(gesture_id)).flatten()
     } else {
         ui.data_mut(|data| data.remove_temp::<Option<Gesture>>(gesture_id));
@@ -92,8 +91,11 @@ pub(super) fn handle(
     };
 
     let mut turning = None;
-    if let Some(gesture) = gesture {
-        turning = carry_on(ui, catchers, gesture, content, picture, commands);
+    if let Some(carried_on) = gesture.as_mut() {
+        turning = carry_on(ui, catchers, carried_on, content, picture, commands);
+        // (What it has got to, for the next frame.)
+        let remembered = *carried_on;
+        ui.data_mut(|data| data.insert_temp(gesture_id, Some(remembered)));
     } else if catchers.clicked_by(PointerButton::Primary) {
         click(catchers, content, picture, commands);
     }
@@ -131,8 +133,8 @@ fn begin(
         }
         Grab::PlaceToTurnFrom { layer, .. } => {
             let layer = content.layer(layer)?;
-            turn = Some(TurnBegun {
-                direction_of_the_pointer: layer
+            turn = Some(Turning {
+                last_direction_of_the_pointer: layer
                     .placement
                     .direction_to(picture.fractions_at(origin), picture.size_in_pixels),
                 rotation_of_the_layer: layer.placement.rotation,
@@ -145,11 +147,11 @@ fn begin(
 
 /// Carries on what a drag took hold of, by adding the command that puts it where the pointer has taken
 /// it. When it is a layer that is being turned, this gives where the pointer is and how far round the
-/// layer is turned.
+/// layer is turned (and notes in `gesture` how far it has got).
 fn carry_on(
     ui: &Ui,
     catchers: &Catchers,
-    gesture: Gesture,
+    gesture: &mut Gesture,
     content: &PreviewContent<'_>,
     picture: &PictureOnScreen,
     commands: &mut Vec<Command>,
@@ -178,13 +180,15 @@ fn carry_on(
         }
         Grab::PlaceToTurnFrom { layer, .. } => {
             let layer = content.layer(layer)?;
-            let begun = gesture.turn?;
+            let turning = gesture.turn.as_mut()?;
             let direction = layer
                 .placement
                 .direction_to(picture.fractions_at(pointer), picture.size_in_pixels);
-            let mut rotation = begun
+            turning.rotation_of_the_layer = turning
                 .rotation_of_the_layer
-                .plus(direction.minus(begun.direction_of_the_pointer));
+                .plus(direction.shortest_turn_from(turning.last_direction_of_the_pointer));
+            turning.last_direction_of_the_pointer = direction;
+            let mut rotation = turning.rotation_of_the_layer;
             if ui.input(|input| input.modifiers.shift) {
                 rotation = rotation.snapped_to(SNAP_STEP_DEGREES);
             }
@@ -345,11 +349,13 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_across_the_half_way_point_is_a_turn_and_not_a_nearly_whole_circle() {
-        // 179.9 and -179.9 are close together on the circle: they are not 359.8 degrees apart.
-        let place = Placement::new(CanvasArea::DEFAULT, Angle::from_degrees(179.9999));
-        let other = Placement::new(CanvasArea::DEFAULT, Angle::from_degrees(-179.9999));
-        assert!(places_are_the_same(&place, &other));
+    fn a_turn_and_the_same_angle_a_whole_turn_on_are_not_the_same_place() {
+        // A turn is kept as it was made (see `Angle`): between two keyframes the one goes round once more than the other.
+        let place = Placement::new(CanvasArea::DEFAULT, Angle::from_degrees(30.0));
+        let a_turn_on = Placement::new(CanvasArea::DEFAULT, Angle::from_degrees(390.0));
+        assert!(!places_are_the_same(&place, &a_turn_on));
+        let nearly = Placement::new(CanvasArea::DEFAULT, Angle::from_degrees(390.0 + 1e-5));
+        assert!(places_are_the_same(&a_turn_on, &nearly));
     }
 
     fn pointing(grab: Option<Grab>, is_dragging: bool) -> Pointing {

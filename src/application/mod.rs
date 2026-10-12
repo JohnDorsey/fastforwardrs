@@ -16,6 +16,7 @@ mod file_chooser;
 mod history;
 mod keyboard;
 mod menu_bar;
+mod naming;
 mod opening;
 mod preview_panel;
 mod properties_panel;

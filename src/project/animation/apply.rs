@@ -260,9 +260,16 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_of_more_than_half_a_turn_is_the_angle_it_comes_to() {
-        let turned = with_placement_value(somewhere(), PropertyId::Rotation, &PropertyValue::Number(270.0));
-        assert_eq!(turned.rotation.degrees(), -90.0);
+    fn a_turn_of_more_than_half_a_turn_is_kept_as_it_was_given() {
+        for degrees in [270.0, -540.0, 720.0, 1080.5] {
+            let turned = with_placement_value(somewhere(), PropertyId::Rotation, &PropertyValue::Number(degrees));
+            assert_eq!(turned.rotation.degrees(), degrees);
+            assert_eq!(
+                placement_value(&turned, PropertyId::Rotation),
+                Some(PropertyValue::Number(degrees)),
+                "and it is what the placement says it is"
+            );
+        }
     }
 
     #[test]

@@ -1,16 +1,38 @@
 //! Changing a track: cutting, changing speeds and volumes, deleting, adding and changing text.
 
+use std::collections::BTreeMap;
+
 use thiserror::Error;
 
 use super::{Room, Track, TrackEntry};
 use crate::project::tracks::clip::Clip;
+use crate::project::tracks::drawer::Drawer;
 use crate::project::tracks::gain::Gain;
-use crate::project::tracks::ids::ClipId;
+use crate::project::tracks::ids::{ClipId, RackId};
 use crate::project::tracks::placement::Placement;
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
-use crate::project::{Animation, PropertyId};
+use crate::project::{AnimationTarget, PropertyId, PropertyValue};
 use crate::project::{SpeedFactor, TimelineFrameIndex};
+
+/// What a cut puts at the edges of the two parts, in each of the racks of the cut clip's own keyframes: the value that the
+/// property has at the last frame of the first part, if its keyframes go on beyond the cut, and at the first frame of the
+/// second part, if they come from before it. They are what the property is there by *all* the keyframes it has, wherever
+/// they are kept, which is the project's to work out (see [`Track::racks_cut_by`]).
+pub type CutEdges = BTreeMap<RackId, (Option<PropertyValue>, Option<PropertyValue>)>;
+
+/// One of the racks of a clip's own keyframes that a cut, or making the clip shorter, divides, and what it needs at the edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RackCut {
+    pub rack: RackId,
+    pub property: PropertyId,
+    /// Whether the rack has keyframes at or after the cut, so that the property goes on beyond it (and the first part needs a
+    /// keyframe at its last frame to have what the whole had there).
+    pub keyframes_go_on_beyond: bool,
+    /// Whether the rack has keyframes before the cut, so that the property comes from before it (and the second part needs a
+    /// keyframe at its first frame to have what the whole had there).
+    pub keyframes_come_from_before: bool,
+}
 
 /// The result of cutting a clip in two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,8 +108,70 @@ impl Track {
 
     /// Cuts the clip at `timeline_frame` in two, so that the clip's frame at that position becomes
     /// the first frame of the second half. Both halves keep everything else about the clip, and
-    /// together last as long as the clip did, so that nothing else moves.
+    /// together last as long as the clip did, so that nothing else moves. What is in the clip's drawer is cut with it: see
+    /// [`Self::split_at_with_edges`]. (The racks of the clip's own keyframes are given what their own keyframes say at the
+    /// edges: when others of its keyframes are kept elsewhere, the project works out what they all say.)
     pub fn split_at(&mut self, timeline_frame: TimelineFrameIndex) -> Result<SplitOutcome, SplitError> {
+        let edges = self.edges_by_the_own_keyframes_of_the_clip_at(timeline_frame);
+        self.split_at_with_edges(timeline_frame, &edges)
+    }
+
+    /// The values that a cut at `timeline_frame` needs at the edges of the racks of the clip's own keyframes, by what those
+    /// keyframes say by themselves.
+    fn edges_by_the_own_keyframes_of_the_clip_at(&self, timeline_frame: TimelineFrameIndex) -> CutEdges {
+        let Some(placement) = self.placement_covering(timeline_frame) else {
+            return CutEdges::new();
+        };
+        let frames_in = timeline_frame.value() - placement.first_timeline_frame.value();
+        self.racks_cut_by(placement.id, frames_in)
+            .into_iter()
+            .filter_map(|cut| {
+                let curve = placement.drawer.rack(cut.rack)?.curve();
+                let before = cut
+                    .keyframes_go_on_beyond
+                    .then(|| frames_in.checked_sub(1).and_then(|last| curve.value_at(last)))
+                    .flatten();
+                let after = cut
+                    .keyframes_come_from_before
+                    .then(|| curve.value_at(frames_in))
+                    .flatten();
+                Some((cut.rack, (before, after)))
+            })
+            .collect()
+    }
+
+    /// The racks of the keyframes of `clip` itself that are in its drawer and that a cut `frames_in` frames after its first
+    /// frame divides, with what each needs at the edges (see [`CutEdges`]).
+    pub fn racks_cut_by(&self, clip: ClipId, frames_in: u64) -> Vec<RackCut> {
+        let Some(entry) = self.index_of(clip).map(|index| &self.entries[index]) else {
+            return Vec::new();
+        };
+        entry
+            .drawer
+            .racks()
+            .iter()
+            .filter(|rack| rack.target() == AnimationTarget::Clip(clip))
+            .map(|rack| RackCut {
+                rack: rack.id(),
+                property: rack.property(),
+                keyframes_go_on_beyond: rack.keyframes().iter().any(|keyframe| keyframe.frame >= frames_in),
+                keyframes_come_from_before: rack.keyframes().iter().any(|keyframe| keyframe.frame < frames_in),
+            })
+            .collect()
+    }
+
+    /// Cuts the clip at `timeline_frame` in two, as [`Self::split_at`] does, with `edges` for the racks of the clip's own
+    /// keyframes. What is in the clip's drawer is cut with it: each rack gives the keyframes before the cut to the first half
+    /// and the others to the second half (counted from the cut), which gets a rack of its own. The racks of the clip's own
+    /// keyframes become racks of the keyframes of the first half and of the second, and are given the values at the edges that
+    /// `edges` has for them, so that each half has what the clip had at every frame it has; racks of the keyframes of other
+    /// clips are cut without any, because the keyframes they have together are the same as before. A rack that has nothing
+    /// left in a half is not in it.
+    pub fn split_at_with_edges(
+        &mut self,
+        timeline_frame: TimelineFrameIndex,
+        edges: &CutEdges,
+    ) -> Result<SplitOutcome, SplitError> {
         let placement = self
             .placement_covering(timeline_frame)
             .ok_or(SplitError::NoClipThere { timeline_frame })?;
@@ -100,16 +184,42 @@ impl Track {
 
         let second_id = self.take_next_clip_id();
         let first_id = self.entries[index].id;
-        // Each half has what the clip had at every frame it has: see `Animation::split_at`.
-        let (first_animation, second_animation) = self.entries[index].animation.split_at(frames_in);
+        let drawer_before = std::mem::take(&mut self.entries[index].drawer);
+        let mut first_drawer = Drawer::default();
+        let mut second_drawer = Drawer::default();
+        for rack in drawer_before.racks() {
+            let is_of_the_clip_itself = rack.target() == AnimationTarget::Clip(first_id);
+            let (value_before, value_after) = if is_of_the_clip_itself {
+                edges.get(&rack.id()).cloned().unwrap_or((None, None))
+            } else {
+                (None, None)
+            };
+            let target_of_the_second = if is_of_the_clip_itself {
+                AnimationTarget::Clip(second_id)
+            } else {
+                rack.target()
+            };
+            let (first_rack, second_rack) = rack.split_at(
+                frames_in,
+                value_before,
+                value_after,
+                (self.take_next_rack_id(), target_of_the_second),
+            );
+            if !first_rack.is_empty() {
+                first_drawer.push(first_rack);
+            }
+            if !second_rack.is_empty() {
+                second_drawer.push(second_rack);
+            }
+        }
         self.entries[index].clip = first_half;
-        self.entries[index].animation = first_animation;
+        self.entries[index].drawer = first_drawer;
         self.entries.insert(
             index + 1,
             TrackEntry {
                 id: second_id,
                 clip: second_half,
-                animation: second_animation,
+                drawer: second_drawer,
                 gap_before_frames: 0,
             },
         );
@@ -145,7 +255,7 @@ impl Track {
         let changed = match &self.entries[index].clip {
             Clip::Video(media) => Clip::Video(change(media)),
             Clip::Audio(media) => Clip::Audio(change(media)),
-            Clip::Image(_) | Clip::Text(_) => return Err(ClipEditError::NotAMediaClip { clip }),
+            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) => return Err(ClipEditError::NotAMediaClip { clip }),
         };
         self.entries[index].clip = changed;
         self.reposition(&anchors);
@@ -199,27 +309,81 @@ impl Track {
         Ok(())
     }
 
-    /// Makes the clip `clip`, which is a text object or a picture, last `duration_in_frames`
-    /// frames, or as long as there is room for before the next clip if that is less (and at least
-    /// one frame). Nothing else moves. Returns how many frames it lasts now.
-    pub fn set_clip_duration(&mut self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
+    /// How many frames the clip `clip`, which is a text object or a picture, would last if it were asked to last
+    /// `duration_in_frames`: that, or as long as there is room for before the next clip if that is less (and at least one
+    /// frame).
+    pub fn duration_a_clip_would_be_given(&self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
         let start = self.first_timeline_frames[index];
         let longest = self
             .first_timeline_frames
             .get(index + 1)
             .map_or(u64::MAX, |next_start| next_start - start);
+        self.entries[index]
+            .clip
+            .duration_in_frames_it_says()
+            .ok_or(ClipEditError::LastsAsLongAsItsFile { clip })?;
+        Ok(duration_in_frames.clamp(1, longest))
+    }
+
+    /// Makes the clip `clip`, which is a text object or a picture, last `duration_in_frames`
+    /// frames, or as long as there is room for before the next clip if that is less (and at least
+    /// one frame). Nothing else moves. Returns how many frames it lasts now. What is in its drawer is shortened with it: see
+    /// [`Self::set_clip_duration_with_edges`].
+    pub fn set_clip_duration(&mut self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
+        let new_duration = self.duration_a_clip_would_be_given(clip, duration_in_frames)?;
+        let edges = self.edges_by_the_own_keyframes_of_the_clip_shortened_to(clip, new_duration);
+        self.set_clip_duration_with_edges(clip, duration_in_frames, &edges)
+    }
+
+    /// The values that making `clip` `new_duration` frames long needs at the end of the racks of its own keyframes, by what
+    /// those keyframes say by themselves.
+    fn edges_by_the_own_keyframes_of_the_clip_shortened_to(&self, clip: ClipId, new_duration: u64) -> CutEdges {
+        let Some(placement) = self.placement_of(clip) else {
+            return CutEdges::new();
+        };
+        self.racks_cut_by(clip, new_duration)
+            .into_iter()
+            .filter_map(|cut| {
+                let curve = placement.drawer.rack(cut.rack)?.curve();
+                let at_the_end = cut
+                    .keyframes_go_on_beyond
+                    .then(|| new_duration.checked_sub(1).and_then(|last| curve.value_at(last)))
+                    .flatten();
+                Some((cut.rack, (at_the_end, None)))
+            })
+            .collect()
+    }
+
+    /// Makes the clip `clip` last as long as [`Self::set_clip_duration`] does, with `edges` for the racks of its own
+    /// keyframes (only the value at the first part's last frame counts: see [`CutEdges`]). The keyframes in its drawer that
+    /// it has no frame for any more are gone, with the value the rack has at the clip's end kept in the racks that have
+    /// something that goes on beyond it (a clip made longer keeps the keyframes it had, which are all before its old end).
+    pub fn set_clip_duration_with_edges(
+        &mut self,
+        clip: ClipId,
+        duration_in_frames: u64,
+        edges: &CutEdges,
+    ) -> Result<u64, ClipEditError> {
+        let new_duration = self.duration_a_clip_would_be_given(clip, duration_in_frames)?;
+        let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
+        let start = self.first_timeline_frames[index];
         let old_duration = self.entries[index]
             .clip
             .duration_in_frames_it_says()
             .ok_or(ClipEditError::LastsAsLongAsItsFile { clip })?;
-        let new_duration = duration_in_frames.clamp(1, longest);
         if let Some(changed) = self.entries[index].clip.with_duration_in_frames_it_says(new_duration) {
             let old_end = start + old_duration;
             self.entries[index].clip = changed;
-            // Keyframes beyond the new end are gone, with the value the clip has at its end kept (a clip made longer
-            // keeps the keyframes it had, which are all before its old end).
-            self.entries[index].animation = self.entries[index].animation.truncated_to(new_duration);
+            self.entries[index].drawer = self.entries[index].drawer.with_each_rack_changed(|rack| {
+                if rack.target() == AnimationTarget::Clip(clip) {
+                    let value_at_the_end = edges.get(&rack.id()).and_then(|(at_the_end, _)| at_the_end.clone());
+                    rack.truncated_to(new_duration, value_at_the_end)
+                } else {
+                    // (The keyframes of something else that are kept here are shortened by what they say themselves.)
+                    rack.truncated_by_its_own_curve(new_duration)
+                }
+            });
             if let Some(next) = self.entries.get_mut(index + 1) {
                 // The next clip stays where it is, so the gap before it takes up the difference.
                 next.gap_before_frames = next.gap_before_frames + old_end - (start + new_duration);
@@ -245,10 +409,14 @@ impl Track {
         }
     }
 
-    /// Puts `clip` on the track so that it starts at `timeline_frame`. There must be nothing at
-    /// any of the frames it occupies. Nothing else moves.
-    pub fn insert_clip_at(&mut self, timeline_frame: TimelineFrameIndex, clip: Clip) -> Result<ClipId, InsertError> {
-        let needed = clip.timeline_frame_count(self.speed);
+    /// Whether a clip that lasts `needed` frames could be put on the track starting at `timeline_frame`, which it can if
+    /// there is nothing at any of the frames it would occupy. If it can, gives the first frame of the empty stretch of
+    /// timeline that it would be put in (the end of the clip before it, or 0); if it cannot, says why not.
+    pub fn start_of_the_free_stretch_that_has_room_for(
+        &self,
+        timeline_frame: TimelineFrameIndex,
+        needed: u64,
+    ) -> Result<u64, InsertError> {
         let Room::Free {
             from_frame,
             until_frame,
@@ -262,6 +430,14 @@ impl Track {
                 return Err(InsertError::NotEnoughRoom { frames_of_room, needed });
             }
         }
+        Ok(from_frame)
+    }
+
+    /// Puts `clip` on the track so that it starts at `timeline_frame`. There must be nothing at
+    /// any of the frames it occupies. Nothing else moves.
+    pub fn insert_clip_at(&mut self, timeline_frame: TimelineFrameIndex, clip: Clip) -> Result<ClipId, InsertError> {
+        let needed = clip.timeline_frame_count(self.speed);
+        let from_frame = self.start_of_the_free_stretch_that_has_room_for(timeline_frame, needed)?;
 
         let index = self
             .first_timeline_frames
@@ -278,7 +454,7 @@ impl Track {
             TrackEntry {
                 id,
                 clip,
-                animation: Animation::default(),
+                drawer: Drawer::default(),
                 gap_before_frames: new_start - from_frame,
             },
         );

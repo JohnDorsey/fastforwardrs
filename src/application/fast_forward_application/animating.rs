@@ -11,20 +11,9 @@ use std::time::Instant;
 use super::FastForwardApplication;
 use crate::application::commands::Command;
 use crate::project::{
-    Angle, AnimationTarget, ClipId, Gain, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, Placement,
-    PropertyId, PropertyValue, TextObject, TimelineFrameIndex, TrackId, placement_value, text_value,
+    AnimationTarget, ClipId, Gain, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, Placement, PropertyId,
+    PropertyValue, TextObject, TimelineFrameIndex, TrackId, placement_value, text_value,
 };
-
-/// Whether `wanted` is already what a property is: `current`. (A turn is the same as itself and a whole number of turns more
-/// or less: that is how far a clip that has turned round more than half a turn by keyframes is shown to be turned.)
-fn is_already(property: PropertyId, wanted: &PropertyValue, current: Option<&PropertyValue>) -> bool {
-    match (property, wanted, current) {
-        (PropertyId::Rotation, PropertyValue::Number(wanted), Some(PropertyValue::Number(current))) => {
-            Angle::from_degrees(*wanted) == Angle::from_degrees(*current)
-        }
-        _ => Some(wanted) == current,
-    }
-}
 
 impl FastForwardApplication {
     /// The frame of the timeline the playhead is at.
@@ -66,7 +55,10 @@ impl FastForwardApplication {
         now: Instant,
     ) {
         let frame = self.frame_at_the_playhead(now);
-        let _ = self.project.set_property_at(target, property, value, frame);
+        // (If that made a keyframe, the drawer it is in opens, so that it is seen where it is.)
+        if let Ok(Some(made)) = self.project.set_property_at(target, property, value, frame) {
+            self.timeline_view.open_the_drawer_of(made.owner);
+        }
     }
 
     /// Gives the clip `clip` the loudness `gain`, at the playhead.
@@ -110,11 +102,7 @@ impl FastForwardApplication {
             let Some(wanted) = placement_value(&placement, property) else {
                 continue;
             };
-            if !is_already(
-                property,
-                &wanted,
-                self.project.property_value_at(target, property, frame).as_ref(),
-            ) {
+            if self.project.property_value_at(target, property, frame).as_ref() != Some(&wanted) {
                 self.change_a_property_at_the_playhead(target, property, wanted, now);
             }
         }
@@ -135,11 +123,7 @@ impl FastForwardApplication {
             let Some(wanted) = text_value(&object, property) else {
                 continue;
             };
-            if !is_already(
-                property,
-                &wanted,
-                self.project.property_value_at(target, property, frame).as_ref(),
-            ) {
+            if self.project.property_value_at(target, property, frame).as_ref() != Some(&wanted) {
                 self.change_a_property_at_the_playhead(target, property, wanted, now);
             }
         }

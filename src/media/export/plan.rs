@@ -277,7 +277,9 @@ pub(super) fn place_to_export(placement: Placement, picture_size: (u32, u32)) ->
         top_in_pixels: pixels.top,
         width_in_pixels: pixels.width,
         height_in_pixels: pixels.height,
-        turn_in_degrees: placement.rotation.degrees(),
+        // (A turn of more than half a turn is the angle it looks like, and a whole number of turns is none at all: nothing
+        // is turned for nothing.)
+        turn_in_degrees: placement.rotation.within_a_turn().degrees(),
     }
 }
 

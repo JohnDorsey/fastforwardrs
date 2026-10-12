@@ -40,10 +40,7 @@ fn window_with_a_picture_selected() -> (Window, ClipId) {
     assert!(outcome.created_track, "the video is on the only track");
     let picture = outcome.clip.expect("a picture makes a clip");
     let mut window = Window::showing(project);
-    window.do_this(Command::Select {
-        clips: vec![picture],
-        change: SelectionChange::Replace,
-    });
+    window.do_this(Command::select_clips(vec![picture], SelectionChange::Replace));
     (window, picture)
 }
 

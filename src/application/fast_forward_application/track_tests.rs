@@ -324,10 +324,10 @@ fn what_was_selected_on_a_deleted_track_is_not_selected_any_more_and_the_playhea
     // The sound is 5 seconds, the video 10: the playhead at the end of the video is past what is left.
     let sound = window.clip(0, 0);
     let video = window.clip(1, 0);
-    window.do_this(crate::application::commands::Command::Select {
-        clips: vec![sound, video],
-        change: crate::application::selection::SelectionChange::Replace,
-    });
+    window.do_this(crate::application::commands::Command::select_clips(
+        vec![sound, video],
+        crate::application::selection::SelectionChange::Replace,
+    ));
     assert_eq!(window.application().selected_clips().len(), 2);
 
     right_click_the_title_box_of_track(&mut window, 0);

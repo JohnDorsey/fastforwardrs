@@ -11,20 +11,11 @@ use super::controls::{gain_slider, labelled_row, speed_slider};
 use super::{PropertiesContent, kind_box, placement_controls, text_properties};
 use crate::application::commands::Command;
 use crate::application::duration_control::shown_for;
+use crate::application::naming::kind_name;
 use crate::application::timeline_panel::SourceLook;
 use crate::project::{
     AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, PropertyId, SpeedFactor,
 };
-
-/// What the box of a clip is headed with: the kind of thing it is.
-pub(super) fn kind_name(kind: ClipKind) -> &'static str {
-    match kind {
-        ClipKind::Video => "Video clip",
-        ClipKind::Audio => "Sound clip",
-        ClipKind::Image => "Picture clip",
-        ClipKind::Text => "Text object",
-    }
-}
 
 /// What the row of how big a video or a picture is is called.
 const SIZE_LABEL: &str = "Size";
@@ -40,6 +31,8 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         }
         Clip::Image(image) => show_a_picture(ui, content, clip, image, commands),
         Clip::Text(text) => text_properties::show(ui, content, clip, text, commands),
+        // (A crate has nothing of its own to change: what it holds is in its racks, which are shown in the timeline.)
+        Clip::Crate(_) => {}
     }
 }
 

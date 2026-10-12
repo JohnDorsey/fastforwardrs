@@ -5,10 +5,12 @@ use egui::{Pos2, Rect};
 
 use super::drawers::Drawers;
 use super::flash::CutFlashes;
+use super::racks::{DropTarget, RackLabel};
 use super::track_reordering::{RowMotion, TrackReorder};
 use crate::application::clip_moving::StartTimeMemory;
+use crate::application::selection::SelectionItem;
 use crate::application::timeline_geometry::TimelineGeometry;
-use crate::project::{ClipId, TimelineFrameIndex, TrackId};
+use crate::project::{ClipId, KeyframeId, RackId, TimelineFrameIndex, TrackId};
 
 /// Where a click on an empty part of a strip happened, for the menu that puts something new there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,18 +32,41 @@ pub(super) struct TrackResize {
     pub(super) rows_area_height: f32,
 }
 
-/// Clips that are being dragged along their tracks.
+/// What was taken hold of to be dragged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Grabbed {
+    Clip(ClipId),
+    Keyframe(KeyframeId),
+}
+
+/// Clips and keyframes that are being dragged along the timeline (the clips along their tracks and to the other tracks).
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct ClipDrag {
-    /// All the clips that move: the selected clips if the one that was taken hold of was one of them,
-    /// and otherwise that clip alone.
-    pub(super) moving: Vec<ClipId>,
-    /// The clip that was taken hold of, whose place the pointer is kept at.
-    pub(super) grabbed: ClipId,
-    /// The frame that was under the pointer when the clip was taken hold of.
+pub(super) struct ItemDrag {
+    /// All the clips that move: the selected clips if the one that was taken hold of was one of them (or if it was a
+    /// keyframe that was selected with them), and otherwise the clip that was taken hold of alone.
+    pub(super) clips: Vec<ClipId>,
+    /// All the keyframes that move on their own, likewise. (Not those in the drawers of the clips that move: they go with the
+    /// clips.)
+    pub(super) keyframes: Vec<KeyframeId>,
+    /// What was taken hold of, whose place the pointer is kept at.
+    pub(super) grabbed: Grabbed,
+    /// The frame that was under the pointer when it was taken hold of.
     pub(super) pointer_frame_at_the_start: u64,
-    /// Where the grabbed clip was then, which it is held to when it is on another track (see [`StartTimeMemory`]).
-    pub(super) start_time: StartTimeMemory,
+    /// The frame of the timeline that the grabbed clip started at, or the grabbed keyframe was at, then.
+    pub(super) grabbed_frame_at_the_start: u64,
+    /// Where the grabbed clip was then, which it is held to when it is on another track (see [`StartTimeMemory`]). `None`
+    /// when what was taken hold of is a keyframe.
+    pub(super) start_time: Option<StartTimeMemory>,
+}
+
+/// A rack of keyframes that is being dragged, to another drawer or onto a track.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RackDrag {
+    pub(super) rack: RackId,
+    /// The frame that was under the pointer when the rack was taken hold of.
+    pub(super) pointer_frame_at_the_start: u64,
+    /// The frame of the timeline that the first keyframe of the rack was at then.
+    pub(super) first_keyframe_frame_at_the_start: u64,
 }
 
 /// A rectangle being drawn round clips to select them, by dragging from an empty place.
@@ -49,8 +74,8 @@ pub(super) struct ClipDrag {
 pub(super) struct RubberBand {
     /// Where the pointer was when it was pressed: one corner of the rectangle, the other being where it is now.
     pub(super) origin: Pos2,
-    /// The clips that were selected then and stay selected (when Ctrl was held), to which those in the rectangle are added.
-    pub(super) kept: Vec<ClipId>,
+    /// What was selected then and stays selected (when Ctrl was held), to which what is in the rectangle is added.
+    pub(super) kept: Vec<SelectionItem>,
 }
 
 /// What the timeline remembers between frames of the window.
@@ -78,8 +103,8 @@ pub struct TimelineViewState {
     pub(super) track_reorder: Option<TrackReorder>,
     /// Where the rows are shown while tracks are being moved about.
     pub(super) row_motion: RowMotion,
-    /// The clips that are being dragged along their tracks, if there are some.
-    pub(super) clip_drag: Option<ClipDrag>,
+    /// The clips and keyframes that are being dragged along the timeline, if there are some.
+    pub(super) item_drag: Option<ItemDrag>,
     /// The rectangle that is being drawn round clips, if there is one.
     pub(super) rubber_band: Option<RubberBand>,
     /// Where the ruler and the strips were in the last frame, so that the mouse wheel scrolls
@@ -92,14 +117,33 @@ pub struct TimelineViewState {
     pub(super) new_menu_target: Option<NewMenuTarget>,
     /// The flashes of light at the cuts that were just made.
     pub(super) cut_flashes: CutFlashes,
-    /// Which drawers on clips are open.
+    /// Which drawers on clips and tracks are open.
     pub(super) drawers: Drawers,
+    /// The labels of the racks of keyframes that the pointer is over, which are drawn over everything at the end of the
+    /// frame. (Made again in every frame.)
+    pub(super) rack_labels: Vec<RackLabel>,
+    /// The rack of keyframes that is being dragged to another drawer, if there is one.
+    pub(super) rack_drag: Option<RackDrag>,
+    /// The drawers and crates that a rack can be put in, as they were drawn in this frame, the one drawn last being the one on
+    /// top. (Made again in every frame.)
+    pub(super) drop_targets: Vec<DropTarget>,
+    /// What is said by the pointer in this frame, if anything is: why a rack that is dragged cannot go where it is.
+    pub(super) pointer_message: Option<String>,
+    /// Where each keyframe that can be taken hold of is on the screen, as it was drawn in this frame, which is what the
+    /// rectangle drawn round things to select them goes round. (Made again in every frame.)
+    pub(super) keyframe_grips: Vec<(KeyframeId, Rect)>,
 }
 
 impl TimelineViewState {
     /// Forgets the scroll position and the zoom (when a different project is loaded).
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// Opens the drawer of the clip or the track `owner`, if it is not open, so that what was put in it is seen: it slides
+    /// open in the next frames of the window.
+    pub fn open_the_drawer_of(&mut self, owner: crate::project::AnimationTarget) {
+        self.drawers.open_it(owner);
     }
 
     /// Makes a flash of light at the cut that was just made in the clip on `track` at `frame`, which shows

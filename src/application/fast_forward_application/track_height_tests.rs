@@ -5,7 +5,7 @@ use egui::{CursorIcon, Key, Modifiers, PointerButton, Pos2, vec2};
 use super::test_window::{Window, project_of, project_with_a_video_and_a_sound};
 use crate::application::commands::Command;
 use crate::application::theme;
-use crate::application::timeline_panel::HEIGHT_THE_TITLE_NEEDS;
+use crate::application::timeline_panel::HEIGHT_THE_BOX_NEEDS;
 use crate::project::TrackHeight;
 
 /// A window with a sound on the track in front and a video on the one behind it.
@@ -41,10 +41,13 @@ fn set_height(window: &mut Window, position: usize, points: f32) {
 // --- the limits ---
 
 #[test]
-fn the_least_a_track_can_be_is_just_taller_than_what_its_title_needs_and_the_most_is_half_as_much_again() {
-    let needs = HEIGHT_THE_TITLE_NEEDS;
+fn the_least_a_track_can_be_is_just_taller_than_what_its_dots_and_title_need_and_the_most_is_half_as_much_again() {
+    let needs = HEIGHT_THE_BOX_NEEDS;
     let least = TrackHeight::SMALLEST_IN_POINTS;
-    assert!(least > needs, "the title fits: {least} is more than {needs}");
+    assert!(
+        least > needs,
+        "the dots and the title fit: {least} is more than {needs}"
+    );
     assert!(
         least <= needs + 4.0,
         "and only just: {least} is not within 4 points of {needs}"
@@ -227,11 +230,11 @@ fn rows_of_other_heights_keep_their_clips_where_they_are_along_the_timeline() {
 fn a_shorter_track_makes_the_whole_timeline_shorter() {
     let mut window = Window::showing(project_of(300));
     let ruler_before = window.rectangle_of("Ruler").top();
-    set_height(&mut window, 0, 40.0);
+    set_height(&mut window, 0, 50.0);
     // The timeline is at the bottom of the window and everything above it makes way.
     assert_close(
         window.rectangle_of("Ruler").top(),
-        ruler_before + 64.0,
+        ruler_before + 54.0,
         "the ruler comes down as the row gets shorter",
     );
 }

@@ -601,27 +601,47 @@ fn write_screenshots_of_drawers_on_clips() {
     journey.import(&video);
     journey.cut_at_frame(40);
     journey.cut_at_frame(80);
+    // A track in front of the video, with a text object on it from frame 20.
     journey.add_a_track();
+    journey.make_a_text_object_at(0, 20);
     journey.harness.run_steps(40);
     journey.move_playhead_to_frame(60);
     journey.wait_until_idle();
-    save(&mut journey, &folder, "70_the_buttons_of_the_drawers_on_three_clips");
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(
+        &mut journey,
+        &folder,
+        "70_no_buttons_for_the_drawers_while_nothing_is_hovered",
+    );
 
-    // Open the drawer of the middle clip: halfway, and then all the way.
-    let middle = journey.application().project().tracks()[1]
-        .placement_at_index(1)
+    // The pointer over a clip of the video: its button is there, on the bottom edge.
+    let video_strip = journey.strip_of_track(1);
+    journey.move_pointer_to(egui::pos2(video_strip.left() + 200.0, video_strip.top() + 20.0));
+    save_what_is_drawn(&mut journey, &folder, "71_the_button_of_a_clip_that_is_hovered");
+
+    // Open the drawer of the text object, which is on the track in front: it opens over the video under it.
+    let text = journey.application().project().tracks()[0]
+        .placement_at_index(0)
         .unwrap()
         .id;
-    let button = journey.rectangle_of(&format!("Drawer of clip {} of track 0", middle.number()));
+    let front_title = journey.application().project().tracks()[0].title().to_owned();
+    journey.move_pointer_to(journey.strip_of_track(0).center());
+    let button = journey.rectangle_of(&format!("Drawer of clip {} of {front_title}", text.number()));
     journey.click(button.center());
     journey.harness.run_steps(0);
+    save_what_is_drawn(&mut journey, &folder, "72_the_drawer_of_the_text_has_begun_to_open");
+    journey.harness.run_steps(40);
     save_what_is_drawn(
         &mut journey,
         &folder,
-        "71_the_drawer_of_the_middle_clip_has_begun_to_open",
+        "73_the_drawer_of_the_text_is_open_over_the_video",
     );
+
+    // The drawer of the track in front, which is opened by the button on the bottom edge of its box.
+    let button = journey.rectangle_of(&format!("Drawer of {front_title}"));
+    journey.click(button.center());
     journey.harness.run_steps(40);
-    save_what_is_drawn(&mut journey, &folder, "72_the_drawer_of_the_middle_clip_is_open");
+    save_what_is_drawn(&mut journey, &folder, "74_the_drawer_of_the_track_is_open_too");
 
     // A track as short as it can be, with the same clips.
     let boundary = journey.boundary_under_the_track(1);
@@ -631,7 +651,185 @@ fn write_screenshots_of_drawers_on_clips() {
         boundary - egui::vec2(0.0, 150.0),
     );
     journey.harness.run_steps(40);
-    save_what_is_drawn(&mut journey, &folder, "73_the_same_at_the_least_height_of_a_track");
+    save_what_is_drawn(&mut journey, &folder, "75_the_same_at_the_least_height_of_a_track");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_racks_of_keyframes_in_drawers() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.select_the_clip_at(10);
+    journey.move_playhead_to_frame(30);
+    journey.wait_until_idle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(&mut journey, &folder, "90_a_video_selected_with_no_keyframes");
+
+    // The stopwatch of the gain: a keyframe under the playhead, and the drawer of the clip opens with a rack for it.
+    let stopwatch = journey.rectangle_of("Make a keyframe of gain here");
+    journey.click(stopwatch.center());
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "91_the_first_keyframe_in_a_new_rack");
+
+    // More keyframes of the gain, and of the position and the size: a rack for each.
+    journey.move_playhead_to_frame(90);
+    journey.set_slider("Gain", -12.0);
+    journey.move_playhead_to_frame(150);
+    journey.set_slider("Gain", -3.0);
+    for property in ["position", "size", "rotation"] {
+        let stopwatch = journey.rectangle_of(&format!("Make a keyframe of {property} here"));
+        journey.click(stopwatch.center());
+    }
+    journey.move_playhead_to_frame(220);
+    for property in ["position", "rotation"] {
+        let stopwatch = journey.rectangle_of(&format!("Make a keyframe of {property} here"));
+        journey.click(stopwatch.center());
+    }
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "92_four_racks_in_the_drawer_of_a_video");
+
+    // The pointer over a rack: the label to the left of it. And over a keyframe.
+    let strip = journey.strip_of_track(0);
+    let second_rack = egui::pos2(strip.left() + 120.0, strip.bottom() + 8.0 + 20.0 + 8.0);
+    journey.move_pointer_to(second_rack);
+    save_what_is_drawn(&mut journey, &folder, "93_the_label_of_a_rack_the_pointer_is_over");
+
+    // A keyframe of the track in front, which opens the drawer of the track.
+    journey.select_the_track_at(0);
+    journey.move_playhead_to_frame(60);
+    let stopwatch = journey.rectangle_of("Make a keyframe of gain here");
+    journey.click(stopwatch.center());
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "94_the_drawer_of_the_track_has_a_rack_too");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_racks_being_dragged_and_keyframe_crates() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    // A track in front with a text object on it from frame 10 to frame 100.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 10);
+    journey.harness.run_steps(40);
+    // Keyframes of the video: its gain at the start of the video, 3 seconds in and 5 seconds in.
+    let on_the_video = journey.point_on_the_strip_at_frame(1, 100);
+    journey.click(on_the_video);
+    for frame in [30, 90, 150] {
+        journey.move_playhead_to_frame(frame);
+        let stopwatch = journey.rectangle_of("Make a keyframe of gain here");
+        journey.click(stopwatch.center());
+    }
+    for frame in [60, 120] {
+        journey.move_playhead_to_frame(frame);
+        let stopwatch = journey.rectangle_of("Make a keyframe of position here");
+        journey.click(stopwatch.center());
+    }
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "95_two_racks_in_the_drawer_of_the_video");
+
+    // Taking hold of the position rack and going up with it, over the empty stretch of the front track: a crate fills it.
+    let racks_strip = journey.strip_of_track(1);
+    let second_rack = egui::pos2(
+        racks_strip.left() + 300.0,
+        racks_strip.bottom() + 8.0 + 16.0 + 4.0 + 8.0,
+    );
+    let on_the_front_track = egui::pos2(racks_strip.left() + 700.0, journey.strip_of_track(0).center().y);
+    journey.drag_and_hold(egui::PointerButton::Primary, second_rack, on_the_front_track);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "96_a_rack_over_an_empty_stretch_of_a_track_is_in_a_crate",
+    );
+    journey.release(egui::PointerButton::Primary, on_the_front_track);
+    journey.harness.run_steps(20);
+    save_what_is_drawn(&mut journey, &folder, "97_the_crate_with_the_rack_in_it");
+
+    // Over the room of the text object, which has no drawer open: the rack goes nowhere. And then the gain rack, which has
+    // keyframes two and a half seconds apart, over a crate that is shorter than that.
+    let crate_rack = egui::pos2(racks_strip.left() + 700.0, journey.strip_of_track(0).center().y);
+    journey.move_pointer_to(crate_rack);
+    save_what_is_drawn(&mut journey, &folder, "98_the_label_of_the_rack_in_the_crate");
+
+    // The project, for opening in the real program.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("demo_racks_and_a_crate.fastforwardrs.json"));
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_menus_that_copy_clips_and_tracks() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.cut_at_frame(60);
+    // A track in front with a text object on it, from frame 20 to frame 80 or so, and a keyframe in the drawer of it.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 20);
+    journey.harness.run_steps(40);
+    journey.move_playhead_to_frame(40);
+    let stopwatch = journey.rectangle_of("Make a keyframe of rotation here");
+    journey.click(stopwatch.center());
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+
+    // The menu of the text object: a copy to the right or to the left, and deleting it.
+    let on_the_text = journey.point_on_the_strip_at_frame(0, 50);
+    journey.right_click(on_the_text);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "99_the_menu_of_a_clip");
+
+    // A copy to the right: the copy has a copy of the keyframe in its drawer, and is selected.
+    journey.harness.get_by_label("Duplicate to the right").click();
+    journey.settle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "100_a_copy_to_the_right_selected");
+
+    // Two clips selected, the copy (which was selected by being made) and the clip it is a copy of: the menu says how many.
+    let on_the_text = journey.point_on_the_strip_at_frame(0, 50);
+    journey.click_with_control(on_the_text);
+    journey.right_click(on_the_text);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "101_the_menu_when_two_clips_are_selected");
+
+    // The menu of the box of a track, and the track copied below.
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    let title = journey.application().project().tracks()[0].title().to_owned();
+    let field = journey
+        .harness
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|node| node.value().as_deref() == Some(title.as_str()))
+        .expect("the title of the track is shown")
+        .rect();
+    journey.right_click(egui::pos2(field.left() - 4.0, field.center().y));
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "102_the_menu_of_the_box_of_a_track");
+    journey.harness.get_by_label("Duplicate below").click();
+    journey.settle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "103_the_track_copied_below_and_selected");
+
+    // The project, for opening in the real program.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("demo_copies.fastforwardrs.json"));
 }
 
 #[test]

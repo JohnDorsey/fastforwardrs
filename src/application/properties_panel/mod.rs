@@ -16,6 +16,7 @@ mod animatable;
 mod clip_properties;
 mod controls;
 mod keyframe_buttons;
+mod keyframe_properties;
 mod kind_box;
 mod placement_controls;
 mod selection_list;
@@ -63,6 +64,7 @@ pub fn show(ui: &mut Ui, content: &PropertiesContent<'_>, commands: &mut Vec<Com
             None => selection_list::show(ui, content, commands),
             Some(SelectionItem::Clip(clip)) => clip_properties::show(ui, content, clip, commands),
             Some(SelectionItem::Track(track)) => track_properties::show(ui, content, track, commands),
+            Some(SelectionItem::Keyframe(keyframe)) => keyframe_properties::show(ui, content, keyframe),
         });
     });
 }

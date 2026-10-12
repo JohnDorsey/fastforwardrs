@@ -110,7 +110,9 @@ impl PropertyId {
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self {
             Self::Gain | Self::Muted => matches!(kind, ClipKind::Video | ClipKind::Audio),
-            Self::Position | Self::Size | Self::Rotation => !matches!(kind, ClipKind::Audio),
+            Self::Position | Self::Size | Self::Rotation => {
+                matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text)
+            }
             Self::Text | Self::FontFamily | Self::FontSize | Self::Colour => kind == ClipKind::Text,
         }
     }

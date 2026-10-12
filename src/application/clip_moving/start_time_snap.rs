@@ -47,6 +47,7 @@ impl StartTimeMemory {
     }
 
     /// The first frame of the clip when it was taken hold of.
+    #[cfg(test)]
     pub fn start(&self) -> u64 {
         self.start
     }

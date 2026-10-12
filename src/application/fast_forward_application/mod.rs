@@ -30,11 +30,17 @@ mod dialog_flow;
 #[cfg(test)]
 mod drawer_tests;
 mod drawing;
+#[cfg(test)]
+mod duplicate_tests;
 mod export_flow;
 #[cfg(test)]
 mod file_question_tests;
 #[cfg(test)]
+mod grip_dot_tests;
+#[cfg(test)]
 mod interaction_tests;
+#[cfg(test)]
+mod keyframe_drag_tests;
 #[cfg(test)]
 mod keyframe_panel_tests;
 #[cfg(test)]
@@ -47,6 +53,12 @@ mod programmatic_interface;
 mod project_file_flow;
 #[cfg(test)]
 mod properties_panel_tests;
+#[cfg(test)]
+mod rack_command_tests;
+#[cfg(test)]
+mod rack_drag_tests;
+#[cfg(test)]
+mod rack_tests;
 #[cfg(test)]
 mod selection_tests;
 mod settings_flow;
@@ -491,6 +503,7 @@ impl FastForwardApplication {
                 is_playing: frame_state.is_playing,
                 timeline_is_empty: frame_state.total_frames == 0,
                 selected_clips: self.selection.to_vec(),
+                selected_keyframes: self.selection.keyframes_to_vec(),
                 selected_clips_at_the_current_frame,
                 can_undo: self.history.can_undo(),
                 can_redo: self.history.can_redo(),

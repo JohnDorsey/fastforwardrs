@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, FrameRate, Project, PropertyId, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    Animation, AnimationTarget, FrameRate, Project, PropertyId, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -60,11 +60,9 @@ pub struct Layer {
     /// object this is where the object says it is, and for a video or a picture where it was put or, if it was not,
     /// where it is fitted.) Where it is at a frame is [`Self::placement_at`].
     pub placement: Placement,
-    /// The keyframes of what is seen of the clip: where it is, and for a text object how it looks. Their frames are
-    /// counted from [`Self::clip_first_timeline_frame`].
+    /// The keyframes of what is seen of the clip, from all the racks that animate it wherever they are kept: where it is, and
+    /// for a text object how it looks. Their frames are frames of the timeline.
     pub animation: Animation,
-    /// The frame of the timeline that the clip starts at, from which the frames of [`Self::animation`] are counted.
-    pub clip_first_timeline_frame: u64,
 }
 
 impl Layer {
@@ -74,11 +72,6 @@ impl Layer {
             LayerContent::Video(video) => Some(video),
             LayerContent::Image { .. } | LayerContent::Text(_) => None,
         }
-    }
-
-    /// How many frames into the clip `timeline_frame` is: what the frames of [`Self::animation`] are counted in.
-    fn frames_into_the_clip(&self, timeline_frame: TimelineFrameIndex) -> u64 {
-        timeline_frame.value().saturating_sub(self.clip_first_timeline_frame)
     }
 
     /// Whether the layer has keyframes for where it is or how it looks, so that it is not the same at every frame.
@@ -99,7 +92,6 @@ impl Layer {
             },
             placement: self.placement_at(timeline_frame),
             animation: Animation::default(),
-            clip_first_timeline_frame: self.clip_first_timeline_frame,
         }
     }
 
@@ -113,8 +105,7 @@ impl Layer {
     /// Where the layer is on the picture at `timeline_frame` (a frame it is seen at): where [`Self::placement`] says, changed
     /// as the keyframes say.
     pub fn placement_at(&self, timeline_frame: TimelineFrameIndex) -> Placement {
-        self.animation
-            .placement_at(self.placement, self.frames_into_the_clip(timeline_frame))
+        self.animation.placement_at(self.placement, timeline_frame.value())
     }
 
     /// The text object the layer is at `timeline_frame`: what the object says, changed as the keyframes say. `None` if the
@@ -126,10 +117,7 @@ impl Layer {
         Some(if self.animation.is_empty() {
             Cow::Borrowed(object)
         } else {
-            Cow::Owned(
-                self.animation
-                    .text_object_at(object, self.frames_into_the_clip(timeline_frame)),
-            )
+            Cow::Owned(self.animation.text_object_at(object, timeline_frame.value()))
         })
     }
 
@@ -282,7 +270,6 @@ impl Candidate<'_> {
             content,
             placement: self.placement,
             animation: self.animation.clone(),
-            clip_first_timeline_frame: self.first_timeline_frame,
         }
     }
 
@@ -312,6 +299,7 @@ impl Candidate<'_> {
 /// has no pictures, as a video has none where its file has no more.
 pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier) -> bool) -> PicturePlan {
     let picture_size = project.picture_size();
+    let animations = project.resolved_animations();
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
         for placement in track.placements() {
@@ -323,7 +311,8 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 // A picture has no pictures to run out of: it is there or its file is not.
                 Clip::Image(image) => u64::from(is_usable(image.source())),
                 Clip::Text(_) => 0,
-                Clip::Audio(_) => continue,
+                // (Nothing is seen of a sound, or of a crate, which holds nothing but keyframes.)
+                Clip::Audio(_) | Clip::Crate(_) => continue,
             };
             let where_it_is = project
                 .placement_on_the_picture(placement.clip)
@@ -338,7 +327,9 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 content: placement.clip,
                 source_frame_count,
                 placement: where_it_is,
-                animation: placement.animation.restricted_to(PropertyId::is_seen),
+                animation: animations
+                    .of(AnimationTarget::Clip(placement.id))
+                    .restricted_to(PropertyId::is_seen),
             });
         }
     }
@@ -454,7 +445,7 @@ fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<Pic
                     candidate.track_position,
                     candidate.layer(LayerContent::Text(text.object.clone())),
                 )),
-                Clip::Audio(_) => {}
+                Clip::Audio(_) | Clip::Crate(_) => {}
             }
         }
 
@@ -513,8 +504,8 @@ fn layers_carried_on(previous: &PictureSection, section: &PictureSection) -> Opt
                 return None;
             }
             debug_assert_eq!(
-                (before.placement, &before.animation, before.clip_first_timeline_frame),
-                (after.placement, &after.animation, after.clip_first_timeline_frame),
+                (before.placement, &before.animation),
+                (after.placement, &after.animation),
                 "a clip is in one place, with the same keyframes, for as long as it lasts"
             );
             match (&before.content, &after.content) {

@@ -1224,7 +1224,7 @@ fn a_video_animated_with_the_stopwatch_and_the_panel_is_saved_with_its_keyframes
             .project()
             .placement_of(clip)
             .unwrap()
-            .animation
+            .own_animation()
             .keyframes_of(property)
             .map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame).collect())
             .unwrap_or_default()
@@ -1247,21 +1247,33 @@ fn a_video_animated_with_the_stopwatch_and_the_panel_is_saved_with_its_keyframes
     let project_path = scratch.path().join("animated.fastforwardrs.json");
     journey.application_mut().save_project_to(project_path.clone());
     let (text_of_file, saved) = read_project_file_as_json(&project_path);
-    assert_eq!(saved["file_format_version"], 6, "{text_of_file}");
-    assert_eq!(
-        saved["tracks"][0]["clips"][0]["animation"]["position"][1]["frame"], 30,
-        "{text_of_file}"
-    );
-    assert_eq!(
-        saved["tracks"][0]["clips"][0]["animation"]["gain"][1]["value"], -20.0,
-        "{text_of_file}"
-    );
+    assert_eq!(saved["file_format_version"], 7, "{text_of_file}");
+    // (The keyframes are in racks, in the drawer of the clip.)
+    let rack_of = |property: &str| {
+        saved["tracks"][0]["clips"][0]["drawer"]
+            .as_array()
+            .and_then(|racks| racks.iter().find(|rack| rack["property"] == property))
+            .cloned()
+            .unwrap_or_else(|| panic!("no rack of {property}: {text_of_file}"))
+    };
+    assert_eq!(rack_of("position")["keyframes"][1]["frame"], 30, "{text_of_file}");
+    assert_eq!(rack_of("gain")["keyframes"][1]["value"], -20.0, "{text_of_file}");
     let mut fresh = Journey::start(&toolchain);
     fresh.application_mut().load_project_from(project_path);
     fresh.wait_until_idle();
     assert_eq!(
-        fresh.application().project().placement_of(clip).unwrap().animation,
-        journey.application().project().placement_of(clip).unwrap().animation,
+        fresh
+            .application()
+            .project()
+            .placement_of(clip)
+            .unwrap()
+            .own_animation(),
+        journey
+            .application()
+            .project()
+            .placement_of(clip)
+            .unwrap()
+            .own_animation(),
         "the keyframes come back exactly"
     );
 
@@ -1294,6 +1306,193 @@ fn a_video_animated_with_the_stopwatch_and_the_panel_is_saved_with_its_keyframes
         (ratio / expected - 1.0).abs() < 0.08,
         "{ratio} times as loud, not {expected}"
     );
+}
+
+/// The words that name a rack on the screen, as the screen reader (and the tests) are told them.
+fn name_of_the_rack(rack: fastforwardrs::project::RackId) -> String {
+    format!("Rack {} of {}", rack.number(), rack.origin())
+}
+
+#[test]
+fn keyframes_kept_in_the_drawer_of_a_text_lower_the_video_wherever_the_text_or_a_copy_of_it_is() {
+    use fastforwardrs::project::{AnimationTarget, PropertyId};
+
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 20 seconds with a 440 hertz tone
+    let scratch = scratch_directory();
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    // Keep five seconds of the video (150 frames), so that all of it can be seen on the timeline.
+    journey.cut_at_frame(150);
+    let rest = journey.point_on_the_track_at_frame(151);
+    journey.click(rest);
+    journey.press_key(Key::Delete);
+    assert_eq!(journey.clips(), vec![(0, 150, 1)]);
+
+    // A text object in front of it, from frame 5, which lasts three seconds.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 5);
+    journey.harness.run_steps(40);
+    let (text, video_clip) = {
+        let project = journey.application().project();
+        (
+            project.tracks()[0].entries()[0].id(),
+            project.tracks()[1].entries()[0].id(),
+        )
+    };
+    assert_eq!(
+        journey.application().project().placement_of(text).map(|placement| (
+            placement.first_timeline_frame.value(),
+            placement.end_timeline_frame.value()
+        )),
+        Some((5, 95))
+    );
+
+    // The video's loudness, as the keyframes of the video: 0 decibels, then -20 from frame 25 to 55, then 0 again at 65.
+    // (They are in a rack in the drawer of the video, which the stopwatch opens.)
+    let on_the_video = journey.point_on_the_strip_at_frame(1, 10);
+    journey.click(on_the_video);
+    journey.move_playhead_to_frame(15);
+    make_a_keyframe_with_the_stopwatch(&mut journey, "gain");
+    journey.move_playhead_to_frame(25);
+    journey.set_slider("Gain", -20.0);
+    journey.move_playhead_to_frame(55);
+    make_a_keyframe_with_the_stopwatch(&mut journey, "gain");
+    journey.move_playhead_to_frame(65);
+    journey.set_slider("Gain", 0.0);
+    journey.harness.run_steps(40);
+    let loudness_of_the_video = AnimationTarget::Clip(video_clip);
+    let frames_of_the_loudness = |journey: &Journey| -> Vec<u64> {
+        journey
+            .application()
+            .project()
+            .keyframes_of(loudness_of_the_video, PropertyId::Gain)
+            .iter()
+            .map(|keyframe| keyframe.frame)
+            .collect()
+    };
+    assert_eq!(frames_of_the_loudness(&journey), vec![15, 25, 55, 65]);
+    let rack = {
+        let project = journey.application().project();
+        let racks = project
+            .drawer_of(loudness_of_the_video)
+            .expect("the video has a drawer")
+            .racks();
+        assert_eq!(racks.len(), 1, "one rack, of the loudness, in the drawer of the video");
+        racks[0].id()
+    };
+
+    // The rack is taken out of the drawer of the video and put in that of the text (which is opened with its button): they
+    // are the keyframes of the video that go wherever the text goes.
+    let title_of_the_front_track = journey.application().project().tracks()[0].title().to_owned();
+    let button = journey.rectangle_of(&format!(
+        "Drawer of clip {} of {title_of_the_front_track}",
+        text.number()
+    ));
+    journey.move_pointer_to(journey.strip_of_track(0).center());
+    journey.click(button.center());
+    journey.harness.run_steps(40);
+    let on_the_rack = journey.rectangle_of(&name_of_the_rack(rack));
+    let from = egui::pos2(journey.point_on_the_strip_at_frame(1, 40).x, on_the_rack.center().y);
+    let into_the_drawer_of_the_text = egui::pos2(from.x, journey.strip_of_track(0).bottom() + 14.0);
+    journey.drag(PointerButton::Primary, from, into_the_drawer_of_the_text);
+    {
+        let project = journey.application().project();
+        assert_eq!(
+            project
+                .drawer_of(AnimationTarget::Clip(text))
+                .map(|drawer| drawer.len()),
+            Some(1),
+            "the rack is in the drawer of the text"
+        );
+        assert_eq!(
+            project.drawer_of(loudness_of_the_video).map(|drawer| drawer.len()),
+            Some(0)
+        );
+    }
+    assert_eq!(
+        frames_of_the_loudness(&journey),
+        vec![15, 25, 55, 65],
+        "the video has the same keyframes, at the same times"
+    );
+
+    // The text is copied to the right, with the menu of the clip: the copy has a copy of the rack, of the same video.
+    let on_the_text = journey.point_on_the_strip_at_frame(0, 50);
+    journey.right_click(on_the_text);
+    journey.harness.get_by_label("Duplicate to the right").click();
+    journey.settle();
+    assert_eq!(
+        journey.application().project().tracks()[0]
+            .placements()
+            .map(|placement| (
+                placement.first_timeline_frame.value(),
+                placement.end_timeline_frame.value()
+            ))
+            .collect::<Vec<_>>(),
+        vec![(5, 95), (95, 185)]
+    );
+    assert_eq!(
+        frames_of_the_loudness(&journey),
+        vec![15, 25, 55, 65, 105, 115, 145, 155]
+    );
+
+    // Saved, the rack is in the drawer of each text, and says which clip it is the keyframes of.
+    let project_path = scratch.path().join("lowering.fastforwardrs.json");
+    journey.application_mut().save_project_to(project_path.clone());
+    let (text_of_file, saved) = read_project_file_as_json(&project_path);
+    for clip in 0..2 {
+        let racks = &saved["tracks"][0]["clips"][clip]["drawer"];
+        assert_eq!(racks[0]["property"], "gain", "{text_of_file}");
+        assert_eq!(racks[0]["target"]["track"], 1, "{text_of_file}");
+        assert_eq!(racks[0]["target"]["clip"], 0, "{text_of_file}");
+    }
+    assert!(
+        saved["tracks"][1]["clips"][0].get("drawer").is_none(),
+        "{text_of_file}: the video has none of its own"
+    );
+
+    // Loaded into a fresh editor it is the same, and the export has the video quieter where each text is than where it is not.
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().load_project_from(project_path);
+    fresh.wait_until_idle();
+    assert_eq!(fresh.application().message_showing(), None);
+    let fresh_video = fresh.application().project().tracks()[1].entries()[0].id();
+    assert_eq!(
+        fresh
+            .application()
+            .project()
+            .keyframes_of(AnimationTarget::Clip(fresh_video), PropertyId::Gain)
+            .iter()
+            .map(|keyframe| (keyframe.frame, keyframe.value.clone()))
+            .collect::<Vec<_>>(),
+        journey
+            .application()
+            .project()
+            .keyframes_of(loudness_of_the_video, PropertyId::Gain)
+            .iter()
+            .map(|keyframe| (keyframe.frame, keyframe.value.clone()))
+            .collect::<Vec<_>>(),
+        "the loudness of the video is the same when the file is loaded"
+    );
+    let exported_path = scratch.path().join("lowering.mp4");
+    export_to(&mut fresh, &exported_path);
+    let sound = support::decoded_sound(&toolchain, &exported_path, 1, 48_000);
+    let loudness_around = |seconds: f64| {
+        let first = ((seconds - 0.1) * 48_000.0) as usize;
+        f64::from(support::loudness(&sound[first..first + 9_600]))
+    };
+    let loud = loudness_around(0.25);
+    let quiet = 10f64.powf(-20.0 / 20.0);
+    for (seconds, times_as_loud, what) in [
+        (1.2, quiet, "the first text is there: 20 decibels quieter"),
+        (2.7, 1.0, "between the texts: as loud as it was"),
+        (4.2, quiet, "the copy of the text is there: 20 decibels quieter again"),
+    ] {
+        let ratio = loudness_around(seconds) / loud;
+        assert!(
+            (ratio / times_as_loud - 1.0).abs() < 0.08,
+            "{what}: at {seconds} s it is {ratio} times as loud as it was, and should be {times_as_loud}"
+        );
+    }
 }
 
 /// A video of 60 seconds (1800 frames), a small picture so that it is quick to make.

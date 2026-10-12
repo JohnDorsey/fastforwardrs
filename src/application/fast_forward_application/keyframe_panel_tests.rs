@@ -2,7 +2,7 @@
 //! keyframe after, which float to the right of a control when the pointer is over it), of what the controls show of what has
 //! keyframes, and of the controls for where a clip is on the picture.
 
-use egui::{Color32, Shape};
+use egui::{Color32, PointerButton, Shape, vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::keyframe_tests::{keyframes_of, window_with_a_video};
@@ -663,4 +663,59 @@ fn the_rows_for_a_place_that_is_animated_show_where_it_is_at_the_playhead_and_ch
     window.set_slider("y", 80.0);
 
     assert_eq!(keyframes_of(&window, clip, PropertyId::Position), vec![0, 50, 100]);
+}
+
+// --- turning more than half a turn ---
+
+#[test]
+fn the_field_for_how_far_something_is_turned_takes_more_than_half_a_turn_either_way_and_shows_what_it_was_given() {
+    let (mut window, clip) = window_with_the_video_selected();
+    for degrees in [200.0, 720.0, -540.0, 3600.0] {
+        window.set_slider("Rotation", degrees);
+
+        let placed = window.application().project().placement_at(clip, frame(0)).unwrap();
+        assert_eq!(placed.rotation.degrees(), degrees as f32);
+        assert_eq!(
+            drag_value(&window, "Rotation"),
+            degrees,
+            "the field shows the turn, and not the same angle brought back to between -180 and 180"
+        );
+    }
+}
+
+#[test]
+fn two_whole_turns_typed_for_a_later_keyframe_make_the_clip_go_round_twice_between_them() {
+    let (mut window, clip) = window_with_the_video_selected();
+    let target = AnimationTarget::Clip(clip);
+    window.do_this(Command::AddKeyframe {
+        target,
+        property: PropertyId::Rotation,
+        frame: frame(0),
+    });
+    window.move_current_frame_to(100);
+
+    window.set_slider("Rotation", 720.0);
+
+    assert_eq!(keyframes_of(&window, clip, PropertyId::Rotation), vec![0, 100]);
+    for (at, expected) in [(0, 0.0), (25, 180.0), (50, 360.0), (75, 540.0), (100, 720.0)] {
+        window.move_current_frame_to(at);
+        assert_eq!(drag_value(&window, "Rotation"), expected, "at frame {at}");
+    }
+}
+
+#[test]
+fn dragging_the_field_for_how_far_something_is_turned_goes_on_past_a_whole_turn() {
+    let (mut window, clip) = window_with_the_video_selected();
+    let field = window.rectangle_of("Rotation").center();
+
+    window.drag(field, field + vec2(500.0, 0.0), PointerButton::Primary);
+
+    let turned = window
+        .application()
+        .project()
+        .placement_at(clip, frame(0))
+        .unwrap()
+        .rotation
+        .degrees();
+    assert!(turned > 360.0, "dragged 500 points, it is {turned} degrees");
 }

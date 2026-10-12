@@ -174,52 +174,192 @@ fn the_project_that_makes_the_trip_through_the_file_has_keyframes_for_every_prop
 }
 
 #[test]
-fn a_project_that_has_no_keyframes_has_nothing_about_them_in_its_file() {
-    let text = saved(&project_with_everything());
-    assert!(!text.contains("animation"), "{text}");
+fn keyframes_for_a_turn_that_are_whole_turns_apart_come_back_as_they_were_saved() {
+    let mut project = project_with_everything();
+    let video = project.tracks()[2].entries()[0].id();
+    for (frame, degrees) in [(0, 0.0), (60, 1080.0)] {
+        make_a_keyframe(
+            &mut project,
+            AnimationTarget::Clip(video),
+            PropertyId::Rotation,
+            frame,
+            PropertyValue::Number(degrees),
+        );
+    }
+
+    let loaded = project_from_json_text(&saved(&project)).unwrap();
+
+    let video = loaded.tracks()[2].entries()[0].id();
+    assert_eq!(
+        loaded.property_value_at(
+            AnimationTarget::Clip(video),
+            PropertyId::Rotation,
+            crate::project::TimelineFrameIndex::new(30)
+        ),
+        Some(PropertyValue::Number(540.0)),
+        "half way is a turn and a half"
+    );
 }
 
 #[test]
-fn keyframes_are_written_by_the_name_of_the_property_with_a_frame_and_a_value_each_in_the_order_of_the_frames() {
+fn a_project_that_has_no_keyframes_has_nothing_about_them_in_its_file() {
+    let text = saved(&project_with_everything());
+    assert!(!text.contains("animation"), "{text}");
+    assert!(!text.contains("drawer"), "{text}");
+    assert!(!text.contains("keyframes"), "{text}");
+}
+
+#[test]
+fn keyframes_are_written_as_racks_in_the_drawer_of_what_has_them_by_the_name_of_the_property_with_a_frame_and_a_value_each()
+ {
     let text = saved(&project_with_keyframes());
     let file: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-    let video = &file["tracks"][2]["clips"][0]["animation"];
+    let video = &file["tracks"][2]["clips"][0]["drawer"];
     assert_eq!(
-        video["gain"],
+        rack_of(video, "gain")["keyframes"],
         serde_json::json!([{"frame": 0, "value": 0.0}, {"frame": 30, "value": -6.0}])
     );
     assert_eq!(
-        video["position"],
+        rack_of(video, "position")["keyframes"],
         serde_json::json!([{"frame": 10, "value": [0.25, 0.5]}, {"frame": 90, "value": [0.75, 0.5]}])
     );
-    assert_eq!(video["size"], serde_json::json!([{"frame": 0, "value": [1.0, 1.0]}]));
-    assert_eq!(video["rotation"], serde_json::json!([{"frame": 20, "value": -45.5}]));
     assert_eq!(
-        file["tracks"][1]["clips"][0]["animation"]["muted"],
+        rack_of(video, "size")["keyframes"],
+        serde_json::json!([{"frame": 0, "value": [1.0, 1.0]}])
+    );
+    assert_eq!(
+        rack_of(video, "rotation")["keyframes"],
+        serde_json::json!([{"frame": 20, "value": -45.5}])
+    );
+    assert_eq!(
+        rack_of(&file["tracks"][1]["clips"][0]["drawer"], "muted")["keyframes"],
         serde_json::json!([{"frame": 0, "value": false}, {"frame": 60, "value": true}])
     );
-    let text_clip = &file["tracks"][0]["clips"][0]["animation"];
+    let text_clip = &file["tracks"][0]["clips"][0]["drawer"];
     assert_eq!(
-        text_clip["colour"],
+        rack_of(text_clip, "colour")["keyframes"],
         serde_json::json!([{"frame": 0, "value": "#FF0000FF"}, {"frame": 50, "value": "#0000FF80"}])
     );
     assert_eq!(
-        text_clip["text"],
+        rack_of(text_clip, "text")["keyframes"],
         serde_json::json!([{"frame": 0, "value": "One \"two\"\nthree"}])
     );
-    assert_eq!(text_clip["font"], serde_json::json!([{"frame": 5, "value": "Arial"}]));
     assert_eq!(
-        file["tracks"][1]["animation"]["gain"],
+        rack_of(text_clip, "font")["keyframes"],
+        serde_json::json!([{"frame": 5, "value": "Arial"}])
+    );
+    assert_eq!(
+        rack_of(&file["tracks"][1]["drawer"], "gain")["keyframes"],
         serde_json::json!([{"frame": 0, "value": 2.0}, {"frame": 500, "value": -12.0}])
     );
     assert_eq!(
-        file["tracks"][1]["animation"]["muted"],
+        rack_of(&file["tracks"][1]["drawer"], "muted")["keyframes"],
         serde_json::json!([{"frame": 600, "value": true}])
     );
     assert!(
-        file["tracks"][2].get("animation").is_none(),
-        "a track that has no keyframes has none in its file"
+        file["tracks"][2].get("drawer").is_none(),
+        "a track that has no keyframes has no drawer in its file"
+    );
+    assert!(
+        !text.contains("\"animation\""),
+        "the animation objects of the files before this are not written"
+    );
+}
+
+/// The rack of the keyframes of `property` in `drawer` (a list of racks, as the file has it).
+fn rack_of<'a>(drawer: &'a serde_json::Value, property: &str) -> &'a serde_json::Value {
+    drawer
+        .as_array()
+        .expect("a drawer is a list of racks")
+        .iter()
+        .find(|rack| rack["property"] == property)
+        .unwrap_or_else(|| panic!("no rack of {property} in {drawer}"))
+}
+
+fn rack_of_mut<'a>(drawer: &'a mut serde_json::Value, property: &str) -> &'a mut serde_json::Value {
+    drawer
+        .as_array_mut()
+        .expect("a drawer is a list of racks")
+        .iter_mut()
+        .find(|rack| rack["property"] == property)
+        .unwrap_or_else(|| panic!("no rack of {property}"))
+}
+
+#[test]
+fn a_rack_does_not_say_what_it_is_of_when_it_is_of_the_clip_or_the_track_that_has_the_drawer_it_is_in() {
+    let file: serde_json::Value = serde_json::from_str(&saved(&project_with_keyframes())).unwrap();
+    for drawer in [
+        &file["tracks"][2]["clips"][0]["drawer"],
+        &file["tracks"][0]["clips"][0]["drawer"],
+        &file["tracks"][1]["drawer"],
+    ] {
+        for rack in drawer.as_array().unwrap() {
+            assert!(rack.get("target").is_none(), "{rack}");
+        }
+    }
+}
+
+#[test]
+fn racks_kept_in_the_drawer_of_another_clip_or_of_a_track_say_what_they_are_of_by_where_it_is_in_the_file_and_come_back()
+ {
+    // The caption (the first clip of the first track) holds a rack of how loud the video is (the first clip of the third
+    // track), and the drawer of the first track holds a rack of whether the music track (the second) is silent.
+    let mut file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
+    file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
+        {"property": "gain", "target": {"track": 2, "clip": 0}, "keyframes": [{"frame": 3, "value": -4.0}, {"frame": 9, "value": 0.0}]}
+    ]);
+    file["tracks"][0]["drawer"] = serde_json::json!([
+        {"property": "muted", "target": {"track": 1}, "keyframes": [{"frame": 100, "value": true}]}
+    ]);
+    let text = serde_json::to_string_pretty(&file).unwrap();
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let music = AnimationTarget::Track(loaded.tracks()[1].id());
+    let frame = crate::project::TimelineFrameIndex::new;
+    assert_eq!(
+        loaded.property_value_at(video, PropertyId::Gain, frame(120 + 3)),
+        Some(PropertyValue::Number(-4.0)),
+        "the caption starts at frame 120"
+    );
+    assert!(loaded.is_animated(music, PropertyId::Muted));
+    assert!(
+        loaded.tracks()[2].entries()[0].drawer().is_empty(),
+        "the video's own drawer has nothing in it"
+    );
+    let written: serde_json::Value = serde_json::from_str(&saved(&loaded)).unwrap();
+    assert_eq!(
+        written["tracks"][0]["clips"][0]["drawer"],
+        file["tracks"][0]["clips"][0]["drawer"]
+    );
+    assert_eq!(written["tracks"][0]["drawer"], file["tracks"][0]["drawer"]);
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+}
+
+#[test]
+fn a_keyframe_crate_is_written_with_how_long_it_lasts_and_its_drawer_and_comes_back() {
+    let mut file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
+    file["tracks"][0]["clips"].as_array_mut().unwrap().push(serde_json::json!({
+        "kind": "crate",
+        "gap_before_frames": 40,
+        "duration_in_frames": 200,
+        "drawer": [{"property": "rotation", "target": {"track": 2, "clip": 0}, "keyframes": [{"frame": 10, "value": 90.0}]}]
+    }));
+    let text = serde_json::to_string_pretty(&file).unwrap();
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let crate_entry = loaded.tracks()[0].entries().last().unwrap();
+    assert!(matches!(crate_entry.clip(), crate::project::Clip::Crate(_)));
+    assert_eq!(crate_entry.clip().duration_in_frames_it_says(), Some(200));
+    assert_eq!(crate_entry.gap_before_frames(), 40);
+    assert_eq!(crate_entry.drawer().len(), 1);
+    let written: serde_json::Value = serde_json::from_str(&saved(&loaded)).unwrap();
+    assert_eq!(
+        written["tracks"][0]["clips"].as_array().unwrap().last(),
+        file["tracks"][0]["clips"].as_array().unwrap().last()
     );
 }
 
@@ -234,13 +374,83 @@ fn numbers_of_keyframes_are_written_as_short_as_the_other_numbers_of_the_file_ar
 fn a_file_of_the_version_before_keyframes_loads_as_a_project_with_nothing_animated() {
     let text = valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 5");
     let project = project_from_json_text(&text).unwrap();
-    assert!(project.tracks()[0].animation().is_empty());
+    assert!(project.tracks()[0].own_animation().is_empty());
     assert!(
         project.tracks()[0]
             .entries()
             .iter()
-            .all(|entry| entry.animation().is_empty())
+            .all(|entry| entry.own_animation().is_empty())
     );
+}
+
+/// The file of a version before 7, which has the keyframes of what a clip or a track is in an `animation` object in it, made from
+/// the file of `project` (which has racks of the keyframes of what has the drawer they are in, and no others).
+fn written_the_way_version_6_did(project: &Project) -> String {
+    let mut file: serde_json::Value = serde_json::from_str(&saved(project)).unwrap();
+    let to_animation = |holder: &mut serde_json::Value| {
+        let Some(drawer) = holder.as_object_mut().and_then(|holder| holder.remove("drawer")) else {
+            return;
+        };
+        let mut animation = serde_json::Map::new();
+        for rack in drawer.as_array().unwrap() {
+            assert!(
+                rack.get("target").is_none(),
+                "only racks of what has the drawer: {rack}"
+            );
+            animation.insert(rack["property"].as_str().unwrap().to_owned(), rack["keyframes"].clone());
+        }
+        holder["animation"] = serde_json::Value::Object(animation);
+    };
+    for track in file["tracks"].as_array_mut().unwrap() {
+        to_animation(track);
+        for clip in track["clips"].as_array_mut().unwrap() {
+            to_animation(clip);
+        }
+    }
+    file["file_format_version"] = serde_json::json!(6);
+    serde_json::to_string_pretty(&file).unwrap()
+}
+
+#[test]
+fn a_file_of_version_6_has_the_keyframes_in_an_animation_object_which_is_read_as_a_rack_in_the_drawer_of_what_has_them()
+{
+    let project = project_with_keyframes();
+    let old_file = written_the_way_version_6_did(&project);
+    assert!(old_file.contains("\"animation\""), "{old_file}");
+    assert!(!old_file.contains("\"drawer\""), "{old_file}");
+
+    let loaded = project_from_json_text(&old_file).unwrap();
+
+    // (The racks of a clip are in the order of the table of properties when they come from an animation object, which is the
+    // order they were made in or not: what is the same is what each drawer has.)
+    assert_eq!(
+        with_the_racks_in_order(&saved(&loaded)),
+        with_the_racks_in_order(&saved(&project))
+    );
+    assert!(
+        saved(&loaded).contains("\"file_format_version\": 7"),
+        "it is written the way the version of today writes it"
+    );
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+}
+
+/// The JSON of a file with the racks of every drawer sorted by the name of their property (and what they are of).
+fn with_the_racks_in_order(text: &str) -> serde_json::Value {
+    fn sort_the_drawers(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::Array(racks)) = map.get_mut("drawer") {
+                    racks.sort_by_key(|rack| (rack["property"].to_string(), rack["target"].to_string()));
+                }
+                map.values_mut().for_each(sort_the_drawers);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(sort_the_drawers),
+            _ => {}
+        }
+    }
+    let mut file: serde_json::Value = serde_json::from_str(text).unwrap();
+    sort_the_drawers(&mut file);
+    file
 }
 
 // --- what is wrong with a file ---
@@ -261,16 +471,11 @@ fn reason_for_invalid_project(text: &str) -> String {
     }
 }
 
-/// Renames the key `from` of the object `object` to `to`.
-fn rename(object: &mut serde_json::Value, from: &str, to: &str) {
-    let map = object.as_object_mut().expect("an object");
-    let value = map.remove(from).expect("it has the key");
-    map.insert(to.to_owned(), value);
-}
-
 #[test]
 fn keyframes_of_something_that_cannot_be_animated_are_refused_by_name() {
-    let text = saved_with(|file| rename(&mut file["tracks"][2]["clips"][0]["animation"], "gain", "loudness"));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain")["property"] = serde_json::json!("loudness");
+    });
     let reason = reason_for_invalid_project(&text);
     assert!(reason.contains("\"loudness\""), "{reason}");
     assert!(reason.contains("not something that can be animated"), "{reason}");
@@ -278,53 +483,121 @@ fn keyframes_of_something_that_cannot_be_animated_are_refused_by_name() {
         reason.contains("clip number 1 of track number 3"),
         "the clip is named: {reason}"
     );
+    assert!(reason.contains("rack number"), "and the rack: {reason}");
 }
 
 #[test]
 fn keyframes_of_something_the_clip_or_the_track_does_not_have_are_refused() {
     // A video has no words.
-    let text = saved_with(|file| rename(&mut file["tracks"][2]["clips"][0]["animation"], "rotation", "text"));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "rotation")["property"] = serde_json::json!("text");
+    });
     let reason = reason_for_invalid_project(&text);
-    assert!(reason.contains("\"text\" cannot be animated for a video"), "{reason}");
+    assert!(reason.contains("\"text\" cannot be animated"), "{reason}");
 
     // A sound has no place on the picture.
-    let text = saved_with(|file| rename(&mut file["tracks"][1]["clips"][0]["animation"], "muted", "position"));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][1]["clips"][0]["drawer"], "muted")["property"] = serde_json::json!("position");
+    });
     let reason = reason_for_invalid_project(&text);
-    assert!(
-        reason.contains("\"position\" cannot be animated for a sound"),
-        "{reason}"
-    );
+    assert!(reason.contains("\"position\" cannot be animated"), "{reason}");
 
     // A track has no place on the picture either.
-    let text = saved_with(|file| rename(&mut file["tracks"][1]["animation"], "gain", "position"));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][1]["drawer"], "gain")["property"] = serde_json::json!("position");
+    });
     let reason = reason_for_invalid_project(&text);
-    assert!(
-        reason.contains("\"position\" cannot be animated for a track"),
-        "{reason}"
-    );
+    assert!(reason.contains("\"position\" cannot be animated"), "{reason}");
     assert!(reason.contains("track number 2"), "{reason}");
+
+    // What a rack is of is what the property is checked against, not what has the drawer: a sound is not on the picture, whichever
+    // drawer a rack of its place is in.
+    let text = saved_with(|file| {
+        file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
+            {"property": "position", "target": {"track": 1, "clip": 0}, "keyframes": [{"frame": 1, "value": [0.5, 0.5]}]}
+        ]);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("\"position\" cannot be animated"), "{reason}");
+}
+
+#[test]
+fn a_rack_of_what_is_not_in_the_file_is_refused_and_says_which() {
+    let text = saved_with(|file| {
+        file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
+            {"property": "gain", "target": {"track": 9}, "keyframes": [{"frame": 1, "value": 0.0}]}
+        ]);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("there is no track 9"), "{reason}");
+    assert!(reason.contains("clip number 1 of track number 1"), "{reason}");
+
+    let text = saved_with(|file| {
+        file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
+            {"property": "gain", "target": {"track": 2, "clip": 7}, "keyframes": [{"frame": 1, "value": 0.0}]}
+        ]);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("there is no clip 7 on track 2"), "{reason}");
+}
+
+#[test]
+fn a_drawer_that_has_two_racks_of_one_property_of_one_thing_is_refused() {
+    let text = saved_with(|file| {
+        let rack = rack_of(&file["tracks"][2]["clips"][0]["drawer"], "gain").clone();
+        file["tracks"][2]["clips"][0]["drawer"]
+            .as_array_mut()
+            .unwrap()
+            .push(rack);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("another rack of the keyframes of \"gain\""), "{reason}");
+
+    // The same thing in the animation object that files of the version before had, and in a drawer.
+    let text = saved_with(|file| {
+        file["tracks"][2]["clips"][0]["animation"] = serde_json::json!({"gain": [{"frame": 1, "value": 0.0}]});
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("another rack of the keyframes of \"gain\""), "{reason}");
+}
+
+#[test]
+fn a_rack_with_no_keyframes_is_refused() {
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain")["keyframes"] = serde_json::json!([]);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("no keyframes of \"gain\""), "{reason}");
 }
 
 #[test]
 fn a_value_that_is_not_the_kind_the_property_has_is_refused_and_says_what_was_wanted() {
-    let text =
-        saved_with(|file| file["tracks"][2]["clips"][0]["animation"]["gain"][1]["value"] = serde_json::json!("quiet"));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain")["keyframes"][1]["value"] =
+            serde_json::json!("quiet");
+    });
     let reason = reason_for_invalid_project(&text);
     assert!(reason.contains("the keyframe of \"gain\" at frame 30"), "{reason}");
     assert!(reason.contains("words, where a number is wanted"), "{reason}");
 
-    let text =
-        saved_with(|file| file["tracks"][1]["clips"][0]["animation"]["muted"][0]["value"] = serde_json::json!(1.0));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][1]["clips"][0]["drawer"], "muted")["keyframes"][0]["value"] =
+            serde_json::json!(1.0);
+    });
     let reason = reason_for_invalid_project(&text);
     assert!(reason.contains("a number, where true or false is wanted"), "{reason}");
 
-    let text =
-        saved_with(|file| file["tracks"][0]["clips"][0]["animation"]["colour"][1]["value"] = serde_json::json!("blue"));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][0]["clips"][0]["drawer"], "colour")["keyframes"][1]["value"] =
+            serde_json::json!("blue");
+    });
     let reason = reason_for_invalid_project(&text);
     assert!(reason.contains("#RRGGBBAA"), "{reason}");
 
-    let text =
-        saved_with(|file| file["tracks"][2]["clips"][0]["animation"]["position"][0]["value"] = serde_json::json!(0.5));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "position")["keyframes"][0]["value"] =
+            serde_json::json!(0.5);
+    });
     let reason = reason_for_invalid_project(&text);
     assert!(reason.contains("a number, where two numbers"), "{reason}");
 }
@@ -332,36 +605,68 @@ fn a_value_that_is_not_the_kind_the_property_has_is_refused_and_says_what_was_wa
 #[test]
 fn a_pair_of_numbers_that_has_three_is_not_a_value_at_all() {
     let text = saved_with(|file| {
-        file["tracks"][2]["clips"][0]["animation"]["position"][0]["value"] = serde_json::json!([0.25, 0.5, 1.0]);
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "position")["keyframes"][0]["value"] =
+            serde_json::json!([0.25, 0.5, 1.0]);
     });
     let reason = reason_for_unreadable_project(&text);
     assert!(reason.contains("did not match any variant"), "{reason}");
 }
 
 #[test]
-fn a_misspelt_field_of_a_keyframe_is_reported() {
+fn a_misspelt_field_of_a_keyframe_a_rack_or_a_target_is_reported() {
     let text = saved_with(|file| {
-        rename(
-            &mut file["tracks"][2]["clips"][0]["animation"]["gain"][1],
-            "frame",
-            "frames",
-        )
+        let keyframe = &mut rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain")["keyframes"][1];
+        let value = keyframe.as_object_mut().unwrap().remove("frame").unwrap();
+        keyframe["frames"] = value;
     });
     let reason = reason_for_unreadable_project(&text);
     assert!(reason.contains("unknown field `frames`"), "{reason}");
+
+    let text = saved_with(|file| {
+        let rack = rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain");
+        let keyframes = rack.as_object_mut().unwrap().remove("keyframes").unwrap();
+        rack["keyframe"] = keyframes;
+    });
+    let reason = reason_for_unreadable_project(&text);
+    assert!(reason.contains("unknown field `keyframe`"), "{reason}");
+
+    let text = saved_with(|file| {
+        file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
+            {"property": "gain", "target": {"track": 2, "clipp": 0}, "keyframes": [{"frame": 1, "value": 0.0}]}
+        ]);
+    });
+    let reason = reason_for_unreadable_project(&text);
+    assert!(reason.contains("unknown field `clipp`"), "{reason}");
+}
+
+#[test]
+fn a_crate_that_lasts_no_time_is_refused() {
+    let text = saved_with(|file| {
+        file["tracks"][0]["clips"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "kind": "crate",
+                "duration_in_frames": 0
+            }));
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("at least one frame"), "{reason}");
 }
 
 #[test]
 fn keyframes_after_the_end_of_a_clip_are_cut_off_when_a_file_is_read_and_the_curve_is_kept_up_to_the_end() {
     // The first video clip lasts 300 frames: the second keyframe of its gain, at frame 1000, is where it is not.
-    let text =
-        saved_with(|file| file["tracks"][2]["clips"][0]["animation"]["gain"][1]["frame"] = serde_json::json!(1000));
+    let text = saved_with(|file| {
+        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain")["keyframes"][1]["frame"] =
+            serde_json::json!(1000);
+    });
     let project = project_from_json_text(&text).unwrap();
     let video = project.tracks()[2].entries()[0].id();
     let keyframes = project
         .placement_of(video)
         .unwrap()
-        .animation
+        .own_animation()
         .keyframes_of(PropertyId::Gain)
         .unwrap()
         .iter()
@@ -376,4 +681,27 @@ fn keyframes_after_the_end_of_a_clip_are_cut_off_when_a_file_is_read_and_the_cur
         panic!("a number");
     };
     assert!((decibels - (-6.0 * 299.0 / 1000.0)).abs() < 1e-4, "{decibels}");
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
+}
+
+#[test]
+fn keyframes_after_the_end_of_the_clip_that_has_the_drawer_are_cut_off_even_if_they_are_of_another_clip() {
+    // The caption lasts 90 frames, and its drawer has a rack of the video's rotation that has a keyframe at frame 100.
+    let text = saved_with(|file| {
+        file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
+            {"property": "rotation", "target": {"track": 2, "clip": 0}, "keyframes": [{"frame": 10, "value": 0.0}, {"frame": 100, "value": 90.0}]}
+        ]);
+    });
+    let project = project_from_json_text(&text).unwrap();
+    let caption = &project.tracks()[0].entries()[0];
+    let rack = &caption.drawer().racks()[0];
+    assert_eq!(
+        rack.keyframes()
+            .iter()
+            .map(|keyframe| keyframe.frame)
+            .collect::<Vec<_>>(),
+        vec![10, 89],
+        "the last frame of the caption has what the keyframes say there"
+    );
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
 }

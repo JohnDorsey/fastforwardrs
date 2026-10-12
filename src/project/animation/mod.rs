@@ -40,6 +40,13 @@ pub struct Animation {
 }
 
 impl Animation {
+    /// An animation of nothing.
+    pub const fn none() -> Self {
+        Self {
+            properties: BTreeMap::new(),
+        }
+    }
+
     /// An animation of the properties that `keyframes` are given for (ones without any are left out).
     pub fn from_keyframes(keyframes: impl IntoIterator<Item = (PropertyId, Keyframes)>) -> Self {
         Self {

@@ -1,31 +1,77 @@
 //! The box at the left of each track: the track's title, which can be changed by typing in it. Clicking the
 //! box (or its title) selects the track, which is not the clips on it: the settings of the track are then
-//! shown in the properties panel. Right-clicking the box (or its title) opens a menu with Delete track.
+//! shown in the properties panel. Right-clicking the box (or its title) opens a menu to put a copy of the track above it or
+//! below it, and to delete it.
 //! Dragging the box up or down moves the track to another place in the list (see [`super::track_reordering`]),
 //! and so does dragging the title up or down: dragging it along (sideways) selects the text, as it does in any
-//! text box.
+//! text box. The grip dots on the top of the box say that it can be dragged.
+//!
+//! The box is rounded at the corners at its left, and square at the two that face the strip: the box and the strip
+//! meet with nothing notched between them.
 
 use egui::{
     Button, CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo, pos2,
 };
 
+use super::grip_dots::{self, Arrangement};
 use crate::application::commands::Command;
 use crate::application::selection::SelectionChange;
 use crate::application::theme;
-use crate::project::Track;
+use crate::project::{Track, TrackSide};
 
-/// How tall the box for the title is, in points. (The least a track can be is just taller than this, which a
-/// test checks.)
+/// How tall the box for the title is, in points.
 pub const TITLE_HEIGHT: f32 = 26.0;
 
-/// How far the title keeps from the edges of the box, in points.
+/// How far the title keeps from the sides of the box, in points.
 const MARGIN: f32 = 8.0;
+
+/// How far the grip dots keep from the top of the box, in points.
+const DOTS_MARGIN_ABOVE: f32 = 3.0;
+
+/// How much of the top of the box is the dots', which the title keeps below: the room above the dots, the dots, and a
+/// little under them. (A test checks that they fit.)
+const ROOM_FOR_THE_DOTS: f32 = 14.0;
+
+/// How far the title keeps from the bottom of the box when the box is as short as it can be, in points.
+const MARGIN_BELOW_THE_TITLE: f32 = 2.0;
+
+/// How tall the box has to be to have the dots and the title in it, which is the least a track can be (that is
+/// [`crate::project::TrackHeight::SMALLEST_IN_POINTS`], just more than this, which a test checks).
+#[cfg(test)]
+pub const HEIGHT_THE_BOX_NEEDS: f32 = ROOM_FOR_THE_DOTS + TITLE_HEIGHT + MARGIN_BELOW_THE_TITLE;
+
+/// How round the corners of the box are, which are the two at its left: the two that face the strip are square.
+const CORNERS: CornerRadius = CornerRadius {
+    nw: 10,
+    sw: 10,
+    ne: 0,
+    se: 0,
+};
 
 /// What the menu of the box of a track offers to delete.
 pub const DELETE_TRACK_LABEL: &str = "Delete track";
 
-/// The menu that opens when the box of `track` is right-clicked.
+/// What the menu of the box of a track offers to put a copy of the track in front of it (which is above it on the screen), and
+/// behind it.
+pub const DUPLICATE_ABOVE_LABEL: &str = "Duplicate above";
+pub const DUPLICATE_BELOW_LABEL: &str = "Duplicate below";
+
+/// The menu that opens when the box of `track` is right-clicked. What deletes the track is last, apart from the others, so that
+/// it is not what a click that has hardly moved from the right-click chooses.
 fn show_the_menu(ui: &mut Ui, track: &Track, can_delete: bool, commands: &mut Vec<Command>) {
+    for (label, side) in [
+        (DUPLICATE_ABOVE_LABEL, TrackSide::Above),
+        (DUPLICATE_BELOW_LABEL, TrackSide::Below),
+    ] {
+        if ui.button(label).clicked() {
+            commands.push(Command::DuplicateTrack {
+                track: track.id(),
+                side,
+            });
+            ui.close();
+        }
+    }
+    ui.separator();
     let item = ui.add_enabled(can_delete, Button::new(DELETE_TRACK_LABEL));
     if item.clicked() {
         commands.push(Command::DeleteTrack(track.id()));
@@ -40,14 +86,14 @@ fn show_the_menu(ui: &mut Ui, track: &Track, can_delete: bool, commands: &mut Ve
 /// is added to what is selected (or let go of if it was).
 fn select_the_track(ui: &Ui, track: &Track, commands: &mut Vec<Command>) {
     let adding = ui.input(|input| input.modifiers.command);
-    commands.push(Command::SelectTrack {
-        track: track.id(),
-        change: if adding {
+    commands.push(Command::select_track(
+        track.id(),
+        if adding {
             SelectionChange::Toggle
         } else {
             SelectionChange::Replace
         },
-    });
+    ));
 }
 
 /// What a track can be taken hold of by, to be dragged to another place in the list.
@@ -69,7 +115,15 @@ pub(super) fn show(
     commands: &mut Vec<Command>,
 ) -> Handles {
     ui.painter()
-        .rect_filled(header_rectangle, CornerRadius::same(10), theme::TRACK_HEADER_BACKGROUND);
+        .rect_filled(header_rectangle, CORNERS, theme::TRACK_HEADER_BACKGROUND);
+    grip_dots::draw(
+        ui.painter(),
+        Arrangement::FOR_A_TRACK_BOX,
+        pos2(
+            header_rectangle.center().x,
+            header_rectangle.top() + DOTS_MARGIN_ABOVE + Arrangement::FOR_A_TRACK_BOX.size().y / 2.0,
+        ),
+    );
     // The whole box senses clicks, and being dragged (under the title, which is put over it).
     let background = ui.interact(
         header_rectangle,
@@ -84,7 +138,10 @@ pub(super) fn show(
     if background.clicked() {
         select_the_track(ui, track, commands);
     }
-    let middle_y = header_rectangle.center().y;
+    // The title is in the middle of the box, as far down as the dots need it to be in a box that is short.
+    let highest_middle = header_rectangle.top() + ROOM_FOR_THE_DOTS + TITLE_HEIGHT / 2.0;
+    let lowest_middle = (header_rectangle.bottom() - MARGIN_BELOW_THE_TITLE - TITLE_HEIGHT / 2.0).max(highest_middle);
+    let middle_y = header_rectangle.center().y.clamp(highest_middle, lowest_middle);
 
     let title_rectangle = Rect::from_min_max(
         pos2(header_rectangle.left() + MARGIN, middle_y - TITLE_HEIGHT / 2.0),
@@ -124,7 +181,7 @@ pub(super) fn show(
     if is_selected {
         ui.painter().rect_stroke(
             header_rectangle,
-            CornerRadius::same(10),
+            CORNERS,
             Stroke::new(2.0, theme::SELECTION_OUTLINE),
             StrokeKind::Inside,
         );
@@ -132,5 +189,27 @@ pub(super) fn show(
     Handles {
         box_round_the_title: background,
         title: title_response,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_room_kept_for_the_dots_at_the_top_of_the_box_is_enough_for_them_and_what_is_above_them() {
+        assert!(
+            ROOM_FOR_THE_DOTS >= DOTS_MARGIN_ABOVE + Arrangement::FOR_A_TRACK_BOX.size().y,
+            "{ROOM_FOR_THE_DOTS} is not enough for {DOTS_MARGIN_ABOVE} and {:?}",
+            Arrangement::FOR_A_TRACK_BOX.size()
+        );
+    }
+
+    #[test]
+    fn the_box_needs_the_dots_the_title_and_a_little_under_it() {
+        assert_eq!(
+            HEIGHT_THE_BOX_NEEDS,
+            ROOM_FOR_THE_DOTS + TITLE_HEIGHT + MARGIN_BELOW_THE_TITLE
+        );
     }
 }

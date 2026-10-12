@@ -4,16 +4,12 @@
 
 use egui::{Button, CornerRadius, Frame, Margin, Stroke, Ui};
 
-use super::PropertiesContent;
-use super::clip_properties::kind_name;
-use super::track_properties;
+use super::{PropertiesContent, keyframe_properties, track_properties};
 use crate::application::commands::Command;
+use crate::application::naming::{detail_of_a_clip, kind_name};
 use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::application::theme;
-use crate::project::{Clip, format_timecode};
-
-/// How many letters of the words of a text object are shown to tell it from the others.
-const MOST_LETTERS_OF_WORDS: usize = 24;
+use crate::project::format_timecode;
 
 /// What the list says about a selected thing: its kind, and then what tells it from the others of its kind
 /// (the name of its file, the beginning of its words, the title of the track), and for a clip where it
@@ -24,16 +20,13 @@ pub(super) fn describe(content: &PropertiesContent<'_>, item: SelectionItem) -> 
             let track = content.project.track(track)?;
             Some(format!("{}: {}", track_properties::KIND_NAME, track.title()))
         }
+        SelectionItem::Keyframe(keyframe) => {
+            let (what, when) = keyframe_properties::description(content, keyframe)?;
+            Some(format!("{}: {what} (at {when})", keyframe_properties::KIND_NAME))
+        }
         SelectionItem::Clip(clip) => {
             let placement = content.project.placement_of(clip)?;
-            let detail = match placement.clip {
-                Clip::Text(text) => beginning_of(&text.object.text),
-                other => other
-                    .source()
-                    .and_then(|source| content.source_looks.get(&source))
-                    .map(|look| look.file_name.clone())
-                    .unwrap_or_default(),
-            };
+            let detail = detail_of_a_clip(placement.clip, content.source_looks);
             let kind = kind_name(placement.clip.kind());
             let starts = format_timecode(placement.first_timeline_frame, content.project.frame_rate());
             Some(if detail.is_empty() {
@@ -45,26 +38,13 @@ pub(super) fn describe(content: &PropertiesContent<'_>, item: SelectionItem) -> 
     }
 }
 
-/// The first line of `words`, cut short if it is long.
-fn beginning_of(words: &str) -> String {
-    let first_line = words.lines().next().unwrap_or("").trim();
-    if first_line.chars().count() > MOST_LETTERS_OF_WORDS {
-        let cut: String = first_line.chars().take(MOST_LETTERS_OF_WORDS).collect();
-        format!("{}...", cut.trim_end())
-    } else {
-        first_line.to_owned()
-    }
-}
-
 /// The command that makes just `item` the selection.
 fn select_only(item: SelectionItem) -> Command {
     match item {
-        SelectionItem::Clip(clip) => Command::Select {
-            clips: vec![clip],
-            change: SelectionChange::Replace,
-        },
-        SelectionItem::Track(track) => Command::SelectTrack {
-            track,
+        SelectionItem::Clip(clip) => Command::select_clips(vec![clip], SelectionChange::Replace),
+        SelectionItem::Track(track) => Command::select_track(track, SelectionChange::Replace),
+        SelectionItem::Keyframe(_) => Command::SelectItems {
+            items: vec![item],
             change: SelectionChange::Replace,
         },
     }

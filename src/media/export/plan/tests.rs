@@ -822,3 +822,25 @@ fn a_picture_behind_a_video_that_fills_the_picture_is_not_an_input() {
     let plan = plan(&project).unwrap();
     assert_eq!(plan.source_files, vec![SourceMediaIdentifier::new(2)]);
 }
+
+#[test]
+fn a_turn_is_exported_as_the_angle_between_minus_180_and_180_that_looks_the_same() {
+    let exported = |degrees: f32| {
+        place_to_export(
+            Placement::new(CanvasArea::WHOLE_PICTURE, Angle::from_degrees(degrees)),
+            (1920, 1080),
+        )
+        .turn_in_degrees
+    };
+    assert_eq!(exported(0.0), 0.0);
+    assert_eq!(
+        exported(360.0),
+        0.0,
+        "a whole turn is not turned at all: the picture is laid over as it is and not turned a lot for nothing"
+    );
+    assert_eq!(exported(720.0), 0.0);
+    assert!((exported(725.0) - 5.0).abs() < 1e-3);
+    assert!((exported(-725.0) + 5.0).abs() < 1e-3);
+    assert!((exported(270.0) + 90.0).abs() < 1e-3);
+    assert!((exported(90.0) - 90.0).abs() < 1e-3);
+}

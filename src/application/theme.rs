@@ -27,6 +27,26 @@ pub const ADD_TRACK_BUTTON_DIAMETER: f32 = 34.0;
 /// this much rounding is rounded as far as it can be, which is by half its width.)
 pub const CLIP_CORNER_RADIUS: u8 = 27;
 
+/// How tall a rack of keyframes is in a drawer, in points, how much room there is between two of them, and how much room
+/// there is above the first.
+pub const RACK_HEIGHT: f32 = 16.0;
+pub const SPACE_BETWEEN_RACKS: f32 = 4.0;
+pub const SPACE_ABOVE_THE_RACKS: f32 = 8.0;
+
+/// How far the racks in a keyframe crate keep from the top and the bottom of it when it is tall enough for them to be in
+/// the middle, and how little room there is above the first when it is not (the crate then reaches below the strip, and
+/// has this much room under the last).
+pub const CRATE_MARGIN: f32 = 18.0;
+pub const CRATE_LEAST_MARGIN: f32 = 6.0;
+
+/// What a rack of keyframes is filled with where it has no grain (at its round ends), which is about what the grain is
+/// on average: a very dark grey.
+pub const RACK_BACKGROUND: Color32 = Color32::from_rgb(20, 20, 22);
+
+/// The label that comes to the left of a rack of keyframes when the pointer is over it, and says what it animates.
+pub const RACK_LABEL_BACKGROUND: Color32 = Color32::from_rgba_premultiplied(20, 21, 24, 235);
+pub const RACK_LABEL_TEXT: Color32 = Color32::from_rgb(238, 240, 244);
+
 /// How wide one bar of the waveform of a sound clip is, in points.
 pub const WAVEFORM_COLUMN_WIDTH: f64 = 2.0;
 
@@ -81,6 +101,9 @@ pub const TEXT_CLIP_TEXT: Color32 = Color32::from_rgb(236, 246, 246);
 /// A clip with a picture in it: its file's name beside the picture, on a muted violet background.
 pub const IMAGE_CLIP_BACKGROUND: Color32 = Color32::from_rgb(70, 52, 104);
 pub const IMAGE_CLIP_TEXT: Color32 = Color32::from_rgb(240, 234, 250);
+
+/// A keyframe crate: a box that is nothing but a drawer that is always open, a little darker than the strip it is on.
+pub const CRATE_CLIP_BACKGROUND: Color32 = Color32::from_rgb(24, 26, 31);
 
 /// A clip whose file cannot be found.
 pub const MISSING_CLIP_BACKGROUND: Color32 = Color32::from_rgb(82, 42, 46);
@@ -177,6 +200,7 @@ mod tests {
             TEXT_CLIP_BACKGROUND,
             IMAGE_CLIP_BACKGROUND,
             MISSING_CLIP_BACKGROUND,
+            CRATE_CLIP_BACKGROUND,
         ];
         for (index, first) in colours.iter().enumerate() {
             for second in &colours[index + 1..] {

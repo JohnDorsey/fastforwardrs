@@ -67,7 +67,7 @@ pub(super) fn keyframes_of(window: &Window, clip: ClipId, property: PropertyId) 
         .project()
         .placement_of(clip)
         .unwrap()
-        .animation
+        .own_animation()
         .keyframes_of(property)
         .map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame).collect())
         .unwrap_or_default()
@@ -214,7 +214,7 @@ fn a_property_that_is_not_animated_is_changed_for_the_whole_clip_wherever_the_pl
             .project()
             .placement_of(clip)
             .unwrap()
-            .animation
+            .own_animation()
             .is_empty(),
         "no keyframe was made"
     );
@@ -520,9 +520,11 @@ fn resizing_and_turning_a_clip_whose_position_is_animated_change_those_propertie
     );
 }
 
-/// Regression test: a clip that is turned round by keyframes by more than half a turn is shown to be turned by the angle that
+/// Regression test: a clip that is turned round by keyframes by more than half a turn was shown to be turned by the angle that
 /// is the same as that (-168 degrees for 192), so that the preview moving it, which gives the angle it was shown with back,
-/// looked like a change of how far it is turned, and made a keyframe for that at the playhead.
+/// looked like a change of how far it is turned, and made a keyframe for that at the playhead. (Angles are not brought back into
+/// half a turn any more: what is shown is the turn it is, 192, and gives itself back exactly. The test stays to say that moving
+/// a clip that is turned by keyframes makes no keyframe for its turn.)
 #[test]
 fn moving_a_clip_that_keyframes_have_turned_more_than_half_a_turn_makes_no_keyframe_for_its_turn() {
     let (mut window, clip) = window_with_a_video();
@@ -543,10 +545,10 @@ fn moving_a_clip_that_keyframes_have_turned_more_than_half_a_turn_makes_no_keyfr
         "turned round on"
     );
 
-    // 60 frames on from the keyframe at 100 it is 192 degrees round, which is shown as -168.
+    // 60 frames on from the keyframe at 100 it is 192 degrees round, which is shown as it is.
     window.move_current_frame_to(160);
     let shown = window.application().project().placement_at(clip, frame(160)).unwrap();
-    assert!((shown.rotation.degrees() + 168.0).abs() < 1e-3, "{shown:?}");
+    assert!((shown.rotation.degrees() - 192.0).abs() < 1e-3, "{shown:?}");
     window.do_this(Command::SetClipPlacement {
         clip,
         placement: shown.moved_by(0.1, 0.0),
@@ -577,13 +579,13 @@ fn a_clip_that_has_nothing_about_its_place_animated_is_put_where_it_is_told_as_i
             .project()
             .placement_of(clip)
             .unwrap()
-            .animation
+            .own_animation()
             .is_empty()
     );
 }
 
 #[test]
-fn turning_a_clip_whose_turn_is_animated_the_short_way_round_keeps_the_turns_in_step() {
+fn the_turn_that_is_given_for_an_animated_turn_is_the_turn_it_gets_and_does_not_go_the_short_way_round() {
     let (mut window, clip) = window_with_a_video();
     let target = AnimationTarget::Clip(clip);
     window.do_this(Command::SetClipPlacement {
@@ -593,7 +595,7 @@ fn turning_a_clip_whose_turn_is_animated_the_short_way_round_keeps_the_turns_in_
     add_a_keyframe(&mut window, target, PropertyId::Rotation, 0);
     window.move_current_frame_to(60);
 
-    // 170 degrees to -170 is 20 degrees more, not 340 less.
+    // 170 degrees to -170 is 340 degrees back, which is what was asked for, and not 20 on.
     window.do_this(Command::SetClipPlacement {
         clip,
         placement: Placement::new(CanvasArea::WHOLE_PICTURE, Angle::from_degrees(-170.0)),
@@ -601,11 +603,31 @@ fn turning_a_clip_whose_turn_is_animated_the_short_way_round_keeps_the_turns_in_
 
     assert_eq!(
         value_at(&window, target, PropertyId::Rotation, 60),
-        Some(PropertyValue::Number(190.0))
+        Some(PropertyValue::Number(-170.0))
     );
     assert_eq!(
         value_at(&window, target, PropertyId::Rotation, 30),
-        Some(PropertyValue::Number(180.0))
+        Some(PropertyValue::Number(0.0))
+    );
+}
+
+#[test]
+fn turning_a_clip_by_a_whole_number_of_turns_at_the_playhead_is_a_turn_and_not_no_change() {
+    let (mut window, clip) = window_with_a_video();
+    let target = AnimationTarget::Clip(clip);
+    add_a_keyframe(&mut window, target, PropertyId::Rotation, 0);
+    window.move_current_frame_to(60);
+
+    window.do_this(Command::SetClipPlacement {
+        clip,
+        placement: Placement::new(CanvasArea::WHOLE_PICTURE, Angle::from_degrees(360.0)),
+    });
+
+    assert_eq!(keyframes_of(&window, clip, PropertyId::Rotation), vec![0, 60]);
+    assert_eq!(
+        value_at(&window, target, PropertyId::Rotation, 60),
+        Some(PropertyValue::Number(360.0)),
+        "a whole turn more than where it began"
     );
 }
 
@@ -677,7 +699,7 @@ fn a_text_object_that_has_nothing_animated_is_changed_as_it_always_was() {
             .project()
             .placement_of(clip)
             .unwrap()
-            .animation
+            .own_animation()
             .is_empty()
     );
 }
@@ -747,29 +769,36 @@ fn window_with_a_video_to_drag_at_frame_100(animated: bool) -> (Window, ClipId) 
 
 #[test]
 fn dragging_an_animated_clip_on_the_preview_moves_it_as_far_as_dragging_one_that_is_not_animated_but_in_a_keyframe() {
-    let how_far_a_drag_moves_it = |animated: bool| {
+    // (How far it goes is counted in points of the screen: the window of the clip that is animated has a drawer open, which
+    // the keyframes opened, so its picture is not as big and the same distance on the screen is more of the picture.)
+    let how_far_a_drag_moves_it_in_points = |animated: bool| {
         let (mut window, clip) = window_with_a_video_to_drag_at_frame_100(animated);
         let before = position_at_frame_100(&window, clip);
         let middle = middle_of_the_layer(&window);
         window.drag(middle, middle + vec2(40.0, 20.0), PointerButton::Primary);
         let after = position_at_frame_100(&window, clip);
-        (after.0 - before.0, after.1 - before.1)
+        let picture = picture_rectangle_on_the_screen(&window);
+        (
+            (after.0 - before.0) * picture.width(),
+            (after.1 - before.1) * picture.height(),
+        )
     };
 
-    let (across_if_not_animated, down_if_not_animated) = how_far_a_drag_moves_it(false);
-    let (across, down) = how_far_a_drag_moves_it(true);
+    let (across_if_not_animated, down_if_not_animated) = how_far_a_drag_moves_it_in_points(false);
+    let (across, down) = how_far_a_drag_moves_it_in_points(true);
 
+    // (The pointer goes in twelve steps and the clip follows from the second: it is behind by one of them.)
     assert!(
-        across_if_not_animated > 0.03 && down_if_not_animated > 0.03,
-        "the drag moved the clip that was not animated"
+        across_if_not_animated > 30.0 && down_if_not_animated > 15.0,
+        "the drag moved the clip that was not animated by about as much as the pointer went: {across_if_not_animated}, {down_if_not_animated}"
     );
     assert!(
-        (across - across_if_not_animated).abs() < 1e-4,
-        "across: {across} and not {across_if_not_animated}"
+        (across - across_if_not_animated).abs() < 0.5,
+        "across: {across} points and not {across_if_not_animated}"
     );
     assert!(
-        (down - down_if_not_animated).abs() < 1e-4,
-        "down: {down} and not {down_if_not_animated}"
+        (down - down_if_not_animated).abs() < 0.5,
+        "down: {down} points and not {down_if_not_animated}"
     );
 }
 

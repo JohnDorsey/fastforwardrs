@@ -77,11 +77,22 @@ fn a_layer_whose_clip_has_no_keyframes_is_where_the_clip_says_at_every_frame() {
 }
 
 #[test]
-fn the_keyframes_of_a_clip_are_counted_from_where_the_clip_starts() {
+fn the_keyframes_of_a_layer_are_at_the_frames_of_the_timeline_that_they_are_at() {
     let (project, _) = a_video_that_moves_across();
     let plan = plan(&project);
     let layer = &plan.section_at(frame(50)).unwrap().layers[0];
-    assert_eq!(layer.clip_first_timeline_frame, 20);
+    let frames: Vec<u64> = layer
+        .animation
+        .keyframes_of(PropertyId::Position)
+        .unwrap()
+        .iter()
+        .map(|keyframe| keyframe.frame)
+        .collect();
+    assert_eq!(
+        frames,
+        vec![20, 80],
+        "the clip starts at frame 20 and has them at its first frame and 60 frames on"
+    );
     assert!(layer.is_moved_by_keyframes());
 
     assert_centre_is(layer.placement_at(frame(20)), (0.25, 0.25), "the clip's first frame");

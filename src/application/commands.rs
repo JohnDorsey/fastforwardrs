@@ -3,10 +3,11 @@
 //! code ever has to change the project while it is still being drawn from.
 
 use super::history::EditKey;
-use super::selection::SelectionChange;
+use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ClipId, ClipMove, FrameRate, Gain, Placement, ProjectSettings, PropertyId, Settings,
-    SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TimelineFrameIndex, TrackHeight, TrackId,
+    AnimationTarget, ClipId, ClipMove, ClipSide, FrameRate, Gain, KeyframeId, KeyframeMove, Placement, ProjectSettings,
+    PropertyId, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout,
+    TextObject, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -50,11 +51,11 @@ pub enum Command {
     /// Move the current frame this many frames on (or, if negative, back), with the arrow keys.
     MoveCurrentFrameBy(i64),
 
-    /// Change which clips are selected (by clicking one, or drawing a rectangle round some):
-    /// select `clips` and nothing else, or as well as what is selected, or the other way round for
-    /// each of them, as `change` says.
-    Select {
-        clips: Vec<ClipId>,
+    /// Change what is selected (by clicking something, or drawing a rectangle round some things): select `items`
+    /// and nothing else, or as well as what is selected, or the other way round for each of them, as `change` says.
+    /// (A track is selected as itself, which is not all the clips on it.)
+    SelectItems {
+        items: Vec<SelectionItem>,
         change: SelectionChange,
     },
 
@@ -68,10 +69,11 @@ pub enum Command {
     /// Take clips off their tracks (with the Delete key).
     DeleteClips(Vec<ClipId>),
 
-    /// Select a track (by clicking its title box), or let go of it, as `change` says. This is not all the clips on it.
-    SelectTrack {
-        track: TrackId,
-        change: SelectionChange,
+    /// Put a copy of each of these clips right beside it, on this side of it, with a copy of everything in its drawer (from
+    /// the menu of a clip), and select the copies. A clip with no room beside it is not copied.
+    DuplicateClips {
+        clips: Vec<ClipId>,
+        side: ClipSide,
     },
 
     /// Move clips, by dragging them: each to the track and the frame given for it.
@@ -119,6 +121,12 @@ pub enum Command {
     },
     /// Take a track, and everything on it, out of the project (from the menu of its title box).
     DeleteTrack(TrackId),
+    /// Put a copy of a track, with all its clips and everything in all its drawers, right in front of it or right behind it
+    /// (from the menu of its title box), and select the copy.
+    DuplicateTrack {
+        track: TrackId,
+        side: TrackSide,
+    },
     /// A track was moved to another place in the list of tracks (0 is the front), by dragging its title box
     /// and letting go of it there.
     MoveTrack {
@@ -162,12 +170,40 @@ pub enum Command {
         property: PropertyId,
         frame: TimelineFrameIndex,
     },
+    /// Move keyframes, by dragging them: each to the frame given for it, counted from the start of the drawer its rack
+    /// is in.
+    MoveKeyframes(Vec<KeyframeMove>),
+    /// Take keyframes away, whichever racks they are in (with the Delete key).
+    DeleteKeyframes(Vec<KeyframeId>),
+    /// Move a rack of keyframes to another drawer, or onto an empty stretch of a track (where it is put in a keyframe
+    /// crate made for it), by dragging it, with all its keyframes this many frames later in time (earlier, if negative).
+    MoveRack {
+        rack: RackId,
+        to: RackDestination,
+        shift_in_frames: i64,
+    },
 
     /// Move or resize the fast-forward symbol.
     SetSpeedIndicatorLayout(SpeedIndicatorLayout),
 }
 
 impl Command {
+    /// The command that changes what is selected by these clips, in the way `change` says.
+    pub fn select_clips(clips: impl IntoIterator<Item = ClipId>, change: SelectionChange) -> Self {
+        Self::SelectItems {
+            items: clips.into_iter().map(SelectionItem::Clip).collect(),
+            change,
+        }
+    }
+
+    /// The command that changes what is selected by this track (by clicking its title box), in the way `change` says.
+    pub fn select_track(track: TrackId, change: SelectionChange) -> Self {
+        Self::SelectItems {
+            items: vec![SelectionItem::Track(track)],
+            change,
+        }
+    }
+
     /// Whether doing this can change the project, so that it may be an edit that can be undone.
     /// (Everything else leaves the project alone, or changes what is not part of what is edited:
     /// the settings, the selection, which frame is current.) Written out for every command, with
@@ -176,6 +212,7 @@ impl Command {
         match self {
             Self::SplitAt { .. }
             | Self::DeleteClips(_)
+            | Self::DuplicateClips { .. }
             | Self::MoveClips(_)
             | Self::SetClipSpeed { .. }
             | Self::SetClipGain { .. }
@@ -183,6 +220,7 @@ impl Command {
             | Self::SetClipPlacement { .. }
             | Self::AddTrack
             | Self::DeleteTrack(_)
+            | Self::DuplicateTrack { .. }
             | Self::MoveTrack { .. }
             | Self::SetTrackTitle { .. }
             | Self::SetTrackSpeed { .. }
@@ -194,6 +232,9 @@ impl Command {
             | Self::SetClipDuration { .. }
             | Self::AddKeyframe { .. }
             | Self::RemoveKeyframe { .. }
+            | Self::MoveKeyframes(_)
+            | Self::DeleteKeyframes(_)
+            | Self::MoveRack { .. }
             | Self::SetProjectFrameRate(_)
             | Self::SetSpeedIndicatorLayout(_) => true,
 
@@ -205,7 +246,6 @@ impl Command {
             | Self::Undo
             | Self::Redo
             | Self::Deselect
-            | Self::SelectTrack { .. }
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
             | Self::SetProjectSettings(_)
@@ -215,7 +255,7 @@ impl Command {
             | Self::Stop
             | Self::SeekTo(_)
             | Self::MoveCurrentFrameBy(_)
-            | Self::Select { .. }
+            | Self::SelectItems { .. }
             | Self::RelinkSource(_) => false,
         }
     }
@@ -239,6 +279,12 @@ impl Command {
             Self::SetTrackHeight { track, .. } => Some(EditKey::about(&("the height of", track))),
             Self::SetTextObject { clip, .. } => Some(EditKey::about(&("the text object of", clip))),
             Self::SetClipDuration { clip, .. } => Some(EditKey::about(&("how long it lasts of", clip))),
+            Self::MoveKeyframes(moves) => {
+                let mut keyframes: Vec<KeyframeId> = moves.iter().map(|moved| moved.keyframe).collect();
+                keyframes.sort();
+                Some(EditKey::about(&("the place of the keyframes", keyframes)))
+            }
+            Self::MoveRack { rack, .. } => Some(EditKey::about(&("the place of the rack", rack))),
             Self::SetSpeedIndicatorLayout(_) => Some(EditKey::about(&"where the fast-forward symbol is")),
             _ => None,
         }
@@ -286,6 +332,78 @@ mod tests {
         }
     }
 
+    fn keyframe(number: u32) -> KeyframeId {
+        KeyframeId::new(RackId::new(TrackId::new(0), 0), number)
+    }
+
+    #[test]
+    fn selecting_clips_and_selecting_a_track_are_selecting_items() {
+        assert_eq!(
+            Command::select_clips([clip(1), clip(2)], SelectionChange::Toggle),
+            Command::SelectItems {
+                items: vec![SelectionItem::Clip(clip(1)), SelectionItem::Clip(clip(2))],
+                change: SelectionChange::Toggle,
+            }
+        );
+        assert_eq!(
+            Command::select_track(TrackId::new(3), SelectionChange::Replace),
+            Command::SelectItems {
+                items: vec![SelectionItem::Track(TrackId::new(3))],
+                change: SelectionChange::Replace,
+            }
+        );
+        assert!(!Command::select_clips([clip(1)], SelectionChange::Replace).may_change_the_project());
+    }
+
+    #[test]
+    fn moving_deleting_and_moving_racks_of_keyframes_are_edits_of_the_project() {
+        assert!(Command::MoveKeyframes(vec![]).may_change_the_project());
+        assert!(Command::DeleteKeyframes(vec![keyframe(0)]).may_change_the_project());
+        assert!(
+            Command::MoveRack {
+                rack: RackId::new(TrackId::new(0), 0),
+                to: RackDestination::Drawer(AnimationTarget::Clip(clip(0))),
+                shift_in_frames: 4,
+            }
+            .may_change_the_project()
+        );
+    }
+
+    #[test]
+    fn dragging_the_same_keyframes_is_one_gesture_whatever_frames_they_go_to_and_whatever_order_they_are_in() {
+        let moving = |moves: &[(u32, u64)]| {
+            Command::MoveKeyframes(
+                moves
+                    .iter()
+                    .map(|(number, to_frame)| KeyframeMove {
+                        keyframe: keyframe(*number),
+                        to_frame: *to_frame,
+                    })
+                    .collect(),
+            )
+        };
+        let key = |command: Command| command.gesture_key().expect("a drag of keyframes is a gesture");
+        assert_eq!(key(moving(&[(1, 10), (2, 20)])), key(moving(&[(2, 25), (1, 15)])));
+        assert_ne!(
+            key(moving(&[(1, 10), (2, 20)])),
+            key(moving(&[(1, 10)])),
+            "other keyframes are another drag"
+        );
+        assert_ne!(key(moving(&[(1, 10)])), key(moving(&[(3, 10)])));
+    }
+
+    #[test]
+    fn dragging_a_rack_is_one_gesture_for_the_rack_wherever_it_is_taken() {
+        let dragging = |rack: u32, owner: u32, shift: i64| Command::MoveRack {
+            rack: RackId::new(TrackId::new(0), rack),
+            to: RackDestination::Drawer(AnimationTarget::Clip(clip(owner))),
+            shift_in_frames: shift,
+        };
+        assert_eq!(dragging(1, 0, 5).gesture_key(), dragging(1, 3, -8).gesture_key());
+        assert!(dragging(1, 0, 5).gesture_key().is_some());
+        assert_ne!(dragging(1, 0, 5).gesture_key(), dragging(2, 0, 5).gesture_key());
+    }
+
     fn keyframe_removed_at(frame: u64) -> Command {
         Command::RemoveKeyframe {
             target: AnimationTarget::Clip(clip(0)),
@@ -299,11 +417,19 @@ mod tests {
         for edit in [
             Command::AddTrack,
             Command::DeleteTrack(TrackId::new(0)),
+            Command::DuplicateTrack {
+                track: TrackId::new(0),
+                side: TrackSide::Below,
+            },
             Command::MoveTrack {
                 track: TrackId::new(0),
                 to_position: 1,
             },
             Command::DeleteClips(vec![clip(0)]),
+            Command::DuplicateClips {
+                clips: vec![clip(0)],
+                side: ClipSide::Left,
+            },
             Command::SplitAt {
                 frame: TimelineFrameIndex::new(3),
                 only: None,
@@ -329,10 +455,7 @@ mod tests {
             Command::Deselect,
             Command::Play,
             Command::SeekTo(TimelineFrameIndex::new(3)),
-            Command::Select {
-                clips: vec![clip(0)],
-                change: SelectionChange::Replace,
-            },
+            Command::select_clips([clip(0)], SelectionChange::Replace),
             Command::SetProjectSettings(ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS),
         ] {
             assert!(!not_an_edit.may_change_the_project(), "{not_an_edit:?}");
@@ -459,15 +582,23 @@ mod tests {
     }
 
     #[test]
-    fn a_cut_or_a_delete_or_a_new_track_is_never_joined_to_another_edit() {
+    fn a_cut_or_a_delete_or_a_copy_or_a_new_track_is_never_joined_to_another_edit() {
         for edit in [
             Command::AddTrack,
             Command::DeleteTrack(TrackId::new(0)),
+            Command::DuplicateTrack {
+                track: TrackId::new(0),
+                side: TrackSide::Above,
+            },
             Command::MoveTrack {
                 track: TrackId::new(0),
                 to_position: 1,
             },
             Command::DeleteClips(vec![clip(0)]),
+            Command::DuplicateClips {
+                clips: vec![clip(0), clip(1)],
+                side: ClipSide::Right,
+            },
             Command::SplitAt {
                 frame: TimelineFrameIndex::new(3),
                 only: None,

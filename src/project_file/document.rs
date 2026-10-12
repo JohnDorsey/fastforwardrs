@@ -1,4 +1,4 @@
-//! The exact shape of a project file on disk (the current version, 6).
+//! The exact shape of a project file on disk (the current version, 7).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -91,9 +91,14 @@ pub(super) struct TrackDocument {
     #[serde(default = "normal_height_in_points", skip_serializing_if = "is_the_normal_height")]
     pub height_in_points: f32,
     /// The keyframes of the track's own properties (how loud it is, and whether it is silent), counted in frames from the
-    /// start of the timeline. Left out for a track that has none, and in the files of versions before 6.
-    #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+    /// start of the timeline, as the files of versions before 7 had them: a rack of them in the drawer of the track is what is
+    /// written now. It is read, and never written.
+    #[serde(default, skip_serializing)]
     pub animation: AnimationDocument,
+    /// The racks of keyframes that are kept with the track, whatever they are the keyframes of, their frames counted from the
+    /// start of the timeline. Left out for a track that has none, and in the files of versions before 7.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drawer: Vec<RackDocument>,
     pub clips: Vec<ClipDocument>,
 }
 
@@ -125,10 +130,14 @@ pub(super) enum ClipDocument {
         /// video that is simply fitted inside the picture.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         placement: Option<PlacementDocument>,
-        /// The keyframes of what is animated, counted in frames from the clip's first frame. Left out for a clip that
-        /// has none.
-        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        /// The keyframes of what is animated, counted in frames from the clip's first frame, as the files of versions
+        /// before 7 had them: a rack of them in the drawer of the clip is what is written now. It is read, and never written.
+        #[serde(default, skip_serializing)]
         animation: AnimationDocument,
+        /// The racks of keyframes that are kept with the clip, whatever they are the keyframes of, their frames counted from
+        /// the clip's first frame. Left out for a clip that has none, and in the files of versions before 7.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
     },
     Audio {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -141,8 +150,10 @@ pub(super) enum ClipDocument {
         gain_decibels: Gain,
         #[serde(default, skip_serializing_if = "is_false")]
         muted: bool,
-        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        #[serde(default, skip_serializing)]
         animation: AnimationDocument,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
     },
     Image {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -153,8 +164,10 @@ pub(super) enum ClipDocument {
         /// picture that is simply fitted inside the picture.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         placement: Option<PlacementDocument>,
-        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        #[serde(default, skip_serializing)]
         animation: AnimationDocument,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
     },
     Text {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -169,9 +182,43 @@ pub(super) enum ClipDocument {
         /// How far the area is turned, clockwise. Left out for a text that is upright.
         #[serde(default, skip_serializing_if = "is_not_turned")]
         rotation_degrees: f32,
-        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        #[serde(default, skip_serializing)]
         animation: AnimationDocument,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
     },
+    /// A keyframe crate: a stretch of the track that has racks of keyframes in its drawer and nothing else.
+    Crate {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        duration_in_frames: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
+    },
+}
+
+/// The keyframes of one property that are kept together, in a drawer.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RackDocument {
+    /// The name of the property (see [`crate::project::PropertyId::name`]).
+    pub property: String,
+    /// The clip or the track that the keyframes are of. Left out when it is the one whose drawer the rack is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<TargetDocument>,
+    /// In the order of their frames, which are counted from the start of what the drawer belongs to (a clip's first frame, or the
+    /// start of the timeline for a track).
+    pub keyframes: Vec<KeyframeDocument>,
+}
+
+/// A clip or a track, by where it is in the file: the number of its track in the list of tracks, and for a clip the number of
+/// the clip in the list of that track's clips, both counted from 0.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct TargetDocument {
+    pub track: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<usize>,
 }
 
 /// The keyframes of the properties that a clip or a track has animated, by the name of the property (see
@@ -180,12 +227,6 @@ pub(super) enum ClipDocument {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub(super) struct AnimationDocument(pub BTreeMap<String, Vec<KeyframeDocument>>);
-
-impl AnimationDocument {
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
 
 /// What a property is at a frame.
 #[derive(Debug, Serialize, Deserialize)]

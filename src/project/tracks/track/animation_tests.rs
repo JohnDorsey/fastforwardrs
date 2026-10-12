@@ -3,11 +3,24 @@
 
 use super::tests::{THE_TRACK, clip_id, frame, picture, sound, spans, speed, text, track_of, video};
 use super::*;
-use crate::project::{Animation, FrameRate, PropertyId, PropertyValue};
+use crate::project::{Animation, AnimationTarget, Drawer, FrameRate, PropertyId, PropertyValue, Rack, RackId};
 use crate::test_support::DeterministicRandomNumbers;
 
 fn db(decibels: f32) -> PropertyValue {
     PropertyValue::Number(decibels)
+}
+
+/// A drawer that has a rack of the loudness of `clip` with keyframes at these frames.
+fn a_drawer_with_the_loudness_of(clip: ClipId, frames_and_decibels: &[(u64, f32)]) -> Drawer {
+    let mut rack = Rack::new(
+        RackId::new(TrackId::new(9), 0),
+        AnimationTarget::Clip(clip),
+        PropertyId::Gain,
+    );
+    for (frame, decibels) in frames_and_decibels {
+        rack.set(*frame, db(*decibels)).unwrap();
+    }
+    Drawer::with_racks([rack])
 }
 
 /// A track with a video of 100 frames (clip 0) whose loudness is 0 dB at its first frame and -20 dB at its last.
@@ -26,7 +39,7 @@ fn gain_of(track: &Track, clip: ClipId, frames_in: u64) -> f32 {
     match track
         .placement_of(clip)
         .unwrap()
-        .animation
+        .own_animation()
         .value_at(PropertyId::Gain, frames_in)
     {
         Some(PropertyValue::Number(decibels)) => decibels,
@@ -38,7 +51,7 @@ fn keyframe_frames(track: &Track, clip: ClipId, property: PropertyId) -> Vec<u64
     track
         .placement_of(clip)
         .unwrap()
-        .animation
+        .own_animation()
         .keyframes_of(property)
         .map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame).collect())
         .unwrap_or_default()
@@ -47,7 +60,7 @@ fn keyframe_frames(track: &Track, clip: ClipId, property: PropertyId) -> Vec<u64
 /// Every keyframe of every clip is at a frame the clip has.
 fn assert_keyframes_are_inside_their_clips(track: &Track) {
     for placement in track.placements() {
-        for (property, keyframes) in placement.animation.properties() {
+        for (property, keyframes) in placement.own_animation().properties() {
             for keyframe in keyframes.iter() {
                 assert!(
                     keyframe.frame < placement.timeline_frame_count(),
@@ -66,9 +79,9 @@ fn assert_keyframes_are_inside_their_clips(track: &Track) {
 #[test]
 fn nothing_is_animated_to_begin_with() {
     let track = track_of(vec![(0, video(0, 100, 1))]);
-    assert!(track.animation().is_empty());
-    assert!(track.placement_of(clip_id(0)).unwrap().animation.is_empty());
-    assert!(track.entries()[0].animation().is_empty());
+    assert!(track.own_animation().is_empty());
+    assert!(track.placement_of(clip_id(0)).unwrap().own_animation().is_empty());
+    assert!(track.entries()[0].own_animation().is_empty());
 }
 
 #[test]
@@ -90,7 +103,7 @@ fn a_keyframe_can_be_put_on_a_clip_replaced_and_taken_away_again() {
         .unwrap();
     assert_eq!(removed.value, db(-9.0));
     assert!(removed.was_the_last);
-    assert!(track.placement_of(clip_id(0)).unwrap().animation.is_empty());
+    assert!(track.placement_of(clip_id(0)).unwrap().own_animation().is_empty());
     assert_eq!(
         track.remove_clip_keyframe(clip_id(0), PropertyId::Gain, 20),
         Ok(None),
@@ -161,7 +174,7 @@ fn a_track_has_keyframes_of_its_own_for_the_properties_it_has() {
     );
     assert!(!track.set_own_keyframe(PropertyId::Position, frame(10), PropertyValue::Pair(0.0, 0.0)));
     assert!(!track.set_own_keyframe(PropertyId::Gain, frame(11), PropertyValue::Flag(true)));
-    assert_eq!(track.animation().keyframes_of(PropertyId::Gain).unwrap().len(), 1);
+    assert_eq!(track.own_animation().keyframes_of(PropertyId::Gain).unwrap().len(), 1);
     assert!(
         track
             .remove_own_keyframe(PropertyId::Gain, frame(10))
@@ -209,7 +222,7 @@ fn cutting_a_clip_that_is_not_animated_leaves_both_halves_not_animated() {
     let mut track = track_of(vec![(0, video(0, 100, 1))]);
     let outcome = track.split_at(frame(40)).unwrap();
     for half in [outcome.first_half, outcome.second_half] {
-        assert!(track.placement_of(half).unwrap().animation.is_empty());
+        assert!(track.placement_of(half).unwrap().own_animation().is_empty());
     }
 }
 
@@ -231,7 +244,7 @@ fn what_is_animated_in_a_text_clip_or_a_picture_is_cut_with_it() {
         track
             .placement_of(text_halves.second_half)
             .unwrap()
-            .animation
+            .own_animation()
             .is_animated(PropertyId::Rotation)
     );
     for half in [picture_halves.first_half, picture_halves.second_half] {
@@ -239,7 +252,7 @@ fn what_is_animated_in_a_text_clip_or_a_picture_is_cut_with_it() {
             track
                 .placement_of(half)
                 .unwrap()
-                .animation
+                .own_animation()
                 .is_animated(PropertyId::Size)
         );
     }
@@ -302,7 +315,7 @@ fn the_speed_of_a_track_moves_the_keyframes_of_its_clips_and_leaves_the_tracks_o
     );
     assert_eq!(
         track
-            .animation()
+            .own_animation()
             .keyframes_of(PropertyId::Gain)
             .unwrap()
             .iter()
@@ -340,7 +353,7 @@ fn a_text_object_that_is_made_shorter_loses_the_keyframes_it_no_longer_has_a_fra
         track
             .placement_of(clip_id(0))
             .unwrap()
-            .animation
+            .own_animation()
             .value_at(PropertyId::Rotation, 49),
         Some(db(49.0)),
         "what it was at its last frame"
@@ -392,11 +405,7 @@ fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stre
     fast.arrange_clips(vec![ClipToArrange {
         id: clip_id(7),
         clip: video(0, 100, 1),
-        animation: {
-            let mut animation = Animation::default();
-            animation.set_keyframe(PropertyId::Gain, 60, db(-6.0));
-            animation
-        },
+        drawer: a_drawer_with_the_loudness_of(clip_id(7), &[(60, -6.0)]),
         start: 0,
         frames_it_lasted_before: 100,
     }])
@@ -409,7 +418,9 @@ fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stre
     same.arrange_clips(vec![ClipToArrange {
         id: clip_id(7),
         clip: video(0, 100, 1),
-        animation: fast.entries()[0].animation().rescaled(50, 100),
+        drawer: fast.entries()[0]
+            .drawer()
+            .with_each_rack_changed(|rack| rack.rescaled(50, 100)),
         start: 5,
         frames_it_lasted_before: 100,
     }])
@@ -439,7 +450,7 @@ fn a_track_counted_again_at_another_frame_rate_has_its_keyframes_counted_again_t
     assert_eq!(keyframe_frames(&at_60, clip_id(1), PropertyId::Rotation), vec![30]);
     assert_eq!(
         at_60
-            .animation()
+            .own_animation()
             .keyframes_of(PropertyId::Gain)
             .unwrap()
             .iter()
@@ -509,15 +520,15 @@ fn whatever_cuts_and_speeds_are_done_every_keyframe_stays_inside_its_clip_and_ev
             assert_keyframes_are_inside_their_clips(&track);
             // What was animated stays animated, and nothing is animated that was not.
             for placement in track.placements() {
-                let kinds_animated = placement.animation.properties().count();
+                let kinds_animated = placement.own_animation().properties().count();
                 assert!(
                     kinds_animated <= 1,
                     "round {round} step {step}: {:?}",
-                    placement.animation
+                    placement.own_animation()
                 );
                 assert!(
                     placement
-                        .animation
+                        .own_animation()
                         .properties()
                         .all(|(_, keyframes)| !keyframes.is_empty()),
                     "round {round}"

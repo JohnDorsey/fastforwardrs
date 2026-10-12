@@ -19,6 +19,7 @@ use egui::{
 
 use super::bevel::{self, bevel_lines};
 use super::clip_shape::ClipShape;
+use super::grip_dots::{self, Arrangement};
 use super::strip_view::StripView;
 use super::{SourceLook, TimelineContent};
 use crate::application::textures::Textures;
@@ -241,9 +242,37 @@ pub(super) fn draw_clips(
                 painter.rect_filled(rectangles.whole, corner_radius, theme::TEXT_CLIP_BACKGROUND);
                 draw_label(painter, rectangles, &text.object.text, theme::TEXT_CLIP_TEXT);
             }
+            Clip::Crate(_) => {
+                painter.rect_filled(rectangles.whole, corner_radius, theme::CRATE_CLIP_BACKGROUND);
+            }
         }
         draw_bevel(painter, rectangles, view);
+        draw_grip_dots(painter, rectangles);
     }
+}
+
+/// How far the grip dots on the top of a clip keep from its top edge, in points.
+const DOTS_MARGIN_ABOVE: f32 = 5.0;
+
+/// How much room is left empty at each side of the grip dots on a clip, in points, which is as narrow as the part of a
+/// clip that can be seen can be and have them.
+const DOTS_MARGIN_AT_THE_SIDES: f32 = 8.0;
+
+/// Draws the grip dots on the top edge of a clip, in the middle of the part of it that can be seen, which say that it can
+/// be taken hold of and dragged. (A clip too narrow to have room for them has none.)
+fn draw_grip_dots(painter: &Painter, rectangles: ClipRectangles) {
+    let size = Arrangement::FOR_A_CLIP.size();
+    if rectangles.visible.width() < size.x + 2.0 * DOTS_MARGIN_AT_THE_SIDES {
+        return;
+    }
+    grip_dots::draw(
+        painter,
+        Arrangement::FOR_A_CLIP,
+        pos2(
+            rectangles.visible.center().x,
+            rectangles.whole.top() + DOTS_MARGIN_ABOVE + size.y / 2.0,
+        ),
+    );
 }
 
 /// Gives a clip its raised look: light along its top and left edges, shade along its bottom and

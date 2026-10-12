@@ -1,6 +1,7 @@
-//! A clip: one thing on a track. It is a piece of a video, a piece of a sound file, a picture or a
-//! text object.
+//! A clip: one thing on a track. It is a piece of a video, a piece of a sound file, a picture, a
+//! text object or a keyframe crate.
 
+use super::crate_clip::CrateClip;
 use super::image_clip::ImageClip;
 use super::media_clip::MediaClip;
 use super::placement::Placement;
@@ -14,6 +15,8 @@ pub enum ClipKind {
     Audio,
     Image,
     Text,
+    /// A keyframe crate: nothing to see or hear, only racks of keyframes.
+    Crate,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +28,8 @@ pub enum Clip {
     /// A picture, shown for a while.
     Image(ImageClip),
     Text(TextClip),
+    /// A keyframe crate: a stretch of the track that holds racks of keyframes, and nothing else.
+    Crate(CrateClip),
 }
 
 impl Clip {
@@ -34,6 +39,7 @@ impl Clip {
             Self::Audio(_) => ClipKind::Audio,
             Self::Image(_) => ClipKind::Image,
             Self::Text(_) => ClipKind::Text,
+            Self::Crate(_) => ClipKind::Crate,
         }
     }
 
@@ -41,7 +47,7 @@ impl Clip {
     pub fn as_media(&self) -> Option<&MediaClip> {
         match self {
             Self::Video(media) | Self::Audio(media) => Some(media),
-            Self::Image(_) | Self::Text(_) => None,
+            Self::Image(_) | Self::Text(_) | Self::Crate(_) => None,
         }
     }
 
@@ -64,7 +70,7 @@ impl Clip {
         match self {
             Self::Video(media) | Self::Audio(media) => Some(media.source()),
             Self::Image(image) => Some(image.source()),
-            Self::Text(_) => None,
+            Self::Text(_) | Self::Crate(_) => None,
         }
     }
 
@@ -75,7 +81,7 @@ impl Clip {
         match self {
             Self::Video(media) => media.placement(),
             Self::Image(image) => image.placement(),
-            Self::Audio(_) => None,
+            Self::Audio(_) | Self::Crate(_) => None,
             Self::Text(text) => Some(text.object.placement()),
         }
     }
@@ -86,7 +92,7 @@ impl Clip {
         match self {
             Self::Video(media) => Some(Self::Video(media.with_placement(Some(placement)))),
             Self::Image(image) => Some(Self::Image(image.with_placement(Some(placement)))),
-            Self::Audio(_) => None,
+            Self::Audio(_) | Self::Crate(_) => None,
             Self::Text(text) => {
                 let mut moved = text.clone();
                 moved.object = text.object.with_placement(placement);
@@ -101,6 +107,7 @@ impl Clip {
         match self {
             Self::Text(text) => Some(text.duration_in_frames()),
             Self::Image(image) => Some(image.duration_in_frames()),
+            Self::Crate(crate_clip) => Some(crate_clip.duration_in_frames()),
             Self::Video(_) | Self::Audio(_) => None,
         }
     }
@@ -112,6 +119,7 @@ impl Clip {
         match self {
             Self::Text(text) => text.with_duration_in_frames(duration_in_frames).map(Self::Text),
             Self::Image(image) => image.with_duration_in_frames(duration_in_frames).map(Self::Image),
+            Self::Crate(crate_clip) => crate_clip.with_duration_in_frames(duration_in_frames).map(Self::Crate),
             Self::Video(_) | Self::Audio(_) => None,
         }
     }
@@ -123,7 +131,7 @@ impl Clip {
         match self {
             Self::Video(media) => Self::Video(media.retimed(from, to)),
             Self::Audio(media) => Self::Audio(media.retimed(from, to)),
-            Self::Image(_) | Self::Text(_) => {
+            Self::Image(_) | Self::Text(_) | Self::Crate(_) => {
                 let duration = self.duration_in_frames_it_says().unwrap_or(1);
                 let retimed = from.convert_frame_count_to(duration, to).max(1);
                 self.with_duration_in_frames_it_says(retimed)
@@ -154,6 +162,7 @@ impl Clip {
             Self::Video(media) | Self::Audio(media) => media.timeline_frame_count(self.effective_speed(track_speed)),
             Self::Image(image) => image.duration_in_frames(),
             Self::Text(text) => text.duration_in_frames(),
+            Self::Crate(crate_clip) => crate_clip.duration_in_frames(),
         }
     }
 
@@ -181,6 +190,9 @@ impl Clip {
             Self::Text(text) => text
                 .split_after(frames_in)
                 .map(|(first, second)| (Self::Text(first), Self::Text(second))),
+            Self::Crate(crate_clip) => crate_clip
+                .split_after(frames_in)
+                .map(|(first, second)| (Self::Crate(first), Self::Crate(second))),
         }
     }
 }

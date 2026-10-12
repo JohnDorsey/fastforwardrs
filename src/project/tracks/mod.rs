@@ -7,25 +7,32 @@
 //! [`Track`]; everything here is plain data and logic, which can be tested quickly and thoroughly.
 
 mod clip;
+mod crate_clip;
+mod drawer;
 mod gain;
 mod ids;
 mod image_clip;
 mod media_clip;
 mod picture_fit;
 mod placement;
+mod rack;
 mod text_object;
 mod track;
 mod track_height;
 
 pub use clip::{Clip, ClipKind};
+pub use crate_clip::{CrateClip, EmptyCrate};
+pub use drawer::Drawer;
 pub use gain::Gain;
-pub use ids::{ClipId, TrackId};
+pub use ids::{ClipId, KeyframeId, RackId, TrackId};
 pub use image_clip::{EmptyImageClip, ImageClip};
 pub use media_clip::{EmptyClip, MediaClip};
 pub use picture_fit::{PictureFit, fit_inside_picture, fitted_placement};
 pub use placement::{Angle, CanvasArea, Corner, PictureDimensions, PixelBox, Placement, PointOnThePicture};
+pub use rack::{Rack, RackEditError, RackKeyframe};
 pub use text_object::{EmptyTextClip, FontSize, TextClip, TextColour, TextObject};
 pub use track::{
-    ClipEditError, ClipPlacement, ClipToArrange, InsertError, Room, SplitError, SplitOutcome, Track, TrackEntry,
+    ClipEditError, ClipPlacement, ClipToArrange, CutEdges, InsertError, RackCut, Room, SplitError, SplitOutcome, Track,
+    TrackEntry,
 };
 pub use track_height::TrackHeight;

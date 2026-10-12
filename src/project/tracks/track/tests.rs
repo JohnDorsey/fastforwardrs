@@ -122,10 +122,10 @@ fn a_new_track_has_the_normal_height_and_changing_it_moves_nothing() {
     assert_track_is_consistent(&track);
     assert_eq!(
         Track::new(TrackId::new(0), "short")
-            .with_height(TrackHeight::from_points(40.0))
+            .with_height(TrackHeight::from_points(50.0))
             .height()
             .points(),
-        40.0
+        50.0
     );
 }
 
