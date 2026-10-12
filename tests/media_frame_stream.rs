@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use fastforwardrs::media::{DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamEvent, FrameStreamRequest};
 use fastforwardrs::project::{FrameRate, SourceFrameIndex, SpeedFactor};
 use support::{
-    TestVideo, TestVideoSpecification, counter_video, frame_number_in_picture, scratch_directory, test_video,
+    TestVideo, TestVideoSpecification, counter_video, frame_number_in_picture, picture_shown_in_frame,
+    scratch_directory, test_video,
 };
 
 const TIME_ALLOWED_FOR_A_STREAM: Duration = Duration::from_secs(30);
@@ -21,7 +22,8 @@ fn request_for(
 ) -> FrameStreamRequest {
     FrameStreamRequest {
         video_path: video.path.clone(),
-        frame_rate: FrameRate::new(30, 1).unwrap(),
+        project_frame_rate: FrameRate::new(30, 1).unwrap(),
+        video_frame_rate: video.specification.frame_rate.parse().expect("a frame rate"),
         first_source_frame: SourceFrameIndex::new(first_source_frame),
         source_frame_count,
         speed_factor: SpeedFactor::new(speed_factor).unwrap(),
@@ -68,6 +70,159 @@ fn frame_numbers_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamReq
             }
         }
     }
+}
+
+#[test]
+fn a_video_that_runs_slower_than_the_project_shows_some_pictures_twice_and_skips_none() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS);
+    // Frames 30 up to 90 of a project at 30 a second are its seconds 2 and 3: its 60 frames are made of the
+    // 50 pictures of the video that are there, so 10 of the pictures are shown twice.
+    let (frame_numbers, error_output) = frame_numbers_delivered(&toolchain, &request_for(&video, 30, 60, 1));
+    assert_eq!(error_output, None);
+    let expected: Vec<u64> = (30..90).map(|slot| picture_shown_in_frame(25, 30, slot)).collect();
+    assert_eq!(frame_numbers, expected);
+    assert_eq!(frame_numbers.len(), 60);
+    assert_eq!(
+        (frame_numbers.first(), frame_numbers.last()),
+        (Some(&25), Some(&74)),
+        "all 50 pictures of those two seconds, from the first of the 2nd second to the last of the 3rd"
+    );
+    assert!(
+        frame_numbers.windows(2).all(|pair| pair[1] - pair[0] <= 1),
+        "no picture is skipped when the video is slower than the project"
+    );
+    assert_eq!(
+        frame_numbers.windows(2).filter(|pair| pair[1] == pair[0]).count(),
+        10,
+        "one picture in every 6 frames is shown a second time"
+    );
+}
+
+#[test]
+fn a_video_that_runs_faster_than_the_project_skips_some_pictures_and_shows_none_twice() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 30 a second
+    // A project at 24 a second, in which one second is 24 frames and one second of the video is 30 pictures.
+    let mut request = request_for(&video, 24, 24, 1);
+    request.project_frame_rate = FrameRate::new(24, 1).unwrap();
+    let (frame_numbers, error_output) = frame_numbers_delivered(&toolchain, &request);
+    assert_eq!(error_output, None);
+    let expected: Vec<u64> = (24..48).map(|slot| picture_shown_in_frame(30, 24, slot)).collect();
+    assert_eq!(frame_numbers, expected);
+    assert_eq!(frame_numbers.len(), 24);
+    assert!(
+        frame_numbers.windows(2).all(|pair| pair[1] - pair[0] >= 1),
+        "no picture is shown twice when the video is faster than the project"
+    );
+    assert_eq!(
+        (frame_numbers.first(), frame_numbers.last()),
+        (Some(&30), Some(&59)),
+        "the second second of the video, 30 pictures, 6 of which are not shown"
+    );
+}
+
+#[test]
+fn a_video_of_another_frame_rate_gives_the_same_pictures_wherever_the_stream_starts() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS);
+    // Frames 6 up to 54 of a project of 30 a second, each as the first of a stream of 12. In one of every 6 of
+    // them (27, 33, 39, 45, ...) no picture is in the frame itself, and the picture that is on screen is the one
+    // before, which a stream that begins there has to have read to show: if it begins with the picture after it
+    // instead, it takes that for the first frame and every picture of it is a frame too early.
+    for first_frame in 6..54 {
+        let (frame_numbers, error_output) =
+            frame_numbers_delivered(&toolchain, &request_for(&video, first_frame, 12, 1));
+        assert_eq!(error_output, None, "from frame {first_frame}");
+        let expected: Vec<u64> = (first_frame..first_frame + 12)
+            .map(|slot| picture_shown_in_frame(25, 30, slot))
+            .collect();
+        assert_eq!(frame_numbers, expected, "a stream that starts at frame {first_frame}");
+    }
+}
+
+#[test]
+fn a_picture_that_is_exactly_half_way_between_two_frames_goes_to_the_later_one_wherever_the_stream_starts() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::FILM_3_SECONDS);
+    // 24 pictures a second in a project of 30: the pictures 2, 6, 10, ... are at frames 2.5, 7.5, 12.5, ...
+    // The export puts each of them in the later frame (ffmpeg rounds a half up), and so does a stream, whatever
+    // the file's own ticks are and wherever it starts.
+    for first_frame in 0..24 {
+        let (frame_numbers, error_output) =
+            frame_numbers_delivered(&toolchain, &request_for(&video, first_frame, 12, 1));
+        assert_eq!(error_output, None, "from frame {first_frame}");
+        let expected: Vec<u64> = (first_frame..first_frame + 12)
+            .map(|slot| picture_shown_in_frame(24, 30, slot))
+            .collect();
+        assert_eq!(frame_numbers, expected, "a stream that starts at frame {first_frame}");
+    }
+}
+
+#[test]
+fn a_stream_of_a_video_of_another_frame_rate_has_all_the_frames_wanted_to_the_very_end_of_the_video() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS);
+    // 75 pictures at 25 a second are 90 frames of the project: the last 30 of them, and 40 from the middle.
+    for (first_frame, count) in [(60, 30), (89, 1), (30, 40), (0, 90)] {
+        let (frame_numbers, error_output) =
+            frame_numbers_delivered(&toolchain, &request_for(&video, first_frame, count, 1));
+        assert_eq!(error_output, None);
+        let expected: Vec<u64> = (first_frame..first_frame + count)
+            .map(|slot| picture_shown_in_frame(25, 30, slot))
+            .collect();
+        assert_eq!(frame_numbers, expected, "{count} frames from frame {first_frame}");
+    }
+}
+
+#[test]
+fn a_video_with_far_fewer_pictures_than_the_project_has_frames_delivers_every_frame_wanted_and_no_more() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::SLOW_3_SECONDS);
+    // 12 pictures a second in a project of 30: each picture is on screen for two or three frames, so the
+    // picture that follows the last frame wanted can be nearly three frames further on than it, and it must
+    // have been read for the last frame wanted to be known to be the last, and not be delivered itself.
+    // The video has 36 pictures, which are 90 frames. (The pictures come every 2.5 frames, so every five
+    // frames the same thing is the case again: the first 25 starts have each of them several times.)
+    let starts_of_12: Vec<(u64, u64)> = (0..25).map(|first_frame| (first_frame, 12)).collect();
+    let others = [(7, 20), (33, 40), (50, 40), (89, 1)];
+    for &(first_frame, count) in starts_of_12.iter().chain(&others) {
+        let (frame_numbers, error_output) =
+            frame_numbers_delivered(&toolchain, &request_for(&video, first_frame, count, 1));
+        assert_eq!(error_output, None);
+        let expected: Vec<u64> = (first_frame..first_frame + count)
+            .map(|slot| picture_shown_in_frame(12, 30, slot))
+            .collect();
+        assert_eq!(frame_numbers, expected, "{count} frames from frame {first_frame}");
+    }
+}
+
+#[test]
+fn a_sped_up_stream_of_a_video_of_another_frame_rate_has_the_picture_of_every_nth_frame() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS);
+    for first_frame in [10, 13, 33] {
+        let (frame_numbers, error_output) =
+            frame_numbers_delivered(&toolchain, &request_for(&video, first_frame, 50, 3));
+        assert_eq!(error_output, None);
+        let expected: Vec<u64> = (first_frame..first_frame + 50)
+            .step_by(3)
+            .map(|slot| picture_shown_in_frame(25, 30, slot))
+            .collect();
+        assert_eq!(expected.len(), 17);
+        assert_eq!(frame_numbers, expected, "50 frames at 3x from frame {first_frame}");
+    }
+}
+
+#[test]
+fn the_picture_a_frame_shows_is_that_of_the_nearest_time_with_the_earlier_one_at_a_tie() {
+    // A check of the helper the tests above use, against the plain meaning of what it says, by hand: at 25
+    // and 30 a second, the time of frame 63 is 2.1 s, in the middle of the pictures 52 (2.08 s) and 53 (2.12 s).
+    assert_eq!(picture_shown_in_frame(25, 30, 62), 52, "2.067 s: nearer to 52");
+    assert_eq!(picture_shown_in_frame(25, 30, 63), 52, "a tie: the earlier");
+    assert_eq!(picture_shown_in_frame(25, 30, 64), 53, "2.133 s: nearer to 53");
+    // The same rate gives each frame its own picture.
+    assert!((0..100).all(|slot| picture_shown_in_frame(30, 30, slot) == slot));
 }
 
 #[test]
@@ -193,12 +348,12 @@ fn a_fractional_frame_rate_video_is_decoded_exactly_too() {
         },
     );
     let mut request = request_for(&video, 50, 20, 1);
-    request.frame_rate = FrameRate::new(30000, 1001).unwrap();
+    request.project_frame_rate = FrameRate::new(30000, 1001).unwrap();
     let (frame_numbers, _) = frame_numbers_delivered(&toolchain, &request);
     assert_eq!(frame_numbers, (50..70).collect::<Vec<u64>>());
 
     let mut sped_up = request_for(&video, 50, 20, 4);
-    sped_up.frame_rate = FrameRate::new(30000, 1001).unwrap();
+    sped_up.project_frame_rate = FrameRate::new(30000, 1001).unwrap();
     let (frame_numbers, _) = frame_numbers_delivered(&toolchain, &sped_up);
     assert_eq!(frame_numbers, vec![50, 54, 58, 62, 66]);
 }
@@ -234,7 +389,7 @@ fn pictures_are_exact_in_files_whose_timestamps_are_rounded_to_milliseconds() {
             for speed in [1u32, 3] {
                 // 12 source frames from a frame that is at least 12 before the end of the video.
                 let mut request = request_for(&video, first_source_frame, 12, speed);
-                request.frame_rate = frame_rate;
+                request.project_frame_rate = frame_rate;
                 let (frame_numbers, error_output) = frame_numbers_delivered(&toolchain, &request);
                 let expected: Vec<u64> = (0..12u64.div_ceil(u64::from(speed)))
                     .map(|picture| first_source_frame + picture * u64::from(speed))
@@ -255,7 +410,8 @@ fn a_variable_frame_rate_file_gives_the_picture_nearest_in_time_to_each_slot() {
     let video = variable_frame_rate_video(&toolchain);
     // The video has 400 pictures over 20 s, so the project (and the request) run at 20 per second.
     let mut request = request_for(&video, 100, 40, 1);
-    request.frame_rate = FrameRate::new(20, 1).unwrap();
+    request.project_frame_rate = FrameRate::new(20, 1).unwrap();
+    request.video_frame_rate = FrameRate::new(20, 1).unwrap(); // as many pictures as it has per second: that is what is known of it
 
     let (frame_numbers, error_output) = frame_numbers_delivered(&toolchain, &request);
 

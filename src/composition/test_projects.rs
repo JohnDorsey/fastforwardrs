@@ -4,11 +4,13 @@
 use std::path::PathBuf;
 
 use crate::project::tracks::{
-    Angle, CanvasArea, Clip, ImageClip, MediaClip, Placement, TextClip, TextObject, Track, TrackId,
+    Angle, CanvasArea, Clip, ClipKind, ImageClip, MediaClip, Placement, TextClip, TextColour, TextObject, Track,
+    TrackId,
 };
 use crate::project::{
-    FrameRate, Project, SourceAudioProperties, SourceFrameIndex, SourceImageProperties, SourceMedia,
-    SourceMediaIdentifier, SourceMediaLink, SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout,
+    AnimationTarget, FrameRate, Project, PropertyId, PropertyValue, SourceAudioProperties, SourceFrameIndex,
+    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceVideoProperties, SpeedFactor,
+    SpeedIndicatorLayout, TimelineFrameIndex,
 };
 use crate::test_support::DeterministicRandomNumbers;
 
@@ -96,6 +98,121 @@ pub(super) fn random_project(random: &mut DeterministicRandomNumbers) -> Project
 /// turned.
 pub(super) fn random_project_with_places(random: &mut DeterministicRandomNumbers) -> Project {
     random_project_of(random, true)
+}
+
+/// Like [`random_project`], and some of the clips that have sound in it have keyframes for how loud they are and whether
+/// they are silent, and so do some of the tracks.
+pub(super) fn random_project_with_sound_keyframes(random: &mut DeterministicRandomNumbers) -> Project {
+    let mut project = random_project(random);
+    let clips: Vec<_> = project
+        .tracks()
+        .iter()
+        .flat_map(|track| {
+            track
+                .placements()
+                .filter(|placement| placement.clip.as_media().is_some())
+                .map(|placement| {
+                    (
+                        placement.id,
+                        placement.first_timeline_frame.value(),
+                        placement.timeline_frame_count(),
+                    )
+                })
+        })
+        .collect();
+    let make_keyframes = |random: &mut DeterministicRandomNumbers,
+                          project: &mut Project,
+                          target: AnimationTarget,
+                          first_frame: u64,
+                          length: u64| {
+        for _ in 0..2 + random.next_below(3) {
+            let at = TimelineFrameIndex::new(first_frame + random.next_below(length));
+            let (property, value) = if random.next_below(5) < 3 {
+                (
+                    PropertyId::Gain,
+                    PropertyValue::Number(random.next_below(41) as f32 - 20.0),
+                )
+            } else {
+                (PropertyId::Muted, PropertyValue::Flag(random.next_below(3) == 0))
+            };
+            project
+                .add_keyframe(target, property, at)
+                .expect("the frame is in what it is for");
+            project
+                .set_property_at(target, property, value, at)
+                .expect("a keyframe was just made there");
+        }
+    };
+    for (clip, first_frame, length) in clips {
+        if random.next_below(2) == 0 {
+            make_keyframes(random, &mut project, AnimationTarget::Clip(clip), first_frame, length);
+        }
+    }
+    let tracks: Vec<_> = project.tracks().iter().map(|track| track.id()).collect();
+    let total_frames = project.total_frame_count();
+    for track in tracks {
+        if total_frames > 0 && random.next_below(3) == 0 {
+            make_keyframes(random, &mut project, AnimationTarget::Track(track), 0, total_frames);
+        }
+    }
+    project
+}
+
+/// Like [`random_project_with_places`], and some of the videos, pictures and text objects in it have keyframes for where
+/// they are, and some text objects for how they look.
+pub(super) fn random_project_with_places_and_keyframes(random: &mut DeterministicRandomNumbers) -> Project {
+    let mut project = random_project_with_places(random);
+    let clips: Vec<_> = project
+        .tracks()
+        .iter()
+        .flat_map(|track| {
+            track.placements().map(|placement| {
+                (
+                    placement.id,
+                    placement.clip.kind(),
+                    placement.first_timeline_frame.value(),
+                    placement.timeline_frame_count(),
+                )
+            })
+        })
+        .collect();
+    let unit = |random: &mut DeterministicRandomNumbers| random.next_below(1001) as f32 / 1000.0;
+    for (clip, kind, first_frame, length) in clips {
+        if kind == ClipKind::Audio || random.next_below(2) == 0 {
+            continue;
+        }
+        let target = AnimationTarget::Clip(clip);
+        for _ in 0..1 + random.next_below(3) {
+            let at = TimelineFrameIndex::new(first_frame + random.next_below(length));
+            let (property, value) = match random.next_below(4) {
+                0 => (PropertyId::Position, PropertyValue::Pair(unit(random), unit(random))),
+                1 => (
+                    PropertyId::Size,
+                    PropertyValue::Pair(0.1 + unit(random), 0.1 + unit(random)),
+                ),
+                2 => (
+                    PropertyId::Rotation,
+                    PropertyValue::Number(unit(random) * 360.0 - 180.0),
+                ),
+                _ => (
+                    PropertyId::Colour,
+                    PropertyValue::Colour(TextColour::new(
+                        random.next_below(256) as u8,
+                        random.next_below(256) as u8,
+                        0,
+                        255,
+                    )),
+                ),
+            };
+            // (A colour is not a property of a video: that one is not made.)
+            if project.add_keyframe(target, property, at).is_ok() {
+                project
+                    .set_property_at(target, property, value, at)
+                    .expect("a keyframe was just made there");
+            }
+        }
+    }
+    project
 }
 
 fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool) -> Project {

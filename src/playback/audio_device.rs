@@ -1,34 +1,19 @@
 //! The speakers: playing the preview's sound through the operating system's default output device.
 //!
-//! The device asks for sound in small pieces, on a thread of its own, many times a second. The
-//! sound waits in a queue that the editor fills a little ahead of when it is heard; when the queue
-//! runs dry the device is given silence, never a pause.
+//! The device asks for sound in small pieces, on a thread of its own, many times a second (see
+//! [`super::output_stream`]). The sound waits in a queue that the editor fills a little ahead of when it is
+//! heard; when the queue runs dry the device is given silence, never a pause.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample, Stream};
-use thiserror::Error;
+use cpal::{FromSample, SizedSample, Stream};
 
 use super::audio_splice::splice_waiting_sound;
 use super::audio_supplier::{AudioSink, AudioSinkOpener};
+use super::output_stream::{AudioDeviceError, FillsOutput, OutputShape, open_default_output};
 use crate::media::AudioFormat;
-
-/// More than two channels (surround) are not made use of: the sound is stereo, and the other
-/// channels of a device that has them are left silent.
-const MOST_CHANNELS_WE_MAKE_SOUND_FOR: u16 = 2;
-
-#[derive(Debug, Error)]
-pub enum AudioDeviceError {
-    #[error("this computer has no sound output")]
-    NoOutputDevice,
-    #[error("the sound output could not be set up: {0}")]
-    CouldNotSetUp(String),
-    #[error("the sound output wants samples of a kind this program cannot make ({0})")]
-    UnsupportedSampleFormat(String),
-}
 
 /// The default output device, playing what is queued.
 pub struct DeviceAudioSink {
@@ -39,62 +24,36 @@ pub struct DeviceAudioSink {
     has_failed: Arc<AtomicBool>,
 }
 
+/// What gives the device the sound that is queued.
+struct QueuedSound {
+    queue: Arc<Mutex<VecDeque<f32>>>,
+    shape: OutputShape,
+}
+
+impl FillsOutput for QueuedSound {
+    fn fill<Sample: SizedSample + FromSample<f32>>(&mut self, output: &mut [Sample]) {
+        fill_output(
+            output,
+            &mut lock(&self.queue),
+            self.shape.device_channels,
+            self.shape.sound_channels,
+        );
+    }
+}
+
 impl DeviceAudioSink {
     /// Opens the default output device and starts it playing silence, ready for sound to be queued.
     pub fn open() -> Result<Self, AudioDeviceError> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or(AudioDeviceError::NoOutputDevice)?;
-        let supported_configuration = device
-            .default_output_config()
-            .map_err(|error| AudioDeviceError::CouldNotSetUp(error.to_string()))?;
-        let sample_format = supported_configuration.sample_format();
-        let configuration = supported_configuration.config();
-
-        let device_channels = usize::from(configuration.channels);
-        let sound_channels = usize::from(configuration.channels.min(MOST_CHANNELS_WE_MAKE_SOUND_FOR));
         let queue: Arc<Mutex<VecDeque<f32>>> = Arc::default();
-        let has_failed = Arc::new(AtomicBool::new(false));
-
-        let stream = {
+        let opened = open_default_output({
             let queue = Arc::clone(&queue);
-            let has_failed = Arc::clone(&has_failed);
-            let on_error = move |_error| has_failed.store(true, Ordering::Relaxed);
-            // The same code for each kind of sample the device can want.
-            macro_rules! stream_of {
-                ($sample:ty) => {
-                    device.build_output_stream(
-                        configuration,
-                        move |output: &mut [$sample], _| {
-                            fill_output(output, &mut lock(&queue), device_channels, sound_channels);
-                        },
-                        on_error,
-                        None,
-                    )
-                };
-            }
-            match sample_format {
-                SampleFormat::F32 => stream_of!(f32),
-                SampleFormat::F64 => stream_of!(f64),
-                SampleFormat::I16 => stream_of!(i16),
-                SampleFormat::I32 => stream_of!(i32),
-                SampleFormat::U16 => stream_of!(u16),
-                other => return Err(AudioDeviceError::UnsupportedSampleFormat(other.to_string())),
-            }
-            .map_err(|error| AudioDeviceError::CouldNotSetUp(error.to_string()))?
-        };
-        stream
-            .play()
-            .map_err(|error| AudioDeviceError::CouldNotSetUp(error.to_string()))?;
-
+            move |shape| QueuedSound { queue, shape }
+        })?;
         Ok(Self {
-            _stream: stream,
+            _stream: opened.stream,
             queue,
-            format: AudioFormat {
-                sample_rate: configuration.sample_rate,
-                channel_count: sound_channels as u16,
-            },
-            has_failed,
+            format: opened.format,
+            has_failed: opened.has_failed,
         })
     }
 }

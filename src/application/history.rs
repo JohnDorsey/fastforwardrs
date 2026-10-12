@@ -18,7 +18,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
-use crate::project::{ClipLocation, Project};
+use super::selection::SelectionItem;
+use crate::project::Project;
 
 /// How many steps can be undone. The oldest are forgotten when there are more.
 pub const MOST_STEPS_KEPT: usize = 200;
@@ -49,7 +50,7 @@ struct StateId(u64);
 /// One step that can be undone (or redone): the project as it was before it, and what was selected.
 struct Step {
     project_before: Project,
-    selection_before: Vec<ClipLocation>,
+    selection_before: Vec<SelectionItem>,
     state_before: StateId,
     /// What the edits of the step are about, while more may still be joined to it.
     key: Option<EditKey>,
@@ -60,7 +61,7 @@ struct Step {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Restored {
     pub project: Project,
-    pub selection: Vec<ClipLocation>,
+    pub selection: Vec<SelectionItem>,
 }
 
 /// The edits that were made, and the ones that were undone.
@@ -148,7 +149,7 @@ impl History {
     pub fn record_change(
         &mut self,
         project_before: Project,
-        selection_before: Vec<ClipLocation>,
+        selection_before: Vec<SelectionItem>,
         key: Option<EditKey>,
         now: Instant,
         pointer_is_down: bool,
@@ -179,7 +180,7 @@ impl History {
 
     /// Takes back the latest step. `project_now` and `selection_now` are what there is now, which a
     /// redo gives back. `None` if there is nothing to undo.
-    pub fn undo(&mut self, project_now: &Project, selection_now: Vec<ClipLocation>) -> Option<Restored> {
+    pub fn undo(&mut self, project_now: &Project, selection_now: Vec<SelectionItem>) -> Option<Restored> {
         let step = self.undo.pop()?;
         self.redo.push(Step {
             project_before: project_now.clone(),
@@ -197,7 +198,7 @@ impl History {
     }
 
     /// Does again the step that was undone last. `None` if there is nothing to redo.
-    pub fn redo(&mut self, project_now: &Project, selection_now: Vec<ClipLocation>) -> Option<Restored> {
+    pub fn redo(&mut self, project_now: &Project, selection_now: Vec<SelectionItem>) -> Option<Restored> {
         let step = self.redo.pop()?;
         self.undo.push(Step {
             project_before: project_now.clone(),
@@ -301,18 +302,16 @@ mod tests {
     #[test]
     fn the_selection_a_step_was_made_with_comes_back_with_it() {
         use crate::project::{ClipId, TrackId};
-        let clip = ClipLocation {
-            track: TrackId::new(0),
-            clip: ClipId::new(5),
-        };
+        let clip = SelectionItem::Clip(ClipId::new(TrackId::new(0), 5));
+        let track = SelectionItem::Track(TrackId::new(2));
         let mut history = History::new();
-        history.record_change(project_of(1), vec![clip], None, Instant::now(), false);
+        history.record_change(project_of(1), vec![clip, track], None, Instant::now(), false);
         let undone = history.undo(&project_of(2), Vec::new()).unwrap();
-        assert_eq!(undone.selection, vec![clip]);
+        assert_eq!(undone.selection, vec![clip, track], "a track too");
         let redone = history.redo(&undone.project, vec![clip]).unwrap();
         assert_eq!(
             redone.selection,
-            Vec::<ClipLocation>::new(),
+            Vec::<SelectionItem>::new(),
             "what was selected when it was undone"
         );
     }

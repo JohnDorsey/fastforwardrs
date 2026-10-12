@@ -105,7 +105,6 @@ impl FastForwardApplication {
         self.openings.clear();
         self.source_files.clear();
         self.selection.clear();
-        self.text_window_open = None;
         self.preview_pictures.set_setup(None);
         self.textures.clear();
         self.timeline_view.reset();

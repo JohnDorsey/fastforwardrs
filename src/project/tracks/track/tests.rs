@@ -5,16 +5,16 @@ use crate::project::tracks::media_clip::MediaClip;
 use crate::project::tracks::placement::{Angle, CanvasArea, Placement};
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
-use crate::project::{SourceFrameIndex, SourceMediaIdentifier};
+use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier};
 use crate::test_support::DeterministicRandomNumbers;
 
 const SOURCE: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
 
-fn speed(factor: u32) -> SpeedFactor {
+pub(super) fn speed(factor: u32) -> SpeedFactor {
     SpeedFactor::new(factor).unwrap()
 }
 
-fn frame(number: u64) -> TimelineFrameIndex {
+pub(super) fn frame(number: u64) -> TimelineFrameIndex {
     TimelineFrameIndex::new(number)
 }
 
@@ -29,30 +29,38 @@ fn media(first: u64, end: u64, factor: u32) -> MediaClip {
 }
 
 /// A video clip of source frames `first` up to `end` at `factor`x.
-fn video(first: u64, end: u64, factor: u32) -> Clip {
+pub(super) fn video(first: u64, end: u64, factor: u32) -> Clip {
     Clip::Video(media(first, end, factor))
 }
 
-fn sound(first: u64, end: u64, factor: u32) -> Clip {
+pub(super) fn sound(first: u64, end: u64, factor: u32) -> Clip {
     Clip::Audio(media(first, end, factor))
 }
 
-fn text(duration: u64) -> Clip {
+pub(super) fn text(duration: u64) -> Clip {
     Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
 }
 
 /// A picture that is shown for `duration` frames.
-fn picture(duration: u64) -> Clip {
+pub(super) fn picture(duration: u64) -> Clip {
     Clip::Image(ImageClip::new(SourceMediaIdentifier::new(9), duration).unwrap())
 }
 
+/// The track the tests make their clips on.
+pub(super) const THE_TRACK: TrackId = TrackId::new(1);
+
+/// The id of the clip that is number `number` of those made on [`THE_TRACK`].
+pub(super) fn clip_id(number: u32) -> ClipId {
+    ClipId::new(THE_TRACK, number)
+}
+
 /// A track with these clips, each with the number of empty frames before it.
-fn track_of(clips: Vec<(u64, Clip)>) -> Track {
-    Track::new(TrackId::new(1), "track 0").with_clips(clips)
+pub(super) fn track_of(clips: Vec<(u64, Clip)>) -> Track {
+    Track::new(THE_TRACK, "track 0").with_clips(clips)
 }
 
 /// Where each clip starts and ends, in order.
-fn spans(track: &Track) -> Vec<(u64, u64)> {
+pub(super) fn spans(track: &Track) -> Vec<(u64, u64)> {
     track
         .placements()
         .map(|placement| {
@@ -196,11 +204,11 @@ fn what_is_at_a_frame_says_whether_a_clip_is_there_or_how_much_room_there_is() {
     };
     assert_eq!(track.room_at(frame(0)), free(0, Some(20)));
     assert_eq!(track.room_at(frame(19)), free(0, Some(20)));
-    assert_eq!(track.room_at(frame(20)), Room::Occupied(ClipId::new(0)));
-    assert_eq!(track.room_at(frame(119)), Room::Occupied(ClipId::new(0)));
+    assert_eq!(track.room_at(frame(20)), Room::Occupied(clip_id(0)));
+    assert_eq!(track.room_at(frame(119)), Room::Occupied(clip_id(0)));
     assert_eq!(track.room_at(frame(120)), free(120, Some(170)));
     assert_eq!(track.room_at(frame(169)), free(120, Some(170)));
-    assert_eq!(track.room_at(frame(170)), Room::Occupied(ClipId::new(1)));
+    assert_eq!(track.room_at(frame(170)), Room::Occupied(clip_id(1)));
     assert_eq!(track.room_at(frame(180)), free(180, None));
     assert_eq!(track.room_at(frame(9999)), free(180, None));
 }
@@ -479,8 +487,8 @@ fn speed_gain_and_muting_apply_to_videos_and_sounds_and_not_to_text() {
     assert!(track.set_clip_speed(ids[1], speed(2)).is_ok());
     assert!(track.set_clip_speed(ids[2], speed(2)).is_ok());
     assert_eq!(
-        track.set_clip_speed(ClipId::new(99), speed(2)),
-        Err(ClipEditError::UnknownClip { clip: ClipId::new(99) })
+        track.set_clip_speed(clip_id(99), speed(2)),
+        Err(ClipEditError::UnknownClip { clip: clip_id(99) })
     );
 }
 
@@ -570,8 +578,8 @@ fn deleting_a_clip_that_is_not_there_is_an_error_and_changes_nothing() {
     let mut track = track_of(vec![(0, video(0, 100, 1))]);
     let before = track.clone();
     assert_eq!(
-        track.delete_clip(ClipId::new(5)),
-        Err(ClipEditError::UnknownClip { clip: ClipId::new(5) })
+        track.delete_clip(clip_id(5)),
+        Err(ClipEditError::UnknownClip { clip: clip_id(5) })
     );
     assert_eq!(track, before);
 }
@@ -702,7 +710,7 @@ fn a_clip_that_is_not_there_or_not_on_the_picture_cannot_be_placed() {
         track.set_clip_placement(sound_id, somewhere()),
         Err(ClipEditError::NotOnThePicture { clip: sound_id })
     );
-    let unknown = ClipId::new(99);
+    let unknown = clip_id(99);
     assert_eq!(
         track.set_clip_placement(unknown, somewhere()),
         Err(ClipEditError::UnknownClip { clip: unknown })
@@ -778,7 +786,7 @@ fn a_video_or_a_sound_has_no_time_to_be_set_and_nothing_changes_for_the_try() {
         );
     }
     assert_eq!(track, before);
-    let unknown = ClipId::new(99);
+    let unknown = clip_id(99);
     assert_eq!(
         track.set_clip_duration(unknown, 10),
         Err(ClipEditError::UnknownClip { clip: unknown })
@@ -1161,7 +1169,7 @@ fn a_clip_that_is_not_on_the_track_is_an_error_and_nothing_moves() {
     let mut track = track_of_videos(&[(0, 20), (10, 20)]);
     let before = track.clone();
     let clips = ids(&track);
-    let gone = ClipId::new(99);
+    let gone = clip_id(99);
 
     assert_eq!(
         track.move_clips(&[(clips[0], 100), (gone, 5)]),
@@ -1257,4 +1265,85 @@ fn random_moves_are_made_exactly_when_nothing_would_overlap_and_then_every_clip_
         made >= 20 && refused >= 20,
         "the test sees both: {made} made, {refused} refused"
     );
+}
+
+// --- counting the track again at another frame rate ---
+
+fn frames_per_second(frames: u32) -> FrameRate {
+    FrameRate::new(frames, 1).unwrap()
+}
+
+#[test]
+fn a_clip_of_one_frame_is_still_a_frame_where_both_its_ends_are_counted_to_the_same_frame() {
+    // Source frame 2 at 30 a second is 1.6 at 24, and the frame after it 2.4: both come to frame 2.
+    let track = track_of(vec![(0, video(2, 3, 1))]);
+
+    let retimed = track.retimed(frames_per_second(30), frames_per_second(24));
+
+    assert_eq!(spans(&retimed), vec![(0, 1)]);
+    let clip = retimed.entries()[0].clip().as_media().unwrap();
+    assert_eq!(
+        (clip.first_source_frame().value(), clip.end_source_frame().value()),
+        (2, 3),
+        "it has the frame it had, and not nothing"
+    );
+    assert_track_is_consistent(&retimed);
+}
+
+#[test]
+fn clips_that_touched_still_touch_even_where_counting_each_start_on_its_own_would_leave_a_frame_between() {
+    // Source frames 7 and 8 at 30 a second are 5.6 and 6.4 at 24: the first clip comes to 7 - 6 = 1 frame (and
+    // the exact is 1.6). The clip after it starts at frame 2, which counted on its own is 1.6, which is 2.
+    let track = track_of(vec![(0, video(7, 9, 1)), (0, video(9, 20, 1))]);
+    assert_eq!(
+        frames_per_second(30).convert_frame_count_to(2, frames_per_second(24)),
+        2
+    );
+
+    let retimed = track.retimed(frames_per_second(30), frames_per_second(24));
+
+    assert_eq!(spans(&retimed)[0], (0, 1));
+    assert_eq!(spans(&retimed)[1].0, 1, "it starts where the one before it ends");
+    assert_eq!(retimed.entries()[1].gap_before_frames(), 0);
+    assert_track_is_consistent(&retimed);
+}
+
+#[test]
+fn a_clip_after_a_gap_is_never_counted_to_start_before_the_clip_before_it_ends() {
+    // Source frames 29 and 30 at 50 a second are 17.4 and 18.6 at 30: the clip is 19 - 17 = 2 frames long
+    // (and the exact is 1.2), and it starts at frame 1 (0.6), so it ends at 3. The clip after it, a frame
+    // after that at 50 a second, is at 4, which counted on its own is 2.4: before the end of the first.
+    let track = track_of(vec![(1, video(29, 31, 1)), (1, video(31, 40, 1))]);
+    assert_eq!(
+        frames_per_second(50).convert_frame_count_to(4, frames_per_second(30)),
+        2
+    );
+
+    let retimed = track.retimed(frames_per_second(50), frames_per_second(30));
+
+    assert_eq!(spans(&retimed)[0], (1, 3));
+    assert_eq!(
+        spans(&retimed)[1].0,
+        3,
+        "no sooner than the first ends: the gap between them is gone"
+    );
+    assert_eq!(retimed.entries()[1].gap_before_frames(), 0);
+    assert_track_is_consistent(&retimed);
+}
+
+// --- the ids of the clips a track makes ---
+
+#[test]
+fn the_clips_a_track_makes_are_numbered_in_the_order_it_makes_them_and_say_which_track_made_them() {
+    let mut track = track_of(vec![(0, video(0, 100, 1)), (10, video(100, 150, 1))]);
+    assert_eq!(ids(&track), vec![clip_id(0), clip_id(1)]);
+
+    // A clip that is cut in two keeps its id for the first half; the second half is a new clip.
+    let outcome = track.split_at(frame(50)).unwrap();
+    assert_eq!((outcome.first_half, outcome.second_half), (clip_id(0), clip_id(2)));
+    // And so is one that is put in.
+    let inserted = track.insert_clip_at(frame(400), text(10)).unwrap();
+    assert_eq!(inserted, clip_id(3));
+
+    assert!(ids(&track).iter().all(|id| id.origin() == THE_TRACK));
 }

@@ -9,6 +9,7 @@ use crate::project::tracks::ids::ClipId;
 use crate::project::tracks::placement::Placement;
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
+use crate::project::{Animation, PropertyId};
 use crate::project::{SpeedFactor, TimelineFrameIndex};
 
 /// The result of cutting a clip in two.
@@ -41,6 +42,10 @@ pub enum ClipEditError {
     LastsAsLongAsItsFile { clip: ClipId },
     #[error("{clip} would be on top of another clip there")]
     WouldOverlap { clip: ClipId },
+    #[error("{property:?} is not a property of {clip}, or the value is not the kind it has")]
+    NotAPropertyOfThisClip { clip: ClipId, property: PropertyId },
+    #[error("{clip} is not as long as {frames_in} frames, so it has nothing at that frame")]
+    NotWithinTheClip { clip: ClipId, frames_in: u64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -95,12 +100,16 @@ impl Track {
 
         let second_id = self.take_next_clip_id();
         let first_id = self.entries[index].id;
+        // Each half has what the clip had at every frame it has: see `Animation::split_at`.
+        let (first_animation, second_animation) = self.entries[index].animation.split_at(frames_in);
         self.entries[index].clip = first_half;
+        self.entries[index].animation = first_animation;
         self.entries.insert(
             index + 1,
             TrackEntry {
                 id: second_id,
                 clip: second_half,
+                animation: second_animation,
                 gap_before_frames: 0,
             },
         );
@@ -156,6 +165,7 @@ impl Track {
                 *next_anchor = super::layout::Anchor {
                     start: removed_anchor.start,
                     moves_along: false,
+                    length: next_anchor.length,
                 };
             } else if !removed.clip.is_media() {
                 // A text object that goes leaves what came after it where it was.
@@ -207,6 +217,9 @@ impl Track {
         if let Some(changed) = self.entries[index].clip.with_duration_in_frames_it_says(new_duration) {
             let old_end = start + old_duration;
             self.entries[index].clip = changed;
+            // Keyframes beyond the new end are gone, with the value the clip has at its end kept (a clip made longer
+            // keeps the keyframes it had, which are all before its old end).
+            self.entries[index].animation = self.entries[index].animation.truncated_to(new_duration);
             if let Some(next) = self.entries.get_mut(index + 1) {
                 // The next clip stays where it is, so the gap before it takes up the difference.
                 next.gap_before_frames = next.gap_before_frames + old_end - (start + new_duration);
@@ -265,6 +278,7 @@ impl Track {
             TrackEntry {
                 id,
                 clip,
+                animation: Animation::default(),
                 gap_before_frames: new_start - from_frame,
             },
         );

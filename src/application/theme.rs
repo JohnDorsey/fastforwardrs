@@ -36,12 +36,20 @@ pub const SCRUB_SLIDER_HEIGHT: f32 = 30.0;
 /// The space around and between the parts of the window, in points.
 pub const SPACING: f32 = 8.0;
 
+/// How far the panels are from the edges of the window and from one another, in points.
+pub const PANEL_GAP: i8 = 6;
+
+/// How wide the properties panel is, in points, with the space that is round it.
+pub const PROPERTIES_PANEL_WIDTH: f32 = 340.0;
+
 /// How tall the thumbnail pictures are made, in pixels. They are shown about 104 points tall, and
 /// this leaves room for screens that draw two pixels to a point.
 pub const THUMBNAIL_HEIGHT_IN_PIXELS: u32 = 144;
 
-pub const WINDOW_BACKGROUND: Color32 = Color32::from_rgb(24, 25, 28);
-pub const PREVIEW_BACKGROUND: Color32 = Color32::from_rgb(10, 10, 12);
+/// What the panels are (and the menu bar): the window is divided into panels, with [`PANEL_GAP`] of the darker
+/// [`GAP_BACKGROUND`] between them and round them.
+pub const PANEL_BACKGROUND: Color32 = Color32::from_rgb(24, 25, 28);
+pub const GAP_BACKGROUND: Color32 = Color32::from_rgb(12, 12, 14);
 pub const TRACK_BACKGROUND: Color32 = Color32::from_rgb(34, 36, 40);
 pub const TRACK_BORDER: Color32 = Color32::from_rgb(80, 84, 92);
 /// What a thumbnail looks like until its picture has been made.
@@ -81,9 +89,17 @@ pub const MISSING_CLIP_TEXT: Color32 = Color32::from_rgb(232, 196, 198);
 /// The box at the left of a track, with its title.
 pub const TRACK_HEADER_BACKGROUND: Color32 = Color32::from_rgb(40, 43, 49);
 
-/// The floating settings boxes (and the pointer that comes out of them).
-pub const BUBBLE_BACKGROUND: Color32 = Color32::from_rgb(38, 40, 46);
-pub const BUBBLE_BORDER: Color32 = Color32::from_rgb(112, 118, 130);
+/// What a drawer on a clip is filled with, and the button that opens it (which is over a clip, whatever it looks
+/// like, so it dims what is behind it).
+pub const DRAWER_BACKGROUND: Color32 = Color32::from_rgb(32, 34, 40);
+pub const DRAWER_BUTTON_FILL: Color32 = Color32::from_black_alpha(150);
+pub const DRAWER_BUTTON_FILL_HOVERED: Color32 = Color32::from_black_alpha(205);
+pub const DRAWER_BUTTON_OUTLINE: Color32 = Color32::from_rgba_premultiplied(70, 70, 70, 70);
+pub const DRAWER_BUTTON_OUTLINE_HOVERED: Color32 = Color32::from_rgba_premultiplied(150, 150, 150, 150);
+pub const DRAWER_BUTTON_ARROW: Color32 = Color32::from_rgba_premultiplied(225, 225, 225, 225);
+
+/// The box in the properties panel that has the properties of one thing in it: a little lighter than the panel.
+pub const PROPERTIES_BOX_BACKGROUND: Color32 = Color32::from_rgb(38, 40, 46);
 
 pub const SLIDER_TRACK: Color32 = Color32::from_rgb(70, 74, 82);
 pub const SLIDER_FILLED: Color32 = Color32::from_rgb(214, 88, 70);
@@ -94,6 +110,12 @@ pub const ICON_DISABLED: Color32 = Color32::from_rgb(110, 112, 118);
 pub const ICON_BUTTON_HOVER: Color32 = Color32::from_rgb(60, 64, 72);
 pub const ICON_BUTTON_PRESSED: Color32 = Color32::from_rgb(84, 90, 102);
 pub const ICON_BUTTON_ACTIVE: Color32 = Color32::from_rgb(52, 90, 140);
+
+/// The buttons of the keyframes in the properties panel (the stopwatch and the arrows to the keyframes): bright orange for one
+/// that has a keyframe (or has one to go to), and grey for one that has not.
+pub const KEYFRAME_BUTTON_ACTIVE: Color32 = Color32::from_rgb(255, 150, 24);
+pub const KEYFRAME_BUTTON_INACTIVE: Color32 = Color32::from_rgb(116, 120, 128);
+pub const KEYFRAME_BUTTON_HOVERED_BACKGROUND: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 30);
 
 /// The outline shown around the fast-forward symbol while the pointer is over it.
 pub const INDICATOR_OUTLINE: Color32 = Color32::from_rgb(120, 190, 255);

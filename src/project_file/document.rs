@@ -1,9 +1,11 @@
-//! The exact shape of a project file on disk (the current version, 4).
+//! The exact shape of a project file on disk (the current version, 6).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
 //! between the two is where files from the outside world get validated. (Files of earlier
 //! versions have their own types, in [`super::legacy`].)
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +26,10 @@ pub(super) struct ProjectDocument {
     /// What the project has set for itself. Left out when it follows every global setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<ProjectSettingsDocument>,
+    /// The frame rate the project was given. Left out while it follows its first video, and in the
+    /// files of versions before 5 (in which it always did).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<FrameRate>,
 }
 
 /// The settings a project has set for itself. A setting that follows the global one is not in the
@@ -84,6 +90,10 @@ pub(super) struct TrackDocument {
     /// height, and in the files of versions before 4, which had no heights.
     #[serde(default = "normal_height_in_points", skip_serializing_if = "is_the_normal_height")]
     pub height_in_points: f32,
+    /// The keyframes of the track's own properties (how loud it is, and whether it is silent), counted in frames from the
+    /// start of the timeline. Left out for a track that has none, and in the files of versions before 6.
+    #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+    pub animation: AnimationDocument,
     pub clips: Vec<ClipDocument>,
 }
 
@@ -115,6 +125,10 @@ pub(super) enum ClipDocument {
         /// video that is simply fitted inside the picture.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         placement: Option<PlacementDocument>,
+        /// The keyframes of what is animated, counted in frames from the clip's first frame. Left out for a clip that
+        /// has none.
+        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        animation: AnimationDocument,
     },
     Audio {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -127,6 +141,8 @@ pub(super) enum ClipDocument {
         gain_decibels: Gain,
         #[serde(default, skip_serializing_if = "is_false")]
         muted: bool,
+        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        animation: AnimationDocument,
     },
     Image {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -137,6 +153,8 @@ pub(super) enum ClipDocument {
         /// picture that is simply fitted inside the picture.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         placement: Option<PlacementDocument>,
+        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        animation: AnimationDocument,
     },
     Text {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -151,7 +169,43 @@ pub(super) enum ClipDocument {
         /// How far the area is turned, clockwise. Left out for a text that is upright.
         #[serde(default, skip_serializing_if = "is_not_turned")]
         rotation_degrees: f32,
+        #[serde(default, skip_serializing_if = "AnimationDocument::is_empty")]
+        animation: AnimationDocument,
     },
+}
+
+/// The keyframes of the properties that a clip or a track has animated, by the name of the property (see
+/// [`crate::project::PropertyId::name`]), each property's in the order of their frames. A property that is not animated is
+/// not in it.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(super) struct AnimationDocument(pub BTreeMap<String, Vec<KeyframeDocument>>);
+
+impl AnimationDocument {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// What a property is at a frame.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct KeyframeDocument {
+    /// How many frames after the first frame of the clip (or after the start of the timeline, for a track).
+    pub frame: u64,
+    pub value: KeyframeValueDocument,
+}
+
+/// The value of a keyframe, which is the kind of value that the property has: a number (how loud, in decibels; how far turned,
+/// in degrees; how big the letters are), two numbers (a place, a size), yes or no, or text (words, the name of a font, a
+/// colour as `#RRGGBBAA`). Which of them it has to be is told by the property, and checked when the file is loaded.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(super) enum KeyframeValueDocument {
+    Flag(bool),
+    Number(f32),
+    Pair([f32; 2]),
+    Text(String),
 }
 
 fn is_zero(number: &u64) -> bool {
@@ -202,7 +256,7 @@ pub(super) struct SpeedIndicatorDocument {
 pub(super) struct ColourDocument(pub TextColour);
 
 impl ColourDocument {
-    fn to_text(self) -> String {
+    pub(super) fn to_text(self) -> String {
         let TextColour {
             red,
             green,
@@ -212,7 +266,7 @@ impl ColourDocument {
         format!("#{red:02X}{green:02X}{blue:02X}{alpha:02X}")
     }
 
-    fn from_text(text: &str) -> Result<Self, String> {
+    pub(super) fn from_text(text: &str) -> Result<Self, String> {
         let digits = text
             .strip_prefix('#')
             .filter(|digits| digits.len() == 8 && digits.chars().all(|digit| digit.is_ascii_hexdigit()))

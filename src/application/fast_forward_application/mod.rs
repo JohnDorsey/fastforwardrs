@@ -4,10 +4,10 @@
 //! [`FastForwardApplication`]:
 //!
 //! * this file: the state, starting up, and the loop that runs once for each frame drawn;
-//! * `drawing`: laying out the window (the menu bar, the preview, the timeline);
+//! * `drawing`: laying out the window (the menu bar and the three panels: the properties, the preview, the
+//!   timeline);
 //! * `command_execution`: what each [`Command`] does;
-//! * `dialog_flow`: messages, questions, the export's progress, the missing-files warning and the
-//!   text object window;
+//! * `dialog_flow`: messages, questions, the export's progress and the missing-files warning;
 //! * `source_media_flow`: finding, opening and relinking the source files (videos and sounds),
 //!   and making the thumbnails and waveforms for the timeline;
 //! * `project_file_flow`: new, load and save;
@@ -17,15 +17,18 @@
 //! * `programmatic_interface`: what the window does, without its file dialogs, and a look at the
 //!   state afterwards (for tests, and for scripting).
 
+mod animating;
 mod autosave;
-#[cfg(test)]
-mod clip_box_tests;
 #[cfg(test)]
 mod clip_drag_tests;
 #[cfg(test)]
 mod clip_look_tests;
 mod command_execution;
+#[cfg(test)]
+mod cut_feedback_tests;
 mod dialog_flow;
+#[cfg(test)]
+mod drawer_tests;
 mod drawing;
 mod export_flow;
 #[cfg(test)]
@@ -33,11 +36,17 @@ mod file_question_tests;
 #[cfg(test)]
 mod interaction_tests;
 #[cfg(test)]
+mod keyframe_panel_tests;
+#[cfg(test)]
+mod keyframe_tests;
+#[cfg(test)]
 mod picture_tests;
 #[cfg(test)]
 mod preview_layer_tests;
 mod programmatic_interface;
 mod project_file_flow;
+#[cfg(test)]
+mod properties_panel_tests;
 #[cfg(test)]
 mod selection_tests;
 mod settings_flow;
@@ -50,6 +59,10 @@ mod test_window;
 mod text_object_tests;
 #[cfg(test)]
 mod track_height_tests;
+#[cfg(test)]
+mod track_reorder_tests;
+#[cfg(test)]
+mod track_selection_tests;
 #[cfg(test)]
 mod track_tests;
 #[cfg(test)]
@@ -85,9 +98,10 @@ use crate::media::{
 use crate::playback::{
     AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PicturesReport, PlaybackClock, PreviewPictures, PreviewSetup,
-    PreviewVideo, opener_of_the_default_speakers, preview_picture_size, wanted_pictures,
+    PreviewVideo, SoundEffects, opener_of_the_default_effect_speakers, opener_of_the_default_speakers,
+    preview_picture_size, wanted_pictures,
 };
-use crate::project::{ClipLocation, FrameRate, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
+use crate::project::{FrameRate, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
 use crate::settings_file::default_settings_file_path;
 use crate::text_rendering::LazyTextRenderer;
@@ -226,8 +240,6 @@ pub struct FastForwardApplication {
     openings: Vec<OpeningTask>,
     /// The clips that were clicked, which Delete deletes and S cuts.
     selection: Selection,
-    /// The text clip whose text object the pop-up window is editing, if the window is open.
-    text_window_open: Option<ClipLocation>,
     text_renderer: LazyTextRenderer,
     /// The fonts the computer has, once they are known.
     font_families: Option<Vec<String>>,
@@ -236,6 +248,9 @@ pub struct FastForwardApplication {
     preview_pictures: PreviewPictures<FfmpegPictureStreamStarter>,
     /// Plays the sound of the preview. It is silent until given speakers to play through.
     audio_supplier: AudioSupplier<FfmpegAudioStreamStarter>,
+    /// Plays the editor's own little sounds, such as the snip of a cut. It is silent until given speakers to
+    /// play through.
+    sound_effects: SoundEffects,
     textures: Textures,
     timeline_view: TimelineViewState,
     dialog: Option<Dialog>,
@@ -259,20 +274,25 @@ impl FastForwardApplication {
         if let Some(settings_path) = default_settings_file_path() {
             application.keep_global_settings_in(settings_path);
         }
-        application
-            .audio_supplier
-            .play_through(opener_of_the_default_speakers());
+        application.use_the_default_speakers();
         if let Some(path) = project_to_open {
             application.load_project(path);
         }
         application
     }
 
+    /// Has the editor play the sound of the preview, and its own little sounds, through the computer's default speakers
+    /// (which are opened when the first sound is made). Without this it is silent, which is what the tests want.
+    fn use_the_default_speakers(&mut self) {
+        self.audio_supplier.play_through(opener_of_the_default_speakers());
+        self.sound_effects.play_through(opener_of_the_default_effect_speakers());
+    }
+
     /// An editor drawing into `context`, using `toolchain` (or reporting that ffmpeg is missing).
     /// The global settings are the defaults and are not kept in any file; see
     /// [`Self::keep_global_settings_in`]. It has no one to ask for files: reaching a file dialog
-    /// is a failure (the editor is given a file chooser that panics when asked), and what a dialog would have chosen is given
-    /// to the editor directly (see the programmatic interface).
+    /// is a failure (the editor is given a file chooser that panics when asked), and what a dialog
+    /// would have chosen is given to the editor directly (see the programmatic interface).
     pub fn with_context(context: &Context, toolchain: Result<FfmpegToolchain, ToolchainError>) -> Self {
         context.set_visuals(egui::Visuals::dark());
         let wake_up: UserInterfaceWakeUp = {
@@ -298,6 +318,7 @@ impl FastForwardApplication {
                 Arc::clone(&wake_up),
             )),
             audio_supplier: AudioSupplier::new(FfmpegAudioStreamStarter::new(toolchain.clone(), Arc::clone(&wake_up))),
+            sound_effects: SoundEffects::default(),
             toolchain,
             clock: PlaybackClock::new(project.frame_rate()),
             project,
@@ -311,7 +332,6 @@ impl FastForwardApplication {
             source_files: HashMap::new(),
             openings: Vec::new(),
             selection: Selection::empty(),
-            text_window_open: None,
             text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),
             font_families: None,
             textures: Textures::default(),
@@ -390,17 +410,9 @@ impl FastForwardApplication {
         }
     }
 
-    /// Lets go of a selection, and of a text window, that are about a clip that is not there any more.
+    /// Lets go of a selection that is about a clip or a track that is not there any more.
     fn forget_what_is_gone_from_the_project(&mut self) {
-        self.selection.forget_clips_that_are_gone(&self.project);
-        if self.text_window_open.is_some_and(|clip| {
-            self.project
-                .placement_of(clip)
-                .and_then(|placement| placement.clip.as_text())
-                .is_none()
-        }) {
-            self.text_window_open = None;
-        }
+        self.selection.forget_what_is_gone(&self.project);
     }
 
     /// Tells the picture supplier which videos it can get pictures from, and how big the pictures
@@ -420,6 +432,7 @@ impl FastForwardApplication {
                         .path_if_available()?
                         .to_owned(),
                     display_size_in_pixels: (video.display_width_in_pixels, video.display_height_in_pixels),
+                    frame_rate: video.frame_rate,
                 })
             })
             .collect();
@@ -481,8 +494,6 @@ impl FastForwardApplication {
                 selected_clips_at_the_current_frame,
                 can_undo: self.history.can_undo(),
                 can_redo: self.history.can_redo(),
-                a_box_with_controls_is_open: self.timeline_view.settings_box_is_open()
-                    || self.text_window_open.is_some(),
             },
         ));
     }
@@ -501,7 +512,7 @@ impl FastForwardApplication {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
         let now = Instant::now();
-        ui.painter().rect_filled(ui.max_rect(), 0.0, theme::WINDOW_BACKGROUND);
+        ui.painter().rect_filled(ui.max_rect(), 0.0, theme::GAP_BACKGROUND);
 
         self.handle_close_request(&context);
         let frame_state = self.prepare_frame(&context, now);
@@ -513,11 +524,10 @@ impl FastForwardApplication {
         settings_windows::show(
             &context,
             &mut self.settings_windows_open,
-            self.project.settings(),
+            (self.project.settings(), self.project.frame_rate()),
             self.global_settings,
             &mut commands,
         );
-        self.show_text_object_window(&context, &frame_state, &mut commands);
         self.show_dialogs(&context);
         self.execute_all(commands, now, &context);
         self.autosave_when_quiet_for_long_enough(&context, now);

@@ -6,7 +6,8 @@
 //! A video is cut, and made to play at its speed, and only then scaled to its box (so that the
 //! pictures that a sped-up clip drops are never scaled). A layer that is turned is made into a
 //! picture with clear corners, the size of the smallest picture the turned box fits in, and that
-//! is laid over with its middle where the box's middle is.
+//! is laid over with its middle where the box's middle is. A box can reach out past the edges of
+//! the picture, which cuts off what is laid over it there.
 
 use std::collections::BTreeMap;
 
@@ -31,9 +32,10 @@ pub struct VideoToExport {
 /// Where a layer goes on the finished picture, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlaceToExport {
-    /// The box the layer fills, before it is turned.
-    pub left_in_pixels: u32,
-    pub top_in_pixels: u32,
+    /// The box the layer fills, before it is turned. It can reach out past the edges of the picture, so
+    /// that its left and top are below zero when it starts before the picture does.
+    pub left_in_pixels: i32,
+    pub top_in_pixels: i32,
     pub width_in_pixels: u32,
     pub height_in_pixels: u32,
     /// How far the box is turned about its middle, clockwise.
@@ -43,6 +45,15 @@ pub struct PlaceToExport {
 impl PlaceToExport {
     fn is_turned(&self) -> bool {
         self.turn_in_degrees != 0.0
+    }
+
+    /// Whether all of the box (before it is turned) is on a picture `picture_width` by `picture_height`
+    /// pixels: touching its edges is, reaching past them is not.
+    fn is_inside_the_picture(&self, picture_width: u32, picture_height: u32) -> bool {
+        self.left_in_pixels >= 0
+            && self.top_in_pixels >= 0
+            && i64::from(self.left_in_pixels) + i64::from(self.width_in_pixels) <= i64::from(picture_width)
+            && i64::from(self.top_in_pixels) + i64::from(self.height_in_pixels) <= i64::from(picture_height)
     }
 }
 
@@ -133,10 +144,15 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
         let finished_label = format!("finished_clip_{section_number}");
         let layers = &section.layers;
 
-        // The picture to lay the layers over: a video at the back that is not turned is that
-        // picture itself (put on black where it does not reach), and otherwise it is black.
+        // The picture to lay the layers over: a video at the back that is not turned and is inside
+        // the picture is that picture itself (put on black where it does not reach), and otherwise
+        // it is black (a box that reaches out of the picture cannot be put on black by padding).
         let back_video = layers.first().and_then(|first| match first.content {
-            LayerContentToExport::Video(video) if !first.place.is_turned() => Some((video, first.place)),
+            LayerContentToExport::Video(video)
+                if !first.place.is_turned() && first.place.is_inside_the_picture(width, height) =>
+            {
+                Some((video, first.place))
+            }
             _ => None,
         });
         let (mut current_label, first_layer_to_lay_over) = match back_video {
@@ -258,8 +274,12 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
 }
 
 /// The filters that scale a picture to the box of `place` with square pixels, and, if the box is
-/// not all of the picture, put it in its place on black.
+/// not all of the picture, put it in its place on black. (The box must be inside the picture.)
 fn fit_to_place_filters(place: PlaceToExport, picture_width: u32, picture_height: u32) -> String {
+    debug_assert!(
+        place.is_inside_the_picture(picture_width, picture_height),
+        "{place:?} cannot be padded to {picture_width}x{picture_height}"
+    );
     let scaled = format!("scale={}:{},setsar=1", place.width_in_pixels, place.height_in_pixels);
     let fills_the_picture = place.left_in_pixels == 0
         && place.top_in_pixels == 0

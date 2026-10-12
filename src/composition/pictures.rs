@@ -12,11 +12,17 @@
 //!
 //! The timeline is cut into *sections*, stretches of frames over which the same layers are seen.
 
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
-use crate::project::tracks::{CanvasArea, Clip, ClipLocation, Placement, TextObject};
-use crate::project::{FrameRate, Project, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex, fitted_placement};
+use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
+use crate::project::{
+    Animation, FrameRate, Project, PropertyId, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+};
+
+/// The properties that say where a layer is on the picture.
+const PROPERTIES_OF_WHERE_A_LAYER_IS: [PropertyId; 3] = [PropertyId::Position, PropertyId::Size, PropertyId::Rotation];
 
 /// The video that a layer shows during a section: the part of one clip that the section covers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,12 +52,19 @@ pub enum LayerContent {
 /// A video, a picture or a text object that is seen during a section, and where it is on the picture.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
-    pub clip: ClipLocation,
+    pub clip: ClipId,
+    /// The track the clip is on. (The pictures of a track's videos are got by a stream of the track's own.)
+    pub track: TrackId,
     pub content: LayerContent,
-    /// Where the layer is on the picture, and how far it is turned. (For a text object this is
-    /// where the object says it is, and for a video or a picture where it was put or, if it was not,
-    /// where it is fitted.)
+    /// Where the layer is on the picture, and how far it is turned, before its keyframes change that. (For a text
+    /// object this is where the object says it is, and for a video or a picture where it was put or, if it was not,
+    /// where it is fitted.) Where it is at a frame is [`Self::placement_at`].
     pub placement: Placement,
+    /// The keyframes of what is seen of the clip: where it is, and for a text object how it looks. Their frames are
+    /// counted from [`Self::clip_first_timeline_frame`].
+    pub animation: Animation,
+    /// The frame of the timeline that the clip starts at, from which the frames of [`Self::animation`] are counted.
+    pub clip_first_timeline_frame: u64,
 }
 
 impl Layer {
@@ -63,11 +76,72 @@ impl Layer {
         }
     }
 
+    /// How many frames into the clip `timeline_frame` is: what the frames of [`Self::animation`] are counted in.
+    fn frames_into_the_clip(&self, timeline_frame: TimelineFrameIndex) -> u64 {
+        timeline_frame.value().saturating_sub(self.clip_first_timeline_frame)
+    }
+
+    /// Whether the layer has keyframes for where it is or how it looks, so that it is not the same at every frame.
+    pub fn has_keyframes(&self) -> bool {
+        !self.animation.is_empty()
+    }
+
+    /// The layer as it is at `timeline_frame` (a frame it is seen at), with what its keyframes say worked out: where it is, and
+    /// what a text object says and how it looks, there. It has no keyframes, being the same at every frame.
+    #[must_use]
+    pub fn as_it_is_at(&self, timeline_frame: TimelineFrameIndex) -> Layer {
+        Layer {
+            clip: self.clip,
+            track: self.track,
+            content: match self.text_at(timeline_frame) {
+                Some(object) => LayerContent::Text(object.into_owned()),
+                None => self.content.clone(),
+            },
+            placement: self.placement_at(timeline_frame),
+            animation: Animation::default(),
+            clip_first_timeline_frame: self.clip_first_timeline_frame,
+        }
+    }
+
+    /// Whether where the layer is on the picture is changed by keyframes, so that it is not in the same place at every frame.
+    pub fn is_moved_by_keyframes(&self) -> bool {
+        PROPERTIES_OF_WHERE_A_LAYER_IS
+            .into_iter()
+            .any(|property| self.animation.is_animated(property))
+    }
+
+    /// Where the layer is on the picture at `timeline_frame` (a frame it is seen at): where [`Self::placement`] says, changed
+    /// as the keyframes say.
+    pub fn placement_at(&self, timeline_frame: TimelineFrameIndex) -> Placement {
+        self.animation
+            .placement_at(self.placement, self.frames_into_the_clip(timeline_frame))
+    }
+
+    /// The text object the layer is at `timeline_frame`: what the object says, changed as the keyframes say. `None` if the
+    /// layer is not a text object.
+    pub fn text_at(&self, timeline_frame: TimelineFrameIndex) -> Option<Cow<'_, TextObject>> {
+        let LayerContent::Text(object) = &self.content else {
+            return None;
+        };
+        Some(if self.animation.is_empty() {
+            Cow::Borrowed(object)
+        } else {
+            Cow::Owned(
+                self.animation
+                    .text_object_at(object, self.frames_into_the_clip(timeline_frame)),
+            )
+        })
+    }
+
     /// Whether the layer fills all of the picture with pictures and is not turned, so that nothing
     /// behind it can be seen. (A text object never does: it is mostly clear. Nor does a picture: it
-    /// may have clear places, and a picture file does not say whether it has.)
+    /// may have clear places, and a picture file does not say whether it has. Nor does a video that keyframes move
+    /// about: it may not at some other frame.)
     pub fn covers_the_picture(&self) -> bool {
-        self.video().is_some() && self.placement.rotation.is_zero() && self.placement.area == CanvasArea::WHOLE_PICTURE
+        self.video().is_some()
+            && !self.is_moved_by_keyframes()
+            && self.placement.rotation.is_zero()
+            && self.placement.area == CanvasArea::WHOLE_PICTURE
     }
 }
 
@@ -96,6 +170,42 @@ impl PictureSection {
             return None;
         }
         Some(video.first_source_frame + (frame - self.first_timeline_frame) * u64::from(video.speed.value()))
+    }
+
+    /// The part of the section from `first` up to `end` (frames of the timeline inside the section, with at least one frame):
+    /// the same layers, where each video shows the pictures that come in those frames.
+    #[must_use]
+    pub fn slice(&self, first: u64, end: u64) -> PictureSection {
+        debug_assert!(
+            self.first_timeline_frame <= first && first < end && end <= self.end_timeline_frame,
+            "{first}..{end} is not inside {}..{}",
+            self.first_timeline_frame,
+            self.end_timeline_frame
+        );
+        let layers = self
+            .layers
+            .iter()
+            .map(|layer| match &layer.content {
+                LayerContent::Video(video) => {
+                    let speed = u64::from(video.speed.value());
+                    let first_source_frame = video.first_source_frame + (first - self.first_timeline_frame) * speed;
+                    Layer {
+                        content: LayerContent::Video(VisibleVideo {
+                            first_source_frame,
+                            end_source_frame: (first_source_frame + (end - first) * speed).min(video.end_source_frame),
+                            ..*video
+                        }),
+                        ..layer.clone()
+                    }
+                }
+                LayerContent::Image { .. } | LayerContent::Text(_) => layer.clone(),
+            })
+            .collect();
+        PictureSection {
+            first_timeline_frame: first,
+            end_timeline_frame: end,
+            layers,
+        }
     }
 
     /// The layers that are videos, the one at the back first.
@@ -149,18 +259,33 @@ impl PicturePlan {
 struct Candidate<'project> {
     /// Where the clip's track is in the list of tracks: 0 is the front.
     track_position: usize,
-    clip: ClipLocation,
+    track: TrackId,
+    clip: ClipId,
     first_timeline_frame: u64,
     end_timeline_frame: u64,
     effective_speed: SpeedFactor,
     content: &'project Clip,
     /// For a video: how many frames the source file has (none, if the file cannot be used).
     source_frame_count: u64,
-    /// Where the clip is on the picture.
+    /// Where the clip is on the picture, before its keyframes change that.
     placement: Placement,
+    /// The keyframes of what is seen of the clip.
+    animation: Animation,
 }
 
 impl Candidate<'_> {
+    /// The layer that the clip is, with `content`.
+    fn layer(&self, content: LayerContent) -> Layer {
+        Layer {
+            clip: self.clip,
+            track: self.track,
+            content,
+            placement: self.placement,
+            animation: self.animation.clone(),
+            clip_first_timeline_frame: self.first_timeline_frame,
+        }
+    }
+
     /// For a video that starts at the source frame `clip_first_source_frame`: the source frame it
     /// shows at `timeline_frame`, a frame at which the clip is there.
     fn source_frame_at(&self, clip_first_source_frame: u64, timeline_frame: u64) -> u64 {
@@ -190,47 +315,30 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
         for placement in track.placements() {
-            let (source_frame_count, where_it_is) = match placement.clip {
-                Clip::Video(media) => {
-                    let frame_count = if is_usable(media.source()) {
-                        project.frame_count_of_source(media.source()).unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    let shown_size = project
-                        .source(media.source())
-                        .and_then(|source| source.properties.video())
-                        .map_or(picture_size, |video| {
-                            (video.display_width_in_pixels, video.display_height_in_pixels)
-                        });
-                    let fitted = || fitted_placement(shown_size, picture_size);
-                    (frame_count, media.placement().unwrap_or_else(fitted))
+            let source_frame_count = match placement.clip {
+                Clip::Video(media) if is_usable(media.source()) => {
+                    project.frame_count_of_source(media.source()).unwrap_or(0)
                 }
-                Clip::Image(image) => {
-                    // A picture has no pictures to run out of: it is there or its file is not.
-                    let frame_count = u64::from(is_usable(image.source()));
-                    let shown_size = project
-                        .source(image.source())
-                        .and_then(|source| source.properties.display_size_in_pixels())
-                        .unwrap_or(picture_size);
-                    let fitted = || fitted_placement(shown_size, picture_size);
-                    (frame_count, image.placement().unwrap_or_else(fitted))
-                }
-                Clip::Text(text) => (0, text.object.placement()),
+                Clip::Video(_) => 0,
+                // A picture has no pictures to run out of: it is there or its file is not.
+                Clip::Image(image) => u64::from(is_usable(image.source())),
+                Clip::Text(_) => 0,
                 Clip::Audio(_) => continue,
             };
+            let where_it_is = project
+                .placement_on_the_picture(placement.clip)
+                .expect("a clip that is not a sound is on the picture");
             candidates.push(Candidate {
                 track_position,
-                clip: ClipLocation {
-                    track: track.id(),
-                    clip: placement.id,
-                },
+                track: track.id(),
+                clip: placement.id,
                 first_timeline_frame: placement.first_timeline_frame.value(),
                 end_timeline_frame: placement.end_timeline_frame.value(),
                 effective_speed: placement.effective_speed,
                 content: placement.clip,
                 source_frame_count,
                 placement: where_it_is,
+                animation: placement.animation.restricted_to(PropertyId::is_seen),
             });
         }
     }
@@ -326,37 +434,25 @@ fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<Pic
                     let end_source_frame = (first_source_frame + (until - from) * speed).min(limit);
                     layers.push((
                         candidate.track_position,
-                        Layer {
-                            clip: candidate.clip,
-                            content: LayerContent::Video(VisibleVideo {
-                                source: media.source(),
-                                first_source_frame,
-                                end_source_frame,
-                                speed: candidate.effective_speed,
-                            }),
-                            placement: candidate.placement,
-                        },
+                        candidate.layer(LayerContent::Video(VisibleVideo {
+                            source: media.source(),
+                            first_source_frame,
+                            end_source_frame,
+                            speed: candidate.effective_speed,
+                        })),
                     ));
                 }
                 Clip::Image(image) => {
                     if candidate.source_frame_count > 0 {
                         layers.push((
                             candidate.track_position,
-                            Layer {
-                                clip: candidate.clip,
-                                content: LayerContent::Image { source: image.source() },
-                                placement: candidate.placement,
-                            },
+                            candidate.layer(LayerContent::Image { source: image.source() }),
                         ));
                     }
                 }
                 Clip::Text(text) => layers.push((
                     candidate.track_position,
-                    Layer {
-                        clip: candidate.clip,
-                        content: LayerContent::Text(text.object.clone()),
-                        placement: candidate.placement,
-                    },
+                    candidate.layer(LayerContent::Text(text.object.clone())),
                 )),
                 Clip::Audio(_) => {}
             }
@@ -402,8 +498,8 @@ fn push_merging_with_the_one_before(sections: &mut Vec<PictureSection>, section:
 
 /// The layers of `previous` and `section` together, if each layer of `section` is the one of
 /// `previous` carrying on: the same clip, with the same text or picture file or with the pictures
-/// that come right after. (A clip is in one place for as long as it lasts, so the same clip is in the
-/// same place.)
+/// that come right after. (A clip is in one place, and has the same keyframes, for as long as it lasts, so the
+/// same clip is in the same place and has the same keyframes.)
 fn layers_carried_on(previous: &PictureSection, section: &PictureSection) -> Option<Vec<Layer>> {
     if previous.layers.len() != section.layers.len() {
         return None;
@@ -417,8 +513,9 @@ fn layers_carried_on(previous: &PictureSection, section: &PictureSection) -> Opt
                 return None;
             }
             debug_assert_eq!(
-                before.placement, after.placement,
-                "a clip is in one place for as long as it lasts"
+                (before.placement, &before.animation, before.clip_first_timeline_frame),
+                (after.placement, &after.animation, after.clip_first_timeline_frame),
+                "a clip is in one place, with the same keyframes, for as long as it lasts"
             );
             match (&before.content, &after.content) {
                 (LayerContent::Text(first), LayerContent::Text(second)) if first == second => Some(before.clone()),
@@ -450,5 +547,7 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
         && after.first_source_frame == before.first_source_frame + frame_count * u64::from(before.speed.value())
 }
 
+#[cfg(test)]
+mod animation_tests;
 #[cfg(test)]
 mod tests;

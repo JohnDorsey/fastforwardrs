@@ -100,6 +100,8 @@ pub struct PreviewVideo {
     /// How big the video's picture is as it is shown, so that a video of another shape than the
     /// preview's picture can be fitted inside it.
     pub display_size_in_pixels: (u32, u32),
+    /// The frame rate of the video itself, which may be another than the project's.
+    pub frame_rate: FrameRate,
 }
 
 /// The videos the preview shows pictures of, and how big the pictures are.
@@ -456,7 +458,8 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         let video = setup.videos.iter().find(|video| video.source == source)?;
         Some(FrameStreamRequest {
             video_path: video.video_path.clone(),
-            frame_rate: setup.frame_rate,
+            project_frame_rate: setup.frame_rate,
+            video_frame_rate: video.frame_rate,
             first_source_frame,
             source_frame_count: range_end_source_frame
                 .value()

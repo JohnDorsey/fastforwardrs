@@ -28,7 +28,7 @@ mod sound;
 use crate::project::{FrameRate, SpedUpClipSound};
 
 pub use pictures::{LayerContentToExport, LayerToExport, PlaceToExport, SectionToExport, VideoToExport};
-pub use sound::{SoundClipToExport, SoundItemToExport, SoundStripToExport};
+pub use sound::{LoudnessToExport, SoundClipToExport, SoundItemToExport, SoundStripToExport};
 
 /// The name of the video the graph makes.
 const VIDEO_OUTPUT_LABEL: &str = "finished_video";
@@ -177,7 +177,7 @@ mod tests {
             end_source_frame: end,
             speed_factor: speed(factor),
             timeline_frame_count: (end - first).div_ceil(u64::from(factor)),
-            loudness_factor: 1.0,
+            loudness: LoudnessToExport::UNCHANGED,
         })
     }
 

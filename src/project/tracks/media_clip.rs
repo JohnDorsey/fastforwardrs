@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::gain::Gain;
 use super::placement::Placement;
-use crate::project::{SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
+use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
 /// A run of whole frames from a source file, played at a single speed.
 ///
@@ -118,6 +118,22 @@ impl MediaClip {
     #[must_use]
     pub fn with_muted(&self, muted: bool) -> Self {
         Self { muted, ..*self }
+    }
+
+    /// The clip as it is when its project runs at the frame rate `to` and not `from`: it covers the
+    /// same stretch of the file, with its first and its end frame counted again at the new rate (and at
+    /// least one frame of it). Pieces cut from one file that touch each other still do.
+    #[must_use]
+    pub fn retimed(&self, from: FrameRate, to: FrameRate) -> Self {
+        let first_source_frame = from.convert_frame_count_to(self.first_source_frame.value(), to);
+        let end_source_frame = from
+            .convert_frame_count_to(self.end_source_frame.value(), to)
+            .max(first_source_frame + 1);
+        Self {
+            first_source_frame: SourceFrameIndex::new(first_source_frame),
+            end_source_frame: SourceFrameIndex::new(end_source_frame),
+            ..*self
+        }
     }
 
     /// How many source frames the clip covers.

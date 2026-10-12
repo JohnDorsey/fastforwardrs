@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::{FastForwardApplication, OpeningPurpose};
-use crate::playback::{AudioSinkOpener, SuppliedPicture};
-use crate::project::{ClipLocation, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
+use crate::application::selection::SelectionItem;
+use crate::playback::{AudioSinkOpener, EffectSpeakersOpener, SuppliedPicture};
+use crate::project::{ClipId, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
 
 impl FastForwardApplication {
     /// Puts the video or sound file at `path` on the timeline at the current frame, as choosing it
@@ -50,13 +51,18 @@ impl FastForwardApplication {
     }
 
     /// The clip that is selected, if exactly one is.
-    pub fn selected_clip(&self) -> Option<ClipLocation> {
+    pub fn selected_clip(&self) -> Option<ClipId> {
         self.selection.single()
     }
 
     /// The clips that are selected.
-    pub fn selected_clips(&self) -> Vec<ClipLocation> {
+    pub fn selected_clips(&self) -> Vec<ClipId> {
         self.selection.to_vec()
+    }
+
+    /// Everything that is selected, clips and tracks.
+    pub fn selected_items(&self) -> Vec<SelectionItem> {
+        self.selection.to_items()
     }
 
     /// Whether there is an edit that undoing would take back.
@@ -144,6 +150,12 @@ impl FastForwardApplication {
     /// driven by a script, must not make noise.
     pub fn play_sound_through(&mut self, open_speakers: AudioSinkOpener) {
         self.audio_supplier.play_through(open_speakers);
+    }
+
+    /// Plays the editor's own little sounds (the snip of a cut, say) through the speakers `open_speakers`
+    /// makes (when the first of them is played). Until this is called they are silent, like the preview's sound.
+    pub fn play_effects_through(&mut self, open_speakers: EffectSpeakersOpener) {
+        self.sound_effects.play_through(open_speakers);
     }
 
     /// Whether the preview's sound is being decoded and played right now.

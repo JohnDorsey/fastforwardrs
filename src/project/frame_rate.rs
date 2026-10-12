@@ -90,6 +90,16 @@ impl FrameRate {
         frames_times_denominator as f64 / f64::from(self.numerator)
     }
 
+    /// The moment, in whole microseconds, at which frame number `frame_number` starts, to the nearest
+    /// microsecond (half a microsecond is rounded up). Exact integer arithmetic. A microsecond is what
+    /// ffmpeg's own sums are made in when it is asked for them (`AVTB`), so a moment given in them is
+    /// given exactly as it will be used.
+    pub fn microseconds_at_frame(self, frame_number: u64) -> u64 {
+        let numerator = u128::from(self.numerator);
+        let scaled = u128::from(frame_number) * u128::from(self.denominator) * 1_000_000;
+        u64::try_from((2 * scaled + numerator) / (2 * numerator)).unwrap_or(u64::MAX)
+    }
+
     /// The frame that is on screen at `seconds`. Negative and not-a-number inputs give frame 0.
     pub fn frame_at_seconds(self, seconds: f64) -> u64 {
         if seconds.is_nan() || seconds <= 0.0 {
@@ -119,6 +129,22 @@ impl FrameRate {
     pub fn first_frame_in_whole_second(self, whole_second: u64) -> u64 {
         let frames_numerator = u128::from(whole_second) * u128::from(self.numerator);
         frames_numerator.div_ceil(u128::from(self.denominator)) as u64
+    }
+
+    /// How many frames at the rate `other` take as long as `frames` frames at this rate, to the nearest
+    /// whole frame (half a frame is rounded up). Exact integer arithmetic.
+    ///
+    /// This is also how many pictures a video of `frames` pictures comes to when it is made to run at
+    /// `other`: that is what ffmpeg's `fps` filter does when it is asked for the nearest picture to each
+    /// moment (checked against ffmpeg 9.0.2 for videos of 12 to 60 frames per second, of 1 to 300 pictures).
+    pub fn convert_frame_count_to(self, frames: u64, other: FrameRate) -> u64 {
+        let numerator = u128::from(frames) * u128::from(other.numerator) * u128::from(self.denominator);
+        let denominator = u128::from(other.denominator) * u128::from(self.numerator);
+        let rounded = numerator
+            .checked_mul(2)
+            .and_then(|twice| twice.checked_add(denominator))
+            .map(|sum| sum / (2 * denominator));
+        rounded.and_then(|count| u64::try_from(count).ok()).unwrap_or(u64::MAX)
     }
 }
 
@@ -233,6 +259,56 @@ mod tests {
     }
 
     #[test]
+    fn microseconds_at_frame_are_the_exact_moment_to_the_nearest_microsecond_with_halves_rounded_up() {
+        assert_eq!(frame_rate(30, 1).microseconds_at_frame(0), 0);
+        assert_eq!(frame_rate(30, 1).microseconds_at_frame(45), 1_500_000);
+        assert_eq!(
+            frame_rate(30, 1).microseconds_at_frame(1),
+            33_333,
+            "33333.33 microseconds"
+        );
+        assert_eq!(
+            frame_rate(30, 1).microseconds_at_frame(2),
+            66_667,
+            "66666.67 microseconds"
+        );
+        assert_eq!(frame_rate(30000, 1001).microseconds_at_frame(30000), 1_001_000_000);
+        assert_eq!(
+            frame_rate(2_000_000, 1).microseconds_at_frame(1),
+            1,
+            "half a microsecond is rounded up"
+        );
+        assert_eq!(frame_rate(4_000_000, 1).microseconds_at_frame(1), 0, "a quarter is not");
+        assert_eq!(
+            frame_rate(1, 1).microseconds_at_frame(u64::MAX),
+            u64::MAX,
+            "no moment is too far to say"
+        );
+    }
+
+    #[test]
+    fn microseconds_at_frame_agree_with_seconds_at_frame_to_within_half_a_microsecond() {
+        for rate in [
+            frame_rate(12, 1),
+            frame_rate(24000, 1001),
+            frame_rate(25, 1),
+            frame_rate(30, 1),
+            frame_rate(30000, 1001),
+            frame_rate(60000, 1001),
+            frame_rate(120, 1),
+        ] {
+            for frame in [0, 1, 2, 3, 29, 30, 31, 1000, 123_456, 10_000_000] {
+                let exact = rate.seconds_at_frame(frame) * 1_000_000.0;
+                let microseconds = rate.microseconds_at_frame(frame) as f64;
+                assert!(
+                    (microseconds - exact).abs() <= 0.5 + 1.0e-3,
+                    "frame {frame} at {rate}: {microseconds} against {exact}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_frame_maps_back_to_itself_through_seconds() {
         for rate in [
             frame_rate(24, 1),
@@ -271,6 +347,109 @@ mod tests {
         assert_eq!(rate.frame_at_seconds(f64::NAN), 0);
         assert_eq!(rate.nearest_frame_to_seconds(-5.0), 0);
         assert_eq!(rate.nearest_frame_to_seconds(f64::NAN), 0);
+    }
+
+    #[test]
+    fn frames_are_counted_again_at_another_rate_as_the_same_time_to_the_nearest_whole_frame() {
+        let (thirty, twenty_five, twenty_four, sixty) = (
+            frame_rate(30, 1),
+            frame_rate(25, 1),
+            frame_rate(24, 1),
+            frame_rate(60, 1),
+        );
+        assert_eq!(twenty_five.convert_frame_count_to(100, thirty), 120);
+        assert_eq!(twenty_four.convert_frame_count_to(24, thirty), 30);
+        assert_eq!(thirty.convert_frame_count_to(30, sixty), 60);
+        assert_eq!(sixty.convert_frame_count_to(60, thirty), 30);
+        assert_eq!(thirty.convert_frame_count_to(0, sixty), 0);
+        assert_eq!(
+            thirty.convert_frame_count_to(77, thirty),
+            77,
+            "the same rate changes nothing"
+        );
+        // Half a frame is rounded up: 5 frames at 60 are 2.5 at 30.
+        assert_eq!(sixty.convert_frame_count_to(5, thirty), 3);
+        assert_eq!(sixty.convert_frame_count_to(1, thirty), 1);
+        // Less than half a frame is nothing.
+        assert_eq!(frame_rate(50, 1).convert_frame_count_to(1, twenty_four), 0);
+        // The fractional rates are exact: 300 frames at 29.97 last 10.01 seconds, which is 300.3 at 30.
+        assert_eq!(frame_rate(30000, 1001).convert_frame_count_to(300, thirty), 300);
+        assert_eq!(frame_rate(30000, 1001).convert_frame_count_to(30000, thirty), 30030);
+    }
+
+    #[test]
+    fn the_number_of_frames_that_ffmpeg_makes_when_it_changes_the_rate_of_a_video_is_what_is_counted() {
+        // What `fps=<rate>:round=near` was measured to make out of videos of these rates and lengths.
+        let measured = [
+            // (the video's rate, its pictures, the rate asked for, the pictures that came out)
+            ((50, 1), 241, (30, 1), 145),
+            ((60, 1), 1, (30, 1), 1),
+            ((60, 1), 5, (30, 1), 3),
+            ((12, 1), 1, (30, 1), 3),
+            ((24, 1), 1, (25, 1), 1),
+            ((50, 1), 1, (24, 1), 0),
+            ((60, 1), 1, (24, 1), 0),
+            ((60, 1), 2, (24, 1), 1),
+            ((30000, 1001), 300, (30, 1), 300),
+        ];
+        for ((from_numerator, from_denominator), pictures, (to_numerator, to_denominator), expected) in measured {
+            assert_eq!(
+                frame_rate(from_numerator, from_denominator)
+                    .convert_frame_count_to(pictures, frame_rate(to_numerator, to_denominator)),
+                expected,
+                "{pictures} pictures at {from_numerator}/{from_denominator} made to run at {to_numerator}/{to_denominator}"
+            );
+        }
+    }
+
+    #[test]
+    fn counting_at_another_rate_and_back_gives_the_same_number_when_the_other_rate_is_a_multiple() {
+        let (thirty, sixty, hundred_and_twenty) = (frame_rate(30, 1), frame_rate(60, 1), frame_rate(120, 1));
+        for frames in 0..2000 {
+            assert_eq!(
+                sixty.convert_frame_count_to(thirty.convert_frame_count_to(frames, sixty), thirty),
+                frames
+            );
+            assert_eq!(
+                hundred_and_twenty
+                    .convert_frame_count_to(thirty.convert_frame_count_to(frames, hundred_and_twenty), thirty),
+                frames
+            );
+        }
+    }
+
+    #[test]
+    fn counting_at_another_rate_never_goes_back_in_time_and_is_never_more_than_a_frame_off_the_exact_time() {
+        let rates = [
+            frame_rate(24, 1),
+            frame_rate(25, 1),
+            frame_rate(30000, 1001),
+            frame_rate(60, 1),
+            frame_rate(12, 1),
+        ];
+        for from in rates {
+            for to in rates {
+                let mut previous = 0;
+                for frames in 0..1200u64 {
+                    let converted = from.convert_frame_count_to(frames, to);
+                    assert!(converted >= previous, "{from} to {to} at {frames}");
+                    previous = converted;
+                    let exact = frames as f64 * to.frames_per_second() / from.frames_per_second();
+                    assert!(
+                        (converted as f64 - exact).abs() <= 0.5 + 1e-9,
+                        "{from} to {to}: {frames} is {exact}, not {converted}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn counting_a_huge_number_of_frames_at_another_rate_does_not_overflow() {
+        assert_eq!(
+            frame_rate(1, 4_000_000_000).convert_frame_count_to(u64::MAX, frame_rate(4_000_000_000, 1)),
+            u64::MAX
+        );
     }
 
     #[test]

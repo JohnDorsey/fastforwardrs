@@ -1,17 +1,17 @@
 //! The pictures kept on the graphics card for drawing: the preview picture, the thumbnails that
 //! are on screen, the fast-forward symbol and the text objects.
 
-use std::collections::hash_map::{DefaultHasher, Entry};
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 
 use crate::media::{DecodedFrame, ThumbnailKey, ThumbnailLibrary};
 use crate::playback::SuppliedPicture;
-use crate::project::{SourceMediaIdentifier, SpeedFactor, TextObject, TrackId};
+use crate::project::{SourceMediaIdentifier, SpeedFactor, TrackId};
 use crate::rgba_picture::RgbaPicture;
 use crate::speed_indicator::render_speed_indicator;
+use crate::text_rendering::TextAppearance;
 
 /// How many symbol pictures (each speed at each size is a different one) are kept before the
 /// ones no longer needed are thrown away. Dragging the symbol's size makes many of them.
@@ -23,31 +23,6 @@ const MOST_TEXT_PICTURES_KEPT: usize = 24;
 
 /// Which thumbnail: a picture of a video (see [`ThumbnailKey`]).
 type ThumbnailTextureKey = (SourceMediaIdentifier, ThumbnailKey);
-
-/// What a picture of a text object depends on, so that it is only made again when one of these changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TextPictureKey(u64);
-
-impl TextPictureKey {
-    /// The key of the picture of `object` on a finished picture that is `picture_width_in_pixels`
-    /// by `picture_height_in_pixels`. Where the object is on the picture does not matter, only how
-    /// big its area is, so moving it does not make the picture again.
-    pub fn of(object: &TextObject, picture_width_in_pixels: u32, picture_height_in_pixels: u32) -> Self {
-        let mut hasher = DefaultHasher::new();
-        object.text.hash(&mut hasher);
-        object.font_family.hash(&mut hasher);
-        object
-            .font_size
-            .fraction_of_picture_height()
-            .to_bits()
-            .hash(&mut hasher);
-        object.colour.hash(&mut hasher);
-        crate::text_rendering::area_size_in_pixels(object, picture_width_in_pixels, picture_height_in_pixels)
-            .hash(&mut hasher);
-        picture_height_in_pixels.hash(&mut hasher);
-        Self(hasher.finish())
-    }
-}
 
 /// The picture of the video of a track on the graphics card, and which picture it is.
 struct PreviewTexture {
@@ -64,7 +39,7 @@ pub struct Textures {
     /// The finer pictures that were wanted since they were last taken, and were not there.
     finer_thumbnails_wanted: BTreeMap<SourceMediaIdentifier, BTreeSet<ThumbnailKey>>,
     symbols: HashMap<(u32, u32), TextureHandle>,
-    text_pictures: HashMap<TextPictureKey, TextureHandle>,
+    text_pictures: HashMap<TextAppearance, TextureHandle>,
     image_pictures: HashMap<SourceMediaIdentifier, TextureHandle>,
 }
 
@@ -163,7 +138,7 @@ impl Textures {
     pub fn text_picture(
         &mut self,
         context: &Context,
-        key: TextPictureKey,
+        key: TextAppearance,
         make_picture: impl FnOnce() -> Option<RgbaPicture>,
     ) -> Option<&TextureHandle> {
         if !self.text_pictures.contains_key(&key) {
@@ -175,8 +150,10 @@ impl Textures {
                 [picture.width_in_pixels as usize, picture.height_in_pixels as usize],
                 &picture.rgba_pixels,
             );
-            self.text_pictures
-                .insert(key, context.load_texture("text object", image, TextureOptions::LINEAR));
+            self.text_pictures.insert(
+                key.clone(),
+                context.load_texture("text object", image, TextureOptions::LINEAR),
+            );
         }
         self.text_pictures.get(&key)
     }
@@ -213,7 +190,7 @@ fn color_image_of(frame: &DecodedFrame) -> ColorImage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::{Angle, CanvasArea, FontSize, TextColour};
+    use crate::project::{Angle, CanvasArea, FontSize, TextColour, TextObject};
 
     fn object() -> TextObject {
         TextObject {
@@ -226,8 +203,8 @@ mod tests {
         }
     }
 
-    fn key(object: &TextObject) -> TextPictureKey {
-        TextPictureKey::of(object, 1920, 1080)
+    fn key(object: &TextObject) -> TextAppearance {
+        TextAppearance::of(object, 1920, 1080)
     }
 
     fn picture_of(shade: u8) -> crate::media::CompressedPicture {
@@ -457,7 +434,7 @@ mod tests {
         assert_ne!(base, key(&changed), "how big the area is");
         assert_ne!(
             base,
-            TextPictureKey::of(&object(), 1280, 720),
+            TextAppearance::of(&object(), 1280, 720),
             "how big the finished picture is"
         );
     }

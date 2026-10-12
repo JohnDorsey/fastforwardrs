@@ -5,7 +5,7 @@ use super::image_clip::ImageClip;
 use super::media_clip::MediaClip;
 use super::placement::Placement;
 use super::text_object::TextClip;
-use crate::project::{SourceMediaIdentifier, SpeedFactor};
+use crate::project::{FrameRate, SourceMediaIdentifier, SpeedFactor};
 
 /// What kind of thing a clip is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -113,6 +113,22 @@ impl Clip {
             Self::Text(text) => text.with_duration_in_frames(duration_in_frames).map(Self::Text),
             Self::Image(image) => image.with_duration_in_frames(duration_in_frames).map(Self::Image),
             Self::Video(_) | Self::Audio(_) => None,
+        }
+    }
+
+    /// The clip as it is when its project runs at the frame rate `to` and not `from`: it lasts as long
+    /// as it did, counted again at the new rate (a picture or a text object for at least one frame).
+    #[must_use]
+    pub fn retimed(&self, from: FrameRate, to: FrameRate) -> Clip {
+        match self {
+            Self::Video(media) => Self::Video(media.retimed(from, to)),
+            Self::Audio(media) => Self::Audio(media.retimed(from, to)),
+            Self::Image(_) | Self::Text(_) => {
+                let duration = self.duration_in_frames_it_says().unwrap_or(1);
+                let retimed = from.convert_frame_count_to(duration, to).max(1);
+                self.with_duration_in_frames_it_says(retimed)
+                    .unwrap_or_else(|| self.clone())
+            }
         }
     }
 

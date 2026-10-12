@@ -17,13 +17,14 @@ use thiserror::Error;
 
 use crate::atomic_file::write_file_atomically;
 use crate::project::{
-    Angle, CanvasArea, Clip, FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings,
-    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaLink, SourceMediaProperties,
-    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track, TrackHeight, TrackId,
+    Angle, Animation, CanvasArea, Clip, FontSize, ImageClip, Keyframe, Keyframes, MediaClip, Placement, Project,
+    ProjectSettings, PropertyId, PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia,
+    SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip,
+    TextObject, Track, TrackHeight, TrackId, ValueKind,
 };
 use document::{
-    CanvasAreaDocument, ClipDocument, ColourDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument,
-    SourceDocument, SpeedIndicatorDocument, TrackDocument,
+    AnimationDocument, CanvasAreaDocument, ClipDocument, ColourDocument, KeyframeDocument, KeyframeValueDocument,
+    PlacementDocument, ProjectDocument, ProjectSettingsDocument, SourceDocument, SpeedIndicatorDocument, TrackDocument,
 };
 use legacy::LegacyProjectDocument;
 pub use relative_path::relative_path_between;
@@ -37,8 +38,12 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// the row of each track on the timeline (a file of version 3 has none: its tracks are of the
 /// normal height), pictures, and where a video, a picture or a text is on the picture and how far
 /// it is turned (a file of version 3 has none of those: every video is fitted inside the picture
-/// and every text is upright).
-pub const FILE_FORMAT_VERSION: u32 = 4;
+/// and every text is upright). Version 5 added the frame rate chosen for the project, and with it
+/// videos of other frame rates than the project's (a file of version 4 has no frame rate of its own:
+/// the project follows its first video, as it always did, and all its videos run at the same rate).
+/// Version 6 added keyframes, of the clips and of the tracks (a file of version 5 has none: nothing in it
+/// is animated).
+pub const FILE_FORMAT_VERSION: u32 = 6;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -219,8 +224,107 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
     }
 }
 
-/// The clip a document describes, and how many empty frames come before it.
-fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
+/// The keyframes that `document` has, which are of properties that `has_property` says yes to. (A property that is not one of
+/// those the file is of has no keyframes: one that the file has all the same is a mistake in it, and is refused, as is a
+/// value that is not the kind the property has.)
+fn animation_from_document(
+    document: AnimationDocument,
+    has_property: impl Fn(PropertyId) -> bool,
+    what_it_is_of: &str,
+) -> Result<Animation, String> {
+    let mut properties = Vec::with_capacity(document.0.len());
+    for (name, keyframes) in document.0 {
+        let property = PropertyId::from_name(&name)
+            .ok_or_else(|| format!("the keyframes are of \"{name}\", which is not something that can be animated"))?;
+        if !has_property(property) {
+            return Err(format!(
+                "\"{name}\" cannot be animated for {what_it_is_of}: it has none"
+            ));
+        }
+        let mut converted = Vec::with_capacity(keyframes.len());
+        for keyframe in keyframes {
+            let value = value_from_document(keyframe.value, property)
+                .map_err(|reason| format!("the keyframe of \"{name}\" at frame {}: {reason}", keyframe.frame))?;
+            converted.push(Keyframe {
+                frame: keyframe.frame,
+                value,
+            });
+        }
+        properties.push((property, Keyframes::from_unordered(converted)));
+    }
+    Ok(Animation::from_keyframes(properties))
+}
+
+/// What the value `document` is for `property`.
+fn value_from_document(document: KeyframeValueDocument, property: PropertyId) -> Result<PropertyValue, String> {
+    let wrong_kind = |found: &str| {
+        let wanted = match property.kind() {
+            ValueKind::Number => "a number",
+            ValueKind::Pair => "two numbers, as [across, down] or [wide, tall]",
+            ValueKind::Colour => "a colour such as \"#FFFFFFFF\"",
+            ValueKind::Flag => "true or false",
+            ValueKind::Words => "words in quotation marks",
+        };
+        format!("{found}, where {wanted} is wanted")
+    };
+    let finite = |number: f32| {
+        if number.is_finite() {
+            Ok(number)
+        } else {
+            Err("a number that is not a number".to_owned())
+        }
+    };
+    match (property.kind(), document) {
+        (ValueKind::Number, KeyframeValueDocument::Number(number)) => Ok(PropertyValue::Number(finite(number)?)),
+        (ValueKind::Pair, KeyframeValueDocument::Pair([first, second])) => {
+            Ok(PropertyValue::Pair(finite(first)?, finite(second)?))
+        }
+        (ValueKind::Colour, KeyframeValueDocument::Text(text)) => {
+            Ok(PropertyValue::Colour(ColourDocument::from_text(&text)?.0))
+        }
+        (ValueKind::Flag, KeyframeValueDocument::Flag(flag)) => Ok(PropertyValue::Flag(flag)),
+        (ValueKind::Words, KeyframeValueDocument::Text(words)) => Ok(PropertyValue::Words(words)),
+        (_, KeyframeValueDocument::Flag(_)) => Err(wrong_kind("true or false")),
+        (_, KeyframeValueDocument::Number(_)) => Err(wrong_kind("a number")),
+        (_, KeyframeValueDocument::Pair(_)) => Err(wrong_kind("two numbers")),
+        (_, KeyframeValueDocument::Text(_)) => Err(wrong_kind("words")),
+    }
+}
+
+/// The clip a document describes, how many empty frames come before it, and its keyframes.
+fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip, Animation), String> {
+    let kind = document_kind_of(&document);
+    let (gap_before_frames, clip, animation) = clip_without_keyframes_from_document(document)?;
+    let animation = animation_from_document(
+        animation,
+        |property| property.applies_to_a_clip_of_kind(kind),
+        &format!("a {}", kind_name(kind)),
+    )?;
+    Ok((gap_before_frames, clip, animation))
+}
+
+fn document_kind_of(document: &ClipDocument) -> crate::project::ClipKind {
+    use crate::project::ClipKind;
+    match document {
+        ClipDocument::Video { .. } => ClipKind::Video,
+        ClipDocument::Audio { .. } => ClipKind::Audio,
+        ClipDocument::Image { .. } => ClipKind::Image,
+        ClipDocument::Text { .. } => ClipKind::Text,
+    }
+}
+
+fn kind_name(kind: crate::project::ClipKind) -> &'static str {
+    use crate::project::ClipKind;
+    match kind {
+        ClipKind::Video => "video",
+        ClipKind::Audio => "sound",
+        ClipKind::Image => "picture",
+        ClipKind::Text => "text object",
+    }
+}
+
+/// The clip a document describes, how many empty frames come before it, and the document of its keyframes.
+fn clip_without_keyframes_from_document(document: ClipDocument) -> Result<(u64, Clip, AnimationDocument), String> {
     match document {
         ClipDocument::Video {
             gap_before_frames,
@@ -231,6 +335,7 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
             gain_decibels,
             muted,
             placement,
+            animation,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
                 .map_err(|error| error.to_string())?;
@@ -242,6 +347,7 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
                         .with_muted(muted)
                         .with_placement(placement.map(placement_from_document)),
                 ),
+                animation,
             ))
         }
         ClipDocument::Audio {
@@ -252,12 +358,14 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
             speed_factor,
             gain_decibels,
             muted,
+            animation,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
                 .map_err(|error| error.to_string())?;
             Ok((
                 gap_before_frames,
                 Clip::Audio(media.with_gain(gain_decibels).with_muted(muted)),
+                animation,
             ))
         }
         ClipDocument::Image {
@@ -265,11 +373,13 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
             source_identifier,
             duration_in_frames,
             placement,
+            animation,
         } => {
             let image = ImageClip::new(source_identifier, duration_in_frames).map_err(|error| error.to_string())?;
             Ok((
                 gap_before_frames,
                 Clip::Image(image.with_placement(placement.map(placement_from_document))),
+                animation,
             ))
         }
         ClipDocument::Text {
@@ -281,6 +391,7 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
             colour,
             area,
             rotation_degrees,
+            animation,
         } => {
             let object = TextObject {
                 text,
@@ -291,7 +402,7 @@ fn clip_from_document(document: ClipDocument) -> Result<(u64, Clip), String> {
                 rotation: Angle::from_degrees(rotation_degrees),
             };
             let clip = TextClip::new(object, duration_in_frames).map_err(|error| error.to_string())?;
-            Ok((gap_before_frames, Clip::Text(clip)))
+            Ok((gap_before_frames, Clip::Text(clip), animation))
         }
     }
 }
@@ -343,6 +454,8 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
                 ))
             })?);
         }
+        let animation = animation_from_document(track.animation, PropertyId::applies_to_a_track, "a track")
+            .map_err(|reason| invalid_project(format!("track number {}: {reason}", track_number + 1)))?;
         tracks.push(
             Track::new(
                 TrackId::new(u32::try_from(track_number).unwrap_or(u32::MAX)),
@@ -352,13 +465,18 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .with_speed(track.speed_factor)
             .with_muted(track.muted)
             .with_height(TrackHeight::from_points(track.height_in_points))
-            .with_clips(clips),
+            .with_animation(animation)
+            .with_animated_clips(clips),
         );
     }
 
     let layout = speed_indicator_from_document(&document.speed_indicator);
     Project::from_parts(sources, tracks, layout)
-        .map(|project| project.with_settings(settings_from_document(document.settings)))
+        .map(|project| {
+            project
+                .with_settings(settings_from_document(document.settings))
+                .with_frame_rate(document.frame_rate)
+        })
         .map_err(|inconsistency| invalid_project(inconsistency.to_string()))
 }
 
@@ -455,10 +573,11 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
             speed_factor: track.speed(),
             muted: track.is_muted(),
             height_in_points: track.height().points(),
+            animation: animation_document_of(track.animation()),
             clips: track
                 .entries()
                 .iter()
-                .map(|entry| clip_document_of(entry.gap_before_frames(), entry.clip()))
+                .map(|entry| clip_document_of(entry.gap_before_frames(), entry.clip(), entry.animation()))
                 .collect(),
         })
         .collect();
@@ -480,10 +599,12 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
             sped_up_clip_sound: settings.sped_up_clip_sound,
             mute_sped_up_clips: None,
         }),
+        frame_rate: project.chosen_frame_rate(),
     })
 }
 
-fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
+fn clip_document_of(gap_before_frames: u64, clip: &Clip, animation: &Animation) -> ClipDocument {
+    let animation = animation_document_of(animation);
     match clip {
         Clip::Video(media) => ClipDocument::Video {
             gap_before_frames,
@@ -494,6 +615,7 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
             gain_decibels: media.gain(),
             muted: media.is_muted(),
             placement: media.placement().map(placement_document_of),
+            animation,
         },
         Clip::Audio(media) => ClipDocument::Audio {
             gap_before_frames,
@@ -503,12 +625,14 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
             speed_factor: media.speed(),
             gain_decibels: media.gain(),
             muted: media.is_muted(),
+            animation,
         },
         Clip::Image(image) => ClipDocument::Image {
             gap_before_frames,
             source_identifier: image.source(),
             duration_in_frames: image.duration_in_frames(),
             placement: image.placement().map(placement_document_of),
+            animation,
         },
         Clip::Text(text) => ClipDocument::Text {
             gap_before_frames,
@@ -519,7 +643,38 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip) -> ClipDocument {
             colour: ColourDocument(text.object.colour),
             area: area_document_of(text.object.area),
             rotation_degrees: text.object.rotation.degrees(),
+            animation,
         },
+    }
+}
+
+fn animation_document_of(animation: &Animation) -> AnimationDocument {
+    AnimationDocument(
+        animation
+            .properties()
+            .map(|(property, keyframes)| {
+                (
+                    property.name().to_owned(),
+                    keyframes
+                        .iter()
+                        .map(|keyframe| KeyframeDocument {
+                            frame: keyframe.frame,
+                            value: value_document_of(&keyframe.value),
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn value_document_of(value: &PropertyValue) -> KeyframeValueDocument {
+    match value {
+        PropertyValue::Number(number) => KeyframeValueDocument::Number(*number),
+        PropertyValue::Pair(first, second) => KeyframeValueDocument::Pair([*first, *second]),
+        PropertyValue::Colour(colour) => KeyframeValueDocument::Text(ColourDocument(*colour).to_text()),
+        PropertyValue::Flag(flag) => KeyframeValueDocument::Flag(*flag),
+        PropertyValue::Words(words) => KeyframeValueDocument::Text(words.clone()),
     }
 }
 
@@ -545,5 +700,7 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
     Ok(parts.join("/"))
 }
 
+#[cfg(test)]
+mod animation_tests;
 #[cfg(test)]
 mod tests;

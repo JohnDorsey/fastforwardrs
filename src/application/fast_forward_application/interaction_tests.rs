@@ -9,9 +9,12 @@ use super::test_window::{VIDEO, WINDOW_SIZE, Window, project_of, window_inside_a
 use super::{SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::dialogs::{AfterConfirmation, Dialog};
-use crate::application::preview_panel::catcher_id;
+use crate::application::preview_panel::{catcher_id, corner_handle_id, turn_place_id};
+use crate::application::selection::SelectionChange;
 use crate::application::timeline_panel::rows_area_id;
-use crate::project::{FrameRate, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex};
+use crate::project::{
+    Corner, FrameRate, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex,
+};
 
 #[test]
 fn the_file_menu_has_the_five_items_in_the_requested_order() {
@@ -452,6 +455,29 @@ fn the_tab_key_does_not_stop_where_there_is_nothing_to_do_by_keyboard() {
 }
 
 #[test]
+fn the_tab_key_does_not_stop_at_the_handles_of_the_selected_layer_either() {
+    // The handles and the places to turn from take the mouse over everything, but have nothing to do for the keyboard.
+    let mut window = Window::showing(project_of(300));
+    let video = window.clip(0, 0);
+    window.do_this(Command::Select {
+        clips: vec![video],
+        change: SelectionChange::Replace,
+    });
+    let places_with_nothing_to_do: Vec<egui::Id> = Corner::ALL
+        .into_iter()
+        .flat_map(|corner| [corner_handle_id(video, corner), turn_place_id(video, corner)])
+        .collect();
+    for _ in 0..40 {
+        window.press_key(Key::Tab);
+        let focused = window.harness.ctx.memory(|memory| memory.focused());
+        assert!(
+            !focused.is_some_and(|id| places_with_nothing_to_do.contains(&id)),
+            "the focus is at a handle: {focused:?}"
+        );
+    }
+}
+
+#[test]
 fn the_s_key_cuts_even_when_a_button_has_the_keyboard_focus() {
     let mut window = Window::showing(project_of(300));
     window.move_current_frame_to(60);
@@ -795,9 +821,9 @@ fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_i
 
     // The clips of the track cannot be used behind the dialog.
     let on_the_track = window.middle_of_the_track_at(75);
-    window.right_click(on_the_track);
+    window.click(on_the_track);
     assert!(
-        !window.application().timeline_view.settings_box_is_open(),
+        window.application().selected_clip().is_none(),
         "the click did not reach the clip"
     );
 
@@ -807,9 +833,9 @@ fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_i
         "clicking outside a message closes it"
     );
 
-    // With the dialog gone, the same click opens the box of the clip.
-    window.right_click(on_the_track);
-    assert!(window.application().timeline_view.settings_box_is_open());
+    // With the dialog gone, the same click selects the clip.
+    window.click(on_the_track);
+    assert!(window.application().selected_clip().is_some());
 }
 
 #[test]

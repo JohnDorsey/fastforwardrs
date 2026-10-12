@@ -11,13 +11,13 @@
 //!   while playing. Holding the key repeats.
 //!
 //! None of them does anything while something that wants the keys itself is open: a text field
-//! being typed in, a menu or a drop-down list (Escape closes those), or a box with sliders and boxes
-//! to tick (they are given the keys instead).
+//! being typed in (the title of a track, the words of a text object), or a menu or a drop-down list (Escape
+//! closes those).
 
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Popup};
 
 use super::commands::Command;
-use crate::project::{ClipLocation, TimelineFrameIndex};
+use crate::project::{ClipId, TimelineFrameIndex};
 
 /// The key that plays and pauses.
 const PLAY_OR_PAUSE_KEY: Key = Key::Space;
@@ -42,14 +42,12 @@ pub struct KeyboardState {
     /// Whether nothing is on the timeline. The keys that are about what is on it then do nothing.
     pub timeline_is_empty: bool,
     /// The selected clips.
-    pub selected_clips: Vec<ClipLocation>,
+    pub selected_clips: Vec<ClipId>,
     /// The selected clips that are at the current frame.
-    pub selected_clips_at_the_current_frame: Vec<ClipLocation>,
+    pub selected_clips_at_the_current_frame: Vec<ClipId>,
     /// Whether there is an edit to undo, and one that was undone to redo.
     pub can_undo: bool,
     pub can_redo: bool,
-    /// Whether a box is open that has controls of its own, which use the keys.
-    pub a_box_with_controls_is_open: bool,
 }
 
 /// Turns the keys pressed during this frame into commands. The keys are used up, so that no other
@@ -57,7 +55,7 @@ pub struct KeyboardState {
 pub fn commands_for_the_keys_pressed(context: &Context, state: KeyboardState) -> Vec<Command> {
     // Typing in a text field is not a shortcut: the keys belong to the field. Neither are the keys
     // pressed while a menu is open, which are the menu's (Escape closes it).
-    if context.text_edit_focused() || Popup::is_any_open(context) || state.a_box_with_controls_is_open {
+    if context.text_edit_focused() || Popup::is_any_open(context) {
         return Vec::new();
     }
     context.input_mut(|input| {
@@ -119,11 +117,8 @@ mod tests {
     use super::*;
     use crate::project::{ClipId, TrackId};
 
-    fn location(clip: u32) -> ClipLocation {
-        ClipLocation {
-            track: TrackId::new(0),
-            clip: ClipId::new(clip),
-        }
+    fn location(clip: u32) -> ClipId {
+        ClipId::new(TrackId::new(0), clip)
     }
 
     fn state() -> KeyboardState {
@@ -135,7 +130,6 @@ mod tests {
             timeline_is_empty: false,
             can_undo: false,
             can_redo: false,
-            a_box_with_controls_is_open: false,
         }
     }
 
@@ -386,30 +380,5 @@ mod tests {
             },
         );
         assert_eq!(commands, Vec::<Command>::new());
-    }
-
-    #[test]
-    fn nothing_is_a_shortcut_while_a_box_with_controls_of_its_own_is_open() {
-        let box_open = KeyboardState {
-            selected_clips: vec![location(1)],
-            a_box_with_controls_is_open: true,
-            ..with_edits_to_undo_and_redo()
-        };
-        for key in [
-            Key::Space,
-            Key::S,
-            Key::Delete,
-            Key::Backspace,
-            Key::Escape,
-            Key::ArrowLeft,
-            Key::ArrowRight,
-        ] {
-            assert_eq!(pressing(key, box_open.clone()), Vec::<Command>::new(), "{key:?}");
-        }
-        assert_eq!(
-            pressing_with(Modifiers::COMMAND, Key::Z, box_open),
-            Vec::<Command>::new(),
-            "Ctrl+Z neither"
-        );
     }
 }

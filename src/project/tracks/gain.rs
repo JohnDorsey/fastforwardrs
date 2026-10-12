@@ -54,6 +54,12 @@ impl Gain {
     pub fn combined_linear_factor(self, other: Gain) -> f64 {
         decibels_to_linear_factor(f64::from(self.decibels) + f64::from(other.decibels))
     }
+
+    /// The number the samples are multiplied by to change their loudness by `decibels`, whatever that is (it is not
+    /// limited to what one gain can be: it may be that of two together).
+    pub fn linear_factor_of_decibels(decibels: f64) -> f64 {
+        decibels_to_linear_factor(decibels)
+    }
 }
 
 fn decibels_to_linear_factor(decibels: f64) -> f64 {

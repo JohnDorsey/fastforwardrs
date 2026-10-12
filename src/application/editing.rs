@@ -5,15 +5,13 @@
 //! frame would stay at the same position on the timeline and so show something else. Instead it
 //! follows the source frame it was showing.
 
-use crate::project::{
-    Clip, ClipLocation, EditError, Project, SourceFrameIndex, SpeedFactor, TimelineFrameIndex, TrackId,
-};
+use crate::project::{Clip, ClipId, EditError, Project, SourceFrameIndex, SpeedFactor, TimelineFrameIndex, TrackId};
 
 /// What the picture on screen at some frame is made from: the video clip that is in front there,
 /// and which of its source frames shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ShownPicture {
-    clip: ClipLocation,
+    clip: ClipId,
     source_frame: SourceFrameIndex,
 }
 
@@ -25,10 +23,7 @@ fn picture_shown_at(project: &Project, frame: TimelineFrameIndex) -> Option<Show
             return None;
         }
         Some(ShownPicture {
-            clip: ClipLocation {
-                track: track.id(),
-                clip: placement.id,
-            },
+            clip: placement.id,
             source_frame: placement.source_frame_at(frame)?,
         })
     })
@@ -65,7 +60,7 @@ fn keeping_the_picture<Failure>(
 pub fn set_clip_speed_keeping_the_picture(
     project: &mut Project,
     current_frame: TimelineFrameIndex,
-    clip: ClipLocation,
+    clip: ClipId,
     speed_factor: SpeedFactor,
 ) -> Result<TimelineFrameIndex, EditError> {
     keeping_the_picture(project, current_frame, |project| {
@@ -91,7 +86,7 @@ pub fn set_track_speed_keeping_the_picture(
 pub fn delete_clip_keeping_the_picture(
     project: &mut Project,
     current_frame: TimelineFrameIndex,
-    clip: ClipLocation,
+    clip: ClipId,
 ) -> Result<TimelineFrameIndex, EditError> {
     keeping_the_picture(project, current_frame, |project| project.delete_clip(clip))
 }
@@ -106,6 +101,14 @@ pub fn restore_keeping_the_picture(
     current_frame: TimelineFrameIndex,
     earlier: Project,
 ) -> TimelineFrameIndex {
+    let (rate_now, rate_then) = (project.frame_rate(), earlier.frame_rate());
+    if rate_now != rate_then {
+        // Everything was counted again at the other rate: the picture to keep is the one of the same
+        // moment, which is another frame number.
+        project.restore(earlier);
+        let same_moment = rate_now.convert_frame_count_to(current_frame.value(), rate_then);
+        return TimelineFrameIndex::new(same_moment.min(project.total_frame_count().saturating_sub(1)));
+    }
     match keeping_the_picture::<std::convert::Infallible>(project, current_frame, |project| {
         project.restore(earlier);
         Ok(())
@@ -152,12 +155,9 @@ mod tests {
     }
 
     /// The `index`th clip of the front-most track.
-    fn clip(project: &Project, index: usize) -> ClipLocation {
+    fn clip(project: &Project, index: usize) -> ClipId {
         let track = &project.tracks()[0];
-        ClipLocation {
-            track: track.id(),
-            clip: track.placement_at_index(index).unwrap().id,
-        }
+        track.placement_at_index(index).unwrap().id
     }
 
     fn source_frame_shown(project: &Project, frame: TimelineFrameIndex) -> SourceFrameIndex {
@@ -234,18 +234,45 @@ mod tests {
     }
 
     #[test]
+    fn restoring_a_project_at_another_frame_rate_keeps_the_current_moment_and_not_the_current_frame_number() {
+        let mut project = project_with_clips_at(&[200]);
+        let before_the_change = project.clone();
+        project.set_frame_rate(FrameRate::new(60, 1).unwrap());
+        // Frame 700 of 1200 at 60 frames per second is 11 2/3 seconds, which is frame 350 at 30.
+        let moved = restore_keeping_the_picture(&mut project, frame(700), before_the_change.clone());
+        assert_eq!(moved, frame(350));
+        assert_eq!(project.frame_rate(), FrameRate::new(30, 1).unwrap());
+        assert_eq!(project.tracks(), before_the_change.tracks());
+
+        // And redoing: from frame 350 at 30 back to frame 700 at 60.
+        let after_the_change = {
+            let mut changed = before_the_change.clone();
+            changed.set_frame_rate(FrameRate::new(60, 1).unwrap());
+            changed
+        };
+        let moved_back = restore_keeping_the_picture(&mut project, frame(350), after_the_change);
+        assert_eq!(moved_back, frame(700));
+    }
+
+    #[test]
+    fn restoring_at_another_frame_rate_never_leaves_the_current_frame_beyond_the_end() {
+        let mut project = project_with_clips_at(&[]);
+        let before_the_change = project.clone();
+        project.set_frame_rate(FrameRate::new(60, 1).unwrap());
+        let moved = restore_keeping_the_picture(&mut project, frame(1199), before_the_change);
+        assert!(moved.value() < project.total_frame_count());
+    }
+
+    #[test]
     fn an_unknown_clip_is_an_error_and_changes_nothing() {
         let mut project = project_with_clips_at(&[200]);
         let before = project.clone();
-        let nonexistent = ClipLocation {
-            track: project.tracks()[0].id(),
-            clip: ClipId::new(99),
-        };
+        let nonexistent = ClipId::new(project.tracks()[0].id(), 99);
         let result =
             set_clip_speed_keeping_the_picture(&mut project, frame(10), nonexistent, SpeedFactor::new(2).unwrap());
         assert_eq!(
             result,
-            Err(EditError::Clip(ClipEditError::UnknownClip { clip: ClipId::new(99) }))
+            Err(EditError::Clip(ClipEditError::UnknownClip { clip: nonexistent }))
         );
         assert_eq!(project, before);
     }
@@ -253,10 +280,7 @@ mod tests {
     #[test]
     fn an_empty_project_has_no_clip_to_change() {
         let mut project = Project::empty();
-        let nowhere = ClipLocation {
-            track: project.tracks()[0].id(),
-            clip: ClipId::new(0),
-        };
+        let nowhere = ClipId::new(project.tracks()[0].id(), 0);
         assert!(
             set_clip_speed_keeping_the_picture(&mut project, frame(0), nowhere, SpeedFactor::new(2).unwrap()).is_err()
         );
@@ -347,10 +371,7 @@ mod tests {
         second_video.identifier = SourceMediaIdentifier::new(2);
         let imported = project.import_source(second_video, frame(0)).unwrap();
         assert!(imported.created_track);
-        let front_clip = ClipLocation {
-            track: imported.track,
-            clip: imported.clip.unwrap(),
-        };
+        let front_clip = imported.clip.unwrap();
         assert_eq!(picture_shown_at(&project, frame(100)).unwrap().clip, front_clip);
 
         let moved =

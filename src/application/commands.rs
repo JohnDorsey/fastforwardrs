@@ -5,8 +5,8 @@
 use super::history::EditKey;
 use super::selection::SelectionChange;
 use crate::project::{
-    ClipLocation, Gain, Placement, ProjectSettings, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout,
-    TextObject, TimelineFrameIndex, TrackHeight, TrackId,
+    AnimationTarget, ClipId, ClipMove, FrameRate, Gain, Placement, ProjectSettings, PropertyId, Settings,
+    SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TimelineFrameIndex, TrackHeight, TrackId,
 };
 
 /// Something the user has asked for.
@@ -32,6 +32,9 @@ pub enum Command {
 
     /// The project's own settings were changed in the project settings window.
     SetProjectSettings(ProjectSettings),
+    /// A frame rate was chosen for the project in the project settings window: everything on the
+    /// timeline is counted again at it, and lasts as long as it did.
+    SetProjectFrameRate(FrameRate),
     /// The global settings were changed in the global settings window.
     SetGlobalSettings(Settings),
 
@@ -51,7 +54,7 @@ pub enum Command {
     /// select `clips` and nothing else, or as well as what is selected, or the other way round for
     /// each of them, as `change` says.
     Select {
-        clips: Vec<ClipLocation>,
+        clips: Vec<ClipId>,
         change: SelectionChange,
     },
 
@@ -59,31 +62,37 @@ pub enum Command {
     /// given, and otherwise every clip there is under the frame, on every track.
     SplitAt {
         frame: TimelineFrameIndex,
-        only: Option<Vec<ClipLocation>>,
+        only: Option<Vec<ClipId>>,
     },
 
     /// Take clips off their tracks (with the Delete key).
-    DeleteClips(Vec<ClipLocation>),
+    DeleteClips(Vec<ClipId>),
 
-    /// Move clips along their tracks, by dragging them: each to start at the frame given for it.
-    MoveClips(Vec<(ClipLocation, TimelineFrameIndex)>),
+    /// Select a track (by clicking its title box), or let go of it, as `change` says. This is not all the clips on it.
+    SelectTrack {
+        track: TrackId,
+        change: SelectionChange,
+    },
+
+    /// Move clips, by dragging them: each to the track and the frame given for it.
+    MoveClips(Vec<ClipMove>),
 
     // The settings of a clip, from the box that opens above it.
     SetClipSpeed {
-        clip: ClipLocation,
+        clip: ClipId,
         speed_factor: SpeedFactor,
     },
     SetClipGain {
-        clip: ClipLocation,
+        clip: ClipId,
         gain: Gain,
     },
     SetClipMuted {
-        clip: ClipLocation,
+        clip: ClipId,
         muted: bool,
     },
     /// A video or text clip was moved, resized or turned on the preview.
     SetClipPlacement {
-        clip: ClipLocation,
+        clip: ClipId,
         placement: Placement,
     },
     /// Choose again the file a clip is made from, because it cannot be found.
@@ -110,6 +119,12 @@ pub enum Command {
     },
     /// Take a track, and everything on it, out of the project (from the menu of its title box).
     DeleteTrack(TrackId),
+    /// A track was moved to another place in the list of tracks (0 is the front), by dragging its title box
+    /// and letting go of it there.
+    MoveTrack {
+        track: TrackId,
+        to_position: usize,
+    },
     /// The row of a track was made taller or shorter, by dragging the boundary under its title box.
     SetTrackHeight {
         track: TrackId,
@@ -117,22 +132,35 @@ pub enum Command {
     },
 
     // Text objects.
-    /// Put a new text object on a track, starting at a frame, and open the window to write it in.
+    /// Put a new text object on a track, starting at a frame, and select it, so that its properties show.
     NewTextObject {
         track: TrackId,
         frame: TimelineFrameIndex,
     },
-    /// Open the window that edits a text object.
-    EditTextObject(ClipLocation),
     /// A text object was changed: what it says, how it looks, or where it is on the picture.
     SetTextObject {
-        clip: ClipLocation,
+        clip: ClipId,
         object: TextObject,
     },
     /// A text clip or a picture was made to last this many frames.
     SetClipDuration {
-        clip: ClipLocation,
+        clip: ClipId,
         frames: u64,
+    },
+
+    // Keyframes.
+    /// Put a keyframe on a property of a clip or a track at a frame (with the stopwatch), with the value the property
+    /// has there now.
+    AddKeyframe {
+        target: AnimationTarget,
+        property: PropertyId,
+        frame: TimelineFrameIndex,
+    },
+    /// Take away the keyframe of a property of a clip or a track at a frame (with the stopwatch).
+    RemoveKeyframe {
+        target: AnimationTarget,
+        property: PropertyId,
+        frame: TimelineFrameIndex,
     },
 
     /// Move or resize the fast-forward symbol.
@@ -155,6 +183,7 @@ impl Command {
             | Self::SetClipPlacement { .. }
             | Self::AddTrack
             | Self::DeleteTrack(_)
+            | Self::MoveTrack { .. }
             | Self::SetTrackTitle { .. }
             | Self::SetTrackSpeed { .. }
             | Self::SetTrackGain { .. }
@@ -163,6 +192,9 @@ impl Command {
             | Self::NewTextObject { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
+            | Self::AddKeyframe { .. }
+            | Self::RemoveKeyframe { .. }
+            | Self::SetProjectFrameRate(_)
             | Self::SetSpeedIndicatorLayout(_) => true,
 
             Self::LoadProject
@@ -173,6 +205,7 @@ impl Command {
             | Self::Undo
             | Self::Redo
             | Self::Deselect
+            | Self::SelectTrack { .. }
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
             | Self::SetProjectSettings(_)
@@ -183,8 +216,7 @@ impl Command {
             | Self::SeekTo(_)
             | Self::MoveCurrentFrameBy(_)
             | Self::Select { .. }
-            | Self::RelinkSource(_)
-            | Self::EditTextObject(_) => false,
+            | Self::RelinkSource(_) => false,
         }
     }
 
@@ -193,8 +225,8 @@ impl Command {
     /// of the history. `None` for an edit that is to be a step of its own, and for what is no edit.
     pub fn gesture_key(&self) -> Option<EditKey> {
         match self {
-            Self::MoveClips(starts) => {
-                let mut clips: Vec<ClipLocation> = starts.iter().map(|(clip, _)| *clip).collect();
+            Self::MoveClips(moves) => {
+                let mut clips: Vec<ClipId> = moves.iter().map(|moved| moved.clip).collect();
                 clips.sort();
                 Some(EditKey::about(&("the place of", clips)))
             }
@@ -235,11 +267,8 @@ mod tests {
     use super::*;
     use crate::project::{Angle, CanvasArea, ClipId, TextObject};
 
-    fn clip(number: u32) -> ClipLocation {
-        ClipLocation {
-            track: TrackId::new(0),
-            clip: ClipId::new(number),
-        }
+    fn clip(number: u32) -> ClipId {
+        ClipId::new(TrackId::new(0), number)
     }
 
     fn speed_of(clip_number: u32, factor: u32) -> Command {
@@ -249,11 +278,31 @@ mod tests {
         }
     }
 
+    fn keyframe_added_at(frame: u64) -> Command {
+        Command::AddKeyframe {
+            target: AnimationTarget::Clip(clip(0)),
+            property: PropertyId::Gain,
+            frame: TimelineFrameIndex::new(frame),
+        }
+    }
+
+    fn keyframe_removed_at(frame: u64) -> Command {
+        Command::RemoveKeyframe {
+            target: AnimationTarget::Clip(clip(0)),
+            property: PropertyId::Gain,
+            frame: TimelineFrameIndex::new(frame),
+        }
+    }
+
     #[test]
     fn what_changes_the_project_and_what_does_not_is_told_apart() {
         for edit in [
             Command::AddTrack,
             Command::DeleteTrack(TrackId::new(0)),
+            Command::MoveTrack {
+                track: TrackId::new(0),
+                to_position: 1,
+            },
             Command::DeleteClips(vec![clip(0)]),
             Command::SplitAt {
                 frame: TimelineFrameIndex::new(3),
@@ -268,6 +317,9 @@ mod tests {
                 clip: clip(0),
                 object: TextObject::default(),
             },
+            keyframe_added_at(3),
+            keyframe_removed_at(3),
+            Command::SetProjectFrameRate(FrameRate::new(24, 1).unwrap()),
         ] {
             assert!(edit.may_change_the_project(), "{edit:?}");
         }
@@ -282,7 +334,6 @@ mod tests {
                 change: SelectionChange::Replace,
             },
             Command::SetProjectSettings(ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS),
-            Command::EditTextObject(clip(0)),
         ] {
             assert!(!not_an_edit.may_change_the_project(), "{not_an_edit:?}");
         }
@@ -309,12 +360,27 @@ mod tests {
     }
 
     #[test]
+    fn each_click_of_a_stopwatch_is_a_step_of_the_history_of_its_own() {
+        assert_eq!(keyframe_added_at(3).gesture_key(), None);
+        assert_eq!(keyframe_removed_at(3).gesture_key(), None);
+        assert_eq!(
+            gesture_key_of_the_edits_among(&[keyframe_added_at(3), keyframe_added_at(4)]),
+            None,
+            "two of them are not one gesture either"
+        );
+    }
+
+    #[test]
     fn dragging_clips_is_one_gesture_for_those_clips_wherever_they_have_got_to() {
         let moved = |clips: &[(u32, u64)]| {
             Command::MoveClips(
                 clips
                     .iter()
-                    .map(|&(number, start)| (clip(number), TimelineFrameIndex::new(start)))
+                    .map(|&(number, start)| ClipMove {
+                        clip: clip(number),
+                        to_track: TrackId::new(0),
+                        start: TimelineFrameIndex::new(start),
+                    })
                     .collect(),
             )
         };
@@ -325,6 +391,16 @@ mod tests {
             moved(&[(0, 10), (1, 50)]).gesture_key(),
             moved(&[(1, 70), (0, 30)]).gesture_key(),
             "the same clips in any order"
+        );
+        let to_another_track = Command::MoveClips(vec![ClipMove {
+            clip: clip(0),
+            to_track: TrackId::new(5),
+            start: TimelineFrameIndex::new(10),
+        }]);
+        assert_eq!(
+            moved(&[(0, 10)]).gesture_key(),
+            to_another_track.gesture_key(),
+            "the same clip is the same gesture on whichever track it is dragged to"
         );
         assert_ne!(
             moved(&[(0, 10)]).gesture_key(),
@@ -387,6 +463,10 @@ mod tests {
         for edit in [
             Command::AddTrack,
             Command::DeleteTrack(TrackId::new(0)),
+            Command::MoveTrack {
+                track: TrackId::new(0),
+                to_position: 1,
+            },
             Command::DeleteClips(vec![clip(0)]),
             Command::SplitAt {
                 frame: TimelineFrameIndex::new(3),
@@ -396,6 +476,7 @@ mod tests {
                 clip: clip(0),
                 muted: true,
             },
+            Command::SetProjectFrameRate(FrameRate::new(24, 1).unwrap()),
         ] {
             assert_eq!(edit.gesture_key(), None, "{edit:?}");
         }

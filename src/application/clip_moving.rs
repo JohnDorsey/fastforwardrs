@@ -1,40 +1,153 @@
-//! Moving clips along their tracks by dragging them: how far they can go.
+//! Moving clips by dragging them: how far they can go.
 //!
-//! Dragging a clip moves it as far as the pointer goes, until it comes to another clip that is not
-//! moving along with it (no two clips can be at the same time on one track), or to the start of the
-//! timeline. The clips in the way stop it, they are not pushed. Everything here is arithmetic on
-//! frames, so that how far is allowed can be tested without a window.
+//! Dragging a clip moves it as far as the pointer goes along its track (and up or down to the other tracks),
+//! until it comes to another clip that is not moving along with it (no two clips can be at the same time on
+//! one track), or to the start of the timeline. The clips in the way stop it, they are not pushed. A clip
+//! goes to the track the pointer is over if there is room for it there, where it is along the timeline, and
+//! otherwise stays on the track it is on: tracks that it does not fit on are not entered. A clip that goes to
+//! another track can be held to the time it started at, as a magnet holds iron (see [`Snap`], and
+//! [`StartTimeMemory`] for when it is). Everything here is arithmetic on frames and on the places of tracks in the
+//! list of them, so that how far is allowed can be tested without a window.
+
+mod start_time_snap;
 
 use std::collections::HashSet;
 
-use crate::project::{ClipLocation, Project, TimelineFrameIndex};
+pub use self::start_time_snap::StartTimeMemory;
+#[cfg(test)]
+pub use self::start_time_snap::{DECENT_DISTANCE_IN_POINTS, HELD_WITHIN_POINTS};
+use crate::project::{ClipId, ClipMove, Project, TimelineFrameIndex, TrackId};
 
-/// How many frames, earlier (negative) or later, the clips `moving` can be moved by, when `wanted`
-/// is how many the pointer has gone: `wanted` itself, or as much of it as the clips in the way
-/// allow. All the clips move by the same amount, so two of them that are moving never come to one
-/// another: only the clips that are not moving stop them.
-pub fn allowed_move_in_frames(project: &Project, moving: &[ClipLocation], wanted: i64) -> i64 {
-    let moving_set: HashSet<ClipLocation> = moving.iter().copied().collect();
-    // Never further than the start of the timeline, and never more than a clip that stays (the
-    // nearest on either side of each clip that moves) leaves room for.
+/// How far to move clips: down that many tracks in the list of them (up, if negative), and later by that
+/// many frames of the timeline (earlier, if negative).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MoveBy {
+    pub tracks_down: i64,
+    pub frames: i64,
+}
+
+/// How far the clips `moving` can be moved when nothing holds any of them to a time: [`allowed_move_holding`]
+/// without a [`Snap`], which is what the tests of how far clips go use.
+#[cfg(test)]
+pub fn allowed_move(project: &Project, moving: &[ClipId], wanted: MoveBy) -> MoveBy {
+    allowed_move_holding(project, moving, wanted, None)
+}
+
+/// A time that a dragged clip is held to when it is near, as a magnet holds iron.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Snap {
+    /// The clip that is held: the one that was taken hold of. The others that move with it go by as much as it
+    /// does.
+    pub clip: ClipId,
+    /// The frame the clip is held to starting at.
+    pub start: u64,
+    /// How near to `start`, in frames, the frame the clip would start at if it followed the pointer exactly has
+    /// to be for it to be held there.
+    pub within_frames: u64,
+    /// The track that the clip is not held to `start` on, if there is one.
+    pub free_on: Option<TrackId>,
+}
+
+/// How far the clips `moving` can be moved when `wanted` is how far the pointer has gone: `wanted` itself, or
+/// as much of it as can be done. All the clips move by the same, so two of them that are moving never come
+/// to one another by it: only the clips that are not moving stop them.
+///
+/// The tracks come first. The clips go down or up as many tracks as are wanted, but not past the first or
+/// the last, and if they do not fit on the tracks they would then be on (where they are along the timeline),
+/// as many fewer as they do fit on. Then they are moved along the timeline as far as the clips that stay on
+/// those tracks leave room for.
+///
+/// With the clip that was taken hold of held to the time of the [`Snap`] when it is near that, where it is held
+/// it is wanted at that time and not where the pointer would put it, and so it fits on a track if it fits there
+/// at that time, though it would not at the frame it is at now.
+pub fn allowed_move_holding(project: &Project, moving: &[ClipId], wanted: MoveBy, snap: Option<Snap>) -> MoveBy {
+    let positions: Vec<usize> = moving
+        .iter()
+        .filter_map(|clip| project.track_position_holding(*clip))
+        .collect();
+    let (Some(&highest), Some(&lowest)) = (positions.iter().min(), positions.iter().max()) else {
+        // None of them is there, so nothing stops them.
+        return MoveBy {
+            tracks_down: 0,
+            frames: wanted.frames,
+        };
+    };
+    let furthest_up = -to_signed(highest);
+    let furthest_down = to_signed(project.tracks().len()) - 1 - to_signed(lowest);
+    let wanted_tracks = wanted.tracks_down.clamp(furthest_up, furthest_down);
+    // From as many tracks as were wanted back to none, the first that they fit on.
+    let tracks_down = std::iter::successors(Some(wanted_tracks), |&tracks| {
+        (tracks != 0).then(|| tracks - tracks.signum())
+    })
+    .find(|&tracks| {
+        tracks == 0
+            || the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks, 0)
+            || frames_to_the_time_held_to(project, wanted, snap, tracks)
+                .is_some_and(|held| the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks, held))
+    })
+    .unwrap_or(0);
+    let frames = frames_to_the_time_held_to(project, wanted, snap, tracks_down).unwrap_or(wanted.frames);
+    MoveBy {
+        tracks_down,
+        frames: allowed_frames(project, moving, tracks_down, frames),
+    }
+}
+
+/// How many frames later (earlier, if negative) than where it is now the clip that `snap` holds is at the time it
+/// is held to, if it is held when the clips go down `tracks_down` tracks and `wanted` is what is wanted of
+/// them: it is, unless it is on a track that it is free on, or what the pointer wants of it would put it too far
+/// from that time.
+fn frames_to_the_time_held_to(project: &Project, wanted: MoveBy, snap: Option<Snap>, tracks_down: i64) -> Option<i64> {
+    let snap = snap?;
+    let from = project.track_position_holding(snap.clip)?;
+    let placement = project.tracks()[from].placement_of(snap.clip)?;
+    let destination = project
+        .tracks()
+        .get(usize::try_from(to_signed(from) + tracks_down).ok()?)?;
+    if snap.free_on == Some(destination.id()) {
+        return None;
+    }
+    let to_the_time = to_signed(snap.start) - to_signed(placement.first_timeline_frame.value());
+    ((wanted.frames - to_the_time).unsigned_abs() <= snap.within_frames).then_some(to_the_time)
+}
+
+/// Whether the clips `moving` can be moved down `tracks_down` tracks and `frames` frames along.
+fn the_clips_fit_on_the_tracks_they_would_be_on(
+    project: &Project,
+    moving: &[ClipId],
+    tracks_down: i64,
+    frames: i64,
+) -> bool {
+    let moves = moves_by(project, moving, MoveBy { tracks_down, frames });
+    project.clone().move_clips(&moves).is_ok()
+}
+
+/// How many frames earlier (negative) or later the clips `moving` can be moved, when they are on the tracks
+/// `tracks_down` below the ones they are on, and `wanted` is how many are wanted: never before the start of
+/// the timeline, and never more than the clips that stay on those tracks leave room for. (How long a clip
+/// lasts is counted by the speed of the track it is on then.)
+fn allowed_frames(project: &Project, moving: &[ClipId], tracks_down: i64, wanted: i64) -> i64 {
+    let moving_set: HashSet<ClipId> = moving.iter().copied().collect();
     let mut furthest_earlier = i64::MIN;
     let mut furthest_later = i64::MAX;
     for clip in moving {
-        let Some(track) = project.track(clip.track) else {
+        let Some(from) = project.track_position_holding(*clip) else {
             continue;
         };
-        let Some(placement) = track.placement_of(clip.clip) else {
+        let Some(placement) = project.tracks()[from].placement_of(*clip) else {
+            continue;
+        };
+        let Some(destination) = usize::try_from(to_signed(from) + tracks_down)
+            .ok()
+            .and_then(|position| project.tracks().get(position))
+        else {
             continue;
         };
         let first = to_signed(placement.first_timeline_frame.value());
-        let end = to_signed(placement.end_timeline_frame.value());
+        let end = first.saturating_add(to_signed(placement.clip.timeline_frame_count(destination.speed())));
         furthest_earlier = furthest_earlier.max(-first);
-        for other in track.placements() {
-            let stays = !moving_set.contains(&ClipLocation {
-                track: clip.track,
-                clip: other.id,
-            });
-            if !stays || other.id == clip.clip {
+        for other in destination.placements() {
+            if moving_set.contains(&other.id) {
                 continue;
             }
             let other_first = to_signed(other.first_timeline_frame.value());
@@ -50,28 +163,35 @@ pub fn allowed_move_in_frames(project: &Project, moving: &[ClipLocation], wanted
     wanted.clamp(furthest_earlier.min(0), furthest_later.max(0))
 }
 
-fn to_signed(frame: u64) -> i64 {
-    i64::try_from(frame).unwrap_or(i64::MAX)
+fn to_signed<T: TryInto<i64>>(number: T) -> i64 {
+    number.try_into().unwrap_or(i64::MAX)
 }
 
-/// Where each of the clips `moving` starts once they are all moved by `frames` (earlier if
-/// negative). A clip that is not on the timeline is left out.
-pub fn starts_after_moving_by(
-    project: &Project,
-    moving: &[ClipLocation],
-    frames: i64,
-) -> Vec<(ClipLocation, TimelineFrameIndex)> {
+/// The moves that put each of the clips `moving` `by` as far from where it is: on the track that many
+/// tracks down, starting that many frames later (never before the start of the timeline). A clip that is not
+/// in the project, or that would be on a track that is not there, is left out.
+pub fn moves_by(project: &Project, moving: &[ClipId], by: MoveBy) -> Vec<ClipMove> {
     moving
         .iter()
         .filter_map(|clip| {
-            let placement = project.placement_of(*clip)?;
+            let from = project.track_position_holding(*clip)?;
+            let placement = project.tracks()[from].placement_of(*clip)?;
+            let to = project
+                .tracks()
+                .get(usize::try_from(to_signed(from) + by.tracks_down).ok()?)?;
             let start = to_signed(placement.first_timeline_frame.value())
-                .saturating_add(frames)
+                .saturating_add(by.frames)
                 .max(0);
-            Some((*clip, TimelineFrameIndex::new(start as u64)))
+            Some(ClipMove {
+                clip: *clip,
+                to_track: to.id(),
+                start: TimelineFrameIndex::new(start as u64),
+            })
         })
         .collect()
 }
 
+#[cfg(test)]
+mod snap_tests;
 #[cfg(test)]
 mod tests;

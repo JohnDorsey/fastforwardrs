@@ -64,6 +64,11 @@ impl TimelineGeometry {
         self.frame_rate.seconds_at_frame(frame_number) * self.points_per_second
     }
 
+    /// How wide a frame is, in points.
+    pub fn points_per_frame(&self) -> f64 {
+        self.x_of_frame(1)
+    }
+
     /// The whole length of the strip for a timeline of `total_frame_count` frames.
     pub fn content_width(&self, total_frame_count: u64) -> f64 {
         self.x_of_frame(total_frame_count)

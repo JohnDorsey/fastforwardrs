@@ -5,7 +5,7 @@ use egui::{CursorIcon, Key, Modifiers, PointerButton, Pos2, vec2};
 use super::test_window::{Window, project_of, project_with_a_video_and_a_sound};
 use crate::application::commands::Command;
 use crate::application::theme;
-use crate::application::timeline_panel::HEIGHT_THE_TITLE_AND_GEAR_NEED;
+use crate::application::timeline_panel::HEIGHT_THE_TITLE_NEEDS;
 use crate::project::TrackHeight;
 
 /// A window with a sound on the track in front and a video on the one behind it.
@@ -14,10 +14,10 @@ fn window_with_two_tracks() -> Window {
 }
 
 /// Where the boundary under the title box of the track at `position` is: in the middle of the gap
-/// between that box and the one under it, below the gear (which is clear of it at any height).
+/// between that box and the one under it, below the title (which is clear of it at any height).
 fn boundary_under(window: &Window, position: usize) -> Pos2 {
     Pos2::new(
-        window.gear_of_track(position).center().x,
+        window.title_box_of_track(position).center().x,
         window.strip_of_track(position).bottom() + theme::SPACE_BETWEEN_TRACKS / 2.0,
     )
 }
@@ -41,13 +41,10 @@ fn set_height(window: &mut Window, position: usize, points: f32) {
 // --- the limits ---
 
 #[test]
-fn the_least_a_track_can_be_is_just_taller_than_what_its_title_and_gear_need_and_the_most_is_half_as_much_again() {
-    let needs = HEIGHT_THE_TITLE_AND_GEAR_NEED;
+fn the_least_a_track_can_be_is_just_taller_than_what_its_title_needs_and_the_most_is_half_as_much_again() {
+    let needs = HEIGHT_THE_TITLE_NEEDS;
     let least = TrackHeight::SMALLEST_IN_POINTS;
-    assert!(
-        least > needs,
-        "the title and the gear fit: {least} is more than {needs}"
-    );
+    assert!(least > needs, "the title fits: {least} is more than {needs}");
     assert!(
         least <= needs + 4.0,
         "and only just: {least} is not within 4 points of {needs}"
@@ -56,21 +53,17 @@ fn the_least_a_track_can_be_is_just_taller_than_what_its_title_and_gear_need_and
 }
 
 #[test]
-fn at_the_least_height_the_title_and_the_gear_are_inside_the_title_box() {
+fn at_the_least_height_the_title_is_inside_the_title_box() {
     let mut window = window_with_two_tracks();
     set_height(&mut window, 0, 0.0);
     let row = window.strip_of_track(0); // the title box has the top and the bottom of its strip
     assert_close(row.height(), TrackHeight::SMALLEST_IN_POINTS, "the height of the row");
 
-    for (name, rectangle) in [
-        ("the gear", window.gear_of_track(0)),
-        ("the title", window.title_box_of_track(0)),
-    ] {
-        assert!(
-            rectangle.top() >= row.top() && rectangle.bottom() <= row.bottom(),
-            "{name} ({rectangle:?}) is inside the box ({row:?})"
-        );
-    }
+    let title = window.title_box_of_track(0);
+    assert!(
+        title.top() >= row.top() && title.bottom() <= row.bottom(),
+        "the title ({title:?}) is inside the box ({row:?})"
+    );
 }
 
 #[test]

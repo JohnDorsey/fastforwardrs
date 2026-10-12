@@ -1,43 +1,48 @@
 //! The timeline: a top row with the ruler, and below it a row for every track, the one in front at
 //! the top.
 //!
-//! A row has, at its left, a box with the track's title and its settings gear, and then the strip
+//! A row has, at its left, a box with the track's title, and then the strip
 //! of the track, which has the clips on it. The strips are wider than the window, and scroll
 //! (together) to keep the current frame in view. In the top row, over the title boxes, there is a
 //! round button that adds a track. With more tracks than fit, the rows scroll up and down.
 //!
 //! * Clicking or dragging along the ruler moves the playhead there.
-//! * Clicking a clip selects it. Right-clicking a clip opens a box above it with its settings.
-//!   Right-clicking an empty part of a strip opens a menu to put something new there.
-//! * The gear of a track opens a box above it with the settings of everything on the track.
+//! * Clicking a clip selects it, and so does right-clicking it (what is selected has its settings in the
+//!   properties panel). Right-clicking an empty part of a strip opens a menu to put something new there.
+//! * Clicking the box of a track selects the track.
 //! * The mouse wheel (or a trackpad) scrolls the strips without moving the current frame.
 //!
 //! Cutting is done with a key (see the `keyboard` module), not with the mouse.
 
 mod bevel;
+mod clip_dragging;
+mod clip_shape;
 mod clips;
+mod drawers;
+mod flash;
 mod header;
 mod icons;
 mod playhead;
+mod rows;
 mod ruler;
 mod scrolling;
-mod settings_boxes;
 mod strip;
 mod strip_view;
 mod top_row;
+mod track_reordering;
 mod track_resize;
 mod view_state;
 
 use std::collections::HashMap;
 
 use egui::scroll_area::{DragScroll, ScrollSource};
-use egui::{Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2};
 
 // The names the parts of the timeline are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
-pub use header::{CONTENT_HEIGHT as HEIGHT_THE_TITLE_AND_GEAR_NEED, gear_label};
+pub use drawers::drawer_button_label;
 #[cfg(test)]
-pub use settings_boxes::SettingsBoxSubject;
+pub use header::TITLE_HEIGHT as HEIGHT_THE_TITLE_NEEDS;
 #[cfg(test)]
 pub use strip::strip_label;
 pub use view_state::TimelineViewState;
@@ -57,7 +62,7 @@ use super::textures::Textures;
 use super::theme;
 use super::timeline_geometry::TimelineGeometry;
 use crate::media::{ThumbnailLibrary, Waveform};
-use crate::project::{ClipLocation, Project, SourceMediaIdentifier, TimelineFrameIndex, Track, TrackHeight};
+use crate::project::{Project, SourceMediaIdentifier, TimelineFrameIndex, Track, TrackHeight};
 use crate::rgba_picture::RgbaPicture;
 
 /// The name the button that adds a track is known by to screen readers (and the tests).
@@ -114,12 +119,15 @@ pub fn show(
     commands: &mut Vec<Command>,
 ) {
     let context = ui.ctx().clone();
-    state.close_settings_box_if_pressed_outside(&context);
-    if let Some(open) = state.settings_box.as_mut() {
-        // Where it points is worked out again, from where its subject is drawn in this frame.
-        open.anchor = None;
+    // The flashes at cuts that were just made begin now, and go on until they are over.
+    if state.cut_flashes.update(context.input(|input| input.time)) {
+        context.request_repaint();
     }
-
+    // The drawers that are sliding go on sliding, and those of clips that are gone are forgotten.
+    state.drawers.forget_what_is_gone(content.project);
+    if state.drawers.advance(context.input(|input| input.stable_dt)) {
+        context.request_repaint();
+    }
     let width = ui.available_width();
     let strips_offset = theme::TRACK_HEADER_WIDTH + theme::TRACK_HEADER_GAP;
     let strips_width = (width - strips_offset - theme::SCROLL_BAR_ROOM).max(1.0);
@@ -152,7 +160,6 @@ pub fn show(
             Sense::hover()
         },
     );
-    let mut strip_views: Vec<(&Track, self::strip_view::StripView)> = Vec::new();
 
     // While a track is being made taller or shorter the rows keep the height they had, however tall
     // they would be: the window is at the bottom of the screen and grows upward, so if it grew with
@@ -181,42 +188,26 @@ pub fn show(
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = theme::SPACE_BETWEEN_TRACKS;
                 let rows_area_height = state.rows_area_height;
-                for track in content.project.tracks() {
-                    let height = track.height().points();
-                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-                    let header_rectangle = Rect::from_min_size(row.min, vec2(theme::TRACK_HEADER_WIDTH, height));
-                    let strip_rectangle =
-                        Rect::from_min_size(pos2(row.left() + strips_offset, row.top()), vec2(strips_width, height));
-                    let can_delete = content.project.tracks().len() > 1;
-                    header::show(
-                        ui,
-                        header_rectangle,
-                        track,
-                        (content.can_edit, can_delete),
-                        state,
-                        commands,
-                    );
-                    let strip_view = ruler_view.shown_in(strip_rectangle);
-                    strip::show(ui, &strip_view, track, content, state, textures, commands);
-                    strip_views.push((track, strip_view));
-                    track_resize::show(
-                        ui,
-                        header_rectangle,
-                        track,
-                        content.can_edit,
-                        rows_area_height,
-                        state,
-                        commands,
-                    );
-                }
+                let strip_views = rows::show(
+                    ui,
+                    content,
+                    (ruler_view, strips_offset, strips_width),
+                    rows_area_height,
+                    state,
+                    textures,
+                    commands,
+                );
                 // Room under the last row (after the space there is between the rows) for the boundary
                 // under the last track to be taken hold of: without anything after the last row the
                 // rows would end where it does.
                 ui.add_space(track_resize::REACH_INTO_THE_BOXES);
+                strip_views
             })
     });
     let rows = rows_scope.inner;
+    let strip_views = rows.inner;
     ui.spacing_mut().item_spacing.y = previous_item_spacing;
+    clip_dragging::keep_dragging(ui, content, state, &strip_views, rows.inner_rect, commands);
     if content.can_edit {
         draw_a_rubber_band(ui, &rows_response, rows_area, &strip_views, content, state, commands);
     }
@@ -229,17 +220,32 @@ pub fn show(
     state.timeline_area_in_the_last_frame = Some(top_row.rectangle.union(rows.inner_rect));
     state.rows_scroll_offset = rows.state.offset.y;
     state.rows_area_height = rows_scope.response.rect.height();
+    // A track dragged to the top or the bottom of the rows brings the rows beyond it into view.
+    if state.track_reorder.is_some() {
+        state.rows_scroll_offset += track_reordering::scroll_while_dragging_a_track(
+            context
+                .input(|input| input.pointer.interact_pos())
+                .map(|pointer| pointer.y),
+            (rows.inner_rect.top(), rows.inner_rect.bottom()),
+            context.input(|input| input.stable_dt),
+        );
+    }
     playhead::draw(
         ui.painter(),
         &ruler_view.shown_in(strips_rectangle),
         ruler_rectangle,
         content.current_frame,
     );
+    flash::draw_over(
+        &ui.painter().with_clip_rect(rows.inner_rect),
+        strip_views.iter().map(|(track, view)| (track.id(), view)),
+        &state.cut_flashes,
+        context.input(|input| input.time),
+    );
 
-    settings_boxes::show(&context, content, state, commands);
     if !context.input(|input| input.pointer.any_down()) {
-        state.settings_box_closed_by_the_press = None;
         state.track_resize = None;
+        state.track_reorder = None;
     }
 }
 
@@ -276,10 +282,7 @@ fn draw_a_rubber_band(
         for (track, view) in strip_views {
             for placement in track.placements() {
                 let visible = rectangles_of(&placement, view).visible;
-                let location = ClipLocation {
-                    track: track.id(),
-                    clip: placement.id,
-                };
+                let location = placement.id;
                 if visible.width() > 0.0 && visible.intersects(rectangle) && !selected.contains(&location) {
                     selected.push(location);
                 }

@@ -1,25 +1,25 @@
-//! What the mouse does to the preview: a click picks a layer (a double click on text edits it), dragging
-//! a layer moves it, dragging a corner of the selected layer resizes it, dragging round from just
-//! outside a corner turns it, and the fast-forward symbol is moved and resized the same way.
+//! What the mouse does to the preview: a click picks a layer, dragging a layer moves it, dragging a corner of
+//! the selected layer resizes it, dragging round from just outside a corner turns it, and the fast-forward
+//! symbol is moved and resized the same way.
 //!
-//! One widget takes every click and drag on the preview (the "catcher"), and what each of them is
-//! about is worked out from where it began, with [`grab_at`], when it comes. That is not the same as
-//! giving every layer a widget of its own that is only sensitive when it is on top of what is under the
-//! pointer: egui decides who gets a press at the start of a frame from the widgets of the frame before,
-//! so a click that came in the same frame as the move of the pointer that brought it there (a tap on a
-//! touch screen, or a quick click) would be given to what the pointer was over a frame earlier, or to
-//! nothing.
+//! The widgets that take every click and drag on the preview (the "catchers") are made once for the panel
+//! and once for each place of the selected layer that can be taken hold of, and what each press is about is
+//! worked out from where it began, with [`grab_at`], when it comes. That is not the same as giving every
+//! layer a widget of its own that is only sensitive when it is on top of what is under the pointer: egui
+//! decides who gets a press at the start of a frame from the widgets of the frame before, so a click that
+//! came in the same frame as the move of the pointer that brought it there (a tap on a touch screen, or a
+//! quick click) would be given to what the pointer was over a frame earlier, or to nothing.
 
-use egui::{Align2, CursorIcon, FontId, Id, PointerButton, Pos2, Response, Stroke, Ui, vec2};
+use egui::{Align2, CursorIcon, FontId, Id, Painter, PointerButton, Pos2, Stroke, Ui, vec2};
 
+use super::catchers::Catchers;
 use super::geometry::{PictureOnScreen, TURN_ZONE_RADIUS, cursor_for_resizing_at};
 use super::grab::{Grab, grab_at};
 use super::{PreviewContent, PreviewLayer};
-use crate::application::clicks::is_a_double_click;
 use crate::application::commands::Command;
 use crate::application::selection::SelectionChange;
 use crate::application::theme;
-use crate::project::{Angle, ClipLocation, Placement};
+use crate::project::{Angle, ClipId, Placement};
 
 /// A layer that is turned with Shift held is turned to a whole number of these many degrees.
 const SNAP_STEP_DEGREES: f32 = 15.0;
@@ -59,7 +59,7 @@ pub(super) struct Pointing {
 }
 
 /// The command that makes `clip` the only clip that is selected.
-fn select_only(clip: ClipLocation) -> Command {
+fn select_only(clip: ClipId) -> Command {
     Command::Select {
         clips: vec![clip],
         change: SelectionChange::Replace,
@@ -70,20 +70,20 @@ fn select_only(clip: ClipLocation) -> Command {
 /// pointer is on.
 pub(super) fn handle(
     ui: &Ui,
-    catcher: &Response,
+    catchers: &Catchers,
     content: &PreviewContent<'_>,
     picture: &PictureOnScreen,
     commands: &mut Vec<Command>,
 ) -> Pointing {
     let gesture_id = Id::new("what the preview is being dragged by");
-    if catcher.drag_started_by(PointerButton::Primary) {
+    if catchers.drag_started_by(PointerButton::Primary) {
         let begun = ui
             .input(|input| input.pointer.press_origin())
             .and_then(|origin| begin(content, picture, origin, commands));
         ui.data_mut(|data| data.insert_temp(gesture_id, begun));
     }
 
-    let is_dragging = catcher.dragged_by(PointerButton::Primary);
+    let is_dragging = catchers.dragged_by(PointerButton::Primary);
     let gesture = if is_dragging {
         ui.data(|data| data.get_temp::<Option<Gesture>>(gesture_id)).flatten()
     } else {
@@ -93,14 +93,14 @@ pub(super) fn handle(
 
     let mut turning = None;
     if let Some(gesture) = gesture {
-        turning = carry_on(ui, catcher, gesture, content, picture, commands);
-    } else if catcher.clicked_by(PointerButton::Primary) {
-        click(catcher, content, picture, commands);
+        turning = carry_on(ui, catchers, gesture, content, picture, commands);
+    } else if catchers.clicked_by(PointerButton::Primary) {
+        click(catchers, content, picture, commands);
     }
 
     let grab = if is_dragging {
         gesture.map(|gesture| gesture.grab)
-    } else if catcher.hovered() {
+    } else if catchers.hovered() {
         ui.input(|input| input.pointer.hover_pos())
             .and_then(|point| grab_at(content, picture, point))
     } else {
@@ -148,17 +148,17 @@ fn begin(
 /// layer is turned.
 fn carry_on(
     ui: &Ui,
-    catcher: &Response,
+    catchers: &Catchers,
     gesture: Gesture,
     content: &PreviewContent<'_>,
     picture: &PictureOnScreen,
     commands: &mut Vec<Command>,
 ) -> Option<(Pos2, Angle)> {
-    let pointer = catcher.interact_pointer_pos()?;
+    let pointer = catchers.interact_pointer_pos()?;
     match gesture.grab {
         Grab::Layer(clip) => {
             let layer = content.layer(clip)?;
-            let delta = catcher.drag_delta();
+            let delta = catchers.drag_delta();
             let moved = layer.placement.moved_by(
                 delta.x / picture.rectangle.width().max(1.0),
                 delta.y / picture.rectangle.height().max(1.0),
@@ -203,7 +203,7 @@ fn carry_on(
             commands.push(Command::SetSpeedIndicatorLayout(symbol.layout_moved_by(
                 content.indicator_layout,
                 picture.rectangle,
-                catcher.drag_delta(),
+                catchers.drag_delta(),
             )));
         }
         Grab::SymbolCorner => {
@@ -216,18 +216,13 @@ fn carry_on(
     None
 }
 
-/// Does what a click at the place of the catcher that was clicked does: picks the layer there, and for
-/// a double click, asks to edit it (which opens the window of a text object, and does nothing for
-/// anything else).
-fn click(catcher: &Response, content: &PreviewContent<'_>, picture: &PictureOnScreen, commands: &mut Vec<Command>) {
-    let Some(point) = catcher.interact_pointer_pos() else {
+/// Does what a click at the place of the catcher that was clicked does: picks the layer there.
+fn click(catchers: &Catchers, content: &PreviewContent<'_>, picture: &PictureOnScreen, commands: &mut Vec<Command>) {
+    let Some(point) = catchers.interact_pointer_pos() else {
         return;
     };
     if let Some(Grab::Layer(clip)) = grab_at(content, picture, point) {
         commands.push(select_only(clip));
-        if is_a_double_click(catcher) {
-            commands.push(Command::EditTextObject(clip));
-        }
     }
 }
 
@@ -293,9 +288,10 @@ impl Pointing {
         }
     }
 
-    /// Shows what the pointer is on: the mouse pointer, a ring round the corner that a layer is
-    /// turned from, and how far round a layer being turned is turned.
-    pub fn show(&self, ui: &Ui, content: &PreviewContent<'_>, picture: &PictureOnScreen) {
+    /// Shows what the pointer is on, with `painter` for what is drawn (which is not cut off anywhere): the
+    /// mouse pointer, a ring round the corner that a layer is turned from, and how far round a layer being
+    /// turned is turned.
+    pub fn show(&self, ui: &Ui, painter: &Painter, content: &PreviewContent<'_>, picture: &PictureOnScreen) {
         if let Some(cursor) = self.cursor(content, picture) {
             ui.ctx().set_cursor_icon(cursor);
         }
@@ -303,14 +299,14 @@ impl Pointing {
             && let Some(layer) = content.layer(layer)
         {
             // A ring round the corner shows where the layer can be turned from.
-            ui.painter().circle_stroke(
+            painter.circle_stroke(
                 picture.corner_of(&layer.placement, corner),
                 TURN_ZONE_RADIUS * 0.75,
                 Stroke::new(1.5, theme::SELECTION_OUTLINE.gamma_multiply(0.7)),
             );
         }
         if let Some((pointer, rotation)) = self.turning {
-            ui.painter().text(
+            painter.text(
                 pointer + vec2(18.0, -18.0),
                 Align2::LEFT_BOTTOM,
                 format!("{:.0}\u{b0}", rotation.degrees()),

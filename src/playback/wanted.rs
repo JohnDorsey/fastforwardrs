@@ -5,7 +5,7 @@
 //! track that has a video that is seen.
 
 use crate::composition::{Layer, PicturePlan, PictureSection, VisibleVideo};
-use crate::project::{ClipLocation, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex, TrackId};
+use crate::project::{ClipId, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex, TrackId};
 
 /// The video that follows the one being shown on a track, so that its pictures can be got ready
 /// before they are needed.
@@ -60,7 +60,7 @@ pub fn wanted_pictures(
             break;
         }
         for (layer, video) in section.video_layers() {
-            if wanted.iter().any(|already| already.track == layer.clip.track) {
+            if wanted.iter().any(|already| already.track == layer.track) {
                 continue;
             }
             wanted.extend(wanted_picture_of(
@@ -108,7 +108,7 @@ fn wanted_picture_of(
         .get(next_index)
         .and_then(|next| {
             next.video_layers()
-                .find(|(next_layer, _)| next_layer.clip.track == layer.clip.track)
+                .find(|(next_layer, _)| next_layer.track == layer.track)
         })
         .map(|(_, next)| UpcomingVideo {
             source: next.source,
@@ -117,7 +117,7 @@ fn wanted_picture_of(
             speed_factor: next.speed,
         });
     Some(WantedPicture {
-        track: layer.clip.track,
+        track: layer.track,
         source: video.source,
         source_frame: SourceFrameIndex::new(source_frame),
         speed_factor: video.speed,
@@ -128,7 +128,7 @@ fn wanted_picture_of(
 }
 
 /// The video that `clip` shows in `section`, if it is a layer of it.
-fn video_of_clip(section: &PictureSection, clip: ClipLocation) -> Option<VisibleVideo> {
+fn video_of_clip(section: &PictureSection, clip: ClipId) -> Option<VisibleVideo> {
     section
         .video_layers()
         .find(|(layer, _)| layer.clip == clip)

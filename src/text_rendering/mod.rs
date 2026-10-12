@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap};
 
 use crate::media::UserInterfaceWakeUp;
-use crate::project::TextObject;
+use crate::project::{TextColour, TextObject};
 use crate::rgba_picture::RgbaPicture;
 
 /// How tall a line of text is, as a multiple of the size of the letters.
@@ -117,6 +117,35 @@ impl TextRenderer {
 impl Default for TextRenderer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Everything that the picture [`TextRenderer::render`] makes of a text object depends on: two text objects on finished
+/// pictures of the same size have the same appearance exactly when their pictures are the same. Where the object is on the
+/// picture and how far it is turned are not part of it (the picture is of the text upright in its own area, and is
+/// moved and turned when it is laid over the picture), only how big its area is.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TextAppearance {
+    text: String,
+    font_family: String,
+    /// The bits of the size of the letters as a fraction of the picture's height: a number with a fraction cannot be hashed.
+    font_size_bits: u32,
+    colour: TextColour,
+    area_size_in_pixels: (u32, u32),
+    picture_height_in_pixels: u32,
+}
+
+impl TextAppearance {
+    /// The appearance of `object` on a finished picture that is `picture_width_in_pixels` by `picture_height_in_pixels`.
+    pub fn of(object: &TextObject, picture_width_in_pixels: u32, picture_height_in_pixels: u32) -> Self {
+        Self {
+            text: object.text.clone(),
+            font_family: object.font_family.clone(),
+            font_size_bits: object.font_size.fraction_of_picture_height().to_bits(),
+            colour: object.colour,
+            area_size_in_pixels: area_size_in_pixels(object, picture_width_in_pixels, picture_height_in_pixels),
+            picture_height_in_pixels,
+        }
     }
 }
 

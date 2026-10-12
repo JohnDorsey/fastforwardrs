@@ -219,7 +219,7 @@ mod tests {
 
     use super::*;
     use crate::media::do_nothing_when_woken;
-    use crate::media::export::{SoundClipToExport, SoundItemToExport, SoundStripToExport};
+    use crate::media::export::{LoudnessToExport, SoundClipToExport, SoundItemToExport, SoundStripToExport};
     use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 
     const STEREO: usize = 2;
@@ -355,7 +355,7 @@ mod tests {
                         end_source_frame: 90,
                         speed_factor: SpeedFactor::NORMAL,
                         timeline_frame_count: 90,
-                        loudness_factor: 1.0,
+                        loudness: LoudnessToExport::UNCHANGED,
                     })],
                 }],
                 sped_up_clip_sound: SpedUpClipSound::MaintainPitch,

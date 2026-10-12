@@ -4,7 +4,7 @@ use egui::{Rect, pos2, vec2};
 
 use super::geometry::PictureOnScreen;
 use super::{PreviewContent, PreviewLayer, PreviewLayerContent, VideoInThePicture};
-use crate::project::{CanvasArea, ClipId, ClipLocation, Placement, SpeedIndicatorLayout, TrackId};
+use crate::project::{CanvasArea, ClipId, Placement, SpeedIndicatorLayout, TrackId};
 
 /// A picture of 1600 by 900 pixels drawn 800 by 450 points, with its top left corner at (100, 50).
 pub fn picture() -> PictureOnScreen {
@@ -12,17 +12,15 @@ pub fn picture() -> PictureOnScreen {
 }
 
 /// The clip that is number `number`: each is on a track of its own.
-pub fn clip(number: u32) -> ClipLocation {
-    ClipLocation {
-        track: TrackId::new(number),
-        clip: ClipId::new(0),
-    }
+pub fn clip(number: u32) -> ClipId {
+    ClipId::new(TrackId::new(number), 0)
 }
 
 /// A video, not yet shown, of clip number `number` that is where `placement` says.
 pub fn layer(number: u32, placement: Placement) -> PreviewLayer<'static> {
     PreviewLayer {
         clip: clip(number),
+        track: TrackId::new(number),
         placement,
         content: PreviewLayerContent::Video(VideoInThePicture::Waiting),
     }

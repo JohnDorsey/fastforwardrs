@@ -184,7 +184,7 @@ impl FastForwardApplication {
             Ok(_) => {
                 // Importing is an edit like any other: undoing it takes the file off the timeline again.
                 self.history
-                    .record_change(project_before, self.selection.to_vec(), None, now, false);
+                    .record_change(project_before, self.selection.to_items(), None, now, false);
                 self.note_the_project_was_edited(now);
                 // The first video decides the frame rate of the whole project.
                 if self.project.frame_rate() != frame_rate_before {
@@ -198,8 +198,8 @@ impl FastForwardApplication {
     }
 
     /// A file was found for a source file of a project that was just loaded. It must be the same
-    /// kind of file, and a video must run at the frame rate the edits were made at; if it does,
-    /// the project keeps everything it knew and only the place the file was found is remembered.
+    /// kind of file; if it is, the project keeps everything it knew and only the place the file was
+    /// found is remembered.
     fn finish_locating_a_file_of_the_loaded_project(
         &mut self,
         identifier: SourceMediaIdentifier,
@@ -216,20 +216,6 @@ impl FastForwardApplication {
                 format!(
                     "{} is {found}, but the project was edited on {expected}",
                     path.display()
-                ),
-            );
-            return;
-        }
-        if let (Some(project_video), Some(found_video)) = (source.properties.video(), properties.video())
-            && project_video.frame_rate != found_video.frame_rate
-        {
-            self.mark_source_unavailable(
-                identifier,
-                format!(
-                    "{} runs at {} frames per second, but the project was edited on a video running at {}",
-                    path.display(),
-                    found_video.frame_rate,
-                    project_video.frame_rate
                 ),
             );
             return;

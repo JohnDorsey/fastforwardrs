@@ -32,8 +32,24 @@ const LARGEST_AUDIO_TEMPO_PER_FILTER: f64 = 100.0;
 /// replaced by silence of the same length, which is always safe.
 const SHORTEST_SPED_UP_SOUND_IN_SECONDS: f64 = 0.1;
 
+/// How loud the sound of a clip is made.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoudnessToExport {
+    /// The number the samples are multiplied by, the same all the way through.
+    Constant(f64),
+    /// Louder at some frames than at others: how loud, in decibels, at each of some frames counted from the start of the
+    /// clip, between which it changes evenly (in decibels), and before the first and after the last as at that one.
+    /// There are at least two.
+    Changing(Vec<(u64, f32)>),
+}
+
+impl LoudnessToExport {
+    /// The sound as it is: nothing is done to it.
+    pub const UNCHANGED: Self = Self::Constant(1.0);
+}
+
 /// A stretch of the sound of one source file.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SoundClipToExport {
     /// Which of the graph's inputs the file is.
     pub source_input: usize,
@@ -43,11 +59,10 @@ pub struct SoundClipToExport {
     pub speed_factor: SpeedFactor,
     /// How many frames of the timeline the clip lasts, which is how long its sound is made.
     pub timeline_frame_count: u64,
-    /// The number the samples are multiplied by.
-    pub loudness_factor: f64,
+    pub loudness: LoudnessToExport,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SoundItemToExport {
     Silence { frame_count: u64 },
     Clip(SoundClipToExport),
@@ -228,10 +243,41 @@ fn clip_filters(frame_rate: FrameRate, clip: &SoundClipToExport, sped_up_clip_so
     let (sound_start, sound_end) = audio_cut_times(frame_rate, clip);
     let mut filters = format!("atrim=start={sound_start}:end={sound_end},asetpts=PTS-STARTPTS");
     filters.push_str(&treatment_of(frame_rate, clip, sped_up_clip_sound).filters());
-    if clip.loudness_factor != 1.0 {
-        filters.push_str(&format!(",volume={}", format_number(clip.loudness_factor)));
+    match &clip.loudness {
+        LoudnessToExport::Constant(factor) if *factor == 1.0 => {}
+        LoudnessToExport::Constant(factor) => filters.push_str(&format!(",volume={}", format_number(*factor))),
+        // The volume is worked out again for every piece of the sound that goes through, from the time it is at (the
+        // time into the clip: the sound has been made as long as the clip's place on the timeline by now).
+        LoudnessToExport::Changing(points) => filters.push_str(&format!(
+            ",volume='pow(10,({})/20)':eval=frame",
+            decibels_expression(frame_rate, points)
+        )),
     }
     filters
+}
+
+/// The expression, in the time `t` in seconds, for how loud in decibels a clip is made at that time: between two of the
+/// `points` (frames, and decibels at them) it changes evenly from what the first says to what the second says, and before
+/// the first and after the last it is what that one says.
+fn decibels_expression(frame_rate: FrameRate, points: &[(u64, f32)]) -> String {
+    let times_and_decibels: Vec<(f64, f64)> = points
+        .iter()
+        .map(|&(frame, decibels)| (frame_rate.seconds_at_frame(frame), f64::from(decibels)))
+        .collect();
+    let (_, last_decibels) = *times_and_decibels.last().expect("there are points");
+    let mut expression = format_number(last_decibels);
+    for pair in times_and_decibels.windows(2).rev() {
+        let ((from_time, from_decibels), (to_time, to_decibels)) = (pair[0], pair[1]);
+        let decibels_a_second = (to_decibels - from_decibels) / (to_time - from_time);
+        expression = format!(
+            "if(lt(t,{}),{}+({})*(t-{}),{expression})",
+            format_number(to_time),
+            format_number(from_decibels),
+            format_number(decibels_a_second),
+            format_number(from_time)
+        );
+    }
+    expression
 }
 
 /// What is done to the sound of a clip, after it has been cut out, to make it fit the clip.

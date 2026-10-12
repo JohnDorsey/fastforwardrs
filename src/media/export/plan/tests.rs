@@ -6,7 +6,7 @@ use crate::project::{
     SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextColour, fit_inside_picture,
 };
 
-fn frame(number: u64) -> TimelineFrameIndex {
+pub(super) fn frame(number: u64) -> TimelineFrameIndex {
     TimelineFrameIndex::new(number)
 }
 
@@ -14,7 +14,7 @@ fn speed(factor: u32) -> SpeedFactor {
     SpeedFactor::new(factor).unwrap()
 }
 
-fn video_source(identifier: u32, width: u32, height: u32, frames: u64, has_audio: bool) -> SourceMedia {
+pub(super) fn video_source(identifier: u32, width: u32, height: u32, frames: u64, has_audio: bool) -> SourceMedia {
     SourceMedia::video(
         SourceMediaIdentifier::new(identifier),
         SourceMediaLink::from_absolute_path(PathBuf::from(format!("/videos/{identifier}.mp4"))),
@@ -49,7 +49,7 @@ fn audio_source(identifier: u32, seconds: u64) -> SourceMedia {
     )
 }
 
-fn project_with_video(width: u32, height: u32, has_audio: bool) -> Project {
+pub(super) fn project_with_video(width: u32, height: u32, has_audio: bool) -> Project {
     let mut project = Project::empty();
     project
         .import_source(video_source(1, width, height, 300, has_audio), frame(0))
@@ -58,7 +58,7 @@ fn project_with_video(width: u32, height: u32, has_audio: bool) -> Project {
 }
 
 /// A picture the size of the text's area, filled with white, standing in for rendered text.
-fn stand_in_for_text(object: &TextObject, picture_width: u32, picture_height: u32) -> RgbaPicture {
+pub(super) fn stand_in_for_text(object: &TextObject, picture_width: u32, picture_height: u32) -> RgbaPicture {
     let (width, height) = crate::text_rendering::area_size_in_pixels(object, picture_width, picture_height);
     RgbaPicture {
         width_in_pixels: width,
@@ -67,7 +67,7 @@ fn stand_in_for_text(object: &TextObject, picture_width: u32, picture_height: u3
     }
 }
 
-fn plan(project: &Project) -> Result<ExportPlan, ExportPlanError> {
+pub(super) fn plan(project: &Project) -> Result<ExportPlan, ExportPlanError> {
     plan_export(project, Settings::DEFAULT, &stand_in_for_text)
 }
 
@@ -75,11 +75,8 @@ fn plan_with(project: &Project, settings: Settings) -> ExportPlan {
     plan_export(project, settings, &stand_in_for_text).unwrap()
 }
 
-fn clip_location(project: &Project, track_position: usize, clip_number: usize) -> ClipLocation {
-    ClipLocation {
-        track: project.tracks()[track_position].id(),
-        clip: project.tracks()[track_position].entries()[clip_number].id(),
-    }
+pub(super) fn clip_location(project: &Project, track_position: usize, clip_number: usize) -> ClipId {
+    project.tracks()[track_position].entries()[clip_number].id()
 }
 
 #[test]
@@ -305,7 +302,7 @@ fn the_symbol_is_the_product_of_the_clips_speed_and_the_tracks() {
     let mut project = project_with_video(640, 360, false);
     let only_clip = clip_location(&project, 0, 0);
     project.set_clip_speed(only_clip, speed(3)).unwrap();
-    project.set_track_speed(only_clip.track, speed(2)).unwrap();
+    project.set_track_speed(project.tracks()[0].id(), speed(2)).unwrap();
     let plan = plan(&project).unwrap();
     assert_eq!(
         plan.still_pictures[0].kind,
@@ -376,7 +373,7 @@ fn a_muted_clip_or_track_leaves_the_sound_out() {
     project.set_clip_muted(only_clip, true).unwrap();
     assert!(!plan(&project).unwrap().has_audio);
     project.set_clip_muted(only_clip, false).unwrap();
-    project.set_track_muted(only_clip.track, true).unwrap();
+    project.set_track_muted(project.tracks()[0].id(), true).unwrap();
     assert!(!plan(&project).unwrap().has_audio);
 }
 
@@ -435,7 +432,7 @@ fn the_inputs_are_the_source_files_in_order_of_their_names_and_then_the_still_pi
 
 // --- text ---
 
-fn project_with_text(text_object: TextObject) -> (Project, ClipLocation) {
+fn project_with_text(text_object: TextObject) -> (Project, ClipId) {
     let mut project = project_with_video(1280, 720, false);
     let front = project.add_track_in_front();
     let (location, _) = project.insert_text(front, frame(30), text_object, 60).unwrap();
@@ -474,10 +471,7 @@ fn text_is_made_for_the_finished_picture_size_and_once_however_many_pieces_it_is
     // Cut the video under the text (and not the text) in three places.
     for at in [40, 50, 60] {
         let video_track = &project.tracks()[1];
-        let video_clip = ClipLocation {
-            track: video_track.id(),
-            clip: video_track.placement_covering(frame(at)).unwrap().id,
-        };
+        let video_clip = video_track.placement_covering(frame(at)).unwrap().id;
         assert_eq!(project.split_at(frame(at), Some(&[video_clip])).len(), 1);
     }
     let sizes = std::cell::RefCell::new(Vec::new());
@@ -535,6 +529,43 @@ fn a_video_that_was_put_somewhere_smaller_is_exported_scaled_to_its_place_and_in
         .unwrap();
     let text = plan(&project).unwrap().filter_graph.text;
     assert!(text.contains("scale=640:360,setsar=1,pad=1280:720:320:180"), "{text}");
+}
+
+#[test]
+fn a_video_that_was_put_partly_past_the_edge_is_exported_laid_over_black_at_a_place_before_the_picture() {
+    let mut project = project_with_video(1280, 720, false);
+    let video = clip_location(&project, 0, 0);
+    // Half of it is before the left edge of the picture: 640 by 360 pixels, from -320 across and 180 down.
+    project
+        .set_clip_placement(video, Placement::upright(CanvasArea::new(-0.25, 0.25, 0.5, 0.5)))
+        .unwrap();
+    let text = plan(&project).unwrap().filter_graph.text;
+    assert!(text.contains("color=c=black:s=1280x720"), "{text}");
+    assert!(text.contains("scale=640:360,setsar=1[clip_layer_0_0]"), "{text}");
+    assert!(text.contains("overlay=x=-320:y=180:format=auto"), "{text}");
+    assert!(!text.contains("pad="), "{text}");
+}
+
+#[test]
+fn text_put_partly_past_the_edges_is_laid_over_at_its_place_that_is_below_zero_or_beyond_the_picture() {
+    let (project, _) = project_with_text(TextObject {
+        area: CanvasArea::new(-0.25, 0.875, 0.5, 0.25),
+        ..TextObject::default()
+    });
+    let plan = plan(&project).unwrap();
+    assert_eq!(
+        (
+            plan.still_pictures[0].picture.width_in_pixels,
+            plan.still_pictures[0].picture.height_in_pixels
+        ),
+        (640, 180),
+        "the size of its area, the whole of it, though some of it is past the edge"
+    );
+    assert!(
+        plan.filter_graph.text.contains("overlay=x=-320:y=630:format=auto"),
+        "{}",
+        plan.filter_graph.text
+    );
 }
 
 #[test]
@@ -641,7 +672,10 @@ fn the_symbol_is_the_one_of_the_front_most_video_so_a_sped_up_video_behind_a_nor
         .import_source(video_source(2, 1280, 720, 100, false), frame(0))
         .unwrap();
     let in_front = clip_location(&project, 0, 0);
-    assert_ne!(in_front.track, behind.track);
+    assert_ne!(
+        project.track_holding(in_front).unwrap().id(),
+        project.track_holding(behind).unwrap().id()
+    );
     project
         .set_clip_placement(in_front, Placement::upright(CanvasArea::new(0.1, 0.1, 0.3, 0.3)))
         .unwrap();
@@ -740,10 +774,7 @@ fn a_picture_is_an_input_of_its_own_scaled_to_where_it_is_with_nothing_rendered_
 fn a_picture_that_is_turned_and_made_smaller_is_exported_that_way() {
     let mut project = project_with_video(1280, 720, false);
     let outcome = project.import_source(picture_source(2, 800, 400), frame(0)).unwrap();
-    let picture = ClipLocation {
-        track: outcome.track,
-        clip: outcome.clip.unwrap(),
-    };
+    let picture = outcome.clip.unwrap();
     project
         .set_clip_placement(
             picture,

@@ -60,10 +60,18 @@ fn first_clip(strip: &SoundStrip) -> SoundClip {
         .items
         .iter()
         .find_map(|item| match item {
-            SoundItem::Clip(clip) => Some(*clip),
+            SoundItem::Clip(clip) => Some(clip.clone()),
             SoundItem::Silence { .. } => None,
         })
         .expect("the strip has a clip")
+}
+
+/// The number the sound of `clip` is multiplied by, for a clip that is as loud all the way through.
+fn constant_loudness_factor(clip: &SoundClip) -> f64 {
+    match clip.loudness {
+        Loudness::Constant(factor) => factor,
+        Loudness::Changing(_) => panic!("the clip is not as loud all the way through: {clip:?}"),
+    }
 }
 
 #[test]
@@ -72,7 +80,7 @@ fn a_video_with_sound_makes_one_strip_with_one_clip_at_its_normal_loudness() {
     assert_eq!(plan.strips.len(), 1);
     assert_eq!(items(&plan.strips[0]), vec![(100, Some((1, 0, 100, 1)))]);
     assert_eq!(
-        first_clip(&plan.strips[0]).loudness_factor,
+        constant_loudness_factor(&first_clip(&plan.strips[0])),
         1.0,
         "exactly 1, so that nothing needs to be done to the sound"
     );
@@ -134,10 +142,7 @@ fn a_muted_clip_is_silence_for_as_long_as_it_lasts() {
         (0, long_video(50, 100, 1)),
         (0, long_video(100, 150, 1)),
     ]]);
-    let middle = ClipLocation {
-        track: project.tracks()[0].id(),
-        clip: project.tracks()[0].entries()[1].id(),
-    };
+    let middle = project.tracks()[0].entries()[1].id();
     project.set_clip_muted(middle, true).unwrap();
     assert_eq!(
         items(&plan(&project).strips[0]),
@@ -158,21 +163,15 @@ fn a_track_that_is_muted_has_no_sound_at_all() {
 #[test]
 fn the_gain_of_the_clip_and_of_its_track_are_both_applied() {
     let mut project = project_of(vec![vec![(0, sound_file(0, 50, 1))]]);
-    let location = ClipLocation {
-        track: project.tracks()[0].id(),
-        clip: project.tracks()[0].entries()[0].id(),
-    };
+    let location = project.tracks()[0].entries()[0].id();
+    let track = project.tracks()[0].id();
     project.set_clip_gain(location, Gain::from_decibels(6.0)).unwrap();
-    project
-        .set_track_gain(location.track, Gain::from_decibels(-6.0))
-        .unwrap();
-    let factor = first_clip(&plan(&project).strips[0]).loudness_factor;
+    project.set_track_gain(track, Gain::from_decibels(-6.0)).unwrap();
+    let factor = constant_loudness_factor(&first_clip(&plan(&project).strips[0]));
     assert!((factor - 1.0).abs() < 1e-12, "+6 and -6 decibels cancel: {factor}");
 
-    project
-        .set_track_gain(location.track, Gain::from_decibels(14.0))
-        .unwrap();
-    let factor = first_clip(&plan(&project).strips[0]).loudness_factor;
+    project.set_track_gain(track, Gain::from_decibels(14.0)).unwrap();
+    let factor = constant_loudness_factor(&first_clip(&plan(&project).strips[0]));
     assert!((factor - 10.0).abs() < 1e-9, "+20 decibels is ten times: {factor}");
 }
 
@@ -246,7 +245,7 @@ fn a_clip_that_has_ended_before_the_start_is_not_part_of_the_plan() {
 // --- checked against the plain answer ---
 
 /// What track `strip` plays at `offset` frames from its start: the clip and its source frame.
-fn heard_at(strip: &SoundStrip, offset: u64) -> Option<(ClipLocation, u64)> {
+fn heard_at(strip: &SoundStrip, offset: u64) -> Option<(ClipId, u64)> {
     let mut item_start = 0;
     for item in &strip.items {
         let length = item.timeline_frame_count();
@@ -269,16 +268,13 @@ fn plainly_heard(
     project: &Project,
     track: &crate::project::tracks::Track,
     timeline_frame: u64,
-) -> Option<(ClipLocation, u64)> {
+) -> Option<(ClipId, u64)> {
     let placement = track.placement_covering(frame(timeline_frame))?;
     let media = placement.clip.as_media()?;
     let has_sound = project.source(media.source())?.properties.has_sound();
     (has_sound && !track.is_muted() && !media.is_muted()).then(|| {
         (
-            ClipLocation {
-                track: track.id(),
-                clip: placement.id,
-            },
+            placement.id,
             placement.source_frame_at(frame(timeline_frame)).unwrap().value(),
         )
     })
@@ -337,11 +333,5 @@ fn the_plan_has_at_every_frame_exactly_the_sound_that_looking_at_the_tracks_one_
 fn clips_keep_the_names_they_have_on_their_track() {
     let project = project_of(vec![vec![(0, long_video(0, 10, 1))]]);
     let clip = first_clip(&plan(&project).strips[0]);
-    assert_eq!(
-        clip.clip,
-        ClipLocation {
-            track: TrackId::new(0),
-            clip: ClipId::new(0)
-        }
-    );
+    assert_eq!(clip.clip, ClipId::new(TrackId::new(0), 0));
 }

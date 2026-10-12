@@ -9,6 +9,8 @@
 //! ([`SourceFrameIndex`], [`TimelineFrameIndex`]). Whole frames keep every calculation exact and
 //! make the live preview show precisely the frames the export will contain.
 
+mod animating;
+mod animation;
 mod frame_index;
 mod frame_rate;
 mod settings;
@@ -23,6 +25,11 @@ use std::num::NonZeroU32;
 
 use thiserror::Error;
 
+pub use animating::AnimationTarget;
+pub use animation::{
+    Animation, Keyframe, Keyframes, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, PropertyId, PropertyValue,
+    RemovedKeyframe, ValueKind, placement_value, text_value, with_placement_value, with_text_value,
+};
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
 pub use settings::{
@@ -36,7 +43,7 @@ pub use speed_factor::{SpeedFactor, ZeroSpeedFactor};
 pub use speed_indicator_layout::SpeedIndicatorLayout;
 pub use timecode::format_timecode;
 pub use tracks::{
-    Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipLocation, ClipPlacement, Corner, EmptyClip,
+    Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner, EmptyClip,
     EmptyImageClip, EmptyTextClip, FontSize, Gain, ImageClip, InsertError, MediaClip, PictureDimensions, PictureFit,
     PixelBox, Placement, PointOnThePicture, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track,
     TrackEntry, TrackHeight, TrackId, fit_inside_picture, fitted_placement,
@@ -59,6 +66,9 @@ pub struct Project {
     next_track_number: u32,
     speed_indicator_layout: SpeedIndicatorLayout,
     settings: ProjectSettings,
+    /// The frame rate the project was given, or `None` while it follows its first video (and has the
+    /// rate of [`FRAME_RATE_WITHOUT_A_VIDEO`] until there is one).
+    frame_rate: Option<FrameRate>,
 }
 
 /// Returned when the parts offered to [`Project::from_parts`] contradict each other.
@@ -78,35 +88,21 @@ pub enum InconsistentProject {
         track: TrackId,
         identifier: SourceMediaIdentifier,
     },
-    #[error(
-        "this version of fastforwardrs needs every video in a project to have the same frame rate, but video {first_identifier} runs at {first_frame_rate} and video {other_identifier} at {other_frame_rate}"
-    )]
-    MixedFrameRates {
-        first_identifier: SourceMediaIdentifier,
-        first_frame_rate: FrameRate,
-        other_identifier: SourceMediaIdentifier,
-        other_frame_rate: FrameRate,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 pub enum ImportError {
     #[error("the project already has a source file number {identifier}")]
     IdentifierInUse { identifier: SourceMediaIdentifier },
-    #[error(
-        "this project runs at {project_frame_rate} frames per second, but the video runs at {chosen_frame_rate}. All the videos of a project must run at the same frame rate"
-    )]
-    DifferentFrameRate {
-        project_frame_rate: FrameRate,
-        chosen_frame_rate: FrameRate,
-    },
-    #[error(
-        "this project already has things on its tracks, laid out at {project_frame_rate} frames per second (because it has no video yet), but the video runs at {chosen_frame_rate}. Import the video first, and then the rest"
-    )]
-    ProjectAlreadyLaidOutAtAnotherFrameRate {
-        project_frame_rate: FrameRate,
-        chosen_frame_rate: FrameRate,
-    },
+}
+
+/// Where [`Project::move_clips`] is to put a clip: on which track (the one it is on, or another), and at
+/// which frame of the timeline it is to start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipMove {
+    pub clip: ClipId,
+    pub to_track: TrackId,
+    pub start: TimelineFrameIndex,
 }
 
 /// Where an imported file went.
@@ -129,13 +125,6 @@ pub enum RelinkError {
         expected: &'static str,
         chosen: &'static str,
     },
-    #[error(
-        "the chosen video runs at {chosen_frame_rate} frames per second, but this project was edited on a video running at {project_frame_rate}. Choose the original video (or a copy with the same frame rate) so that the edits still line up"
-    )]
-    DifferentFrameRate {
-        project_frame_rate: FrameRate,
-        chosen_frame_rate: FrameRate,
-    },
 }
 
 /// How a relinked file compares with the one it replaced.
@@ -152,6 +141,8 @@ pub enum EditError {
     UnknownTrack { track: TrackId },
     #[error("{track} is the only track, and a project always has a track")]
     CannotDeleteTheOnlyTrack { track: TrackId },
+    #[error("{property:?} is not a property of a track")]
+    NotAPropertyOfTheTrack { track: TrackId, property: PropertyId },
     #[error(transparent)]
     Clip(#[from] ClipEditError),
 }
@@ -168,6 +159,7 @@ impl Project {
             next_track_number: 0,
             speed_indicator_layout: SpeedIndicatorLayout::DEFAULT,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
+            frame_rate: None,
         };
         project.add_track_in_front();
         project
@@ -217,23 +209,6 @@ impl Project {
                 }
             }
         }
-        let mut videos = sources.iter().filter_map(|source| {
-            source
-                .properties
-                .video()
-                .map(|video| (source.identifier, video.frame_rate))
-        });
-        if let Some((first_identifier, first_frame_rate)) = videos.next()
-            && let Some((other_identifier, other_frame_rate)) =
-                videos.find(|(_, frame_rate)| *frame_rate != first_frame_rate)
-        {
-            return Err(InconsistentProject::MixedFrameRates {
-                first_identifier,
-                first_frame_rate,
-                other_identifier,
-                other_frame_rate,
-            });
-        }
         let next_track_number = tracks
             .iter()
             .map(|track| track.id().value() + 1)
@@ -246,7 +221,16 @@ impl Project {
             next_track_number,
             speed_indicator_layout,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
+            frame_rate: None,
         })
+    }
+
+    /// The same project with this frame rate chosen for it, or with none chosen (`None`), so that it
+    /// follows its first video. (Nothing in it is counted again: see [`Self::set_frame_rate`] for that.)
+    #[must_use]
+    pub fn with_frame_rate(mut self, frame_rate: Option<FrameRate>) -> Self {
+        self.frame_rate = frame_rate;
+        self
     }
 
     /// The same project with these settings of its own.
@@ -294,8 +278,24 @@ impl Project {
     }
 
     /// Where a clip is, on its track.
-    pub fn placement_of(&self, location: ClipLocation) -> Option<ClipPlacement<'_>> {
-        self.track(location.track)?.placement_of(location.clip)
+    pub fn placement_of(&self, clip: ClipId) -> Option<ClipPlacement<'_>> {
+        self.track_holding(clip)?.placement_of(clip)
+    }
+
+    /// The track that has `clip` on it now: not necessarily the one it was made on, because a clip keeps
+    /// its id when it is moved to another track.
+    pub fn track_holding(&self, clip: ClipId) -> Option<&Track> {
+        self.track_position_holding(clip).map(|position| &self.tracks[position])
+    }
+
+    /// Where, in the list of tracks (0 is the front), the track that has `clip` on it is.
+    pub fn track_position_holding(&self, clip: ClipId) -> Option<usize> {
+        let has_it = |track: &Track| track.index_of(clip).is_some();
+        // Nearly always still on the track it was made on, which is looked in first.
+        match self.track_position(clip.origin()) {
+            Some(position) if has_it(&self.tracks[position]) => Some(position),
+            _ => self.tracks.iter().position(has_it),
+        }
     }
 
     pub fn speed_indicator_layout(&self) -> SpeedIndicatorLayout {
@@ -306,13 +306,34 @@ impl Project {
         self.speed_indicator_layout = layout;
     }
 
-    /// The frame rate of the finished video: the frame rate of the project's videos, or
-    /// [`FRAME_RATE_WITHOUT_A_VIDEO`] while it has none.
+    /// The frame rate of the finished video, and of everything on the timeline: the one that was
+    /// chosen for the project, or if none was, that of its first video (or [`FRAME_RATE_WITHOUT_A_VIDEO`]
+    /// while it has none). Videos of other rates are made to run at it.
     pub fn frame_rate(&self) -> FrameRate {
-        self.sources
-            .iter()
-            .find_map(|source| source.properties.video().map(|video| video.frame_rate))
-            .unwrap_or(FRAME_RATE_WITHOUT_A_VIDEO)
+        self.frame_rate.unwrap_or_else(|| {
+            self.sources
+                .iter()
+                .find_map(|source| source.properties.video().map(|video| video.frame_rate))
+                .unwrap_or(FRAME_RATE_WITHOUT_A_VIDEO)
+        })
+    }
+
+    /// The frame rate that was chosen for the project, if one was (the project file keeps only that).
+    pub fn chosen_frame_rate(&self) -> Option<FrameRate> {
+        self.frame_rate
+    }
+
+    /// Makes `frame_rate` the rate of the project, and counts everything on the timeline again at it, so
+    /// that everything lasts as long as it did and starts when it did, to the nearest frame (see
+    /// [`Track::retimed`]). The project keeps the rate from now on, whatever videos come.
+    pub fn set_frame_rate(&mut self, frame_rate: FrameRate) {
+        let before = self.frame_rate();
+        self.frame_rate = Some(frame_rate);
+        if frame_rate != before {
+            for track in &mut self.tracks {
+                *track = track.retimed(before, frame_rate);
+            }
+        }
     }
 
     /// The size of the finished picture in pixels, as the first video shows it (or a standard size
@@ -361,8 +382,23 @@ impl Project {
         Ok(())
     }
 
+    /// Moves a track to `position` in the list of tracks (0 is the front): it goes in front of the tracks that are
+    /// from that place on and behind those before it, and the other tracks keep their order. A `position` that
+    /// is past the last place is the last place.
+    pub fn move_track(&mut self, track: TrackId, position: usize) -> Result<(), EditError> {
+        let from = self.track_position(track).ok_or(EditError::UnknownTrack { track })?;
+        let moved = self.tracks.remove(from);
+        self.tracks.insert(position.min(self.tracks.len()), moved);
+        Ok(())
+    }
+
     /// Adds a file to the project and puts all of it on a track, starting at `at_frame`: on the
     /// front-most track that has nothing on it, or on a new track in front of all of them.
+    ///
+    /// A video that does not run at the frame rate of the project is made to: it lasts as long as it
+    /// does in time, which is as many frames as it comes to at the project's rate. The first video of a
+    /// project that has nothing on its tracks (and no rate chosen for it) sets that rate; in a project
+    /// that has something on them, which was laid out at the rate it has, the rate stays what it is.
     pub fn import_source(
         &mut self,
         source: SourceMedia,
@@ -373,24 +409,12 @@ impl Project {
                 identifier: source.identifier,
             });
         }
-        if let Some(chosen) = source.properties.video().map(|video| video.frame_rate) {
-            let project_frame_rate = self.frame_rate();
-            let has_a_video = self
-                .sources
-                .iter()
-                .any(|existing| existing.properties.video().is_some());
-            if has_a_video && chosen != project_frame_rate {
-                return Err(ImportError::DifferentFrameRate {
-                    project_frame_rate,
-                    chosen_frame_rate: chosen,
-                });
-            }
-            if !has_a_video && chosen != project_frame_rate && !self.has_no_clips() {
-                return Err(ImportError::ProjectAlreadyLaidOutAtAnotherFrameRate {
-                    project_frame_rate,
-                    chosen_frame_rate: chosen,
-                });
-            }
+        let has_a_video = self
+            .sources
+            .iter()
+            .any(|existing| existing.properties.video().is_some());
+        if source.properties.video().is_some() && !has_a_video && !self.has_no_clips() {
+            self.frame_rate = Some(self.frame_rate());
         }
 
         let (track_id, created_track) = match self.tracks.iter().find(|track| track.is_empty()) {
@@ -399,17 +423,16 @@ impl Project {
         };
         let identifier = source.identifier;
         let kind = source.kind();
-        let frame_count = match source.properties.video() {
-            // The project's frame rate is the video's own, once it has been added.
-            Some(video) => video.total_frame_count,
+        let properties = source.properties;
+        self.sources.push(source);
+        let frame_count = match kind {
             // A picture is shown for a while, as long as that is said to be (it has no length of its own).
-            None if kind == SourceMediaKind::Image => self
+            SourceMediaKind::Image => self
                 .frame_rate()
                 .nearest_frame_to_seconds(SECONDS_A_NEW_PICTURE_IS_SHOWN_FOR)
                 .max(1),
-            None => source.properties.frame_count_at(self.frame_rate()),
+            SourceMediaKind::Video | SourceMediaKind::Audio => properties.frame_count_at(self.frame_rate()),
         };
-        self.sources.push(source);
 
         let clip = match kind {
             SourceMediaKind::Image => ImageClip::new(identifier, frame_count).ok().map(Clip::Image),
@@ -444,9 +467,10 @@ impl Project {
     /// Points a source file at a different file, for example after the original was moved. The
     /// clips are left exactly as they are: no edit is lost.
     ///
-    /// The new file must be the same kind of file, and a video must run at the same frame rate as
-    /// the old one, because the clips are stored as frame numbers. Its length may differ; the
-    /// returned [`RelinkOutcome`] reports by how much so that the caller can tell the user.
+    /// The new file must be the same kind of file. A video may run at another frame rate than the old
+    /// one: the clips are stored as frames of the project, which is as much as to say as stretches of
+    /// time. Its length may differ; the returned [`RelinkOutcome`] reports by how much (in frames of the
+    /// project) so that the caller can tell the user.
     pub fn relink_source(
         &mut self,
         identifier: SourceMediaIdentifier,
@@ -466,20 +490,17 @@ impl Project {
                 chosen: properties.kind().description(),
             });
         }
-        if let (Some(old), Some(new)) = (source.properties.video(), properties.video())
-            && old.frame_rate != new.frame_rate
-        {
-            return Err(RelinkError::DifferentFrameRate {
-                project_frame_rate: old.frame_rate,
-                chosen_frame_rate: new.frame_rate,
-            });
-        }
         let outcome = RelinkOutcome {
             frame_count_before: source.properties.frame_count_at(frame_rate),
             frame_count_after: properties.frame_count_at(frame_rate),
         };
         source.link = link;
         source.properties = properties;
+        // A project that follows its first video must not follow it to another frame rate by this: the
+        // edits are laid out at the rate it had.
+        if self.frame_rate() != frame_rate {
+            self.frame_rate = Some(frame_rate);
+        }
         Ok(outcome)
     }
 
@@ -510,23 +531,27 @@ impl Project {
         self.track_mut(track).ok_or(EditError::UnknownTrack { track })
     }
 
+    fn track_holding_mut_or_error(&mut self, clip: ClipId) -> Result<&mut Track, EditError> {
+        let position = self
+            .track_position_holding(clip)
+            .ok_or(ClipEditError::UnknownClip { clip })?;
+        Ok(&mut self.tracks[position])
+    }
+
     /// Cuts the clips that are at `timeline_frame`, each in two, there. (A track that has nothing
     /// there, or where a clip already starts there, is left alone.) With `only` given, only those
     /// clips are cut, and only those of them that are at that frame. Returns what was cut.
     pub fn split_at(
         &mut self,
         timeline_frame: TimelineFrameIndex,
-        only: Option<&[ClipLocation]>,
+        only: Option<&[ClipId]>,
     ) -> Vec<(TrackId, SplitOutcome)> {
         let mut cut = Vec::new();
         for track in &mut self.tracks {
             if let Some(only) = only {
-                let is_one_of_them = track.placement_covering(timeline_frame).is_some_and(|placement| {
-                    only.contains(&ClipLocation {
-                        track: track.id(),
-                        clip: placement.id,
-                    })
-                });
+                let is_one_of_them = track
+                    .placement_covering(timeline_frame)
+                    .is_some_and(|placement| only.contains(&placement.id));
                 if !is_one_of_them {
                     continue;
                 }
@@ -539,53 +564,100 @@ impl Project {
     }
 
     /// Plays a video or sound clip at `speed` (on top of the speed of its track).
-    pub fn set_clip_speed(&mut self, location: ClipLocation, speed: SpeedFactor) -> Result<(), EditError> {
-        Ok(self
-            .track_mut_or_error(location.track)?
-            .set_clip_speed(location.clip, speed)?)
+    pub fn set_clip_speed(&mut self, clip: ClipId, speed: SpeedFactor) -> Result<(), EditError> {
+        Ok(self.track_holding_mut_or_error(clip)?.set_clip_speed(clip, speed)?)
     }
 
-    pub fn set_clip_gain(&mut self, location: ClipLocation, gain: Gain) -> Result<(), EditError> {
-        Ok(self
-            .track_mut_or_error(location.track)?
-            .set_clip_gain(location.clip, gain)?)
+    pub fn set_clip_gain(&mut self, clip: ClipId, gain: Gain) -> Result<(), EditError> {
+        Ok(self.track_holding_mut_or_error(clip)?.set_clip_gain(clip, gain)?)
     }
 
-    pub fn set_clip_muted(&mut self, location: ClipLocation, muted: bool) -> Result<(), EditError> {
-        Ok(self
-            .track_mut_or_error(location.track)?
-            .set_clip_muted(location.clip, muted)?)
+    pub fn set_clip_muted(&mut self, clip: ClipId, muted: bool) -> Result<(), EditError> {
+        Ok(self.track_holding_mut_or_error(clip)?.set_clip_muted(clip, muted)?)
     }
 
-    /// Moves clips so that each starts at the frame given for it, on its own track (see
-    /// [`Track::move_clips`]). Either all of them move or, if one of them cannot (a clip or a track is
-    /// not there, or the clips would be on top of one another), none does.
-    pub fn move_clips(&mut self, starts: &[(ClipLocation, TimelineFrameIndex)]) -> Result<(), EditError> {
-        let mut tracks_to_change: Vec<TrackId> = starts.iter().map(|(clip, _)| clip.track).collect();
-        tracks_to_change.sort_unstable();
-        tracks_to_change.dedup();
-        let mut changed = Vec::with_capacity(tracks_to_change.len());
-        for id in tracks_to_change {
-            let mut track = self.track(id).ok_or(EditError::UnknownTrack { track: id })?.clone();
-            let for_this_track: Vec<(ClipId, u64)> = starts
-                .iter()
-                .filter(|(clip, _)| clip.track == id)
-                .map(|(clip, start)| (clip.clip, start.value()))
-                .collect();
-            track.move_clips(&for_this_track)?;
-            changed.push(track);
+    /// Moves clips, each to start at the frame given for it on the track given for it, which may be the track
+    /// it is on or another: it is the same clip on the other track, and has the id it had. Nothing else moves
+    /// (a clip that touched one that is moved away stays where it was, with a gap now before it), and how long
+    /// a clip lasts is counted by the speed of the track it ends up on. A clip named twice goes where it is
+    /// last told to.
+    ///
+    /// Either all of them move or, if one of them cannot (a clip or a track is not there, or clips would be
+    /// on top of one another), none does. The clips all leave before any arrives, so that clips can swap
+    /// places, or one take the place another leaves.
+    pub fn move_clips(&mut self, moves: &[ClipMove]) -> Result<(), EditError> {
+        /// A clip to move: where it is now (as a place in the list of tracks), where it goes, and where it starts.
+        struct Departure {
+            clip: ClipId,
+            from: usize,
+            to: usize,
+            start: u64,
         }
-        for track in changed {
-            if let Some(slot) = self.track_mut(track.id()) {
-                *slot = track;
+        let mut departures: Vec<Departure> = Vec::with_capacity(moves.len());
+        for requested in moves {
+            let from = self
+                .track_position_holding(requested.clip)
+                .ok_or(ClipEditError::UnknownClip { clip: requested.clip })?;
+            let to = self.track_position(requested.to_track).ok_or(EditError::UnknownTrack {
+                track: requested.to_track,
+            })?;
+            let departure = Departure {
+                clip: requested.clip,
+                from,
+                to,
+                start: requested.start.value(),
+            };
+            match departures.iter_mut().find(|existing| existing.clip == requested.clip) {
+                Some(existing) => *existing = departure,
+                None => departures.push(departure),
             }
+        }
+
+        let mut affected: Vec<usize> = departures
+            .iter()
+            .flat_map(|departure| [departure.from, departure.to])
+            .collect();
+        affected.sort_unstable();
+        affected.dedup();
+        let mut arranged: Vec<(usize, Track)> = Vec::with_capacity(affected.len());
+        for position in affected {
+            // What the track has when it is done: the clips of it that stay, where they are, and the clips that arrive.
+            let mut clips: Vec<ClipToArrange> = self.tracks[position]
+                .placements()
+                .filter(|placement| departures.iter().all(|departure| departure.clip != placement.id))
+                .map(|placement| ClipToArrange {
+                    id: placement.id,
+                    clip: placement.clip.clone(),
+                    animation: placement.animation.clone(),
+                    start: placement.first_timeline_frame.value(),
+                    frames_it_lasted_before: placement.timeline_frame_count(),
+                })
+                .collect();
+            for departure in departures.iter().filter(|departure| departure.to == position) {
+                let leaving = self.tracks[departure.from]
+                    .placement_of(departure.clip)
+                    .expect("the clip is on the track it was found on");
+                clips.push(ClipToArrange {
+                    id: departure.clip,
+                    clip: leaving.clip.clone(),
+                    animation: leaving.animation.clone(),
+                    start: departure.start,
+                    frames_it_lasted_before: leaving.timeline_frame_count(),
+                });
+            }
+            let mut track = self.tracks[position].clone();
+            track.arrange_clips(clips)?;
+            arranged.push((position, track));
+        }
+        for (position, track) in arranged {
+            self.tracks[position] = track;
         }
         Ok(())
     }
 
     /// Takes a clip off its track. See [`Track::delete_clip`] for what moves.
-    pub fn delete_clip(&mut self, location: ClipLocation) -> Result<(), EditError> {
-        Ok(self.track_mut_or_error(location.track)?.delete_clip(location.clip)?)
+    pub fn delete_clip(&mut self, clip: ClipId) -> Result<(), EditError> {
+        Ok(self.track_holding_mut_or_error(clip)?.delete_clip(clip)?)
     }
 
     pub fn set_track_title(&mut self, track: TrackId, title: impl Into<String>) -> Result<(), EditError> {
@@ -624,32 +696,28 @@ impl Project {
         timeline_frame: TimelineFrameIndex,
         object: TextObject,
         wanted_frames: u64,
-    ) -> Option<(ClipLocation, u64)> {
+    ) -> Option<(ClipId, u64)> {
         let (clip, duration) = self
             .track_mut(track)?
             .insert_text_at(timeline_frame, object, wanted_frames)?;
-        Some((ClipLocation { track, clip }, duration))
+        Some((clip, duration))
     }
 
-    pub fn set_text_object(&mut self, location: ClipLocation, object: TextObject) -> Result<(), EditError> {
-        Ok(self
-            .track_mut_or_error(location.track)?
-            .set_text_object(location.clip, object)?)
+    pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), EditError> {
+        Ok(self.track_holding_mut_or_error(clip)?.set_text_object(clip, object)?)
     }
 
     /// Puts a video or a text clip somewhere on the picture: where, how big and how far turned.
-    pub fn set_clip_placement(&mut self, location: ClipLocation, placement: Placement) -> Result<(), EditError> {
+    pub fn set_clip_placement(&mut self, clip: ClipId, placement: Placement) -> Result<(), EditError> {
         Ok(self
-            .track_mut_or_error(location.track)?
-            .set_clip_placement(location.clip, placement)?)
+            .track_holding_mut_or_error(clip)?
+            .set_clip_placement(clip, placement)?)
     }
 
     /// Makes a text clip or a picture last `frames` frames, or as long as there is room for if that
     /// is less. Returns how long it lasts now.
-    pub fn set_clip_duration(&mut self, location: ClipLocation, frames: u64) -> Result<u64, EditError> {
-        Ok(self
-            .track_mut_or_error(location.track)?
-            .set_clip_duration(location.clip, frames)?)
+    pub fn set_clip_duration(&mut self, clip: ClipId, frames: u64) -> Result<u64, EditError> {
+        Ok(self.track_holding_mut_or_error(clip)?.set_clip_duration(clip, frames)?)
     }
 }
 
@@ -659,5 +727,7 @@ impl Default for Project {
     }
 }
 
+#[cfg(test)]
+mod animating_tests;
 #[cfg(test)]
 mod tests;

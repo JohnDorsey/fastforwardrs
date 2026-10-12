@@ -33,7 +33,7 @@ use crate::media::{
     AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain,
     UserInterfaceWakeUp,
 };
-use crate::project::{Clip, Project, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex};
+use crate::project::{Clip, Project, PropertyId, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex};
 
 /// How much sound is kept waiting at the speakers, in seconds. Enough to ride out a late frame of
 /// the window without a gap, and little enough that a change (pausing, say) is heard at once.
@@ -172,6 +172,9 @@ impl AudioContent<'_> {
             track.gain().decibels().to_bits().hash(&mut hasher);
             track.speed().value().hash(&mut hasher);
             track.is_muted().hash(&mut hasher);
+            track
+                .animation()
+                .hash_properties_into(&mut hasher, PropertyId::is_heard);
             for entry in track.entries() {
                 let media = match entry.clip() {
                     Clip::Video(media) | Clip::Audio(media) => media,
@@ -186,6 +189,9 @@ impl AudioContent<'_> {
                 media.speed().value().hash(&mut hasher);
                 media.gain().decibels().to_bits().hash(&mut hasher);
                 media.is_muted().hash(&mut hasher);
+                entry
+                    .animation()
+                    .hash_properties_into(&mut hasher, PropertyId::is_heard);
             }
         }
         hasher.finish()
@@ -278,6 +284,11 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         self.sink = None;
         self.open_sink = Some(open_sink);
         self.last_failed_speakers_attempt_at = None;
+    }
+
+    /// Whether it has been told where to play the sound (see [`Self::play_through`]); until it has, it is silent.
+    pub fn is_given_speakers_to_play_through(&self) -> bool {
+        self.open_sink.is_some()
     }
 
     /// Whether a stream is running.

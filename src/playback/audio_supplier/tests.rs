@@ -10,12 +10,12 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use super::*;
-use crate::media::export::{SoundClipToExport, SoundItemToExport};
+use crate::media::export::{LoudnessToExport, SoundClipToExport, SoundItemToExport};
 use crate::playback::splice_waiting_sound;
 use crate::project::SourceMediaProperties;
 use crate::project::{
-    ClipLocation, FrameRate, Gain, MediaClip, SourceFrameIndex, SourceMedia, SourceMediaLink, SourceVideoProperties,
-    SpeedFactor, SpeedIndicatorLayout, Track, TrackId,
+    AnimationTarget, FrameRate, Gain, MediaClip, PropertyId, SourceFrameIndex, SourceMedia, SourceMediaLink,
+    SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout, Track, TrackId,
 };
 
 const SAMPLE_RATE: u32 = 48_000;
@@ -207,18 +207,15 @@ fn project_of_clips(clips: &[(u64, u64, u32)]) -> Project {
 /// is a change to what is heard that leaves the sound as long as it was.
 fn project_with_a_clip_that_is_louder_by(decibels: f32) -> Project {
     let mut project = project_of_clips(&[(0, 600, 1)]);
-    let location = ClipLocation {
-        track: project.tracks()[0].id(),
-        clip: project.tracks()[0].placement_at_index(0).unwrap().id,
-    };
+    let location = project.tracks()[0].placement_at_index(0).unwrap().id;
     project.set_clip_gain(location, Gain::from_decibels(decibels)).unwrap();
     project
 }
 
 /// The first clip of the first track of the sound a request asks for.
 fn first_sound_clip(request: &AudioStreamRequest) -> SoundClipToExport {
-    match request.sound.strips[0].items[0] {
-        SoundItemToExport::Clip(clip) => clip,
+    match &request.sound.strips[0].items[0] {
+        SoundItemToExport::Clip(clip) => clip.clone(),
         SoundItemToExport::Silence { .. } => panic!("the sound starts with silence"),
     }
 }
@@ -406,7 +403,7 @@ fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
             end_source_frame: 600,
             speed_factor: SpeedFactor::new(3).unwrap(),
             timeline_frame_count: 80,
-            loudness_factor: 1.0,
+            loudness: LoudnessToExport::UNCHANGED,
         })]
     );
     assert_eq!(request.sound.sped_up_clip_sound, SpedUpClipSound::Mute);
@@ -607,6 +604,83 @@ fn a_change_to_what_the_sound_is_made_of_starts_it_again_even_though_the_clock_i
     assert_eq!(bench.streams_started(), 2);
 }
 
+/// `project` with a keyframe for `property` of `target` at frame 100.
+fn with_a_keyframe_at_frame_100(mut project: Project, target: AnimationTarget, property: PropertyId) -> Project {
+    project
+        .add_keyframe(target, property, TimelineFrameIndex::new(100))
+        .unwrap();
+    project
+}
+
+/// The same project as `project_of_clips(&[(0, 600, 1)])` but with a keyframe for `property` of its clip at frame 100.
+fn project_with_a_keyframe_for(property: PropertyId) -> Project {
+    let project = project_of_clips(&[(0, 600, 1)]);
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    with_a_keyframe_at_frame_100(project, AnimationTarget::Clip(clip), property)
+}
+
+/// The same project as `project_of_clips(&[(0, 600, 1)])` but with a keyframe for `property` of its track at frame 100.
+fn project_with_a_keyframe_of_the_track_for(property: PropertyId) -> Project {
+    let project = project_of_clips(&[(0, 600, 1)]);
+    let track = project.tracks()[0].id();
+    with_a_keyframe_at_frame_100(project, AnimationTarget::Track(track), property)
+}
+
+/// How many streams of sound have been started once the project has become `changed_project` while the sound has been
+/// playing steadily from the start of `project_of_clips(&[(0, 600, 1)])`: one if the sound goes on as it was, and two if it
+/// is made again.
+fn streams_started_when_the_project_becomes(changed_project: Project) -> usize {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    assert_eq!(bench.streams_started(), 1);
+
+    bench.project = changed_project;
+    bench.let_time_pass(A_FRAME_OF_THE_WINDOW);
+    bench.update_playing_at(clock);
+    bench.let_time_pass(Duration::from_millis(150));
+    bench.update_playing_at(clock);
+    bench.streams_started()
+}
+
+#[test]
+fn a_keyframe_for_how_loud_a_clip_is_changes_what_the_sound_is_made_of_and_starts_it_again() {
+    assert_eq!(
+        streams_started_when_the_project_becomes(project_with_a_keyframe_for(PropertyId::Gain)),
+        2,
+        "the sound is made again, with its keyframes"
+    );
+}
+
+/// Found by the planted-mistakes check: leaving the keyframes of a track out of what the sound is made of changed no test,
+/// so a track whose loudness was changed by a keyframe while the preview played was heard as it was until something else
+/// made the sound again.
+#[test]
+fn a_keyframe_for_anything_that_is_heard_of_a_clip_or_of_a_track_starts_the_sound_again() {
+    for property in PropertyId::ALL.into_iter().filter(|property| property.is_heard()) {
+        let projects = [
+            ("a clip", project_with_a_keyframe_for(property)),
+            ("a track", project_with_a_keyframe_of_the_track_for(property)),
+        ];
+        for (whose, project) in projects {
+            assert_eq!(
+                streams_started_when_the_project_becomes(project),
+                2,
+                "a keyframe for {property:?} of {whose} makes the sound again, with its keyframes"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_keyframe_for_where_a_clip_is_on_the_picture_changes_nothing_that_is_heard() {
+    assert_eq!(
+        streams_started_when_the_project_becomes(project_with_a_keyframe_for(PropertyId::Position)),
+        1,
+        "the sound goes on as it was"
+    );
+}
+
 // --- editing while the video plays ---
 
 #[test]
@@ -733,10 +807,7 @@ fn an_edit_that_leaves_nothing_to_hear_silences_the_sound_at_once() {
 
     // The only clip is muted.
     let mut muted = project_of_clips(&[(0, 600, 1)]);
-    let location = ClipLocation {
-        track: muted.tracks()[0].id(),
-        clip: muted.tracks()[0].placement_at_index(0).unwrap().id,
-    };
+    let location = muted.tracks()[0].placement_at_index(0).unwrap().id;
     muted.set_clip_muted(location, true).unwrap();
     bench.project = muted;
     bench.let_time_pass(A_FRAME_OF_THE_WINDOW);

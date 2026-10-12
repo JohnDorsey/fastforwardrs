@@ -14,25 +14,33 @@
 //! because of another clip's change: they stay exactly where they were put (and are pushed on only
 //! the same way). So a video made of clips that touch moves up as one, and captions stay in time.
 
+#[cfg(test)]
+mod animation_tests;
 mod editing;
+mod keyframing;
 mod layout;
 mod moving;
+mod retiming;
 #[cfg(test)]
 mod tests;
 
 pub use editing::{ClipEditError, InsertError, SplitError, SplitOutcome};
+pub use moving::ClipToArrange;
 
 use super::clip::Clip;
 use super::gain::Gain;
 use super::ids::{ClipId, TrackId};
 use super::track_height::TrackHeight;
-use crate::project::{SourceFrameIndex, SpeedFactor, TimelineFrameIndex};
+use crate::project::{Animation, SourceFrameIndex, SpeedFactor, TimelineFrameIndex};
 
 /// A clip on a track, and where it is in relation to the clip before it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackEntry {
     id: ClipId,
     clip: Clip,
+    /// The keyframes of the clip's properties, counted in frames from the clip's first frame. They belong to the
+    /// clip: they go where it goes, and are cut, stretched and shortened as it is.
+    animation: Animation,
     /// How many frames of empty timeline come before the clip: after the end of the clip before
     /// it, or after the start of the timeline for the first clip.
     gap_before_frames: u64,
@@ -45,6 +53,10 @@ impl TrackEntry {
 
     pub fn clip(&self) -> &Clip {
         &self.clip
+    }
+
+    pub fn animation(&self) -> &Animation {
+        &self.animation
     }
 
     pub fn gap_before_frames(&self) -> u64 {
@@ -62,6 +74,9 @@ pub struct Track {
     /// How tall the track's row is on the timeline. (A way of looking at the track, not part of
     /// what it plays: it is saved with the project because it is something that was arranged.)
     height: TrackHeight,
+    /// The keyframes of the track's own properties (its loudness, and whether it is muted), counted in frames from
+    /// the start of the timeline.
+    animation: Animation,
     entries: Vec<TrackEntry>,
     /// The number the next new clip of this track is given (see [`ClipId`]).
     next_clip_number: u32,
@@ -81,6 +96,8 @@ pub struct ClipPlacement<'track> {
     pub index: usize,
     pub id: ClipId,
     pub clip: &'track Clip,
+    /// The keyframes of the clip's properties, counted in frames from `first_timeline_frame`.
+    pub animation: &'track Animation,
     pub first_timeline_frame: TimelineFrameIndex,
     /// The frame just after the clip's last frame (the end is exclusive).
     pub end_timeline_frame: TimelineFrameIndex,
@@ -136,6 +153,7 @@ impl Track {
             speed: SpeedFactor::NORMAL,
             muted: false,
             height: TrackHeight::DEFAULT,
+            animation: Animation::default(),
             entries: Vec::new(),
             next_clip_number: 0,
             first_timeline_frames: Vec::new(),
@@ -145,16 +163,36 @@ impl Track {
 
     /// A track holding `clips`, each with the number of empty frames before it.
     #[must_use]
-    pub fn with_clips(mut self, clips: impl IntoIterator<Item = (u64, Clip)>) -> Self {
-        for (gap_before_frames, clip) in clips {
+    pub fn with_clips(self, clips: impl IntoIterator<Item = (u64, Clip)>) -> Self {
+        self.with_animated_clips(
+            clips
+                .into_iter()
+                .map(|(gap_before_frames, clip)| (gap_before_frames, clip, Animation::default())),
+        )
+    }
+
+    /// A track holding `clips`, each with the number of empty frames before it and its animation. (Keyframes at or
+    /// after a clip's end are left out: a clip has none there.)
+    #[must_use]
+    pub fn with_animated_clips(mut self, clips: impl IntoIterator<Item = (u64, Clip, Animation)>) -> Self {
+        for (gap_before_frames, clip, animation) in clips {
             let id = self.take_next_clip_id();
+            let animation = animation.truncated_to(clip.timeline_frame_count(self.speed));
             self.entries.push(TrackEntry {
                 id,
                 clip,
+                animation,
                 gap_before_frames,
             });
         }
         self.rebuild_derived_values();
+        self
+    }
+
+    /// The same track with `animation` for its own properties.
+    #[must_use]
+    pub fn with_animation(mut self, animation: Animation) -> Self {
+        self.animation = animation;
         self
     }
 
@@ -209,6 +247,11 @@ impl Track {
         self.height
     }
 
+    /// The keyframes of the track's own properties, counted in frames from the start of the timeline.
+    pub fn animation(&self) -> &Animation {
+        &self.animation
+    }
+
     pub fn entries(&self) -> &[TrackEntry] {
         &self.entries
     }
@@ -229,6 +272,7 @@ impl Track {
             index,
             id: entry.id,
             clip: &entry.clip,
+            animation: &entry.animation,
             first_timeline_frame: TimelineFrameIndex::new(first),
             end_timeline_frame: TimelineFrameIndex::new(first + entry.clip.timeline_frame_count(self.speed)),
             effective_speed: entry.clip.effective_speed(self.speed),
@@ -283,7 +327,7 @@ impl Track {
     }
 
     fn take_next_clip_id(&mut self) -> ClipId {
-        let id = ClipId::new(self.next_clip_number);
+        let id = ClipId::new(self.id, self.next_clip_number);
         self.next_clip_number += 1;
         id
     }

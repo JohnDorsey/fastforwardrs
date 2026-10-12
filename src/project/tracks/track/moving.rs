@@ -1,8 +1,21 @@
-//! Moving clips along a track.
+//! Moving clips along a track, and laying a track's clips out again.
 
 use super::editing::ClipEditError;
 use super::{Track, TrackEntry};
+use crate::project::Animation;
+use crate::project::tracks::clip::Clip;
 use crate::project::tracks::ids::ClipId;
+
+/// A clip that is to be put on a track: with its id, its keyframes, where it starts, and how long it lasted where
+/// it was (which is not how long it will last if it comes from a track that played at another speed).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClipToArrange {
+    pub id: ClipId,
+    pub clip: Clip,
+    pub animation: Animation,
+    pub start: u64,
+    pub frames_it_lasted_before: u64,
+}
 
 impl Track {
     /// Moves clips so that each starts at the frame given for it, and leaves every other clip where
@@ -17,26 +30,48 @@ impl Track {
             let index = self.index_of(*clip).ok_or(ClipEditError::UnknownClip { clip: *clip })?;
             starts[index] = *start;
         }
-        let mut order: Vec<usize> = (0..self.entries.len()).collect();
-        order.sort_by_key(|&index| starts[index]);
-        let mut previous_end = 0;
-        for &index in &order {
-            if starts[index] < previous_end {
-                return Err(ClipEditError::WouldOverlap {
-                    clip: self.entries[index].id,
-                });
-            }
-            previous_end = starts[index] + self.entries[index].clip.timeline_frame_count(self.speed);
-        }
+        let clips = self
+            .entries
+            .iter()
+            .zip(starts)
+            .map(|(entry, start)| ClipToArrange {
+                id: entry.id,
+                clip: entry.clip.clone(),
+                animation: entry.animation.clone(),
+                start,
+                frames_it_lasted_before: entry.clip.timeline_frame_count(self.speed),
+            })
+            .collect();
+        self.arrange_clips(clips)
+    }
 
-        let mut entries: Vec<Option<TrackEntry>> = std::mem::take(&mut self.entries).into_iter().map(Some).collect();
+    /// Makes the clips of the track exactly `clips`, each with its id and the frame it starts at, in any
+    /// order: they are put in the order of their starts, with the gaps between them that follow. A clip
+    /// of another track may be among them, and keeps its id. How long each lasts is counted by this track's
+    /// speed. If one starts before the one before it ends, nothing is changed and that clip, the one that
+    /// starts inside the other, is named.
+    pub fn arrange_clips(&mut self, mut clips: Vec<ClipToArrange>) -> Result<(), ClipEditError> {
+        // (A stable sort: two clips that start at the same frame stay in the order they were given in.)
+        clips.sort_by_key(|arranged| arranged.start);
         let mut previous_end = 0;
-        for index in order {
-            let mut entry = entries[index].take().expect("every clip is placed once");
-            entry.gap_before_frames = starts[index] - previous_end;
-            previous_end = starts[index] + entry.clip.timeline_frame_count(self.speed);
-            self.entries.push(entry);
+        let mut entries = Vec::with_capacity(clips.len());
+        for arranged in clips {
+            if arranged.start < previous_end {
+                return Err(ClipEditError::WouldOverlap { clip: arranged.id });
+            }
+            let gap_before_frames = arranged.start - previous_end;
+            let length = arranged.clip.timeline_frame_count(self.speed);
+            previous_end = arranged.start + length;
+            entries.push(TrackEntry {
+                id: arranged.id,
+                clip: arranged.clip,
+                // On a track that plays at another speed the clip lasts another time, and its keyframes are as far
+                // through it as they were.
+                animation: arranged.animation.rescaled(arranged.frames_it_lasted_before, length),
+                gap_before_frames,
+            });
         }
+        self.entries = entries;
         self.rebuild_derived_values();
         Ok(())
     }

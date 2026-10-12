@@ -5,24 +5,18 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::path::Path;
 
-use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
+use fastforwardrs::media::{FfmpegToolchain, probe_source_media};
 use fastforwardrs::project::{
-    Angle, CanvasArea, ClipLocation, Gain, Placement, Project, Settings, SpeedFactor, TextObject, TimelineFrameIndex,
+    Angle, CanvasArea, ClipId, FrameRate, Gain, Placement, Project, SpeedFactor, TextObject, TimelineFrameIndex,
 };
-use fastforwardrs::rgba_picture::RgbaPicture;
 use support::{
-    ClipOfTheVideo, TestVideoSpecification, counter_video, decode_video, decoded_sound, expected_source_frames,
-    is_black, loudness, project_with_a_picture_over_a_video, project_with_a_video_and_a_tone_file,
-    project_with_tracks_of_videos, red_then_blue_text_picture, scratch_directory, stream_durations, test_video,
-    tone_strength, transparent_text_picture,
+    ClipOfTheVideo, TestVideoSpecification, counter_video, decode_video, decoded_sound, expected_source_frames, export,
+    export_with_text_pictures, is_black, loudness, picture_shown_in_frame, project_for,
+    project_with_a_picture_over_a_video, project_with_a_video_and_a_tone_file, project_with_tracks_of_videos,
+    red_then_blue_text_picture, scratch_directory, stream_durations, test_video, tone_strength,
 };
-
-const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(180);
 
 /// How loud ffmpeg's `sine` source is, which is the sound of the test videos and tone files.
 const TONE_AMPLITUDE: f64 = 0.125;
@@ -33,44 +27,6 @@ fn clip(gap_before_frames: u64, first_source_frame: u64, end_source_frame: u64, 
         first_source_frame,
         end_source_frame,
         speed,
-    }
-}
-
-/// Exports `project` to `destination` (reading its files from where its links say they are) and waits.
-fn export(toolchain: &FfmpegToolchain, project: &Project, destination: &Path) {
-    export_with_text_pictures(toolchain, project, destination, &transparent_text_picture);
-}
-
-/// Like [`export`], with `render_text` making the pictures of the text objects.
-fn export_with_text_pictures(
-    toolchain: &FfmpegToolchain,
-    project: &Project,
-    destination: &Path,
-    render_text: &dyn Fn(&TextObject, u32, u32) -> RgbaPicture,
-) {
-    let plan = plan_export(project, Settings::DEFAULT, render_text).expect("the project can be exported");
-    let source_paths: Vec<PathBuf> = plan
-        .source_files
-        .iter()
-        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
-        .collect();
-    let export = VideoExport::start(toolchain, &plan, &source_paths, destination, Arc::new(|| {})).expect("it starts");
-    let started = Instant::now();
-    loop {
-        match export.try_next_event() {
-            Some(ExportEvent::Finished(result)) => {
-                assert_eq!(result, ExportResult::Completed);
-                return;
-            }
-            Some(ExportEvent::Progress { .. }) => {}
-            None => {
-                assert!(
-                    started.elapsed() < TIME_ALLOWED_FOR_AN_EXPORT,
-                    "the export did not finish in time"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
     }
 }
 
@@ -254,11 +210,8 @@ fn a_video_behind_one_of_another_shape_shows_through_the_bars_beside_it() {
 // --- where videos and text are on the picture, and how far they are turned ---
 
 /// The first clip of the first track of `project`.
-fn the_first_clip(project: &Project) -> ClipLocation {
-    ClipLocation {
-        track: project.tracks()[0].id(),
-        clip: project.tracks()[0].entries()[0].id(),
-    }
+fn the_first_clip(project: &Project) -> ClipId {
+    project.tracks()[0].entries()[0].id()
 }
 
 /// The colour of the pixel at `(x, y)` of a 320x180 picture.
@@ -405,6 +358,148 @@ fn something_turned_at_the_edge_of_the_picture_is_cut_off_there_and_the_picture_
     );
 }
 
+// --- reaching out past the edges of the picture ---
+
+/// How big the picture of the video at `path` is.
+fn size_of_the_exported_picture(toolchain: &FfmpegToolchain, path: &Path) -> Option<(u32, u32)> {
+    probe_source_media(toolchain, path)
+        .expect("the video can be probed")
+        .display_size_in_pixels()
+}
+
+#[test]
+fn a_video_that_is_the_only_thing_and_reaches_past_the_right_edge_is_cut_off_there_and_black_is_all_round_it() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
+    // As wide as the picture (320), from halfway across, and half as tall (90, from 45 down to 135).
+    project
+        .set_clip_placement(
+            the_first_clip(&project),
+            Placement::upright(CanvasArea::new(0.5, 0.25, 1.0, 0.5)),
+        )
+        .unwrap();
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("past_the_right_edge.mp4");
+    export(&toolchain, &project, &destination);
+
+    assert_eq!(
+        size_of_the_exported_picture(&toolchain, &destination),
+        Some((320, 180)),
+        "the picture stays the size it is, whatever reaches out of it"
+    );
+    let decoded = decode_video(&toolchain, &destination, 320, 180);
+    assert_eq!(decoded.pictures.len(), 60);
+    let picture = &decoded.pictures[10];
+    for (x, y) in [(40, 90), (120, 90), (200, 20), (300, 170), (250, 40), (250, 140)] {
+        assert!(is_black(&colour_at(picture, x, y)), "({x}, {y}) is outside the video");
+    }
+    assert!(
+        something_in(picture, 170..310, 50..130),
+        "what of the video is on the picture is there"
+    );
+}
+
+#[test]
+fn a_picture_from_a_file_that_reaches_past_the_left_edge_is_cut_off_there_and_shows_the_rest_of_it() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 0, 60);
+    // Made 160 by 90, from 45 down to 135, with its left half (the red half) before the picture.
+    project
+        .set_clip_placement(picture, Placement::upright(CanvasArea::new(-0.25, 0.25, 0.5, 0.5)))
+        .unwrap();
+    let destination = scratch.path().join("picture_past_the_left_edge.mp4");
+    export(&toolchain, &project, &destination);
+
+    let decoded = decode_video(&toolchain, &destination, 320, 180);
+    let picture = &decoded.pictures[10];
+    // What is left of it is the right half of it: blue, from 0 to 80 across.
+    for (x, y) in [(40, 90), (6, 50), (74, 130), (6, 130), (74, 50)] {
+        assert!(
+            is_blue(colour_at(picture, x, y)),
+            "({x}, {y}) is the blue half of the picture"
+        );
+    }
+    for x in (4..76).step_by(8) {
+        for y in (50..130).step_by(8) {
+            assert!(!is_red(colour_at(picture, x, y)), "({x}, {y}) is not the red half");
+        }
+    }
+    let beside_it = colour_at(picture, 100, 90);
+    assert!(
+        !is_blue(beside_it) && !is_red(beside_it),
+        "past the right edge of the picture it is the video again"
+    );
+}
+
+#[test]
+fn text_that_reaches_past_the_right_and_bottom_edges_is_cut_off_there_and_shows_its_left_and_top() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
+    let front = project.add_track_in_front();
+    // 160 by 45 pixels, from (240, 158): the red half of it is on the picture, only 22 of its 45 rows
+    // are, and the blue half is all past the right edge.
+    project
+        .insert_text(
+            front,
+            TimelineFrameIndex::new(0),
+            TextObject {
+                area: CanvasArea::new(0.75, 0.875, 0.5, 0.25),
+                ..TextObject::default()
+            },
+            60,
+        )
+        .unwrap();
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("text_past_the_corner.mp4");
+    export_with_text_pictures(&toolchain, &project, &destination, &red_then_blue_text_picture);
+
+    assert_eq!(size_of_the_exported_picture(&toolchain, &destination), Some((320, 180)));
+    let decoded = decode_video(&toolchain, &destination, 320, 180);
+    let picture = &decoded.pictures[10];
+    for (x, y) in [(250, 164), (310, 164), (250, 176), (310, 176)] {
+        assert!(is_red(colour_at(picture, x, y)), "({x}, {y}) is its left half");
+    }
+    for x in (240..320).step_by(8) {
+        for y in (160..180).step_by(4) {
+            assert!(!is_blue(colour_at(picture, x, y)), "({x}, {y}) is not its right half");
+        }
+    }
+}
+
+#[test]
+fn a_video_that_is_turned_and_reaches_past_the_left_edge_is_cut_off_there() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
+    // 160 by 90 with its middle on the left edge at (0, 90), turned a quarter: 90 across and 160 down, so
+    // that of what stands up the right half is on the picture, from 0 to 45 across and 10 to 170 down.
+    project
+        .set_clip_placement(
+            the_first_clip(&project),
+            Placement::new(CanvasArea::new(-0.25, 0.25, 0.5, 0.5), Angle::from_degrees(90.0)),
+        )
+        .unwrap();
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("turned_past_the_left_edge.mp4");
+    export(&toolchain, &project, &destination);
+
+    let decoded = decode_video(&toolchain, &destination, 320, 180);
+    let picture = &decoded.pictures[10];
+    for (x, y) in [(80, 90), (160, 90), (20, 4), (20, 176), (60, 20), (60, 160)] {
+        assert!(
+            is_black(&colour_at(picture, x, y)),
+            "({x}, {y}) is outside the turned video"
+        );
+    }
+    assert!(
+        something_in(picture, 5..40, 20..160),
+        "the half of it that is on the picture is there"
+    );
+}
+
 // --- pictures from files ---
 
 fn is_red(colour: [u8; 3]) -> bool {
@@ -432,18 +527,14 @@ fn a_picture_over_a_video_that_is_cut_into_pieces_is_over_each_of_them() {
     let scratch = scratch_directory();
     let (mut project, _picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 0, 60);
     // Cut the video (and not the picture) in two places: three pieces, the one picture over all of them.
-    let video_track = project.tracks().last().unwrap().id();
     for at in [20, 40] {
-        let video = ClipLocation {
-            track: video_track,
-            clip: project
-                .tracks()
-                .last()
-                .unwrap()
-                .placement_covering(TimelineFrameIndex::new(at))
-                .unwrap()
-                .id,
-        };
+        let video = project
+            .tracks()
+            .last()
+            .unwrap()
+            .placement_covering(TimelineFrameIndex::new(at))
+            .unwrap()
+            .id;
         assert_eq!(project.split_at(TimelineFrameIndex::new(at), Some(&[video])).len(), 1);
     }
     let destination = scratch.path().join("picture_over_pieces.mp4");
@@ -593,10 +684,7 @@ fn the_volume_of_a_clip_and_of_its_track_both_count_and_a_muted_track_is_silent(
 
     // The video is on the track at the back. Its clip is 6 decibels quieter: about half.
     let video_track = project.tracks()[1].id();
-    let video_clip = fastforwardrs::project::ClipLocation {
-        track: video_track,
-        clip: project.tracks()[1].entries()[0].id(),
-    };
+    let video_clip = project.tracks()[1].entries()[0].id();
     project.set_clip_gain(video_clip, Gain::from_decibels(-6.0)).unwrap();
     let clip_quieter = measure(&project, "clip_quieter.mp4");
     assert!(
@@ -695,5 +783,145 @@ fn a_clip_wholly_past_the_end_of_a_shorter_file_is_silent_and_the_sound_after_it
     assert!(
         tone_strength(window(7.0, 8.2), 440.0, 48_000) > 0.8 * TONE_AMPLITUDE,
         "the clip after it is heard where it is on the timeline"
+    );
+}
+
+// --- videos of other frame rates than the project's ---
+
+#[test]
+fn a_video_that_runs_slower_than_the_project_has_a_picture_in_every_frame_and_lasts_as_long_in_time() {
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::PAL_20_SECONDS); // 500 pictures at 25 a second
+    let mut project = project_for(&toolchain, &video);
+    assert_eq!(
+        project.frame_rate(),
+        FrameRate::new(25, 1).unwrap(),
+        "the video is the first, and decides"
+    );
+    assert_eq!(project.total_frame_count(), 500);
+    project.set_frame_rate(FrameRate::new(30, 1).unwrap());
+    assert_eq!(project.total_frame_count(), 600, "20 seconds at 30 frames a second");
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("at_30.mp4");
+    export(&toolchain, &project, &destination);
+
+    let decoded = decode_video(&toolchain, &destination, 320, 180);
+    let expected: Vec<u64> = (0..600).map(|frame| picture_shown_in_frame(25, 30, frame)).collect();
+    assert_eq!(decoded.frame_numbers(), expected);
+    assert_eq!(
+        expected.windows(2).filter(|pair| pair[0] == pair[1]).count(),
+        100,
+        "100 of the 500 pictures are on screen for two frames"
+    );
+    let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
+    assert!((video_seconds.unwrap() - 20.0).abs() < 0.01, "{video_seconds:?}");
+    assert!((audio_seconds.unwrap() - 20.0).abs() < 0.05, "{audio_seconds:?}");
+}
+
+#[test]
+fn a_video_that_runs_faster_than_the_project_skips_pictures_and_lasts_as_long_in_time() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 600 pictures at 30 a second
+    let mut project = project_for(&toolchain, &video);
+    project.set_frame_rate(FrameRate::new(24, 1).unwrap());
+    assert_eq!(project.total_frame_count(), 480, "20 seconds at 24 frames a second");
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("at_24.mp4");
+    export(&toolchain, &project, &destination);
+
+    let decoded = decode_video(&toolchain, &destination, 320, 180);
+    let expected: Vec<u64> = (0..480).map(|frame| picture_shown_in_frame(30, 24, frame)).collect();
+    assert_eq!(decoded.frame_numbers(), expected);
+    assert_eq!(
+        expected.windows(2).filter(|pair| pair[1] - pair[0] == 2).count(),
+        120,
+        "120 of the 600 pictures are not shown"
+    );
+    let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
+    assert!((video_seconds.unwrap() - 20.0).abs() < 0.01, "{video_seconds:?}");
+    assert!((audio_seconds.unwrap() - 20.0).abs() < 0.05, "{audio_seconds:?}");
+}
+
+#[test]
+fn videos_of_two_frame_rates_on_two_tracks_are_each_made_to_run_at_the_rate_of_the_project() {
+    let toolchain = toolchain_or_skip!();
+    let behind = counter_video(&toolchain); // 30 a second: the first video, so the project runs at 30
+    let in_front = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS); // 75 pictures at 25 a second
+    // In front, after 60 empty frames, all the 3 seconds of the video (90 frames of the project); behind, the
+    // first 300 frames of the other.
+    let project = project_with_tracks_of_videos(
+        &toolchain,
+        &[&behind, &in_front],
+        &[(1, &[clip(60, 0, 90, 1)]), (0, &[clip(0, 0, 300, 1)])],
+    );
+    assert_eq!(project.frame_rate(), FrameRate::new(30, 1).unwrap());
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("both_rates.mp4");
+    export(&toolchain, &project, &destination);
+
+    let frame_numbers = decode_video(&toolchain, &destination, 320, 180).frame_numbers();
+    let expected: Vec<u64> = (0..300u64)
+        .map(|timeline_frame| match timeline_frame {
+            60..150 => picture_shown_in_frame(25, 30, timeline_frame - 60),
+            _ => timeline_frame,
+        })
+        .collect();
+    assert_eq!(frame_numbers, expected);
+}
+
+#[test]
+fn a_video_of_twelve_pictures_a_second_in_a_project_of_thirty_shows_each_for_two_or_three_frames() {
+    let toolchain = toolchain_or_skip!();
+    let behind = counter_video(&toolchain);
+    let in_front = test_video(&toolchain, &TestVideoSpecification::SLOW_3_SECONDS); // 36 pictures at 12 a second
+    let project = project_with_tracks_of_videos(
+        &toolchain,
+        &[&behind, &in_front],
+        &[(1, &[clip(10, 0, 90, 1)]), (0, &[clip(0, 0, 120, 1)])],
+    );
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("slow.mp4");
+    export(&toolchain, &project, &destination);
+
+    let frame_numbers = decode_video(&toolchain, &destination, 320, 180).frame_numbers();
+    let expected: Vec<u64> = (0..120u64)
+        .map(|timeline_frame| match timeline_frame {
+            10..100 => picture_shown_in_frame(12, 30, timeline_frame - 10),
+            _ => timeline_frame,
+        })
+        .collect();
+    assert_eq!(frame_numbers, expected);
+    let mut lengths_of_runs: Vec<usize> = Vec::new();
+    for number in 0..36u64 {
+        lengths_of_runs.push(frame_numbers[10..100].iter().filter(|&&shown| shown == number).count());
+    }
+    assert!(
+        lengths_of_runs.iter().all(|&length| length == 2 || length == 3),
+        "each picture is on screen for 2 or 3 frames: {lengths_of_runs:?}"
+    );
+}
+
+#[test]
+fn a_picture_that_is_exactly_half_way_between_two_frames_goes_to_the_later_one_in_the_export_as_it_does_in_the_preview()
+{
+    let toolchain = toolchain_or_skip!();
+    let video = test_video(&toolchain, &TestVideoSpecification::FILM_3_SECONDS); // 72 pictures at 24 a second
+    let mut project = project_for(&toolchain, &video);
+    project.set_frame_rate(FrameRate::new(30, 1).unwrap());
+    assert_eq!(project.total_frame_count(), 90);
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("film_at_30.mp4");
+    export(&toolchain, &project, &destination);
+
+    // The pictures 2, 6, 10, ... are at 2.5, 7.5, 12.5, ... frames: each is in the frame after.
+    let expected: Vec<u64> = (0..90).map(|frame| picture_shown_in_frame(24, 30, frame)).collect();
+    assert_eq!(
+        decode_video(&toolchain, &destination, 320, 180).frame_numbers(),
+        expected
+    );
+    assert_eq!(
+        &expected[..8],
+        &[0, 1, 1, 2, 3, 4, 5, 5],
+        "picture 2 starts at frame 3 and not at 2"
     );
 }

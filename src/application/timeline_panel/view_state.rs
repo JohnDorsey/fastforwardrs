@@ -1,12 +1,14 @@
 //! What the timeline remembers between frames of the window: how far it is scrolled and zoomed,
-//! which box of settings is open, and the like.
+//! what is being dragged, and the like.
 
-use egui::{Context, Pos2, Rect};
+use egui::{Pos2, Rect};
 
-use super::settings_boxes::{OpenSettingsBox, SettingsBoxSubject};
-use crate::application::bubble;
+use super::drawers::Drawers;
+use super::flash::CutFlashes;
+use super::track_reordering::{RowMotion, TrackReorder};
+use crate::application::clip_moving::StartTimeMemory;
 use crate::application::timeline_geometry::TimelineGeometry;
-use crate::project::{ClipLocation, TimelineFrameIndex, TrackId};
+use crate::project::{ClipId, TimelineFrameIndex, TrackId};
 
 /// Where a click on an empty part of a strip happened, for the menu that puts something new there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,13 +35,13 @@ pub(super) struct TrackResize {
 pub(super) struct ClipDrag {
     /// All the clips that move: the selected clips if the one that was taken hold of was one of them,
     /// and otherwise that clip alone.
-    pub(super) moving: Vec<ClipLocation>,
+    pub(super) moving: Vec<ClipId>,
     /// The clip that was taken hold of, whose place the pointer is kept at.
-    pub(super) grabbed: ClipLocation,
+    pub(super) grabbed: ClipId,
     /// The frame that was under the pointer when the clip was taken hold of.
     pub(super) pointer_frame_at_the_start: u64,
-    /// The frame that the grabbed clip started at then.
-    pub(super) grabbed_start_at_the_start: u64,
+    /// Where the grabbed clip was then, which it is held to when it is on another track (see [`StartTimeMemory`]).
+    pub(super) start_time: StartTimeMemory,
 }
 
 /// A rectangle being drawn round clips to select them, by dragging from an empty place.
@@ -48,7 +50,7 @@ pub(super) struct RubberBand {
     /// Where the pointer was when it was pressed: one corner of the rectangle, the other being where it is now.
     pub(super) origin: Pos2,
     /// The clips that were selected then and stay selected (when Ctrl was held), to which those in the rectangle are added.
-    pub(super) kept: Vec<ClipLocation>,
+    pub(super) kept: Vec<ClipId>,
 }
 
 /// What the timeline remembers between frames of the window.
@@ -67,11 +69,15 @@ pub struct TimelineViewState {
     pub(super) frame_picked_on_the_ruler: Option<TimelineFrameIndex>,
     /// How far down the rows are scrolled, in points. (The scroll bar moves them too: what it did
     /// is read back into this each frame.)
-    pub(super) rows_scroll_offset: f32,
+    pub(in crate::application) rows_scroll_offset: f32,
     /// How tall the rows were together in the last frame, in points.
     pub(super) rows_area_height: f32,
     /// The track that is being resized, if one is.
     pub(super) track_resize: Option<TrackResize>,
+    /// The track that is being dragged to another place in the list, if one is.
+    pub(super) track_reorder: Option<TrackReorder>,
+    /// Where the rows are shown while tracks are being moved about.
+    pub(super) row_motion: RowMotion,
     /// The clips that are being dragged along their tracks, if there are some.
     pub(super) clip_drag: Option<ClipDrag>,
     /// The rectangle that is being drawn round clips, if there is one.
@@ -82,19 +88,24 @@ pub struct TimelineViewState {
     /// Where the whole timeline (the title boxes too) was in the last frame, so that the mouse
     /// wheel with Alt held scrolls the rows up and down only while the pointer is over it.
     pub(super) timeline_area_in_the_last_frame: Option<Rect>,
-    /// The settings box that is open, if one is.
-    pub(super) settings_box: Option<OpenSettingsBox>,
-    /// The box that the press of a mouse button that is still down closed, so that letting go of
-    /// the button (which is a click on whatever opens that box) does not open it again at once.
-    pub(super) settings_box_closed_by_the_press: Option<SettingsBoxSubject>,
     /// Where the "New" menu was last opened.
     pub(super) new_menu_target: Option<NewMenuTarget>,
+    /// The flashes of light at the cuts that were just made.
+    pub(super) cut_flashes: CutFlashes,
+    /// Which drawers on clips are open.
+    pub(super) drawers: Drawers,
 }
 
 impl TimelineViewState {
-    /// Forgets the scroll position, the zoom and any open box (when a different project is loaded).
+    /// Forgets the scroll position and the zoom (when a different project is loaded).
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// Makes a flash of light at the cut that was just made in the clip on `track` at `frame`, which shows
+    /// from the next frame of the window on.
+    pub fn flash_a_cut(&mut self, track: TrackId, frame: TimelineFrameIndex) {
+        self.cut_flashes.add(track, frame);
     }
 
     /// The scale the strips are drawn at: `normal`, the scale the timeline starts at, as far as the
@@ -103,59 +114,5 @@ impl TimelineViewState {
         self.points_per_second.map_or(normal, |points_per_second| {
             normal.with_points_per_second(points_per_second)
         })
-    }
-
-    /// Whether a settings box is open. (It has sliders and tick boxes of its own, which use the
-    /// keys of the keyboard.)
-    pub fn settings_box_is_open(&self) -> bool {
-        self.settings_box.is_some()
-    }
-
-    /// What the open settings box is about, if one is open.
-    pub fn settings_box_subject(&self) -> Option<SettingsBoxSubject> {
-        self.settings_box.map(|open| open.subject)
-    }
-
-    /// Where the open settings box was drawn in the last frame, if one is open and has been drawn.
-    #[cfg(test)]
-    pub fn settings_box_rectangle(&self) -> Option<Rect> {
-        self.settings_box.and_then(|open| open.rect)
-    }
-
-    /// Opens the settings box of `subject` (in place of any other), unless a press that is still
-    /// going on has just closed it.
-    pub(super) fn open_settings_box(&mut self, subject: SettingsBoxSubject) {
-        if self.settings_box_closed_by_the_press == Some(subject) {
-            return;
-        }
-        self.settings_box = Some(OpenSettingsBox {
-            subject,
-            anchor: None,
-            shown_anchor: None,
-            rect: None,
-        });
-    }
-
-    pub(super) fn close_settings_box(&mut self) {
-        self.settings_box = None;
-    }
-
-    /// Says where the settings box of `subject` has to point, if that is the box that is open.
-    pub(super) fn point_settings_box_at(&mut self, subject: SettingsBoxSubject, anchor: Pos2) {
-        if let Some(open) = self.settings_box.as_mut()
-            && open.subject == subject
-        {
-            open.anchor = Some(anchor);
-        }
-    }
-
-    /// Closes the open settings box if a mouse button was pressed outside it.
-    pub(super) fn close_settings_box_if_pressed_outside(&mut self, context: &Context) {
-        if let Some(open) = self.settings_box
-            && bubble::pressed_outside(context, open.rect)
-        {
-            self.settings_box_closed_by_the_press = Some(open.subject);
-            self.settings_box = None;
-        }
     }
 }

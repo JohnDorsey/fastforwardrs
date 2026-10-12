@@ -11,18 +11,31 @@
 //! resized by dragging any of its four corners and turned by dragging just outside a corner. What
 //! the pointer can take hold of where is worked out in `grab`, what is done with it in `gestures`,
 //! and what is drawn in `layers`.
+//!
+//! They can be put partly past the edge of the picture. What is past it is not seen (it is cut off,
+//! as in the export), so only the selected one is taken hold of there; and the box of the selected one
+//! (its outline, its corners, the places to turn it from) is drawn over all of the window and taken hold
+//! of wherever it is, over the other panels too. The widgets that take the mouse are made in
+//! `catchers`, and the names the parts of the preview are known by are in `names`.
 
+mod catchers;
 mod geometry;
 mod gestures;
 mod grab;
 mod layers;
+mod names;
 mod speed_indicator_overlay;
 #[cfg(test)]
 mod test_content;
 
 // The names the layers and their handles are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
-pub use layers::{catcher_id, corner_handle_label, picture_label, text_object_label, turn_handle_label, video_label};
+pub use names::{
+    catcher_id, corner_handle_id, corner_handle_label, picture_label, text_object_label, turn_handle_label,
+    turn_place_id, video_label,
+};
+
+use std::borrow::Cow;
 
 use egui::{Rect, Ui, vec2};
 
@@ -31,7 +44,9 @@ use super::textures::Textures;
 use super::theme;
 use crate::media::ThumbnailLibrary;
 use crate::playback::SuppliedPicture;
-use crate::project::{ClipLocation, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject};
+use crate::project::{
+    ClipId, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId,
+};
 use crate::rgba_picture::RgbaPicture;
 use crate::text_rendering::LazyTextRenderer;
 use geometry::PictureOnScreen;
@@ -59,12 +74,16 @@ pub enum PreviewLayerContent<'a> {
         source: SourceMediaIdentifier,
         picture: Option<&'a RgbaPicture>,
     },
-    Text(&'a TextObject),
+    /// A text object as it is at the current frame: what the clip says, or, if it has keyframes, as they change it.
+    Text(Cow<'a, TextObject>),
 }
 
 /// A video, a picture or a text object that is seen, and where it is on the picture.
 pub struct PreviewLayer<'a> {
-    pub clip: ClipLocation,
+    pub clip: ClipId,
+    /// The track the clip is on.
+    pub track: TrackId,
+    /// Where the layer is at the current frame: where the clip says, or, if it has keyframes, as they change that.
     pub placement: Placement,
     pub content: PreviewLayerContent<'a>,
 }
@@ -84,9 +103,9 @@ impl PreviewLayer<'_> {
     /// The name the layer is known by to screen readers (and the tests).
     fn label(&self) -> String {
         match self.content {
-            PreviewLayerContent::Text(_) => layers::text_object_label(self.clip),
-            PreviewLayerContent::Video(_) => layers::video_label(self.clip),
-            PreviewLayerContent::Image { .. } => layers::picture_label(self.clip),
+            PreviewLayerContent::Text(_) => names::text_object_label(self.clip),
+            PreviewLayerContent::Video(_) => names::video_label(self.clip),
+            PreviewLayerContent::Image { .. } => names::picture_label(self.clip),
         }
     }
 }
@@ -94,7 +113,7 @@ impl PreviewLayer<'_> {
 /// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.
 #[derive(Clone, Copy)]
 pub struct SymbolOnThePreview {
-    pub over: ClipLocation,
+    pub over: ClipId,
     pub speed: SpeedFactor,
 }
 
@@ -107,12 +126,12 @@ pub struct PreviewContent<'a> {
     /// The symbol of the video that is in front, if that is sped up.
     pub symbol: Option<SymbolOnThePreview>,
     pub indicator_layout: SpeedIndicatorLayout,
-    pub selected_clip: Option<ClipLocation>,
+    pub selected_clip: Option<ClipId>,
 }
 
 impl<'a> PreviewContent<'a> {
     /// The layer of `clip`, if it is on the preview.
-    fn layer(&self, clip: ClipLocation) -> Option<&PreviewLayer<'a>> {
+    fn layer(&self, clip: ClipId) -> Option<&PreviewLayer<'a>> {
         self.layers.iter().find(|layer| layer.clip == clip)
     }
 
@@ -137,8 +156,6 @@ pub fn show(
     commands: &mut Vec<Command>,
 ) {
     let panel_rectangle = ui.available_rect_before_wrap();
-    ui.painter()
-        .rect_filled(panel_rectangle, 0.0, theme::PREVIEW_BACKGROUND);
 
     let Some((picture_width, picture_height)) = content.picture_size else {
         return;

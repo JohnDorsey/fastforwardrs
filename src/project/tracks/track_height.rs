@@ -16,7 +16,7 @@ impl TrackHeight {
     pub const DEFAULT_IN_POINTS: f32 = 104.0;
 
     /// The least a track can be: just taller than what the box at its left needs to hold the title
-    /// of the track and its settings button. (A test of the application checks that they do fit.)
+    /// of the track. (A test of the application checks that it does fit.)
     pub const SMALLEST_IN_POINTS: f32 = 30.0;
 
     /// The most a track can be: half as tall again as a new track.

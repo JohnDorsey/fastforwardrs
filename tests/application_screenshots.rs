@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
+use egui::Pos2;
 use egui_kittest::kittest::Queryable;
 use fastforwardrs::media::FfmpegToolchain;
 use journey::Journey;
@@ -74,6 +75,11 @@ fn pulsing_sound(toolchain: &FfmpegToolchain, folder: &Path) -> PathBuf {
 
 fn save(journey: &mut Journey, folder: &Path, name: &str) {
     journey.settle();
+    save_what_is_drawn(journey, folder, name);
+}
+
+/// Saves the picture of the frame that was drawn last, without drawing any more frames first.
+fn save_what_is_drawn(journey: &mut Journey, folder: &Path, name: &str) {
     let picture = journey.harness.render().expect("the window could be drawn");
     picture
         .save(folder.join(format!("{name}.png")))
@@ -104,9 +110,9 @@ fn write_screenshots_of_the_window() {
     journey.wait_for_the_preview_to_show_the_current_frame();
     save(&mut journey, &folder, "3_inside_the_sped_up_clip");
 
-    // The box of settings of a clip, open above it.
-    journey.open_the_settings_of_the_clip_at(30);
-    save(&mut journey, &folder, "4_the_settings_of_a_clip");
+    // The properties of a clip, in the panel at the left.
+    journey.select_the_clip_at(30);
+    save(&mut journey, &folder, "4_the_properties_of_a_clip");
 }
 
 #[test]
@@ -197,23 +203,27 @@ fn write_screenshots_of_tracks_sound_and_text() {
     journey.settle();
     journey.replace_text_in_the_field_showing("Text", "Chapter one: the beach");
     journey.wait_until_idle();
-    save(&mut journey, &folder, "13_a_text_object_and_the_window_it_is_edited_in");
+    save(
+        &mut journey,
+        &folder,
+        "13_a_text_object_and_its_properties_in_the_panel",
+    );
 
     // The text object is selected, with a handle at each of its corners on the preview.
-    journey.harness.get_by_label("Close window").click();
     journey.settle();
     save(&mut journey, &folder, "14_the_text_object_selected_on_the_preview");
 
-    // The box of settings of a clip, above the clip, and the box of a track, above its gear.
+    // The properties of a clip, and of a track, in the panel.
     journey.move_playhead_to_frame(30);
     let on_the_video = journey.point_on_the_strip_at_frame(2, 60);
-    journey.right_click(on_the_video);
-    save(&mut journey, &folder, "15_the_settings_of_a_clip");
-    journey.press_key(egui::Key::Escape);
-    let gear = journey.rectangle_of("Settings of track 1").center();
-    journey.click(gear);
-    save(&mut journey, &folder, "16_the_settings_of_a_track");
-    journey.press_key(egui::Key::Escape);
+    journey.click(on_the_video);
+    save(&mut journey, &folder, "15_the_properties_of_a_clip");
+    journey.select_the_track_at(1);
+    save(&mut journey, &folder, "16_the_properties_of_a_track");
+
+    // Several things selected: a list in a yellow outline.
+    journey.click_with_control(on_the_video);
+    save(&mut journey, &folder, "16_b_a_track_and_a_clip_selected");
 
     // A clip that is selected has an outline.
     let on_the_sound = journey.point_on_the_strip_at_frame(1, 90);
@@ -242,7 +252,6 @@ fn write_screenshots_of_many_tracks_and_missing_files() {
     }
     journey.make_a_text_object_at(1, 30);
     journey.wait_until_idle();
-    journey.harness.get_by_label("Close window").click();
     save(&mut journey, &folder, "18_seven_tracks_the_rows_scroll");
 
     // A project whose sound file cannot be found.
@@ -258,7 +267,7 @@ fn write_screenshots_of_many_tracks_and_missing_files() {
     reopened.wait_until_idle();
     save(&mut reopened, &folder, "19_a_sound_file_that_cannot_be_found");
 
-    // Its clip says so, and its box offers to choose the file again. (Its track is below the
+    // Its clip says so, and its properties offer to choose the file again. (Its track is below the
     // others that are shown, so the rows are scrolled to it first, as a person would with the scroll bar.)
     reopened.harness.get_by_label("Strip of track 1").scroll_to_me();
     reopened.settle();
@@ -330,7 +339,6 @@ fn write_screenshots_of_turned_and_resized_videos_and_text() {
     journey.add_a_track();
     journey.make_a_text_object_at(0, 0);
     journey.replace_text_in_the_field_showing("Text", "A caption, turned");
-    journey.harness.get_by_label("Close window").click();
     journey.settle();
     save(&mut journey, &folder, "31_the_text_selected_with_its_corners");
     let handle = |journey: &Journey, which: &str| {
@@ -378,6 +386,61 @@ fn write_screenshots_of_turned_and_resized_videos_and_text() {
     journey.drag(egui::PointerButton::Primary, outside, turned_about(outside, 20.0));
     journey.wait_until_idle();
     save(&mut journey, &folder, "35_the_video_moved_and_turned");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_things_that_reach_out_past_the_edges_of_the_picture() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.move_playhead_to_frame(60);
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    let handle = |journey: &Journey, which: &str| {
+        journey
+            .rectangle_of(&format!("Resize handle at the {which} corner"))
+            .center()
+    };
+
+    // The video, made smaller and then taken to the left until half of it is past the edge: its box
+    // reaches over the properties panel, where its corners can be taken hold of as well.
+    let on_the_video = journey.rectangle_of("Video, clip 0 of track 0").center();
+    journey.click(on_the_video);
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    journey.drag(
+        egui::PointerButton::Primary,
+        bottom_right,
+        top_left + (bottom_right - top_left) * 0.6,
+    );
+    journey.wait_until_idle();
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    journey.drag(egui::PointerButton::Primary, middle, middle - egui::vec2(380.0, 0.0));
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "36_a_video_taken_past_the_left_edge");
+
+    // And a corner of it, over the properties panel, dragged on.
+    let top_left = handle(&journey, "top left");
+    journey.drag(
+        egui::PointerButton::Primary,
+        top_left,
+        top_left + egui::vec2(60.0, 40.0),
+    );
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "37_its_corner_over_the_properties_dragged");
+
+    // Text past the bottom right corner of the picture.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 0);
+    journey.replace_text_in_the_field_showing("Text", "Half of this is not seen");
+    journey.settle();
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    journey.drag(egui::PointerButton::Primary, middle, middle + egui::vec2(500.0, 160.0));
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "38_text_taken_past_the_bottom_right_corner");
 }
 
 #[test]
@@ -437,10 +500,10 @@ fn write_screenshots_of_a_picture_on_the_timeline_and_the_preview() {
     journey.wait_until_idle();
     save(&mut journey, &folder, "41_the_picture_made_smaller_moved_and_turned");
 
-    // Its box on the timeline.
+    // Its properties in the panel.
     let on_the_picture_clip = journey.point_on_the_strip_at_frame(0, 90);
-    journey.right_click(on_the_picture_clip);
-    save(&mut journey, &folder, "42_the_box_of_a_picture_clip");
+    journey.click(on_the_picture_clip);
+    save(&mut journey, &folder, "42_the_properties_of_a_picture_clip");
 }
 
 #[test]
@@ -468,4 +531,166 @@ fn write_screenshots_of_a_video_of_another_shape_over_one_that_fills_the_picture
     journey.move_playhead_to_frame(60);
     journey.wait_for_the_preview_to_show_the_current_frame();
     save(&mut journey, &folder, "50_a_tall_video_in_front_of_a_wide_one");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_cut_flashing() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.move_playhead_to_frame(150);
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    journey.settle();
+
+    // The frames that follow the cut, as they are drawn: just after it, and then every five frames (a flash is
+    // over in a third of a second, which is eighteen of them).
+    journey.harness.key_press(egui::Key::S);
+    journey.harness.step();
+    save_what_is_drawn(&mut journey, &folder, "60_a_cut_flashing_1");
+    for number in 2..=4 {
+        journey.harness.run_steps(5);
+        save_what_is_drawn(&mut journey, &folder, &format!("60_a_cut_flashing_{number}"));
+    }
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_track_being_dragged_to_another_place() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.add_a_track();
+    // (A second click right after the first, which frames this short make, would be a double click.)
+    journey.harness.run_steps(40);
+    journey.add_a_track();
+    journey.harness.run_steps(40);
+    journey.move_playhead_to_frame(150);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "61_three_tracks_the_video_at_the_back");
+
+    // Take hold of the box of the track at the back (the one with the video), a little way in from its left edge,
+    // and drag it up over the one in front of it, and a little over the one in front of that.
+    let strip = journey.strip_of_track(2);
+    let from = Pos2::new(strip.left() - 154.0, strip.center().y);
+    journey.drag_and_hold(egui::PointerButton::Primary, from, from - egui::vec2(0.0, 150.0));
+    journey.harness.run_steps(30);
+    save_what_is_drawn(&mut journey, &folder, "62_the_back_track_dragged_up_over_the_others");
+
+    // Let go: the track goes into the place it is over, which is the first, and the rows settle.
+    journey.release(egui::PointerButton::Primary, from - egui::vec2(0.0, 150.0));
+    save_what_is_drawn(&mut journey, &folder, "63_just_let_go");
+    journey.harness.run_steps(40);
+    save_what_is_drawn(&mut journey, &folder, "64_settled_in_its_place");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_drawers_on_clips() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.cut_at_frame(40);
+    journey.cut_at_frame(80);
+    journey.add_a_track();
+    journey.harness.run_steps(40);
+    journey.move_playhead_to_frame(60);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "70_the_buttons_of_the_drawers_on_three_clips");
+
+    // Open the drawer of the middle clip: halfway, and then all the way.
+    let middle = journey.application().project().tracks()[1]
+        .placement_at_index(1)
+        .unwrap()
+        .id;
+    let button = journey.rectangle_of(&format!("Drawer of clip {} of track 0", middle.number()));
+    journey.click(button.center());
+    journey.harness.run_steps(0);
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "71_the_drawer_of_the_middle_clip_has_begun_to_open",
+    );
+    journey.harness.run_steps(40);
+    save_what_is_drawn(&mut journey, &folder, "72_the_drawer_of_the_middle_clip_is_open");
+
+    // A track as short as it can be, with the same clips.
+    let boundary = journey.boundary_under_the_track(1);
+    journey.drag(
+        egui::PointerButton::Primary,
+        boundary,
+        boundary - egui::vec2(0.0, 150.0),
+    );
+    journey.harness.run_steps(40);
+    save_what_is_drawn(&mut journey, &folder, "73_the_same_at_the_least_height_of_a_track");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_keyframe_buttons_and_an_animated_video() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.select_the_clip_at(10);
+    journey.move_playhead_to_frame(0);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "80_a_video_selected_with_its_place_in_the_panel");
+
+    // The pointer over the gain: the three buttons come, all grey while there are no keyframes.
+    let gain = journey.rectangle_of("Gain");
+    journey.move_pointer_to(gain.center());
+    save_what_is_drawn(&mut journey, &folder, "81_the_buttons_of_the_gain_with_no_keyframes");
+
+    // A keyframe at the start and one 2 seconds on, at which the video is smaller and further right and quieter.
+    let stopwatch = journey.rectangle_of("Make a keyframe of gain here");
+    journey.click(stopwatch.center());
+    let stopwatch = journey.rectangle_of("Make a keyframe of position here");
+    journey.click(stopwatch.center());
+    journey.move_playhead_to_frame(60);
+    journey.set_slider("w", 40.0);
+    journey.set_slider("h", 40.0);
+    journey.set_slider("x", 70.0);
+    journey.set_slider("Gain", -12.0);
+    let gain = journey.rectangle_of("Gain");
+    journey.move_pointer_to(gain.center());
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "82_on_a_keyframe_the_stopwatch_is_orange_and_the_arrow_back_too",
+    );
+
+    // In between: the arrows are both orange, the stopwatch is grey, and the video is half way.
+    journey.move_playhead_to_frame(30);
+    let gain = journey.rectangle_of("Gain");
+    journey.move_pointer_to(gain.center());
+    save_what_is_drawn(&mut journey, &folder, "83_half_way_between_two_keyframes");
+
+    // Over the position, to see the buttons of a pair of numbers.
+    let position = journey.rectangle_of("x");
+    journey.move_pointer_to(position.center());
+    save_what_is_drawn(&mut journey, &folder, "84_the_buttons_of_the_position");
+
+    // A text object, with the rows of what it says and how it looks and where it is.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 20);
+    journey.settle();
+    let colour = journey.rectangle_of("Colour");
+    journey.move_pointer_to(colour.center());
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "85_the_properties_of_a_text_object_with_its_place",
+    );
 }

@@ -1,0 +1,528 @@
+//! Tests of the keyframes of a track and of its clips: where they are kept, and what happens to them when a clip is
+//! cut, changes its length, is deleted or moved.
+
+use super::tests::{THE_TRACK, clip_id, frame, picture, sound, spans, speed, text, track_of, video};
+use super::*;
+use crate::project::{Animation, FrameRate, PropertyId, PropertyValue};
+use crate::test_support::DeterministicRandomNumbers;
+
+fn db(decibels: f32) -> PropertyValue {
+    PropertyValue::Number(decibels)
+}
+
+/// A track with a video of 100 frames (clip 0) whose loudness is 0 dB at its first frame and -20 dB at its last.
+fn track_with_a_fading_video() -> Track {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 0, db(0.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 99, db(-20.0))
+        .unwrap();
+    track
+}
+
+fn gain_of(track: &Track, clip: ClipId, frames_in: u64) -> f32 {
+    match track
+        .placement_of(clip)
+        .unwrap()
+        .animation
+        .value_at(PropertyId::Gain, frames_in)
+    {
+        Some(PropertyValue::Number(decibels)) => decibels,
+        other => panic!("the gain of {clip} at {frames_in} is {other:?}"),
+    }
+}
+
+fn keyframe_frames(track: &Track, clip: ClipId, property: PropertyId) -> Vec<u64> {
+    track
+        .placement_of(clip)
+        .unwrap()
+        .animation
+        .keyframes_of(property)
+        .map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame).collect())
+        .unwrap_or_default()
+}
+
+/// Every keyframe of every clip is at a frame the clip has.
+fn assert_keyframes_are_inside_their_clips(track: &Track) {
+    for placement in track.placements() {
+        for (property, keyframes) in placement.animation.properties() {
+            for keyframe in keyframes.iter() {
+                assert!(
+                    keyframe.frame < placement.timeline_frame_count(),
+                    "{property:?} of {} has a keyframe at {}, and the clip has {} frames",
+                    placement.id,
+                    keyframe.frame,
+                    placement.timeline_frame_count()
+                );
+            }
+        }
+    }
+}
+
+// --- putting them on and taking them off ---
+
+#[test]
+fn nothing_is_animated_to_begin_with() {
+    let track = track_of(vec![(0, video(0, 100, 1))]);
+    assert!(track.animation().is_empty());
+    assert!(track.placement_of(clip_id(0)).unwrap().animation.is_empty());
+    assert!(track.entries()[0].animation().is_empty());
+}
+
+#[test]
+fn a_keyframe_can_be_put_on_a_clip_replaced_and_taken_away_again() {
+    let mut track = track_of(vec![(10, video(0, 100, 1))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 20, db(-5.0))
+        .unwrap();
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![20]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 20, db(-9.0))
+        .unwrap();
+    assert_eq!(gain_of(&track, clip_id(0), 20), -9.0, "in place of the one there");
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![20]);
+
+    let removed = track
+        .remove_clip_keyframe(clip_id(0), PropertyId::Gain, 20)
+        .unwrap()
+        .unwrap();
+    assert_eq!(removed.value, db(-9.0));
+    assert!(removed.was_the_last);
+    assert!(track.placement_of(clip_id(0)).unwrap().animation.is_empty());
+    assert_eq!(
+        track.remove_clip_keyframe(clip_id(0), PropertyId::Gain, 20),
+        Ok(None),
+        "none there now"
+    );
+}
+
+#[test]
+fn a_keyframe_counts_frames_from_the_first_frame_of_the_clip_wherever_the_clip_is_on_the_timeline() {
+    let mut track = track_of(vec![(500, video(0, 100, 1))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 3, db(1.0))
+        .unwrap();
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![3]);
+    assert_eq!(spans(&track), vec![(500, 600)]);
+}
+
+#[test]
+fn a_keyframe_is_refused_where_the_clip_is_not_for_a_property_it_does_not_have_or_for_the_wrong_kind_of_value() {
+    let mut track = track_of(vec![(0, video(0, 100, 1)), (0, text(30)), (0, sound(0, 10, 1))]);
+    let before = track.clone();
+    assert_eq!(
+        track.set_clip_keyframe(clip_id(0), PropertyId::Gain, 100, db(0.0)),
+        Err(ClipEditError::NotWithinTheClip {
+            clip: clip_id(0),
+            frames_in: 100
+        }),
+        "the clip has frames 0 to 99"
+    );
+    assert_eq!(
+        track.set_clip_keyframe(clip_id(1), PropertyId::Gain, 5, db(0.0)),
+        Err(ClipEditError::NotAPropertyOfThisClip {
+            clip: clip_id(1),
+            property: PropertyId::Gain
+        }),
+        "text has no loudness"
+    );
+    assert_eq!(
+        track.set_clip_keyframe(clip_id(2), PropertyId::Position, 5, PropertyValue::Pair(0.5, 0.5)),
+        Err(ClipEditError::NotAPropertyOfThisClip {
+            clip: clip_id(2),
+            property: PropertyId::Position
+        }),
+        "a sound is not on the picture"
+    );
+    assert_eq!(
+        track.set_clip_keyframe(clip_id(0), PropertyId::Gain, 5, PropertyValue::Flag(true)),
+        Err(ClipEditError::NotAPropertyOfThisClip {
+            clip: clip_id(0),
+            property: PropertyId::Gain
+        }),
+        "a loudness is a number"
+    );
+    assert_eq!(
+        track.set_clip_keyframe(clip_id(99), PropertyId::Gain, 5, db(0.0)),
+        Err(ClipEditError::UnknownClip { clip: clip_id(99) })
+    );
+    assert_eq!(track, before, "nothing was changed");
+}
+
+#[test]
+fn a_track_has_keyframes_of_its_own_for_the_properties_it_has() {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    assert!(track.set_own_keyframe(PropertyId::Gain, frame(10), db(-3.0)));
+    assert!(
+        track.set_own_keyframe(PropertyId::Muted, frame(500), PropertyValue::Flag(true)),
+        "even past its clips"
+    );
+    assert!(!track.set_own_keyframe(PropertyId::Position, frame(10), PropertyValue::Pair(0.0, 0.0)));
+    assert!(!track.set_own_keyframe(PropertyId::Gain, frame(11), PropertyValue::Flag(true)));
+    assert_eq!(track.animation().keyframes_of(PropertyId::Gain).unwrap().len(), 1);
+    assert!(
+        track
+            .remove_own_keyframe(PropertyId::Gain, frame(10))
+            .unwrap()
+            .was_the_last
+    );
+    assert_eq!(track.remove_own_keyframe(PropertyId::Gain, frame(10)), None);
+}
+
+// --- cutting ---
+
+#[test]
+fn each_half_of_a_cut_clip_has_what_the_clip_had_at_every_frame_and_its_keyframes_from_its_own_first_frame() {
+    let mut track = track_with_a_fading_video();
+    let outcome = track.split_at(frame(40)).unwrap();
+
+    assert_eq!(outcome.first_half, clip_id(0));
+    for frames_in in 0..40 {
+        let expected = -20.0 * frames_in as f32 / 99.0;
+        assert!(
+            (gain_of(&track, outcome.first_half, frames_in) - expected).abs() < 1e-3,
+            "first half, frame {frames_in}"
+        );
+    }
+    for frames_in in 0..60 {
+        let expected = -20.0 * (frames_in + 40) as f32 / 99.0;
+        assert!(
+            (gain_of(&track, outcome.second_half, frames_in) - expected).abs() < 1e-3,
+            "second half, frame {frames_in}"
+        );
+    }
+    assert_eq!(
+        keyframe_frames(&track, outcome.first_half, PropertyId::Gain),
+        vec![0, 39]
+    );
+    assert_eq!(
+        keyframe_frames(&track, outcome.second_half, PropertyId::Gain),
+        vec![0, 59]
+    );
+    assert_keyframes_are_inside_their_clips(&track);
+}
+
+#[test]
+fn cutting_a_clip_that_is_not_animated_leaves_both_halves_not_animated() {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    let outcome = track.split_at(frame(40)).unwrap();
+    for half in [outcome.first_half, outcome.second_half] {
+        assert!(track.placement_of(half).unwrap().animation.is_empty());
+    }
+}
+
+#[test]
+fn what_is_animated_in_a_text_clip_or_a_picture_is_cut_with_it() {
+    let mut track = track_of(vec![(0, text(90)), (0, picture(60))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Rotation, 0, db(0.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Rotation, 89, db(90.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(1), PropertyId::Size, 10, PropertyValue::Pair(0.5, 0.5))
+        .unwrap();
+    let text_halves = track.split_at(frame(30)).unwrap();
+    let picture_halves = track.split_at(frame(100)).unwrap();
+    assert!(
+        track
+            .placement_of(text_halves.second_half)
+            .unwrap()
+            .animation
+            .is_animated(PropertyId::Rotation)
+    );
+    for half in [picture_halves.first_half, picture_halves.second_half] {
+        assert!(
+            track
+                .placement_of(half)
+                .unwrap()
+                .animation
+                .is_animated(PropertyId::Size)
+        );
+    }
+    assert_keyframes_are_inside_their_clips(&track);
+}
+
+// --- changing how long a clip lasts ---
+
+#[test]
+fn a_clip_that_is_sped_up_has_its_keyframes_as_far_through_it_as_they_were() {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 40, db(-4.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 80, db(-8.0))
+        .unwrap();
+
+    track.set_clip_speed(clip_id(0), speed(2)).unwrap();
+
+    assert_eq!(spans(&track), vec![(0, 50)]);
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![20, 40]);
+    assert_eq!(
+        gain_of(&track, clip_id(0), 30),
+        -6.0,
+        "half way between them, as it was"
+    );
+    assert_keyframes_are_inside_their_clips(&track);
+
+    track.set_clip_speed(clip_id(0), speed(1)).unwrap();
+    assert_eq!(
+        keyframe_frames(&track, clip_id(0), PropertyId::Gain),
+        vec![40, 80],
+        "and back"
+    );
+}
+
+#[test]
+fn the_speed_of_a_track_moves_the_keyframes_of_its_clips_and_leaves_the_tracks_own_where_they_are_in_time() {
+    let mut track = track_of(vec![(0, video(0, 100, 1)), (0, text(40))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 50, db(-1.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(1), PropertyId::Rotation, 20, db(45.0))
+        .unwrap();
+    track.set_own_keyframe(PropertyId::Gain, frame(70), db(-6.0));
+
+    track.set_speed(speed(2));
+
+    assert_eq!(
+        keyframe_frames(&track, clip_id(0), PropertyId::Gain),
+        vec![25],
+        "the video is half as long"
+    );
+    assert_eq!(
+        keyframe_frames(&track, clip_id(1), PropertyId::Rotation),
+        vec![20],
+        "a text object lasts as long as it said whatever the speed"
+    );
+    assert_eq!(
+        track
+            .animation()
+            .keyframes_of(PropertyId::Gain)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .frame,
+        70
+    );
+    assert_keyframes_are_inside_their_clips(&track);
+}
+
+#[test]
+fn a_clip_that_is_pushed_along_by_another_that_got_longer_keeps_its_keyframes_as_they_were() {
+    let mut track = track_of(vec![(0, video(0, 100, 2)), (0, video(0, 100, 1))]);
+    track
+        .set_clip_keyframe(clip_id(1), PropertyId::Gain, 30, db(-2.0))
+        .unwrap();
+    track.set_clip_speed(clip_id(0), speed(1)).unwrap();
+    assert_eq!(spans(&track), vec![(0, 100), (100, 200)]);
+    assert_eq!(keyframe_frames(&track, clip_id(1), PropertyId::Gain), vec![30]);
+}
+
+#[test]
+fn a_text_object_that_is_made_shorter_loses_the_keyframes_it_no_longer_has_a_frame_for_and_keeps_its_values() {
+    let mut track = track_of(vec![(0, text(100))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Rotation, 0, db(0.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Rotation, 80, db(80.0))
+        .unwrap();
+    assert_eq!(track.set_clip_duration(clip_id(0), 50), Ok(50));
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Rotation), vec![0, 49]);
+    assert_eq!(
+        track
+            .placement_of(clip_id(0))
+            .unwrap()
+            .animation
+            .value_at(PropertyId::Rotation, 49),
+        Some(db(49.0)),
+        "what it was at its last frame"
+    );
+    // Made longer again, it has what it has: nothing comes back.
+    assert_eq!(track.set_clip_duration(clip_id(0), 100), Ok(100));
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Rotation), vec![0, 49]);
+    assert_keyframes_are_inside_their_clips(&track);
+}
+
+// --- deleting, moving, counting again ---
+
+#[test]
+fn deleting_a_clip_takes_its_keyframes_and_leaves_those_of_the_others() {
+    let mut track = track_of(vec![(0, video(0, 100, 1)), (0, video(0, 50, 1))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 10, db(1.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(1), PropertyId::Gain, 20, db(2.0))
+        .unwrap();
+    track.delete_clip(clip_id(0)).unwrap();
+    assert_eq!(keyframe_frames(&track, clip_id(1), PropertyId::Gain), vec![20]);
+    assert_eq!(track.entries().len(), 1);
+}
+
+#[test]
+fn clips_moved_along_a_track_take_their_keyframes_with_them() {
+    let mut track = track_of(vec![(0, video(0, 100, 1)), (0, video(0, 50, 1))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 10, db(1.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(1), PropertyId::Gain, 20, db(2.0))
+        .unwrap();
+    track.move_clips(&[(clip_id(1), 0), (clip_id(0), 60)]).unwrap();
+    assert_eq!(ids(&track), vec![clip_id(1), clip_id(0)], "they changed places");
+    assert_eq!(keyframe_frames(&track, clip_id(1), PropertyId::Gain), vec![20]);
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![10]);
+}
+
+fn ids(track: &Track) -> Vec<ClipId> {
+    track.entries().iter().map(TrackEntry::id).collect()
+}
+
+#[test]
+fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stretched_to_what_it_lasts_there() {
+    let mut fast = Track::new(TrackId::new(2), "fast").with_speed(speed(2));
+    fast.arrange_clips(vec![ClipToArrange {
+        id: clip_id(7),
+        clip: video(0, 100, 1),
+        animation: {
+            let mut animation = Animation::default();
+            animation.set_keyframe(PropertyId::Gain, 60, db(-6.0));
+            animation
+        },
+        start: 0,
+        frames_it_lasted_before: 100,
+    }])
+    .unwrap();
+    assert_eq!(spans(&fast), vec![(0, 50)], "half as long on a track twice as fast");
+    assert_eq!(keyframe_frames(&fast, clip_id(7), PropertyId::Gain), vec![30]);
+
+    // On a track at the same speed it lasts the same and its keyframes are where they were.
+    let mut same = Track::new(TrackId::new(3), "same");
+    same.arrange_clips(vec![ClipToArrange {
+        id: clip_id(7),
+        clip: video(0, 100, 1),
+        animation: fast.entries()[0].animation().rescaled(50, 100),
+        start: 5,
+        frames_it_lasted_before: 100,
+    }])
+    .unwrap();
+    assert_eq!(keyframe_frames(&same, clip_id(7), PropertyId::Gain), vec![60]);
+}
+
+#[test]
+fn a_track_counted_again_at_another_frame_rate_has_its_keyframes_counted_again_too() {
+    let mut track = track_of(vec![(10, video(0, 90, 1)), (0, text(30))]);
+    track
+        .set_clip_keyframe(clip_id(0), PropertyId::Gain, 45, db(-3.0))
+        .unwrap();
+    track
+        .set_clip_keyframe(clip_id(1), PropertyId::Rotation, 15, db(10.0))
+        .unwrap();
+    track.set_own_keyframe(PropertyId::Gain, frame(60), db(-9.0));
+
+    let at_60 = track.retimed(FrameRate::new(30, 1).unwrap(), FrameRate::new(60, 1).unwrap());
+
+    assert_eq!(spans(&at_60), vec![(20, 200), (200, 260)]);
+    assert_eq!(
+        keyframe_frames(&at_60, clip_id(0), PropertyId::Gain),
+        vec![90],
+        "as far through the clip as it was"
+    );
+    assert_eq!(keyframe_frames(&at_60, clip_id(1), PropertyId::Rotation), vec![30]);
+    assert_eq!(
+        at_60
+            .animation()
+            .keyframes_of(PropertyId::Gain)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .frame,
+        120,
+        "the track's own: at the same moment of time, which is twice the frame"
+    );
+    assert_keyframes_are_inside_their_clips(&at_60);
+}
+
+#[test]
+fn a_track_made_from_clips_with_keyframes_past_their_ends_has_those_cut_off() {
+    let mut animation = Animation::default();
+    animation.set_keyframe(PropertyId::Gain, 10, db(1.0));
+    animation.set_keyframe(PropertyId::Gain, 500, db(5.0));
+    let track = Track::new(THE_TRACK, "track").with_animated_clips([(0, video(0, 50, 1), animation)]);
+    assert_keyframes_are_inside_their_clips(&track);
+    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![10, 49]);
+}
+
+// --- whatever is done ---
+
+#[test]
+fn whatever_cuts_and_speeds_are_done_every_keyframe_stays_inside_its_clip_and_every_clip_stays_animated() {
+    let mut random = DeterministicRandomNumbers::with_seed(66);
+    for round in 0..200 {
+        let mut track = track_of(vec![
+            (0, video(0, 60 + random.next_below(100), 1)),
+            (5, text(20 + random.next_below(60))),
+        ]);
+        for clip in [clip_id(0), clip_id(1)] {
+            let length = track.placement_of(clip).unwrap().timeline_frame_count();
+            let property = if clip == clip_id(0) {
+                PropertyId::Gain
+            } else {
+                PropertyId::Rotation
+            };
+            for _ in 0..1 + random.next_below(4) {
+                let _ = track.set_clip_keyframe(
+                    clip,
+                    property,
+                    random.next_below(length),
+                    db(random.next_below(40) as f32 - 20.0),
+                );
+            }
+        }
+        for step in 0..8 {
+            let total = track.total_frame_count().max(1);
+            match random.next_below(4) {
+                0 => {
+                    let _ = track.split_at(frame(random.next_below(total)));
+                }
+                1 => {
+                    let _ = track.set_clip_speed(clip_id(0), speed(1 + random.next_below(5) as u32));
+                }
+                2 => track.set_speed(speed(1 + random.next_below(3) as u32)),
+                _ => {
+                    let target = track.entries().len();
+                    if target > 1 {
+                        let victim = track.entries()[random.next_below(target as u64) as usize].id();
+                        let _ = track.set_clip_duration(victim, 1 + random.next_below(40));
+                    }
+                }
+            }
+            assert_keyframes_are_inside_their_clips(&track);
+            // What was animated stays animated, and nothing is animated that was not.
+            for placement in track.placements() {
+                let kinds_animated = placement.animation.properties().count();
+                assert!(
+                    kinds_animated <= 1,
+                    "round {round} step {step}: {:?}",
+                    placement.animation
+                );
+                assert!(
+                    placement
+                        .animation
+                        .properties()
+                        .all(|(_, keyframes)| !keyframes.is_empty()),
+                    "round {round}"
+                );
+            }
+        }
+    }
+}

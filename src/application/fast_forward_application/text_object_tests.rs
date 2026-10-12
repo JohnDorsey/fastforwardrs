@@ -1,5 +1,5 @@
 //! Tests of text objects: making one from the menu that opens on an empty part of a track, the
-//! window it is edited in, and moving and resizing it on the preview.
+//! properties panel it is edited in, and moving and resizing it on the preview.
 
 use egui::{Key, vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -8,11 +8,12 @@ use super::test_window::{VIDEO, Window, project_of, video_source};
 use crate::application::commands::Command;
 use crate::application::preview_panel::{corner_handle_label, text_object_label};
 use crate::project::{
-    CanvasArea, Clip, ClipLocation, Corner, MediaClip, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout,
+    CanvasArea, Clip, ClipId, Corner, MediaClip, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout,
     TextObject, TimelineFrameIndex, Track, TrackId,
 };
 
-const TEXT_WINDOW: &str = "Text object";
+/// What the box of the properties of a text object is headed with.
+const TEXT_BOX_HEADING: &str = "Text object";
 
 /// Makes a text object the way a person does: right-clicks the empty part of the strip of the
 /// track at `position`, where timeline frame `frame` is, and chooses New, then Text object.
@@ -26,7 +27,7 @@ fn make_a_text_object_at(window: &mut Window, position: usize, frame: u64) {
 }
 
 /// The text clip of the track at `position` that is its `index`th clip, with its text object.
-fn text_clip(window: &Window, position: usize, index: usize) -> (ClipLocation, TextObject, u64) {
+fn text_clip(window: &Window, position: usize, index: usize) -> (ClipId, TextObject, u64) {
     let location = window.clip(position, index);
     let placement = window.application().project().placement_of(location).unwrap();
     let text = placement.clip.as_text().expect("a text clip");
@@ -70,14 +71,15 @@ fn right_clicking_a_clip_does_not_offer_new() {
     let clip = window.middle_of_the_strip_at(0, 45);
     window.right_click(clip);
     assert!(window.harness.query_by_label_contains("New").is_none());
-    assert!(
-        window.application().timeline_view.settings_box_is_open(),
-        "its box opened instead"
+    assert_eq!(
+        window.application().selected_clip(),
+        Some(window.clip(0, 0)),
+        "it was selected instead"
     );
 }
 
 #[test]
-fn choosing_text_object_puts_a_text_clip_where_the_menu_was_opened_selects_it_and_opens_its_window() {
+fn choosing_text_object_puts_a_text_clip_where_the_menu_was_opened_and_selects_it_which_shows_its_properties() {
     let mut window = Window::showing(project_of(90));
     assert_eq!(window.current_frame(), 0);
 
@@ -97,8 +99,8 @@ fn choosing_text_object_puts_a_text_clip_where_the_menu_was_opened_selects_it_an
     assert_eq!(window.application().selected_clip(), Some(location));
     assert!(window.application().has_unsaved_changes());
     assert!(
-        window.harness.query_by_label(TEXT_WINDOW).is_some(),
-        "the window to write it in is open"
+        window.harness.query_by_label(TEXT_BOX_HEADING).is_some(),
+        "the properties to write it in are in the panel"
     );
     assert_eq!(
         window.current_frame(),
@@ -170,16 +172,16 @@ fn a_text_object_can_be_made_in_a_project_with_no_video_at_all_and_the_preview_t
     assert_eq!(window.application().project().tracks()[0].entries().len(), 1);
     assert_eq!(window.application().project().total_frame_count(), 90);
     assert_eq!(window.application().project().picture_size(), (1920, 1080));
-    assert!(window.harness.query_by_label(TEXT_WINDOW).is_some());
+    assert!(window.harness.query_by_label(TEXT_BOX_HEADING).is_some());
     // The text can be grabbed on the preview, so the picture is there.
     let (location, _, _) = text_clip(&window, 0, 0);
     assert!(window.harness.query_by_label(&text_object_label(location)).is_some());
 }
 
-// --- its window ---
+// --- its properties ---
 
 #[test]
-fn the_window_has_the_words_the_font_the_size_the_colour_and_how_long_the_text_is_shown() {
+fn the_panel_has_the_words_the_font_the_size_the_colour_and_how_long_the_text_is_shown() {
     let mut window = window_with_a_text_object();
     window.application_mut().font_families = Some(vec!["Arial".to_owned(), "Courier New".to_owned()]);
     window.settle();
@@ -194,7 +196,7 @@ fn the_window_has_the_words_the_font_the_size_the_colour_and_how_long_the_text_i
 }
 
 #[test]
-fn typing_in_the_window_changes_the_words_of_the_text_object_and_marks_the_project_changed() {
+fn typing_in_the_panel_changes_the_words_of_the_text_object_and_marks_the_project_changed() {
     let mut window = window_with_a_text_object();
     window.application_mut().note_everything_is_saved();
 
@@ -211,7 +213,7 @@ fn typing_in_the_window_changes_the_words_of_the_text_object_and_marks_the_proje
 }
 
 #[test]
-fn the_keys_are_not_shortcuts_while_the_window_is_open_or_being_typed_in() {
+fn the_keys_are_not_shortcuts_while_the_words_are_being_typed_in() {
     let mut window = window_with_a_text_object();
     window.replace_text_in_the_field_showing("Text", "s is for sound");
     let (_, object, _) = text_clip(&window, 0, 1);
@@ -226,7 +228,7 @@ fn the_keys_are_not_shortcuts_while_the_window_is_open_or_being_typed_in() {
     }
     assert!(
         !window.application().is_playing(),
-        "the keys are the window's while it is open"
+        "the keys are the text's while it is typed in"
     );
     assert_eq!(
         window.application().project().tracks()[0].entries().len(),
@@ -236,7 +238,7 @@ fn the_keys_are_not_shortcuts_while_the_window_is_open_or_being_typed_in() {
 }
 
 #[test]
-fn choosing_a_font_in_the_window_sets_the_font_of_the_text_object() {
+fn choosing_a_font_in_the_panel_sets_the_font_of_the_text_object() {
     let mut window = window_with_a_text_object();
     window.application_mut().font_families = Some(vec!["Arial".to_owned(), "Courier New".to_owned()]);
     window.settle();
@@ -291,42 +293,32 @@ fn the_time_the_text_is_shown_for_can_be_changed_in_seconds_and_stops_at_the_nex
 }
 
 #[test]
-fn the_close_button_closes_the_window_and_it_comes_back_from_the_text_clip() {
+fn selecting_the_text_clip_again_brings_its_properties_back_and_a_text_has_no_speed_or_loudness() {
     let mut window = window_with_a_text_object();
-    window.harness.get_by_label("Close window").click();
-    window.settle();
-    assert!(window.harness.query_by_label(TEXT_WINDOW).is_none());
-    assert!(window.application().text_window_open.is_none());
+    window.press_key_outside_the_text(Key::Escape);
+    assert!(
+        window.harness.query_by_label(TEXT_BOX_HEADING).is_none(),
+        "nothing is selected"
+    );
 
-    // Double-clicking the text clip on the timeline brings it back.
     let (location, _, _) = text_clip(&window, 0, 1);
     let on_the_clip = window.middle_of_the_strip_at(0, 120);
-    window.double_click(on_the_clip);
-    assert!(window.harness.query_by_label(TEXT_WINDOW).is_some());
-    assert_eq!(window.application().selected_clip(), Some(location));
-}
-
-#[test]
-fn right_clicking_a_text_clip_opens_its_window_and_not_a_box_of_settings() {
-    let mut window = window_with_a_text_object();
-    window.harness.get_by_label("Close window").click();
-    window.settle();
-    let on_the_clip = window.middle_of_the_strip_at(0, 120);
     window.right_click(on_the_clip);
-    assert!(window.harness.query_by_label(TEXT_WINDOW).is_some());
-    assert!(
-        !window.application().timeline_view.settings_box_is_open(),
-        "a text has no speed or loudness"
-    );
+
+    assert!(window.harness.query_by_label(TEXT_BOX_HEADING).is_some());
+    assert_eq!(window.application().selected_clip(), Some(location));
+    for label in ["Speed", "Gain", "Mute"] {
+        assert!(window.harness.query_by_label(label).is_none(), "a text has no {label}");
+    }
 }
 
 #[test]
-fn the_window_goes_when_the_text_clip_is_deleted() {
+fn the_properties_go_when_the_text_clip_is_deleted() {
     let mut window = window_with_a_text_object();
     let (location, _, _) = text_clip(&window, 0, 1);
     window.do_this(Command::DeleteClips(vec![location]));
     window.settle();
-    assert!(window.harness.query_by_label(TEXT_WINDOW).is_none());
+    assert!(window.harness.query_by_label(TEXT_BOX_HEADING).is_none());
     assert_eq!(window.application().selected_clip(), None);
 }
 
@@ -358,7 +350,7 @@ fn the_selected_text_object_has_a_handle_at_each_of_its_four_corners_and_others_
             "{corner:?}"
         );
     }
-    // Deselect from the Edit menu (the keys are not shortcuts while the window of the text is open).
+    // Deselect from the Edit menu (the keys are not shortcuts while the words of the text are typed in).
     window.harness.get_by_label("Edit").click();
     window.settle();
     window.harness.get_by_label_contains("Deselect").click();
@@ -404,12 +396,20 @@ fn dragging_any_corner_of_the_selected_text_object_resizes_it_from_that_corner()
 }
 
 #[test]
-fn a_text_object_cannot_be_dragged_outside_the_picture_or_made_too_small() {
+fn a_text_object_cannot_be_made_bigger_than_the_picture_or_so_big_that_its_middle_leaves_it_or_too_small() {
     let mut window = window_with_a_text_object();
     let handle = window.rectangle_of(&corner_handle_label(Corner::BottomRight)).center();
     window.drag(handle, handle + vec2(4000.0, 4000.0), egui::PointerButton::Primary);
     let area = area_of(&window);
-    assert!(area.right() <= 1.0 + 1e-4 && area.bottom() <= 1.0 + 1e-4, "{area:?}");
+    assert!(area.width() <= 1.0 + 1e-4 && area.height() <= 1.0 + 1e-4, "{area:?}");
+    assert!(
+        area.left() + area.width() / 2.0 <= 1.0 + 1e-4 && area.top() + area.height() / 2.0 <= 1.0 + 1e-4,
+        "its middle is still on the picture: {area:?}"
+    );
+    assert!(
+        area.right() > 1.0 && area.bottom() > 1.0,
+        "the corner did go out past the edges: {area:?}"
+    );
 
     let handle = window.rectangle_of(&corner_handle_label(Corner::BottomRight)).center();
     let top_left = window.rectangle_of(&corner_handle_label(Corner::TopLeft)).center();
@@ -417,6 +417,39 @@ fn a_text_object_cannot_be_dragged_outside_the_picture_or_made_too_small() {
     let area = area_of(&window);
     assert!(area.width() >= CanvasArea::SMALLEST_SIDE_FRACTION - 1e-4, "{area:?}");
     assert!(area.height() >= CanvasArea::SMALLEST_SIDE_FRACTION - 1e-4, "{area:?}");
+}
+
+#[test]
+fn a_text_object_dragged_far_past_the_edge_stops_with_its_middle_at_the_edge_and_can_be_dragged_back() {
+    let mut window = window_with_a_text_object();
+    let (location, _, _) = text_clip(&window, 0, 1);
+    let body = window.rectangle_of(&text_object_label(location));
+    let before = area_of(&window);
+
+    window.drag(
+        body.center(),
+        body.center() + vec2(4000.0, 0.0),
+        egui::PointerButton::Primary,
+    );
+
+    let out = area_of(&window);
+    assert!(
+        (out.left() + out.width() / 2.0 - 1.0).abs() < 1e-3,
+        "its middle is on the right edge of the picture: {out:?}"
+    );
+    assert!(out.right() > 1.0, "so that half of it is past the edge: {out:?}");
+    assert_eq!(
+        (out.width(), out.height(), out.top()),
+        (before.width(), before.height(), before.top())
+    );
+
+    // It is selected, so the whole of its box can be taken hold of, and it comes back the way it went.
+    let top_left = window.rectangle_of(&corner_handle_label(Corner::TopLeft)).center();
+    let bottom_right = window.rectangle_of(&corner_handle_label(Corner::BottomRight)).center();
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    window.drag(middle, middle - vec2(120.0, 0.0), egui::PointerButton::Primary);
+    let back = area_of(&window);
+    assert!(back.left() < out.left() - 0.05, "{out:?} then {back:?}");
 }
 
 #[test]
@@ -439,27 +472,18 @@ fn dragging_the_text_object_itself_moves_it_without_resizing_it() {
 }
 
 #[test]
-fn clicking_a_text_object_on_the_preview_selects_its_clip_and_double_clicking_opens_its_window() {
+fn clicking_a_text_object_on_the_preview_selects_its_clip_and_its_properties_are_in_the_panel() {
     let mut window = window_with_a_text_object();
     let (location, _, _) = text_clip(&window, 0, 1);
-    window.harness.get_by_label("Close window").click();
-    window.settle();
     window.application_mut().selection.clear();
     window.settle();
+    assert!(window.harness.query_by_label(TEXT_BOX_HEADING).is_none());
     let body = window.rectangle_of(&text_object_label(location));
 
     window.click(body.center());
-    assert_eq!(window.application().selected_clip(), Some(location));
-    assert!(
-        window.harness.query_by_label(TEXT_WINDOW).is_none(),
-        "a click only selects"
-    );
 
-    window.double_click(body.center());
-    assert!(
-        window.harness.query_by_label(TEXT_WINDOW).is_some(),
-        "a double click opens the window"
-    );
+    assert_eq!(window.application().selected_clip(), Some(location));
+    assert!(window.harness.query_by_label(TEXT_BOX_HEADING).is_some());
 }
 
 #[test]

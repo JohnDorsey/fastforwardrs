@@ -5,8 +5,13 @@ use std::time::{Duration, Instant};
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::test_window::{Window, project_of};
+use crate::application::commands::Command;
 use crate::application::dialogs::{AfterConfirmation, Dialog};
-use crate::project::{ProjectSettings, SETTINGS, SettingControlKind, Settings, SpedUpClipSound};
+use crate::application::settings_windows::FRAME_RATE_LABEL;
+use crate::project::{
+    FrameRate, Project, ProjectSettings, SETTINGS, SettingControlKind, Settings, SourceMedia, SourceMediaIdentifier,
+    SourceMediaLink, SourceVideoProperties, SpedUpClipSound, TimelineFrameIndex,
+};
 use crate::project_file::read_project_file;
 use crate::settings_file::read_settings_file;
 
@@ -619,4 +624,126 @@ fn a_failed_autosave_says_so_once_and_does_not_try_again_until_the_project_chang
         1,
         "and the file that was there is untouched"
     );
+}
+
+// --- the frame rate of the project ---
+
+fn frame_rate(numerator: u32, denominator: u32) -> FrameRate {
+    FrameRate::new(numerator, denominator).unwrap()
+}
+
+#[test]
+fn the_project_settings_window_has_a_drop_down_list_of_frame_rates_that_shows_the_one_of_the_project() {
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Project settings");
+    assert!(window.harness.query_by_label(FRAME_RATE_LABEL).is_some());
+    assert!(
+        window.harness.query_by_value("30 fps").is_some(),
+        "the video runs at 30"
+    );
+    assert!(
+        window.harness.query_by_label(AUTOSAVE).is_some(),
+        "next to the settings that follow the global ones"
+    );
+
+    window.harness.get_by_value("30 fps").click();
+    window.settle();
+    for usual in [
+        "12 fps",
+        "24 fps",
+        "23.976 fps",
+        "25 fps",
+        "29.97 fps",
+        "50 fps",
+        "59.94 fps",
+        "60 fps",
+    ] {
+        assert!(window.harness.query_by_label(usual).is_some(), "{usual} is offered");
+    }
+}
+
+#[test]
+fn the_global_settings_window_has_no_frame_rate_because_a_project_has_its_own() {
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Global settings");
+    assert!(window.harness.query_by_label(FRAME_RATE_LABEL).is_none());
+}
+
+#[test]
+fn choosing_another_frame_rate_counts_everything_again_and_undoing_it_takes_it_back() {
+    let mut window = Window::showing(project_of(300));
+    let before = window.application().project().clone();
+    window.application_mut().note_everything_is_saved();
+    window.open_from_the_edit_menu("Project settings");
+
+    window.choose_from_the_dropdown_showing("30 fps", "24 fps");
+
+    let project = window.application().project();
+    assert_eq!(project.frame_rate(), frame_rate(24, 1));
+    assert_eq!(project.chosen_frame_rate(), Some(frame_rate(24, 1)));
+    assert_eq!(project.total_frame_count(), 240, "ten seconds, at 24 frames a second");
+    assert!(
+        window.harness.query_by_value("24 fps").is_some(),
+        "the list shows what is chosen"
+    );
+    assert!(window.application().has_unsaved_changes());
+
+    window.do_this(Command::Undo);
+    assert_eq!(window.application().project(), &before);
+    assert!(window.harness.query_by_value("30 fps").is_some());
+    window.do_this(Command::Redo);
+    assert_eq!(window.application().project().frame_rate(), frame_rate(24, 1));
+}
+
+#[test]
+fn the_current_frame_stays_at_the_same_moment_when_the_frame_rate_changes_and_when_that_is_undone() {
+    let mut window = Window::showing(project_of(300));
+    window.move_current_frame_to(150); // five seconds
+    window.open_from_the_edit_menu("Project settings");
+
+    window.choose_from_the_dropdown_showing("30 fps", "15 fps");
+    assert_eq!(window.application().project().frame_rate(), frame_rate(15, 1));
+    assert_eq!(window.current_frame(), 75, "five seconds at 15 frames a second");
+
+    window.do_this(Command::Undo);
+    assert_eq!(window.current_frame(), 150);
+
+    // (The fastest of the usual ones can be reached too: the list is not made to scroll.)
+    window.choose_from_the_dropdown_showing("30 fps", "60 fps");
+    assert_eq!(window.application().project().frame_rate(), frame_rate(60, 1));
+    assert_eq!(window.current_frame(), 300);
+}
+
+#[test]
+fn a_frame_rate_that_is_not_a_usual_one_is_shown_and_listed_in_its_place_among_the_others() {
+    let mut project = Project::empty();
+    project
+        .import_source(
+            SourceMedia::video(
+                SourceMediaIdentifier::new(1),
+                SourceMediaLink::from_absolute_path(std::path::PathBuf::from("holiday.mp4")),
+                SourceVideoProperties {
+                    frame_rate: frame_rate(17, 1),
+                    total_frame_count: 170,
+                    display_width_in_pixels: 640,
+                    display_height_in_pixels: 360,
+                    has_audio: false,
+                },
+            ),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    let mut window = Window::showing(project);
+    window.open_from_the_edit_menu("Project settings");
+    assert!(window.harness.query_by_value("17 fps").is_some());
+
+    window.harness.get_by_value("17 fps").click();
+    window.settle();
+    let top_of = |label: &str| window.rectangle_of(label).top();
+    assert!(
+        top_of("15 fps") < top_of("24 fps") && top_of("12 fps") < top_of("15 fps"),
+        "the usual ones, from the slowest"
+    );
+    let all_items = window.harness.get_all_by_label("17 fps").count();
+    assert!(all_items >= 1);
 }

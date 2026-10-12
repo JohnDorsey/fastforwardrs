@@ -1,38 +1,25 @@
-//! The box at the left of each track: the track's title, which can be changed by typing in it, and
-//! the settings gear that opens the box with the settings of everything on the track. Right-clicking
-//! the box (or its title) opens a menu with Delete track.
+//! The box at the left of each track: the track's title, which can be changed by typing in it. Clicking the
+//! box (or its title) selects the track, which is not the clips on it: the settings of the track are then
+//! shown in the properties panel. Right-clicking the box (or its title) opens a menu with Delete track.
+//! Dragging the box up or down moves the track to another place in the list (see [`super::track_reordering`]),
+//! and so does dragging the title up or down: dragging it along (sideways) selects the text, as it does in any
+//! text box.
 
-use egui::{Button, CornerRadius, Rect, Sense, TextEdit, Ui, UiBuilder, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{
+    Button, CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo, pos2,
+};
 
-use super::TimelineViewState;
-use super::icons::draw_gear;
-use super::settings_boxes::SettingsBoxSubject;
 use crate::application::commands::Command;
+use crate::application::selection::SelectionChange;
 use crate::application::theme;
 use crate::project::Track;
 
-/// How big the gear's button is, in points.
-const GEAR_BUTTON_SIZE: f32 = 28.0;
+/// How tall the box for the title is, in points. (The least a track can be is just taller than this, which a
+/// test checks.)
+pub const TITLE_HEIGHT: f32 = 26.0;
 
-/// How tall the box for the title is, in points.
-const TITLE_HEIGHT: f32 = 26.0;
-
-/// How far the title and the gear keep from the edges of the box, in points.
+/// How far the title keeps from the edges of the box, in points.
 const MARGIN: f32 = 8.0;
-
-/// How tall the box has to be to hold the title and the gear: the taller of the two. (The least a
-/// track can be is just taller than this, which a test checks.)
-#[cfg(test)]
-pub const CONTENT_HEIGHT: f32 = if GEAR_BUTTON_SIZE > TITLE_HEIGHT {
-    GEAR_BUTTON_SIZE
-} else {
-    TITLE_HEIGHT
-};
-
-/// The name the gear's button is known by to screen readers (and the tests): it says which track.
-pub fn gear_label(track_title: &str) -> String {
-    format!("Settings of {track_title}")
-}
 
 /// What the menu of the box of a track offers to delete.
 pub const DELETE_TRACK_LABEL: &str = "Delete track";
@@ -49,49 +36,83 @@ fn show_the_menu(ui: &mut Ui, track: &Track, can_delete: bool, commands: &mut Ve
     }
 }
 
-/// Draws the box of `track` in `header_rectangle`, and adds a command when its title is typed in or
-/// the track is deleted from the menu (`can_delete` says whether it may be: not the last one).
+/// How a click on the box of `track` changes what is selected: the track is selected, and with Ctrl held it
+/// is added to what is selected (or let go of if it was).
+fn select_the_track(ui: &Ui, track: &Track, commands: &mut Vec<Command>) {
+    let adding = ui.input(|input| input.modifiers.command);
+    commands.push(Command::SelectTrack {
+        track: track.id(),
+        change: if adding {
+            SelectionChange::Toggle
+        } else {
+            SelectionChange::Replace
+        },
+    });
+}
+
+/// What a track can be taken hold of by, to be dragged to another place in the list.
+pub(super) struct Handles {
+    /// The box, which is all of it but the title.
+    pub(super) box_round_the_title: Response,
+    /// The title, which is dragged along to select its text and up and down to move the track.
+    pub(super) title: Response,
+}
+
+/// Draws the box of `track` in `header_rectangle` (`is_selected` says whether the track is selected), and adds
+/// a command when it is clicked, when its title is typed in or when the track is deleted from the menu
+/// (`can_delete` says whether it may be: not the last one). Gives what the track can be taken hold of by.
 pub(super) fn show(
     ui: &mut Ui,
     header_rectangle: Rect,
     track: &Track,
-    (can_edit, can_delete): (bool, bool),
-    state: &mut TimelineViewState,
+    (can_edit, can_delete, is_selected): (bool, bool, bool),
     commands: &mut Vec<Command>,
-) {
+) -> Handles {
     ui.painter()
         .rect_filled(header_rectangle, CornerRadius::same(10), theme::TRACK_HEADER_BACKGROUND);
-    // The whole box senses the right button (under the title and the gear, which are put over it).
-    // It takes no clicks of the left: it is only there for the menu.
+    // The whole box senses clicks, and being dragged (under the title, which is put over it).
     let background = ui.interact(
         header_rectangle,
         ui.id().with(("track header", track.id())),
-        if can_edit { Sense::CLICK } else { Sense::hover() },
+        if can_edit {
+            Sense::CLICK | Sense::DRAG
+        } else {
+            Sense::hover()
+        },
     );
     background.context_menu(|ui| show_the_menu(ui, track, can_delete, commands));
+    if background.clicked() {
+        select_the_track(ui, track, commands);
+    }
     let middle_y = header_rectangle.center().y;
 
-    let gear_rectangle = Rect::from_center_size(
-        pos2(header_rectangle.right() - MARGIN - GEAR_BUTTON_SIZE / 2.0, middle_y),
-        vec2(GEAR_BUTTON_SIZE, GEAR_BUTTON_SIZE),
-    );
     let title_rectangle = Rect::from_min_max(
         pos2(header_rectangle.left() + MARGIN, middle_y - TITLE_HEIGHT / 2.0),
-        pos2(gear_rectangle.left() - MARGIN / 2.0, middle_y + TITLE_HEIGHT / 2.0),
+        pos2(header_rectangle.right() - MARGIN, middle_y + TITLE_HEIGHT / 2.0),
     );
 
     // (The box is made in a child of its own, so that putting it here does not move the place the
-    // next track is laid out at, which `Ui::put` would.)
+    // next track is laid out at, which `Ui::put` would. The box has a name that is the track's: otherwise its name,
+    // which what is typed in it and what is being dragged are kept by, would be a number that is counted as the
+    // rows are drawn, and the rows are not always drawn in the order they are in.)
     let mut title = track.title().to_owned();
-    let mut title_ui = ui.new_child(UiBuilder::new().max_rect(title_rectangle));
+    let mut title_ui = ui.new_child(
+        UiBuilder::new()
+            .id_salt(("title of track", track.id()))
+            .max_rect(title_rectangle),
+    );
     let title_response = title_ui.add(
         TextEdit::singleline(&mut title)
+            .id_salt(("the title box of track", track.id()))
             .desired_width(title_rectangle.width())
             .interactive(can_edit),
     );
     title_response
         .widget_info(|| WidgetInfo::text_edit(can_edit, track.title(), title.clone(), "The title of the track"));
     title_response.context_menu(|ui| show_the_menu(ui, track, can_delete, commands));
+    if title_response.clicked() {
+        select_the_track(ui, track, commands);
+    }
     if title != track.title() {
         commands.push(Command::SetTrackTitle {
             track: track.id(),
@@ -99,35 +120,17 @@ pub(super) fn show(
         });
     }
 
-    // Not focusable, so that the keys of the keyboard keep their meanings as shortcuts of the window.
-    let gear = ui.interact(
-        gear_rectangle,
-        ui.id().with(("track settings gear", track.id())),
-        if can_edit { Sense::CLICK } else { Sense::hover() },
-    );
-    gear.widget_info(|| WidgetInfo::labeled(WidgetType::Button, can_edit, gear_label(track.title())));
-    let subject = SettingsBoxSubject::Track(track.id());
-    if gear.clicked() {
-        state.open_settings_box(subject);
+    // The outline goes over the title, as it does over a clip.
+    if is_selected {
+        ui.painter().rect_stroke(
+            header_rectangle,
+            CornerRadius::same(10),
+            Stroke::new(2.0, theme::SELECTION_OUTLINE),
+            StrokeKind::Inside,
+        );
     }
-    let box_is_open = state.settings_box_subject() == Some(subject);
-    if box_is_open {
-        state.point_settings_box_at(subject, gear_rectangle.center_top());
+    Handles {
+        box_round_the_title: background,
+        title: title_response,
     }
-    if gear.hovered() || box_is_open {
-        ui.painter()
-            .rect_filled(gear_rectangle, CornerRadius::same(6), theme::ICON_BUTTON_HOVER);
-    }
-    draw_gear(
-        ui.painter(),
-        gear_rectangle.center(),
-        GEAR_BUTTON_SIZE * 0.36,
-        theme::ICON,
-        if gear.hovered() || box_is_open {
-            theme::ICON_BUTTON_HOVER
-        } else {
-            theme::TRACK_HEADER_BACKGROUND
-        },
-    );
-    gear.on_hover_text("Track settings");
 }

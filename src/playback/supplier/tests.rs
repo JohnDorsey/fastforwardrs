@@ -17,6 +17,7 @@ fn supplier() -> (PictureSupplier<ScriptedStarter>, Script) {
             source: VIDEO,
             video_path: PathBuf::from("holiday.mp4"),
             display_size_in_pixels: (1280, 720),
+            frame_rate: FrameRate::new(25, 1).unwrap(),
         }],
     }));
     (supplier, script)
@@ -78,7 +79,8 @@ fn the_first_request_starts_a_stream_at_the_wanted_picture_that_runs_to_the_end_
         script.requests(),
         vec![FrameStreamRequest {
             video_path: PathBuf::from("holiday.mp4"),
-            frame_rate: FrameRate::new(30, 1).unwrap(),
+            project_frame_rate: FrameRate::new(30, 1).unwrap(),
+            video_frame_rate: FrameRate::new(25, 1).unwrap(),
             first_source_frame: SourceFrameIndex::new(50),
             source_frame_count: 150,
             speed_factor: SpeedFactor::NORMAL,

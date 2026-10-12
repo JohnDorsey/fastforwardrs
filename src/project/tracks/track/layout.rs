@@ -17,6 +17,8 @@ pub(super) struct Anchor {
     pub start: u64,
     /// Whether the clip moves along with the clip before it, so that it starts where that ends.
     pub moves_along: bool,
+    /// How many frames of the timeline the clip lasted, which is what its keyframes were counted against.
+    pub length: u64,
 }
 
 impl Track {
@@ -29,6 +31,7 @@ impl Track {
             .map(|(index, entry)| Anchor {
                 start: self.first_timeline_frames[index],
                 moves_along: index > 0 && entry.gap_before_frames == 0 && entry.clip.is_media(),
+                length: entry.clip.timeline_frame_count(self.speed),
             })
             .collect()
     }
@@ -46,7 +49,12 @@ impl Track {
                 anchor.start.max(previous_end)
             };
             entry.gap_before_frames = start - previous_end;
-            previous_end = start + entry.clip.timeline_frame_count(track_speed);
+            let length = entry.clip.timeline_frame_count(track_speed);
+            if length != anchor.length {
+                // The clip got longer or shorter: its keyframes are as far through it as they were.
+                entry.animation = entry.animation.rescaled(anchor.length, length);
+            }
+            previous_end = start + length;
         }
         self.rebuild_derived_values();
     }

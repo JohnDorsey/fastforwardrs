@@ -106,11 +106,13 @@ mod tests {
                     source: VIDEO,
                     video_path: PathBuf::from("holiday.mp4"),
                     display_size_in_pixels: (1280, 720),
+                    frame_rate: FrameRate::new(30, 1).unwrap(),
                 },
                 PreviewVideo {
                     source: ANOTHER_VIDEO,
                     video_path: PathBuf::from("birthday.mp4"),
                     display_size_in_pixels: (720, 1280),
+                    frame_rate: FrameRate::new(25, 1).unwrap(),
                 },
             ],
         }

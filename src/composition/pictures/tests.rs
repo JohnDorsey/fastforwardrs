@@ -1,13 +1,13 @@
 use super::*;
 use crate::composition::test_projects::{
     LONG_VIDEO, LONG_VIDEO_FRAME_COUNT, SHORT_SILENT_VIDEO, SHORT_VIDEO_FRAME_COUNT, TALL_VIDEO, WIDE_PICTURE,
-    media_clip, project_of, random_project_with_places,
+    media_clip, project_of, random_project_with_places, random_project_with_places_and_keyframes,
 };
 use crate::project::tracks::{Angle, CanvasArea, ClipId, ImageClip, Placement, TextClip, TrackId};
-use crate::project::{SourceMediaIdentifier, fitted_placement};
+use crate::project::{AnimationTarget, SourceMediaIdentifier, fitted_placement, with_placement_value};
 use crate::test_support::DeterministicRandomNumbers;
 
-fn frame(number: u64) -> TimelineFrameIndex {
+pub(super) fn frame(number: u64) -> TimelineFrameIndex {
     TimelineFrameIndex::new(number)
 }
 
@@ -19,29 +19,29 @@ fn video(source: SourceMediaIdentifier, first: u64, end: u64, factor: u32) -> Cl
     Clip::Video(media_clip(source, first, end, factor))
 }
 
-fn long_video(first: u64, end: u64, factor: u32) -> Clip {
+pub(super) fn long_video(first: u64, end: u64, factor: u32) -> Clip {
     video(LONG_VIDEO, first, end, factor)
 }
 
 /// A video that stands upright, so it does not fill the picture, which is wide.
-fn tall_video(first: u64, end: u64) -> Clip {
+pub(super) fn tall_video(first: u64, end: u64) -> Clip {
     video(TALL_VIDEO, first, end, 1)
 }
 
 /// A long video that was put at `placement`.
-fn long_video_placed(first: u64, end: u64, placement: Placement) -> Clip {
+pub(super) fn long_video_placed(first: u64, end: u64, placement: Placement) -> Clip {
     Clip::Video(media_clip(LONG_VIDEO, first, end, 1).with_placement(Some(placement)))
 }
 
-fn over_the_whole_picture() -> Placement {
+pub(super) fn over_the_whole_picture() -> Placement {
     Placement::upright(CanvasArea::WHOLE_PICTURE)
 }
 
-fn text(duration: u64) -> Clip {
+pub(super) fn text(duration: u64) -> Clip {
     Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
 }
 
-fn plan(project: &Project) -> PicturePlan {
+pub(super) fn plan(project: &Project) -> PicturePlan {
     plan_pictures(project, |_| true)
 }
 
@@ -192,7 +192,7 @@ fn text_in_front_of_a_video_is_over_it_and_text_behind_it_is_hidden() {
         ],
         "only the text in front is ever seen, and not when it is not there"
     );
-    assert_eq!(plan.sections[1].layers[1].clip.track, TrackId::new(0));
+    assert_eq!(plan.sections[1].layers[1].track, TrackId::new(0));
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn text_over_black_is_all_there_with_the_one_at_the_back_first() {
         .unwrap()
         .layers
         .iter()
-        .map(|layer| layer.clip.track)
+        .map(|layer| layer.track)
         .collect();
     assert_eq!(
         tracks_of_texts_in_the_middle,
@@ -406,7 +406,7 @@ fn only_the_layers_in_front_of_the_front_most_one_that_covers_the_picture_are_ke
         vec![(0, text(40))],
     ]);
     let plan = plan(&project);
-    let tracks: Vec<TrackId> = plan.sections[0].layers.iter().map(|layer| layer.clip.track).collect();
+    let tracks: Vec<TrackId> = plan.sections[0].layers.iter().map(|layer| layer.track).collect();
     assert_eq!(tracks, vec![TrackId::new(2), TrackId::new(1), TrackId::new(0)]);
 }
 
@@ -583,7 +583,7 @@ fn where_a_video_has_run_out_it_is_as_if_it_were_not_there_so_what_was_behind_it
             .unwrap()
             .layers
             .iter()
-            .map(|layer| layer.clip.track)
+            .map(|layer| layer.track)
             .collect()
     };
     assert_eq!(
@@ -683,21 +683,22 @@ fn a_file_that_cannot_be_used_shows_nothing_wherever_it_is_used() {
 /// video, where it is on the picture), the one at the back first, and whether some video that is
 /// in front of what is seen has no picture to show.
 ///
-/// A video that fills the picture and is not turned hides everything behind it, and a video
-/// that has no picture to show is not there.
-fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipLocation, Option<u64>, Placement)>, bool) {
+/// A video that fills the picture, is not turned and is not moved about by keyframes hides everything behind it, and a
+/// video that has no picture to show is not there.
+fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<u64>, Placement)>, bool) {
     let mut front_to_back = Vec::new();
     let mut a_picture_is_missing = false;
     for track in project.tracks() {
         let Some(placement) = track.placement_covering(frame(timeline_frame)) else {
             continue;
         };
-        let location = ClipLocation {
-            track: track.id(),
-            clip: placement.id,
-        };
+        let location = placement.id;
         match placement.clip {
-            Clip::Text(text) => front_to_back.push((location, None, text.object.placement())),
+            Clip::Text(text) => front_to_back.push((
+                location,
+                None,
+                plain_place(project, location, text.object.placement(), timeline_frame),
+            )),
             Clip::Image(image) => {
                 let shown_size = project
                     .source(image.source())
@@ -708,7 +709,7 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipLocation, O
                 let place = image
                     .placement()
                     .unwrap_or_else(|| fitted_placement(shown_size, project.picture_size()));
-                front_to_back.push((location, None, place));
+                front_to_back.push((location, None, plain_place(project, location, place, timeline_frame)));
             }
             Clip::Video(media) => {
                 let source_frame = placement.source_frame_at(frame(timeline_frame)).unwrap().value();
@@ -727,8 +728,17 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipLocation, O
                 let place = media
                     .placement()
                     .unwrap_or_else(|| fitted_placement(shown_size, project.picture_size()));
-                front_to_back.push((location, Some(source_frame), place));
-                if place.rotation.is_zero() && place.area == CanvasArea::WHOLE_PICTURE {
+                front_to_back.push((
+                    location,
+                    Some(source_frame),
+                    plain_place(project, location, place, timeline_frame),
+                ));
+                if place.rotation.is_zero()
+                    && place.area == CanvasArea::WHOLE_PICTURE
+                    && !PROPERTIES_OF_WHERE_A_LAYER_IS
+                        .into_iter()
+                        .any(|property| project.is_animated(AnimationTarget::Clip(location), property))
+                {
                     break;
                 }
             }
@@ -739,11 +749,41 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipLocation, O
     (front_to_back, a_picture_is_missing)
 }
 
+/// Where the clip `clip` is on the picture at `timeline_frame`, worked out the plain way: where it says it is, with what
+/// each of the properties of where it is that has keyframes says (the project knows) put in, one after another.
+fn plain_place(project: &Project, clip: ClipId, says: Placement, timeline_frame: u64) -> Placement {
+    let target = AnimationTarget::Clip(clip);
+    PROPERTIES_OF_WHERE_A_LAYER_IS
+        .into_iter()
+        .filter(|property| project.is_animated(target, *property))
+        .fold(says, |place, property| {
+            let value = project
+                .property_value_at(target, property, frame(timeline_frame))
+                .expect("a property that is animated has a value");
+            with_placement_value(place, property, &value)
+        })
+}
+
 #[test]
 fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at_a_time_shows() {
+    check_that_the_plan_shows_what_looking_at_one_frame_at_a_time_shows(0, random_project_with_places);
+}
+
+#[test]
+fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at_a_time_shows_when_keyframes_move_things_about()
+ {
+    check_that_the_plan_shows_what_looking_at_one_frame_at_a_time_shows(7000, random_project_with_places_and_keyframes);
+}
+
+/// Checks the plans of 300 projects made at random, whose seeds begin after `first_seed_after`, against what looking at
+/// each frame of the tracks shows.
+fn check_that_the_plan_shows_what_looking_at_one_frame_at_a_time_shows(
+    first_seed_after: u64,
+    make_project: fn(&mut DeterministicRandomNumbers) -> Project,
+) {
     for seed in 1..=300u64 {
-        let mut random = DeterministicRandomNumbers::with_seed(seed);
-        let project = random_project_with_places(&mut random);
+        let mut random = DeterministicRandomNumbers::with_seed(seed + first_seed_after);
+        let project = make_project(&mut random);
         let plan = plan(&project);
         let describe = || format!("seed {seed}: tracks {:?}", project.tracks());
 
@@ -766,7 +806,7 @@ fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at
             let section = plan.section_at(frame(timeline_frame)).unwrap();
             let (expected_layers, a_picture_is_missing) = plainly_seen(&project, timeline_frame);
             frames_missing_a_picture += u64::from(a_picture_is_missing);
-            let seen_layers: Vec<(ClipLocation, Option<u64>, Placement)> = section
+            let seen_layers: Vec<(ClipId, Option<u64>, Placement)> = section
                 .layers
                 .iter()
                 .map(|layer| {
@@ -775,7 +815,7 @@ fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at
                         layer
                             .video()
                             .map(|video| section.source_frame_at(video, frame(timeline_frame)).unwrap()),
-                        layer.placement,
+                        layer.placement_at(frame(timeline_frame)),
                     )
                 })
                 .collect();
@@ -872,13 +912,7 @@ fn nothing_is_split_that_does_not_need_to_be() {
 fn clip_numbers_are_the_clips_own() {
     let project = project_of(vec![vec![(0, long_video(0, 10, 1))]]);
     let section = &plan(&project).sections[0];
-    assert_eq!(
-        section.layers[0].clip,
-        ClipLocation {
-            track: TrackId::new(0),
-            clip: ClipId::new(0)
-        }
-    );
+    assert_eq!(section.layers[0].clip, ClipId::new(TrackId::new(0), 0));
     assert_eq!(section.layers[0].video().unwrap().source, LONG_VIDEO);
     assert_eq!(LONG_VIDEO_FRAME_COUNT, 300);
 }
@@ -893,7 +927,7 @@ fn the_front_most_video_is_the_last_of_the_video_layers_and_there_is_none_withou
     let planned = plan(&project);
     let (layer, video) = planned.sections[0].front_video().unwrap();
     assert_eq!(video.source, TALL_VIDEO);
-    assert_eq!(layer.clip.track, TrackId::new(1));
+    assert_eq!(layer.track, TrackId::new(1));
     assert_eq!(planned.sections[0].layers.len(), 3);
     assert_eq!(planned.sections[0].video_layers().count(), 2);
 

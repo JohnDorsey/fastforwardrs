@@ -4,6 +4,7 @@
 //! (without ever touching the real mouse).
 
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use egui::accesskit::{Action, ActionData, ActionRequest, Role};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Shape, vec2};
@@ -14,15 +15,20 @@ use super::{FastForwardApplication, SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::file_chooser::ScriptedFileChooser;
 use crate::application::theme;
-use crate::application::timeline_panel::{gear_label, strip_label};
+use crate::application::timeline_panel::strip_label;
 use crate::media::ToolchainError;
+use crate::playback::{SpeakersLog, speakers_that_only_keep_a_log};
 use crate::project::{
-    ClipLocation, FrameRate, Project, SourceAudioProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    ClipId, FrameRate, Project, SourceAudioProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
     SourceVideoProperties, SpeedFactor, TimelineFrameIndex,
 };
 
 pub(super) const WINDOW_SIZE: [f32; 2] = [1280.0, 820.0];
 pub(super) const FRAMES_PER_SECOND: u32 = 30;
+
+/// What the window of the tests puts round the whole of what the editor draws, in points (the real window does
+/// not: the panels are 6 points from its edges, which are these edges' 6 points more than this).
+pub(super) const MARGIN_THE_TEST_WINDOW_HAS_ROUND_ITS_EDGES: f32 = 8.0;
 
 /// The video that [`project_of`] is made from.
 pub(super) const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
@@ -32,14 +38,19 @@ pub(super) const SOUND: SourceMediaIdentifier = SourceMediaIdentifier::new(2);
 
 /// A video of `total_frames` frames that is 1280x720 at 30 frames per second, with sound.
 pub(super) fn video_source(total_frames: u64) -> SourceMedia {
+    video_source_shown_at(total_frames, 1280, 720)
+}
+
+/// A video like [`video_source`] that is shown `width` by `height` pixels.
+pub(super) fn video_source_shown_at(total_frames: u64, width: u32, height: u32) -> SourceMedia {
     SourceMedia::video(
         VIDEO,
         SourceMediaLink::from_absolute_path(PathBuf::from("holiday.mp4")),
         SourceVideoProperties {
             frame_rate: FrameRate::from_whole_frames_per_second(FRAMES_PER_SECOND).unwrap(),
             total_frame_count: total_frames,
-            display_width_in_pixels: 1280,
-            display_height_in_pixels: 720,
+            display_width_in_pixels: width,
+            display_height_in_pixels: height,
             has_audio: true,
         },
     )
@@ -62,6 +73,19 @@ pub(super) fn project_of(total_frames: u64) -> Project {
     let mut project = Project::empty();
     project
         .import_source(video_source(total_frames), TimelineFrameIndex::new(0))
+        .unwrap();
+    project
+}
+
+/// A project of `total_frames` frames from a video that is 720x1280, standing up, at 30 frames per second,
+/// as one clip on its one track: the picture is tall, and the preview has room at the sides of it.
+pub(super) fn portrait_project_of(total_frames: u64) -> Project {
+    let mut project = Project::empty();
+    project
+        .import_source(
+            video_source_shown_at(total_frames, 720, 1280),
+            TimelineFrameIndex::new(0),
+        )
         .unwrap();
     project
 }
@@ -174,6 +198,14 @@ impl Window {
         self.harness.state_mut()
     }
 
+    /// Has the editor play its own little sounds (the snip of a cut) through speakers that make no sound and keep
+    /// a log of what they were asked to play, which is what this gives.
+    pub(super) fn log_the_sound_effects(&mut self) -> Rc<SpeakersLog> {
+        let (opener, log) = speakers_that_only_keep_a_log(48000);
+        self.application_mut().play_effects_through(opener);
+        log
+    }
+
     /// Makes the editor ask `chooser` for files, in place of the one that fails when it is asked.
     pub(super) fn use_file_chooser(&mut self, chooser: &ScriptedFileChooser) {
         self.application_mut().file_chooser = Box::new(chooser.clone());
@@ -196,6 +228,54 @@ impl Window {
 
     pub(super) fn rectangle_of(&self, label: &str) -> Rect {
         self.harness.get_by_label(label).rect()
+    }
+
+    // --- the panels ---
+
+    /// The rectangles drawn in the colour of panels that are big enough to be panels (and not the menu bar).
+    pub(super) fn panels(&self) -> Vec<Rect> {
+        self.harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::Rect(rectangle)
+                    if rectangle.fill == theme::PANEL_BACKGROUND
+                        && rectangle.rect.width() > 200.0
+                        && rectangle.rect.height() > 100.0 =>
+                {
+                    Some(rectangle.rect)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// What the timeline is drawn on: the panel along the bottom, which is the widest.
+    pub(super) fn the_timeline_panel(&self) -> Rect {
+        *self
+            .panels()
+            .iter()
+            .max_by(|first, second| first.width().total_cmp(&second.width()))
+            .expect("the panels are drawn")
+    }
+
+    /// The two panels above the timeline, the one at the left first: the properties and the preview.
+    fn the_panels_above_the_timeline(&self) -> [Rect; 2] {
+        let timeline = self.the_timeline_panel();
+        let mut above: Vec<Rect> = self.panels().into_iter().filter(|panel| *panel != timeline).collect();
+        above.sort_by(|first, second| first.left().total_cmp(&second.left()));
+        above.try_into().expect("two panels are above the timeline")
+    }
+
+    /// What the properties are drawn on: the left of the two panels above the timeline.
+    pub(super) fn the_properties_panel(&self) -> Rect {
+        self.the_panels_above_the_timeline()[0]
+    }
+
+    /// What the preview is drawn on: the right of the two panels above the timeline.
+    pub(super) fn the_preview_panel(&self) -> Rect {
+        self.the_panels_above_the_timeline()[1]
     }
 
     // --- the mouse ---
@@ -251,16 +331,6 @@ impl Window {
         self.settle();
     }
 
-    /// Clicks twice in a row, quickly enough to be a double click.
-    pub(super) fn double_click(&mut self, position: Pos2) {
-        self.move_pointer_to(position);
-        for _ in 0..2 {
-            self.press(position, PointerButton::Primary);
-            self.release(position, PointerButton::Primary);
-        }
-        self.settle();
-    }
-
     fn click_with(&mut self, position: Pos2, button: PointerButton) {
         self.move_pointer_to(position);
         self.press(position, button);
@@ -309,6 +379,13 @@ impl Window {
     }
 
     // --- the keyboard ---
+
+    /// Presses `key` after a click on the preview's empty place, which takes the keyboard away from whatever
+    /// text was being typed in (the keys are the text's while it is), so that the key is the window's.
+    pub(super) fn press_key_outside_the_text(&mut self, key: Key) {
+        self.click(Pos2::new(WINDOW_SIZE[0] - 20.0, 120.0));
+        self.press_key(key);
+    }
 
     pub(super) fn press_key(&mut self, key: Key) {
         self.harness.key_press(key);
@@ -372,15 +449,12 @@ impl Window {
     }
 
     /// The `index`th clip of the track at `position`.
-    pub(super) fn clip(&self, position: usize, index: usize) -> ClipLocation {
+    pub(super) fn clip(&self, position: usize, index: usize) -> ClipId {
         let track = &self.application().project.tracks()[position];
-        ClipLocation {
-            track: track.id(),
-            clip: track
-                .placement_at_index(index)
-                .expect("the track has that many clips")
-                .id,
-        }
+        track
+            .placement_at_index(index)
+            .expect("the track has that many clips")
+            .id
     }
 
     pub(super) fn current_frame(&self) -> u64 {
@@ -405,14 +479,16 @@ impl Window {
             .unwrap_or_else(|| panic!("no text field shows {shown:?}"))
     }
 
+    /// Selects the track at `position` by clicking its box beside the title, which is typed in when it is
+    /// clicked (the box has the same room again round the title).
+    pub(super) fn select_the_track_at(&mut self, position: usize) {
+        let title = self.title_box_of_track(position);
+        self.click(Pos2::new(title.left() - 4.0, title.center().y));
+    }
+
     /// The box with the title of the track at `position` in it.
     pub(super) fn title_box_of_track(&self, position: usize) -> Rect {
         self.text_field_showing(&self.title_of_track(position)).rect()
-    }
-
-    /// The settings gear of the track at `position`.
-    pub(super) fn gear_of_track(&self, position: usize) -> Rect {
-        self.rectangle_of(&gear_label(&self.title_of_track(position)))
     }
 
     /// Where, on screen, the start of timeline frame `frame` is along the strip of the track at
@@ -445,18 +521,36 @@ impl Window {
         )
     }
 
+    /// Whether the window asked, when it drew the last frame, to be drawn again at once, as it does while
+    /// something is moving (and does not while all is still).
+    pub(super) fn repaint_is_wanted_at_once(&self) -> bool {
+        self.harness
+            .output()
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|viewport| viewport.repaint_delay.is_zero())
+    }
+
     /// Every shape that was drawn in the last frame, in the order they were drawn. (Shapes that
     /// were grouped are listed one by one.)
     pub(super) fn shapes_drawn(&self) -> Vec<&Shape> {
-        fn add_to<'a>(shape: &'a Shape, shapes: &mut Vec<&'a Shape>) {
+        self.clipped_shapes_drawn()
+            .into_iter()
+            .map(|(_, shape)| shape)
+            .collect()
+    }
+
+    /// Like [`Self::shapes_drawn`], with the rectangle each was cut off at when it was drawn.
+    pub(super) fn clipped_shapes_drawn(&self) -> Vec<(Rect, &Shape)> {
+        fn add_to<'a>(clip_rect: Rect, shape: &'a Shape, shapes: &mut Vec<(Rect, &'a Shape)>) {
             match shape {
-                Shape::Vec(inner) => inner.iter().for_each(|shape| add_to(shape, shapes)),
-                other => shapes.push(other),
+                Shape::Vec(inner) => inner.iter().for_each(|shape| add_to(clip_rect, shape, shapes)),
+                other => shapes.push((clip_rect, other)),
             }
         }
         let mut shapes = Vec::new();
         for clipped in &self.harness.output().shapes {
-            add_to(&clipped.shape, &mut shapes);
+            add_to(clipped.clip_rect, &clipped.shape, &mut shapes);
         }
         shapes
     }

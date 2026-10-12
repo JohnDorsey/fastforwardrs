@@ -101,7 +101,7 @@ impl FastForwardApplication {
         let plan = match plan {
             Ok(plan) => plan,
             Err(error) => {
-                self.show_message("There is nothing to export", error.to_string());
+                self.show_message(error.heading(), error.to_string());
                 return;
             }
         };

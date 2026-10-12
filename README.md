@@ -6,8 +6,11 @@ Open a video, cut it into clips, and make any clip play 2x, 4x, 10x... faster; e
 clips show a fast-forward symbol with their speed (like ▶▶ 4x), in the live preview and in the exported video.
 The preview plays the sound too. A project can have several **tracks**, and on them videos, sound files,
 **pictures** and **text objects**, which are put together in front-to-back order: a video or a picture (or a
-text) can be made smaller, moved and **turned** on the picture, so that what is behind it shows. Every edit can
-be undone.
+text) can be made smaller, moved (even partly past the edge of the picture) and **turned** on the picture, so
+that what is behind it shows. The window is divided into **panels**: the timeline along the bottom, the preview at
+the top right and, at the top left, the **properties** of whatever is selected. Most properties (how loud a clip is,
+where it is on the picture, how big and how far turned, what a text says and how it looks) can be **animated** with
+**keyframes**. Every edit can be undone.
 
 ## Status
 
@@ -43,7 +46,7 @@ cargo run --release -- "C:\path\to\project.json"     # open a project straight a
   * *New project* asks for a video or sound file straight away.
   * *Import* asks for a video, a sound file or a **picture** (PNG, JPEG, BMP, WebP or TIFF) and puts **all of
     it on the timeline at the current frame**: on the front-most track that has nothing on it, or on a new track in
-    front of all the others. A picture is shown for five seconds (change that in its box, see below).
+    front of all the others. A picture is shown for five seconds (change that in its properties, see below).
   * *Export* asks where to save the finished video (`.mp4`, `.mkv` or `.mov`) and shows its progress, with a
     Cancel button.
   * Loading, starting a new project and closing the window ask first if there are changes that have not been
@@ -51,35 +54,45 @@ cargo run --release -- "C:\path\to\project.json"     # open a project straight a
 * **Edit**: *Undo* and *Redo*, *Deselect* (with its key, **Esc**, shown beside it; it can be used while a clip is
   selected), *Project settings* and *Global settings*, which open little windows (see *Settings*).
 
-**The window** is the preview in the middle, and along the bottom the Stop / Play / Pause buttons with the
-current time next to them (`hh:mm:ss.ff`, where `ff` is the frame within that second), then the timeline (a round
-**+** button, a ruler, and a row for every track), then a slider that spans the whole window.
+**The window** is divided into three **panels**, each in a lighter grey than the space between them (which is 6
+points wide, and goes round every panel too): the **properties panel** at the top left, the **preview** at the top
+right, and along the bottom the **timeline panel**, which has the Stop / Play / Pause buttons with the current time
+next to them (`hh:mm:ss.ff`, where `ff` is the frame within that second), then the timeline (a round **+** button,
+a ruler, and a row for every track), then a slider that spans the whole panel. The properties panel shows the
+properties of what is selected, in a box headed with what it is: *Video clip*, *Sound clip*, *Picture clip*, *Text
+object* or *Track* (and asks you to select something when nothing is). When several things are selected it lists
+them inside a yellow outline instead, and has nothing to change: click an entry of the list to select just that one.
 
 | To... | Do this |
 |---|---|
 | play or pause | press **Space** (or the buttons) |
 | move the playhead | **click or drag in the ruler** (the strip with the marks, where the red triangle sits); or press **Left** / **Right** to move it one frame back or forward, paused or playing (holding the key repeats); or drag the slider along the bottom |
 | undo and redo | **Ctrl+Z** undoes the latest edit; **Ctrl+Y** (or **Ctrl+Shift+Z**) does it again; or use the Edit menu. Everything that changes the project is an edit: cutting, deleting, moving, speeds, volumes, tracks (their titles, settings, heights, adding and deleting them), text, where things are on the picture, importing a file and the fast-forward symbol. Dragging a clip or a slider, or typing a title, is one edit however long it goes on. **Not** edits: the settings of the program and of the project, and choosing a missing file again. |
-| cut | press **S**: the selected clips that are at the playhead are cut there; if none is, every clip under the playhead, on every track, is cut |
+| cut | press **S**: the selected clips that are at the playhead are cut there; if none is, every clip under the playhead, on every track, is cut. A cut makes a short **snip** sound (once, however many clips were cut; nothing if nothing was cut) and a quick **flash of white light** at the playhead on each track that was cut, which fades in about a third of a second (0.3 s) |
 | select clips | **click** a clip; **Ctrl+click** adds a clip to the selection or takes it away; or **drag a rectangle** from any empty place on the timeline (also from the gaps between tracks) to select every clip it touches, on any track (hold Ctrl to keep what was selected). Clicking an empty part of a track, pressing **Esc** or choosing *Edit > Deselect* selects nothing. Selected clips have a bright outline. |
+| select a track | **click its box** (the one at the left of the track, with its title in it): the track is selected, with a bright outline round its box, and its properties are in the properties panel. Selecting a track does not select what is on it, and the keys that cut and delete are about clips only. **Ctrl+click** adds a track to the selection or takes it away. (Clicking the title itself also lets you type in it, which makes the keys the title's.) |
 | delete clips | select them and press **Delete** (or **Backspace**). The clips that touch the end of a deleted video or sound clip move up to close the gap; a gap, a picture or a text object stops that. |
-| move clips | **drag** a clip along its track. It cannot go onto another clip (it stops against it) or before the start of the timeline. If several are selected they all move together (and stop together). Clips cannot be moved onto another track. |
-| change a clip's speed, loudness or mute | **right-click** the clip: a box opens right above it, with a pointer at the clip. It has a speed slider (1x to 1000x, whole numbers), a gain slider (−30 to +30 dB with no change in the middle) and a *Mute* box. If several clips are selected and it is one of them, what is changed is changed for all of them. Click anywhere else, or press Esc, to close it. |
-| change how long a picture is shown | **right-click** its clip: the box has *Shown for*, in seconds (the picture is shown for as long as there is room before the next clip on its track). |
-| change the settings of a whole track | press the **gear** in the box at the left of the track. The box that opens above it has the track's gain, speed and *Mute*: they apply to everything on the track, on top of each clip's own. The speed of a clip is its own speed times its track's, and that product is what the fast-forward symbol shows. |
+| move clips | **drag** a clip along its track, or **onto another track** (any kind of clip can be on any track): it follows the pointer up and down the rows as well as along them. It cannot go onto another clip (it stops against it) or before the start of the timeline, and a track where it would not fit is not gone onto. If several are selected they all move together, by the same number of tracks and frames (and stop together). A clip keeps its settings and its place on the picture when it changes track, and lasts as long on the timeline as the speed of the track it is on makes it. Dragging never makes a new track. **A clip dragged to another track is held to the time it started at**, as a magnet holds iron: it can be moved left and right, but when it gets within a few points of that time it snaps back to it, until the button is let go (after that it is wherever it was put). A clip that was dragged a good way along its own track before it was taken across (more than 96 points) has no such time, and a clip that has been on another track is held to its start time on every track, its first included. |
+| change the order of the tracks | **drag a track's title box** (the box at the left of the track, not the words in it) **up or down**: the whole track follows the pointer, and the other tracks move out of its way, quickly, to where the track was taken from, as it passes over them. When it is let go it is put where it was, between the tracks it is over, and the tracks are as they were in every other way (this is one edit, and can be undone). A drag that is more along than up and down is a click, or a selection of the words, as before. The list scrolls if the track is taken to the top or the bottom of it. |
+| open the drawer of a clip | every clip has a wide, thin **button over its bottom edge** (about five times as wide as it is tall; it covers less than half of the clip on the least tall track): click it and the **drawer** slides out under the clip, in a fraction of a second, as wide as the clip and with its outer corners as round as the clip's; click it again to shut it. The drawers have nothing in them yet: they are for the keyframes of the clip, which will be shown in them one day. Which drawers are open is not saved and is not an edit. A track is as tall as its open drawers need. |
+| change a clip's speed, loudness or mute | **select** the clip (a click on it, on the timeline or on the preview): its properties are in the properties panel, which has a speed slider (1x to 1000x, whole numbers), a gain slider (−30 to +30 dB with no change in the middle) and a *Mute* box, and says which file the clip is from (and, if that cannot be found, offers to choose it again). With several clips selected the panel only lists them. (A right-click on a clip selects it too, unless it is one of several that are selected.) |
+| change how long a picture is shown | select its clip: the properties have *Shown for*, in seconds (the picture is shown for as long as there is room before the next clip on its track). |
+| change the settings of a whole track | **select the track** (click its box at the left of it): the properties panel has the track's gain, speed and *Mute*, which apply to everything on the track, on top of each clip's own. The speed of a clip is its own speed times its track's, and that product is what the fast-forward symbol shows. |
 | rename a track | type in its **title box** (new tracks are called `track 0`, `track 1`, ...) |
-| make a track taller or shorter | drag the **boundary** under its title box. A track can be made as short as its title and gear need, or half as tall again as a new one. A video on a shorter track is drawn with smaller pictures, taken more often. |
+| make a track taller or shorter | drag the **boundary** under its title box. A track can be made as short as its title needs, or half as tall again as a new one. A video on a shorter track is drawn with smaller pictures, taken more often. |
 | add a track | press the big round **+** above the list of tracks; the new track goes in front of the others, at the top |
 | delete a track | **right-click** its title box (or the box's empty part) and choose *Delete track*: the track and everything on it go (the files stay part of the project). The only track cannot be deleted. |
-| make a text object | **right-click an empty part of a track**, choose *New* and then *Text object*. It lasts three seconds (or until the next clip), is selected, and its window opens. |
-| change a text object | its window (it opens when the object is made, and again on a double click or right click on its clip, or a double click on it in the preview) has the words, the font, the size in points (on a picture 1080 tall), the colour and for how long it is shown |
-| pick, move, resize and turn something on the preview | **click** a video, a picture or a text object on the preview to select it (or select its clip on the timeline): it shows an outline and a square at each of its four corners. **Drag it** to move it; drag a **corner** to resize it from that corner (a video or a picture keeps its shape, text takes whatever shape you drag it to); drag from **just outside a corner** (a faint ring appears) to **turn** it about its middle, clockwise or not, with its angle shown beside the pointer, and with **Shift** held to turn it by 15 degrees at a time. A video that has not been touched fills the picture (or as much of it as its shape lets it). What is turned is cut off at the edge of the picture. |
+| make a text object | **right-click an empty part of a track**, choose *New* and then *Text object*. It lasts three seconds (or until the next clip) and is selected, so that its properties are in the properties panel. |
+| change a text object | select it: its properties have the words, the font, the size in points (on a picture 1080 tall), the colour, for how long it is shown, and where it is (see below) |
+| set where something is on the picture with numbers | a video, a picture or a text object has the rows *Position* (where its middle is, as percentages of the picture across and down), *Size* (how wide and tall it is, in percentages of the picture; *Box size* for a text object, whose letters have a size of their own) and *Rotation* (in degrees, clockwise), which show where it is at the playhead, and can be dragged or typed in. It is the same as dragging it on the preview. |
+| **animate** a property | **move the pointer over a control** whose property can be animated (how loud a clip or a track is, whether it is muted, where a video, picture or text object is, how big, how far turned, what a text says, its font, the size and the colour of its letters): three little buttons come to the right of it, an **arrow to the left**, a **stopwatch** and an **arrow to the right**. The stopwatch is **grey** when the property has no keyframe at the playhead and **bright orange** when it has: click it to make one (with what the property is there) or, when it is orange, to take it away. The arrows are orange when the property has a keyframe before (or after) the playhead, however far off, and grey when it has not: click one to go to that keyframe. Once a property has keyframes the control shows what it is **at the playhead**, and changing it there (with the control, or by dragging the thing on the preview) makes or changes the keyframe at the playhead; the keyframes at other frames are as they were. What has no keyframes is changed for the whole clip, as it always was. A control of a property that has keyframes cannot be changed where the playhead is not on the clip (there is nowhere to put a keyframe), and is dimmed there. The speed of a clip or a track and for how long something is shown cannot be animated (that would move the keyframes about). |
+| pick, move, resize and turn something on the preview | **click** a video, a picture or a text object on the preview to select it (or select its clip on the timeline): it shows an outline and a square at each of its four corners. **Drag it** to move it, **past the edge of the picture** if you like (it stops when its middle is at the edge, so that it can always be found again); drag a **corner** to resize it from that corner, out past the edge as well (a video or a picture keeps its shape, text takes whatever shape you drag it to, and nothing can be made bigger than the picture); drag from **just outside a corner** (a faint ring appears) to **turn** it about its middle, clockwise or not, with its angle shown beside the pointer, and with **Shift** held to turn it by 15 degrees at a time. A video that has not been touched fills the picture (or as much of it as its shape lets it). What is past the edge of the picture is not seen, and is cut off in the export, as what is turned and sticks out is. **The outline and the corners of what is selected are drawn, and can be taken hold of, wherever they are in the window**, over the other panels too, so that a corner far past the edge of the picture can still be dragged. What is not selected can only be taken hold of where it is over the picture. |
 | zoom the timeline | **Ctrl + the mouse wheel** over the ruler or a track zooms in and out about the pointer (from some minutes across the whole window to a few frames across it, with a mark for every frame). The ruler's marks, and its time labels (`m:ss`), follow the zoom. |
 | scroll the timeline | the mouse wheel over the ruler or a track scrolls it along without moving the playhead; **Alt + the mouse wheel** (or the thin scroll bar at the right, with more than three tracks) moves the rows up and down |
 | move or resize the fast-forward symbol | move the pointer over it in the preview (it is shown while the video that is in front is sped up), then drag it, or drag its corner. There is one symbol position and size for the whole project. |
 
-None of the keys works while a text field is being typed in or while one of the boxes or windows that have
-controls of their own (a clip's box, a track's box, the window of a text object) is open: they are the box's.
+None of the keys works while a text field is being typed in (the title of a track, the words of a text object) or
+while a menu or a drop-down list is open: they are its.
 
 **Tracks.** The tracks are drawn in front-to-back order: tracks higher in the list are in front of those below.
 A track is a row of clips that may have empty time between them (and never two clips at the same time), and a
@@ -88,15 +101,17 @@ mixture. A video clip is drawn as a row of pictures from the video, one for ever
 video, side by side with no gaps (or more often, when you zoom in or make the track shorter); a sound clip is
 drawn as the **waveform** of its sound, dark blue on pale violet; a picture clip is violet, with the picture once
 and the name of its file; a text clip is teal, with what it says; a clip whose file cannot be found is dull red
-with the file's name. Every clip has its corners rounded and its top and left edges lit, so that dark clips can be
-told apart. A sped-up clip is narrower, and the time shown is the time in the exported video. The red line is the
+with the file's name. Every clip has its corners rounded (the pictures and the waveform are cut off at them too), its left
+edge lit and its right edge in shadow (a little more than its top and bottom), so that dark clips can be told apart
+where they meet. A sped-up clip is narrower, and the time shown is the time in the exported video. The red line is the
 playhead.
 
 **What is on the screen at a frame** is made of **layers**, the one on the back-most track first. Every video,
 picture and text object that is there at the frame is a layer, in the place on the picture that it was given
 (the default place of a video or a picture is the biggest it can be inside the picture, in the middle, in its
-own shape), and turned as far as it was turned. Where a layer does not cover the picture, what is behind it
-shows, down to black. The fast-forward symbol goes over the front-most video (if that is sped up), under whatever
+own shape), and turned as far as it was turned. A layer may reach out past the edge of the picture, with its
+middle always on the picture: what is past the edge is cut off. Where a layer does not cover the picture, what is
+behind it shows, down to black. The fast-forward symbol goes over the front-most video (if that is sped up), under whatever
 is in front of that. Two details that are decisions rather than accidents:
 
 * A video that fills the picture and is not turned hides everything behind it, so nothing behind it is read or
@@ -114,10 +129,24 @@ down, and the clips that *touch* its end move along with it so that no gap opens
 the movement, and **pictures and text objects stay where they are** (and never move other clips). A picture or a
 text object lasts as many seconds as its box or window says, whatever the speed of its track.
 
-**The first video decides the picture.** The frame rate of the project is the frame rate of its first video, and
-the size of the finished picture is that video's size. Until a project has a video it is 30 frames per second and
-1920×1080. All the videos of a project must have the same frame rate (sound files and pictures can be anything),
-because clips are stored as frame numbers.
+**The first video decides the picture, and starts the frame rate.** The size of the finished picture is the size
+of the first video, and a project follows that video's frame rate too, until it is given one of its own (*Edit >
+Project settings > Frame rate*). Until a project has a video it is 30 frames per second and 1920×1080. Choosing
+another frame rate counts everything on the timeline again, so that every clip lasts as long as it did and starts
+when it did, to the nearest frame (a clip is a whole number of frames, so a clip of a few frames can come to one
+more or less, and the pieces of a video that was cut into several stay together as far as they can). Undoing it
+puts everything back exactly.
+
+**Videos of another frame rate than the project's can be added.** Every video is made to run at the rate of the
+project, in the preview and in the export: each frame of the project shows the picture of the video that is nearest
+in time to it (a picture that is exactly half way between two frames is in the later), so a video of 25 pictures
+a second in a project of 30 has a picture on screen for two frames now and then, and lasts as long in time as it
+did (3 seconds are 90 frames); a video of 60 in a project of 24 has pictures that are never shown. The first video
+of a project that already has clips on its tracks does not change the rate they were laid out at. The preview
+chooses the pictures the way the export does wherever it starts (this is tested with the real ffmpeg, for
+videos of 12, 24, 25 and 30 pictures a second in projects of 24 and 30).
+
+**Keyframes.** A property that has keyframes is what they say: **between** two keyframes it changes evenly from the one's value to the other's (how loud in decibels, where and how big in fractions of the picture, how far turned in degrees, the letter size, and each of the red, green, blue and opacity of a colour), and a yes or no (mute) and words stay what they were until the next keyframe is reached. **Before the first** keyframe it is what the first says, and **after the last** what the last says. A turn goes the short way round: a keyframe's angle is the one nearest the keyframe before it, so a clip can turn round and round by keyframes less than half a turn apart (the panel shows an angle between −180 and 180 degrees whatever turn it is on). The keyframes of a clip are **in the clip**, counted from its first frame, and go with it wherever it is moved, to another track too. **Cutting** a clip keeps the curve as it was on both sides (a keyframe is put at the cut if the curve goes on through it), **changing the speed** of a clip stretches its keyframes with it, and making a clip shorter (a picture's or a text object's time) cuts off the keyframes that are past its end, keeping the curve up to the end. A track's keyframes are counted from the start of the timeline. Taking away the last keyframe of a property leaves it as that keyframe said, not animated. There is **no timeline of keyframes yet**: they are made and gone to with the buttons beside the controls (and by changing what is animated); the drawers of the clips are where they will be shown.
 
 **Sound.** While the video plays, its sound plays too, and it is the sound the export will have: every clip's
 sound is cut out, sped up with the clip, and mixed with the other tracks' (see *Settings* for what sped-up sound
@@ -128,8 +157,9 @@ is paused. Changing the volume of one clip or track while playing does not inter
 If a loaded project's file can't be found or opened, a warning appears in the middle of the window listing each
 such file and saying it must be chosen again. The rest of the program stays usable and none of the edits are
 discarded; choosing the file (the warning's button, or the *Choose the file again* button in the box of a clip
-that is made from it) puts it back. A replacement must be the same kind of file, and a video must have the same
-frame rate as the original.
+that is made from it) puts it back. A replacement must be the same kind of file; a video may have another frame
+rate than the original (the project does not change its own: the clips are in frames of the project, and the
+replacement is made to run at its rate).
 
 ## Settings
 
@@ -156,12 +186,19 @@ written to a temporary file first and then renamed into place, so a failed save 
 project. Tracks are listed front-most first; a clip has `gap_before_frames` (left out when 0), and gain, mute, a
 track's height, and the place and turn of a clip are left out when they have their normal values. Where
 something is on the picture is always **fractions of the picture's width and height** (and the turn is in
-degrees, clockwise), so it comes out in the same place whatever size the picture is shown or exported at.
+degrees, clockwise), so it comes out in the same place whatever size the picture is shown or exported at. A clip or
+a track that has **keyframes** has an `animation` object: for each property that is animated (`gain`, `muted`,
+`position`, `size`, `rotation`, `text`, `font`, `font size`, `colour`) a list of keyframes, each a `frame` (counted
+from the clip's first frame, or from the start of the timeline for a track) and a `value`: a number, a pair of numbers
+(`[across, down]` or `[wide, tall]` as fractions of the picture), true or false, words, or a colour like `"#FFFFFFFF"`.
+What the clip itself says (its gain, its place, its words) is what the property is while it has no keyframes, and is
+left as it was when it has some. A file with keyframes for what a clip does not have, or a value of the wrong kind, is
+refused with the clip named.
 
 ```json
 {
   "file_format": "fastforwardrs-project",
-  "file_format_version": 4,
+  "file_format_version": 6,
   "sources": [
     {
       "kind": "video",
@@ -212,7 +249,13 @@ degrees, clockwise), so it comes out in the same place whatever size the picture
             "width_fraction_of_frame_width": 0.8,
             "height_fraction_of_frame_height": 0.16
           },
-          "rotation_degrees": -12.5
+          "rotation_degrees": -12.5,
+          "animation": {
+            "colour": [
+              { "frame": 0, "value": "#FFFFFF00" },
+              { "frame": 15, "value": "#FFFFFFFF" }
+            ]
+          }
         },
         {
           "kind": "image",
@@ -237,7 +280,7 @@ degrees, clockwise), so it comes out in the same place whatever size the picture
       "speed_factor": 1,
       "muted": false,
       "clips": [
-        { "kind": "video", "source_identifier": 1, "first_source_frame": 0, "end_source_frame": 300, "speed_factor": 1 },
+        { "kind": "video", "source_identifier": 1, "first_source_frame": 0, "end_source_frame": 300, "speed_factor": 1, "animation": { "gain": [ { "frame": 0, "value": 0.0 }, { "frame": 60, "value": -12.0 } ], "position": [ { "frame": 0, "value": [0.5, 0.5] }, { "frame": 120, "value": [0.25, 0.5] } ] } },
         { "kind": "video", "source_identifier": 1, "first_source_frame": 300, "end_source_frame": 600, "speed_factor": 4, "muted": true },
         { "kind": "audio", "gap_before_frames": 30, "source_identifier": 2, "first_source_frame": 0, "end_source_frame": 150, "speed_factor": 1, "gain_decibels": 6.0 }
       ]
@@ -250,7 +293,8 @@ degrees, clockwise), so it comes out in the same place whatever size the picture
   },
   "settings": {
     "sped_up_clip_sound": "mute"
-  }
+  },
+  "frame_rate": "30/1"
 }
 ```
 
@@ -259,10 +303,15 @@ line. A test loads this very example, so it cannot go out of date without the te
 font size is a fraction of the picture's height, which the window shows as points on a picture 1080 tall; an
 empty `font_family` is the program's default font. A video clip may have a `placement` like the picture's
 (without one it is fitted inside the picture), and the `area` of a placement is the rectangle **before** it is
-turned, which is always inside the picture. `settings` holds only the settings the project has chosen for
-itself, and is left out altogether when the project follows them all. **Older files are still read**: version 3
-files have no heights, pictures, places or turns (every track is of the normal height, every video is fitted
-inside the picture and every text is upright); version 2 files (one video and its clips) become a project with
+turned. It may reach out past the edges of the picture (a `left_fraction_of_frame_width` below 0 starts before the
+picture, and a left and a width that add up to more than 1 end after it), but its middle is always on the picture
+and it is never bigger than the picture: what is further out than that is moved back in when the file is read. `settings` holds only the settings the project has chosen for
+itself, and is left out altogether when the project follows them all. `frame_rate` is the frame rate chosen for
+the project, and is left out while the project follows its first video. **Older files are still read**: version 5
+files have no keyframes (nothing in them is animated); version 4
+files have no frame rate of their own (the project follows its first video, and all its videos run at that rate);
+version 3 files have no heights, pictures, places or turns (every track is of the normal height, every video is
+fitted inside the picture and every text is upright); version 2 files (one video and its clips) become a project with
 one track called `track 0`, and version 1 files (from before there were settings) follow all the settings. The
 old yes-or-no setting *mute sped-up clips* is read as *Mute* or *Maintain pitch*.
 
@@ -275,8 +324,20 @@ old yes-or-no setting *mute sped-up clips* is read as *Mute* or *Maintain pitch*
 * The picture of each frame is made the way the preview shows it: the layers from the back to the front over
   black, the fast-forward symbol over the front-most video. Each video or picture is scaled to where it is on the
   picture (after the pictures a sped-up clip does not keep are dropped, so those are never scaled), and what is
-  turned is made into a picture with clear corners before it is laid over. Text is drawn by the same code for the
-  preview and for the export, at the size of the finished picture, and turned the same way.
+  turned is made into a picture with clear corners before it is laid over. What reaches out past the edge of the
+  picture is cut off by being laid over it (a video at the back that does is laid over black, and not put on it by
+  padding). Text is drawn by the same code for the preview and for the export, at the size of the finished picture,
+  and turned the same way.
+* What has **keyframes** is made as they say, frame by frame, the way the preview shows it. A stretch of the picture
+  in which a layer has keyframes is cut into the stretches over which what is made of it does not change: where it is
+  in whole pixels, how far it is turned (in steps of a tenth of a degree, for what keyframes turn), and for a text
+  object what it looks like (a picture is made of it for each way it looks, and one picture however far it moves). A
+  slow change is a few stretches and a fast one a stretch for each frame, and each stretch costs ffmpeg time to set up
+  (measured: about 7 seconds for 1000, 13 for 1500, 26 for 2000 and over a minute for 3000), so **an animation that
+  would need more than 1500 of them is refused** with a message that says so (make what changes change more slowly,
+  for a shorter time, or cut the clip into shorter ones). How loud a clip is, when it has keyframes for that, is
+  worked out again for every little piece of its sound (a fiftieth of a second or so) from the keyframes, and a clip
+  or a track that is muted by keyframes for a while is silence for that while.
 * The sound is every track's sound mixed, each clip sped up with its picture (see *Settings*), and it is as long as
   the picture. Where a sped-up clip is so short that its sound would be under a tenth of a second, that stretch is
   silent instead.
@@ -297,15 +358,15 @@ The code is a library plus a thin `main`. It is layered, and each layer only dep
 
 | Module | What is in it |
 |---|---|
-| `project` | What a project *is*: its source files, its tracks (`project::tracks`: a `Track` is a row of clips with gaps, a speed, a gain, a height and a mute switch, and holds all the arithmetic of which clip is at which frame, what moves when a length changes and whether clips may be moved), the speed and gain types, text objects, pictures, **placements** (`placement.rs`: a rectangle on the picture as fractions, an angle, how a corner drags and what a point is on), the fit of a video inside a picture, settings. Pure logic: no files, processes or drawing. In whole frames (`SourceFrameIndex`, `TimelineFrameIndex`, `SpeedFactor`...). |
-| `composition` | Works out from a project what the finished video is: the **picture plan** (for each stretch of the timeline, the layers that are seen: their video, picture or text, and where each is) and the **sound plan** (for each track, which clips are heard when, and how loud). Plain logic. The live preview and the export both use these plans, which is what makes them agree. |
+| `project` | What a project *is*: its source files, its tracks (`project::tracks`: a `Track` is a row of clips with gaps, a speed, a gain, a height and a mute switch, and holds all the arithmetic of which clip is at which frame, what moves when a length changes and whether clips may be moved; a clip's `ClipId` is the track it was first made on and a number, so that it keeps its id when it is moved to another track, which `Project::move_clips` does for several clips at once or not at all), the speed and gain types, text objects, pictures, **placements** (`placement.rs`: a rectangle on the picture as fractions, with its middle on the picture and free to reach past its edges, an angle, how a corner drags and what a point is on), the fit of a video inside a picture, settings, and **animation** (`project::animation`: the table of properties that can be animated and the kind of value each has, the keyframes of one property, and the animation of a clip or a track; the clip or track holds them, `project/animating.rs` is the project's way of asking what a property is at a frame and of making a keyframe or changing a property at a frame). Pure logic: no files, processes or drawing. In whole frames (`SourceFrameIndex`, `TimelineFrameIndex`, `SpeedFactor`...). |
+| `composition` | Works out from a project what the finished video is: the **picture plan** (for each stretch of the timeline, the layers that are seen: their video, picture or text, where each is, and its keyframes, from which the preview works out where it is at a frame) and the **sound plan** (for each track, which clips are heard when, and how loud, which for a clip with keyframes is a loudness that changes; a clip muted by keyframes is cut into the stretches that are heard). Plain logic. The live preview and the export both use these plans, which is what makes them agree. |
 | `project_file` | Saving and loading the project JSON, including the older versions. Separate document types keep the file format independent of the in-memory model. |
 | `settings_file` | The same for the global settings file, which is more forgiving: a missing setting gets its default and an unknown one is ignored. (Both files are written by one small `atomic_file` module that never leaves a file half-written.) |
 | `media` | Everything that runs ffmpeg: finding it, probing a video, sound or picture file, the streams of preview pictures and preview sound, the decoding of a picture file, the thumbnails (at several levels of detail), the waveforms, and the export (planning, the filter graph in a picture half and a sound half, running and cancelling). The streams share one small skeleton (`StreamingTool`). |
 | `rgba_picture`, `text_rendering` | A picture made by the program (as pixels), and the drawing of a text object into one, with `cosmic-text` (fonts, wrapping, fallback fonts for other alphabets and emoji). The fonts of the computer take a moment to load, which is done once on another thread. The text is drawn upright in its area: turning it is done when it is laid over. |
 | `speed_indicator` | Draws the fast-forward symbol and decides where it goes, for the preview **and** the export, so they cannot disagree. |
-| `playback` | The clock, which pictures the preview needs for a frame (one for each video that is seen), the `PreviewPictures` that keeps a `PictureSupplier` for each track (decoders running ahead of the clock), and the `AudioSupplier` that keeps the sound in step with it and feeds the speakers (through `cpal`). |
-| `application` | The egui window. Decisions (where tiles and waveform bars go, how far a clip may be moved, what a slider position means, how an edit moves the current frame, which keys do what, where a layer's handles are and what a point on the preview is on, which settings the windows show) are plain functions or small tables with tests; the drawing code is thin. The timeline is a directory of small files (ruler, a track's header, its strip, the clips, the playhead, the boxes of settings, resizing a track, scrolling and zooming, and the `StripView` that turns a place along the strips into a place on the screen and back, so that no drawing code writes that formula out for itself), the preview too (the layers and their handles, the symbol), the history of edits and the selection are modules of their own, and the application itself is a set of files by what they are about (flows for source files, the project file, export, dialogs, and one place that carries out every command). |
+| `playback` | The clock, which pictures the preview needs for a frame (one for each video that is seen), the `PreviewPictures` that keeps a `PictureSupplier` for each track (decoders running ahead of the clock), and the `AudioSupplier` that keeps the sound in step with it and feeds the speakers (through `cpal`, opened by `output_stream`, which the **sound effects** use too: the snip of a cut is made by the program (`sound_effects`) and plays through a stream of its own, so that it is heard while paused and never disturbs the sound of the preview). |
+| `application` | The egui window. Decisions (where tiles and waveform bars go, how far a clip may be moved, what a slider position means, how an edit moves the current frame, which keys do what, where a layer's handles are and what a point on the preview is on, which settings the windows show) are plain functions or small tables with tests; the drawing code is thin. The timeline is a directory of small files (ruler, a track's header, its strip, the clips, the playhead, dragging clips about, resizing a track, the rows (where each track is drawn, and `track_reordering`, which moves them out of the way of a track whose title box is being dragged), the drawers of the clips, the flash of a cut, scrolling and zooming, and the `StripView` that turns a place along the strips into a place on the screen and back, so that no drawing code writes that formula out for itself), the preview too (the layers, the widgets that take the mouse, what is under a point, the symbol), and the properties panel (a file for each kind of thing it shows), the history of edits and the selection are modules of their own, and the application itself is a set of files by what they are about (flows for source files, the project file, export, dialogs, and one place that carries out every command). |
 
 Some choices that are not obvious from the code:
 
@@ -316,6 +377,17 @@ Some choices that are not obvious from the code:
   under a point, how a turned rectangle is resized with the corner across staying where it is) can be done in
   them; `placement.rs` does it in the pixels of a picture of a given size, which the preview (drawn at the same
   shape) shares with the export.
+* **Keyframes are a table of properties, kept where the thing is.** `PropertyId` lists what can be animated and what
+  kind of value each has (a number, a pair, a colour, yes or no, words), and `Animation` holds the keyframes of whichever
+  of them a clip or a track has; what is shown in the panel, saved in the file, hashed to tell whether the sound
+  changed and made by the stopwatch is driven from that table, so a property that is added is a row and not a new
+  feature everywhere. A change of an animated property is made by **`FastForwardApplication`** (`animating.rs`): the
+  commands that change a gain, a place or a text object still say the whole new value, and what is different from what
+  the property is at the playhead is worked out there and made a keyframe there, so the preview, the panel and the
+  numbers all change things the same way. The places that have to list the properties by hand (the rows of the panel, the
+  keyframes tried in the file's tests, the properties that make up a place and a text object, the ones that are heard) are
+  each checked against the table by a test, so that a property that is added to the table and left out of one of them
+  fails a test and is not a control that quietly does nothing.
 * **Ripple rules live in one place.** What moves when a clip changes length or goes is decided by `Track` alone
   (media clips that touch follow; a gap stops it; pictures and text stay), and is tested against a simple model by
   random edits. So are the rules for moving clips about (they never overlap, they move together, they stop at the
@@ -341,14 +413,18 @@ Some choices that are not obvious from the code:
   speed, put a clip somewhere on the picture, make a text object...) and one function afterwards carries out
   each. That one place also keeps the playhead on the picture it was showing when an edit moves clips along the
   timeline.
-* **One widget takes every press on the preview.** egui decides who gets a press at the start of a frame, from
-  the widgets of the frame before. A preview whose layers each felt the mouse only while they were what the pointer
-  was over would give a click that came in the same frame as the move that brought the pointer there (a tap on a
-  touch screen, a very quick click) to whatever the pointer was over a frame earlier, or to nothing. So the preview
-  has a single widget over all its room, and `grab_at` works out from where a press was what it takes hold of: the
-  handles and the places to turn from of the selected layer, then the layers from the front (each as far as it
-  really is, turned as it is), with the fast-forward symbol between the front-most video and what is in front of
-  it. Only the left button picks and drags. The test window gives every event a frame of its own, as egui's test
+* **A few widgets take every press on the preview, and none of them knows what the press is about.** egui
+  decides who gets a press at the start of a frame, from the widgets of the frame before. A preview whose layers
+  each felt the mouse only while they were what the pointer was over would give a click that came in the same frame
+  as the move that brought the pointer there (a tap on a touch screen, a very quick click) to whatever the pointer
+  was over a frame earlier, or to nothing. So the preview has one widget over all its room, and `grab_at` works out
+  from where a press was what it takes hold of: the handles and the places to turn from of the selected layer, then
+  the layers from the front (each as far as it really is, turned as it is, and only over the picture, but for the
+  selected one), with the fast-forward symbol between the front-most video and what is in front of it. The box of
+  the selected layer (its handles and the places to turn it from) can reach out of the picture and of the panel, over
+  the other panels, so each of those has a widget of its own too, made after all the others, which makes it the one
+  on top where it is: they only take the press to the same place. (Where they are, they hide what is under them.)
+  Only the left button picks and drags. The test window gives every event a frame of its own, as egui's test
   harness does, so the tests that need more than one event in a frame say so (`Window::all_in_one_frame`).
 * **Native file dialogs are behind a trait** (`FileChooser`), and the editor in tests has one that panics when
   asked, so a test that reaches a dialog fails at once instead of hanging on a window nobody can click.
@@ -375,12 +451,13 @@ cargo clippy --all-targets -- -D warnings
 
 | Suite | What it covers |
 |---|---|
-| unit tests (in `src/`) | the model (including the rules for what moves when a clip changes and for moving clips, checked against a simple model with random edits), placements (corner dragging checked with random drags), the plans in `composition` (checked frame by frame against a plain evaluation, with random projects that have videos of other shapes, places and turns), timeline geometry, zoom, thumbnail levels and waveform bars, both files and the older versions of the project file, filter graph text, symbol drawing, text drawing (with the computer's fonts), the clock, the picture and sound suppliers (with fake decoders and speakers), the history... and **window interaction tests** that send simulated mouse and keyboard input to the real window: selecting (with Ctrl and a rectangle), moving, deleting and cutting clips; undo and redo; zooming, scrolling and resizing tracks; tracks, their titles, the round button and deleting one; the boxes above clips and tracks; text objects from the menu, their window; picking, moving, resizing and turning videos, pictures and text on the preview (also with a press that comes in the same frame as the move of the pointer, as a tap does); the keys; dialogs; the menus and settings windows; autosave |
-| `tests/media_*.rs` | the real ffmpeg: probing videos, sound files and pictures, decoding, thumbnails (checked to be the picture on screen at the moment they stand for), waveforms, exports checked **picture by picture** against an independent calculation of what the project must contain (and tone by tone for the sound of several tracks, with gain and speed), **pixel by pixel for what is scaled, moved and turned** (a video at half size, a video turned a quarter, text turned so that its red left half goes to the top, something cut off at the picture's edge, a picture from a file that is turned, comes later in the timeline, or lies over a video that is cut in pieces), and the sound stream (right length and format, from any playhead position, sample for sample the same as the sound from the start, and the same loudness second by second as the export) |
-| `tests/application_journeys.rs` | whole journeys through the real program with a real video: import, edit with the mouse and keyboard, undo, save, load into a fresh editor, lose a file and choose it again, import a sound file or a picture, make a text object, export (and check the picture and the sound of the result) |
+| unit tests (in `src/`) | the model (including the rules for what moves when a clip changes and for moving clips, checked against a simple model with random edits), placements (corner dragging checked with random drags), the plans in `composition` (checked frame by frame against a plain evaluation, with random projects that have videos of other shapes, places and turns), timeline geometry, zoom, thumbnail levels and waveform bars, both files and the older versions of the project file, filter graph text, symbol drawing, text drawing (with the computer's fonts), the clock, the picture and sound suppliers (with fake decoders and speakers), the history... and **window interaction tests** that send simulated mouse and keyboard input to the real window: selecting (with Ctrl and a rectangle), moving, deleting and cutting clips; undo and redo; zooming, scrolling and resizing tracks; tracks, their titles, the round button and deleting one; the panels and the properties panel (what it shows for what is selected, what its controls do, the list of several things), selecting tracks, dragging clips to other tracks; text objects from the menu; picking, moving (past the edge of the picture too), resizing and turning videos, pictures and text on the preview, by corners that are over other panels as well (also with a press that comes in the same frame as the move of the pointer, as a tap does); the keys; dialogs; the menus and settings windows; autosave |
+| `tests/media_*.rs` | the real ffmpeg: probing videos, sound files and pictures, decoding, thumbnails (checked to be the picture on screen at the moment they stand for), waveforms, exports checked **picture by picture** against an independent calculation of what the project must contain (and tone by tone for the sound of several tracks, with gain and speed), **pixel by pixel for what is scaled, moved and turned** (a video at half size, a video turned a quarter, text turned so that its red left half goes to the top, something cut off at the picture's edge, a video, a picture and a text put partly past the edge, a picture from a file that is turned, comes later in the timeline, or lies over a video that is cut in pieces), and the sound stream (right length and format, from any playhead position, sample for sample the same as the sound from the start, and the same loudness second by second as the export) |
+| `tests/application_journeys.rs` | whole journeys through the real program with a real video: import, edit with the mouse and keyboard, undo, save, load into a fresh editor, lose a file and choose it again, import a sound file or a picture, make a text object, animate a video with the stopwatch and the numbers, export (and check the picture and the sound of the result) |
+| `tests/media_export_animation.rs` | exports with the real ffmpeg of clips that have keyframes, checked picture by picture: a video that moves (where its edges are at every frame), one that is turned (each picture is the same as the one made with no keyframes by turning the video that far), one that gets smaller, and text that moves and changes colour over a video that goes on unbroken. The sound of keyframes for how loud and whether silent is checked in `tests/media_audio_stream.rs`: a ramp, a ramp started in the middle, a silent stretch with the sound after it from the right place, and the preview's sound against the export's |
 | `tests/application_playback.rs` | playing: the preview keeps up with the clock, through a change of speed and a jump, and stops on the last picture. Timing-dependent, so it has its own file, which cargo runs on its own. |
 | `tests/application_sound.rs` | the preview's sound in the real program, with recording stand-ins for the speakers: a test video whose pitch changes every second shows that the right sound is heard at the right time, through a change of speed and a jump; that it starts quickly, stops on pause, and is muted or raised in pitch when asked; that changing a volume while playing leaves no gap |
-| `tests/application_screenshots.rs` | not checks: with `FASTFORWARDRS_SCREENSHOT_FOLDER` set, `cargo test --test application_screenshots -- --ignored` draws the window in several states to PNG files (tracks, a waveform, text, pictures, turned and resized videos, zoom, the boxes of settings, the menu, a missing file...) |
+| `tests/application_screenshots.rs` | not checks: with `FASTFORWARDRS_SCREENSHOT_FOLDER` set, `cargo test --test application_screenshots -- --ignored` draws the window in several states to PNG files (tracks, a waveform, text, pictures, turned and resized videos, things past the edge of the picture, zoom, the properties panel, the menus, a missing file, a cut flashing, a track being dragged, drawers, the buttons of the keyframes...) |
 
 The tests that use ffmpeg make their own small test videos (each frame carries its own frame number as a strip of
 black and white blocks, so a test can read which frame it received), tone files and pictures in
@@ -391,22 +468,26 @@ with no fonts at all. Nothing has been tried with a real touch screen: the taps 
 
 ## Known limits
 
-* Clips can be moved along their track, but not onto another track, and cut clips cannot be joined again. There
-  is no way to trim a clip by dragging its edge (cut it and delete the part instead).
+* Cut clips cannot be joined again. There is no way to trim a clip by dragging its edge (cut it and delete the
+  part instead). A clip dragged to another track is never put on a new track: the track has to be there.
 * Undo covers what is edited in the project, not the settings, and not choosing a missing file again. It goes
   back at most 200 steps, and only as far as the program has been open (the history is not saved with the
   project).
-* All the videos of a project must run at the same frame rate, and the finished picture is the size of the first
-  video.
-* Where something is on the picture keeps its rectangle (before it is turned) inside the picture; what is turned
-  can stick out at the corners, and is cut off there. A corner of something that is turned so far that the corner
-  is outside the preview cannot be grabbed (turn it back, or move it). A video or picture thinner than a fiftieth
-  of the picture is drawn a fiftieth wide.
+* The finished picture is the size of the first video.
+* Something on the picture can be put partly past its edge, but its middle stays on the picture, and it cannot be
+  made bigger than the picture (so a video cannot be zoomed in past it). What is past the edge is not seen, and is
+  cut off in the export. Only what is selected can be taken hold of where it is not over the picture: by its corners
+  and the places to turn it from, wherever they are in the window (over the other panels, and over whatever
+  controls of theirs are under them), and by anywhere in its outline over the preview. A video or picture thinner
+  than a fiftieth of the picture is drawn a fiftieth wide.
+* The properties panel changes one thing at a time: with several selected it only lists them (and a group of
+  several things cannot be made yet).
 * A picture file with clear places is drawn with them clear, but a picture never hides what is behind it, so what
   is behind a picture that covers the whole picture is still decoded and exported. A photograph that is turned
   on its side by a note in the file (EXIF) is shown the way ffmpeg shows it, which is not tested.
-* A GIF file is read as a video, as ffprobe says it is one: an animated one plays at its own frame rate (which the
-  project then has to share) and a still one lasts a single frame. It is not offered with the picture files.
+* A GIF file is read as a video, as ffprobe says it is one: an animated one plays at its own frame rate (and is
+  made to run at the project's, like any video) and a still one lasts a single frame. It is not offered with the
+  picture files.
 * A file that is chosen again in place of a missing one must be the same kind of file; if its shape is another,
   the picture is stretched into the place of the old one.
 * A text object has one font, size and colour for all of its words, and is drawn from the top left of its area,
@@ -415,6 +496,25 @@ with no fonts at all. Nothing has been tried with a real touch screen: the taps 
   sound), and *Increase pitch* is silent beyond 1000x.
 * Autosave needs the project to have a file already.
 * A variable-frame-rate source is exported at a constant frame rate (each picture slot gets the source picture
-  nearest in time), and its preview can be a frame off at the start of a clip.
+  nearest in time), and its preview can be a frame off at the start of a clip. The same goes for a file whose
+  pictures are not exactly where its frame rate says they are, in ticks too coarse to say (a thousandth of a second
+  or more): where two pictures are equally near a frame, the preview can choose the other one than the export.
 * The speed sliders offer 1x to 1000x; a project file may hold a larger factor and the editor will keep it.
 * Waveforms are made for sound *files*; a video's own sound is not drawn.
+* **Keyframes**: there is no view of them on the timeline yet (only the buttons beside the controls, and the preview),
+  so a keyframe cannot be seen, moved to another frame, copied or dragged; to move one, take it away and make another.
+  Speed and the time something is shown for cannot be animated, so a clip's length never depends on keyframes.
+  A turn that is made by keyframes goes the short way round, so to turn round more than half a turn keyframes
+  are made less than half a turn apart. A text object's keyframes for its words and its font change them all at
+  once at the keyframe (words are not made of anything that can change evenly).
+* **Exporting keyframes**: where something is is made in whole pixels, and a turn in steps of a tenth of a degree, as
+  its keyframes say; an animation that makes more than 1500 different stretches of the picture (a fast move or a fast
+  change of colour that goes on for more than 50 seconds, say) is refused, for the reason given under *Exported
+  video*. How loud something is when it has keyframes is made in small pieces of sound, not sample by sample.
+* **Undo of keyframes**: a change that makes a keyframe is one step with the changes of the same property at the same
+  frame that follow it; at another frame it is a step of its own, however soon after.
+* **Drawers** are empty and have no setting to turn them off; whether they are open is not saved. The snip of a cut
+  is made by the program (no sound file), plays through the computer's default output device (opened the first time it
+  is needed, so nothing is opened by a program that never cuts) and has no setting to turn it off either; that it is
+  pleasant to hear has not been judged by ear. The flash is drawn for about a third of a second (0.3 s) and is not saved.
+* The controls that have the buttons for keyframes are a little narrower than the others, to leave them room.

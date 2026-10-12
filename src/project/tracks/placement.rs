@@ -4,7 +4,9 @@
 //! Like the fast-forward symbol, everything about where something is and how big it is is a
 //! fraction of the picture rather than a number of pixels, so that it lands in the same place
 //! whatever size the picture is shown or exported at. A [`CanvasArea`] is the rectangle, and a
-//! [`Placement`] is that rectangle and an [`Angle`] it is turned by about its middle.
+//! [`Placement`] is that rectangle and an [`Angle`] it is turned by about its middle. Something may be
+//! put partly past the edge of the picture (what is past it is not seen), as long as its middle is on the
+//! picture, so that it can always be found and taken hold of again.
 //!
 //! Turning makes a difference to how a corner is dragged, and to what is under a point, which are
 //! worked out here, in the pixels of a picture of a given size (the fractions of the width and of
@@ -44,18 +46,20 @@ impl Corner {
     }
 }
 
-/// A rectangle of whole pixels on a picture: what an area comes to when the picture is a given size.
+/// A rectangle of whole pixels on a picture: what an area comes to when the picture is a given size. Its
+/// left and top are below zero when it starts before the picture does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PixelBox {
-    pub left: u32,
-    pub top: u32,
+    pub left: i32,
+    pub top: i32,
     pub width: u32,
     pub height: u32,
 }
 
 /// A rectangle on the picture, as fractions of the picture's width and height: `(0, 0)` is the
-/// top left corner of the picture and `(1, 1)` the bottom right. It is always inside the picture
-/// and never smaller than [`Self::SMALLEST_SIDE_FRACTION`] each way.
+/// top left corner of the picture and `(1, 1)` the bottom right. It is never smaller than
+/// [`Self::SMALLEST_SIDE_FRACTION`] each way and never bigger than the picture, and its middle is always on
+/// the picture, but it can reach out past the edges of it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasArea {
     left: f32,
@@ -85,12 +89,19 @@ impl CanvasArea {
 
     /// The area with this left edge, top edge, width and height. What does not fit is corrected:
     /// the area is made at least as big as it may be, then not bigger than the picture, then moved
-    /// to be inside it. (A value that is not a number counts as the default one.)
+    /// until its middle is on the picture. (A value that is not a number counts as the default one.)
     pub fn new(left: f32, top: f32, width: f32, height: f32) -> Self {
         let width = sanitised(width, Self::SMALLEST_SIDE_FRACTION, 1.0, Self::DEFAULT.width);
         let height = sanitised(height, Self::SMALLEST_SIDE_FRACTION, 1.0, Self::DEFAULT.height);
-        let left = sanitised(left, 0.0, 1.0 - width, Self::DEFAULT.left.min(1.0 - width));
-        let top = sanitised(top, 0.0, 1.0 - height, Self::DEFAULT.top.min(1.0 - height));
+        let (least_left, most_left) = starts_with_the_middle_on_the_picture(width);
+        let (least_top, most_top) = starts_with_the_middle_on_the_picture(height);
+        let left = sanitised(
+            left,
+            least_left,
+            most_left,
+            Self::DEFAULT.left.clamp(least_left, most_left),
+        );
+        let top = sanitised(top, least_top, most_top, Self::DEFAULT.top.clamp(least_top, most_top));
         Self {
             left,
             top,
@@ -124,7 +135,8 @@ impl CanvasArea {
     }
 
     /// Where the area is on a picture `picture_size` pixels across and down, in whole pixels. It is
-    /// never empty and never reaches outside the picture.
+    /// never empty and never bigger than the picture. An area that is inside the picture is inside it in
+    /// pixels too, whatever the rounding; one that reaches out of it does so by about as much in pixels.
     pub fn in_pixels(&self, (picture_width, picture_height): (u32, u32)) -> PixelBox {
         let (left, width) = side_in_pixels(self.left, self.width, picture_width);
         let (top, height) = side_in_pixels(self.top, self.height, picture_height);
@@ -147,22 +159,25 @@ impl CanvasArea {
     }
 
     /// The same area moved by this many picture widths and heights, as far as the picture allows:
-    /// it is stopped at the edges, and keeps its size.
+    /// it keeps its size, and is stopped when its middle is at an edge of the picture (so that half of
+    /// it is past the edge).
     #[must_use]
     pub fn moved_by(&self, across: f32, down: f32) -> Self {
         let across = if across.is_nan() { 0.0 } else { across };
         let down = if down.is_nan() { 0.0 } else { down };
+        let (least_left, most_left) = starts_with_the_middle_on_the_picture(self.width);
+        let (least_top, most_top) = starts_with_the_middle_on_the_picture(self.height);
         Self {
-            left: (self.left + across).clamp(0.0, 1.0 - self.width),
-            top: (self.top + down).clamp(0.0, 1.0 - self.height),
+            left: (self.left + across).clamp(least_left, most_left),
+            top: (self.top + down).clamp(least_top, most_top),
             ..*self
         }
     }
 
-    /// The area after `corner` is dragged to the place `(x, y)` (as fractions of the picture): the
-    /// corner diagonally across stays where it is. The corner cannot go outside the picture or
-    /// past the corner that is staying, and the area cannot become smaller than
-    /// [`Self::SMALLEST_SIDE_FRACTION`].
+    /// The area after `corner` is dragged to the place `(x, y)` (as fractions of the picture, which can be
+    /// outside it): the corner diagonally across stays where it is. The corner cannot go past the corner
+    /// that is staying, the area cannot become smaller than [`Self::SMALLEST_SIDE_FRACTION`] or bigger than
+    /// the picture, and the corner stops where the middle of the area would leave the picture.
     #[must_use]
     pub fn with_corner_dragged_to(&self, corner: Corner, x: f32, y: f32) -> Self {
         let (current_x, current_y) = self.corner_position(corner);
@@ -196,26 +211,51 @@ fn corner_is_at_the_top(corner: Corner) -> bool {
 
 /// The two edges (smaller first) of a side whose fixed end is at `fixed` and whose moving end has
 /// been dragged to `dragged`. The moving end is the smaller one if `moving_end_is_the_smaller`. It
-/// stops at the picture's edge, and at the smallest side length from the fixed end.
+/// can go past the picture's edge, but the side cannot be shorter than the smallest side length or
+/// longer than the picture, and its middle cannot be off the picture.
 fn ordered_edges(fixed: f32, dragged: f32, moving_end_is_the_smaller: bool) -> (f32, f32) {
     let smallest = CanvasArea::SMALLEST_SIDE_FRACTION;
     if moving_end_is_the_smaller {
-        let moving = dragged.clamp(0.0, (fixed - smallest).max(0.0));
-        (moving, fixed)
+        // The side runs from the moving end to `fixed`. Its middle is on the picture when the sum of
+        // its ends is from 0 to 2.
+        let least = (fixed - 1.0).max(-fixed);
+        let most = (fixed - smallest).min(2.0 - fixed).max(least);
+        (dragged.clamp(least, most), fixed)
     } else {
-        let moving = dragged.clamp((fixed + smallest).min(1.0), 1.0);
-        (fixed, moving)
+        // (`CanvasArea::new` would also stop the side at the length of the picture, as it keeps its start: but that
+        // is not for this function to lean on, and the other branch has to do it itself, as it keeps its end.)
+        let most = (fixed + 1.0).min(2.0 - fixed);
+        let least = (fixed + smallest).max(-fixed).min(most);
+        (fixed, dragged.clamp(least, most))
     }
 }
 
+/// The least and the most a side that is `length` long may start at (as fractions of the picture's side)
+/// for its middle to be on the picture: from half its length before the picture to half its length before
+/// the picture's end.
+fn starts_with_the_middle_on_the_picture(length: f32) -> (f32, f32) {
+    (-length / 2.0, 1.0 - length / 2.0)
+}
+
+/// How far past the end of the picture, as a fraction of it, a side can end and still be taken to be inside
+/// the picture: rounding errors of the sums that its end comes from are far below this.
+const ROUNDING_ERROR_OF_AN_EDGE: f32 = 1e-6;
+
 /// Where a side of an area starts and how long it is, in the whole pixels of a picture side that is
 /// `picture_side` pixels long: the length is rounded, at least a pixel and at most the picture, and
-/// the start is rounded and kept so that the side does not reach past the end of the picture.
-fn side_in_pixels(start: f32, length: f32, picture_side: u32) -> (u32, u32) {
+/// the start is rounded. A side that does not reach past the end of the picture is kept so that it does not
+/// after rounding either; one that does reach past it does, as far as it does.
+fn side_in_pixels(start: f32, length: f32, picture_side: u32) -> (i32, u32) {
     let picture_side = picture_side.max(1);
     let length_in_pixels = ((length * picture_side as f32).round() as u32).clamp(1, picture_side);
-    let start_in_pixels = ((start * picture_side as f32).round() as u32).min(picture_side - length_in_pixels);
-    (start_in_pixels, length_in_pixels)
+    let start_in_pixels = (start * picture_side as f32).round() as i32;
+    let reaches_past_the_end = start + length > 1.0 + ROUNDING_ERROR_OF_AN_EDGE;
+    if reaches_past_the_end {
+        (start_in_pixels, length_in_pixels)
+    } else {
+        let last_start = i32::try_from(picture_side - length_in_pixels).unwrap_or(i32::MAX);
+        (start_in_pixels.min(last_start), length_in_pixels)
+    }
 }
 
 fn sanitised(value: f32, smallest: f32, largest: f32, fallback: f32) -> f32 {
@@ -356,10 +396,11 @@ impl Placement {
         }
     }
 
-    /// The place after `corner` is dragged to `point`. The corner diagonally across stays where it is
-    /// on the screen (unless that would take the rectangle out of the picture), and the rectangle
-    /// stays turned as it was. With `keep_shape` the rectangle keeps the shape it has, and gets as big
-    /// as it must for the corner to be as near to `point` as it can be.
+    /// The place after `corner` is dragged to `point` (which can be outside the picture). The corner
+    /// diagonally across stays where it is on the screen (unless that would take the middle of the
+    /// rectangle off the picture), and the rectangle stays turned as it was. With `keep_shape` the
+    /// rectangle keeps the shape it has, and gets as big as it must for the corner to be as near to
+    /// `point` as it can be.
     ///
     /// An upright rectangle that may change shape is dragged the way [`CanvasArea::with_corner_dragged_to`] says.
     #[must_use]
@@ -469,11 +510,25 @@ mod tests {
     const SQUARE_PICTURE: PictureDimensions = (1000.0, 1000.0);
     const WIDE_PICTURE: PictureDimensions = (1920.0, 1080.0);
 
+    /// What every area is: not smaller than the smallest, not bigger than the picture, and with its middle on
+    /// the picture (it may reach out past the edges).
     fn assert_area_is_valid(area: CanvasArea) {
-        assert!(area.left() >= 0.0 && area.top() >= 0.0, "{area:?}");
+        let (middle_across, middle_down) = (area.left() + area.width() / 2.0, area.top() + area.height() / 2.0);
+        assert!(
+            (-1e-6..=1.0 + 1e-6).contains(&middle_across) && (-1e-6..=1.0 + 1e-6).contains(&middle_down),
+            "the middle is off the picture: {area:?}"
+        );
+        for side in [area.width(), area.height()] {
+            assert!(
+                (CanvasArea::SMALLEST_SIDE_FRACTION - 1e-6..=1.0 + 1e-6).contains(&side),
+                "{area:?}"
+            );
+        }
+    }
+
+    fn assert_area_is_inside_the_picture(area: CanvasArea) {
+        assert!(area.left() >= -1e-6 && area.top() >= -1e-6, "{area:?}");
         assert!(area.right() <= 1.0 + 1e-6 && area.bottom() <= 1.0 + 1e-6, "{area:?}");
-        assert!(area.width() >= CanvasArea::SMALLEST_SIDE_FRACTION - 1e-6, "{area:?}");
-        assert!(area.height() >= CanvasArea::SMALLEST_SIDE_FRACTION - 1e-6, "{area:?}");
     }
 
     fn assert_close(actual: f32, expected: f32) {
@@ -502,11 +557,13 @@ mod tests {
     #[test]
     fn an_area_that_does_not_fit_is_corrected_rather_than_refused() {
         // Too big: made as big as the picture.
-        assert_eq!(CanvasArea::new(0.3, 0.3, 5.0, 5.0), CanvasArea::new(0.0, 0.0, 1.0, 1.0));
-        // Sticking out: moved back in, keeping its size.
-        let moved_in = CanvasArea::new(0.9, 0.9, 0.3, 0.2);
-        assert_close(moved_in.left(), 0.7);
-        assert_close(moved_in.top(), 0.8);
+        let too_big = CanvasArea::new(0.3, 0.3, 5.0, 5.0);
+        assert_eq!((too_big.width(), too_big.height()), (1.0, 1.0));
+        // Its middle off the picture: moved back until it is on it, keeping its size.
+        let moved_back = CanvasArea::new(0.9, 0.9, 0.3, 0.2);
+        assert_close(moved_back.left(), 0.85);
+        assert_close(moved_back.top(), 0.9);
+        assert_eq!((moved_back.width(), moved_back.height()), (0.3, 0.2));
         // Too small: made the smallest.
         let tiny = CanvasArea::new(0.0, 0.0, 0.0, -1.0);
         assert_eq!(
@@ -526,12 +583,50 @@ mod tests {
     #[test]
     fn the_area_of_the_whole_picture_is_the_one_that_is_made_from_the_whole_picture() {
         assert_eq!(CanvasArea::WHOLE_PICTURE, CanvasArea::new(0.0, 0.0, 1.0, 1.0));
-        assert_eq!(
-            CanvasArea::WHOLE_PICTURE,
-            CanvasArea::new(-3.0, -3.0, 9.0, 9.0),
-            "what is too big is made as big as the picture"
-        );
         assert_area_is_valid(CanvasArea::WHOLE_PICTURE);
+        assert_eq!(
+            (CanvasArea::WHOLE_PICTURE.width(), CanvasArea::WHOLE_PICTURE.height()),
+            (1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn an_area_may_reach_out_past_the_edges_of_the_picture_as_long_as_its_middle_is_on_it() {
+        let past_the_left = CanvasArea::new(-0.2, 0.3, 0.4, 0.2); // its middle is on the left edge
+        assert_close(past_the_left.left(), -0.2);
+        assert_eq!(
+            (past_the_left.top(), past_the_left.width(), past_the_left.height()),
+            (0.3, 0.4, 0.2)
+        );
+        assert_close(past_the_left.right(), 0.2);
+
+        let past_the_bottom_right = CanvasArea::new(0.8, 0.9, 0.4, 0.2); // its middle is at the corner
+        assert_close(past_the_bottom_right.left(), 0.8);
+        assert_close(past_the_bottom_right.top(), 0.9);
+        assert_close(past_the_bottom_right.right(), 1.2);
+        assert_close(past_the_bottom_right.bottom(), 1.1);
+
+        let a_whole_picture_moved = CanvasArea::new(-0.5, -0.5, 1.0, 1.0);
+        assert_close(a_whole_picture_moved.left(), -0.5);
+        assert_close(a_whole_picture_moved.bottom(), 0.5);
+    }
+
+    #[test]
+    fn an_area_whose_middle_would_be_off_the_picture_is_moved_back_until_it_is_on_it_keeping_its_size() {
+        let too_far_left = CanvasArea::new(-0.5, 0.3, 0.4, 0.2);
+        assert_close(too_far_left.left(), -0.2);
+        assert_eq!((too_far_left.width(), too_far_left.height()), (0.4, 0.2));
+        let too_far_up = CanvasArea::new(0.3, -9.0, 0.4, 0.2);
+        assert_close(too_far_up.top(), -0.1);
+        let too_far_down_and_right = CanvasArea::new(1.0, 1.0, 0.4, 0.2);
+        assert_close(too_far_down_and_right.left(), 0.8);
+        assert_close(too_far_down_and_right.top(), 0.9);
+        // Whatever is asked for, what comes is valid (and not a number is the default one).
+        for odd in [f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN] {
+            assert_area_is_valid(CanvasArea::new(odd, odd, 0.4, 0.2));
+            assert_area_is_valid(CanvasArea::new(odd, odd, 1.0, 1.0));
+        }
+        assert_area_is_valid(CanvasArea::new(f32::NAN, f32::NAN, 1.0, 1.0));
     }
 
     #[test]
@@ -578,16 +673,20 @@ mod tests {
     }
 
     #[test]
-    fn an_area_in_pixels_is_never_empty_and_never_reaches_outside_the_picture() {
+    fn an_area_in_pixels_is_never_empty_and_never_bigger_than_the_picture_and_one_inside_the_picture_is_inside_it_in_pixels()
+     {
         let mut random = DeterministicRandomNumbers::with_seed(5);
         for _ in 0..3000 {
             let unit = |random: &mut DeterministicRandomNumbers| random.next_below(10_001) as f32 / 10_000.0;
+            let (width, height) = (unit(&mut random), unit(&mut random));
+            // An area that is inside the picture, to begin with (whatever the rounding comes to).
             let area = CanvasArea::new(
-                unit(&mut random),
-                unit(&mut random),
-                unit(&mut random),
-                unit(&mut random),
+                unit(&mut random) * (1.0 - width.max(CanvasArea::SMALLEST_SIDE_FRACTION)),
+                unit(&mut random) * (1.0 - height.max(CanvasArea::SMALLEST_SIDE_FRACTION)),
+                width,
+                height,
             );
+            assert_area_is_inside_the_picture(area);
             let picture = (1 + random.next_below(4000) as u32, 1 + random.next_below(4000) as u32);
             let pixels = area.in_pixels(picture);
             assert!(
@@ -595,11 +694,11 @@ mod tests {
                 "{area:?} on {picture:?}: {pixels:?}"
             );
             assert!(
-                pixels.left + pixels.width <= picture.0,
+                pixels.left >= 0 && pixels.left + pixels.width as i32 <= picture.0 as i32,
                 "{area:?} on {picture:?}: {pixels:?}"
             );
             assert!(
-                pixels.top + pixels.height <= picture.1,
+                pixels.top >= 0 && pixels.top + pixels.height as i32 <= picture.1 as i32,
                 "{area:?} on {picture:?}: {pixels:?}"
             );
         }
@@ -609,31 +708,125 @@ mod tests {
     }
 
     #[test]
+    fn an_area_that_reaches_out_of_the_picture_is_in_pixels_that_reach_out_of_it_with_a_left_or_top_below_zero() {
+        assert_eq!(
+            CanvasArea::new(-0.25, 0.5, 0.5, 0.25).in_pixels((1280, 720)),
+            PixelBox {
+                left: -320,
+                top: 360,
+                width: 640,
+                height: 180
+            }
+        );
+        // Past the right and bottom edges: where it starts is where it starts, and it is as big as it is.
+        assert_eq!(
+            CanvasArea::new(0.75, 0.875, 0.5, 0.25).in_pixels((1280, 720)),
+            PixelBox {
+                left: 960,
+                top: 630,
+                width: 640,
+                height: 180
+            }
+        );
+        assert_eq!(
+            CanvasArea::new(-0.5, -0.5, 1.0, 1.0).in_pixels((1280, 720)),
+            PixelBox {
+                left: -640,
+                top: -360,
+                width: 1280,
+                height: 720
+            }
+        );
+    }
+
+    #[test]
+    fn an_area_that_sticks_out_has_its_middle_on_the_picture_in_pixels_to_within_a_pixel() {
+        let mut random = DeterministicRandomNumbers::with_seed(8);
+        for _ in 0..3000 {
+            let unit = |random: &mut DeterministicRandomNumbers| random.next_below(10_001) as f32 / 10_000.0;
+            let area = CanvasArea::new(
+                unit(&mut random) * 1.5 - 0.5,
+                unit(&mut random) * 1.5 - 0.5,
+                unit(&mut random),
+                unit(&mut random),
+            );
+            assert_area_is_valid(area);
+            let picture = (50 + random.next_below(4000) as u32, 50 + random.next_below(4000) as u32);
+            let pixels = area.in_pixels(picture);
+            assert!(
+                pixels.width >= 1 && pixels.width <= picture.0 && pixels.height >= 1 && pixels.height <= picture.1,
+                "{area:?} on {picture:?}: {pixels:?}"
+            );
+            let middle_across = pixels.left as f32 + pixels.width as f32 / 2.0;
+            let middle_down = pixels.top as f32 + pixels.height as f32 / 2.0;
+            assert!(
+                (-1.0..=picture.0 as f32 + 1.0).contains(&middle_across)
+                    && (-1.0..=picture.1 as f32 + 1.0).contains(&middle_down),
+                "{area:?} on {picture:?}: {pixels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_area_that_reaches_the_edge_of_the_picture_to_within_what_rounding_can_do_is_kept_inside_it_in_pixels() {
+        // 0.35 and 0.6500001 add up to a hair over 1 (in the numbers a computer adds), but not so that it can be told.
+        let area = CanvasArea::new(0.35, 0.0, 0.650_000_1, 1.0);
+        assert!(area.right() > 1.0, "the setup: {area:?}");
+        // A half across a picture of 10 pixels is 3.5, which rounds to 4, and 6.5 to 7: 11 pixels.
+        let pixels = area.in_pixels((10, 10));
+        assert_eq!(pixels.left + pixels.width as i32, 10, "{pixels:?}");
+    }
+
+    #[test]
     fn an_area_that_reaches_the_edge_of_the_picture_reaches_it_in_pixels_too_whatever_the_rounding() {
         // 0.3333 + 0.6667 reaches the edge, and 3.333 and 6.667 rounded are 3 and 7: 10 pixels.
         let area = CanvasArea::new(0.3333, 0.0, 0.6667, 1.0);
         let pixels = area.in_pixels((10, 10));
-        assert_eq!(pixels.left + pixels.width, 10);
+        assert_eq!(pixels.left + pixels.width as i32, 10);
         // A half across a picture of an odd width: 3.5 and 3.5 both round up, which would be 8.
         let area = CanvasArea::new(0.5, 0.0, 0.5, 1.0);
         let pixels = area.in_pixels((7, 7));
-        assert_eq!(pixels.left + pixels.width, 7, "{pixels:?}");
+        assert_eq!(pixels.left + pixels.width as i32, 7, "{pixels:?}");
     }
 
     #[test]
-    fn moving_an_area_keeps_its_size_and_stops_at_the_edges_of_the_picture() {
+    fn moving_an_area_keeps_its_size_and_goes_past_the_edges_of_the_picture_until_its_middle_is_at_them() {
         let area = CanvasArea::new(0.2, 0.2, 0.4, 0.3);
         let moved = area.moved_by(0.1, -0.05);
         assert_close(moved.left(), 0.3);
         assert_close(moved.top(), 0.15);
         assert_eq!((moved.width(), moved.height()), (area.width(), area.height()));
 
+        // Moved across its own width to the right: half of it is past the edge.
+        let moved_out = area.moved_by(0.6, 0.0);
+        assert_close(moved_out.left(), 0.8);
+        assert_close(moved_out.right(), 1.2);
+
         let pushed_into_the_corner = area.moved_by(5.0, 5.0);
-        assert_close(pushed_into_the_corner.right(), 1.0);
-        assert_close(pushed_into_the_corner.bottom(), 1.0);
+        assert_close(
+            pushed_into_the_corner.left() + pushed_into_the_corner.width() / 2.0,
+            1.0,
+        );
+        assert_close(
+            pushed_into_the_corner.top() + pushed_into_the_corner.height() / 2.0,
+            1.0,
+        );
         let pushed_the_other_way = area.moved_by(-5.0, -5.0);
-        assert_eq!((pushed_the_other_way.left(), pushed_the_other_way.top()), (0.0, 0.0));
+        assert_close(pushed_the_other_way.left(), -0.2);
+        assert_close(pushed_the_other_way.top(), -0.15);
+        assert_eq!(
+            (pushed_the_other_way.width(), pushed_the_other_way.height()),
+            (area.width(), area.height())
+        );
         assert_eq!(area.moved_by(f32::NAN, f32::NAN), area, "not a number is no movement");
+    }
+
+    #[test]
+    fn an_area_that_has_been_moved_out_can_be_moved_back_where_it_was() {
+        let area = CanvasArea::new(0.2, 0.2, 0.4, 0.3);
+        let there_and_back = area.moved_by(0.55, 0.45).moved_by(-0.55, -0.45);
+        assert_close(there_and_back.left(), area.left());
+        assert_close(there_and_back.top(), area.top());
     }
 
     #[test]
@@ -663,11 +856,63 @@ mod tests {
     }
 
     #[test]
-    fn dragging_a_corner_cannot_leave_the_picture_or_cross_the_opposite_corner() {
+    fn a_corner_can_be_dragged_out_past_the_edge_of_the_picture() {
+        let area = CanvasArea::new(0.5, 0.5, 0.2, 0.2); // right = 0.7, bottom = 0.7
+        let out_at_the_bottom_right = area.with_corner_dragged_to(Corner::BottomRight, 1.4, 1.25);
+        assert_close(out_at_the_bottom_right.right(), 1.4);
+        assert_close(out_at_the_bottom_right.bottom(), 1.25);
+        assert_eq!(
+            (out_at_the_bottom_right.left(), out_at_the_bottom_right.top()),
+            (area.left(), area.top()),
+            "the opposite corner stays"
+        );
+
+        let out_at_the_top_left = area.with_corner_dragged_to(Corner::TopLeft, -0.3, -0.2);
+        assert_close(out_at_the_top_left.left(), -0.3);
+        assert_close(out_at_the_top_left.top(), -0.2);
+        assert_close(out_at_the_top_left.right(), area.right());
+        assert_close(out_at_the_top_left.bottom(), area.bottom());
+    }
+
+    #[test]
+    fn a_corner_dragged_far_out_stops_where_the_area_is_as_big_as_the_picture_or_its_middle_is_at_the_edge() {
+        // The area cannot be longer than the picture: 0.5 + 1.0.
+        let area = CanvasArea::new(0.5, 0.5, 0.2, 0.2);
+        let as_big_as_it_can_be = area.with_corner_dragged_to(Corner::BottomRight, 1.9, 0.8);
+        assert_close(as_big_as_it_can_be.width(), 1.0);
+        assert_close(as_big_as_it_can_be.right(), 1.5);
+
+        // Its middle cannot be off the picture: it is at the edge when the right is at 2 - 0.8.
+        let near_the_edge = CanvasArea::new(0.8, 0.5, 0.1, 0.2);
+        let dragged_on_to_the_edge = near_the_edge.with_corner_dragged_to(Corner::BottomRight, 1.9, 0.8);
+        assert_close(dragged_on_to_the_edge.right(), 1.2);
+        assert_close(
+            dragged_on_to_the_edge.left() + dragged_on_to_the_edge.width() / 2.0,
+            1.0,
+        );
+
+        // The length of the picture comes first when the fixed corner is nearer the edge than its middle is:
+        // from 0.2 the area is as long as the picture at 1.2 (and not at 1.8, where its middle would leave).
+        let near_the_left = CanvasArea::new(0.2, 0.3, 0.2, 0.2);
+        let as_long_as_the_picture = near_the_left.with_corner_dragged_to(Corner::BottomRight, 5.0, 0.6);
+        assert_close(as_long_as_the_picture.width(), 1.0);
+        assert_close(as_long_as_the_picture.right(), 1.2);
+        // And at the other side: the right corner stays at 0.8, so the left one stops at -0.2 (and not at -0.8).
+        let near_the_right = CanvasArea::new(0.6, 0.3, 0.2, 0.2);
+        let dragged_out_far_to_the_left = near_the_right.with_corner_dragged_to(Corner::TopLeft, -5.0, 0.0);
+        assert_close(dragged_out_far_to_the_left.left(), -0.2);
+        assert_close(dragged_out_far_to_the_left.width(), 1.0);
+
+        // The same at the other side: the left of an area whose right is at 0.2 stops at -0.2.
+        let at_the_left = CanvasArea::new(0.1, 0.3, 0.1, 0.2);
+        let dragged_out_at_the_left = at_the_left.with_corner_dragged_to(Corner::TopLeft, -0.9, 0.0);
+        assert_close(dragged_out_at_the_left.left(), -0.2);
+        assert_close(dragged_out_at_the_left.right(), 0.2);
+    }
+
+    #[test]
+    fn dragging_a_corner_cannot_cross_the_opposite_corner() {
         let area = CanvasArea::new(0.2, 0.3, 0.4, 0.3);
-        let past_the_picture = area.with_corner_dragged_to(Corner::BottomRight, 9.0, 9.0);
-        assert_close(past_the_picture.right(), 1.0);
-        assert_close(past_the_picture.bottom(), 1.0);
         // Dragging the bottom right corner up and to the left of the top left one makes it as
         // small as it can be, still with the top left corner where it was.
         let crossed = area.with_corner_dragged_to(Corner::BottomRight, 0.0, 0.0);
@@ -707,9 +952,10 @@ mod tests {
         let mut random = DeterministicRandomNumbers::with_seed(11);
         for _ in 0..2000 {
             let unit = |random: &mut DeterministicRandomNumbers| random.next_below(10_001) as f32 / 10_000.0;
+            // (An area can start from half a picture before the picture to the end of it: it may reach out.)
             let area = CanvasArea::new(
-                unit(&mut random),
-                unit(&mut random),
+                unit(&mut random) * 1.5 - 0.5,
+                unit(&mut random) * 1.5 - 0.5,
                 unit(&mut random),
                 unit(&mut random),
             );
@@ -725,6 +971,24 @@ mod tests {
                 (before.0 - after.0).abs() < 1e-4 && (before.1 - after.1).abs() < 1e-4,
                 "{area:?} dragged at {corner:?} to ({x}, {y}) became {dragged:?}"
             );
+            // The corner is where it was dragged to, unless that is too far for an area to reach.
+            let (reached_x, reached_y) = dragged.corner_position(corner);
+            let is_where_dragged_to = |reached: f32, asked_for: f32| (reached - asked_for).abs() < 1e-4;
+            let (fixed_x, fixed_y) = before;
+            let long_enough = (x - fixed_x).abs() >= CanvasArea::SMALLEST_SIDE_FRACTION
+                && (y - fixed_y).abs() >= CanvasArea::SMALLEST_SIDE_FRACTION;
+            let not_too_long = (x - fixed_x).abs() <= 1.0 && (y - fixed_y).abs() <= 1.0;
+            let middle_on_the_picture =
+                (0.0..=1.0).contains(&((x + fixed_x) / 2.0)) && (0.0..=1.0).contains(&((y + fixed_y) / 2.0));
+            // (A corner dragged across the opposite one is only as near as it can be.)
+            let on_its_own_side =
+                (x < fixed_x) == corner_is_on_the_left(corner) && (y < fixed_y) == corner_is_at_the_top(corner);
+            if long_enough && not_too_long && middle_on_the_picture && on_its_own_side {
+                assert!(
+                    is_where_dragged_to(reached_x, x) && is_where_dragged_to(reached_y, y),
+                    "{area:?} dragged at {corner:?} to ({x}, {y}) became {dragged:?}"
+                );
+            }
         }
     }
 
@@ -839,6 +1103,21 @@ mod tests {
     }
 
     #[test]
+    fn a_place_that_reaches_out_of_the_picture_has_corners_and_points_outside_it() {
+        let place = Placement::upright(CanvasArea::new(-0.2, 0.3, 0.4, 0.2));
+        assert_points_close(place.corner_position(Corner::TopLeft, SQUARE_PICTURE), (-0.2, 0.3));
+        assert_points_close(place.corner_position(Corner::BottomRight, SQUARE_PICTURE), (0.2, 0.5));
+        assert!(
+            place.contains((-0.1, 0.4), SQUARE_PICTURE),
+            "past the edge, but in the place"
+        );
+        assert!(place.contains((0.1, 0.4), SQUARE_PICTURE));
+        assert!(!place.contains((-0.3, 0.4), SQUARE_PICTURE));
+        assert!(!place.contains((0.3, 0.4), SQUARE_PICTURE));
+        assert_points_close(place.centre(), (0.0, 0.4));
+    }
+
+    #[test]
     fn a_point_is_inside_a_turned_place_when_it_is_inside_the_rectangle_that_is_turned() {
         // 400 by 100 pixels in the middle of a square picture, turned a quarter: it is upright and 100 by 400.
         let place = Placement::new(CanvasArea::new(0.3, 0.45, 0.4, 0.1), Angle::from_degrees(90.0));
@@ -897,6 +1176,40 @@ mod tests {
     }
 
     #[test]
+    fn a_corner_of_a_turned_place_can_be_dragged_out_past_the_edge_of_the_picture() {
+        let place = Placement::new(CanvasArea::new(0.5, 0.4, 0.2, 0.2), Angle::from_degrees(30.0));
+        let fixed = place.corner_position(Corner::TopLeft, WIDE_PICTURE);
+        let corner_now = place.corner_position(Corner::BottomRight, WIDE_PICTURE);
+        // Three times as far from the corner that stays, along the way the rectangle is turned.
+        let pointer = (
+            fixed.0 + (corner_now.0 - fixed.0) * 3.0,
+            fixed.1 + (corner_now.1 - fixed.1) * 3.0,
+        );
+        assert!(
+            pointer.1 > 1.0,
+            "the setup: the pointer is below the picture: {pointer:?}"
+        );
+
+        let dragged = place.with_corner_dragged_to(Corner::BottomRight, pointer, WIDE_PICTURE, false);
+
+        assert_points_close(dragged.corner_position(Corner::BottomRight, WIDE_PICTURE), pointer);
+        assert_points_close(dragged.corner_position(Corner::TopLeft, WIDE_PICTURE), fixed);
+        assert_eq!(dragged.rotation, place.rotation);
+        assert_area_is_valid(dragged.area);
+    }
+
+    #[test]
+    fn a_turned_place_dragged_so_far_out_that_its_middle_would_be_off_the_picture_is_pulled_back_on_to_it() {
+        let place = Placement::new(CanvasArea::new(0.7, 0.7, 0.2, 0.2), Angle::from_degrees(30.0));
+        let dragged = place.with_corner_dragged_to(Corner::BottomRight, (2.0, 2.0), WIDE_PICTURE, false);
+        assert_area_is_valid(dragged.area);
+        assert_eq!(dragged.rotation, place.rotation);
+        let (middle_across, middle_down) = dragged.centre();
+        assert!(middle_across <= 1.0 + 1e-5 && middle_down <= 1.0 + 1e-5, "{dragged:?}");
+        assert!(dragged.area.width() > place.area.width(), "it did get bigger");
+    }
+
+    #[test]
     fn dragging_a_corner_with_the_shape_kept_scales_the_rectangle_about_the_opposite_corner() {
         let place = Placement::new(CanvasArea::new(0.3, 0.3, 0.3, 0.3), Angle::from_degrees(-20.0));
         let fixed = place.corner_position(Corner::TopLeft, SQUARE_PICTURE);
@@ -944,8 +1257,8 @@ mod tests {
         for round in 0..3000 {
             let unit = |random: &mut DeterministicRandomNumbers| random.next_below(10_001) as f32 / 10_000.0;
             let area = CanvasArea::new(
-                unit(&mut random),
-                unit(&mut random),
+                unit(&mut random) * 1.5 - 0.5,
+                unit(&mut random) * 1.5 - 0.5,
                 unit(&mut random),
                 unit(&mut random),
             );

@@ -12,14 +12,16 @@ mod audio_device;
 mod audio_splice;
 mod audio_supplier;
 mod clock;
+mod output_stream;
 mod picture_size;
 mod preview_pictures;
 #[cfg(test)]
 mod scripted_streams;
+mod sound_effects;
 mod supplier;
 mod wanted;
 
-pub use audio_device::{AudioDeviceError, DeviceAudioSink, opener_of_the_default_speakers};
+pub use audio_device::{DeviceAudioSink, opener_of_the_default_speakers};
 pub use audio_splice::splice_waiting_sound;
 pub use audio_supplier::{
     AudioContent, AudioSink, AudioSinkOpener, AudioSource, AudioStreamStarter, AudioSupplier, ClockReading,
@@ -27,8 +29,15 @@ pub use audio_supplier::{
     SECONDS_OF_SOUND_KEPT_WAITING, SMALLEST_DIFFERENCE_TO_CORRECT_IN_SECONDS,
 };
 pub use clock::PlaybackClock;
+pub use output_stream::AudioDeviceError;
 pub use picture_size::{LARGEST_PREVIEW_HEIGHT_IN_PIXELS, LARGEST_PREVIEW_WIDTH_IN_PIXELS, preview_picture_size};
 pub use preview_pictures::{PicturesReport, PreviewPictures};
+pub use sound_effects::{
+    DeviceEffectSpeakers, EffectSpeakers, EffectSpeakersOpener, SoundEffect, SoundEffects,
+    opener_of_the_default_effect_speakers,
+};
+#[cfg(test)]
+pub use sound_effects::{SpeakersLog, speakers_that_only_keep_a_log};
 pub use supplier::{
     FfmpegPictureStreamStarter, MINIMUM_TIME_BETWEEN_STREAM_STARTS, MOST_PICTURES_TO_WAIT_FOR,
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PictureStream, PictureStreamStarter, PictureSupplier,

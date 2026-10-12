@@ -12,14 +12,14 @@ use crate::application::commands::Command;
 use crate::application::preview_panel::{corner_handle_label, picture_label};
 use crate::application::selection::SelectionChange;
 use crate::project::{
-    Angle, ClipKind, ClipLocation, Corner, Placement, SourceImageProperties, SourceMedia, SourceMediaIdentifier,
+    Angle, ClipId, ClipKind, Corner, Placement, SourceImageProperties, SourceMedia, SourceMediaIdentifier,
     SourceMediaLink, TimelineFrameIndex,
 };
 
 const PICTURE_FILE: SourceMediaIdentifier = SourceMediaIdentifier::new(3);
 
 /// A picture file twice as wide as it is tall.
-fn picture_source() -> SourceMedia {
+pub(super) fn picture_source() -> SourceMedia {
     SourceMedia::image(
         PICTURE_FILE,
         SourceMediaLink::from_absolute_path(PathBuf::from("logo.png")),
@@ -32,16 +32,13 @@ fn picture_source() -> SourceMedia {
 
 /// A window with a video of 300 frames and, on a track in front of it, a picture shown for 5 seconds
 /// from frame 0, which is selected.
-fn window_with_a_picture_selected() -> (Window, ClipLocation) {
+fn window_with_a_picture_selected() -> (Window, ClipId) {
     let mut project = project_of(300);
     let outcome = project
         .import_source(picture_source(), TimelineFrameIndex::new(0))
         .unwrap();
     assert!(outcome.created_track, "the video is on the only track");
-    let picture = ClipLocation {
-        track: outcome.track,
-        clip: outcome.clip.expect("a picture makes a clip"),
-    };
+    let picture = outcome.clip.expect("a picture makes a clip");
     let mut window = Window::showing(project);
     window.do_this(Command::Select {
         clips: vec![picture],
@@ -50,7 +47,7 @@ fn window_with_a_picture_selected() -> (Window, ClipLocation) {
     (window, picture)
 }
 
-fn placement_of(window: &Window, clip: ClipLocation) -> Option<Placement> {
+fn placement_of(window: &Window, clip: ClipId) -> Option<Placement> {
     window
         .application()
         .project()
@@ -68,7 +65,11 @@ fn corner_position(window: &Window, corner: Corner) -> Pos2 {
 fn a_picture_is_a_clip_of_its_own_on_a_track_in_front_shown_for_five_seconds() {
     let (window, picture) = window_with_a_picture_selected();
     let project = window.application().project();
-    assert_eq!(project.tracks()[0].id(), picture.track, "in front");
+    assert_eq!(
+        project.tracks()[0].id(),
+        project.track_holding(picture).unwrap().id(),
+        "in front"
+    );
     let placement = project.placement_of(picture).unwrap();
     assert_eq!(placement.clip.kind(), ClipKind::Image);
     assert_eq!(placement.timeline_frame_count(), 150);
@@ -156,14 +157,14 @@ fn a_picture_that_was_made_smaller_can_be_moved_and_turned_from_outside_a_corner
 }
 
 #[test]
-fn right_clicking_a_picture_clip_opens_a_box_that_says_for_how_long_it_is_shown_and_not_speed_or_sound() {
+fn selecting_a_picture_clip_shows_in_the_panel_for_how_long_it_is_shown_and_not_speed_or_sound() {
     let (mut window, picture) = window_with_a_picture_selected();
     window.do_this(Command::Deselect);
 
-    window.right_click(window.middle_of_the_strip_at(0, 75));
+    window.click(window.middle_of_the_strip_at(0, 75));
 
     assert_eq!(window.application().selected_clip(), Some(picture));
-    assert!(window.application().timeline_view.settings_box_is_open());
+    assert!(window.harness.query_by_label("Picture clip").is_some());
     assert!(window.harness.query_by_label("Shown for").is_some());
     for label in ["Speed", "Gain", "Mute"] {
         assert!(
@@ -172,18 +173,15 @@ fn right_clicking_a_picture_clip_opens_a_box_that_says_for_how_long_it_is_shown_
         );
     }
     assert!(
-        window
-            .harness
-            .query_by_label_contains("Picture clip: logo.png")
-            .is_some(),
-        "the box says what the clip is and which file it is from"
+        window.harness.query_by_label("logo.png").is_some(),
+        "the box says which file the clip is from"
     );
 }
 
 #[test]
 fn changing_for_how_long_a_picture_is_shown_changes_the_clip_and_one_undo_takes_it_back() {
     let (mut window, picture) = window_with_a_picture_selected();
-    window.right_click(window.middle_of_the_strip_at(0, 75));
+    window.click(window.middle_of_the_strip_at(0, 75));
 
     window.set_slider("Shown for", 2.0);
 
@@ -214,7 +212,7 @@ fn changing_for_how_long_a_picture_is_shown_changes_the_clip_and_one_undo_takes_
 fn a_picture_clip_can_be_cut_at_the_playhead_and_the_halves_are_pictures_in_the_same_place() {
     let (mut window, picture) = window_with_a_picture_selected();
     window.cut_at_frame(60);
-    let track = window.application().project().track(picture.track).unwrap();
+    let track = window.application().project().track_holding(picture).unwrap();
     let durations: Vec<u64> = track
         .placements()
         .map(|placement| placement.timeline_frame_count())

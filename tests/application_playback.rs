@@ -222,15 +222,7 @@ fn playing_after_jumping_into_the_middle_catches_up_and_keeps_up_and_pausing_hol
 #[test]
 fn playing_to_the_end_stops_on_the_last_picture_and_playing_again_starts_over() {
     let toolchain = toolchain_or_skip!();
-    let short_video = test_video(
-        &toolchain,
-        &TestVideoSpecification {
-            name: "pal_3_seconds",
-            frame_rate: "25",
-            duration_in_seconds: 3,
-            ..TestVideoSpecification::COUNTER
-        },
-    );
+    let short_video = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS);
     let mut journey = Journey::importing(&toolchain, &short_video.path);
     journey.click_the_scrub_slider_at(0.9);
     journey.wait_for_the_preview_to_show_the_current_frame();

@@ -11,9 +11,14 @@
 //! The selected clip has a bright outline.
 
 use egui::epaint::RectShape;
-use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Rect, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::epaint::tessellator::Path;
+use egui::{
+    Align2, Color32, CornerRadius, FontId, Mesh, Painter, Rect, Shape, Stroke, StrokeKind, TextureId, Ui, pos2, remap,
+    vec2,
+};
 
 use super::bevel::{self, bevel_lines};
+use super::clip_shape::ClipShape;
 use super::strip_view::StripView;
 use super::{SourceLook, TimelineContent};
 use crate::application::textures::Textures;
@@ -27,18 +32,60 @@ fn picture_part_up_to(fraction_of_width: f32) -> Rect {
     Rect::from_min_max(pos2(0.0, 0.0), pos2(fraction_of_width, 1.0))
 }
 
-/// Which corners of a tile are rounded: those that are corners of its clip. The first tile of a
-/// clip has the clip's left corners and the last tile has its right corners; a tile in between has
-/// none, so the clip's picture strip stays seamless.
-pub(super) fn corner_radius_of_tile(tile: &TileLayout, radius: u8) -> CornerRadius {
-    let left = if tile.starts_clip { radius } else { 0 };
-    let right = if tile.ends_clip { radius } else { 0 };
-    CornerRadius {
-        nw: left,
-        sw: left,
-        ne: right,
-        se: right,
+/// How far a piece that is cut to the outline of its clip is made to overlap the pieces beside it, in
+/// points, so that no seam shows between a piece with a soft edge along the curve of a corner and its
+/// neighbour. (The neighbour is drawn after it, over the overlap.)
+const OVERLAP_OF_NEIGHBOURING_PIECES: f32 = 1.0;
+
+/// What a piece of a clip is filled with.
+#[derive(Clone, Copy)]
+enum PieceFill {
+    Colour(Color32),
+    /// A picture of which the piece shows `shown` (as fractions of its width and height, from the left
+    /// and the top).
+    Picture {
+        texture: TextureId,
+        shown: Rect,
+    },
+}
+
+/// Draws a piece of a clip (one picture of a video, say) in `piece`, cut to the outline of the clip
+/// (`shape`): what would be outside the curve of a corner is not drawn.
+fn draw_piece_of_clip(painter: &Painter, shape: &ClipShape, piece: Rect, fill: PieceFill) {
+    if shape.contains_all_of(piece) {
+        let rectangle = match fill {
+            PieceFill::Colour(colour) => RectShape::filled(piece, CornerRadius::ZERO, colour),
+            PieceFill::Picture { texture, shown } => {
+                RectShape::filled(piece, CornerRadius::ZERO, Color32::WHITE).with_texture(texture, shown)
+            }
+        };
+        painter.add(rectangle);
+        return;
     }
+    let points = shape.part_of(piece.expand2(vec2(OVERLAP_OF_NEIGHBOURING_PIECES, 0.0)));
+    if points.len() < 3 {
+        return;
+    }
+    let feathering = 1.0 / painter.ctx().pixels_per_point();
+    let mut path = Path::default();
+    path.add_line_loop(&points);
+    let mut mesh = Mesh::default();
+    match fill {
+        PieceFill::Colour(colour) => path.fill(feathering, colour, &mut mesh),
+        PieceFill::Picture { texture, shown } => path.fill_with_uv(
+            feathering,
+            Color32::WHITE,
+            texture,
+            |position| {
+                pos2(
+                    remap(position.x, piece.x_range(), shown.x_range()),
+                    remap(position.y, piece.y_range(), shown.y_range()),
+                )
+            },
+            &mut mesh,
+        ),
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// How loud a bar of the waveform is drawn: the quiet parts are made to stand out a little, so that
@@ -59,6 +106,15 @@ fn waveform_bar_height(column: &WaveformColumn, clip_height: f32) -> f32 {
 
 /// How far the waveform keeps from the top and bottom of its clip, in points.
 const WAVEFORM_MARGIN: f32 = 8.0;
+
+/// One clip, as it is drawn: the view of the strip it is on, where it is on the screen, and its
+/// outline, which every piece of it is cut to.
+#[derive(Clone, Copy)]
+struct ClipToDraw<'a> {
+    view: &'a StripView,
+    rectangles: ClipRectangles,
+    shape: ClipShape,
+}
 
 /// Where on the screen a clip is, as far as it can be seen: its whole extent along the strip, and
 /// the same cut to the strip.
@@ -124,6 +180,11 @@ pub(super) fn draw_clips(
             continue;
         }
         let corner_radius = CornerRadius::same(theme::CLIP_CORNER_RADIUS);
+        let clip = ClipToDraw {
+            view,
+            rectangles,
+            shape: ClipShape::new(rectangles.whole, f32::from(theme::CLIP_CORNER_RADIUS)),
+        };
         match placement.clip {
             Clip::Video(media) => {
                 let look = content.source_looks.get(&media.source());
@@ -132,7 +193,7 @@ pub(super) fn draw_clips(
                         Some(thumbnails) => draw_video_clip(
                             ui,
                             painter,
-                            view,
+                            clip,
                             tiles.iter().filter(|tile| tile.clip == placement.id),
                             media.source(),
                             thumbnails,
@@ -156,7 +217,7 @@ pub(super) fn draw_clips(
                             view.width(),
                             theme::WAVEFORM_COLUMN_WIDTH,
                         );
-                        draw_waveform(painter, view, rectangles, &columns);
+                        draw_waveform(painter, clip, &columns);
                     }
                 }
                 other => draw_missing_clip(painter, rectangles, corner_radius, other),
@@ -165,7 +226,7 @@ pub(super) fn draw_clips(
                 Some(look) if look.is_available => {
                     painter.rect_filled(rectangles.whole, corner_radius, theme::IMAGE_CLIP_BACKGROUND);
                     let picture_width =
-                        draw_picture_of_a_picture_clip(ui, painter, view, rectangles, image.source(), look, textures);
+                        draw_picture_of_a_picture_clip(ui, painter, clip, image.source(), look, textures);
                     draw_label_after(
                         painter,
                         rectangles,
@@ -207,12 +268,16 @@ fn draw_bevel(painter: &Painter, rectangles: ClipRectangles, view: &StripView) {
 fn draw_picture_of_a_picture_clip(
     ui: &Ui,
     painter: &Painter,
-    view: &StripView,
-    rectangles: ClipRectangles,
+    clip: ClipToDraw<'_>,
     source: SourceMediaIdentifier,
     look: &SourceLook<'_>,
     textures: &mut Textures,
 ) -> f32 {
+    let ClipToDraw {
+        view,
+        rectangles,
+        shape,
+    } = clip;
     let Some(picture) = look.picture else {
         return 0.0;
     };
@@ -230,9 +295,14 @@ fn draw_picture_of_a_picture_clip(
             1.0
         };
         let texture = textures.image_picture(ui.ctx(), source, picture);
-        painter.add(
-            RectShape::filled(tile, CornerRadius::ZERO, Color32::WHITE)
-                .with_texture(texture.id(), picture_part_up_to(shown)),
+        draw_piece_of_clip(
+            painter,
+            &shape,
+            tile,
+            PieceFill::Picture {
+                texture: texture.id(),
+                shown: picture_part_up_to(shown),
+            },
         );
     }
     tile.width()
@@ -242,24 +312,26 @@ fn draw_picture_of_a_picture_clip(
 fn draw_video_clip<'a>(
     ui: &Ui,
     painter: &Painter,
-    view: &StripView,
+    clip: ClipToDraw<'_>,
     tiles: impl Iterator<Item = &'a TileLayout>,
     source: SourceMediaIdentifier,
     thumbnails: &ThumbnailLibrary,
     textures: &mut Textures,
 ) {
+    let ClipToDraw { view, shape, .. } = clip;
     for tile in tiles {
         let tile_rectangle = Rect::from_min_size(
             pos2(view.screen_x_of(tile.left), view.rectangle.top()),
             vec2(tile.width as f32, view.rectangle.height()),
         );
-        let corner_radius = corner_radius_of_tile(tile, theme::CLIP_CORNER_RADIUS);
-        let shape = match textures.thumbnail(ui.ctx(), source, thumbnails, tile.picture) {
-            Some(texture) => RectShape::filled(tile_rectangle, corner_radius, Color32::WHITE)
-                .with_texture(texture.id(), picture_part_up_to(tile.fraction_of_picture_shown)),
-            None => RectShape::filled(tile_rectangle, corner_radius, theme::THUMBNAIL_PLACEHOLDER),
+        let fill = match textures.thumbnail(ui.ctx(), source, thumbnails, tile.picture) {
+            Some(texture) => PieceFill::Picture {
+                texture: texture.id(),
+                shown: picture_part_up_to(tile.fraction_of_picture_shown),
+            },
+            None => PieceFill::Colour(theme::THUMBNAIL_PLACEHOLDER),
         };
-        painter.add(shape);
+        draw_piece_of_clip(painter, &shape, tile_rectangle, fill);
     }
 }
 
@@ -282,7 +354,12 @@ fn draw_missing_clip(
 /// Draws the bars of a waveform, each as tall as the sound is loud, centred on the middle of the
 /// clip, side by side so that together they are one solid shape. (They are one mesh of rectangles,
 /// which is quick to draw however many there are, and has no faint seams between them.)
-fn draw_waveform(painter: &Painter, view: &StripView, rectangles: ClipRectangles, columns: &[WaveformColumn]) {
+fn draw_waveform(painter: &Painter, clip: ClipToDraw<'_>, columns: &[WaveformColumn]) {
+    let ClipToDraw {
+        view,
+        rectangles,
+        shape,
+    } = clip;
     let middle = rectangles.whole.center().y;
     let clip_height = rectangles.whole.height();
     let mut mesh = Mesh::default();
@@ -296,9 +373,29 @@ fn draw_waveform(painter: &Painter, view: &StripView, rectangles: ClipRectangles
             pos2(left, middle - height / 2.0),
             pos2(left + column.width as f32, middle + height / 2.0),
         );
-        mesh.add_colored_rect(bar, theme::SOUND_CLIP_WAVEFORM);
+        if shape.contains_all_of(bar) {
+            mesh.add_colored_rect(bar, theme::SOUND_CLIP_WAVEFORM);
+        } else {
+            // A bar near the end of the clip is cut by the curve of the corners. (Its edges are not
+            // softened: the bars are narrow and side by side, and the softened edges would show as seams.)
+            add_polygon(&mut mesh, &shape.part_of(bar), theme::SOUND_CLIP_WAVEFORM);
+        }
     }
     painter.with_clip_rect(rectangles.visible).add(Shape::mesh(mesh));
+}
+
+/// Adds the convex polygon with these `points` (in order) to `mesh`, all of one colour.
+fn add_polygon(mesh: &mut Mesh, points: &[egui::Pos2], colour: Color32) {
+    if points.len() < 3 {
+        return;
+    }
+    let first = mesh.vertices.len() as u32;
+    for point in points {
+        mesh.colored_vertex(*point, colour);
+    }
+    for index in 1..points.len() as u32 - 1 {
+        mesh.add_triangle(first, first + index, first + index + 1);
+    }
 }
 
 /// Writes `text` (its first line) inside the clip, at its left edge, or at the left edge of the
@@ -368,58 +465,7 @@ pub(super) fn draw_clip_boundaries(painter: &Painter, view: &StripView, track: &
 mod tests {
     use super::*;
     use crate::application::timeline_geometry::TimelineGeometry;
-    use crate::media::ThumbnailKey;
-    use crate::project::{ClipId, SourceFrameIndex};
-
-    fn tile(starts_clip: bool, ends_clip: bool) -> TileLayout {
-        TileLayout {
-            clip: ClipId::new(0),
-            source: SourceMediaIdentifier::new(1),
-            left: 0.0,
-            width: 100.0,
-            fraction_of_picture_shown: 1.0,
-            source_frame: SourceFrameIndex::new(0),
-            picture: ThumbnailKey { level: 0, index: 0 },
-            starts_clip,
-            ends_clip,
-        }
-    }
-
-    #[test]
-    fn the_first_tile_of_a_clip_rounds_the_left_corners_only() {
-        assert_eq!(
-            corner_radius_of_tile(&tile(true, false), 4),
-            CornerRadius {
-                nw: 4,
-                sw: 4,
-                ne: 0,
-                se: 0
-            }
-        );
-    }
-
-    #[test]
-    fn the_last_tile_of_a_clip_rounds_the_right_corners_only() {
-        assert_eq!(
-            corner_radius_of_tile(&tile(false, true), 4),
-            CornerRadius {
-                nw: 0,
-                sw: 0,
-                ne: 4,
-                se: 4
-            }
-        );
-    }
-
-    #[test]
-    fn a_tile_in_the_middle_of_a_clip_has_square_corners_so_the_strip_is_seamless() {
-        assert_eq!(corner_radius_of_tile(&tile(false, false), 4), CornerRadius::ZERO);
-    }
-
-    #[test]
-    fn a_clip_of_one_tile_has_all_four_corners_rounded() {
-        assert_eq!(corner_radius_of_tile(&tile(true, true), 4), CornerRadius::same(4));
-    }
+    use crate::project::SourceFrameIndex;
 
     #[test]
     fn the_corners_of_clips_are_rounded_half_as_much_again_as_in_the_last_round() {

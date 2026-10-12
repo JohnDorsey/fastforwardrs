@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::project::{
-    Angle, CanvasArea, ClipLocation, FrameRate, Gain, Placement, SETTINGS, SourceImageProperties,
+    Angle, CanvasArea, ClipId, FrameRate, Gain, Placement, PropertyId, PropertyValue, SETTINGS, SourceImageProperties,
     SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TimelineFrameIndex, TrackHeight,
 };
 
@@ -22,11 +22,8 @@ fn frame(number: u64) -> TimelineFrameIndex {
 }
 
 /// The place of the clip with this number (counting from 0) on the project's only or front-most track.
-fn clip_number(project: &Project, number: usize) -> ClipLocation {
-    ClipLocation {
-        track: project.tracks()[0].id(),
-        clip: project.tracks()[0].entries()[number].id(),
-    }
+fn clip_number(project: &Project, number: usize) -> ClipId {
+    project.tracks()[0].entries()[number].id()
 }
 
 /// A project edited the way a user would: split in three, with the middle clip sped up and the
@@ -55,13 +52,13 @@ fn link_to_missing_video() -> SourceMediaLink {
 }
 
 /// The text a project is saved as, for a project that is in a folder of its own.
-fn saved(project: &Project) -> String {
+pub(super) fn saved(project: &Project) -> String {
     project_to_json_text(project, Path::new("/projects")).unwrap()
 }
 
 /// Whether two projects are the same as far as a file can tell. (Their clips and tracks have
 /// names that are made up when a project is loaded, so loading a saved project gives other names.)
-fn assert_same_content(loaded: &Project, original: &Project) {
+pub(super) fn assert_same_content(loaded: &Project, original: &Project) {
     assert_eq!(saved(loaded), saved(original));
 }
 
@@ -70,7 +67,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 4,
+  "file_format_version": 6,
   "sources": [
     {
       "kind": "video",
@@ -189,8 +186,11 @@ fn every_setting_in_the_table_survives_a_trip_through_the_file_in_every_state() 
     }
 }
 
+/// What the line that says the version looks like in a file of the version this build writes.
+pub(super) const CURRENT_VERSION_LINE: &str = "\"file_format_version\": 6";
+
 /// Valid project text with one thing replaced, for the "bad file" tests below.
-fn valid_text_with(replacing: &str, with: &str) -> String {
+pub(super) fn valid_text_with(replacing: &str, with: &str) -> String {
     let text = saved(&edited_project(link_to_missing_video()));
     assert!(
         text.contains(replacing),
@@ -331,7 +331,7 @@ fn an_earlier_file_with_a_clip_that_has_no_frames_is_rejected_and_the_clip_is_na
 fn an_earlier_file_is_saved_in_the_current_layout_and_that_loads_to_the_same_project() {
     let loaded = project_from_json_text(VERSION_2_TEXT).unwrap();
     let text = saved(&loaded);
-    assert!(text.contains("\"file_format_version\": 4"), "{text}");
+    assert!(text.contains(CURRENT_VERSION_LINE), "{text}");
     assert!(text.contains("\"tracks\""), "{text}");
     assert!(!text.contains("video_track"), "{text}");
     assert_same_content(&project_from_json_text(&text).unwrap(), &loaded);
@@ -357,7 +357,7 @@ fn a_track_of_another_height_is_saved_with_it_and_comes_back_and_one_of_the_norm
 
 #[test]
 fn a_file_of_version_3_has_no_heights_and_its_tracks_are_of_the_normal_height() {
-    let text = valid_text_with("\"file_format_version\": 4", "\"file_format_version\": 3");
+    let text = valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 3");
     let project = project_from_json_text(&text).unwrap();
     assert!(
         project
@@ -526,20 +526,78 @@ fn json_that_is_not_a_fastforwardrs_project_is_rejected() {
 
 #[test]
 fn a_project_from_a_newer_version_is_refused_rather_than_misread() {
-    let error = project_from_json_text(&valid_text_with(
-        "\"file_format_version\": 4",
-        "\"file_format_version\": 5",
-    ))
-    .unwrap_err();
+    let error =
+        project_from_json_text(&valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 7")).unwrap_err();
     assert!(
-        matches!(error, ProjectFileError::NewerFileFormat { found: 5, supported: 4 }),
+        matches!(error, ProjectFileError::NewerFileFormat { found: 7, supported: 6 }),
         "{error:?}"
+    );
+}
+
+// --- the frame rate of the project ---
+
+#[test]
+fn a_project_that_follows_its_first_video_has_no_frame_rate_in_its_file_and_one_that_was_given_one_has_it() {
+    let mut project = edited_project(link_to_missing_video());
+    assert_eq!(project.chosen_frame_rate(), None);
+    let own_line = |text: &str| text.lines().any(|line| line.starts_with("  \"frame_rate\":"));
+    assert!(
+        !own_line(&saved(&project)),
+        "no frame rate of the project is written, only those of the videos"
+    );
+
+    project.set_frame_rate(FrameRate::new(25, 1).unwrap());
+    let text = saved(&project);
+    assert!(
+        text.contains(
+            "
+  \"frame_rate\": \"25/1\"
+"
+        ),
+        "{text}"
+    );
+    let loaded = project_from_json_text(&text).unwrap();
+    assert_eq!(loaded.chosen_frame_rate(), Some(FrameRate::new(25, 1).unwrap()));
+    assert_eq!(loaded.frame_rate(), FrameRate::new(25, 1).unwrap());
+    assert_same_content(&loaded, &project);
+}
+
+#[test]
+fn videos_of_different_frame_rates_survive_a_trip_through_the_file_with_the_edits_that_are_made_of_them() {
+    let mut project = edited_project(link_to_missing_video());
+    let mut other = video_properties();
+    other.frame_rate = FrameRate::new(25, 1).unwrap();
+    other.total_frame_count = 250;
+    project
+        .import_source(
+            SourceMedia::video(SourceMediaIdentifier::new(9), link_to_missing_video(), other),
+            frame(0),
+        )
+        .unwrap();
+    let loaded = project_from_json_text(&saved(&project)).unwrap();
+    assert_same_content(&loaded, &project);
+    assert_eq!(loaded.frame_rate(), project.frame_rate());
+    assert_eq!(
+        loaded.frame_count_of_source(SourceMediaIdentifier::new(9)),
+        project.frame_count_of_source(SourceMediaIdentifier::new(9))
+    );
+}
+
+#[test]
+fn a_file_of_version_4_has_no_frame_rate_of_its_own_and_the_project_follows_its_first_video() {
+    let text = valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 4");
+    let project = project_from_json_text(&text).unwrap();
+    assert_eq!(project.chosen_frame_rate(), None);
+    assert_eq!(
+        project.frame_rate(),
+        FrameRate::new(30000, 1001).unwrap(),
+        "that of the video in the sample"
     );
 }
 
 /// The reason given for a file that is not a readable project, failing the test for any other
 /// kind of error.
-fn reason_for_unreadable_project(text: &str) -> String {
+pub(super) fn reason_for_unreadable_project(text: &str) -> String {
     match project_from_json_text(text) {
         Err(ProjectFileError::NotAProjectFile { reason }) => reason,
         other => panic!("expected NotAProjectFile, got {other:?}"),
@@ -654,7 +712,7 @@ fn symbol_layout_values_that_are_out_of_range_are_corrected_not_rejected() {
 // --- what is new in this layout: tracks, sound files, text ---
 
 /// A project with a video, a sound file and a text object, on three tracks with settings of their own.
-fn project_with_everything() -> Project {
+pub(super) fn project_with_everything() -> Project {
     let mut project = edited_project(link_to_missing_video());
     project
         .import_source(
@@ -698,10 +756,7 @@ fn project_with_everything() -> Project {
             90,
         )
         .unwrap();
-    let placed_video = ClipLocation {
-        track: project.tracks()[2].id(),
-        clip: project.tracks()[2].entries()[1].id(),
-    };
+    let placed_video = project.tracks()[2].entries()[1].id();
     project
         .set_clip_placement(placed_video, a_place_for_the_video())
         .unwrap();
@@ -767,10 +822,7 @@ fn a_text_that_is_turned_says_by_how_much_and_one_that_is_not_says_nothing_about
     assert!(turned.contains("\"rotation_degrees\": -12.5"), "{turned}");
 
     let mut upright_project = project_with_everything();
-    let caption = ClipLocation {
-        track: upright_project.tracks()[0].id(),
-        clip: upright_project.tracks()[0].entries()[0].id(),
-    };
+    let caption = upright_project.tracks()[0].entries()[0].id();
     let area = upright_project
         .placement_of(caption)
         .unwrap()
@@ -939,10 +991,7 @@ fn project_with_a_picture(placed: bool) -> Project {
             frame(100),
         )
         .unwrap();
-    let picture = ClipLocation {
-        track: project.tracks()[0].id(),
-        clip: project.tracks()[0].entries()[0].id(),
-    };
+    let picture = project.tracks()[0].entries()[0].id();
     if placed {
         project
             .set_clip_placement(
@@ -1071,9 +1120,49 @@ fn values_of_a_text_object_that_are_out_of_range_are_corrected_not_rejected() {
         caption.object.font_size.fraction_of_picture_height(),
         FontSize::LARGEST_FRACTION
     );
-    assert!(caption.object.area.right() <= 1.0 + 1e-6, "{:?}", caption.object.area);
+    assert_eq!(
+        caption.object.area.left(),
+        0.75,
+        "moved back as far as it goes: its middle is at the edge of the picture"
+    );
     let media = loaded.tracks()[1].entries()[0].clip().as_media().unwrap();
     assert_eq!(media.gain().decibels(), Gain::SMALLEST_DECIBELS);
+}
+
+#[test]
+fn objects_that_reach_out_past_the_edges_of_the_picture_are_saved_and_loaded_as_they_are() {
+    let mut project = project_with_everything();
+    let caption = project.tracks()[0].entries()[0].id();
+    let video = project.tracks()[2].entries()[1].id();
+    project
+        .set_clip_placement(
+            caption,
+            Placement::new(CanvasArea::new(0.75, 0.875, 0.5, 0.25), Angle::from_degrees(-12.5)),
+        )
+        .unwrap();
+    project
+        .set_clip_placement(
+            video,
+            Placement::new(CanvasArea::new(-0.25, -0.125, 0.5, 0.375), Angle::from_degrees(30.0)),
+        )
+        .unwrap();
+
+    let text = saved(&project);
+    let loaded = project_from_json_text(&text).unwrap();
+
+    assert!(
+        text.contains("\"left_fraction_of_frame_width\": -0.25"),
+        "the left edge of the video is before the picture: {text}"
+    );
+    assert_same_content(&loaded, &project);
+    let loaded_caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
+    assert_eq!(loaded_caption.object.area, CanvasArea::new(0.75, 0.875, 0.5, 0.25));
+    assert!(loaded_caption.object.area.right() > 1.0 && loaded_caption.object.area.bottom() > 1.0);
+    let loaded_video = loaded.tracks()[2].entries()[1].clip().as_media().unwrap();
+    assert_eq!(
+        loaded_video.placement().map(|place| place.area),
+        Some(CanvasArea::new(-0.25, -0.125, 0.5, 0.375))
+    );
 }
 
 #[test]
@@ -1135,6 +1224,18 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
     assert_eq!(picture.source(), SourceMediaIdentifier::new(3));
     assert_eq!(picture.placement().unwrap().rotation, Angle::from_degrees(20.0));
     assert_eq!(project.tracks()[1].entries().len(), 3);
+    // The keyframes the example shows: the caption fades in, and the first video gets quieter and moves.
+    let caption_animation = project.tracks()[0].entries()[0].animation();
+    assert_eq!(caption_animation.keyframes_of(PropertyId::Colour).unwrap().len(), 2);
+    let video_animation = project.tracks()[1].entries()[0].animation();
+    assert_eq!(
+        video_animation.value_at(PropertyId::Gain, 30),
+        Some(PropertyValue::Number(-6.0))
+    );
+    assert_eq!(
+        video_animation.value_at(PropertyId::Position, 60),
+        Some(PropertyValue::Pair(0.375, 0.5))
+    );
     // And what the program writes for it is what the example shows (the same project, whichever way it is told).
     let written = saved(&project);
     let again = project_from_json_text(&written).unwrap();

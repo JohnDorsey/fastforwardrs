@@ -11,10 +11,12 @@ use fastforwardrs::media::export::{
     ExportResult, VideoExport, plan_export, sound_graph_specification, sources_of_sound,
 };
 use fastforwardrs::media::{AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain};
-use fastforwardrs::project::{Project, Settings, SpedUpClipSound, TimelineFrameIndex};
+use fastforwardrs::project::{
+    AnimationTarget, Project, PropertyId, PropertyValue, Settings, SpedUpClipSound, TimelineFrameIndex,
+};
 use support::{
-    counter_video, decoded_sound, edited, loudness, project_for, project_with_a_video_and_a_tone_file,
-    scratch_directory, tone_strength, transparent_text_picture,
+    TestVideoSpecification, clip_number, counter_video, decoded_sound, edited, loudness, pitch_in_hertz, project_for,
+    project_with_a_video_and_a_tone_file, scratch_directory, test_video, tone_strength, transparent_text_picture,
 };
 
 const TIME_ALLOWED: Duration = Duration::from_secs(60);
@@ -411,4 +413,158 @@ fn the_preview_sound_of_two_tracks_is_the_sound_the_export_has_second_by_second(
             "second {second}: {in_the_preview} against {in_the_export}"
         );
     }
+}
+
+// --- keyframes ---
+
+/// Makes `property` of the first clip of `project` have `value` at timeline frame `frame`: a keyframe.
+fn make_a_keyframe(project: &mut Project, property: PropertyId, frame: u64, value: PropertyValue) {
+    let target = AnimationTarget::Clip(clip_number(project, 0));
+    support::make_a_keyframe(project, target, property, frame, value);
+}
+
+/// The left channel of stereo samples.
+fn left_channel(samples: &[f32]) -> Vec<f32> {
+    samples.iter().step_by(2).copied().collect()
+}
+
+/// How many times louder than the sound at `from_seconds` the sound at `to_seconds` is (both stretches 0.2 seconds long).
+fn how_much_louder_it_is_at(samples: &[f32], from_seconds: f64, to_seconds: f64) -> f64 {
+    f64::from(loudness_of_stretch(samples, to_seconds, 0.2))
+        / f64::from(loudness_of_stretch(samples, from_seconds, 0.2))
+}
+
+#[test]
+fn a_clip_whose_gain_has_keyframes_is_as_loud_as_they_say_at_each_moment() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let mut project = project_for(&toolchain, &video);
+    // 0 decibels at the start, getting quieter by 4 decibels every second until -20 decibels at 5 seconds.
+    make_a_keyframe(&mut project, PropertyId::Gain, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, PropertyId::Gain, 150, PropertyValue::Number(-20.0));
+
+    let (samples, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
+
+    assert_eq!(error_output, None);
+    assert_eq!(samples.len() / 2, 20 * 48_000, "as long as before");
+    // The stretches are 0.2 seconds long, and start at 1 second (gain -4.4 decibels at their middle), at 4 seconds
+    // (-16.4) and at 7 seconds (-20, as it stays).
+    let at_4_seconds = how_much_louder_it_is_at(&samples, 1.0, 4.0);
+    let expected = 10f64.powf(-12.0 / 20.0);
+    assert!(
+        (at_4_seconds / expected - 1.0).abs() < 0.06,
+        "{at_4_seconds} times as loud, not {expected}"
+    );
+    let at_7_seconds = how_much_louder_it_is_at(&samples, 1.0, 7.0);
+    let expected = 10f64.powf(-15.6 / 20.0);
+    assert!(
+        (at_7_seconds / expected - 1.0).abs() < 0.06,
+        "{at_7_seconds} times as loud, not {expected}"
+    );
+    let at_10_seconds = how_much_louder_it_is_at(&samples, 7.0, 10.0);
+    assert!(
+        (at_10_seconds - 1.0).abs() < 0.03,
+        "{at_10_seconds}: after the last keyframe it stays as loud"
+    );
+}
+
+#[test]
+fn the_sound_that_starts_in_the_middle_of_a_change_of_gain_starts_as_loud_as_it_is_there() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let mut project = project_for(&toolchain, &video);
+    make_a_keyframe(&mut project, PropertyId::Gain, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, PropertyId::Gain, 150, PropertyValue::Number(-20.0));
+
+    // From frame 75 (2.5 seconds), where it is -10 decibels, to frame 150, 2.5 seconds later, where it is -20.
+    let (samples, error_output) =
+        everything_from(&toolchain, &request_for(&project, 75, SpedUpClipSound::MaintainPitch));
+
+    assert_eq!(error_output, None);
+    // The first stretch is at -10.4 decibels (at 0.1 seconds), and the one at 3 seconds is -20.
+    let ratio = how_much_louder_it_is_at(&samples, 0.0, 3.0);
+    let expected = 10f64.powf(-9.6 / 20.0);
+    assert!(
+        (ratio / expected - 1.0).abs() < 0.06,
+        "{ratio} times as loud, not {expected}"
+    );
+}
+
+#[test]
+fn a_clip_muted_by_keyframes_is_silent_for_that_stretch_and_the_sound_after_it_is_the_sound_of_that_time() {
+    let toolchain = toolchain_or_skip!();
+    // A video whose sound is a different pitch every second: 300 hertz in the first, 500 in the second, and so on.
+    let video = test_video(
+        &toolchain,
+        &TestVideoSpecification {
+            name: "stepped_tones_20_seconds",
+            audio_expression: Some("0.3*sin(2*PI*(300+200*floor(t))*t)"),
+            ..TestVideoSpecification::COUNTER
+        },
+    );
+    let mut project = project_for(&toolchain, &video);
+    // Silent from 3 seconds to 5 seconds.
+    make_a_keyframe(&mut project, PropertyId::Muted, 0, PropertyValue::Flag(false));
+    make_a_keyframe(&mut project, PropertyId::Muted, 90, PropertyValue::Flag(true));
+    make_a_keyframe(&mut project, PropertyId::Muted, 150, PropertyValue::Flag(false));
+
+    let (samples, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
+
+    assert_eq!(error_output, None);
+    assert_eq!(samples.len() / 2, 20 * 48_000, "nothing moved");
+    let left = left_channel(&samples);
+    let heard_at = |seconds: f64| &left[(seconds * 48_000.0) as usize..((seconds + 0.1) * 48_000.0) as usize];
+    let pitch_at = |seconds: f64| pitch_in_hertz(heard_at(seconds), 48_000);
+    assert!(
+        (pitch_at(1.2) / 500.0 - 1.0).abs() < 0.04,
+        "second 1 is 500 hertz: {}",
+        pitch_at(1.2)
+    );
+    assert!(loudness(heard_at(3.3)) < 0.001, "silent: {}", loudness(heard_at(3.3)));
+    assert!(loudness(heard_at(4.8)) < 0.001, "silent: {}", loudness(heard_at(4.8)));
+    assert!(
+        (pitch_at(6.2) / 1500.0 - 1.0).abs() < 0.04,
+        "after it is the sound of second 6, which is 1500 hertz: {}",
+        pitch_at(6.2)
+    );
+}
+
+#[test]
+fn the_preview_sound_is_the_sound_the_export_has_when_clips_and_tracks_have_keyframes_for_it() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let mut project = project_for(&toolchain, &video);
+    make_a_keyframe(&mut project, PropertyId::Gain, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, PropertyId::Gain, 300, PropertyValue::Number(-18.0));
+    make_a_keyframe(&mut project, PropertyId::Muted, 0, PropertyValue::Flag(false));
+    make_a_keyframe(&mut project, PropertyId::Muted, 360, PropertyValue::Flag(true));
+    make_a_keyframe(&mut project, PropertyId::Muted, 420, PropertyValue::Flag(false));
+    let exported = sound_of_the_export_of(&toolchain, &project);
+
+    let (previewed, error_output) =
+        everything_from(&toolchain, &request_for(&project, 0, SpedUpClipSound::MaintainPitch));
+
+    assert_eq!(error_output, None);
+    assert!(
+        (previewed.len() / 2).abs_diff(exported.len() / 2) < 2 * 1024,
+        "preview {} moments, export {}",
+        previewed.len() / 2,
+        exported.len() / 2
+    );
+    let seconds = (previewed.len().min(exported.len()) / 2 / 48_000).saturating_sub(1);
+    assert!(seconds >= 15, "enough to compare: {seconds} s");
+    for second in 0..seconds {
+        let in_the_preview = loudness_of_stretch(&previewed, second as f64, 1.0);
+        let in_the_export = loudness_of_stretch(&exported, second as f64, 1.0);
+        assert!(
+            (in_the_preview - in_the_export).abs() < 0.01,
+            "second {second}: {in_the_preview} against {in_the_export}"
+        );
+    }
+    assert!(
+        loudness_of_stretch(&previewed, 12.5, 1.0) < 0.001,
+        "the gap from 12 to 14 seconds is silent"
+    );
 }

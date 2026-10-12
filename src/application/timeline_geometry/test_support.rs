@@ -41,5 +41,5 @@ pub(super) fn two_clip_track() -> Track {
 }
 
 pub(super) fn clip_id(number: u32) -> ClipId {
-    ClipId::new(number)
+    ClipId::new(TrackId::new(0), number)
 }

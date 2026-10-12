@@ -13,10 +13,42 @@
 use egui::{Align2, ComboBox, Context, Grid, Id, Ui, Vec2, Window, vec2};
 
 use super::commands::Command;
-use crate::project::{AnySetting, ProjectSettings, SETTINGS, SettingControlKind, Settings};
+use crate::project::{AnySetting, FrameRate, ProjectSettings, SETTINGS, SettingControlKind, Settings};
 
 /// What the checkbox next to each control in the project settings window says.
 const USE_GLOBAL_SETTING_LABEL: &str = "Use global setting";
+
+/// What the drop-down list of frame rates in the project settings window is called.
+pub const FRAME_RATE_LABEL: &str = "Frame rate";
+
+/// The frame rates the drop-down list offers, as numerators and denominators (a project can have
+/// another one, because it follows its first video, and then that one is listed too).
+const USUAL_FRAME_RATES: [(u32, u32); 11] = [
+    (12, 1),
+    (15, 1),
+    (24000, 1001),
+    (24, 1),
+    (25, 1),
+    (30000, 1001),
+    (30, 1),
+    (48, 1),
+    (50, 1),
+    (60000, 1001),
+    (60, 1),
+];
+
+/// How tall the list of frame rates can be before it scrolls, in points: tall enough for all of them.
+const MOST_HEIGHT_OF_THE_LIST_OF_FRAME_RATES: f32 = 360.0;
+
+/// A frame rate as the drop-down list says it: "30 fps", or "29.97 fps" for the one that is not a whole
+/// number of frames a second.
+pub fn frame_rate_label(frame_rate: FrameRate) -> String {
+    if frame_rate.denominator() == 1 {
+        return format!("{} fps", frame_rate.numerator());
+    }
+    let with_decimals = format!("{:.3}", frame_rate.frames_per_second());
+    format!("{} fps", with_decimals.trim_end_matches('0').trim_end_matches('.'))
+}
 
 /// Which of the settings windows are open.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -26,10 +58,11 @@ pub struct SettingsWindowsOpen {
 }
 
 /// Shows whichever settings windows are open, and adds a command for each change made in them.
+/// `frame_rate` is the frame rate of the project.
 pub fn show(
     context: &Context,
     open: &mut SettingsWindowsOpen,
-    project_settings: ProjectSettings,
+    project: (ProjectSettings, FrameRate),
     global_settings: Settings,
     commands: &mut Vec<Command>,
 ) {
@@ -38,10 +71,8 @@ pub fn show(
     {
         commands.push(Command::SetGlobalSettings(changed));
     }
-    if open.project
-        && let Some(changed) = show_project_settings(context, &mut open.project, project_settings, global_settings)
-    {
-        commands.push(Command::SetProjectSettings(changed));
+    if open.project {
+        show_project_settings(context, &mut open.project, project, global_settings, commands);
     }
 }
 
@@ -98,15 +129,48 @@ fn show_global_settings(context: &Context, open: &mut bool, settings: Settings) 
     (edited != settings).then_some(edited)
 }
 
-/// Shows the project settings window; returns the project's settings if they were changed in it.
+/// The drop-down list of frame rates, with `frame_rate` chosen. Returns the one chosen, which is a
+/// different one if the user picked another.
+fn show_frame_rate_control(ui: &mut Ui, frame_rate: FrameRate) -> FrameRate {
+    let mut chosen = frame_rate;
+    let mut offered: Vec<FrameRate> = USUAL_FRAME_RATES
+        .iter()
+        .filter_map(|(numerator, denominator)| FrameRate::new(*numerator, *denominator).ok())
+        .collect();
+    if !offered.contains(&frame_rate) {
+        // One that is not usual (a video of that rate was the first) is there too, in its place in the order.
+        offered.push(frame_rate);
+        offered.sort_by(|first, second| first.frames_per_second().total_cmp(&second.frames_per_second()));
+    }
+    ui.horizontal(|ui| {
+        ui.label(FRAME_RATE_LABEL);
+        ComboBox::from_id_salt("project frame rate")
+            .selected_text(frame_rate_label(frame_rate))
+            .height(MOST_HEIGHT_OF_THE_LIST_OF_FRAME_RATES)
+            .show_ui(ui, |ui| {
+                for rate in offered {
+                    ui.selectable_value(&mut chosen, rate, frame_rate_label(rate));
+                }
+            });
+    });
+    chosen
+}
+
+/// Shows the project settings window, and adds a command for each change made in it.
 fn show_project_settings(
     context: &Context,
     open: &mut bool,
-    settings: ProjectSettings,
+    (settings, frame_rate): (ProjectSettings, FrameRate),
     global_settings: Settings,
-) -> Option<ProjectSettings> {
+    commands: &mut Vec<Command>,
+) {
     let mut edited = settings;
     small_window("Project settings", open, context, vec2(-150.0, -70.0)).show(context, |ui| {
+        let chosen_frame_rate = show_frame_rate_control(ui, frame_rate);
+        if chosen_frame_rate != frame_rate {
+            commands.push(Command::SetProjectFrameRate(chosen_frame_rate));
+        }
+        ui.add_space(6.0);
         Grid::new("project settings")
             .num_columns(2)
             .spacing([24.0, 8.0])
@@ -124,5 +188,41 @@ fn show_project_settings(
                 }
             });
     });
-    (edited != settings).then_some(edited)
+    if edited != settings {
+        commands.push(Command::SetProjectSettings(edited));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_frame_rate_is_said_as_the_number_of_frames_a_second_in_as_few_figures_as_it_takes() {
+        let rate = |numerator, denominator| FrameRate::new(numerator, denominator).unwrap();
+        assert_eq!(frame_rate_label(rate(30, 1)), "30 fps");
+        assert_eq!(frame_rate_label(rate(24, 1)), "24 fps");
+        assert_eq!(frame_rate_label(rate(30000, 1001)), "29.97 fps");
+        assert_eq!(frame_rate_label(rate(24000, 1001)), "23.976 fps");
+        assert_eq!(frame_rate_label(rate(60000, 1001)), "59.94 fps");
+        assert_eq!(frame_rate_label(rate(25, 3)), "8.333 fps");
+        assert_eq!(frame_rate_label(rate(1, 1)), "1 fps");
+    }
+
+    #[test]
+    fn the_usual_frame_rates_are_all_valid_and_in_order_and_each_has_a_label_of_its_own() {
+        let rates: Vec<FrameRate> = USUAL_FRAME_RATES
+            .iter()
+            .map(|(numerator, denominator)| FrameRate::new(*numerator, *denominator).unwrap())
+            .collect();
+        assert!(
+            rates
+                .windows(2)
+                .all(|pair| pair[0].frames_per_second() < pair[1].frames_per_second())
+        );
+        let mut labels: Vec<String> = rates.iter().map(|rate| frame_rate_label(*rate)).collect();
+        labels.sort();
+        labels.dedup();
+        assert_eq!(labels.len(), rates.len());
+    }
 }

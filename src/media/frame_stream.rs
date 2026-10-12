@@ -4,7 +4,8 @@
 //! editor's own terms, which source frame to start at, how many source frames to read and at what
 //! speed, and it runs the very same trimming, retiming and frame-rate steps that the export uses
 //! (see [`crate::media::export`]). Frame number `k` that comes out of a stream is the clip's frame
-//! number `k`.
+//! number `k`: for a video that does not run at the frame rate of the project too, which then has,
+//! in each frame, the picture that is nearest in time (see [`frame_stream_arguments`]).
 
 use std::ffi::OsString;
 use std::io::{self, Read};
@@ -28,7 +29,13 @@ const BYTES_PER_PIXEL: usize = 4;
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameStreamRequest {
     pub video_path: PathBuf,
-    pub frame_rate: FrameRate,
+    /// The frame rate of the project: the rate at which the pictures are delivered, and the one the
+    /// numbers of the frames in this request are at.
+    pub project_frame_rate: FrameRate,
+    /// The frame rate of the video itself. It says how long each of the video's pictures lasts, and so
+    /// how far back in the file the reading has to begin to have the picture that is on screen at the
+    /// first frame wanted, when that picture began before it.
+    pub video_frame_rate: FrameRate,
     /// The first source frame to show.
     pub first_source_frame: SourceFrameIndex,
     /// How many source frames to read, starting at `first_source_frame`. With a speed factor of
@@ -178,55 +185,125 @@ fn read_frames(
     wake_up();
 }
 
+/// How much later than the exact middle between two frames of the project a picture of the video has to
+/// be taken to be, in microseconds.
+///
+/// A picture that is exactly half way between two frames of the project goes to the later of them: that
+/// is how ffmpeg rounds a half, when it does its sums on the exact times, as the export does. The times
+/// a stream does its sums on are not exact: ffmpeg moves them by the time it seeked to, to a whole number
+/// of the file's own ticks, so they are up to half a tick out, and a picture that is exactly half way
+/// would go to either frame by chance, and the preview would not agree with the export about it. Taking
+/// every picture to be this much later than it is settles those the way the export does. It is more than
+/// half a tick of any file that is made for editing (a tick is a ten thousandth of a second or finer),
+/// and a three-hundredth of a frame at 30 frames a second, which no picture is likely to be that near to
+/// the middle of two frames except by being exactly in it.
+const BIAS_TOWARDS_THE_LATER_FRAME_IN_MICROSECONDS: i64 = 100;
+
+/// Where a stream reads its file from and to, and where its first frame is in what is read, all in whole
+/// microseconds (the unit ffmpeg is told them in, so that nothing is lost to rounding on the way).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StreamTiming {
+    /// Where in the file the reading starts.
+    start_in_file: u64,
+    /// How long is read from there.
+    duration_read: u64,
+    /// How long after the start of what is read the first frame wanted is.
+    first_frame_after_the_start: u64,
+}
+
+impl StreamTiming {
+    /// The reading starts before the first frame wanted by half a frame of the project, so that rounding
+    /// in the file's timestamps can never cut a wanted picture off, and by as much more as a picture of
+    /// the video lasts longer than a frame of the project: a video of 25 pictures a second has, in a frame
+    /// of a project of 30, the picture that began up to 40 ms before, and that picture is before the
+    /// first frame wanted. It ends half a frame before the frame that follows the last wanted (measured
+    /// with videos of 5 to 60 pictures a second in projects of 12 to 30 frames a second: that is enough
+    /// for every frame wanted to come out, however slow the pictures are, and no more is read).
+    fn of(request: &FrameStreamRequest) -> Self {
+        let project_frame_rate = request.project_frame_rate;
+        let first_frame_at = project_frame_rate.microseconds_at_frame(request.first_source_frame.value());
+        let end_at = project_frame_rate.microseconds_at_frame(
+            request
+                .first_source_frame
+                .value()
+                .saturating_add(request.source_frame_count),
+        );
+
+        let frame = 1_000_000.0 / project_frame_rate.frames_per_second();
+        let half_a_frame = frame / 2.0;
+        let picture_of_the_video = 1_000_000.0 / request.video_frame_rate.frames_per_second();
+        let longer_than_a_frame = (picture_of_the_video - frame).max(0.0);
+
+        let lead_in = (half_a_frame + longer_than_a_frame).ceil() as u64;
+        let start_in_file = first_frame_at.saturating_sub(lead_in);
+        let stop_in_file = end_at as f64 - half_a_frame;
+        Self {
+            start_in_file,
+            duration_read: (stop_in_file - start_in_file as f64).max(0.0).round() as u64,
+            first_frame_after_the_start: first_frame_at - start_in_file,
+        }
+    }
+}
+
+/// Microseconds as ffmpeg is given them as seconds: "1.500000".
+fn microseconds_as_seconds(microseconds: u64) -> String {
+    format!("{}.{:06}", microseconds / 1_000_000, microseconds % 1_000_000)
+}
+
 /// The ffmpeg command line that decodes `request`.
 ///
 /// The pictures are chosen the way the export chooses them (see `crate::media::export`): resample
 /// to the project's constant frame rate with `round=near` so that there is one picture for every
-/// frame, whatever the file's timestamps look like, then keep every `speed_factor`th picture of
-/// the clip, starting with its first.
+/// frame, whatever the file's frame rate and timestamps look like, then keep every `speed_factor`th
+/// picture of the clip, starting with its first.
 ///
-/// To start at the clip's first picture the file is read from half a frame before it, and to stop
-/// after its last the reading ends half a frame before the picture that follows. That half frame
-/// of slack means that rounding in the file's timestamps can never cut a wanted picture off or
-/// let an unwanted one in. The timestamps are then moved back by exactly that half frame, so
-/// that every picture sits right on a frame slot, which is where resampling to the nearest slot
-/// is most dependable.
+/// What comes out has to be what the export has at the same frames, wherever the stream starts, even
+/// though it reads only a stretch of the file:
+///
+/// * it begins reading early enough (see `StreamTiming::of`) to have the picture that is on screen at
+///   the first frame wanted, which may have begun before it;
+/// * the timestamps are made microseconds (`settb=AVTB`) and moved by a whole number of them, so that the
+///   first frame wanted is at the time 0 (a little later, see
+///   `BIAS_TOWARDS_THE_LATER_FRAME_IN_MICROSECONDS`), and `fps` is told to start at 0 too
+///   (`start_time=0`). Without that it would begin with the first picture it is given, wherever that is,
+///   and every picture would be a frame too early whenever no picture was in the frame wanted first;
+/// * `-frames:v` ends the stream after the pictures that are wanted, however many the reading brought.
 pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
-    let frame_rate = request.frame_rate;
-    let first_picture_seconds = frame_rate.seconds_at_frame(request.first_source_frame.value());
-    let seconds_to_start = (first_picture_seconds - half_a_frame_in_seconds(frame_rate)).max(0.0);
-    let seconds_to_stop = frame_rate.seconds_at_frame(request.first_source_frame.value() + request.source_frame_count)
-        - half_a_frame_in_seconds(frame_rate);
-    let seconds_to_read = (seconds_to_stop - seconds_to_start).max(0.0);
-    // After seeking, the first wanted picture is this far from time zero.
-    let seconds_the_first_picture_is_late = first_picture_seconds - seconds_to_start;
+    let timing = StreamTiming::of(request);
+    let first_frame_moved_to_time_zero =
+        timing.first_frame_after_the_start as i64 - BIAS_TOWARDS_THE_LATER_FRAME_IN_MICROSECONDS;
+    let project_frame_rate = request.project_frame_rate;
 
-    let mut filters = format!("setpts=PTS-{seconds_the_first_picture_is_late:.9}/TB,fps={frame_rate}:round=near");
+    let mut filters = format!(
+        "settb=AVTB,setpts=PTS-({first_frame_moved_to_time_zero}),fps={project_frame_rate}:round=near:start_time=0"
+    );
     if request.speed_factor.is_accelerated() {
         filters.push_str(&format!(",select='not(mod(n,{}))'", request.speed_factor.value()));
     }
     let (delivered_width, delivered_height) = request.delivered_size();
     filters.push_str(&format!(
         ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags=fast_bilinear,format=rgba",
-        frame_rate.denominator(),
-        frame_rate.numerator(),
+        project_frame_rate.denominator(),
+        project_frame_rate.numerator(),
     ));
 
     let mut arguments: Vec<OsString> = Vec::new();
     arguments.extend(["-hide_banner", "-loglevel", "error", "-nostdin", "-ss"].map(OsString::from));
-    arguments.push(format!("{seconds_to_start:.6}").into());
+    arguments.push(microseconds_as_seconds(timing.start_in_file).into());
     arguments.push("-t".into());
-    arguments.push(format!("{seconds_to_read:.6}").into());
+    arguments.push(microseconds_as_seconds(timing.duration_read).into());
     arguments.push("-i".into());
     arguments.push(request.video_path.clone().into());
     arguments.extend(["-an", "-sn", "-dn", "-vf"].map(OsString::from));
     arguments.push(filters.into());
+    let pictures_wanted = request
+        .source_frame_count
+        .div_ceil(u64::from(request.speed_factor.value()));
+    if pictures_wanted > 0 {
+        arguments.extend(["-frames:v".into(), pictures_wanted.to_string().into()]);
+    }
     arguments.extend(["-f", "rawvideo", "pipe:1"].map(OsString::from));
     arguments
-}
-
-fn half_a_frame_in_seconds(frame_rate: FrameRate) -> f64 {
-    0.5 / frame_rate.frames_per_second()
 }
 
 #[cfg(test)]
@@ -238,7 +315,8 @@ mod tests {
     fn request(first_source_frame: u64, source_frame_count: u64, speed_factor: u32) -> FrameStreamRequest {
         FrameStreamRequest {
             video_path: PathBuf::from("holiday.mp4"),
-            frame_rate: FrameRate::new(30, 1).unwrap(),
+            project_frame_rate: FrameRate::new(30, 1).unwrap(),
+            video_frame_rate: FrameRate::new(30, 1).unwrap(),
             first_source_frame: SourceFrameIndex::new(first_source_frame),
             source_frame_count,
             speed_factor: SpeedFactor::new(speed_factor).unwrap(),
@@ -263,8 +341,9 @@ mod tests {
     #[test]
     fn the_command_line_seeks_half_a_frame_early_and_reads_exactly_the_clip() {
         // Frames 300 up to (not including) 600 at 30 fps: start at 9.983333 s (half a frame
-        // before frame 300 at 10 s), read until half a frame before frame 600 at 20 s. The first
-        // picture is then half a frame (0.016666667 s) after the start of what is read.
+        // before frame 300 at 10 s, to the next microsecond), read until half a frame before frame 600 at
+        // 20 s. The first picture is then 16667 microseconds after the start of what is read, and 100
+        // less than that is what the pictures are moved back by.
         let arguments = arguments_as_text(&request(300, 300, 1));
         assert_eq!(
             arguments,
@@ -283,7 +362,9 @@ mod tests {
                 "-sn",
                 "-dn",
                 "-vf",
-                "setpts=PTS-0.016666667/TB,fps=30/1:round=near,setpts=N*1/(30*TB),scale=640:360:flags=fast_bilinear,format=rgba",
+                "settb=AVTB,setpts=PTS-(16567),fps=30/1:round=near:start_time=0,setpts=N*1/(30*TB),scale=640:360:flags=fast_bilinear,format=rgba",
+                "-frames:v",
+                "300",
                 "-f",
                 "rawvideo",
                 "pipe:1",
@@ -297,22 +378,139 @@ mod tests {
         assert_eq!(arguments[5], "0.000000");
         // Frames 0..90 end half a frame before 3 s.
         assert_eq!(arguments[7], "2.983333");
-        // Reading starts at the very first picture, so there is no half frame to take back.
+        // Reading starts at the very first picture, so there is no half frame to take back: the first
+        // frame is at the start of what is read, and only the bias moves the pictures.
         assert!(
-            filters_of(&request(0, 90, 1)).starts_with("setpts=PTS-0.000000000/TB,"),
+            filters_of(&request(0, 90, 1))
+                .starts_with("settb=AVTB,setpts=PTS-(-100),fps=30/1:round=near:start_time=0,"),
             "{}",
             filters_of(&request(0, 90, 1))
         );
     }
 
     #[test]
+    fn a_video_whose_pictures_last_longer_than_a_frame_of_the_project_is_read_from_as_far_back_as_the_picture_on_screen_began()
+     {
+        let mut slower = request(33, 12, 1);
+        slower.video_frame_rate = FrameRate::new(25, 1).unwrap();
+        let arguments = arguments_as_text(&slower);
+        // Frame 33 is at 1.1 s. A picture of the video lasts 40 ms and a frame of the project 33.33 ms,
+        // so the picture on screen then began up to half a frame and 6.67 ms (23.33 ms, which is made
+        // 23.334) before: reading starts at 1.076666 s, and the first frame is 23334 microseconds later.
+        assert_eq!(arguments[5], "1.076666");
+        assert!(
+            filters_of(&slower).starts_with("settb=AVTB,setpts=PTS-(23234),fps=30/1:round=near:start_time=0,"),
+            "{}",
+            filters_of(&slower)
+        );
+        // Frame 45 is at 1.5 s: the reading ends half a frame before it, at 1.483333 s (as it does for a
+        // video that is as fast as the project: only the start is earlier).
+        assert_eq!(arguments[7], "0.406667", "from 1.076666 s to 1.483333 s");
+    }
+
+    #[test]
+    fn a_video_whose_pictures_are_as_short_as_the_frames_of_the_project_or_shorter_is_read_the_same_whatever_its_rate()
+    {
+        let same = arguments_as_text(&request(300, 300, 1));
+        for faster in [30, 50, 60, 120] {
+            let mut request = request(300, 300, 1);
+            request.video_frame_rate = FrameRate::new(faster, 1).unwrap();
+            assert_eq!(
+                arguments_as_text(&request),
+                same,
+                "a video of {faster} pictures a second"
+            );
+        }
+    }
+
+    #[test]
+    fn the_reading_starts_early_enough_and_ends_late_enough_for_every_pair_of_frame_rates_and_never_starts_before_the_file()
+     {
+        let rates = [
+            (12, 1),
+            (24000, 1001),
+            (24, 1),
+            (25, 1),
+            (30000, 1001),
+            (30, 1),
+            (60, 1),
+        ];
+        for (project_numerator, project_denominator) in rates {
+            for (video_numerator, video_denominator) in rates {
+                for first_source_frame in [0, 1, 2, 7, 33, 300, 12_345] {
+                    let mut request = request(first_source_frame, 40, 1);
+                    request.project_frame_rate = FrameRate::new(project_numerator, project_denominator).unwrap();
+                    request.video_frame_rate = FrameRate::new(video_numerator, video_denominator).unwrap();
+                    let project_frame_rate = request.project_frame_rate;
+                    let description = format!(
+                        "a video of {} in a project of {project_frame_rate}, from frame {first_source_frame}",
+                        request.video_frame_rate
+                    );
+                    let timing = StreamTiming::of(&request);
+
+                    // Where the first frame is in what is read is where it is in the file, less where the
+                    // reading starts.
+                    let first_frame_at = project_frame_rate.microseconds_at_frame(first_source_frame);
+                    assert_eq!(
+                        timing.start_in_file + timing.first_frame_after_the_start,
+                        first_frame_at,
+                        "{description}"
+                    );
+
+                    // The reading starts half a frame before it, and as much before that as a picture of the
+                    // video lasts longer than a frame (unless that would be before the file).
+                    let frame = 1_000_000.0 / project_frame_rate.frames_per_second();
+                    let picture = 1_000_000.0 / request.video_frame_rate.frames_per_second();
+                    let longer_than_a_frame = (picture - frame).max(0.0);
+                    assert!(
+                        timing.start_in_file == 0
+                            || timing.first_frame_after_the_start as f64 >= frame / 2.0 + longer_than_a_frame,
+                        "{description}: the reading starts {} before the first frame",
+                        timing.first_frame_after_the_start
+                    );
+
+                    // It ends half a frame before the end of the frames wanted.
+                    let end_at = project_frame_rate.microseconds_at_frame(first_source_frame + 40) as f64;
+                    let reads_to = (timing.start_in_file + timing.duration_read) as f64;
+                    assert!(
+                        (reads_to - (end_at - frame / 2.0)).abs() <= 1.0,
+                        "{description}: reads to {reads_to}, the frames end at {end_at}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn an_accelerated_clip_keeps_every_nth_picture_after_resampling_and_a_normal_one_keeps_all() {
         let accelerated = filters_of(&request(300, 300, 8));
         assert!(
-            accelerated.contains("fps=30/1:round=near,select='not(mod(n,8))',setpts=N*1/(30*TB),"),
+            accelerated.contains("fps=30/1:round=near:start_time=0,select='not(mod(n,8))',setpts=N*1/(30*TB),"),
             "{accelerated}"
         );
         assert!(!filters_of(&request(300, 300, 1)).contains("select"));
+    }
+
+    #[test]
+    fn the_stream_ends_after_the_pictures_wanted_which_are_one_in_every_speed_factor_of_the_frames() {
+        let frames_wanted = |request: &FrameStreamRequest| {
+            let arguments = arguments_as_text(request);
+            let position = arguments.iter().position(|argument| argument == "-frames:v")?;
+            Some(arguments[position + 1].clone())
+        };
+        assert_eq!(frames_wanted(&request(100, 30, 1)).as_deref(), Some("30"));
+        assert_eq!(
+            frames_wanted(&request(100, 100, 3)).as_deref(),
+            Some("34"),
+            "100 frames at 3x: 0, 3, ..., 99"
+        );
+        assert_eq!(frames_wanted(&request(100, 99, 3)).as_deref(), Some("33"));
+        assert_eq!(frames_wanted(&request(100, 1, 8)).as_deref(), Some("1"));
+        assert_eq!(
+            frames_wanted(&request(100, 0, 1)),
+            None,
+            "none wanted, so nothing is asked for, which would be all"
+        );
     }
 
     #[test]
@@ -329,9 +527,10 @@ mod tests {
     #[test]
     fn fractional_frame_rates_are_passed_as_exact_fractions() {
         let mut request = request(0, 100, 1);
-        request.frame_rate = FrameRate::new(30000, 1001).unwrap();
+        request.project_frame_rate = FrameRate::new(30000, 1001).unwrap();
+        request.video_frame_rate = FrameRate::new(30000, 1001).unwrap();
         let filters = filters_of(&request);
-        assert!(filters.contains("fps=30000/1001:round=near"), "{filters}");
+        assert!(filters.contains("fps=30000/1001:round=near:start_time=0"), "{filters}");
         assert!(filters.contains("setpts=N*1001/(30000*TB)"), "{filters}");
     }
 

@@ -14,9 +14,10 @@ use crate::application::editing::{
     delete_clip_keeping_the_picture, restore_keeping_the_picture, set_clip_speed_keeping_the_picture,
     set_track_speed_keeping_the_picture,
 };
-use crate::application::history::Restored;
-use crate::application::selection::Selection;
-use crate::project::{ClipLocation, Gain, SpeedFactor, TextObject, TimelineFrameIndex, TrackId};
+use crate::application::history::{EditKey, Restored};
+use crate::application::selection::{Selection, SelectionItem};
+use crate::playback::SoundEffect;
+use crate::project::{AnimationTarget, ClipId, FrameRate, SpeedFactor, TextObject, TimelineFrameIndex, TrackId};
 
 /// How long a text object lasts when it is made, in seconds (or less, if it would run into a clip).
 const SECONDS_A_NEW_TEXT_OBJECT_LASTS: f64 = 3.0;
@@ -27,10 +28,25 @@ impl FastForwardApplication {
     /// same gesture, see [`crate::application::history`]).
     pub(super) fn execute_all(&mut self, commands: Vec<Command>, now: Instant, context: &Context) {
         let may_edit = commands.iter().any(Command::may_change_the_project);
-        let gesture_key = gesture_key_of_the_edits_among(&commands);
+        // An edit that makes or changes a keyframe is about the frame it is at as well: what is done at another frame is
+        // another edit, not more of this gesture, however soon after it.
+        let changes_a_keyframe = commands.iter().any(|command| self.command_changes_a_keyframe(command));
+        let gesture_key = gesture_key_of_the_edits_among(&commands).map(|key| {
+            if changes_a_keyframe {
+                EditKey::about(&(key, self.frame_at_the_playhead(now)))
+            } else {
+                key
+            }
+        });
         let pointer_is_down = context.input(|input| input.pointer.any_down());
         // A copy of the project is only made in a frame in which something asks for a change.
-        let before = may_edit.then(|| (self.project.clone(), self.selection.to_vec(), self.history.generation()));
+        let before = may_edit.then(|| {
+            (
+                self.project.clone(),
+                self.selection.to_items(),
+                self.history.generation(),
+            )
+        });
         for command in commands {
             self.execute(command, now, context);
         }
@@ -64,6 +80,7 @@ impl FastForwardApplication {
             Command::ShowProjectSettings => self.settings_windows_open.project = true,
             Command::ShowGlobalSettings => self.settings_windows_open.global = true,
             Command::SetProjectSettings(settings) => self.set_project_settings(settings),
+            Command::SetProjectFrameRate(frame_rate) => self.set_project_frame_rate(frame_rate, now),
             Command::SetGlobalSettings(settings) => self.set_global_settings(settings),
 
             Command::Pause => self.clock.pause(now, total_frames),
@@ -76,6 +93,11 @@ impl FastForwardApplication {
                 self.clock.seek(now, TimelineFrameIndex::new(moved_frame), total_frames);
             }
 
+            Command::SelectTrack { track, change } => {
+                if self.project.track(track).is_some() {
+                    self.selection.change_items([SelectionItem::Track(track)], change);
+                }
+            }
             Command::Select { clips, change } => {
                 let clips_that_exist = clips
                     .into_iter()
@@ -83,10 +105,7 @@ impl FastForwardApplication {
                     .collect::<Vec<_>>();
                 self.selection.change(clips_that_exist, change);
             }
-            Command::SplitAt { frame, only } => {
-                // A cut that is not possible (it is where one already is) is simply not made.
-                self.project.split_at(frame, only.as_deref());
-            }
+            Command::SplitAt { frame, only } => self.split_at(frame, only, now),
             Command::DeleteClips(clips) => self.delete_clips(clips, now),
             Command::MoveClips(starts) => {
                 // A move that cannot be made (clips would be on top of one another) is not made.
@@ -94,12 +113,12 @@ impl FastForwardApplication {
             }
 
             Command::SetClipSpeed { clip, speed_factor } => self.set_clip_speed(clip, speed_factor, now),
-            Command::SetClipGain { clip, gain } => self.set_clip_gain(clip, gain),
+            Command::SetClipGain { clip, gain } => self.set_clip_gain_at_the_playhead(clip, gain, now),
             Command::SetClipMuted { clip, muted } => {
-                let _ = self.project.set_clip_muted(clip, muted);
+                self.set_muted_at_the_playhead(AnimationTarget::Clip(clip), muted, now);
             }
             Command::SetClipPlacement { clip, placement } => {
-                let _ = self.project.set_clip_placement(clip, placement);
+                self.set_clip_placement_at_the_playhead(clip, placement, now);
             }
             Command::RelinkSource(identifier) => self.relink_source(identifier),
 
@@ -107,52 +126,70 @@ impl FastForwardApplication {
                 self.project.add_track_in_front();
             }
             Command::DeleteTrack(track) => self.delete_track(track, now),
+            Command::MoveTrack { track, to_position } => {
+                let _ = self.project.move_track(track, to_position);
+            }
             Command::SetTrackTitle { track, title } => {
                 let _ = self.project.set_track_title(track, title);
             }
             Command::SetTrackSpeed { track, speed_factor } => self.set_track_speed(track, speed_factor, now),
-            Command::SetTrackGain { track, gain } => {
-                let _ = self.project.set_track_gain(track, gain);
-            }
+            Command::SetTrackGain { track, gain } => self.set_track_gain_at_the_playhead(track, gain, now),
             Command::SetTrackMuted { track, muted } => {
-                let _ = self.project.set_track_muted(track, muted);
+                self.set_muted_at_the_playhead(AnimationTarget::Track(track), muted, now);
             }
             Command::SetTrackHeight { track, height } => {
                 let _ = self.project.set_track_height(track, height);
             }
 
             Command::NewTextObject { track, frame } => self.new_text_object(track, frame, now),
-            Command::EditTextObject(clip) => {
-                if self
-                    .project
-                    .placement_of(clip)
-                    .is_some_and(|placement| placement.clip.as_text().is_some())
-                {
-                    self.selection = Selection::only(clip);
-                    self.text_window_open = Some(clip);
-                }
-            }
-            Command::SetTextObject { clip, object } => {
-                let _ = self.project.set_text_object(clip, object);
-            }
+            Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
                 let _ = self.project.set_clip_duration(clip, frames);
+            }
+
+            Command::AddKeyframe {
+                target,
+                property,
+                frame,
+            } => {
+                let _ = self.project.add_keyframe(target, property, frame);
+            }
+            Command::RemoveKeyframe {
+                target,
+                property,
+                frame,
+            } => {
+                let _ = self.project.remove_keyframe(target, property, frame);
             }
 
             Command::SetSpeedIndicatorLayout(layout) => self.project.set_speed_indicator_layout(layout),
         }
     }
 
+    /// Cuts the clips that are at `frame` (see [`crate::project::Project::split_at`]) and makes the cut felt: it
+    /// snips, once however many clips were cut, and a flash of light shows at the cut in each track it was made
+    /// in. A cut that is not possible (it is where one already is) is simply not made, and does neither.
+    fn split_at(&mut self, frame: TimelineFrameIndex, only: Option<Vec<ClipId>>, now: Instant) {
+        let cuts = self.project.split_at(frame, only.as_deref());
+        if cuts.is_empty() {
+            return;
+        }
+        self.sound_effects.play(SoundEffect::Snip, now);
+        for (track, _) in cuts {
+            self.timeline_view.flash_a_cut(track, frame);
+        }
+    }
+
     /// Takes the latest edit back.
     fn undo(&mut self, now: Instant) {
-        if let Some(restored) = self.history.undo(&self.project, self.selection.to_vec()) {
+        if let Some(restored) = self.history.undo(&self.project, self.selection.to_items()) {
             self.put_back(restored, now);
         }
     }
 
     /// Does again the edit that was last taken back.
     fn redo(&mut self, now: Instant) {
-        if let Some(restored) = self.history.redo(&self.project, self.selection.to_vec()) {
+        if let Some(restored) = self.history.redo(&self.project, self.selection.to_items()) {
             self.put_back(restored, now);
         }
     }
@@ -163,8 +200,8 @@ impl FastForwardApplication {
         let current_frame = self.clock.position(now, self.project.total_frame_count());
         // The picture that is on screen stays on screen, if it is still there, however the clips moved.
         let new_current_frame = restore_keeping_the_picture(&mut self.project, current_frame, restored.project);
-        self.selection = Selection::from_clips(restored.selection);
-        self.selection.forget_clips_that_are_gone(&self.project);
+        self.selection = Selection::from_items(restored.selection);
+        self.selection.forget_what_is_gone(&self.project);
         if self.project.frame_rate() != frame_rate_before {
             // The first video came or went, and the frame rate with it.
             self.clock.reset_for_frame_rate(self.project.frame_rate());
@@ -175,8 +212,26 @@ impl FastForwardApplication {
         self.note_the_project_was_edited(now);
     }
 
+    /// Makes `frame_rate` the rate of the project, which counts everything on the timeline again at it
+    /// (see [`crate::project::Project::set_frame_rate`]). The current frame goes to the same moment.
+    fn set_project_frame_rate(&mut self, frame_rate: FrameRate, now: Instant) {
+        let rate_before = self.project.frame_rate();
+        let current_frame = self.clock.position(now, self.project.total_frame_count());
+        self.project.set_frame_rate(frame_rate);
+        if frame_rate != rate_before {
+            self.clock.reset_for_frame_rate(frame_rate);
+            self.timeline_view.reset();
+            let same_moment = rate_before.convert_frame_count_to(current_frame.value(), frame_rate);
+            self.clock.seek(
+                now,
+                TimelineFrameIndex::new(same_moment),
+                self.project.total_frame_count(),
+            );
+        }
+    }
+
     /// Takes clips off their tracks, keeping the current frame on the picture it showed if it can.
-    fn delete_clips(&mut self, clips: Vec<ClipLocation>, now: Instant) {
+    fn delete_clips(&mut self, clips: Vec<ClipId>, now: Instant) {
         let mut current_frame = self.clock.position(now, self.project.total_frame_count());
         let mut deleted_any = false;
         for clip in clips {
@@ -186,7 +241,7 @@ impl FastForwardApplication {
             }
         }
         if deleted_any {
-            self.selection.forget_clips_that_are_gone(&self.project);
+            self.selection.forget_what_is_gone(&self.project);
             let new_total_frames = self.project.total_frame_count();
             self.clock.seek(now, current_frame, new_total_frames);
         }
@@ -197,13 +252,13 @@ impl FastForwardApplication {
     fn delete_track(&mut self, track: TrackId, now: Instant) {
         let current_frame = self.clock.position(now, self.project.total_frame_count());
         if self.project.delete_track(track).is_ok() {
-            self.selection.forget_clips_that_are_gone(&self.project);
+            self.selection.forget_what_is_gone(&self.project);
             let new_total_frames = self.project.total_frame_count();
             self.clock.seek(now, current_frame, new_total_frames);
         }
     }
 
-    fn set_clip_speed(&mut self, clip: ClipLocation, speed_factor: SpeedFactor, now: Instant) {
+    fn set_clip_speed(&mut self, clip: ClipId, speed_factor: SpeedFactor, now: Instant) {
         let already = self
             .project
             .placement_of(clip)
@@ -238,12 +293,9 @@ impl FastForwardApplication {
         }
     }
 
-    fn set_clip_gain(&mut self, clip: ClipLocation, gain: Gain) {
-        let _ = self.project.set_clip_gain(clip, gain);
-    }
-
-    /// Puts a new text object on `track`, starting at `frame`, and opens the window to write it in.
-    /// The playhead goes to it if it is not there, so that it shows in the preview.
+    /// Puts a new text object on `track`, starting at `frame`, and selects it, so that its properties (the words
+    /// of it, to begin with) are in the properties panel. The playhead goes to it if it is not there, so
+    /// that it shows in the preview.
     fn new_text_object(&mut self, track: TrackId, frame: TimelineFrameIndex, now: Instant) {
         let wanted_frames = self
             .project
@@ -261,7 +313,6 @@ impl FastForwardApplication {
             return;
         };
         self.selection = Selection::only(clip);
-        self.text_window_open = Some(clip);
         let total_frames = self.project.total_frame_count();
         let current_frame = self.clock.position(now, total_frames);
         let shown_from = frame.value();

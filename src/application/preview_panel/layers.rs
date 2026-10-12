@@ -2,71 +2,38 @@
 //! each turned as far as it is turned, with the outline of the selected one and the handles at its
 //! corners.
 //!
-//! What the mouse does to them is in [`super::gestures`]: one widget (the "catcher") takes every click
-//! and drag on the preview, and what each is about is worked out from where it began. What is drawn
-//! here has no say in that, but for being what the pointer is over: the widgets made here only give
-//! the parts of the preview their names for screen readers (and the tests), and cannot be clicked.
+//! What the mouse does to them is in [`super::gestures`]: the widgets that take the mouse (the "catchers", see
+//! [`super::catchers`]) take every click and drag on the preview, and what each is about is worked out from
+//! where it began. What is drawn here has no say in that, but for being what the pointer is over: the widgets
+//! made here only give the layers their names for screen readers (and the tests), and cannot be clicked.
 //! Everything is made in the order it is drawn in, the layer at the back first, so that what is in
 //! front of the fast-forward symbol is drawn over it and what is behind it is drawn under it.
+//!
+//! The layers are cut off at the edge of the picture, as the export cuts them off. What shows where they are
+//! and what can be taken hold of (their outlines, the handles, the ring to turn by) is not: it is drawn wherever
+//! it is in the window, over the other panels too.
 
 use egui::epaint::Vertex;
 use egui::{
     Color32, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, TextureId, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use super::geometry::{HANDLE_SIZE, PictureOnScreen, TURN_ZONE_RADIUS};
+use super::catchers::Catchers;
+use super::geometry::{HANDLE_SIZE, PictureOnScreen};
 use super::gestures;
 use super::speed_indicator_overlay::{self, SymbolOnScreen};
 use super::{PreviewContent, PreviewLayer, PreviewLayerContent, VideoInThePicture};
 use crate::application::commands::Command;
-use crate::application::textures::{TextPictureKey, Textures};
+use crate::application::textures::Textures;
 use crate::application::theme;
 use crate::media::ThumbnailKey;
-use crate::project::{ClipLocation, Corner};
-use crate::text_rendering::LazyTextRenderer;
-
-/// What the one widget that takes every click and drag on the preview is known by.
-pub fn catcher_id() -> Id {
-    Id::new("the preview")
-}
-
-/// The name a text object on the preview is known by to screen readers (and the tests).
-pub fn text_object_label(clip: ClipLocation) -> String {
-    format!("Text object, {clip}")
-}
-
-/// The name a video on the preview is known by.
-pub fn video_label(clip: ClipLocation) -> String {
-    format!("Video, {clip}")
-}
-
-/// The name a picture on the preview is known by.
-pub fn picture_label(clip: ClipLocation) -> String {
-    format!("Picture, {clip}")
-}
-
-/// The name the handle at a corner of the selected layer is known by.
-pub fn corner_handle_label(corner: Corner) -> String {
-    format!("Resize handle at the {} corner", corner_name(corner))
-}
-
-/// The name the place just outside a corner of the selected layer, where it is turned from, is known by.
-pub fn turn_handle_label(corner: Corner) -> String {
-    format!("Turning place outside the {} corner", corner_name(corner))
-}
-
-fn corner_name(corner: Corner) -> &'static str {
-    match corner {
-        Corner::TopLeft => "top left",
-        Corner::TopRight => "top right",
-        Corner::BottomLeft => "bottom left",
-        Corner::BottomRight => "bottom right",
-    }
-}
+use crate::project::Corner;
+use crate::text_rendering::{LazyTextRenderer, TextAppearance};
 
 /// Draws the layers (and the symbol over the front-most video) and adds a command for each thing
 /// the user does to them. `panel_rectangle` is all of the room the preview has, of which the
-/// picture is a part: the handles and the places to turn from can be outside the picture.
+/// picture is a part: the box of the selected layer, and the places to turn it from, can be outside
+/// the picture, and outside the panel.
 pub(super) fn show(
     ui: &mut Ui,
     content: &PreviewContent<'_>,
@@ -76,12 +43,16 @@ pub(super) fn show(
     text_renderer: &mut LazyTextRenderer,
     commands: &mut Vec<Command>,
 ) {
-    // What is drawn is cut off at the edge of the picture, as the export cuts it off.
+    // What is drawn is cut off at the edge of the picture, as the export cuts it off, but what is drawn to show
+    // where things are, and what can be taken hold of, is not cut off at all.
     let painter = ui.painter().with_clip_rect(picture.rectangle);
-    // (The constants and not `Sense::click_and_drag()`, which can take the keyboard focus: then Tab would
-    // stop at this, which has nothing to do for the keyboard.)
-    let catcher = ui.interact(panel_rectangle, catcher_id(), Sense::CLICK | Sense::DRAG);
-    let pointing = gestures::handle(ui, &catcher, content, &picture, commands);
+    let over_everything = ui.ctx().layer_painter(ui.layer_id());
+    let catchers = Catchers::register(
+        ui,
+        panel_rectangle,
+        content.selected_layer().map(|layer| (layer, &picture)),
+    );
+    let pointing = gestures::handle(ui, &catchers, content, &picture, commands);
 
     for layer in &content.layers {
         draw_layer(
@@ -95,7 +66,7 @@ pub(super) fn show(
         );
         name_the_layer(ui, layer, &picture);
         if pointing.outlines(content, layer) {
-            ui.painter().add(Shape::closed_line(
+            over_everything.add(Shape::closed_line(
                 picture.outline_of(&layer.placement).to_vec(),
                 Stroke::new(1.0, theme::INDICATOR_OUTLINE),
             ));
@@ -110,9 +81,9 @@ pub(super) fn show(
 
     // The selected layer has its outline and handles over everything else.
     if let Some(layer) = content.selected_layer() {
-        show_the_handles(ui, layer, picture);
+        show_the_box(&over_everything, layer, picture);
     }
-    pointing.show(ui, content, &picture);
+    pointing.show(ui, &over_everything, content, &picture);
 }
 
 /// Gives the layer its name for screen readers (and the tests), over where it is. It senses nothing.
@@ -138,7 +109,7 @@ fn draw_layer(
     let context = ui.ctx();
     let texture: Option<TextureId> = match &layer.content {
         PreviewLayerContent::Video(VideoInThePicture::Picture(supplied)) => {
-            Some(textures.preview_picture(context, layer.clip.track, supplied).id())
+            Some(textures.preview_picture(context, layer.track, supplied).id())
         }
         PreviewLayerContent::Video(VideoInThePicture::Thumbnail {
             source,
@@ -175,7 +146,7 @@ fn draw_layer(
         }
         PreviewLayerContent::Text(object) => {
             let (picture_width, picture_height) = picture_size_in_pixels.unwrap_or((1, 1));
-            let key = TextPictureKey::of(object, picture_width, picture_height);
+            let key = TextAppearance::of(object, picture_width, picture_height);
             textures
                 .text_picture(context, key, || {
                     text_renderer
@@ -206,52 +177,19 @@ fn draw_turned_picture(painter: &Painter, texture: TextureId, corners: [Pos2; 4]
     painter.add(Shape::mesh(mesh));
 }
 
-/// The outline of the selected layer, the square handles on its corners that resize it and, named but
-/// not drawn, the places just outside the corners that turn it.
-fn show_the_handles(ui: &mut Ui, layer: &PreviewLayer<'_>, picture: PictureOnScreen) {
-    ui.painter().add(Shape::closed_line(
+/// The outline of the selected layer and the square handles on its corners that resize it. (The places just
+/// outside the corners that turn it are not drawn: the ring that shows one is drawn while the pointer is in it.)
+fn show_the_box(painter: &Painter, layer: &PreviewLayer<'_>, picture: PictureOnScreen) {
+    painter.add(Shape::closed_line(
         picture.outline_of(&layer.placement).to_vec(),
         Stroke::new(2.0, theme::SELECTION_OUTLINE),
     ));
-    for corner in Corner::ALL {
-        let place_to_turn_from = Rect::from_center_size(
-            picture.corner_of(&layer.placement, corner),
-            vec2(2.0 * TURN_ZONE_RADIUS, 2.0 * TURN_ZONE_RADIUS),
-        );
-        ui.interact(
-            place_to_turn_from,
-            Id::new(("place to turn from", layer.clip, corner_name(corner))),
-            Sense::hover(),
-        )
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, turn_handle_label(corner)));
-    }
     for corner in Corner::ALL {
         let handle = Rect::from_center_size(
             picture.corner_of(&layer.placement, corner),
             vec2(HANDLE_SIZE, HANDLE_SIZE),
         );
-        ui.interact(
-            handle,
-            Id::new(("corner of the layer", layer.clip, corner_name(corner))),
-            Sense::hover(),
-        )
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, corner_handle_label(corner)));
-        ui.painter().rect_filled(handle, 2.0, theme::SELECTION_OUTLINE);
-        ui.painter()
-            .rect_stroke(handle, 2.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Inside);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_corner_has_its_own_names() {
-        let handles: std::collections::HashSet<String> = Corner::ALL.into_iter().map(corner_handle_label).collect();
-        let turns: std::collections::HashSet<String> = Corner::ALL.into_iter().map(turn_handle_label).collect();
-        assert_eq!(handles.len(), 4);
-        assert_eq!(turns.len(), 4);
-        assert!(handles.is_disjoint(&turns));
+        painter.rect_filled(handle, 2.0, theme::SELECTION_OUTLINE);
+        painter.rect_stroke(handle, 2.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Inside);
     }
 }

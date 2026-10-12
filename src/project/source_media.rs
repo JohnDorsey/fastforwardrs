@@ -43,6 +43,16 @@ pub struct SourceVideoProperties {
     pub has_audio: bool,
 }
 
+impl SourceVideoProperties {
+    /// How many frames of a project that runs at `frame_rate` the video lasts: its own pictures counted
+    /// again at that rate, which is how many pictures it has once it is made to run at it (as it is,
+    /// in the preview and in the export, whatever rate it was made at).
+    pub fn frame_count_at(&self, frame_rate: FrameRate) -> u64 {
+        self.frame_rate
+            .convert_frame_count_to(self.total_frame_count, frame_rate)
+    }
+}
+
 /// Where a source video file lives. The project never embeds the video; it remembers the place in
 /// two ways so that it can usually find the file again: the absolute path, and a path relative to
 /// the folder holding the project file (which still works if the project and the video were moved
@@ -171,12 +181,11 @@ impl SourceMediaProperties {
         }
     }
 
-    /// How many frames the file has, counted at the project's `frame_rate`. (A video always runs
-    /// at the project's frame rate, so for it this is its own number of frames, and a picture is a
-    /// single one.)
+    /// How many frames the file has, counted at the project's `frame_rate`: a video made to run at
+    /// the project's rate, a sound as long as that, and a picture is a single one.
     pub fn frame_count_at(&self, frame_rate: FrameRate) -> u64 {
         match self {
-            Self::Video(video) => video.total_frame_count,
+            Self::Video(video) => video.frame_count_at(frame_rate),
             Self::Audio(audio) => audio.frame_count_at(frame_rate),
             Self::Image(_) => 1,
         }
@@ -294,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn a_video_has_the_number_of_frames_it_says_and_a_sound_has_sound_a_video_only_if_it_says_so() {
+    fn a_video_has_as_many_frames_as_it_lasts_at_the_rate_asked_for_and_a_sound_has_sound_a_video_only_if_it_says_so() {
         let video_properties = SourceVideoProperties {
             frame_rate: FrameRate::from_whole_frames_per_second(25).unwrap(),
             total_frame_count: 500,
@@ -304,7 +313,16 @@ mod tests {
         };
         let video = SourceMediaProperties::Video(video_properties);
         let thirty = FrameRate::from_whole_frames_per_second(30).unwrap();
-        assert_eq!(video.frame_count_at(thirty), 500);
+        // The video's own 500 pictures are 20 seconds, which is 600 frames of a project at 30.
+        assert_eq!(
+            video.frame_count_at(FrameRate::from_whole_frames_per_second(25).unwrap()),
+            500
+        );
+        assert_eq!(video.frame_count_at(thirty), 600);
+        assert_eq!(
+            video.frame_count_at(FrameRate::from_whole_frames_per_second(20).unwrap()),
+            400
+        );
         assert!(!video.has_sound());
         assert!(
             SourceMediaProperties::Video(SourceVideoProperties {

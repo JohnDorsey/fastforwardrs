@@ -37,6 +37,11 @@ impl StripView {
         Self { rectangle, ..*self }
     }
 
+    /// How wide a frame is on the screen, in points.
+    pub fn points_per_frame(&self) -> f64 {
+        self.geometry.points_per_frame()
+    }
+
     /// How much of the strips the view shows along them, in points.
     pub fn width(&self) -> f64 {
         f64::from(self.rectangle.width())
@@ -173,5 +178,13 @@ mod tests {
     #[test]
     fn a_view_on_the_strips_is_as_wide_as_its_rectangle() {
         assert_eq!(view().width(), 600.0);
+    }
+
+    #[test]
+    fn a_frame_is_as_wide_on_the_screen_as_the_scale_of_the_strips_makes_it() {
+        // 120 points a second at 30 frames a second.
+        assert_eq!(view().points_per_frame(), 4.0);
+        let frame_start = view().screen_x_of_frame(7);
+        assert_eq!(view().screen_x_of_frame(8) - frame_start, 4.0);
     }
 }

@@ -10,13 +10,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
+use fastforwardrs::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
 use fastforwardrs::media::{FfmpegToolchain, probe_source_media, probe_video};
 use fastforwardrs::project::{
-    Clip, ClipLocation, MediaClip, Project, SourceAudioProperties, SourceFrameIndex, SourceMedia,
-    SourceMediaIdentifier, SourceMediaLink, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex, Track, TrackId,
+    AnimationTarget, Clip, ClipId, MediaClip, Project, PropertyId, PropertyValue, Settings, SourceAudioProperties,
+    SourceFrameIndex, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SpeedFactor, SpeedIndicatorLayout,
+    TextObject, TimelineFrameIndex, Track, TrackId,
 };
+use fastforwardrs::rgba_picture::RgbaPicture;
 
 /// Set this to `1` to make the tests fail (instead of skipping themselves) when ffmpeg is missing.
 pub const REQUIRE_FFMPEG_ENVIRONMENT_VARIABLE: &str = "FASTFORWARDRS_REQUIRE_FFMPEG";
@@ -91,6 +95,41 @@ impl TestVideoSpecification {
         extra_video_filter: None,
         container: "mp4",
         extra_output_arguments: &[],
+    };
+
+    /// Like [`Self::COUNTER`], but at 25 frames per second (as European television) and 3 seconds long (75
+    /// pictures): for a project of 30 frames a second, which has to make 90 frames of them.
+    pub const PAL_3_SECONDS: TestVideoSpecification = TestVideoSpecification {
+        name: "pal_3_seconds",
+        frame_rate: "25",
+        duration_in_seconds: 3,
+        ..Self::COUNTER
+    };
+
+    /// Like [`Self::COUNTER`], but at 24 frames per second (as film) and 3 seconds long (72 pictures): for a
+    /// project of 30 frames a second, in which every fourth picture is exactly half way between two frames.
+    pub const FILM_3_SECONDS: TestVideoSpecification = TestVideoSpecification {
+        name: "film_3_seconds",
+        frame_rate: "24",
+        duration_in_seconds: 3,
+        ..Self::COUNTER
+    };
+
+    /// Like [`Self::COUNTER`], but at 12 frames per second and 3 seconds long (36 pictures): for a project of
+    /// 30 frames a second, in which each picture is on screen for two or three frames.
+    pub const SLOW_3_SECONDS: TestVideoSpecification = TestVideoSpecification {
+        name: "twelve_a_second_3_seconds",
+        frame_rate: "12",
+        duration_in_seconds: 3,
+        ..Self::COUNTER
+    };
+
+    /// Like [`Self::PAL_3_SECONDS`], and 20 seconds long (500 pictures): as long as [`Self::COUNTER`] is,
+    /// which is 600 frames at 30 a second.
+    pub const PAL_20_SECONDS: TestVideoSpecification = TestVideoSpecification {
+        name: "pal_20_seconds",
+        duration_in_seconds: 20,
+        ..Self::PAL_3_SECONDS
     };
 }
 
@@ -203,6 +242,21 @@ fn generate_video(toolchain: &FfmpegToolchain, specification: &TestVideoSpecific
         specification.name,
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// The number of the picture of a video that runs at `video_rate` frames a second which a project that
+/// runs at `project_rate` shows in its frame `slot`. This is what ffmpeg's `fps` filter does with
+/// `round=near`, which is how the editor and the export bring a video to the rate of the project
+/// (measured, not assumed: the tests of the frame stream check this against the real thing, and the
+/// tests that use it check the editor with it): each picture goes to the frame of the project that is
+/// nearest to its time, and each frame shows the latest picture that went there or before it. At the
+/// exact middle between two pictures the earlier one stays.
+pub fn picture_shown_in_frame(video_rate: u64, project_rate: u64, slot: u64) -> u64 {
+    let slot_the_picture_goes_to = |picture: u64| (2 * picture * project_rate + video_rate) / (2 * video_rate);
+    (0..)
+        .take_while(|&picture| slot_the_picture_goes_to(picture) <= slot)
+        .last()
+        .expect("the first picture goes to the first frame")
 }
 
 /// Reads the frame number out of a picture made by the test videos. `pixels` holds the picture
@@ -373,7 +427,7 @@ pub fn project_with_a_picture_over_a_video(
     folder: &Path,
     first_frame: u64,
     frames: u64,
-) -> (Project, ClipLocation) {
+) -> (Project, ClipId) {
     let video = counter_video(toolchain);
     let mut project = project_with_tracks_of_videos(
         toolchain,
@@ -404,10 +458,7 @@ pub fn project_with_a_picture_over_a_video(
         imported.created_track,
         "the picture goes on a track of its own, in front"
     );
-    let picture = ClipLocation {
-        track: imported.track,
-        clip: imported.clip.expect("a picture file makes a clip"),
-    };
+    let picture = imported.clip.expect("a picture file makes a clip");
     project
         .set_clip_duration(picture, frames)
         .expect("a picture can be shown for any length of time");
@@ -436,12 +487,9 @@ pub fn is_black(picture: &[u8]) -> bool {
 }
 
 /// The place of the clip that is number `clip_number` (counting from 0) on the project's only track.
-pub fn clip_number(project: &Project, clip_number: usize) -> ClipLocation {
+pub fn clip_number(project: &Project, clip_number: usize) -> ClipId {
     let track = project.tracks().last().expect("the project has a track");
-    ClipLocation {
-        track: track.id(),
-        clip: track.entries()[clip_number].id(),
-    }
+    track.entries()[clip_number].id()
 }
 
 /// How many clips the project's only track has.
@@ -494,6 +542,46 @@ pub fn expected_source_frames(project: &Project) -> Vec<u64> {
         .collect()
 }
 
+/// How bright the green of the pixel at `(x, y)` of a decoded picture `width` pixels across is.
+pub fn brightness_at(picture: &[u8], width: usize, x: usize, y: usize) -> u8 {
+    picture[(y * width + x) * 3 + 1]
+}
+
+/// The smallest box that has all of the pixels of a decoded picture (`width` by `height`, RGB) that are not black:
+/// `(left, top, right, bottom)`, of the pixels that are in it.
+pub fn box_of_what_is_not_black(picture: &[u8], width: usize, height: usize) -> (usize, usize, usize, usize) {
+    let mut found: Option<(usize, usize, usize, usize)> = None;
+    for y in 0..height {
+        for x in 0..width {
+            if brightness_at(picture, width, x, y) > 40 {
+                found = Some(match found {
+                    None => (x, y, x, y),
+                    Some((left, top, right, bottom)) => (left.min(x), top.min(y), right.max(x), bottom.max(y)),
+                });
+            }
+        }
+    }
+    found.expect("something that is not black is in the picture")
+}
+
+/// Puts a keyframe at `timeline_frame` that makes `property` of `target` have `value` there. (The property is animated from
+/// then on, if it was not.)
+pub fn make_a_keyframe(
+    project: &mut Project,
+    target: AnimationTarget,
+    property: PropertyId,
+    timeline_frame: u64,
+    value: PropertyValue,
+) {
+    let frame = TimelineFrameIndex::new(timeline_frame);
+    project
+        .add_keyframe(target, property, frame)
+        .expect("the frame is in what the keyframe is for");
+    project
+        .set_property_at(target, property, value, frame)
+        .expect("a keyframe was just made there");
+}
+
 /// What stands in for the picture of a text object in tests of the export that have no text in them
 /// (the real renderer needs fonts): a transparent picture of the text's area.
 pub fn transparent_text_picture(
@@ -534,6 +622,64 @@ pub fn red_then_blue_text_picture(
         width_in_pixels: width,
         height_in_pixels: height,
         rgba_pixels,
+    }
+}
+
+/// What stands in for the picture of a text object in tests of what the export does with text whose colour changes (the real
+/// renderer needs fonts): the text's area filled with the colour of the text, all of it opaque.
+pub fn solid_text_picture(
+    object: &TextObject,
+    picture_width_in_pixels: u32,
+    picture_height_in_pixels: u32,
+) -> RgbaPicture {
+    let (width, height) =
+        fastforwardrs::text_rendering::area_size_in_pixels(object, picture_width_in_pixels, picture_height_in_pixels);
+    let colour = object.colour;
+    RgbaPicture {
+        width_in_pixels: width,
+        height_in_pixels: height,
+        rgba_pixels: [colour.red, colour.green, colour.blue, 255].repeat((width * height) as usize),
+    }
+}
+
+/// How long an export of a test project may take before the test gives up.
+pub const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(180);
+
+/// Exports `project` to `destination` (reading its files from where its links say they are) and waits for it to finish.
+pub fn export(toolchain: &FfmpegToolchain, project: &Project, destination: &Path) {
+    export_with_text_pictures(toolchain, project, destination, &transparent_text_picture);
+}
+
+/// Like [`export`], with `render_text` making the pictures of the text objects.
+pub fn export_with_text_pictures(
+    toolchain: &FfmpegToolchain,
+    project: &Project,
+    destination: &Path,
+    render_text: &dyn Fn(&TextObject, u32, u32) -> RgbaPicture,
+) {
+    let plan = plan_export(project, Settings::DEFAULT, render_text).expect("the project can be exported");
+    let source_paths: Vec<PathBuf> = plan
+        .source_files
+        .iter()
+        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
+        .collect();
+    let export = VideoExport::start(toolchain, &plan, &source_paths, destination, Arc::new(|| {})).expect("it starts");
+    let started = Instant::now();
+    loop {
+        match export.try_next_event() {
+            Some(ExportEvent::Finished(result)) => {
+                assert_eq!(result, ExportResult::Completed);
+                return;
+            }
+            Some(ExportEvent::Progress { .. }) => {}
+            None => {
+                assert!(
+                    started.elapsed() < TIME_ALLOWED_FOR_AN_EXPORT,
+                    "the export did not finish in time"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
     }
 }
 

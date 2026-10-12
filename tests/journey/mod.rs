@@ -39,6 +39,10 @@ pub const TIME_ALLOWED_FOR_A_PREVIEW_PICTURE: Duration = Duration::from_secs(20)
 /// along (the radius of the knob).
 const SCRUB_SLIDER_END_MARGIN: f32 = 9.0;
 
+/// How long a frame of the window lasts on its own clock, unless it is asked to be different: a quarter of a second,
+/// which is the harness's usual.
+const DEFAULT_SECONDS_A_FRAME_LASTS: f32 = 0.25;
+
 /// A clip as the test sees it: the first source frame, the source frame after the last, and the speed.
 pub type ClipSummary = (u64, u64, u32);
 
@@ -50,9 +54,16 @@ pub struct Journey {
 impl Journey {
     /// A window showing an editor with an empty project.
     pub fn start(toolchain: &FfmpegToolchain) -> Self {
+        Self::start_with_frames_lasting(toolchain, DEFAULT_SECONDS_A_FRAME_LASTS)
+    }
+
+    /// Like [`Self::start`], with each frame of the window lasting `seconds` on the window's own clock, which is
+    /// the one animations go by (not real time, which is as fast as the computer goes).
+    pub fn start_with_frames_lasting(toolchain: &FfmpegToolchain, seconds: f32) -> Self {
         let application = FastForwardApplication::with_context(&egui::Context::default(), Ok(toolchain.clone()));
         let mut harness = Harness::builder()
             .with_size(vec2(WINDOW_WIDTH, WINDOW_HEIGHT))
+            .with_step_dt(seconds)
             .build_ui_state(
                 |ui, application: &mut FastForwardApplication| application.show(ui),
                 application,
@@ -165,6 +176,20 @@ impl Journey {
             .collect()
     }
 
+    /// Where the clips of the track at `position` in the list of tracks (0 is the front) are on the
+    /// timeline, in order: the first frame of each, and the frame after its last.
+    pub fn timeline_spans_of_track(&self, position: usize) -> Vec<(u64, u64)> {
+        self.application().project().tracks()[position]
+            .placements()
+            .map(|placement| {
+                (
+                    placement.first_timeline_frame.value(),
+                    placement.end_timeline_frame.value(),
+                )
+            })
+            .collect()
+    }
+
     /// Which file, and which frame of it, the video that is in front shows at timeline frame `frame`.
     pub fn the_video_in_front_at(
         &self,
@@ -246,6 +271,25 @@ impl Journey {
         self.click_with(position, PointerButton::Secondary);
     }
 
+    /// Clicks with Ctrl held, which adds what is clicked to what is selected.
+    pub fn click_with_control(&mut self, position: Pos2) {
+        self.harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+        self.harness.step();
+        self.move_pointer_to(position);
+        for pressed in [true, false] {
+            self.harness.event(Event::PointerButton {
+                pos: position,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::COMMAND,
+            });
+            self.harness.step();
+        }
+        self.harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        self.harness.step();
+        self.settle();
+    }
+
     fn click_with(&mut self, position: Pos2, button: PointerButton) {
         self.move_pointer_to(position);
         self.press_or_release(position, button, true);
@@ -283,14 +327,24 @@ impl Journey {
 
     /// Presses `button` at `from`, moves in small steps to `to`, and lets go there.
     pub fn drag(&mut self, button: PointerButton, from: Pos2, to: Pos2) {
+        self.drag_and_hold(button, from, to);
+        self.release(button, to);
+        self.settle();
+    }
+
+    /// Like [`Self::drag`], but keeps the button down at the end.
+    pub fn drag_and_hold(&mut self, button: PointerButton, from: Pos2, to: Pos2) {
         self.move_pointer_to(from);
         self.press_or_release(from, button, true);
         let steps = 12;
         for step in 1..=steps {
             self.move_pointer_to(from + (to - from) * (step as f32 / steps as f32));
         }
-        self.press_or_release(to, button, false);
-        self.settle();
+    }
+
+    /// Lets go of `button` with the pointer at `position`.
+    pub fn release(&mut self, button: PointerButton, position: Pos2) {
+        self.press_or_release(position, button, false);
     }
 
     /// Ticks (or unticks) a setting by its label in the global settings window, which is opened
@@ -306,9 +360,21 @@ impl Journey {
 
     /// Opens the global settings window and, in the drop-down list that shows `shown`, picks `option`.
     pub fn choose_in_a_global_setting_dropdown(&mut self, shown: &str, option: &str) {
+        self.choose_in_a_dropdown_of_the_window_opened_by("Global settings", shown, option);
+    }
+
+    /// Opens the project settings window and, in the drop-down list of frame rates, which shows
+    /// `shown`, picks `option`.
+    pub fn choose_the_frame_rate_of_the_project(&mut self, shown: &str, option: &str) {
+        self.choose_in_a_dropdown_of_the_window_opened_by("Project settings", shown, option);
+    }
+
+    /// Opens the window that the item `menu_item` of the Edit menu opens and, in the drop-down list in it
+    /// that shows `shown`, picks `option`.
+    fn choose_in_a_dropdown_of_the_window_opened_by(&mut self, menu_item: &str, shown: &str, option: &str) {
         self.harness.get_by_label("Edit").click();
         self.settle();
-        self.harness.get_by_label("Global settings").click();
+        self.harness.get_by_label(menu_item).click();
         self.settle();
         self.harness.get_by_value(shown).click();
         self.settle();
@@ -452,19 +518,31 @@ impl Journey {
         self.settle();
     }
 
-    /// Opens the box of settings of the clip that is showing `frame` on the front-most track, by
-    /// right-clicking it there.
-    pub fn open_the_settings_of_the_clip_at(&mut self, frame: u64) {
+    /// Selects the clip that is showing `frame` on the front-most track, by clicking it there: its
+    /// properties are then in the properties panel.
+    pub fn select_the_clip_at(&mut self, frame: u64) {
         let point = self.point_on_the_track_at_frame(frame);
-        self.right_click(point);
+        self.click(point);
     }
 
-    /// Sets the speed of the clip that is showing `frame` to `speed`: opens its box of settings,
-    /// sets the speed slider in it, and closes the box again (with the Escape key).
+    /// Selects the track at `position` in the list of tracks (0 is the front), by clicking its box beside
+    /// the title (the title itself is typed in when it is clicked).
+    pub fn select_the_track_at(&mut self, position: usize) {
+        let title = self.application().project().tracks()[position].title().to_owned();
+        let field = self
+            .harness
+            .query_all_by_role(egui::accesskit::Role::TextInput)
+            .find(|node| node.value().as_deref() == Some(title.as_str()))
+            .unwrap_or_else(|| panic!("no text field shows {title:?}"))
+            .rect();
+        self.click(Pos2::new(field.left() - 4.0, field.center().y));
+    }
+
+    /// Sets the speed of the clip that is showing `frame` to `speed`: selects it, and sets the speed slider
+    /// that the properties panel then has. (The clip stays selected.)
     pub fn set_the_speed_of_the_clip_at(&mut self, frame: u64, speed: u32) {
-        self.open_the_settings_of_the_clip_at(frame);
+        self.select_the_clip_at(frame);
         self.set_slider("Speed", f64::from(speed));
-        self.press_key(Key::Escape);
     }
 
     /// Clicks the slider along the bottom of the window `fraction` of the way along it (0 is the

@@ -16,8 +16,8 @@ use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::project::{Clip, Project, SourceMediaIdentifier, TimelineFrameIndex};
 use journey::Journey;
 use support::{
-    TestVideoSpecification, counter_video, decode_video, expected_source_frames, is_black, red_and_blue_picture,
-    scratch_directory, stream_durations, test_video,
+    TestVideoSpecification, counter_video, decode_video, expected_source_frames, is_black, picture_shown_in_frame,
+    red_and_blue_picture, scratch_directory, stream_durations, test_video,
 };
 
 /// The size of the pictures the test videos are exported at.
@@ -57,7 +57,7 @@ fn what_is_on_the_tracks(project: &Project) -> Vec<(String, Vec<(u64, Clip)>)> {
         .collect()
 }
 
-/// Cuts at 60 and 150 with the keyboard and sets the middle clip to 10x in its box of settings.
+/// Cuts at 60 and 150 with the keyboard and sets the middle clip to 10x in the properties panel.
 fn cut_into_three_with_the_middle_at_ten_times(journey: &mut Journey) {
     journey.cut_at_frame(60);
     journey.cut_at_frame(150);
@@ -368,7 +368,8 @@ fn a_project_whose_video_cannot_be_found_warns_keeps_every_edit_and_can_be_point
 }
 
 #[test]
-fn a_replacement_video_with_a_different_frame_rate_is_refused_and_the_edits_stay() {
+fn a_replacement_video_of_another_frame_rate_that_lasts_as_long_takes_the_place_of_the_old_one_with_the_edits_where_they_were()
+ {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
@@ -386,32 +387,40 @@ fn a_replacement_video_with_a_different_frame_rate_is_refused_and_the_edits_stay
     reopened.wait_until_idle();
     assert!(reopened.application().missing_sources_warning_is_showing());
 
-    let wrong_frame_rate = test_video(
-        &toolchain,
-        &TestVideoSpecification {
-            name: "ntsc_4_seconds",
-            frame_rate: "30000/1001",
-            duration_in_seconds: 4,
-            ..TestVideoSpecification::COUNTER
-        },
-    );
+    // Another 20 seconds, but of 500 pictures at 25 a second where there were 600 at 30.
+    let replacement = test_video(&toolchain, &TestVideoSpecification::PAL_20_SECONDS);
     reopened
         .application_mut()
-        .relink_source_from(THE_VIDEO, wrong_frame_rate.path.clone());
+        .relink_source_from(THE_VIDEO, replacement.path.clone());
     reopened.wait_until_idle();
 
-    let (title, text) = reopened.application().message_showing().expect("a message explains");
-    assert_eq!(title, "That file cannot be used");
-    assert!(text.contains("frames per second"), "{text}");
-    assert!(
-        !reopened.application().every_source_file_is_available(),
-        "the editor is still waiting for the right video"
+    assert_eq!(
+        reopened.application().message_showing(),
+        None,
+        "it lasts as long as the old one did, and that is what the edits care about"
     );
+    assert!(reopened.application().every_source_file_is_available());
     assert_eq!(
         reopened.clips(),
         vec![(0, 90, 1), (90, 600, 1)],
         "the edits are untouched"
     );
+    assert_eq!(
+        reopened.application().project().frame_rate().to_string(),
+        "30/1",
+        "and so is the frame rate of the project: it does not follow the file"
+    );
+
+    // The export has in each of the 600 frames the picture of the new file that is nearest in time.
+    let destination = scratch.path().join("relinked.mp4");
+    export_to(&mut reopened, &destination);
+    let expected: Vec<u64> = expected_source_frames(reopened.application().project())
+        .into_iter()
+        .map(|frame| picture_shown_in_frame(25, 30, frame))
+        .collect();
+    assert_eq!(expected.len(), 600);
+    let exported = decode_video(&toolchain, &destination, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(exported.frame_numbers(), expected);
 }
 
 #[test]
@@ -548,15 +557,7 @@ fn a_file_that_is_not_a_project_is_refused_with_a_message_and_nothing_is_lost() 
 fn a_new_project_forgets_everything_about_the_old_one() {
     let toolchain = toolchain_or_skip!();
     let first_video = counter_video(&toolchain);
-    let second_video = test_video(
-        &toolchain,
-        &TestVideoSpecification {
-            name: "pal_3_seconds",
-            frame_rate: "25",
-            duration_in_seconds: 3,
-            ..TestVideoSpecification::COUNTER
-        },
-    );
+    let second_video = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS);
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &first_video.path);
     cut_into_three_with_the_middle_at_ten_times(&mut journey);
@@ -796,6 +797,91 @@ fn a_text_object_made_with_the_mouse_is_saved_and_drawn_over_the_picture_in_the_
 }
 
 #[test]
+fn a_video_made_smaller_and_dragged_past_the_edge_keeps_its_place_in_the_file_and_is_cut_off_there_in_the_export() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    // Keep two seconds of the video, so that the export is small.
+    journey.cut_at_frame(60);
+    let second_clip = journey.point_on_the_track_at_frame(61);
+    journey.click(second_clip);
+    journey.press_key(Key::Delete);
+    assert_eq!(journey.clips(), vec![(0, 60, 1)]);
+    journey.move_playhead_to_frame(10);
+    journey.wait_for_the_preview_to_show_the_current_frame();
+
+    // Picked on the preview, made half the size by its bottom right corner, and then dragged to the left as
+    // far as it goes (with the pointer far outside the window).
+    let handle = |journey: &Journey, which: &str| {
+        journey
+            .rectangle_of(&format!("Resize handle at the {which} corner"))
+            .center()
+    };
+    let on_the_video = journey.rectangle_of("Video, clip 0 of track 0").center();
+    journey.click(on_the_video);
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    journey.drag(
+        PointerButton::Primary,
+        bottom_right,
+        top_left + (bottom_right - top_left) * 0.5,
+    );
+    journey.wait_until_idle();
+    let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
+    let middle = top_left + (bottom_right - top_left) * 0.5;
+    journey.drag(PointerButton::Primary, middle, middle - vec2(4000.0, 0.0));
+    journey.wait_until_idle();
+
+    let track = journey.application().project().tracks()[0].clone();
+    let Clip::Video(media) = track.placement_at_index(0).unwrap().clip else {
+        panic!("a video clip")
+    };
+    let area = media.placement().expect("it was put somewhere").area;
+    assert!(
+        (area.left() + 0.25).abs() < 0.01 && area.top().abs() < 0.01,
+        "half of it is before the left edge of the picture: {area:?}"
+    );
+    assert!(
+        (area.width() - 0.5).abs() < 0.01 && (area.height() - 0.5).abs() < 0.01,
+        "{area:?}"
+    );
+
+    // Saved, the file says where it is, and loaded into a fresh editor, it is there.
+    let project_path = scratch.path().join("past_the_edge.fastforwardrs.json");
+    journey.application_mut().save_project_to(project_path.clone());
+    let (text_of_file, saved) = read_project_file_as_json(&project_path);
+    let saved_left = saved["tracks"][0]["clips"][0]["placement"]["area"]["left_fraction_of_frame_width"]
+        .as_f64()
+        .unwrap_or_else(|| panic!("the place of the video is in the file: {text_of_file}"));
+    assert!((saved_left + 0.25).abs() < 0.01, "{text_of_file}");
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().load_project_from(project_path);
+    fresh.wait_until_idle();
+    assert_eq!(
+        what_is_on_the_tracks(fresh.application().project()),
+        what_is_on_the_tracks(journey.application().project())
+    );
+
+    // The export has the right half of the video in the top left quarter of the picture, and black elsewhere.
+    let destination = scratch.path().join("past_the_edge.mp4");
+    export_to(&mut fresh, &destination);
+    let decoded = decode_video(&toolchain, &destination, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(decoded.pictures.len(), 60);
+    let picture = &decoded.pictures[10];
+    let pixel = |x: usize, y: usize| {
+        let first = (y * VIDEO_WIDTH as usize + x) * 3;
+        &picture[first..first + 3]
+    };
+    // (The picture is grey, except for the strip along its top with the number of the frame in it.)
+    for (x, y) in [(10, 40), (40, 40), (70, 40), (40, 80)] {
+        assert!(!is_black(pixel(x, y)), "({x}, {y}) is the video");
+    }
+    for (x, y) in [(100, 40), (200, 40), (300, 40), (40, 100), (40, 150), (200, 150)] {
+        assert!(is_black(pixel(x, y)), "({x}, {y}) is not the video");
+    }
+}
+
+#[test]
 fn of_two_videos_at_once_the_preview_shows_the_one_in_front_and_the_other_where_it_would_have_been_when_that_ends() {
     let toolchain = toolchain_or_skip!();
     let long_video = counter_video(&toolchain); // 600 frames
@@ -832,36 +918,127 @@ fn of_two_videos_at_once_the_preview_shows_the_one_in_front_and_the_other_where_
 }
 
 #[test]
-fn a_video_with_another_frame_rate_than_the_projects_cannot_be_imported_and_the_project_stays_as_it_is() {
+fn a_video_of_another_frame_rate_than_the_projects_is_added_for_as_long_as_it_lasts_and_the_project_keeps_its_rate() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain); // 30 frames a second
-    let other_frame_rate = test_video(
-        &toolchain,
-        &TestVideoSpecification {
-            name: "pal_3_seconds",
-            frame_rate: "25",
-            duration_in_seconds: 3,
-            ..TestVideoSpecification::COUNTER
-        },
-    );
+    let other_frame_rate = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS); // 75 pictures at 25
+    let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
     journey.cut_at_frame(150);
-    let before = what_is_on_the_tracks(journey.application().project());
 
-    journey
-        .application_mut()
-        .import_file_from(other_frame_rate.path.clone());
-    journey.wait_until_idle();
+    // The playhead is at frame 150, and that is where the new video goes.
+    journey.import(&other_frame_rate.path);
 
-    let (title, text) = journey.application().message_showing().expect("a message explains");
-    assert_eq!(title, "The file could not be imported");
-    assert!(text.contains("frames per second"), "{text}");
+    assert_eq!(journey.application().message_showing(), None);
     assert_eq!(
-        what_is_on_the_tracks(journey.application().project()),
-        before,
-        "nothing was added"
+        journey.application().project().frame_rate().to_string(),
+        "30/1",
+        "the first video decides the frame rate, and the second does not change it"
     );
-    assert_eq!(journey.application().project().sources().len(), 1);
+    assert_eq!(
+        journey.application().project().tracks().len(),
+        2,
+        "on a track of its own, in front"
+    );
+    assert_eq!(
+        journey.clips(),
+        vec![(0, 90, 1)],
+        "75 pictures at 25 a second last 3 seconds, which are 90 frames of the project"
+    );
+    assert_eq!(journey.timeline_spans_of_track(0), vec![(150, 240)]);
+    assert_eq!(
+        journey.clips_of_track(1),
+        vec![(0, 150, 1), (150, 600, 1)],
+        "the first video is as it was"
+    );
+    assert_eq!(
+        journey.application().thumbnail_progress(SourceMediaIdentifier::new(2)),
+        (3, 3),
+        "one picture for every second of the new video"
+    );
+
+    // The preview shows, in each frame, the picture of the video in front that is nearest in time.
+    for timeline_frame in [149u64, 150, 151, 153, 154, 189, 239, 240] {
+        let expected = match timeline_frame {
+            150..240 => picture_shown_in_frame(25, 30, timeline_frame - 150),
+            _ => timeline_frame,
+        };
+        journey.move_playhead_to_frame(timeline_frame);
+        journey.wait_for_the_preview_to_show_the_current_frame();
+        assert_eq!(
+            journey.frame_number_in_the_preview(),
+            expected,
+            "the preview at timeline frame {timeline_frame}"
+        );
+    }
+
+    // And so does the export, which is as long as the first video, with the sound of both.
+    let destination = scratch.path().join("both.mp4");
+    export_to(&mut journey, &destination);
+    let expected: Vec<u64> = (0..600u64)
+        .map(|timeline_frame| match timeline_frame {
+            150..240 => picture_shown_in_frame(25, 30, timeline_frame - 150),
+            _ => timeline_frame,
+        })
+        .collect();
+    let exported = decode_video(&toolchain, &destination, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(exported.frame_numbers(), expected);
+    let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
+    assert!((video_seconds.unwrap() - 20.0).abs() < 0.01, "{video_seconds:?}");
+    assert!((audio_seconds.unwrap() - 20.0).abs() < 0.05, "{audio_seconds:?}");
+}
+
+#[test]
+fn choosing_another_frame_rate_in_the_project_settings_keeps_every_clip_as_long_in_time_and_the_export_runs_at_that_rate()
+ {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 20 seconds at 30 frames a second: 600 frames
+    let scratch = scratch_directory();
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    journey.cut_at_frame(90); // 3 seconds
+    journey.cut_at_frame(300); // 10 seconds
+    assert_eq!(journey.clips(), vec![(0, 90, 1), (90, 300, 1), (300, 600, 1)]);
+
+    journey.choose_the_frame_rate_of_the_project("30 fps", "24 fps");
+
+    assert_eq!(journey.application().project().frame_rate().to_string(), "24/1");
+    assert_eq!(
+        journey.clips(),
+        vec![(0, 72, 1), (72, 240, 1), (240, 480, 1)],
+        "the cuts are at the same moments: 3, 10 and 20 seconds"
+    );
+    assert_eq!(journey.application().project().total_frame_count(), 480);
+    assert!(journey.application().has_unsaved_changes());
+
+    // The export is of 480 frames at 24 a second, each the picture of the video nearest in time.
+    let destination = scratch.path().join("at_24.mp4");
+    export_to(&mut journey, &destination);
+    let exported = decode_video(&toolchain, &destination, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(
+        exported.frame_numbers(),
+        (0..480)
+            .map(|slot| picture_shown_in_frame(30, 24, slot))
+            .collect::<Vec<u64>>()
+    );
+    let (video_seconds, audio_seconds) = stream_durations(&toolchain, &destination);
+    assert!((video_seconds.unwrap() - 20.0).abs() < 0.01, "{video_seconds:?}");
+    assert!((audio_seconds.unwrap() - 20.0).abs() < 0.05, "{audio_seconds:?}");
+    let streams = support::probe_json(&toolchain, &destination, &["-show_streams"]);
+    let video_stream = streams["streams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stream| stream["codec_type"] == "video")
+        .expect("the file has a video stream");
+    assert_eq!(video_stream["r_frame_rate"], "24/1");
+
+    // Taking the choice back is one step of the history, and the clips are as they were. (The message that the
+    // export is finished is closed first: the keys do nothing while it is up.)
+    journey.harness.get_by_label("OK").click();
+    journey.settle();
+    journey.press_key_with(Modifiers::COMMAND, Key::Z);
+    assert_eq!(journey.application().project().frame_rate().to_string(), "30/1");
+    assert_eq!(journey.clips(), vec![(0, 90, 1), (90, 300, 1), (300, 600, 1)]);
 }
 
 #[test]
@@ -1000,5 +1177,196 @@ fn a_picture_imported_from_a_file_is_decoded_for_the_preview_put_in_front_of_the
     assert!(
         !(later[first] > 200 && later[first + 1] < 60 && later[first + 2] < 60),
         "the picture is not there at frame 200"
+    );
+}
+
+/// Presses the stopwatch of `property` (named as the editor names it: "position", "gain") at the playhead, to make a
+/// keyframe there, the way a person does: with the pointer over the control, which brings the buttons.
+fn make_a_keyframe_with_the_stopwatch(journey: &mut Journey, property: &str) {
+    let stopwatch = journey.rectangle_of(&format!("Make a keyframe of {property} here"));
+    journey.click(stopwatch.center());
+}
+
+#[test]
+fn a_video_animated_with_the_stopwatch_and_the_panel_is_saved_with_its_keyframes_and_exported_as_it_moves_and_fades() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let mut journey = Journey::importing(&toolchain, &video.path);
+    // Keep three seconds of the video, so that the export is small.
+    journey.cut_at_frame(90);
+    let second_clip = journey.point_on_the_track_at_frame(91);
+    journey.click(second_clip);
+    journey.press_key(Key::Delete);
+    assert_eq!(journey.clips(), vec![(0, 90, 1)]);
+
+    // The video is made half as wide and tall as the picture, in the middle of it.
+    journey.select_the_clip_at(10);
+    journey.set_slider("w", 50.0);
+    journey.set_slider("h", 50.0);
+
+    // It moves from there to a place further right during the first second: a keyframe for its place with the stopwatch at the
+    // start, and the next one made by moving it to the right (which is a change of an animated place, so a keyframe).
+    journey.move_playhead_to_frame(0);
+    make_a_keyframe_with_the_stopwatch(&mut journey, "position");
+    journey.move_playhead_to_frame(30);
+    journey.set_slider("x", 75.0);
+    // And it gets quieter, from what it is to 20 decibels quieter by 2 seconds.
+    journey.move_playhead_to_frame(0);
+    make_a_keyframe_with_the_stopwatch(&mut journey, "gain");
+    journey.move_playhead_to_frame(60);
+    journey.set_slider("Gain", -20.0);
+
+    let clip = journey.application().project().tracks()[0].entries()[0].id();
+    let keyframe_frames = |journey: &Journey, property: fastforwardrs::project::PropertyId| -> Vec<u64> {
+        journey
+            .application()
+            .project()
+            .placement_of(clip)
+            .unwrap()
+            .animation
+            .keyframes_of(property)
+            .map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        keyframe_frames(&journey, fastforwardrs::project::PropertyId::Position),
+        vec![0, 30]
+    );
+    assert_eq!(
+        keyframe_frames(&journey, fastforwardrs::project::PropertyId::Gain),
+        vec![0, 60]
+    );
+    assert_eq!(
+        keyframe_frames(&journey, fastforwardrs::project::PropertyId::Size),
+        Vec::<u64>::new(),
+        "the size was set once for the whole clip"
+    );
+
+    // Saved, the file says what is animated, and loaded into a fresh editor it is the same.
+    let project_path = scratch.path().join("animated.fastforwardrs.json");
+    journey.application_mut().save_project_to(project_path.clone());
+    let (text_of_file, saved) = read_project_file_as_json(&project_path);
+    assert_eq!(saved["file_format_version"], 6, "{text_of_file}");
+    assert_eq!(
+        saved["tracks"][0]["clips"][0]["animation"]["position"][1]["frame"], 30,
+        "{text_of_file}"
+    );
+    assert_eq!(
+        saved["tracks"][0]["clips"][0]["animation"]["gain"][1]["value"], -20.0,
+        "{text_of_file}"
+    );
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().load_project_from(project_path);
+    fresh.wait_until_idle();
+    assert_eq!(
+        fresh.application().project().placement_of(clip).unwrap().animation,
+        journey.application().project().placement_of(clip).unwrap().animation,
+        "the keyframes come back exactly"
+    );
+
+    // The export has the video where the keyframes say at each frame, and quieter as the keyframes say.
+    let animated = scratch.path().join("animated.mp4");
+    export_to(&mut fresh, &animated);
+    let (width, height) = (VIDEO_WIDTH as usize, VIDEO_HEIGHT as usize);
+    let decoded = decode_video(&toolchain, &animated, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(decoded.pictures.len(), 90);
+    for (frame, expected_left) in [(0, 80.0), (15, 120.0), (30, 160.0), (75, 160.0)] {
+        let (left, _, right, _) = support::box_of_what_is_not_black(&decoded.pictures[frame], width, height);
+        assert!(
+            (left as f64 - expected_left).abs() <= 3.0,
+            "frame {frame}: the video starts {left} pixels across, not {expected_left}"
+        );
+        assert!(
+            (right - left + 1).abs_diff(160) <= 3,
+            "frame {frame}: it is 160 pixels wide"
+        );
+    }
+    let sound = support::decoded_sound(&toolchain, &animated, 1, 48_000);
+    let loudness_around = |seconds: f64| {
+        let first = ((seconds - 0.1) * 48_000.0) as usize;
+        support::loudness(&sound[first..first + 9_600])
+    };
+    // -5 decibels half way down to the keyframe at 1 second... the gain is 0 at 0 s and -20 at 2 s: -5 at 0.5 s and -20 from 2 s on.
+    let ratio = f64::from(loudness_around(2.5) / loudness_around(0.5));
+    let expected = 10f64.powf((-20.0 + 5.0) / 20.0);
+    assert!(
+        (ratio / expected - 1.0).abs() < 0.08,
+        "{ratio} times as loud, not {expected}"
+    );
+}
+
+/// A video of 60 seconds (1800 frames), a small picture so that it is quick to make.
+fn video_of_a_minute(toolchain: &FfmpegToolchain) -> support::TestVideo {
+    test_video(
+        toolchain,
+        &TestVideoSpecification {
+            name: "animated_export_60_seconds",
+            duration_in_seconds: 60,
+            with_audio: false,
+            ..TestVideoSpecification::COUNTER
+        },
+    )
+}
+
+/// Regression test: the message for a project that cannot be exported was always headed "There is nothing to export", which
+/// is what it was for when there was only that to say.
+#[test]
+fn an_animation_that_is_too_much_to_export_is_refused_with_a_message_that_says_so_and_nothing_is_written() {
+    let toolchain = toolchain_or_skip!();
+    let video = video_of_a_minute(&toolchain);
+    let scratch = scratch_directory();
+    // The video goes a pixel across and back at every frame of its minute: a different place for every frame.
+    let mut project = support::project_with_tracks_of_videos(
+        &toolchain,
+        &[&video],
+        &[(
+            0,
+            &[support::ClipOfTheVideo {
+                gap_before_frames: 0,
+                first_source_frame: 0,
+                end_source_frame: 1800,
+                speed: 1,
+            }],
+        )],
+    );
+    let clip = support::clip_number(&project, 0);
+    project
+        .set_clip_placement(
+            clip,
+            fastforwardrs::project::Placement::upright(fastforwardrs::project::CanvasArea::new(0.0, 0.0, 0.25, 0.25)),
+        )
+        .unwrap();
+    for frame in 0..1800 {
+        let across = if frame % 2 == 0 { 0.125 } else { 0.125 + 1.0 / 320.0 };
+        support::make_a_keyframe(
+            &mut project,
+            fastforwardrs::project::AnimationTarget::Clip(clip),
+            fastforwardrs::project::PropertyId::Position,
+            frame,
+            fastforwardrs::project::PropertyValue::Pair(across, 0.125),
+        );
+    }
+    let project_path = scratch.path().join("too_much.fastforwardrs.json");
+    fastforwardrs::project_file::write_project_file(&project, &project_path).unwrap();
+    let mut journey = Journey::start(&toolchain);
+    journey.application_mut().load_project_from(project_path);
+    journey.wait_until_idle();
+    let destination = scratch.path().join("too_much.mp4");
+
+    journey.application_mut().export_video_to(destination.clone());
+    journey.settle();
+
+    assert!(
+        !journey.application().is_working_in_the_background(),
+        "the export did not start"
+    );
+    let (title, text) = journey.application().message_showing().expect("a message says why");
+    assert_eq!(title, "There is too much animation to export");
+    assert!(text.contains("1500"), "{text}");
+    assert!(!destination.exists(), "nothing was written");
+    assert!(
+        !destination.with_extension("exporting.mp4").exists(),
+        "and no half-written file was left"
     );
 }

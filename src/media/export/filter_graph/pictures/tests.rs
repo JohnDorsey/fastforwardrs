@@ -17,7 +17,7 @@ fn video(source_input: usize, first: u64, end: u64, factor: u32) -> VideoToExpor
     }
 }
 
-fn place(left: u32, top: u32, width: u32, height: u32, turn_in_degrees: f32) -> PlaceToExport {
+fn place(left: i32, top: i32, width: u32, height: u32, turn_in_degrees: f32) -> PlaceToExport {
     PlaceToExport {
         left_in_pixels: left,
         top_in_pixels: top,
@@ -40,7 +40,7 @@ fn video_layer(source_input: usize, first: u64, end: u64, factor: u32, place: Pl
 }
 
 /// A still picture laid over with its top left corner at `(left, top)` that is 40 by 20 pixels.
-fn still_layer(picture_input: usize, left: u32, top: u32) -> LayerToExport {
+fn still_layer(picture_input: usize, left: i32, top: i32) -> LayerToExport {
     LayerToExport {
         content: LayerContentToExport::Still {
             picture_input,
@@ -264,6 +264,106 @@ fn a_video_that_is_the_back_most_layer_but_is_turned_is_laid_over_black_like_any
             "[clip_source_video_0_0]trim=start_frame=0:end_frame=60,setpts=N*1/(30*TB),scale=100:60,setsar=1,format=rgba,rotate=a=0.523598776:ow=118:oh=102:c=black@0[clip_layer_0_0]",
             "[clip_picture_0][clip_layer_0_0]overlay=x=91:y=29:format=auto[finished_clip_0]",
         ]
+    );
+}
+
+// --- reaching out past the edges of the picture ---
+
+#[test]
+fn a_place_is_inside_the_picture_when_all_of_its_box_is_and_touching_an_edge_is_inside() {
+    let inside = |place: PlaceToExport| place.is_inside_the_picture(320, 180);
+    assert!(inside(place(0, 0, 320, 180, 0.0)));
+    assert!(inside(place(10, 20, 100, 60, 0.0)));
+    assert!(
+        inside(place(220, 120, 100, 60, 0.0)),
+        "touching the right and bottom edges"
+    );
+    assert!(!inside(place(-1, 0, 320, 180, 0.0)), "a pixel before the left edge");
+    assert!(!inside(place(0, -1, 320, 180, 0.0)), "a pixel before the top edge");
+    assert!(!inside(place(1, 0, 320, 180, 0.0)), "a pixel past the right edge");
+    assert!(!inside(place(0, 1, 320, 180, 0.0)), "a pixel past the bottom edge");
+    assert!(!inside(place(0, 0, 321, 180, 0.0)), "wider than the picture");
+}
+
+#[test]
+fn a_video_at_the_back_that_reaches_out_past_an_edge_is_laid_over_black_at_a_place_that_can_be_below_zero() {
+    for (the_place, expected_offsets) in [
+        (place(-80, 0, 200, 180, 0.0), "x=-80:y=0"),
+        (place(200, 0, 200, 180, 0.0), "x=200:y=0"),
+        (place(0, -90, 320, 180, 0.0), "x=0:y=-90"),
+        (place(0, 100, 320, 180, 0.0), "x=0:y=100"),
+        (place(-300, -170, 320, 180, 0.0), "x=-300:y=-170"),
+    ] {
+        let mut section = clip_section(0, 60, 1);
+        section.layers[0].place = the_place;
+        let statements = statements_of(&specification(vec![section]));
+        assert_eq!(
+            statements[1..4],
+            [
+                "color=c=black:s=320x180:r=30/1,format=yuv420p,setsar=1,trim=end_frame=60,setpts=N*1/(30*TB)[clip_picture_0]".to_owned(),
+                format!(
+                    "[clip_source_video_0_0]trim=start_frame=0:end_frame=60,setpts=N*1/(30*TB),scale={}:{},setsar=1[clip_layer_0_0]",
+                    the_place.width_in_pixels, the_place.height_in_pixels
+                ),
+                format!("[clip_picture_0][clip_layer_0_0]overlay={expected_offsets}:format=auto[finished_clip_0]"),
+            ],
+            "{the_place:?}"
+        );
+        assert!(
+            statements.iter().all(|statement| !statement.contains("pad=")),
+            "a box that is partly outside cannot be put on black by padding: {statements:?}"
+        );
+    }
+}
+
+#[test]
+fn a_video_at_the_back_that_touches_the_edges_of_the_picture_without_reaching_past_them_is_still_padded() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers[0].place = place(220, 120, 100, 60, 0.0);
+    assert_eq!(
+        statements_of(&specification(vec![section]))[1],
+        "[clip_source_video_0_0]trim=start_frame=0:end_frame=60,setpts=N*1/(30*TB),scale=100:60,setsar=1,pad=320:180:220:120[finished_clip_0]"
+    );
+}
+
+#[test]
+fn a_still_picture_and_a_picture_from_a_file_that_begin_before_the_picture_are_laid_over_at_a_place_below_zero() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers.push(still_layer(1, -10, -5));
+    section.layers.push(picture_layer(2, place(-100, 150, 200, 100, 0.0)));
+    let statements = statements_of(&specification(vec![section]));
+    assert!(
+        statements
+            .iter()
+            .any(|statement| statement.contains("overlay=x=-10:y=-5:format=auto")),
+        "{statements:?}"
+    );
+    assert!(
+        statements
+            .iter()
+            .any(|statement| statement.contains("overlay=x=-100:y=150:format=auto")),
+        "{statements:?}"
+    );
+}
+
+#[test]
+fn a_turned_picture_that_reaches_out_is_laid_over_with_the_corner_of_the_picture_it_is_made_into_before_the_picture() {
+    let mut section = clip_section(0, 60, 1);
+    // 100 by 60, with its top left corner at (-30, -20): its middle is at (20, 10). Turned a twelfth of a
+    // turn it is made into a picture of 118 by 102, whose middle is there too: its corner is at (-39, -41).
+    section.layers.push(LayerToExport {
+        content: LayerContentToExport::Still {
+            picture_input: 1,
+            scaled_to_its_place: false,
+        },
+        place: place(-30, -20, 100, 60, 30.0),
+    });
+    let statements = statements_of(&specification(vec![section]));
+    assert!(
+        statements
+            .iter()
+            .any(|statement| statement.contains("overlay=x=-39:y=-41:format=auto")),
+        "{statements:?}"
     );
 }
 

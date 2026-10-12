@@ -10,17 +10,17 @@ use egui::Pos2;
 use super::PreviewContent;
 use super::geometry::{PictureOnScreen, corner_to_turn_by, corner_whose_handle_is_at};
 use super::speed_indicator_overlay::SymbolOnScreen;
-use crate::project::{ClipLocation, Corner};
+use crate::project::{ClipId, Corner};
 
 /// Something on the preview that the pointer can take hold of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Grab {
     /// A video, a picture or a text object: a click picks it, and dragging moves it.
-    Layer(ClipLocation),
+    Layer(ClipId),
     /// The square handle on a corner of the selected layer: dragging it makes the layer bigger or smaller.
-    Handle { layer: ClipLocation, corner: Corner },
+    Handle { layer: ClipId, corner: Corner },
     /// The place just outside a corner of the selected layer: dragging round from it turns the layer.
-    PlaceToTurnFrom { layer: ClipLocation, corner: Corner },
+    PlaceToTurnFrom { layer: ClipId, corner: Corner },
     /// The fast-forward symbol: dragging it moves it.
     Symbol,
     /// The corner of the fast-forward symbol: dragging it makes the symbol bigger or smaller.
@@ -29,10 +29,12 @@ pub(super) enum Grab {
 
 /// What there is to take hold of at `point` on the screen, if anything.
 ///
-/// The handles and the places to turn the selected layer from are drawn over everything else, so they
-/// come first. Then, from the front to the back, each layer is as far as it is on the screen (turned as
-/// it is, and not as far as the rectangle round it), with the fast-forward symbol, which is over the
-/// front-most video, between that video and the layers in front of it.
+/// The handles and the places to turn the selected layer from are drawn over everything else, wherever
+/// they are, so they come first. Then, from the front to the back, each layer is as far as it is on the
+/// screen (turned as it is, and not as far as the rectangle round it), with the fast-forward symbol, which
+/// is over the front-most video, between that video and the layers in front of it. What is past the edge
+/// of the picture is not seen, so a layer is only taken hold of where it is over the picture, but for the
+/// selected one, whose outline is drawn all the way round it, and is taken hold of inside that.
 pub(super) fn grab_at(content: &PreviewContent<'_>, picture: &PictureOnScreen, point: Pos2) -> Option<Grab> {
     if let Some(selected) = content.selected_layer() {
         if let Some(corner) = corner_whose_handle_is_at(picture, &selected.placement, point) {
@@ -48,6 +50,7 @@ pub(super) fn grab_at(content: &PreviewContent<'_>, picture: &PictureOnScreen, p
             });
         }
     }
+    let is_over_the_picture = picture.rectangle.contains(point);
     for layer in content.layers.iter().rev() {
         if let Some(symbol) = content.symbol.filter(|symbol| symbol.over == layer.clip) {
             let on_screen = SymbolOnScreen::of(content.indicator_layout, symbol.speed, picture.rectangle);
@@ -58,7 +61,8 @@ pub(super) fn grab_at(content: &PreviewContent<'_>, picture: &PictureOnScreen, p
                 return Some(Grab::Symbol);
             }
         }
-        if picture.contains(&layer.placement, point) {
+        let is_where_it_can_be_taken_hold_of = is_over_the_picture || content.selected_clip == Some(layer.clip);
+        if is_where_it_can_be_taken_hold_of && picture.contains(&layer.placement, point) {
             return Some(Grab::Layer(layer.clip));
         }
     }
@@ -150,6 +154,90 @@ mod tests {
             grab_at(&content, &picture, corner + vec2(30.0, 30.0)),
             Some(Grab::Layer(clip(2))),
             "but not inside, where what is in front is"
+        );
+    }
+
+    /// A box 400 by 225 points that begins 80 points before the picture: from (20, 162.5) to (420, 387.5).
+    fn sticking_out_at_the_left() -> Placement {
+        Placement::upright(CanvasArea::new(-0.1, 0.25, 0.5, 0.5))
+    }
+
+    #[test]
+    fn a_layer_that_is_not_selected_is_only_taken_hold_of_where_it_is_over_the_picture() {
+        let content = content(vec![layer(1, sticking_out_at_the_left())], None);
+        let picture = picture();
+        let before_the_picture = pos2(60.0, 275.0);
+        assert!(
+            sticking_out_at_the_left().contains(picture.fractions_at(before_the_picture), picture.size_in_pixels),
+            "the setup: the point is on the layer"
+        );
+        assert!(
+            !picture.rectangle.contains(before_the_picture),
+            "and not on the picture"
+        );
+        assert_eq!(grab_at(&content, &picture, before_the_picture), None);
+        assert_eq!(
+            grab_at(&content, &picture, pos2(200.0, 275.0)),
+            Some(Grab::Layer(clip(1))),
+            "but over the picture it is"
+        );
+    }
+
+    #[test]
+    fn the_selected_layer_is_taken_hold_of_wherever_it_is_even_where_it_is_not_over_the_picture() {
+        let content = content(vec![layer(1, sticking_out_at_the_left())], Some(1));
+        assert_eq!(
+            grab_at(&content, &picture(), pos2(60.0, 275.0)),
+            Some(Grab::Layer(clip(1)))
+        );
+    }
+
+    #[test]
+    fn where_the_picture_ends_what_is_taken_hold_of_is_the_selected_layer_and_not_the_others_that_reach_out_the_same_way()
+     {
+        // Layer 0 is selected and layer 1 is in front of it, and both begin before the picture.
+        let content = content(
+            vec![
+                layer(0, sticking_out_at_the_left()),
+                layer(1, sticking_out_at_the_left()),
+            ],
+            Some(0),
+        );
+        let picture = picture();
+        assert_eq!(
+            grab_at(&content, &picture, pos2(60.0, 275.0)),
+            Some(Grab::Layer(clip(0))),
+            "before the picture: only the selected layer is"
+        );
+        assert_eq!(
+            grab_at(&content, &picture, pos2(200.0, 275.0)),
+            Some(Grab::Layer(clip(1))),
+            "over the picture: the one in front"
+        );
+    }
+
+    #[test]
+    fn the_handles_and_the_places_to_turn_from_of_the_selected_layer_are_taken_hold_of_far_from_the_picture() {
+        let content = content(vec![layer(1, sticking_out_at_the_left())], Some(1));
+        let picture = picture();
+        let corner = picture.corner_of(&sticking_out_at_the_left(), Corner::TopLeft);
+        assert!(
+            !picture.rectangle.contains(corner),
+            "the setup: the corner is before the picture"
+        );
+        assert_eq!(
+            grab_at(&content, &picture, corner),
+            Some(Grab::Handle {
+                layer: clip(1),
+                corner: Corner::TopLeft
+            })
+        );
+        assert_eq!(
+            grab_at(&content, &picture, corner + vec2(-20.0, -20.0)),
+            Some(Grab::PlaceToTurnFrom {
+                layer: clip(1),
+                corner: Corner::TopLeft
+            })
         );
     }
 

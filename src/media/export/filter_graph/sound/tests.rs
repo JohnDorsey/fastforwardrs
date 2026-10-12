@@ -16,7 +16,7 @@ fn clip(first: u64, end: u64, factor: u32) -> SoundClipToExport {
         end_source_frame: end,
         speed_factor: speed(factor),
         timeline_frame_count: (end - first).div_ceil(u64::from(factor)),
-        loudness_factor: 1.0,
+        loudness: LoudnessToExport::UNCHANGED,
     }
 }
 
@@ -167,14 +167,18 @@ fn what_sped_up_sound_is_like_changes_nothing_when_no_clip_is_sped_up() {
     }
 }
 
-fn treatment(clip: SoundClipToExport, sound: SpedUpClipSound) -> ClipSoundTreatment {
-    treatment_of(frame_rate_30(), &clip, sound)
+fn treatment(clip: &SoundClipToExport, sound: SpedUpClipSound) -> ClipSoundTreatment {
+    treatment_of(frame_rate_30(), clip, sound)
 }
 
 #[test]
 fn a_clip_at_normal_speed_has_its_sound_just_cut_out_whatever_the_setting_for_sped_up_clips_is() {
     for sound in SpedUpClipSound::ALL {
-        assert_eq!(treatment(clip(0, 300, 1), sound), ClipSoundTreatment::None, "{sound:?}");
+        assert_eq!(
+            treatment(&clip(0, 300, 1), sound),
+            ClipSoundTreatment::None,
+            "{sound:?}"
+        );
         assert_eq!(ClipSoundTreatment::None.filters(), "");
     }
 }
@@ -182,15 +186,15 @@ fn a_clip_at_normal_speed_has_its_sound_just_cut_out_whatever_the_setting_for_sp
 #[test]
 fn a_muted_sped_up_clip_gets_silence_and_a_pitch_keeping_one_gets_atempo_and_a_pitch_raising_one_gets_asetrate() {
     let sped_up = clip(0, 300, 4);
-    assert_eq!(treatment(sped_up, SpedUpClipSound::Mute), ClipSoundTreatment::Silence);
+    assert_eq!(treatment(&sped_up, SpedUpClipSound::Mute), ClipSoundTreatment::Silence);
     assert_eq!(
-        treatment(sped_up, SpedUpClipSound::MaintainPitch),
+        treatment(&sped_up, SpedUpClipSound::MaintainPitch),
         ClipSoundTreatment::FasterAtTheSamePitch {
             tempos: vec!["4".to_owned()]
         }
     );
     assert_eq!(
-        treatment(sped_up, SpedUpClipSound::IncreasePitch),
+        treatment(&sped_up, SpedUpClipSound::IncreasePitch),
         ClipSoundTreatment::FasterWithHigherPitch { speed_factor: 4 }
     );
 }
@@ -215,16 +219,16 @@ fn a_clip_too_fast_for_its_raised_pitch_to_be_heard_is_silent_instead_of_breakin
     let at_the_limit = clip(0, 100_000, LARGEST_SPEED_THAT_RAISES_THE_PITCH);
     let past_the_limit = clip(0, 100_000, LARGEST_SPEED_THAT_RAISES_THE_PITCH + 1);
     assert!(matches!(
-        treatment(at_the_limit, SpedUpClipSound::IncreasePitch),
+        treatment(&at_the_limit, SpedUpClipSound::IncreasePitch),
         ClipSoundTreatment::FasterWithHigherPitch { .. }
     ));
     assert_eq!(
-        treatment(past_the_limit, SpedUpClipSound::IncreasePitch),
+        treatment(&past_the_limit, SpedUpClipSound::IncreasePitch),
         ClipSoundTreatment::Silence
     );
     // Keeping the pitch has no such limit: atempo can be chained.
     assert!(matches!(
-        treatment(past_the_limit, SpedUpClipSound::MaintainPitch),
+        treatment(&past_the_limit, SpedUpClipSound::MaintainPitch),
         ClipSoundTreatment::FasterAtTheSamePitch { .. }
     ));
 }
@@ -245,12 +249,12 @@ fn a_clip_whose_sped_up_sound_would_be_a_blip_gets_silence_instead_of_atempo() {
     );
     for sound in [SpedUpClipSound::MaintainPitch, SpedUpClipSound::IncreasePitch] {
         assert_eq!(
-            treatment(clip(0, 2, 33), sound),
+            treatment(&clip(0, 2, 33), sound),
             ClipSoundTreatment::Silence,
             "{sound:?}"
         );
         assert_ne!(
-            treatment(clip(0, 30, 8), sound),
+            treatment(&clip(0, 30, 8), sound),
             ClipSoundTreatment::Silence,
             "{sound:?}"
         );
@@ -351,13 +355,13 @@ fn a_clip_at_normal_loudness_has_no_volume_filter_and_one_that_is_not_has_exactl
     let normal = sound_chain_of_only_clip(clip(0, 30, 1), SpedUpClipSound::MaintainPitch);
     assert!(!normal.contains("volume"), "{normal}");
     let louder = SoundClipToExport {
-        loudness_factor: 1.995_262_314_968_879_6,
+        loudness: LoudnessToExport::Constant(1.995_262_314_968_879_6),
         ..clip(0, 30, 1)
     };
     let chain = sound_chain_of_only_clip(louder, SpedUpClipSound::MaintainPitch);
     assert!(chain.ends_with(",volume=1.995262315[clip_cut_audio_0]"), "{chain}");
     let quieter = SoundClipToExport {
-        loudness_factor: 0.5,
+        loudness: LoudnessToExport::Constant(0.5),
         ..clip(0, 30, 1)
     };
     assert!(
@@ -366,10 +370,65 @@ fn a_clip_at_normal_loudness_has_no_volume_filter_and_one_that_is_not_has_exactl
     );
 }
 
+/// A clip of 90 frames (3 seconds at 30 frames a second) that is as loud as 0 decibels at its start, as -12 at 2 seconds, and
+/// stays that.
+fn clip_that_fades_out() -> SoundClipToExport {
+    SoundClipToExport {
+        loudness: LoudnessToExport::Changing(vec![(0, 0.0), (60, -12.0), (90, -12.0)]),
+        ..clip(0, 90, 1)
+    }
+}
+
+#[test]
+fn a_clip_whose_loudness_changes_has_a_volume_that_is_worked_out_again_for_every_piece_of_its_sound() {
+    let chain = sound_chain_of_only_clip(clip_that_fades_out(), SpedUpClipSound::MaintainPitch);
+    assert!(
+        chain.ends_with(
+            ",volume='pow(10,(if(lt(t,2),0+(-6)*(t-0),if(lt(t,3),-12+(0)*(t-2),-12)))/20)':eval=frame[clip_cut_audio_0]"
+        ),
+        "{chain}"
+    );
+}
+
+#[test]
+fn the_decibels_are_a_chain_of_pieces_one_for_each_stretch_between_two_points_and_the_last_holds() {
+    // 4 points: the pieces are from 0 to 1 s, from 1 to 1.5 s and from 1.5 to 2 s.
+    let expression = decibels_expression(frame_rate_30(), &[(0, -3.0), (30, 3.0), (45, 3.0), (60, -9.0)]);
+    assert_eq!(
+        expression,
+        "if(lt(t,1),-3+(6)*(t-0),if(lt(t,1.5),3+(0)*(t-1),if(lt(t,2),3+(-24)*(t-1.5),-9)))"
+    );
+}
+
+#[test]
+fn the_changing_volume_comes_after_the_speed_change_and_a_constant_one_has_no_expression() {
+    let sped_up_and_fading = SoundClipToExport {
+        loudness: LoudnessToExport::Changing(vec![(0, 0.0), (30, -6.0)]),
+        ..clip(0, 300, 4)
+    };
+    let chain = sound_chain_of_only_clip(sped_up_and_fading, SpedUpClipSound::MaintainPitch);
+    let atempo = chain.find("atempo=4").unwrap();
+    let volume = chain.find("volume='").unwrap();
+    assert!(atempo < volume, "{chain}");
+    assert!(
+        !chain.contains("eval=frame,"),
+        "it is the last thing done to the clip: {chain}"
+    );
+
+    let constant = sound_chain_of_only_clip(
+        SoundClipToExport {
+            loudness: LoudnessToExport::Constant(0.5),
+            ..clip(0, 30, 1)
+        },
+        SpedUpClipSound::MaintainPitch,
+    );
+    assert!(!constant.contains("eval=frame"), "{constant}");
+}
+
 #[test]
 fn the_volume_is_applied_after_the_speed_so_that_a_clip_that_is_both_sped_up_and_louder_has_both() {
     let both = SoundClipToExport {
-        loudness_factor: 2.0,
+        loudness: LoudnessToExport::Constant(2.0),
         ..clip(0, 300, 4)
     };
     let chain = sound_chain_of_only_clip(both, SpedUpClipSound::MaintainPitch);

@@ -1,5 +1,6 @@
-//! Laying out the window: the menu bar along the top, the preview in the middle, and along the
-//! bottom the play buttons, the timeline and the slider.
+//! Laying out the window: the menu bar along the top, and under it the panels: the properties panel at the
+//! left, the preview at the right of it, and along the bottom the timeline with the play buttons over it and
+//! the slider under it.
 
 use std::collections::HashMap;
 
@@ -11,6 +12,7 @@ use crate::application::menu_bar::{self, MenuAvailability};
 use crate::application::preview_panel::{
     self, PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
 };
+use crate::application::properties_panel::{self, PropertiesContent};
 use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
@@ -18,16 +20,22 @@ use crate::application::{scrub_bar, theme};
 use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
 use crate::media::thumbnail_second_for_source_frame;
 use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
-use crate::project::{ClipLocation, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
+use crate::project::{ClipId, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
 
 impl FastForwardApplication {
     /// Draws the whole window, adding to `commands` whatever the user asks for with it.
+    ///
+    /// The window is a menu bar along the top, and under it three panels with a gap of the darker
+    /// background round each of them and between them: the timeline panel along the bottom, the
+    /// properties panel at the left above it, and the preview panel, which is the rest.
     pub(super) fn draw(&mut self, ui: &mut Ui, frame_state: &FrameState, commands: &mut Vec<Command>) {
         let availability = self.menu_availability();
+        self.find_out_the_fonts_when_a_text_object_is_selected();
         egui::Panel::top("menu bar")
+            .show_separator_line(false)
             .frame(
                 Frame::new()
-                    .fill(theme::WINDOW_BACKGROUND)
+                    .fill(theme::PANEL_BACKGROUND)
                     .inner_margin(Margin::symmetric(4, 2)),
             )
             .show(ui, |ui| menu_bar::show(ui, &availability, commands));
@@ -36,13 +44,12 @@ impl FastForwardApplication {
         let can_edit = !self.is_blocked();
         let source_looks = source_looks_of(&self.project, &self.source_files);
 
-        egui::Panel::bottom("timeline area")
+        // (The gaps are made by the margins round the panels: half of a gap between two panels is round each
+        // of them, and the whole of it between a panel and the edge of the window.)
+        egui::Panel::bottom("timeline panel")
             .resizable(false)
-            .frame(
-                Frame::new()
-                    .fill(theme::WINDOW_BACKGROUND)
-                    .inner_margin(Margin::symmetric(8, 6)),
-            )
+            .show_separator_line(false)
+            .frame(panel_frame(Margin::symmetric(8, 6), PanelSides::AlongTheBottom))
             .show(ui, |ui| {
                 transport_bar::show(
                     ui,
@@ -73,6 +80,26 @@ impl FastForwardApplication {
                 scrub_bar::show(ui, frame_state.current_frame, frame_state.total_frames, commands);
             });
 
+        egui::Panel::left("properties panel")
+            .resizable(false)
+            .show_separator_line(false)
+            .exact_size(theme::PROPERTIES_PANEL_WIDTH)
+            .frame(panel_frame(Margin::same(10), PanelSides::AtTheLeft))
+            .show(ui, |ui| {
+                properties_panel::show(
+                    ui,
+                    &PropertiesContent {
+                        project: &self.project,
+                        selection: &self.selection,
+                        current_frame: frame_state.current_frame,
+                        source_looks: &source_looks,
+                        font_families: self.font_families.as_deref(),
+                        can_edit,
+                    },
+                    commands,
+                );
+            });
+
         let content = preview_content(
             &self.project,
             &self.preview_pictures,
@@ -81,10 +108,26 @@ impl FastForwardApplication {
             &source_looks,
         );
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(theme::PREVIEW_BACKGROUND))
+            .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| {
                 preview_panel::show(ui, &content, &mut self.textures, &mut self.text_renderer, commands);
             });
+    }
+
+    /// Looks for the names of the fonts the computer has once a text object is selected, which it
+    /// takes a moment to do (the properties panel lists them to choose from when it has them).
+    fn find_out_the_fonts_when_a_text_object_is_selected(&mut self) {
+        if self.font_families.is_some() {
+            return;
+        }
+        let a_text_object_is_selected = self
+            .selection
+            .single()
+            .and_then(|clip| self.project.placement_of(clip))
+            .is_some_and(|placement| placement.clip.as_text().is_some());
+        if a_text_object_is_selected && let Some(renderer) = self.text_renderer.get_if_ready() {
+            self.font_families = Some(renderer.font_family_names());
+        }
     }
 
     /// The scale the strips start at, from the shape of the finished picture. (The user can zoom in
@@ -122,7 +165,7 @@ impl FastForwardApplication {
 fn preview_content<'a>(
     project: &Project,
     preview_pictures: &'a PreviewPictures<FfmpegPictureStreamStarter>,
-    selected_clip: Option<ClipLocation>,
+    selected_clip: Option<ClipId>,
     frame_state: &'a FrameState,
     source_looks: &HashMap<SourceMediaIdentifier, SourceLook<'a>>,
 ) -> PreviewContent<'a> {
@@ -133,9 +176,14 @@ fn preview_content<'a>(
             .iter()
             .map(|layer| PreviewLayer {
                 clip: layer.clip,
-                placement: layer.placement,
+                track: layer.track,
+                placement: layer.placement_at(frame_state.current_frame),
                 content: match &layer.content {
-                    LayerContent::Text(object) => PreviewLayerContent::Text(object),
+                    LayerContent::Text(_) => PreviewLayerContent::Text(
+                        layer
+                            .text_at(frame_state.current_frame)
+                            .expect("a text layer has a text object"),
+                    ),
                     LayerContent::Image { source } => PreviewLayerContent::Image {
                         source: *source,
                         picture: source_looks.get(source).and_then(|look| look.picture),
@@ -176,7 +224,7 @@ fn video_in_the_picture<'a>(
     frame_state: &FrameState,
     source_looks: &HashMap<SourceMediaIdentifier, SourceLook<'a>>,
 ) -> VideoInThePicture<'a> {
-    let track = layer.clip.track;
+    let track = layer.track;
     // (A picture of another video, that this track had before, is not shown in its place.)
     let supplied_picture = preview_pictures
         .picture_of(track)
@@ -322,4 +370,47 @@ mod tests {
         );
         assert_eq!(shown(3, 2), SpeedFactor::new(6), "the two are multiplied");
     }
+}
+
+/// Where a panel is in the window, which says which of its sides are against the edge of the window and which
+/// against another panel.
+#[derive(Clone, Copy)]
+enum PanelSides {
+    /// The panel along the bottom, with all of the window's width.
+    AlongTheBottom,
+    /// The panel at the left, above the one along the bottom.
+    AtTheLeft,
+    /// The panel that is the rest: at the right, above the one along the bottom.
+    AtTheRight,
+}
+
+/// The frame of a panel, in the colour of panels, with room inside it of `inner_margin`, and round it the
+/// gap that keeps the panels from the edge of the window and from one another.
+fn panel_frame(inner_margin: Margin, sides: PanelSides) -> Frame {
+    let gap = theme::PANEL_GAP;
+    let (edge, half) = (gap, gap / 2);
+    let outer_margin = match sides {
+        PanelSides::AlongTheBottom => Margin {
+            left: edge,
+            right: edge,
+            top: half,
+            bottom: edge,
+        },
+        PanelSides::AtTheLeft => Margin {
+            left: edge,
+            right: half,
+            top: edge,
+            bottom: half,
+        },
+        PanelSides::AtTheRight => Margin {
+            left: half,
+            right: edge,
+            top: edge,
+            bottom: half,
+        },
+    };
+    Frame::new()
+        .fill(theme::PANEL_BACKGROUND)
+        .inner_margin(inner_margin)
+        .outer_margin(outer_margin)
 }

@@ -4,23 +4,41 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use thiserror::Error;
 
+use super::animated_sections;
 use super::filter_graph::{
-    FilterGraph, FilterGraphSpecification, LayerContentToExport, LayerToExport, PictureGraphSpecification,
-    PlaceToExport, SectionToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
-    VideoToExport, build_filter_graph,
+    FilterGraph, FilterGraphSpecification, LayerContentToExport, LayerToExport, LoudnessToExport,
+    PictureGraphSpecification, PlaceToExport, SectionToExport, SoundClipToExport, SoundGraphSpecification,
+    SoundItemToExport, SoundStripToExport, VideoToExport, build_filter_graph,
 };
-use crate::composition::{LayerContent, PictureSection, SoundItem, SoundPlan, plan_pictures, plan_sound};
+use crate::composition::{LayerContent, Loudness, PictureSection, SoundItem, SoundPlan, plan_pictures, plan_sound};
 use crate::project::{
-    ClipLocation, FrameRate, Placement, Project, Settings, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor,
-    TextObject, TimelineFrameIndex,
+    ClipId, FrameRate, Placement, Project, Settings, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextObject,
+    TimelineFrameIndex,
 };
 use crate::rgba_picture::RgbaPicture;
 use crate::speed_indicator::indicator_for_frame;
+use crate::text_rendering::TextAppearance;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 pub enum ExportPlanError {
     #[error("there is nothing to export: the project has nothing on its tracks")]
     NothingToExport,
+    #[error(
+        "there is too much animation to export: keyframes make the picture different in more than {most} separate stretches \
+         of the video, and the export would take minutes only to get ready. Make what changes change more slowly, or for \
+         a shorter time, or cut the clip into shorter ones."
+    )]
+    TooMuchAnimation { most: usize },
+}
+
+impl ExportPlanError {
+    /// What a message that says it is headed with.
+    pub fn heading(self) -> &'static str {
+        match self {
+            Self::NothingToExport => "There is nothing to export",
+            Self::TooMuchAnimation { .. } => "There is too much animation to export",
+        }
+    }
 }
 
 /// What a still picture laid over the video is a picture of.
@@ -29,7 +47,7 @@ pub enum StillPictureKind {
     /// The fast-forward symbol for this speed.
     FastForwardSymbol(SpeedFactor),
     /// A text object.
-    Text(ClipLocation),
+    Text(ClipId),
 }
 
 /// One still picture the export needs, to be given to ffmpeg as an input.
@@ -59,7 +77,7 @@ pub struct ExportPlan {
     pub has_audio: bool,
 }
 
-/// Where a still picture goes: which ffmpeg input it is, and its place on the finished picture.
+/// Where the fast-forward symbol goes: which ffmpeg input its picture is, and its place on the finished picture.
 #[derive(Clone, Copy)]
 struct StillPicturePlace {
     picture_input: usize,
@@ -82,10 +100,14 @@ pub fn plan_export(
     let (picture_width, picture_height) = pictures.picture_size;
     let picture_width_in_pixels = even(picture_width);
     let picture_height_in_pixels = even(picture_height);
+    let picture_size = (picture_width_in_pixels, picture_height_in_pixels);
+    // What changes with keyframes is cut into stretches that are each exported as one thing, so from here on a section
+    // is made of layers that are in one place.
+    let sections = animated_sections::with_keyframes_resolved(&pictures.sections, picture_size)?;
 
     // The files ffmpeg reads: every one that a picture or a sound is made from.
     let mut used_sources = sources_of_sound(&sound);
-    for layer in pictures.sections.iter().flat_map(|section| &section.layers) {
+    for layer in sections.iter().flat_map(|section| &section.layers) {
         match &layer.content {
             LayerContent::Video(video) => {
                 used_sources.insert(video.source);
@@ -104,12 +126,10 @@ pub fn plan_export(
         .collect();
 
     // The still pictures: a symbol for every speed that shows one (the speed of the video that is in
-    // front), and every text object that is seen.
-    let picture_size = (picture_width_in_pixels, picture_height_in_pixels);
+    // front), and every text object that is seen, once for each way it looks.
     let mut still_pictures: Vec<StillPictureInput> = Vec::new();
     let mut symbol_places: BTreeMap<SpeedFactor, StillPicturePlace> = BTreeMap::new();
-    let accelerated_speeds: BTreeSet<SpeedFactor> = pictures
-        .sections
+    let accelerated_speeds: BTreeSet<SpeedFactor> = sections
         .iter()
         .filter_map(PictureSection::front_video)
         .map(|(_, video)| video.speed)
@@ -127,8 +147,8 @@ pub fn plan_export(
             StillPicturePlace {
                 picture_input: source_files.len() + still_pictures.len(),
                 place: PlaceToExport {
-                    left_in_pixels: indicator.left_in_pixels,
-                    top_in_pixels: indicator.top_in_pixels,
+                    left_in_pixels: i32::try_from(indicator.left_in_pixels).unwrap_or(i32::MAX),
+                    top_in_pixels: i32::try_from(indicator.top_in_pixels).unwrap_or(i32::MAX),
                     width_in_pixels: indicator.picture.width_in_pixels,
                     height_in_pixels: indicator.picture.height_in_pixels,
                     turn_in_degrees: 0.0,
@@ -140,34 +160,30 @@ pub fn plan_export(
             picture: indicator.picture,
         });
     }
-    let mut text_places: HashMap<ClipLocation, StillPicturePlace> = HashMap::new();
-    for layer in pictures.sections.iter().flat_map(|section| &section.layers) {
+    // Which input the picture of a text object is, for each text clip and each way it looks (a text object that has
+    // keyframes for what it says or how it looks is a picture for each, and one that only moves is one picture).
+    let mut text_inputs: HashMap<(ClipId, TextAppearance), usize> = HashMap::new();
+    for layer in sections.iter().flat_map(|section| &section.layers) {
         let LayerContent::Text(object) = &layer.content else {
             continue;
         };
-        if text_places.contains_key(&layer.clip) {
+        let appearance = TextAppearance::of(object, picture_width_in_pixels, picture_height_in_pixels);
+        if text_inputs.contains_key(&(layer.clip, appearance.clone())) {
             continue;
         }
         // The picture of the text is of the text upright in its area, which is as many pixels as the
         // place is, and is turned, if it is, when it is laid over.
         let picture = render_text(object, picture_width_in_pixels, picture_height_in_pixels);
-        text_places.insert(
-            layer.clip,
-            StillPicturePlace {
-                picture_input: source_files.len() + still_pictures.len(),
-                place: place_to_export(layer.placement, picture_size),
-            },
-        );
+        text_inputs.insert((layer.clip, appearance), source_files.len() + still_pictures.len());
         still_pictures.push(StillPictureInput {
             kind: StillPictureKind::Text(layer.clip),
             picture,
         });
     }
 
-    let sections: Vec<SectionToExport> = pictures
-        .sections
+    let sections: Vec<SectionToExport> = sections
         .iter()
-        .map(|section| section_to_export(section, picture_size, &input_of_source, &symbol_places, &text_places))
+        .map(|section| section_to_export(section, picture_size, &input_of_source, &symbol_places, &text_inputs))
         .collect();
     let specification = FilterGraphSpecification {
         pictures: PictureGraphSpecification {
@@ -238,7 +254,12 @@ pub fn sound_graph_specification(
                             end_source_frame: clip.end_source_frame,
                             speed_factor: clip.speed,
                             timeline_frame_count: clip.timeline_frame_count,
-                            loudness_factor: clip.loudness_factor,
+                            loudness: match &clip.loudness {
+                                Loudness::Constant(factor) => LoudnessToExport::Constant(*factor),
+                                Loudness::Changing(points) => LoudnessToExport::Changing(
+                                    points.iter().map(|point| (point.frame, point.decibels)).collect(),
+                                ),
+                            },
                         }),
                     })
                     .collect(),
@@ -249,7 +270,7 @@ pub fn sound_graph_specification(
 }
 
 /// Where `placement` is on a picture `picture_size` pixels across and down.
-fn place_to_export(placement: Placement, picture_size: (u32, u32)) -> PlaceToExport {
+pub(super) fn place_to_export(placement: Placement, picture_size: (u32, u32)) -> PlaceToExport {
     let pixels = placement.area.in_pixels(picture_size);
     PlaceToExport {
         left_in_pixels: pixels.left,
@@ -265,7 +286,7 @@ fn section_to_export(
     picture_size: (u32, u32),
     input_of_source: &HashMap<SourceMediaIdentifier, usize>,
     symbol_places: &BTreeMap<SpeedFactor, StillPicturePlace>,
-    text_places: &HashMap<ClipLocation, StillPicturePlace>,
+    text_inputs: &HashMap<(ClipId, TextAppearance), usize>,
 ) -> SectionToExport {
     let still = |place: &StillPicturePlace| LayerToExport {
         content: LayerContentToExport::Still {
@@ -296,7 +317,13 @@ fn section_to_export(
                 },
                 place: place_to_export(layer.placement, picture_size),
             }),
-            LayerContent::Text(_) => layers.push(still(&text_places[&layer.clip])),
+            LayerContent::Text(object) => {
+                let appearance = TextAppearance::of(object, picture_size.0, picture_size.1);
+                layers.push(still(&StillPicturePlace {
+                    picture_input: text_inputs[&(layer.clip, appearance)],
+                    place: place_to_export(layer.placement, picture_size),
+                }));
+            }
         }
         if Some(layer.clip) == clip_of_the_front_video
             && let Some((_, video)) = section.front_video()
@@ -317,5 +344,7 @@ fn even(size: u32) -> u32 {
     (size & !1).max(2)
 }
 
+#[cfg(test)]
+mod animation_tests;
 #[cfg(test)]
 mod tests;

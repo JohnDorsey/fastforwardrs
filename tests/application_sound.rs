@@ -301,9 +301,9 @@ fn changing_a_volume_while_playing_makes_the_sound_louder_and_does_not_interrupt
     journey.press_button("Play");
     journey.keep_drawing_for(Duration::from_millis(1500));
 
-    // The volume of the clip is turned up by 12 dB (nearly four times as loud) with its box, as it
+    // The volume of the clip is turned up by 12 dB (nearly four times as loud) in the properties panel, as it
     // plays; the sound is made again for that, and takes over from the sound that is playing.
-    journey.right_click(journey.strip_of_track(0).center());
+    journey.click(journey.strip_of_track(0).center());
     let edited_at = Instant::now();
     journey.set_slider("Gain", 12.0);
     journey.keep_drawing_for(Duration::from_millis(1500));

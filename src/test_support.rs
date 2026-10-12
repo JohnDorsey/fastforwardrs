@@ -1,5 +1,25 @@
 //! Helpers shared by the unit tests in several modules.
 
+use crate::project::{AnimationTarget, Project, PropertyId, PropertyValue, TimelineFrameIndex};
+
+/// Puts a keyframe at `timeline_frame` that makes `property` of `target` have `value` there. (The property is animated from
+/// then on, if it was not.)
+pub fn make_a_keyframe(
+    project: &mut Project,
+    target: AnimationTarget,
+    property: PropertyId,
+    timeline_frame: u64,
+    value: PropertyValue,
+) {
+    let frame = TimelineFrameIndex::new(timeline_frame);
+    project
+        .add_keyframe(target, property, frame)
+        .expect("the frame is in what the keyframe is for");
+    project
+        .set_property_at(target, property, value, frame)
+        .expect("a keyframe was just made there");
+}
+
 /// A tiny deterministic random number generator, so that randomised tests are reproducible
 /// without adding a dependency. (Marsaglia's xorshift64.)
 pub struct DeterministicRandomNumbers(u64);

@@ -4,10 +4,8 @@
 
 use egui::{Context, ViewportCommand};
 
-use super::{FastForwardApplication, FrameState};
-use crate::application::commands::Command;
+use super::FastForwardApplication;
 use crate::application::dialogs::{self, AfterConfirmation, Dialog, DialogAnswer, show_dialog, show_export_progress};
-use crate::application::text_object_window::{self, TextWindowContent};
 
 impl FastForwardApplication {
     /// Asks before closing the window if there are unsaved changes. (With autosave on and a file
@@ -55,48 +53,6 @@ impl FastForwardApplication {
             if let Some(identifier) = chosen {
                 self.relink_source(identifier);
             }
-        }
-    }
-
-    /// Shows the window the text object of the clip `text_window_open` is edited in, if it is open,
-    /// and adds a command for each change made in it.
-    pub(super) fn show_text_object_window(
-        &mut self,
-        context: &Context,
-        frame_state: &FrameState,
-        commands: &mut Vec<Command>,
-    ) {
-        let Some(clip) = self.text_window_open else {
-            return;
-        };
-        if self.font_families.is_none()
-            && let Some(renderer) = self.text_renderer.get_if_ready()
-        {
-            self.font_families = Some(renderer.font_family_names());
-        }
-        let Some(placement) = self.project.placement_of(clip) else {
-            self.text_window_open = None;
-            return;
-        };
-        let Some(text) = placement.clip.as_text() else {
-            self.text_window_open = None;
-            return;
-        };
-        let mut open = true;
-        text_object_window::show(
-            context,
-            &TextWindowContent {
-                clip,
-                object: &text.object,
-                duration_in_frames: text.duration_in_frames(),
-                frame_rate: frame_state.frame_rate,
-                font_families: self.font_families.as_deref(),
-            },
-            &mut open,
-            commands,
-        );
-        if !open {
-            self.text_window_open = None;
         }
     }
 
