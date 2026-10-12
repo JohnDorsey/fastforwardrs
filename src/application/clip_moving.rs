@@ -9,13 +9,9 @@
 //! [`StartTimeMemory`] for when it is). Everything here is arithmetic on frames and on the places of tracks in the
 //! list of them, so that how far is allowed can be tested without a window.
 
-mod start_time_snap;
-
 use std::collections::HashSet;
 
-pub use self::start_time_snap::StartTimeMemory;
-#[cfg(test)]
-pub use self::start_time_snap::{DECENT_DISTANCE_IN_POINTS, HELD_WITHIN_POINTS};
+use super::start_time_hold::{HeldTime, StartTimeMemory};
 use crate::project::{ClipId, ClipMove, Project, TimelineFrameIndex, TrackId};
 
 /// How far to move clips: down that many tracks in the list of them (up, if negative), and later by that
@@ -46,6 +42,27 @@ pub struct Snap {
     pub within_frames: u64,
     /// The track that the clip is not held to `start` on, if there is one.
     pub free_on: Option<TrackId>,
+}
+
+impl Snap {
+    /// What holds `clip`, the clip that was taken hold of, to the time it started at, if anything does: what `memory` says, when a
+    /// frame is `points_per_frame` wide.
+    pub fn held_by(clip: ClipId, memory: &StartTimeMemory<TrackId>, points_per_frame: f64) -> Option<Self> {
+        memory.held_time(points_per_frame).map(|held| Self {
+            clip,
+            start: held.start,
+            within_frames: held.within_frames,
+            free_on: held.free_on,
+        })
+    }
+
+    fn held_time(&self) -> HeldTime<TrackId> {
+        HeldTime {
+            start: self.start,
+            within_frames: self.within_frames,
+            free_on: self.free_on,
+        }
+    }
 }
 
 /// How far the clips `moving` can be moved when `wanted` is how far the pointer has gone: `wanted` itself, or
@@ -104,11 +121,8 @@ fn frames_to_the_time_held_to(project: &Project, wanted: MoveBy, snap: Option<Sn
     let destination = project
         .tracks()
         .get(usize::try_from(to_signed(from) + tracks_down).ok()?)?;
-    if snap.free_on == Some(destination.id()) {
-        return None;
-    }
-    let to_the_time = to_signed(snap.start) - to_signed(placement.first_timeline_frame.value());
-    ((wanted.frames - to_the_time).unsigned_abs() <= snap.within_frames).then_some(to_the_time)
+    snap.held_time()
+        .shift_to_it(destination.id(), placement.first_timeline_frame.value(), wanted.frames)
 }
 
 /// Whether the clips `moving` can be moved down `tracks_down` tracks and `frames` frames along.

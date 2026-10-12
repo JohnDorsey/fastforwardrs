@@ -32,8 +32,8 @@ use crate::text_rendering::{LazyTextRenderer, TextAppearance};
 
 /// Draws the layers (and the symbol over the front-most video) and adds a command for each thing
 /// the user does to them. `panel_rectangle` is all of the room the preview has, of which the
-/// picture is a part: the box of the selected layer, and the places to turn it from, can be outside
-/// the picture, and outside the panel.
+/// picture is a part (all of the panel, or more, if the picture is zoomed in): the box of the selected layer, and the places
+/// to turn it from, can be outside the picture, and outside the panel.
 pub(super) fn show(
     ui: &mut Ui,
     content: &PreviewContent<'_>,
@@ -43,8 +43,8 @@ pub(super) fn show(
     text_renderer: &mut LazyTextRenderer,
     commands: &mut Vec<Command>,
 ) {
-    // What is drawn is cut off at the edge of the picture, as the export cuts it off, but what is drawn to show
-    // where things are, and what can be taken hold of, is not cut off at all.
+    // What is drawn is cut off at the edge of the picture, as the export cuts it off (and at the edge of the panel, if the picture
+    // reaches past it), but what is drawn to show where things are, and what can be taken hold of, is not cut off at all.
     let painter = ui.painter().with_clip_rect(picture.rectangle);
     let over_everything = ui.ctx().layer_painter(ui.layer_id());
     let catchers = Catchers::register(
@@ -55,15 +55,7 @@ pub(super) fn show(
     let pointing = gestures::handle(ui, &catchers, content, &picture, commands);
 
     for layer in &content.layers {
-        draw_layer(
-            ui,
-            &painter,
-            layer,
-            picture,
-            content.picture_size,
-            textures,
-            text_renderer,
-        );
+        draw_layer(ui, &painter, layer, picture, textures, text_renderer);
         name_the_layer(ui, layer, &picture);
         if pointing.outlines(content, layer) {
             over_everything.add(Shape::closed_line(
@@ -101,16 +93,17 @@ fn draw_layer(
     painter: &Painter,
     layer: &PreviewLayer<'_>,
     picture: PictureOnScreen,
-    picture_size_in_pixels: Option<(u32, u32)>,
     textures: &mut Textures,
     text_renderer: &mut LazyTextRenderer,
 ) {
     let corners = picture.outline_of(&layer.placement);
     let context = ui.ctx();
     let texture: Option<TextureId> = match &layer.content {
-        PreviewLayerContent::Video(VideoInThePicture::Picture(supplied)) => {
-            Some(textures.preview_picture(context, layer.track, supplied).id())
-        }
+        PreviewLayerContent::Video(VideoInThePicture::Picture(supplied)) => Some(
+            textures
+                .preview_picture(context, layer.track, supplied, picture.filter, layer.colour)
+                .id(),
+        ),
         PreviewLayerContent::Video(VideoInThePicture::Thumbnail {
             source,
             second,
@@ -121,7 +114,7 @@ fn draw_layer(
                 index: *second,
             };
             textures
-                .thumbnail(context, *source, library, key)
+                .thumbnail_with_colours_changed(context, *source, library, key, layer.colour)
                 .map(|texture| texture.id())
         }
         PreviewLayerContent::Video(VideoInThePicture::Waiting) => {
@@ -134,8 +127,12 @@ fn draw_layer(
         }
         PreviewLayerContent::Image {
             source,
-            picture: Some(picture),
-        } => Some(textures.image_picture(context, *source, picture).id()),
+            picture: Some(decoded),
+        } => Some(
+            textures
+                .image_picture(context, *source, decoded, picture.filter, layer.colour)
+                .id(),
+        ),
         PreviewLayerContent::Image { picture: None, .. } => {
             painter.add(Shape::convex_polygon(
                 corners.to_vec(),
@@ -145,10 +142,10 @@ fn draw_layer(
             None
         }
         PreviewLayerContent::Text(object) => {
-            let (picture_width, picture_height) = picture_size_in_pixels.unwrap_or((1, 1));
+            let (picture_width, picture_height) = picture.size_in_whole_pixels();
             let key = TextAppearance::of(object, picture_width, picture_height);
             textures
-                .text_picture(context, key, || {
+                .text_picture(context, key, picture.filter, layer.colour, || {
                     text_renderer
                         .get_if_ready()
                         .map(|renderer| renderer.render(object, picture_width, picture_height))

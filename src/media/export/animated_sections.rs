@@ -17,6 +17,7 @@
 use super::ExportPlanError;
 use super::filter_graph::PlaceToExport;
 use super::plan::place_to_export;
+use crate::colour_effects::ColourMatrix;
 use crate::composition::{Layer, LayerContent, PictureSection};
 use crate::project::{Placement, PropertyId, TimelineFrameIndex};
 use crate::text_rendering::TextAppearance;
@@ -34,6 +35,8 @@ const TURN_STEP_IN_DEGREES: f32 = 0.1;
 #[derive(Clone, Debug, PartialEq)]
 struct WhatIsExported {
     place: PlaceToExport,
+    /// How the effects of the layer change the colours of its picture.
+    colour: ColourMatrix,
     /// What the picture of a text object is a picture of.
     text: Option<TextAppearance>,
 }
@@ -88,6 +91,7 @@ fn what_is_exported_at(section: &PictureSection, frame: u64, picture_size: (u32,
             let as_it_is = layer_as_exported(layer, frame);
             WhatIsExported {
                 place: place_to_export(as_it_is.placement, picture_size),
+                colour: as_it_is.colour_matrix(),
                 text: match &as_it_is.content {
                     LayerContent::Text(object) => Some(TextAppearance::of(object, picture_size.0, picture_size.1)),
                     LayerContent::Video(_) | LayerContent::Image { .. } => None,
@@ -109,9 +113,13 @@ fn stretch_of(section: &PictureSection, first: u64, end: u64) -> PictureSection 
     stretch
 }
 
-/// `layer` as it is exported at `frame`: as it is there, with a turn that is made by keyframes made a whole number of steps.
+/// `layer` as it is exported at `frame`: as it is there, with a turn that is made by keyframes made a whole number of steps, and
+/// the values of its effects as the effects say they are exported (as near as is worth telling apart).
 fn layer_as_exported(layer: &Layer, frame: TimelineFrameIndex) -> Layer {
     let mut as_it_is = layer.as_it_is_at(frame);
+    for effect in &mut as_it_is.effects {
+        effect.values = effect.kind.as_exported(&effect.values);
+    }
     if layer.animation.is_animated(PropertyId::Rotation) {
         as_it_is.placement = Placement {
             rotation: as_it_is.placement.rotation.snapped_to(TURN_STEP_IN_DEGREES),

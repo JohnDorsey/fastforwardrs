@@ -7,7 +7,7 @@
 //! that nobody is there to give, and a mistake in the code in front of a dialog (such as thinking
 //! that there are no unsaved changes) would turn from a failing test into a test that hangs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One kind of file to offer, such as "Video files" with the endings `mp4` and `mov`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +23,9 @@ pub struct FileQuestion<'a> {
     pub title: &'a str,
     /// The name offered first, when asking where to save.
     pub suggested_file_name: Option<&'a str>,
+    /// The folder the dialog is to open in, when one suits the question (the folder of the project's file, when it is saved
+    /// again under another name). `None` leaves it to the operating system, which opens it where it did last.
+    pub starting_directory: Option<&'a Path>,
     /// The kinds of file to offer, the first of them first.
     pub kinds: &'a [FileKind<'a>],
 }
@@ -44,6 +47,9 @@ impl NativeFileChooser {
         let mut dialog = rfd::FileDialog::new().set_title(question.title);
         if let Some(name) = question.suggested_file_name {
             dialog = dialog.set_file_name(name);
+        }
+        if let Some(directory) = question.starting_directory {
+            dialog = dialog.set_directory(directory);
         }
         for kind in question.kinds {
             dialog = dialog.add_filter(kind.name, kind.extensions);
@@ -94,6 +100,8 @@ mod scripted {
     use std::path::PathBuf;
     use std::rc::Rc;
 
+    use std::path::Path;
+
     use super::{FileChooser, FileQuestion};
 
     /// A question that a [`ScriptedFileChooser`] was asked, kept as plain text for the tests to compare.
@@ -103,6 +111,7 @@ mod scripted {
         pub saving: bool,
         pub title: String,
         pub suggested_file_name: Option<String>,
+        pub starting_directory: Option<PathBuf>,
         /// The name of each kind of file offered, with its endings.
         pub kinds: Vec<(String, Vec<String>)>,
     }
@@ -132,6 +141,7 @@ mod scripted {
                 saving,
                 title: question.title.to_owned(),
                 suggested_file_name: question.suggested_file_name.map(str::to_owned),
+                starting_directory: question.starting_directory.map(Path::to_path_buf),
                 kinds: question
                     .kinds
                     .iter()
@@ -185,6 +195,7 @@ mod tests {
         FileQuestion {
             title: "Pick one",
             suggested_file_name: Some("name.mp4"),
+            starting_directory: None,
             kinds: KINDS,
         }
     }

@@ -12,6 +12,7 @@ mod drawer;
 mod gain;
 mod ids;
 mod image_clip;
+mod keyframe_fitting;
 mod media_clip;
 mod picture_fit;
 mod placement;

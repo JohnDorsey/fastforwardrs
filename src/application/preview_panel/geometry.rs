@@ -7,6 +7,7 @@
 
 use egui::{CursorIcon, Pos2, Rect, pos2, vec2};
 
+use crate::application::textures::PictureFilter;
 use crate::project::{Corner, PictureDimensions, Placement};
 
 /// How big the squares at the corners of the selected layer are, in points.
@@ -22,9 +23,13 @@ pub(super) struct PictureOnScreen {
     /// How big the finished picture is, in pixels. It is only used for its shape and for the sizes
     /// that turning is worked out in.
     pub size_in_pixels: PictureDimensions,
+    /// How the pictures that are drawn on it are put on the screen: blended, or, when the picture is zoomed in so far that the pixels
+    /// can be seen, as blocks.
+    pub filter: PictureFilter,
 }
 
 impl PictureOnScreen {
+    /// The picture of this many pixels drawn in `rectangle`, which blends its pixels.
     pub fn new(rectangle: Rect, picture_width_in_pixels: u32, picture_height_in_pixels: u32) -> Self {
         Self {
             rectangle,
@@ -32,7 +37,22 @@ impl PictureOnScreen {
                 picture_width_in_pixels.max(1) as f32,
                 picture_height_in_pixels.max(1) as f32,
             ),
+            filter: PictureFilter::Smooth,
         }
+    }
+
+    /// The same picture, with the pictures that are drawn on it put on the screen the way `filter` says.
+    #[must_use]
+    pub fn shown_as(self, filter: PictureFilter) -> Self {
+        Self { filter, ..self }
+    }
+
+    /// How many pixels wide and high the finished picture is.
+    pub fn size_in_whole_pixels(&self) -> (u32, u32) {
+        (
+            self.size_in_pixels.0.round() as u32,
+            self.size_in_pixels.1.round() as u32,
+        )
     }
 
     /// Where the point `(x, y)` of the picture, as fractions of its width and height, is on the screen.

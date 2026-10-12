@@ -5,6 +5,7 @@
 use egui::{Context, ViewportCommand};
 
 use super::FastForwardApplication;
+use crate::application::commands::Command;
 use crate::application::dialogs::{self, AfterConfirmation, Dialog, DialogAnswer, show_dialog, show_export_progress};
 
 impl FastForwardApplication {
@@ -25,8 +26,10 @@ impl FastForwardApplication {
         }
     }
 
-    /// Shows the dialog and the warnings, and acts on what the user does to them.
-    pub(super) fn show_dialogs(&mut self, context: &Context) {
+    /// Shows the dialog and the warnings, and acts on what the user does to them. Gives the commands that the user has just
+    /// agreed to have carried out, which they were asked about first (see [`Self::carry_out_all`]).
+    pub(super) fn show_dialogs(&mut self, context: &Context) -> Vec<Command> {
+        let mut agreed_to = Vec::new();
         if let Some(export) = &self.export
             && show_export_progress(context, export.frames_written, export.total_frames)
         {
@@ -38,9 +41,13 @@ impl FastForwardApplication {
                 DialogAnswer::Dismissed => self.dialog = None,
                 DialogAnswer::Confirmed => {
                     self.dialog = None;
-                    if let Dialog::ConfirmDiscardChanges { then } = dialog {
-                        self.note_everything_is_saved();
-                        self.carry_on_after_confirmation(context, then);
+                    match dialog {
+                        Dialog::ConfirmDiscardChanges { then } => {
+                            self.note_everything_is_saved();
+                            self.carry_on_after_confirmation(context, then);
+                        }
+                        Dialog::ConfirmLosingKeyframes { change, .. } => agreed_to.push(*change),
+                        Dialog::Message { .. } => {}
                     }
                 }
             }
@@ -54,6 +61,7 @@ impl FastForwardApplication {
                 self.relink_source(identifier);
             }
         }
+        agreed_to
     }
 
     fn carry_on_after_confirmation(&mut self, context: &Context, then: AfterConfirmation) {

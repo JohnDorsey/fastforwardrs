@@ -339,13 +339,14 @@ fn a_copy_of_a_clip_that_has_the_keyframes_of_another_clip_in_its_drawer_does_to
         .project()
         .drawer_of(AnimationTarget::Clip(video))
         .unwrap()
-        .rack_for(AnimationTarget::Clip(video), PropertyId::Gain)
+        .first_rack_for(AnimationTarget::Clip(video), PropertyId::Gain)
         .unwrap()
         .id();
     window.do_this(Command::MoveRack {
         rack,
         to: RackDestination::Drawer(AnimationTarget::Clip(text)),
         shift_in_frames: 0,
+        slot: None,
     });
     assert_eq!(
         frames_of_the_keyframes_in_the_drawer_of(&window, AnimationTarget::Clip(text)),
@@ -403,6 +404,7 @@ fn the_menu_of_a_keyframe_crate_copies_it_with_the_racks_in_it() {
             length: 200,
         },
         shift_in_frames: 0,
+        slot: None,
     });
     assert_eq!(spans_of_the_clips_on(&window, 0), vec![(40, 100), (100, 300)]);
 

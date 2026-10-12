@@ -5,9 +5,9 @@
 use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ClipId, ClipMove, ClipSide, FrameRate, Gain, KeyframeId, KeyframeMove, Placement, ProjectSettings,
-    PropertyId, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout,
-    TextObject, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
+    AnimationTarget, ClipId, ClipMove, ClipSide, EffectKind, FrameRate, Gain, KeyframeId, KeyframeMove, Placement,
+    ProjectSettings, PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
+    SpeedIndicatorLayout, TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -16,6 +16,8 @@ pub enum Command {
     // The File menu.
     LoadProject,
     SaveProject,
+    /// Save the project to a file chosen now, which is the project's file from then on.
+    SaveProjectAs,
     NewProject,
     /// Choose a video or a sound file and put all of it on the timeline, at the current frame.
     ImportFile,
@@ -156,6 +158,25 @@ pub enum Command {
         frames: u64,
     },
 
+    // Effects.
+    /// Put an effect on a clip or a track (with the plus button of the properties panel), with the values it begins with.
+    AddEffect {
+        target: AnimationTarget,
+        kind: EffectKind,
+    },
+    /// Take an effect off a clip or a track (from the menu of its box in the properties panel), with the keyframes of its values.
+    RemoveEffect {
+        target: AnimationTarget,
+        kind: EffectKind,
+    },
+    /// Give a value of an effect of a clip or a track (a property of it) a value: at the playhead if it has keyframes, as for any
+    /// property.
+    SetEffectValue {
+        target: AnimationTarget,
+        property: PropertyId,
+        value: PropertyValue,
+    },
+
     // Keyframes.
     /// Put a keyframe on a property of a clip or a track at a frame (with the stopwatch), with the value the property
     /// has there now.
@@ -175,12 +196,28 @@ pub enum Command {
     MoveKeyframes(Vec<KeyframeMove>),
     /// Take keyframes away, whichever racks they are in (with the Delete key).
     DeleteKeyframes(Vec<KeyframeId>),
+    /// Make a copy of each of the keyframes in the rack it is in, after them or before them, as far from them as the first of
+    /// them is from the last and then `gap_in_frames` more (see [`crate::project::Project::duplicate_keyframes`]). The copies are
+    /// selected, so that duplicating again goes on from them.
+    DuplicateKeyframes {
+        keyframes: Vec<KeyframeId>,
+        towards: TimeDirection,
+        gap_in_frames: u64,
+    },
+    /// Take racks away with the keyframes in them (with the Delete key).
+    DeleteRacks(Vec<RackId>),
+    /// Make one rack of racks of one property of one thing, which has the keyframes of all of them (see
+    /// [`crate::project::Project::merge_racks`]).
+    MergeRacks(Vec<RackId>),
     /// Move a rack of keyframes to another drawer, or onto an empty stretch of a track (where it is put in a keyframe
-    /// crate made for it), by dragging it, with all its keyframes this many frames later in time (earlier, if negative).
+    /// crate made for it), by dragging it, with all its keyframes this many frames later in time (earlier, if negative). It
+    /// has `slot` racks above it in the drawer it goes to if that is said (not counting itself), and otherwise it keeps its
+    /// place there, or goes under the others if it is not in that drawer yet.
     MoveRack {
         rack: RackId,
         to: RackDestination,
         shift_in_frames: i64,
+        slot: Option<usize>,
     },
 
     /// Move or resize the fast-forward symbol.
@@ -230,16 +267,23 @@ impl Command {
             | Self::NewTextObject { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
+            | Self::AddEffect { .. }
+            | Self::RemoveEffect { .. }
+            | Self::SetEffectValue { .. }
             | Self::AddKeyframe { .. }
             | Self::RemoveKeyframe { .. }
             | Self::MoveKeyframes(_)
             | Self::DeleteKeyframes(_)
+            | Self::DuplicateKeyframes { .. }
+            | Self::DeleteRacks(_)
+            | Self::MergeRacks(_)
             | Self::MoveRack { .. }
             | Self::SetProjectFrameRate(_)
             | Self::SetSpeedIndicatorLayout(_) => true,
 
             Self::LoadProject
             | Self::SaveProject
+            | Self::SaveProjectAs
             | Self::NewProject
             | Self::ImportFile
             | Self::ExportVideo
@@ -258,6 +302,76 @@ impl Command {
             | Self::SelectItems { .. }
             | Self::RelinkSource(_) => false,
         }
+    }
+
+    /// What the user is told this command is, in the question that is asked before it is carried out if it would lose keyframes,
+    /// if it is one that changes how long something lasts (a speed, how long a clip lasts, the frame rate of the project, the
+    /// track a clip is on). Such a command counts the keyframes of what lasts less time again, and there may not be room for all
+    /// of them (see [`crate::project::Rack::rescaled`]). `None` for every other command. Written out for every command, with no
+    /// catch-all, so that a command that is added has to be put on one side or the other.
+    pub fn name_in_a_question_about_losing_keyframes(&self) -> Option<&'static str> {
+        match self {
+            Self::SetClipSpeed { .. } => Some("Playing this clip at that speed"),
+            Self::SetTrackSpeed { .. } => Some("Playing this track at that speed"),
+            Self::SetClipDuration { .. } => Some("Making this clip last that long"),
+            Self::SetProjectFrameRate(_) => Some("Counting everything again at that frame rate"),
+            Self::MoveClips(_) => Some("Putting the clips there"),
+
+            Self::LoadProject
+            | Self::SaveProject
+            | Self::SaveProjectAs
+            | Self::NewProject
+            | Self::ImportFile
+            | Self::ExportVideo
+            | Self::Undo
+            | Self::Redo
+            | Self::Deselect
+            | Self::ShowProjectSettings
+            | Self::ShowGlobalSettings
+            | Self::SetProjectSettings(_)
+            | Self::SetGlobalSettings(_)
+            | Self::Pause
+            | Self::Play
+            | Self::Stop
+            | Self::SeekTo(_)
+            | Self::MoveCurrentFrameBy(_)
+            | Self::SelectItems { .. }
+            | Self::SplitAt { .. }
+            | Self::DeleteClips(_)
+            | Self::DuplicateClips { .. }
+            | Self::SetClipGain { .. }
+            | Self::SetClipMuted { .. }
+            | Self::SetClipPlacement { .. }
+            | Self::RelinkSource(_)
+            | Self::AddTrack
+            | Self::SetTrackTitle { .. }
+            | Self::SetTrackGain { .. }
+            | Self::SetTrackMuted { .. }
+            | Self::DeleteTrack(_)
+            | Self::DuplicateTrack { .. }
+            | Self::MoveTrack { .. }
+            | Self::SetTrackHeight { .. }
+            | Self::NewTextObject { .. }
+            | Self::SetTextObject { .. }
+            | Self::AddEffect { .. }
+            | Self::RemoveEffect { .. }
+            | Self::SetEffectValue { .. }
+            | Self::AddKeyframe { .. }
+            | Self::RemoveKeyframe { .. }
+            | Self::MoveKeyframes(_)
+            | Self::DeleteKeyframes(_)
+            | Self::DuplicateKeyframes { .. }
+            | Self::DeleteRacks(_)
+            | Self::MergeRacks(_)
+            | Self::MoveRack { .. }
+            | Self::SetSpeedIndicatorLayout(_) => None,
+        }
+    }
+
+    /// Whether carrying this command out may lose keyframes, because it changes how long something lasts: the user is asked first
+    /// if it would (see [`Self::name_in_a_question_about_losing_keyframes`]).
+    pub fn may_lose_keyframes(&self) -> bool {
+        self.name_in_a_question_about_losing_keyframes().is_some()
     }
 
     /// What this command is about, if it is the kind of edit that a gesture makes over and over (a
@@ -279,6 +393,9 @@ impl Command {
             Self::SetTrackHeight { track, .. } => Some(EditKey::about(&("the height of", track))),
             Self::SetTextObject { clip, .. } => Some(EditKey::about(&("the text object of", clip))),
             Self::SetClipDuration { clip, .. } => Some(EditKey::about(&("how long it lasts of", clip))),
+            Self::SetEffectValue { target, property, .. } => {
+                Some(EditKey::about(&("the value of the effect", target, property)))
+            }
             Self::MoveKeyframes(moves) => {
                 let mut keyframes: Vec<KeyframeId> = moves.iter().map(|moved| moved.keyframe).collect();
                 keyframes.sort();
@@ -364,9 +481,31 @@ mod tests {
                 rack: RackId::new(TrackId::new(0), 0),
                 to: RackDestination::Drawer(AnimationTarget::Clip(clip(0))),
                 shift_in_frames: 4,
+                slot: None,
             }
             .may_change_the_project()
         );
+    }
+
+    #[test]
+    fn copying_keyframes_taking_racks_away_and_merging_racks_are_edits_of_the_project_and_none_of_them_is_a_gesture() {
+        let rack = |number| RackId::new(TrackId::new(0), number);
+        for command in [
+            Command::DuplicateKeyframes {
+                keyframes: vec![keyframe(0)],
+                towards: TimeDirection::Later,
+                gap_in_frames: 3,
+            },
+            Command::DeleteRacks(vec![rack(1)]),
+            Command::MergeRacks(vec![rack(1), rack(2)]),
+        ] {
+            assert!(command.may_change_the_project(), "{command:?}");
+            assert_eq!(
+                command.gesture_key(),
+                None,
+                "{command:?}: each is a step of the history of its own"
+            );
+        }
     }
 
     #[test]
@@ -377,6 +516,7 @@ mod tests {
                     .iter()
                     .map(|(number, to_frame)| KeyframeMove {
                         keyframe: keyframe(*number),
+                        to_rack: RackId::new(TrackId::new(0), 0),
                         to_frame: *to_frame,
                     })
                     .collect(),
@@ -398,6 +538,7 @@ mod tests {
             rack: RackId::new(TrackId::new(0), rack),
             to: RackDestination::Drawer(AnimationTarget::Clip(clip(owner))),
             shift_in_frames: shift,
+            slot: None,
         };
         assert_eq!(dragging(1, 0, 5).gesture_key(), dragging(1, 3, -8).gesture_key());
         assert!(dragging(1, 0, 5).gesture_key().is_some());
@@ -453,6 +594,7 @@ mod tests {
             Command::Undo,
             Command::Redo,
             Command::Deselect,
+            Command::SaveProjectAs,
             Command::Play,
             Command::SeekTo(TimelineFrameIndex::new(3)),
             Command::select_clips([clip(0)], SelectionChange::Replace),

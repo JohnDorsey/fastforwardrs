@@ -4,9 +4,10 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use egui::{ColorImage, Context, TextureHandle, TextureOptions, TextureWrapMode};
+use egui::{ColorImage, Context, TextureFilter, TextureHandle, TextureOptions, TextureWrapMode};
 
 use crate::application::timeline_panel::grain_of_the_racks as grain_image;
+use crate::colour_effects::ColourMatrix;
 use crate::media::{DecodedFrame, ThumbnailKey, ThumbnailLibrary};
 use crate::playback::SuppliedPicture;
 use crate::project::{SourceMediaIdentifier, SpeedFactor, TrackId};
@@ -25,48 +26,105 @@ const MOST_TEXT_PICTURES_KEPT: usize = 24;
 /// Which thumbnail: a picture of a video (see [`ThumbnailKey`]).
 type ThumbnailTextureKey = (SourceMediaIdentifier, ThumbnailKey);
 
-/// The picture of the video of a track on the graphics card, and which picture it is.
+/// Which texture of a thumbnail: which thumbnail, and how its colours were changed before it was uploaded (what tells one way of
+/// changing colours from another is [`ColourMatrix::bit_pattern`]). The timeline's thumbnails are as they are; those that stand in
+/// for the picture of a video in the preview have the colours of the effects of the clip.
+type ThumbnailTextureWithColoursKey = (ThumbnailTextureKey, [u32; 9]);
+
+/// How a picture is put on the screen when it is drawn bigger than it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PictureFilter {
+    /// Each pixel is blended into those next to it, so that a picture that is drawn bigger than it is looks smooth.
+    #[default]
+    Smooth,
+    /// Each pixel is a block of its own, so that the pixels of a picture that is drawn a lot bigger than it is can be seen.
+    Pixels,
+}
+
+impl PictureFilter {
+    fn options(self) -> TextureOptions {
+        match self {
+            Self::Smooth => TextureOptions::LINEAR,
+            // (When a picture is made smaller it is blended all the same.)
+            Self::Pixels => TextureOptions {
+                magnification: TextureFilter::Nearest,
+                minification: TextureFilter::Linear,
+                ..TextureOptions::LINEAR
+            },
+        }
+    }
+}
+
+/// The picture of the video of a track on the graphics card, and which picture it is, and how it is put on the screen, and how its
+/// colours were changed before it was put there.
 struct PreviewTexture {
     handle: TextureHandle,
     serial_number: u64,
+    filter: PictureFilter,
+    colour: ColourMatrix,
+}
+
+/// The picture of an image file on the graphics card, and how it is put on the screen, and how its colours were changed before it
+/// was put there.
+struct ImageTexture {
+    handle: TextureHandle,
+    filter: PictureFilter,
+    colour: ColourMatrix,
 }
 
 /// A picture on the graphics card, with what it is a picture of.
 #[derive(Default)]
 pub struct Textures {
     preview_pictures: HashMap<TrackId, PreviewTexture>,
-    thumbnails: HashMap<ThumbnailTextureKey, TextureHandle>,
-    thumbnails_used_this_frame: HashSet<ThumbnailTextureKey>,
+    thumbnails: HashMap<ThumbnailTextureWithColoursKey, TextureHandle>,
+    thumbnails_used_this_frame: HashSet<ThumbnailTextureWithColoursKey>,
     /// The finer pictures that were wanted since they were last taken, and were not there.
     finer_thumbnails_wanted: BTreeMap<SourceMediaIdentifier, BTreeSet<ThumbnailKey>>,
     symbols: HashMap<(u32, u32), TextureHandle>,
-    text_pictures: HashMap<TextAppearance, TextureHandle>,
-    image_pictures: HashMap<SourceMediaIdentifier, TextureHandle>,
+    /// The pictures of text, for each way it looks, each way it is put on the screen and each way its colours are changed
+    /// (what tells one way of changing colours from another is [`ColourMatrix::bit_pattern`]).
+    text_pictures: HashMap<(TextAppearance, PictureFilter, [u32; 9]), TextureHandle>,
+    image_pictures: HashMap<SourceMediaIdentifier, ImageTexture>,
     /// The grain that the racks of keyframes are textured with, which is repeated across them.
     rack_grain: Option<TextureHandle>,
 }
 
 impl Textures {
-    /// The texture of the preview picture of the video on `track`, uploading it first if it is a new one.
-    pub fn preview_picture(&mut self, context: &Context, track: TrackId, picture: &SuppliedPicture) -> &TextureHandle {
+    /// The texture of the preview picture of the video on `track`, with its colours changed as `colour` says, uploading it first if
+    /// it is a new one or if it is to be put on the screen another way than it was.
+    pub fn preview_picture(
+        &mut self,
+        context: &Context,
+        track: TrackId,
+        picture: &SuppliedPicture,
+        filter: PictureFilter,
+        colour: ColourMatrix,
+    ) -> &TextureHandle {
         match self.preview_pictures.entry(track) {
             Entry::Occupied(mut occupied) => {
                 let texture = occupied.get_mut();
-                if texture.serial_number != picture.serial_number {
+                if texture.serial_number != picture.serial_number
+                    || texture.filter != filter
+                    || texture.colour != colour
+                {
                     texture
                         .handle
-                        .set(color_image_of(&picture.frame), TextureOptions::LINEAR);
+                        .set(color_image_of(&picture.frame, colour), filter.options());
                     texture.serial_number = picture.serial_number;
+                    texture.filter = filter;
+                    texture.colour = colour;
                 }
             }
             Entry::Vacant(vacancy) => {
                 vacancy.insert(PreviewTexture {
                     handle: context.load_texture(
                         format!("preview picture of {track}"),
-                        color_image_of(&picture.frame),
-                        TextureOptions::LINEAR,
+                        color_image_of(&picture.frame, colour),
+                        filter.options(),
                     ),
                     serial_number: picture.serial_number,
+                    filter,
+                    colour,
                 });
             }
         }
@@ -86,11 +144,24 @@ impl Textures {
         library: &ThumbnailLibrary,
         key: ThumbnailKey,
     ) -> Option<&TextureHandle> {
+        self.thumbnail_with_colours_changed(context, source, library, key, ColourMatrix::NOTHING_CHANGES)
+    }
+
+    /// Like [`Self::thumbnail`], with the colours of the picture changed as `colour` says. (A thumbnail with its colours changed
+    /// one way is a texture of its own, apart from the same thumbnail as it is or changed another way.)
+    pub fn thumbnail_with_colours_changed(
+        &mut self,
+        context: &Context,
+        source: SourceMediaIdentifier,
+        library: &ThumbnailLibrary,
+        key: ThumbnailKey,
+        colour: ColourMatrix,
+    ) -> Option<&TextureHandle> {
         if key.level > 0 && library.get(key).is_none() {
             self.finer_thumbnails_wanted.entry(source).or_default().insert(key);
         }
         let (made_key, picture) = library.nearest_made(key)?;
-        let texture_key = (source, made_key);
+        let texture_key = ((source, made_key), colour.bit_pattern());
         self.thumbnails_used_this_frame.insert(texture_key);
         if let Entry::Vacant(vacancy) = self.thumbnails.entry(texture_key) {
             let frame = picture.decompress().ok()?;
@@ -99,7 +170,7 @@ impl Textures {
                     "thumbnail {} of level {} of file {source}",
                     made_key.index, made_key.level
                 ),
-                color_image_of(&frame),
+                color_image_of(&frame, colour),
                 TextureOptions::LINEAR,
             ));
         }
@@ -135,46 +206,92 @@ impl Textures {
         })
     }
 
-    /// The texture of a text object's picture. `make_picture` is only called (and may take a
-    /// while) when there is no picture for `key` yet, and may decline to make one (`None`), for
-    /// example while the fonts are still loading.
+    /// The texture of a text object's picture, with its colours changed as `colour` says and put on the screen the way `filter`
+    /// says. `make_picture` is only called (and may take a while) when there is no picture for `key` yet, and may decline to make
+    /// one (`None`), for example while the fonts are still loading.
     pub fn text_picture(
         &mut self,
         context: &Context,
         key: TextAppearance,
+        filter: PictureFilter,
+        colour: ColourMatrix,
         make_picture: impl FnOnce() -> Option<RgbaPicture>,
     ) -> Option<&TextureHandle> {
+        let key = (key, filter, colour.bit_pattern());
         if !self.text_pictures.contains_key(&key) {
             let picture = make_picture()?;
             if self.text_pictures.len() >= MOST_TEXT_PICTURES_KEPT {
                 self.text_pictures.clear();
             }
-            let image = ColorImage::from_rgba_unmultiplied(
+            let image = color_image_of_pixels(
                 [picture.width_in_pixels as usize, picture.height_in_pixels as usize],
                 &picture.rgba_pixels,
+                colour,
             );
             self.text_pictures.insert(
                 key.clone(),
-                context.load_texture("text object", image, TextureOptions::LINEAR),
+                context.load_texture("text object", image, filter.options()),
             );
         }
         self.text_pictures.get(&key)
     }
 
-    /// The texture of the picture of an image file, uploading it first if it has not been.
+    /// The texture of the picture of an image file for the preview, with its colours changed as `colour` says, uploading it first
+    /// if it has not been, or if it is to be put on the screen another way than it was.
     pub fn image_picture(
         &mut self,
         context: &Context,
         source: SourceMediaIdentifier,
         picture: &RgbaPicture,
+        filter: PictureFilter,
+        colour: ColourMatrix,
     ) -> &TextureHandle {
-        self.image_pictures.entry(source).or_insert_with(|| {
-            let image = ColorImage::from_rgba_unmultiplied(
+        self.image_texture(context, source, picture, Some((filter, colour)))
+    }
+
+    /// The texture of the picture of an image file for the timeline, which is the one of the preview, whichever way that is put on
+    /// the screen and whatever its colours were changed to (it is drawn a lot smaller than it is, which looks the same either way,
+    /// and the clip is seen on the timeline with the colours that its own picture has), uploading it first if it has not been.
+    pub fn image_picture_for_the_timeline(
+        &mut self,
+        context: &Context,
+        source: SourceMediaIdentifier,
+        picture: &RgbaPicture,
+    ) -> &TextureHandle {
+        self.image_texture(context, source, picture, None)
+    }
+
+    /// The texture of the picture of an image file, put on the screen the way `how` says (how it is put on the screen, and how its
+    /// colours are changed), or the way it is already if that is `None` (and blended, with its colours as they are, if it is not
+    /// made yet).
+    fn image_texture(
+        &mut self,
+        context: &Context,
+        source: SourceMediaIdentifier,
+        picture: &RgbaPicture,
+        how: Option<(PictureFilter, ColourMatrix)>,
+    ) -> &TextureHandle {
+        let image = |colour: ColourMatrix| {
+            color_image_of_pixels(
                 [picture.width_in_pixels as usize, picture.height_in_pixels as usize],
                 &picture.rgba_pixels,
-            );
-            context.load_texture(format!("picture of file {source}"), image, TextureOptions::LINEAR)
-        })
+                colour,
+            )
+        };
+        let (filter, colour) = how.unwrap_or((PictureFilter::Smooth, ColourMatrix::NOTHING_CHANGES));
+        let texture = self.image_pictures.entry(source).or_insert_with(|| ImageTexture {
+            handle: context.load_texture(format!("picture of file {source}"), image(colour), filter.options()),
+            filter,
+            colour,
+        });
+        if let Some((filter, colour)) = how
+            && (texture.filter != filter || texture.colour != colour)
+        {
+            texture.handle.set(image(colour), filter.options());
+            texture.filter = filter;
+            texture.colour = colour;
+        }
+        &texture.handle
     }
 
     /// The texture of the grain of the racks of keyframes, uploading it first if it has not been. It is repeated across what it
@@ -196,264 +313,67 @@ impl Textures {
     pub fn clear(&mut self) {
         *self = Self::default();
     }
+
+    /// How the preview picture of the video on `track` is put on the screen, if it has been uploaded.
+    #[cfg(test)]
+    pub fn filter_of_the_preview_picture(&self, track: TrackId) -> Option<PictureFilter> {
+        self.preview_pictures.get(&track).map(|texture| texture.filter)
+    }
+
+    /// How the picture of the image file `source` is put on the screen, if it has been uploaded.
+    #[cfg(test)]
+    pub fn filter_of_the_picture_of_the_file(&self, source: SourceMediaIdentifier) -> Option<PictureFilter> {
+        self.image_pictures.get(&source).map(|texture| texture.filter)
+    }
+
+    /// How the colours of the preview picture of the video on `track` were changed before it was uploaded, if it has been.
+    #[cfg(test)]
+    pub fn colours_of_the_preview_picture(&self, track: TrackId) -> Option<ColourMatrix> {
+        self.preview_pictures.get(&track).map(|texture| texture.colour)
+    }
+
+    /// How the colours of the picture of the image file `source` were changed before it was uploaded, if it has been.
+    #[cfg(test)]
+    pub fn colours_of_the_picture_of_the_file(&self, source: SourceMediaIdentifier) -> Option<ColourMatrix> {
+        self.image_pictures.get(&source).map(|texture| texture.colour)
+    }
+
+    /// How each of the pictures of text was put on the screen and had its colours changed before it was uploaded (as
+    /// [`ColourMatrix::bit_pattern`]), in no order.
+    #[cfg(test)]
+    pub fn ways_the_pictures_of_text_were_made(&self) -> Vec<(PictureFilter, [u32; 9])> {
+        self.text_pictures
+            .keys()
+            .map(|(_, filter, colour)| (*filter, *colour))
+            .collect()
+    }
+
+    /// How the colours of each of the thumbnails on the graphics card were changed before it was uploaded (as
+    /// [`ColourMatrix::bit_pattern`]), in no order.
+    #[cfg(test)]
+    pub fn ways_the_colours_of_the_thumbnails_were_changed(&self) -> Vec<[u32; 9]> {
+        self.thumbnails.keys().map(|(_, colour)| *colour).collect()
+    }
 }
 
-fn color_image_of(frame: &DecodedFrame) -> ColorImage {
-    ColorImage::from_rgba_unmultiplied(
+/// The picture of `frame` with its colours changed as `colour` says.
+fn color_image_of(frame: &DecodedFrame, colour: ColourMatrix) -> ColorImage {
+    color_image_of_pixels(
         [frame.width_in_pixels as usize, frame.height_in_pixels as usize],
         &frame.rgba_pixels,
+        colour,
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::project::{Angle, CanvasArea, FontSize, TextColour, TextObject};
-
-    fn object() -> TextObject {
-        TextObject {
-            text: "Hello".to_owned(),
-            font_family: String::new(),
-            font_size: FontSize::DEFAULT,
-            colour: TextColour::WHITE,
-            area: CanvasArea::new(0.1, 0.2, 0.5, 0.25),
-            rotation: Angle::ZERO,
-        }
+/// The picture of `size` (across and down) pixels that `rgba_pixels` is, with its colours changed as `colour` says.
+fn color_image_of_pixels(size: [usize; 2], rgba_pixels: &[u8], colour: ColourMatrix) -> ColorImage {
+    if colour.changes_nothing() {
+        return ColorImage::from_rgba_unmultiplied(size, rgba_pixels);
     }
-
-    fn key(object: &TextObject) -> TextAppearance {
-        TextAppearance::of(object, 1920, 1080)
-    }
-
-    fn picture_of(shade: u8) -> crate::media::CompressedPicture {
-        crate::media::CompressedPicture::from_rgb_pixels(
-            &[shade; 8 * 8 * 3],
-            crate::media::PictureSize {
-                width_in_pixels: 8,
-                height_in_pixels: 8,
-            },
-        )
-        .unwrap()
-    }
-
-    const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
-
-    fn thumbnail_key(level: u8, index: usize) -> ThumbnailKey {
-        ThumbnailKey { level, index }
-    }
-
-    #[test]
-    fn a_thumbnail_that_has_been_made_is_given_and_nothing_is_wanted() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let mut library = ThumbnailLibrary::with_room_for(10);
-        library.insert(thumbnail_key(2, 9), picture_of(40));
-
-        assert!(
-            textures
-                .thumbnail(&context, VIDEO, &library, thumbnail_key(2, 9))
-                .is_some()
-        );
-
-        assert!(textures.take_finer_thumbnails_wanted().is_empty());
-    }
-
-    #[test]
-    fn a_finer_thumbnail_that_is_not_made_gives_the_coarser_one_of_about_the_same_moment_and_is_wanted() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let mut library = ThumbnailLibrary::with_room_for(10);
-        library.insert(thumbnail_key(0, 2), picture_of(40)); // 2.0 s
-
-        // 2.25 s at four a second: there is the picture of 2 s, which is shown until the finer one is made.
-        assert!(
-            textures
-                .thumbnail(&context, VIDEO, &library, thumbnail_key(2, 9))
-                .is_some()
-        );
-
-        let wanted = textures.take_finer_thumbnails_wanted();
-        assert_eq!(wanted.len(), 1);
-        assert_eq!(wanted[&VIDEO], BTreeSet::from([thumbnail_key(2, 9)]));
-        assert!(
-            textures.take_finer_thumbnails_wanted().is_empty(),
-            "taken: it is not handed over twice"
-        );
-    }
-
-    #[test]
-    fn a_thumbnail_of_a_second_that_is_not_made_yet_is_not_wanted_because_all_of_them_are_being_made() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let library = ThumbnailLibrary::with_room_for(10);
-
-        assert!(
-            textures
-                .thumbnail(&context, VIDEO, &library, thumbnail_key(0, 3))
-                .is_none()
-        );
-
-        assert!(textures.take_finer_thumbnails_wanted().is_empty());
-    }
-
-    #[test]
-    fn nothing_at_all_made_gives_no_texture_but_the_finer_picture_is_wanted() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let library = ThumbnailLibrary::with_room_for(10);
-
-        assert!(
-            textures
-                .thumbnail(&context, VIDEO, &library, thumbnail_key(3, 17))
-                .is_none()
-        );
-
-        assert_eq!(
-            textures.take_finer_thumbnails_wanted()[&VIDEO],
-            BTreeSet::from([thumbnail_key(3, 17)])
-        );
-    }
-
-    #[test]
-    fn the_same_coarse_picture_is_one_texture_however_many_finer_ones_stand_in_for_it() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let mut library = ThumbnailLibrary::with_room_for(10);
-        library.insert(thumbnail_key(0, 2), picture_of(40));
-
-        let first = textures
-            .thumbnail(&context, VIDEO, &library, thumbnail_key(2, 8))
-            .unwrap()
-            .id();
-        let second = textures
-            .thumbnail(&context, VIDEO, &library, thumbnail_key(2, 9))
-            .unwrap()
-            .id();
-
-        assert_eq!(first, second);
-    }
-
-    fn supplied_picture(serial_number: u64, shade: u8) -> SuppliedPicture {
-        SuppliedPicture {
-            source: VIDEO,
-            source_frame: crate::project::SourceFrameIndex::new(0),
-            frame: DecodedFrame {
-                width_in_pixels: 1,
-                height_in_pixels: 1,
-                rgba_pixels: vec![shade, 0, 0, 255],
-            },
-            serial_number,
-        }
-    }
-
-    #[test]
-    fn the_pictures_of_different_tracks_are_different_textures_and_a_track_keeps_its_own_as_it_changes() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let (track_a, track_b) = (TrackId::new(0), TrackId::new(1));
-
-        let a = textures
-            .preview_picture(&context, track_a, &supplied_picture(1, 10))
-            .id();
-        let b = textures
-            .preview_picture(&context, track_b, &supplied_picture(2, 20))
-            .id();
-        assert_ne!(a, b);
-
-        let a_again = textures
-            .preview_picture(&context, track_a, &supplied_picture(1, 10))
-            .id();
-        assert_eq!(a, a_again, "the same picture is not uploaded again");
-        let a_next = textures
-            .preview_picture(&context, track_a, &supplied_picture(3, 30))
-            .id();
-        assert_eq!(a, a_next, "a new picture of the track is put in the track's texture");
-        assert_eq!(
-            textures
-                .preview_picture(&context, track_b, &supplied_picture(2, 20))
-                .id(),
-            b,
-            "and the other track's is not touched"
-        );
-    }
-
-    #[test]
-    fn moving_a_text_object_does_not_change_its_picture() {
-        let mut moved = object();
-        moved.area = moved.area.moved_by(0.1, 0.2);
-        assert_eq!(key(&object()), key(&moved));
-    }
-
-    /// The picture is of the text upright in its area; turning it is done when it is drawn, so
-    /// turning a text object round and round makes no new pictures.
-    #[test]
-    fn the_picture_of_an_image_file_is_uploaded_once_and_each_file_has_its_own() {
-        let context = Context::default();
-        let mut textures = Textures::default();
-        let red = RgbaPicture {
-            width_in_pixels: 1,
-            height_in_pixels: 1,
-            rgba_pixels: vec![255, 0, 0, 255],
-        };
-        let blue = RgbaPicture {
-            rgba_pixels: vec![0, 0, 255, 255],
-            ..red.clone()
-        };
-        let first = textures
-            .image_picture(&context, SourceMediaIdentifier::new(1), &red)
-            .id();
-        let second = textures
-            .image_picture(&context, SourceMediaIdentifier::new(2), &blue)
-            .id();
-        assert_ne!(first, second);
-        assert_eq!(
-            textures
-                .image_picture(&context, SourceMediaIdentifier::new(1), &red)
-                .id(),
-            first,
-            "the same file is the same texture"
-        );
-        textures.clear();
-        assert_ne!(
-            textures
-                .image_picture(&context, SourceMediaIdentifier::new(1), &red)
-                .id(),
-            first,
-            "forgotten when everything is"
-        );
-    }
-
-    #[test]
-    fn turning_a_text_object_does_not_change_its_picture() {
-        let mut turned = object();
-        turned.rotation = Angle::from_degrees(37.0);
-        assert_eq!(key(&object()), key(&turned));
-    }
-
-    #[test]
-    fn anything_that_changes_how_the_text_looks_changes_its_picture() {
-        let base = key(&object());
-        let mut changed = object();
-        changed.text = "Hello!".to_owned();
-        assert_ne!(base, key(&changed), "the words");
-        let mut changed = object();
-        changed.font_family = "Arial".to_owned();
-        assert_ne!(base, key(&changed), "the font");
-        let mut changed = object();
-        changed.font_size = FontSize::from_points(80.0);
-        assert_ne!(base, key(&changed), "the size of the letters");
-        let mut changed = object();
-        changed.colour = TextColour::new(1, 2, 3, 4);
-        assert_ne!(base, key(&changed), "the colour");
-        let mut changed = object();
-        changed.area = changed
-            .area
-            .with_corner_dragged_to(crate::project::Corner::BottomRight, 0.9, 0.9);
-        assert_ne!(base, key(&changed), "how big the area is");
-        assert_ne!(
-            base,
-            TextAppearance::of(&object(), 1280, 720),
-            "how big the finished picture is"
-        );
-    }
+    let mut changed = rgba_pixels.to_vec();
+    colour.apply_to_rgba_pixels(&mut changed);
+    ColorImage::from_rgba_unmultiplied(size, &changed)
 }
+
+#[cfg(test)]
+mod tests;

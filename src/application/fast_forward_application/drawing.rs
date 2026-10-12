@@ -110,7 +110,14 @@ impl FastForwardApplication {
         egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| {
-                preview_panel::show(ui, &content, &mut self.textures, &mut self.text_renderer, commands);
+                preview_panel::show(
+                    ui,
+                    &content,
+                    &mut self.preview_view,
+                    &mut self.textures,
+                    &mut self.text_renderer,
+                    commands,
+                );
             });
     }
 
@@ -178,6 +185,7 @@ fn preview_content<'a>(
                 clip: layer.clip,
                 track: layer.track,
                 placement: layer.placement_at(frame_state.current_frame),
+                colour: layer.colour_matrix_at(frame_state.current_frame),
                 content: match &layer.content {
                     LayerContent::Text(_) => PreviewLayerContent::Text(
                         layer
@@ -302,12 +310,15 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::colour_effects::ColourMatrix;
     use crate::composition::plan_pictures;
     use crate::playback::PicturesReport;
     use crate::project::{
-        Clip, FrameRate, MediaClip, SourceFrameIndex, SourceMedia, SourceMediaLink, SourceVideoProperties, SpeedFactor,
-        SpeedIndicatorLayout, TimelineFrameIndex, Track, TrackId,
+        AnimationTarget, Clip, EffectKind, FrameRate, MediaClip, PropertyId, PropertyValue, SourceFrameIndex,
+        SourceMedia, SourceMediaLink, SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex,
+        Track, TrackId,
     };
+    use crate::test_support::{make_a_keyframe, put_a_hue_shift_on};
 
     /// A project with one video clip of 600 frames at `clip_speed` on a track that plays at `track_speed`.
     fn project_of_a_sped_up_clip(clip_speed: u32, track_speed: u32) -> Project {
@@ -338,12 +349,11 @@ mod tests {
         Project::from_parts(vec![source], vec![track], SpeedIndicatorLayout::DEFAULT).unwrap()
     }
 
-    /// The speed the preview says the video plays at, with the playhead at the first frame.
-    fn speed_shown_by_the_preview(project: &Project) -> Option<SpeedFactor> {
+    /// What the preview shows of `project` with the playhead at the frame `current_frame`, handed to `look`.
+    fn look_at_the_preview<R>(project: &Project, current_frame: u64, look: impl FnOnce(PreviewContent<'_>) -> R) -> R {
         let picture_plan = plan_pictures(project, |_| true);
-        let current_frame = TimelineFrameIndex::new(0);
         let frame_state = FrameState {
-            current_frame,
+            current_frame: TimelineFrameIndex::new(current_frame),
             total_frames: project.total_frame_count(),
             frame_rate: project.frame_rate(),
             is_playing: false,
@@ -351,9 +361,12 @@ mod tests {
             pictures_report: PicturesReport::default(),
         };
         let pictures = PreviewPictures::new(FfmpegPictureStreamStarter::new(None, Arc::new(|| {})));
-        preview_content(project, &pictures, None, &frame_state, &HashMap::new())
-            .symbol
-            .map(|symbol| symbol.speed)
+        look(preview_content(project, &pictures, None, &frame_state, &HashMap::new()))
+    }
+
+    /// The speed the preview says the video plays at, with the playhead at the first frame.
+    fn speed_shown_by_the_preview(project: &Project) -> Option<SpeedFactor> {
+        look_at_the_preview(project, 0, |content| content.symbol.map(|symbol| symbol.speed))
     }
 
     #[test]
@@ -369,6 +382,46 @@ mod tests {
             "a sped-up track has the symbol though the clip is at normal speed"
         );
         assert_eq!(shown(3, 2), SpeedFactor::new(6), "the two are multiplied");
+    }
+
+    #[test]
+    fn a_layer_of_the_preview_has_the_colours_changed_as_the_effects_of_its_clip_and_then_of_its_track_say_at_the_current_frame()
+     {
+        let mut project = project_of_a_sped_up_clip(1, 1);
+        let clip = AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
+        let track = AnimationTarget::Track(project.tracks()[0].id());
+        put_a_hue_shift_on(&mut project, clip, 90.0);
+        project.add_effect(track, EffectKind::HueShift).unwrap();
+        make_a_keyframe(&mut project, track, PropertyId::HueShift, 0, PropertyValue::Number(0.0));
+        make_a_keyframe(
+            &mut project,
+            track,
+            PropertyId::HueShift,
+            100,
+            PropertyValue::Number(60.0),
+        );
+
+        for (frame, track_turn) in [(0, 0.0), (50, 30.0), (100, 60.0), (400, 60.0)] {
+            let colour = look_at_the_preview(&project, frame, |content| {
+                assert_eq!(content.layers.len(), 1);
+                content.layers[0].colour
+            });
+
+            assert_eq!(
+                colour,
+                ColourMatrix::hue_rotation(90.0).then(ColourMatrix::hue_rotation(track_turn)),
+                "frame {frame}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_layer_of_the_preview_with_no_effects_has_its_colours_as_they_are() {
+        let project = project_of_a_sped_up_clip(1, 1);
+
+        let colour = look_at_the_preview(&project, 10, |content| content.layers[0].colour);
+
+        assert_eq!(colour, ColourMatrix::NOTHING_CHANGES);
     }
 }
 

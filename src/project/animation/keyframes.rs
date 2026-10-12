@@ -77,24 +77,6 @@ impl Keyframes {
         }
     }
 
-    /// Takes away the keyframe at `frame`, if there is one, and gives its value.
-    pub fn remove(&mut self, frame: u64) -> Option<PropertyValue> {
-        let index = self.position_of(frame).ok()?;
-        Some(self.keyframes.remove(index).value)
-    }
-
-    /// The frame of the last keyframe before `frame`.
-    pub fn frame_before(&self, frame: u64) -> Option<u64> {
-        let index = self.keyframes.partition_point(|keyframe| keyframe.frame < frame);
-        index.checked_sub(1).map(|index| self.keyframes[index].frame)
-    }
-
-    /// The frame of the first keyframe after `frame`.
-    pub fn frame_after(&self, frame: u64) -> Option<u64> {
-        let index = self.keyframes.partition_point(|keyframe| keyframe.frame <= frame);
-        self.keyframes.get(index).map(|keyframe| keyframe.frame)
-    }
-
     /// The keyframes of the two parts that what they belong to is cut into when it is cut `frames_in` frames after its
     /// start (which must be more than 0): of the part before the cut, with the frames it has, and of the part from the
     /// cut on, with its frames counted from the cut. At every frame each part has what the whole had there.
@@ -103,6 +85,10 @@ impl Keyframes {
     /// value that the curve has there (the last frame of the first part, the first frame of the second). That also
     /// gives a part that had no keyframes of its own one, so that what was animated stays so. Nothing at all is cut into
     /// nothing at all.
+    ///
+    /// Nothing in the program cuts keyframes like this any more (racks cut their own keyframes: see [`crate::project::Rack::split_at`]);
+    /// it is what a rack's cut is checked against, in the tests, as arithmetic written a second time.
+    #[cfg(test)]
     #[must_use]
     pub fn split_at(&self, frames_in: u64) -> (Keyframes, Keyframes) {
         if self.is_empty() {
@@ -139,33 +125,16 @@ impl Keyframes {
         (first, second)
     }
 
-    /// The keyframes of what they belong to when it is only `length` frames long: its first part (see
-    /// [`Self::split_at`]), which has what it had at every frame it still has.
-    #[must_use]
-    pub fn truncated_to(&self, length: u64) -> Keyframes {
-        if length == 0 {
-            return Self::default();
-        }
-        self.split_at(length).0
+    /// The frame of the last keyframe before `frame`.
+    pub fn frame_before(&self, frame: u64) -> Option<u64> {
+        let index = self.keyframes.partition_point(|keyframe| keyframe.frame < frame);
+        index.checked_sub(1).map(|index| self.keyframes[index].frame)
     }
 
-    /// The keyframes of what they belong to when it is `to_length` frames long and was `from_length`: each is as far
-    /// through it as it was, as near as the frames allow. Keyframes that land on the same frame are one: the later is
-    /// kept. Nothing is kept of what is `to_length` frames or more through.
-    #[must_use]
-    pub fn rescaled(&self, from_length: u64, to_length: u64) -> Keyframes {
-        if to_length == 0 {
-            return Self::default();
-        }
-        if from_length == 0 || from_length == to_length {
-            return self.clone();
-        }
-        let mut rescaled = Self::default();
-        for keyframe in &self.keyframes {
-            let frame = (keyframe.frame as f64 * to_length as f64 / from_length as f64).round() as u64;
-            rescaled.set(frame.min(to_length - 1), keyframe.value.clone());
-        }
-        rescaled
+    /// The frame of the first keyframe after `frame`.
+    pub fn frame_after(&self, frame: u64) -> Option<u64> {
+        let index = self.keyframes.partition_point(|keyframe| keyframe.frame <= frame);
+        self.keyframes.get(index).map(|keyframe| keyframe.frame)
     }
 }
 
@@ -305,16 +274,6 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_keyframe_takes_it_and_gives_its_value_and_there_is_nothing_to_remove_where_there_is_none() {
-        let mut keyframes = keyframes_of(&[(10, 1.0), (20, 3.0)]);
-        assert_eq!(keyframes.remove(15), None);
-        assert_eq!(keyframes.remove(10), Some(number(1.0)));
-        assert_eq!(frames_of(&keyframes), vec![20]);
-        assert_eq!(keyframes.remove(20), Some(number(3.0)));
-        assert!(keyframes.is_empty());
-    }
-
-    #[test]
     fn of_two_keyframes_given_at_one_frame_the_last_is_kept() {
         let keyframes = keyframes_of(&[(5, 1.0), (5, 2.0)]);
         assert_eq!(keyframes.len(), 1);
@@ -402,71 +361,5 @@ mod tests {
             }
             assert!(first.iter().all(|keyframe| keyframe.frame < cut), "round {round}");
         }
-    }
-
-    #[test]
-    fn what_is_shortened_keeps_what_it_had_at_the_frames_it_still_has() {
-        let keyframes = keyframes_of(&[(0, 0.0), (50, 50.0)]);
-        let shorter = keyframes.truncated_to(20);
-        assert_eq!(frames_of(&shorter), vec![0, 19]);
-        for frame in 0..20 {
-            assert!(is_near(
-                as_number(shorter.value_at(frame)),
-                as_number(keyframes.value_at(frame))
-            ));
-        }
-        // Not shortened at all: the same keyframes, and nothing is added where nothing is cut off.
-        assert_eq!(keyframes.truncated_to(51), keyframes);
-        assert_eq!(keyframes.truncated_to(0), Keyframes::default());
-    }
-
-    // --- stretching ---
-
-    #[test]
-    fn keyframes_keep_their_places_in_what_they_belong_to_when_it_is_made_longer_or_shorter() {
-        let keyframes = keyframes_of(&[(0, 1.0), (50, 2.0), (99, 3.0)]);
-        assert_eq!(
-            frames_of(&keyframes.rescaled(100, 200)),
-            vec![0, 100, 198],
-            "twice as long: each is twice as far in (what is held after the last keyframe is the same as it was)"
-        );
-        assert_eq!(frames_of(&keyframes.rescaled(100, 50)), vec![0, 25, 49], "half as long");
-        assert_eq!(keyframes.rescaled(100, 100), keyframes);
-    }
-
-    #[test]
-    fn keyframes_that_land_on_the_same_frame_are_one_and_the_later_is_kept() {
-        let keyframes = keyframes_of(&[(10, 1.0), (11, 2.0), (12, 3.0)]);
-        let squeezed = keyframes.rescaled(100, 10); // frames 1, 1 and 1
-        assert_eq!(frames_of(&squeezed), vec![1]);
-        assert_eq!(squeezed.at(1), Some(&number(3.0)));
-    }
-
-    #[test]
-    fn nothing_lands_beyond_the_last_frame_whatever_the_lengths_and_the_order_stays_and_has_no_repeats() {
-        let mut random = DeterministicRandomNumbers::with_seed(40);
-        for round in 0..300 {
-            let whole = random_keyframes(&mut random);
-            let from = 60 + random.next_below(200);
-            let to = 1 + random.next_below(300);
-            let rescaled = whole.rescaled(from, to);
-            assert!(!rescaled.is_empty(), "round {round}");
-            assert!(
-                rescaled.iter().all(|keyframe| keyframe.frame < to),
-                "round {round}: {rescaled:?} for {to} frames"
-            );
-            let frames = frames_of(&rescaled);
-            assert!(
-                frames.windows(2).all(|pair| pair[0] < pair[1]),
-                "round {round}: {frames:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn rescaling_to_no_frames_leaves_nothing_and_from_no_frames_changes_nothing() {
-        let keyframes = keyframes_of(&[(3, 1.0)]);
-        assert_eq!(keyframes.rescaled(10, 0), Keyframes::default());
-        assert_eq!(keyframes.rescaled(0, 10), keyframes);
     }
 }

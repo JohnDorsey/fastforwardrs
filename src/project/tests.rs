@@ -44,7 +44,7 @@ pub(super) fn audio_source(identifier: u32, seconds: u64) -> SourceMedia {
     )
 }
 
-fn picture_source(identifier: u32, width: u32, height: u32) -> SourceMedia {
+pub(super) fn picture_source(identifier: u32, width: u32, height: u32) -> SourceMedia {
     SourceMedia::image(
         SourceMediaIdentifier::new(identifier),
         link(&format!("{identifier}.png")),

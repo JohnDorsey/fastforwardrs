@@ -6,7 +6,7 @@ use egui::Ui;
 
 use super::animatable::{self, Animatable, flag_at_the_playhead, number_at_the_playhead};
 use super::controls::{gain_slider, labelled_row, speed_slider};
-use super::{PropertiesContent, kind_box};
+use super::{PropertiesContent, effects, kind_box};
 use crate::application::commands::Command;
 use crate::project::{AnimationTarget, Gain, PropertyId, TrackId};
 
@@ -56,4 +56,5 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, track_id: Track
             commands.push(Command::SetTrackMuted { track: track_id, muted });
         }
     });
+    effects::show(ui, content, AnimationTarget::Track(track_id), None, commands);
 }

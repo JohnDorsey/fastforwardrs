@@ -15,15 +15,19 @@
 mod animatable;
 mod clip_properties;
 mod controls;
+mod effects;
 mod keyframe_buttons;
 mod keyframe_properties;
 mod kind_box;
 mod placement_controls;
+mod rack_properties;
 mod selection_list;
 mod text_properties;
 mod track_properties;
 
-// The names the buttons of the keyframes are known by to screen readers, which the tests look them up by.
+// The names the buttons of the keyframes and of the effects are known by to screen readers, which the tests look them up by.
+#[cfg(test)]
+pub use effects::{ADD_EFFECT_LABEL, REMOVE_EFFECT_LABEL};
 #[cfg(test)]
 pub use keyframe_buttons::{KeyframeButton, keyframe_button_label};
 
@@ -65,6 +69,7 @@ pub fn show(ui: &mut Ui, content: &PropertiesContent<'_>, commands: &mut Vec<Com
             Some(SelectionItem::Clip(clip)) => clip_properties::show(ui, content, clip, commands),
             Some(SelectionItem::Track(track)) => track_properties::show(ui, content, track, commands),
             Some(SelectionItem::Keyframe(keyframe)) => keyframe_properties::show(ui, content, keyframe),
+            Some(SelectionItem::Rack(rack)) => rack_properties::show(ui, content, rack),
         });
     });
 }

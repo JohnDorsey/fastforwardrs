@@ -22,11 +22,11 @@ mod drawers;
 mod flash;
 mod grip_dots;
 mod header;
-mod icons;
 mod item_dragging;
 mod playhead;
 mod rack_dragging;
 mod rack_look;
+mod rack_menus;
 mod racks;
 mod rows;
 mod ruler;
@@ -137,6 +137,8 @@ pub fn show(
     }
     state.rack_labels.clear();
     state.keyframe_grips.clear();
+    state.rack_rectangles.clear();
+    state.drawer_bottoms.clear();
     state.drop_targets.clear();
     state.pointer_message = None;
     // The drawers that are sliding go on sliding, and those of clips and tracks that are gone are forgotten.
@@ -237,6 +239,7 @@ pub fn show(
     state.timeline_area_in_the_last_frame = Some(top_row.rectangle.union(rows.inner_rect));
     state.rows_scroll_offset = rows.state.offset.y;
     state.rows_area_height = rows_scope.response.rect.height();
+    bring_the_drawer_that_is_opening_into_view(state, rows.inner_rect, &context);
     // A track dragged to the top or the bottom of the rows brings the rows beyond it into view.
     if state.track_reorder.is_some() {
         state.rows_scroll_offset += track_reordering::scroll_while_dragging_a_track(
@@ -266,6 +269,27 @@ pub fn show(
         state.track_resize = None;
         state.track_reorder = None;
     }
+}
+
+/// While a drawer that was just opened slides open, scrolls the rows down, as far as it takes for the bottom of the drawer to be
+/// in view (`visible_rows` is the part of the screen the rows are seen in): a drawer opened on a track at the bottom reaches
+/// below what was in view. It never scrolls up, and leaves the rows alone once the drawer has stopped sliding.
+fn bring_the_drawer_that_is_opening_into_view(
+    state: &mut TimelineViewState,
+    visible_rows: Rect,
+    context: &egui::Context,
+) {
+    let Some(owner) = state.drawers.revealing() else {
+        return;
+    };
+    if let Some((_, bottom)) = state.drawer_bottoms.iter().find(|(drawer, _)| *drawer == owner) {
+        let how_far_below = bottom + theme::MARGIN_UNDER_A_DRAWER_BROUGHT_INTO_VIEW - visible_rows.bottom();
+        if how_far_below > 0.0 {
+            state.rows_scroll_offset += how_far_below;
+            context.request_repaint();
+        }
+    }
+    state.drawers.stop_revealing_if_it_has_stopped_sliding();
 }
 
 /// Selects the clips that a rectangle goes round while it is dragged from an empty place, and

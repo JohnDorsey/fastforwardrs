@@ -8,9 +8,9 @@ use crate::project::tracks::{
     TrackId,
 };
 use crate::project::{
-    AnimationTarget, FrameRate, Project, PropertyId, PropertyValue, SourceAudioProperties, SourceFrameIndex,
-    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceVideoProperties, SpeedFactor,
-    SpeedIndicatorLayout, TimelineFrameIndex,
+    AnimationTarget, EffectKind, FrameRate, Project, PropertyId, PropertyValue, SourceAudioProperties,
+    SourceFrameIndex, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex, ValueKind,
 };
 use crate::test_support::DeterministicRandomNumbers;
 
@@ -209,6 +209,73 @@ pub(super) fn random_project_with_places_and_keyframes(random: &mut Deterministi
                 project
                     .set_property_at(target, property, value, at)
                     .expect("a keyframe was just made there");
+            }
+        }
+    }
+    project
+}
+
+/// A value of the kind `kind` chosen at random: a turn of the hue of up to a turn and so on either way, for the numbers.
+fn random_value_of_the_kind(random: &mut DeterministicRandomNumbers, kind: ValueKind) -> PropertyValue {
+    let unit = |random: &mut DeterministicRandomNumbers| random.next_below(1001) as f32 / 1000.0;
+    match kind {
+        ValueKind::Number => PropertyValue::Number(random.next_below(721) as f32 - 360.0),
+        ValueKind::Pair => PropertyValue::Pair(unit(random), unit(random)),
+        ValueKind::Colour => PropertyValue::Colour(TextColour::new(
+            random.next_below(256) as u8,
+            random.next_below(256) as u8,
+            random.next_below(256) as u8,
+            255,
+        )),
+        ValueKind::Flag => PropertyValue::Flag(random.next_below(2) == 0),
+        ValueKind::Words => PropertyValue::Words(format!("words {}", random.next_below(1000))),
+    }
+}
+
+/// Like [`random_project_with_places_and_keyframes`], and some of the videos, pictures and text objects in it, and some of the
+/// tracks, have some of the effects there are, with values chosen at random (what they begin with for some), some of them with
+/// keyframes. (Nothing here names an effect: each of the table is tried.)
+pub(crate) fn random_project_with_effects(random: &mut DeterministicRandomNumbers) -> Project {
+    let mut project = random_project_with_places_and_keyframes(random);
+    let total_frames = project.total_frame_count();
+    let mut targets: Vec<(AnimationTarget, u64, u64)> = Vec::new();
+    for track in project.tracks() {
+        targets.push((AnimationTarget::Track(track.id()), 0, total_frames));
+        for placement in track.placements() {
+            targets.push((
+                AnimationTarget::Clip(placement.id),
+                placement.first_timeline_frame.value(),
+                placement.timeline_frame_count(),
+            ));
+        }
+    }
+    for (target, first_frame, length) in targets {
+        for kind in EffectKind::ALL {
+            // (A sound has none of them, and neither has a track that has nothing on it to put keyframes in.)
+            if length == 0 || random.next_below(2) == 0 || project.add_effect(target, kind).is_err() {
+                continue;
+            }
+            let values_begin_as_they_are = random.next_below(4) == 0;
+            for property in kind.properties() {
+                if !values_begin_as_they_are {
+                    let value = random_value_of_the_kind(random, property.kind());
+                    project
+                        .set_property_at(target, *property, value, TimelineFrameIndex::new(first_frame))
+                        .expect("the effect was just put on");
+                }
+                if random.next_below(2) == 0 {
+                    continue;
+                }
+                for _ in 0..1 + random.next_below(3) {
+                    let at = TimelineFrameIndex::new(first_frame + random.next_below(length));
+                    let value = random_value_of_the_kind(random, property.kind());
+                    project
+                        .add_keyframe(target, *property, at)
+                        .expect("the frame is in what it is for");
+                    project
+                        .set_property_at(target, *property, value, at)
+                        .expect("a keyframe was just made there");
+                }
             }
         }
     }

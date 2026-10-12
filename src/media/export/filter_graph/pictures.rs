@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use super::{
     PictureGraphSpecification, VIDEO_OUTPUT_LABEL, format_number, numbered_labels, renumber_pictures_filter, statement,
 };
+use crate::colour_effects::ColourMatrix;
 use crate::project::{FrameRate, SpeedFactor};
 
 const JOINED_VIDEO_LABEL: &str = "joined_video";
@@ -76,6 +77,8 @@ pub enum LayerContentToExport {
 pub struct LayerToExport {
     pub content: LayerContentToExport,
     pub place: PlaceToExport,
+    /// How the colours of its picture are changed by its effects, once it is scaled to its place and before it is turned.
+    pub colour: ColourMatrix,
 }
 
 /// A stretch of the finished picture.
@@ -151,12 +154,12 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
             LayerContentToExport::Video(video)
                 if !first.place.is_turned() && first.place.is_inside_the_picture(width, height) =>
             {
-                Some((video, first.place))
+                Some((video, first.place, first.colour))
             }
             _ => None,
         });
         let (mut current_label, first_layer_to_lay_over) = match back_video {
-            Some((video, place)) => {
+            Some((video, place, colour)) => {
                 let label = if layers.len() == 1 {
                     finished_label.clone()
                 } else {
@@ -167,7 +170,7 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
                     &format!(
                         "{},{}",
                         cut_and_retime_filters(frame_rate, &video),
-                        fit_to_place_filters(place, width, height)
+                        fit_to_place_filters(place, colour, width, height)
                     ),
                     &[&label],
                 ));
@@ -202,6 +205,9 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
                         layer.place.width_in_pixels,
                         layer.place.height_in_pixels
                     );
+                    if !layer.colour.changes_nothing() {
+                        filters.push_str(&format!(",{}", layer.colour.ffmpeg_filter()));
+                    }
                     if layer.place.is_turned() {
                         filters.push_str(&format!(",{}", turn_filters(layer.place)));
                     }
@@ -226,6 +232,9 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
                             "scale={}:{},setsar=1",
                             layer.place.width_in_pixels, layer.place.height_in_pixels
                         ));
+                    }
+                    if !layer.colour.changes_nothing() {
+                        filters.push(layer.colour.ffmpeg_filter());
                     }
                     if layer.place.is_turned() {
                         filters.push(turn_filters(layer.place));
@@ -273,14 +282,17 @@ pub(super) fn picture_statements(specification: &PictureGraphSpecification) -> V
     statements
 }
 
-/// The filters that scale a picture to the box of `place` with square pixels, and, if the box is
-/// not all of the picture, put it in its place on black. (The box must be inside the picture.)
-fn fit_to_place_filters(place: PlaceToExport, picture_width: u32, picture_height: u32) -> String {
+/// The filters that scale a picture to the box of `place` with square pixels, change its colours as `colour` says (if it changes
+/// any), and, if the box is not all of the picture, put it in its place on black. (The box must be inside the picture.)
+fn fit_to_place_filters(place: PlaceToExport, colour: ColourMatrix, picture_width: u32, picture_height: u32) -> String {
     debug_assert!(
         place.is_inside_the_picture(picture_width, picture_height),
         "{place:?} cannot be padded to {picture_width}x{picture_height}"
     );
-    let scaled = format!("scale={}:{},setsar=1", place.width_in_pixels, place.height_in_pixels);
+    let mut scaled = format!("scale={}:{},setsar=1", place.width_in_pixels, place.height_in_pixels);
+    if !colour.changes_nothing() {
+        scaled.push_str(&format!(",{}", colour.ffmpeg_filter()));
+    }
     let fills_the_picture = place.left_in_pixels == 0
         && place.top_in_pixels == 0
         && place.width_in_pixels == picture_width

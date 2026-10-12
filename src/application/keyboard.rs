@@ -4,7 +4,7 @@
 //! * **Space** plays the video, or pauses it while it is playing.
 //! * **S** cuts at the current frame: the selected clips that are there, and otherwise every clip
 //!   that is there, on every track.
-//! * **Delete** (or **Backspace**) takes the selected clips off their tracks, and the selected keyframes away.
+//! * **Delete** (or **Backspace**) takes the selected clips off their tracks, and the selected keyframes and racks away.
 //! * **Escape** deselects.
 //! * **Ctrl+Z** undoes the latest edit, and **Ctrl+Y** (or **Ctrl+Shift+Z**) does it again.
 //! * **Left** and **Right** move the current frame back or forward by one frame, while paused or
@@ -17,7 +17,7 @@
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Popup};
 
 use super::commands::Command;
-use crate::project::{ClipId, KeyframeId, TimelineFrameIndex};
+use crate::project::{ClipId, KeyframeId, RackId, TimelineFrameIndex};
 
 /// The key that plays and pauses.
 const PLAY_OR_PAUSE_KEY: Key = Key::Space;
@@ -45,6 +45,8 @@ pub struct KeyboardState {
     pub selected_clips: Vec<ClipId>,
     /// The selected keyframes.
     pub selected_keyframes: Vec<KeyframeId>,
+    /// The selected racks of keyframes.
+    pub selected_racks: Vec<RackId>,
     /// The selected clips that are at the current frame.
     pub selected_clips_at_the_current_frame: Vec<ClipId>,
     /// Whether there is an edit to undo, and one that was undone to redo.
@@ -95,9 +97,12 @@ pub fn commands_for_the_keys_pressed(context: &Context, state: KeyboardState) ->
             .map(|key| input.count_and_consume_key(Modifiers::NONE, key))
             .sum::<usize>()
             > 0;
-        // (The keyframes first: those that are in the drawers of the clips that go go with them.)
+        // (The keyframes and the racks first: those that are in the drawers of the clips that go go with them.)
         if delete_pressed && !state.selected_keyframes.is_empty() {
             commands.push(Command::DeleteKeyframes(state.selected_keyframes.clone()));
+        }
+        if delete_pressed && !state.selected_racks.is_empty() {
+            commands.push(Command::DeleteRacks(state.selected_racks.clone()));
         }
         if delete_pressed && !state.selected_clips.is_empty() {
             commands.push(Command::DeleteClips(state.selected_clips.clone()));
@@ -133,6 +138,7 @@ mod tests {
             is_playing: false,
             selected_clips: Vec::new(),
             selected_keyframes: Vec::new(),
+            selected_racks: Vec::new(),
             selected_clips_at_the_current_frame: Vec::new(),
             timeline_is_empty: false,
             can_undo: false,
@@ -261,6 +267,42 @@ mod tests {
         assert_eq!(
             pressing(Key::Backspace, only_keyframes),
             vec![Command::DeleteKeyframes(vec![keyframe(7)])]
+        );
+    }
+
+    #[test]
+    fn delete_takes_away_the_selected_racks_after_the_keyframes_and_before_the_clips() {
+        let racks = vec![
+            crate::project::RackId::new(crate::project::TrackId::new(0), 1),
+            crate::project::RackId::new(crate::project::TrackId::new(0), 4),
+        ];
+        let keyframe = KeyframeId::new(racks[0], 0);
+        let everything = KeyboardState {
+            selected_clips: vec![location(2)],
+            selected_keyframes: vec![keyframe],
+            selected_racks: racks.clone(),
+            ..state()
+        };
+        assert_eq!(
+            pressing(Key::Delete, everything),
+            vec![
+                Command::DeleteKeyframes(vec![keyframe]),
+                Command::DeleteRacks(racks.clone()),
+                Command::DeleteClips(vec![location(2)])
+            ]
+        );
+        let only_racks = KeyboardState {
+            selected_racks: racks.clone(),
+            ..state()
+        };
+        assert_eq!(
+            pressing(Key::Backspace, only_racks.clone()),
+            vec![Command::DeleteRacks(racks)]
+        );
+        assert_eq!(
+            pressing(Key::Space, only_racks),
+            vec![Command::Play],
+            "the other keys are not about racks"
         );
     }
 

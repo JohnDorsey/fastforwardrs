@@ -52,7 +52,7 @@ pub(super) fn keyframe_at(window: &Window, target: AnimationTarget, property: Pr
         .locate_the_keyframe_at(target, property, at)
         .expect("a keyframe is there");
     let rack = project.located_rack(location.rack).unwrap().rack;
-    rack.id_of(rack.at(location.frame_in_the_rack).unwrap())
+    rack.at(location.frame_in_the_rack).unwrap().id()
 }
 
 pub(super) fn frame_of(window: &Window, keyframe: KeyframeId) -> u64 {
@@ -322,8 +322,8 @@ fn a_keyframe_in_the_drawer_of_a_clip_that_is_dragged_goes_with_the_clip_and_is_
     window.click(window.middle_of_the_track_at(90));
     window.click_with_control(where_it_is(&window, keyframe));
     let place_in_the_drawer = |window: &Window| {
-        let located = window.application().project().located_rack(keyframe.rack()).unwrap();
-        located.rack.keyframe(keyframe).unwrap().frame
+        let located = window.application().project().locate_keyframe(keyframe).unwrap();
+        located.keyframe.frame
     };
     let before = place_in_the_drawer(&window);
 

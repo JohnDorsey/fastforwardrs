@@ -12,6 +12,8 @@
 //!   for programs' settings.
 //! * [`media`] runs the ffmpeg tools: probing videos, decoding preview frames, making timeline
 //!   thumbnails and exporting.
+//! * [`colour_effects`] is the arithmetic of the effects that change the colours of a picture, and
+//!   what asks ffmpeg to do the same, for the preview and the export alike.
 //! * [`speed_indicator`] draws and positions the fast-forward symbol, for the preview and the
 //!   export alike.
 //! * [`playback`] runs the live preview: the clock, and getting the right picture for each frame.
@@ -20,6 +22,7 @@
 
 pub mod application;
 mod atomic_file;
+pub mod colour_effects;
 pub mod composition;
 pub mod media;
 pub mod playback;

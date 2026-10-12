@@ -20,9 +20,6 @@ pub const MOST_TRACKS_SHOWN_AT_ONCE: usize = 3;
 /// rows to be in (it is always where it is, so that the strips do not change width when it comes), in points.
 pub const SCROLL_BAR_ROOM: f32 = 12.0;
 
-/// How wide across the round button that adds a track is, in points.
-pub const ADD_TRACK_BUTTON_DIAMETER: f32 = 34.0;
-
 /// How much the corners of the clips on the tracks are rounded, in points. (A clip too narrow for
 /// this much rounding is rounded as far as it can be, which is by half its width.)
 pub const CLIP_CORNER_RADIUS: u8 = 27;
@@ -32,6 +29,9 @@ pub const CLIP_CORNER_RADIUS: u8 = 27;
 pub const RACK_HEIGHT: f32 = 16.0;
 pub const SPACE_BETWEEN_RACKS: f32 = 4.0;
 pub const SPACE_ABOVE_THE_RACKS: f32 = 8.0;
+
+/// How much room is left under the bottom of a drawer that the rows are scrolled to bring into view, in points.
+pub const MARGIN_UNDER_A_DRAWER_BROUGHT_INTO_VIEW: f32 = 8.0;
 
 /// How far the racks in a keyframe crate keep from the top and the bottom of it when it is tall enough for them to be in
 /// the middle, and how little room there is above the first when it is not (the crate then reaches below the strip, and
@@ -112,9 +112,10 @@ pub const MISSING_CLIP_TEXT: Color32 = Color32::from_rgb(232, 196, 198);
 /// The box at the left of a track, with its title.
 pub const TRACK_HEADER_BACKGROUND: Color32 = Color32::from_rgb(40, 43, 49);
 
-/// What a drawer on a clip is filled with, and the button that opens it (which is over a clip, whatever it looks
-/// like, so it dims what is behind it).
-pub const DRAWER_BACKGROUND: Color32 = Color32::from_rgb(32, 34, 40);
+/// What a drawer on a clip is filled with: a grey that is plainly lighter than the strip it hangs from and than the box of
+/// the track beside it (and so than the racks in it, which are dark), so that the drawers stand out from what is round them. And
+/// the button that opens it (which is over a clip, whatever it looks like, so it dims what is behind it).
+pub const DRAWER_BACKGROUND: Color32 = Color32::from_rgb(62, 66, 74);
 pub const DRAWER_BUTTON_FILL: Color32 = Color32::from_black_alpha(150);
 pub const DRAWER_BUTTON_FILL_HOVERED: Color32 = Color32::from_black_alpha(205);
 pub const DRAWER_BUTTON_OUTLINE: Color32 = Color32::from_rgba_premultiplied(70, 70, 70, 70);
@@ -191,6 +192,33 @@ mod tests {
     fn the_name_on_a_picture_clip_and_the_words_of_a_text_clip_can_be_read() {
         assert!(contrast_ratio(IMAGE_CLIP_BACKGROUND, IMAGE_CLIP_TEXT) > 7.0);
         assert!(contrast_ratio(TEXT_CLIP_BACKGROUND, TEXT_CLIP_TEXT) > 4.5);
+    }
+
+    #[test]
+    fn a_drawer_is_a_lighter_grey_than_the_strip_it_hangs_from_the_box_of_the_track_and_the_racks_in_it() {
+        let grey = |colour: Color32| {
+            let (_, saturation, lightness) = hue_saturation_lightness(colour);
+            assert!(saturation < 0.15, "a grey, not a colour: {colour:?}");
+            lightness
+        };
+        let drawer = grey(DRAWER_BACKGROUND);
+        assert!(drawer > grey(TRACK_BACKGROUND) + 0.06, "lighter than the strip");
+        assert!(
+            drawer > grey(TRACK_HEADER_BACKGROUND) + 0.04,
+            "and than the box of the track"
+        );
+        assert!(
+            drawer > grey(RACK_BACKGROUND) + 0.15,
+            "far lighter than the racks, which are dark in it"
+        );
+        assert!(
+            drawer < 0.4,
+            "still a dark grey, as the rest of the window is: {drawer}"
+        );
+        assert!(
+            contrast_ratio(DRAWER_BACKGROUND, RACK_BACKGROUND) > 1.6,
+            "the racks can be told from the drawer"
+        );
     }
 
     #[test]

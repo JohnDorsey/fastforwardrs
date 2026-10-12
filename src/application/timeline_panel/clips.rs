@@ -323,7 +323,7 @@ fn draw_picture_of_a_picture_clip(
         } else {
             1.0
         };
-        let texture = textures.image_picture(ui.ctx(), source, picture);
+        let texture = textures.image_picture_for_the_timeline(ui.ctx(), source, picture);
         draw_piece_of_clip(
             painter,
             &shape,

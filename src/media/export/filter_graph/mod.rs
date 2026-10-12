@@ -143,6 +143,7 @@ fn statement(input_labels: &[&str], filters: &str, output_labels: &[impl AsRef<s
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::colour_effects::ColourMatrix;
     use crate::project::SpeedFactor;
 
     fn speed(factor: u32) -> SpeedFactor {
@@ -166,6 +167,7 @@ mod tests {
                     height_in_pixels: 180,
                     turn_in_degrees: 0.0,
                 },
+                colour: ColourMatrix::NOTHING_CHANGES,
             }],
         }
     }

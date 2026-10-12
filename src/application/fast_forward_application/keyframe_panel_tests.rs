@@ -13,7 +13,8 @@ use crate::application::commands::Command;
 use crate::application::properties_panel::{KeyframeButton, keyframe_button_label};
 use crate::application::theme;
 use crate::project::{
-    AnimationTarget, CanvasArea, ClipId, Gain, Placement, PropertyId, PropertyValue, TextObject, TimelineFrameIndex,
+    AnimationTarget, CanvasArea, ClipId, EffectKind, Gain, Placement, PropertyId, PropertyValue, TextObject,
+    TimelineFrameIndex,
 };
 
 fn frame(number: u64) -> TimelineFrameIndex {
@@ -495,26 +496,54 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
             .query_by_label(&the_stopwatch_of(property, false))
             .is_some()
     };
+    // (A value of an effect has its buttons only when what is selected has the effect.)
+    let has_what_the_property_is_of = |window: &Window, target: AnimationTarget, property: PropertyId| {
+        property
+            .effect()
+            .is_none_or(|effect| window.application().project().has_the_effect(target, effect))
+    };
 
-    for clip in [video, sound, picture, text] {
-        select(&mut window, clip);
-        let kind = window.application().project().placement_of(clip).unwrap().clip.kind();
+    // Before an effect is put on anything, and then with every effect there is put on all that can have it.
+    for effects_are_on in [false, true] {
+        for clip in [video, sound, picture, text] {
+            let target = AnimationTarget::Clip(clip);
+            let kind = window.application().project().placement_of(clip).unwrap().clip.kind();
+            if effects_are_on {
+                for effect in EffectKind::ALL
+                    .into_iter()
+                    .filter(|effect| effect.applies_to_a_clip_of_kind(kind))
+                {
+                    window.do_this(Command::AddEffect { target, kind: effect });
+                }
+            }
+            select(&mut window, clip);
+            for property in PropertyId::ALL {
+                assert_eq!(
+                    has_the_buttons_of(&window, property),
+                    property.applies_to_a_clip_of_kind(kind) && has_what_the_property_is_of(&window, target, property),
+                    "a {kind:?} clip and its {property:?} (effects on: {effects_are_on}): the panel and the table of properties disagree"
+                );
+            }
+        }
+
+        let track = window.application().project().tracks()[0].id();
+        if effects_are_on {
+            for effect in EffectKind::ALL.into_iter().filter(|effect| effect.applies_to_a_track()) {
+                window.do_this(Command::AddEffect {
+                    target: AnimationTarget::Track(track),
+                    kind: effect,
+                });
+            }
+        }
+        window.select_the_track_at(0);
         for property in PropertyId::ALL {
             assert_eq!(
                 has_the_buttons_of(&window, property),
-                property.applies_to_a_clip_of_kind(kind),
-                "a {kind:?} clip and its {property:?}: the panel and the table of properties disagree"
+                property.applies_to_a_track()
+                    && has_what_the_property_is_of(&window, AnimationTarget::Track(track), property),
+                "a track and its {property:?} (effects on: {effects_are_on}): the panel and the table of properties disagree"
             );
         }
-    }
-
-    window.select_the_track_at(0);
-    for property in PropertyId::ALL {
-        assert_eq!(
-            has_the_buttons_of(&window, property),
-            property.applies_to_a_track(),
-            "a track and its {property:?}: the panel and the table of properties disagree"
-        );
     }
 }
 

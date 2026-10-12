@@ -519,15 +519,15 @@ fn selecting_a_keyframe_is_not_an_edit_and_the_keyframe_is_where_it_was() {
     assert_eq!(window.application().project(), &before);
     assert!(!window.application().has_unsaved_changes());
     let id = selected_keyframes(&window)[0];
-    assert!(
+    assert_eq!(
         window
             .application()
             .project()
-            .located_rack(id.rack())
+            .locate_keyframe(id)
             .unwrap()
-            .rack
-            .at(10)
-            .is_some(),
+            .keyframe
+            .frame,
+        10,
         "the keyframe is where it was"
     );
 }
@@ -543,7 +543,7 @@ fn a_keyframe_can_be_found_by_screen_readers_by_a_name_that_says_which_it_is() {
         .unwrap()
         .racks()[0]
         .clone();
-    let id = rack.id_of(&rack.keyframes()[0]);
+    let id = rack.keyframes()[0].id();
 
     let found = window.harness.get_by_label(&keyframe_label(id)).rect();
 
@@ -611,6 +611,7 @@ fn a_rack_that_is_in_a_drawer_of_something_else_has_a_label_that_says_what_it_an
         rack,
         to: RackDestination::Drawer(AnimationTarget::Track(track)),
         shift_in_frames: 0,
+        slot: None,
     });
     window.application_mut().note_everything_is_saved();
     let button = window

@@ -1,9 +1,9 @@
 //! Tests of the keyframes of a track and of its clips: where they are kept, and what happens to them when a clip is
 //! cut, changes its length, is deleted or moved.
 
-use super::tests::{THE_TRACK, clip_id, frame, picture, sound, spans, speed, text, track_of, video};
+use super::tests::{clip_id, frame, picture, sound, spans, speed, text, track_of, video};
 use super::*;
-use crate::project::{Animation, AnimationTarget, Drawer, FrameRate, PropertyId, PropertyValue, Rack, RackId};
+use crate::project::{AnimationTarget, Drawer, Effects, FrameRate, PropertyId, PropertyValue, Rack, RackId};
 use crate::test_support::DeterministicRandomNumbers;
 
 fn db(decibels: f32) -> PropertyValue {
@@ -96,19 +96,6 @@ fn a_keyframe_can_be_put_on_a_clip_replaced_and_taken_away_again() {
         .unwrap();
     assert_eq!(gain_of(&track, clip_id(0), 20), -9.0, "in place of the one there");
     assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![20]);
-
-    let removed = track
-        .remove_clip_keyframe(clip_id(0), PropertyId::Gain, 20)
-        .unwrap()
-        .unwrap();
-    assert_eq!(removed.value, db(-9.0));
-    assert!(removed.was_the_last);
-    assert!(track.placement_of(clip_id(0)).unwrap().own_animation().is_empty());
-    assert_eq!(
-        track.remove_clip_keyframe(clip_id(0), PropertyId::Gain, 20),
-        Ok(None),
-        "none there now"
-    );
 }
 
 #[test]
@@ -175,13 +162,6 @@ fn a_track_has_keyframes_of_its_own_for_the_properties_it_has() {
     assert!(!track.set_own_keyframe(PropertyId::Position, frame(10), PropertyValue::Pair(0.0, 0.0)));
     assert!(!track.set_own_keyframe(PropertyId::Gain, frame(11), PropertyValue::Flag(true)));
     assert_eq!(track.own_animation().keyframes_of(PropertyId::Gain).unwrap().len(), 1);
-    assert!(
-        track
-            .remove_own_keyframe(PropertyId::Gain, frame(10))
-            .unwrap()
-            .was_the_last
-    );
-    assert_eq!(track.remove_own_keyframe(PropertyId::Gain, frame(10)), None);
 }
 
 // --- cutting ---
@@ -339,7 +319,7 @@ fn a_clip_that_is_pushed_along_by_another_that_got_longer_keeps_its_keyframes_as
 }
 
 #[test]
-fn a_text_object_that_is_made_shorter_loses_the_keyframes_it_no_longer_has_a_frame_for_and_keeps_its_values() {
+fn a_text_object_that_is_made_shorter_brings_in_the_keyframes_it_no_longer_has_a_frame_for_with_their_values() {
     let mut track = track_of(vec![(0, text(100))]);
     track
         .set_clip_keyframe(clip_id(0), PropertyId::Rotation, 0, db(0.0))
@@ -355,12 +335,35 @@ fn a_text_object_that_is_made_shorter_loses_the_keyframes_it_no_longer_has_a_fra
             .unwrap()
             .own_animation()
             .value_at(PropertyId::Rotation, 49),
-        Some(db(49.0)),
-        "what it was at its last frame"
+        Some(db(80.0)),
+        "the keyframe that was at 80 is at its last frame, and has the value it had"
     );
-    // Made longer again, it has what it has: nothing comes back.
+    // Made longer again, it has what it has: the keyframes do not go back to where they were.
     assert_eq!(track.set_clip_duration(clip_id(0), 100), Ok(100));
     assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Rotation), vec![0, 49]);
+    assert_keyframes_are_inside_their_clips(&track);
+}
+
+#[test]
+fn a_text_object_made_shorter_loses_keyframes_only_when_it_has_more_of_them_than_frames() {
+    let mut track = track_of(vec![(0, text(100))]);
+    for frame in [0, 20, 40, 60, 80] {
+        track
+            .set_clip_keyframe(clip_id(0), PropertyId::Rotation, frame, db(frame as f32))
+            .unwrap();
+    }
+    assert_eq!(track.set_clip_duration(clip_id(0), 6), Ok(6));
+    assert_eq!(
+        keyframe_frames(&track, clip_id(0), PropertyId::Rotation),
+        vec![0, 2, 3, 4, 5],
+        "five keyframes in six frames: none is lost, and the four that were cut off are against the end"
+    );
+    assert_eq!(track.set_clip_duration(clip_id(0), 3), Ok(3));
+    assert_eq!(
+        keyframe_frames(&track, clip_id(0), PropertyId::Rotation),
+        vec![0, 1, 2],
+        "five in three: the first three are what is left"
+    );
     assert_keyframes_are_inside_their_clips(&track);
 }
 
@@ -406,6 +409,7 @@ fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stre
         id: clip_id(7),
         clip: video(0, 100, 1),
         drawer: a_drawer_with_the_loudness_of(clip_id(7), &[(60, -6.0)]),
+        effects: Effects::none(),
         start: 0,
         frames_it_lasted_before: 100,
     }])
@@ -421,6 +425,7 @@ fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stre
         drawer: fast.entries()[0]
             .drawer()
             .with_each_rack_changed(|rack| rack.rescaled(50, 100)),
+        effects: Effects::none(),
         start: 5,
         frames_it_lasted_before: 100,
     }])
@@ -463,14 +468,152 @@ fn a_track_counted_again_at_another_frame_rate_has_its_keyframes_counted_again_t
     assert_keyframes_are_inside_their_clips(&at_60);
 }
 
+// --- no keyframe is lost while there is a frame for it ---
+
+/// A track with a video of 100 frames (clip 0) whose loudness has a keyframe at each of `frames`, the values 0, 1, 2 and so on.
+fn track_with_a_video_animated_at(frames: &[u64]) -> Track {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    for (number, at) in frames.iter().enumerate() {
+        track
+            .set_clip_keyframe(clip_id(0), PropertyId::Gain, *at, db(number as f32))
+            .unwrap();
+    }
+    track
+}
+
+/// The values of the loudness keyframes of clip 0, in the order they are in.
+fn values_of_the_keyframes_of_the_first_clip(track: &Track) -> Vec<f32> {
+    track
+        .placement_of(clip_id(0))
+        .unwrap()
+        .own_animation()
+        .keyframes_of(PropertyId::Gain)
+        .map(|keyframes| {
+            keyframes
+                .iter()
+                .map(|keyframe| match keyframe.value {
+                    PropertyValue::Number(decibels) => decibels,
+                    ref other => panic!("not a number: {other:?}"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The bug of this round, for a clip that is sped up: keyframes that were close together landed on one frame, and all but one of
+/// them were lost, though the clip had room for every one.
 #[test]
-fn a_track_made_from_clips_with_keyframes_past_their_ends_has_those_cut_off() {
-    let mut animation = Animation::default();
-    animation.set_keyframe(PropertyId::Gain, 10, db(1.0));
-    animation.set_keyframe(PropertyId::Gain, 500, db(5.0));
-    let track = Track::new(THE_TRACK, "track").with_animated_clips([(0, video(0, 50, 1), animation)]);
+fn a_clip_that_is_sped_up_keeps_keyframes_that_are_close_together_each_at_a_frame_of_its_own() {
+    let mut track = track_with_a_video_animated_at(&[40, 41, 42, 43, 44]);
+
+    track.set_clip_speed(clip_id(0), speed(4)).unwrap();
+
+    assert_eq!(spans(&track), vec![(0, 25)]);
+    assert_eq!(
+        keyframe_frames(&track, clip_id(0), PropertyId::Gain),
+        vec![9, 10, 11, 12, 13],
+        "round the frame they were all at (10 or 11 of the 25)"
+    );
+    assert_eq!(
+        values_of_the_keyframes_of_the_first_clip(&track),
+        vec![0.0, 1.0, 2.0, 3.0, 4.0]
+    );
     assert_keyframes_are_inside_their_clips(&track);
-    assert_eq!(keyframe_frames(&track, clip_id(0), PropertyId::Gain), vec![10, 49]);
+}
+
+#[test]
+fn a_track_that_is_made_faster_keeps_the_keyframes_of_its_clips_that_are_close_together_each_at_a_frame_of_its_own() {
+    let mut track = track_with_a_video_animated_at(&[40, 41, 42, 43, 44]);
+
+    track.set_speed(speed(4));
+
+    assert_eq!(spans(&track), vec![(0, 25)]);
+    assert_eq!(
+        keyframe_frames(&track, clip_id(0), PropertyId::Gain),
+        vec![9, 10, 11, 12, 13]
+    );
+    assert_eq!(
+        values_of_the_keyframes_of_the_first_clip(&track),
+        vec![0.0, 1.0, 2.0, 3.0, 4.0]
+    );
+}
+
+#[test]
+fn a_clip_arranged_on_a_track_that_plays_faster_keeps_keyframes_that_are_close_together_each_at_a_frame_of_its_own() {
+    let mut fast = Track::new(TrackId::new(2), "fast").with_speed(speed(2));
+    fast.arrange_clips(vec![ClipToArrange {
+        id: clip_id(7),
+        clip: video(0, 100, 1),
+        drawer: a_drawer_with_the_loudness_of(clip_id(7), &[(40, 0.0), (41, 1.0), (42, 2.0), (43, 3.0), (44, 4.0)]),
+        effects: Effects::none(),
+        start: 0,
+        frames_it_lasted_before: 100,
+    }])
+    .unwrap();
+
+    assert_eq!(spans(&fast), vec![(0, 50)]);
+    assert_eq!(
+        keyframe_frames(&fast, clip_id(7), PropertyId::Gain),
+        vec![19, 20, 21, 22, 23]
+    );
+}
+
+#[test]
+fn a_track_counted_again_at_a_lower_frame_rate_keeps_keyframes_that_are_close_together_each_at_a_frame_of_its_own() {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    for (number, at) in [50, 51, 52, 53, 54].into_iter().enumerate() {
+        track
+            .set_clip_keyframe(clip_id(0), PropertyId::Gain, at, db(number as f32))
+            .unwrap();
+    }
+    // The keyframes of the track itself are at the frames of the timeline: four in a row, which a lower rate puts on three frames.
+    for (number, at) in [100, 101, 102, 103].into_iter().enumerate() {
+        track.set_own_keyframe(PropertyId::Gain, frame(at), db(number as f32));
+    }
+
+    let at_24 = track.retimed(FrameRate::new(30, 1).unwrap(), FrameRate::new(24, 1).unwrap());
+
+    assert_eq!(spans(&at_24), vec![(0, 80)]);
+    assert_eq!(
+        keyframe_frames(&at_24, clip_id(0), PropertyId::Gain),
+        vec![40, 41, 42, 43, 44],
+        "the one that would have been on top of the one before it is put after it"
+    );
+    assert_eq!(
+        values_of_the_keyframes_of_the_first_clip(&at_24),
+        vec![0.0, 1.0, 2.0, 3.0, 4.0]
+    );
+    let own: Vec<u64> = at_24
+        .own_animation()
+        .keyframes_of(PropertyId::Gain)
+        .unwrap()
+        .iter()
+        .map(|keyframe| keyframe.frame)
+        .collect();
+    assert_eq!(own, vec![80, 81, 82, 83], "the four of the track are still four");
+}
+
+#[test]
+fn the_keyframes_of_the_track_itself_are_counted_again_however_far_along_the_timeline_they_are() {
+    let mut track = track_of(vec![(0, video(0, 100, 1))]);
+    for at in [3000, 3001, 3002, 3003, 30_000] {
+        track.set_own_keyframe(PropertyId::Gain, frame(at), db(at as f32));
+    }
+
+    let at_24 = track.retimed(FrameRate::new(30, 1).unwrap(), FrameRate::new(24, 1).unwrap());
+
+    let own: Vec<u64> = at_24
+        .own_animation()
+        .keyframes_of(PropertyId::Gain)
+        .unwrap()
+        .iter()
+        .map(|keyframe| keyframe.frame)
+        .collect();
+    assert_eq!(
+        own,
+        vec![2400, 2401, 2402, 2403, 24_000],
+        "the four in a row are four in a row (3000 to 3003 are 2400 to 2402.4), and the track has no end for the last to be held to"
+    );
 }
 
 // --- whatever is done ---

@@ -142,6 +142,7 @@ impl FastForwardApplication {
         let path = self.file_chooser.choose_where_to_save(&FileQuestion {
             title: "Export the video",
             suggested_file_name: Some(&suggested_file_name),
+            starting_directory: None,
             kinds: &[FileKind {
                 name: "Video files",
                 extensions: &EXPORT_FILE_EXTENSIONS,

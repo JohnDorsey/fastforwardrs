@@ -170,6 +170,44 @@ pub fn test_video(toolchain: &FfmpegToolchain, specification: &TestVideoSpecific
     }
 }
 
+/// A video of 2 seconds (60 frames at 30 a second) of one flat colour, 320 by 180 pixels, lossless, made in `folder`.
+pub fn flat_colour_video(toolchain: &FfmpegToolchain, folder: &Path, (red, green, blue): (u8, u8, u8)) -> PathBuf {
+    let path = folder.join(format!("flat_{red}_{green}_{blue}.mp4"));
+    let output = Command::new(toolchain.ffmpeg_path())
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+        ])
+        .arg(format!("color=c=0x{red:02X}{green:02X}{blue:02X}:s=320x180:r=30:d=2"))
+        .args([
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-qp",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "30",
+        ])
+        .arg(&path)
+        .output()
+        .expect("could not run ffmpeg to make a video");
+    assert!(
+        output.status.success(),
+        "making a flat colour video failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    path
+}
+
 /// The standard 20 second, 30 frames per second test video.
 pub fn counter_video(toolchain: &FfmpegToolchain) -> TestVideo {
     test_video(toolchain, &TestVideoSpecification::COUNTER)

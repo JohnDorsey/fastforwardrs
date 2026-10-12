@@ -12,11 +12,15 @@ pub(super) const KIND_NAME: &str = "Keyframe";
 
 /// What is said of a keyframe that is in the project: what its property is, of what, and when it is at.
 pub(super) fn description(content: &PropertiesContent<'_>, keyframe: KeyframeId) -> Option<(String, String)> {
-    let located = content.project.located_rack(keyframe.rack())?;
-    let point = located.rack.keyframe(keyframe)?;
-    let at = TimelineFrameIndex::new(located.timeline_frame_of(point.frame));
+    let located = content.project.locate_keyframe(keyframe)?;
+    let at = TimelineFrameIndex::new(located.timeline_frame());
     Some((
-        what_a_rack_is_called(content.project, located.rack, located.owner, content.source_looks),
+        what_a_rack_is_called(
+            content.project,
+            located.rack.rack,
+            located.rack.owner,
+            content.source_looks,
+        ),
         format_timecode(at, content.project.frame_rate()),
     ))
 }

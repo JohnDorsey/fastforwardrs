@@ -1,8 +1,8 @@
 //! Tests of how keyframes are saved in a project file and read back.
 
 use super::tests::{
-    CURRENT_VERSION_LINE, assert_same_content, project_with_everything, reason_for_unreadable_project, saved,
-    valid_text_with,
+    assert_same_content, current_version_line, project_with_everything, reason_for_unreadable_project, saved,
+    valid_text_with, version_line,
 };
 use super::*;
 use crate::project::{AnimationTarget, TextColour};
@@ -18,6 +18,7 @@ fn project_with_keyframes() -> Project {
     let sound = project.tracks()[1].entries()[0].id();
     let text = project.tracks()[0].entries()[0].id();
     let music_track = project.tracks()[1].id();
+    let text_track = project.tracks()[0].id();
     let clip = AnimationTarget::Clip;
 
     make_a_keyframe(
@@ -61,6 +62,29 @@ fn project_with_keyframes() -> Project {
         PropertyId::Rotation,
         20,
         PropertyValue::Number(-45.5),
+    );
+
+    // (The hue shift of the video is turned a turn and a quarter between its keyframes, which is more than the colours go round.)
+    make_a_keyframe(
+        &mut project,
+        clip(video),
+        PropertyId::HueShift,
+        15,
+        PropertyValue::Number(-90.0),
+    );
+    make_a_keyframe(
+        &mut project,
+        clip(video),
+        PropertyId::HueShift,
+        75,
+        PropertyValue::Number(450.0),
+    );
+    make_a_keyframe(
+        &mut project,
+        AnimationTarget::Track(text_track),
+        PropertyId::HueShift,
+        130,
+        PropertyValue::Number(10.0),
     );
 
     make_a_keyframe(
@@ -372,7 +396,7 @@ fn numbers_of_keyframes_are_written_as_short_as_the_other_numbers_of_the_file_ar
 
 #[test]
 fn a_file_of_the_version_before_keyframes_loads_as_a_project_with_nothing_animated() {
-    let text = valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 5");
+    let text = valid_text_with(&current_version_line(), &version_line(5));
     let project = project_from_json_text(&text).unwrap();
     assert!(project.tracks()[0].own_animation().is_empty());
     assert!(
@@ -428,7 +452,7 @@ fn a_file_of_version_6_has_the_keyframes_in_an_animation_object_which_is_read_as
         with_the_racks_in_order(&saved(&project))
     );
     assert!(
-        saved(&loaded).contains("\"file_format_version\": 7"),
+        saved(&loaded).contains(&current_version_line()),
         "it is written the way the version of today writes it"
     );
     assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
@@ -542,7 +566,7 @@ fn a_rack_of_what_is_not_in_the_file_is_refused_and_says_which() {
 }
 
 #[test]
-fn a_drawer_that_has_two_racks_of_one_property_of_one_thing_is_refused() {
+fn a_drawer_that_has_two_racks_of_one_property_of_one_thing_is_loaded_with_both_and_they_are_saved_as_they_were() {
     let text = saved_with(|file| {
         let rack = rack_of(&file["tracks"][2]["clips"][0]["drawer"], "gain").clone();
         file["tracks"][2]["clips"][0]["drawer"]
@@ -550,15 +574,49 @@ fn a_drawer_that_has_two_racks_of_one_property_of_one_thing_is_refused() {
             .unwrap()
             .push(rack);
     });
-    let reason = reason_for_invalid_project(&text);
-    assert!(reason.contains("another rack of the keyframes of \"gain\""), "{reason}");
 
-    // The same thing in the animation object that files of the version before had, and in a drawer.
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    assert_eq!(
+        loaded
+            .drawer_of(video)
+            .unwrap()
+            .racks_for(video, PropertyId::Gain)
+            .count(),
+        2,
+        "they are not merged"
+    );
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&saved(&loaded)).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        "what is read is what is saved"
+    );
+}
+
+#[test]
+fn the_animation_object_of_a_file_of_the_version_before_is_a_rack_of_its_own_beside_a_rack_of_the_same_property_in_the_drawer()
+ {
     let text = saved_with(|file| {
         file["tracks"][2]["clips"][0]["animation"] = serde_json::json!({"gain": [{"frame": 1, "value": 0.0}]});
     });
-    let reason = reason_for_invalid_project(&text);
-    assert!(reason.contains("another rack of the keyframes of \"gain\""), "{reason}");
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let racks: Vec<usize> = loaded
+        .drawer_of(video)
+        .unwrap()
+        .racks_for(video, PropertyId::Gain)
+        .map(|rack| rack.len())
+        .collect();
+    assert_eq!(
+        racks,
+        vec![1, 2],
+        "the rack that came from the animation object comes first, and the rack of the drawer with its two keyframes under it"
+    );
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
 }
 
 #[test]
@@ -655,7 +713,7 @@ fn a_crate_that_lasts_no_time_is_refused() {
 }
 
 #[test]
-fn keyframes_after_the_end_of_a_clip_are_cut_off_when_a_file_is_read_and_the_curve_is_kept_up_to_the_end() {
+fn keyframes_after_the_end_of_a_clip_are_brought_in_to_its_last_frame_when_a_file_is_read() {
     // The first video clip lasts 300 frames: the second keyframe of its gain, at frame 1000, is where it is not.
     let text = saved_with(|file| {
         rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "gain")["keyframes"][1]["frame"] =
@@ -672,20 +730,19 @@ fn keyframes_after_the_end_of_a_clip_are_cut_off_when_a_file_is_read_and_the_cur
         .iter()
         .map(|keyframe| (keyframe.frame, keyframe.value.clone()))
         .collect::<Vec<_>>();
-    // The one in the clip is kept, and the clip ends where the gain is on the way from 0 to -6 decibels that is 299/1000 of the
-    // way there.
+    // The one in the clip is kept, and the one that is not is at the last frame of the clip, with its value.
     assert_eq!(keyframes.len(), 2, "{keyframes:?}");
     assert_eq!(keyframes[0], (0, PropertyValue::Number(0.0)));
-    assert_eq!(keyframes[1].0, 299, "the last frame of the clip");
-    let PropertyValue::Number(decibels) = keyframes[1].1 else {
-        panic!("a number");
-    };
-    assert!((decibels - (-6.0 * 299.0 / 1000.0)).abs() < 1e-4, "{decibels}");
+    assert_eq!(
+        keyframes[1],
+        (299, PropertyValue::Number(-6.0)),
+        "the last frame of the clip"
+    );
     assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
 }
 
 #[test]
-fn keyframes_after_the_end_of_the_clip_that_has_the_drawer_are_cut_off_even_if_they_are_of_another_clip() {
+fn keyframes_after_the_end_of_the_clip_that_has_the_drawer_are_brought_in_even_if_they_are_of_another_clip() {
     // The caption lasts 90 frames, and its drawer has a rack of the video's rotation that has a keyframe at frame 100.
     let text = saved_with(|file| {
         file["tracks"][0]["clips"][0]["drawer"] = serde_json::json!([
@@ -698,10 +755,10 @@ fn keyframes_after_the_end_of_the_clip_that_has_the_drawer_are_cut_off_even_if_t
     assert_eq!(
         rack.keyframes()
             .iter()
-            .map(|keyframe| keyframe.frame)
+            .map(|keyframe| (keyframe.frame, keyframe.value.clone()))
             .collect::<Vec<_>>(),
-        vec![10, 89],
-        "the last frame of the caption has what the keyframes say there"
+        vec![(10, PropertyValue::Number(0.0)), (89, PropertyValue::Number(90.0))],
+        "the one that was past the end is at the last frame of the caption, with its value"
     );
     assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
 }

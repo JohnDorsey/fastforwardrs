@@ -11,12 +11,15 @@ use std::collections::HashMap;
 
 use super::document::{AnimationDocument, KeyframeDocument, RackDocument, TargetDocument};
 use super::value_from_document;
-use crate::project::{AnimationTarget, ClipId, ClipKind, Drawer, PropertyId, Rack, RackId, Track, TrackId};
+use crate::project::{AnimationTarget, ClipId, ClipKind, Drawer, Effects, PropertyId, Rack, RackId, Track, TrackId};
 
 /// What is known of what a file has, which is what the racks it has can be checked against.
 pub(super) struct FileContents {
     /// The kind of each clip of each track, in the order they are in the file.
     pub kinds_of_the_clips: Vec<Vec<ClipKind>>,
+    /// The effects of each clip of each track, in the same order, and those of each track.
+    pub effects_of_the_clips: Vec<Vec<Effects>>,
+    pub effects_of_the_tracks: Vec<Effects>,
 }
 
 impl FileContents {
@@ -42,13 +45,18 @@ impl FileContents {
         }
     }
 
-    /// Whether `target` (which the file has) has `property`.
+    /// Whether `target` (which the file has) has `property`: a value of an effect only if it has the effect.
     fn has_the_property(&self, target: AnimationTarget, property: PropertyId) -> bool {
         match target {
-            AnimationTarget::Track(_) => property.applies_to_a_track(),
+            AnimationTarget::Track(track) => {
+                property.is_had_by_a_track(&self.effects_of_the_tracks[track.value() as usize])
+            }
             AnimationTarget::Clip(clip) => {
-                let kind = self.kinds_of_the_clips[clip.origin().value() as usize][clip.number() as usize];
-                property.applies_to_a_clip_of_kind(kind)
+                let (track, number) = (clip.origin().value() as usize, clip.number() as usize);
+                property.is_had_by_a_clip(
+                    self.kinds_of_the_clips[track][number],
+                    &self.effects_of_the_clips[track][number],
+                )
             }
         }
     }
@@ -85,13 +93,6 @@ pub(super) fn drawer_from_documents(
         let rack = rack_from_document(document, owner, RackId::new(track, *next_rack_number), length, contents)
             .map_err(|reason| format!("rack number {}: {reason}", number + 1))?;
         *next_rack_number += 1;
-        if !drawer.has_room_for(&rack) {
-            return Err(format!(
-                "rack number {}: the drawer has another rack of the keyframes of \"{}\" of the same thing",
-                number + 1,
-                rack.property().name()
-            ));
-        }
         drawer.push(rack);
     }
     Ok(drawer)
@@ -115,10 +116,16 @@ fn rack_from_document(
         Some(target) => contents.target_from(target)?,
     };
     if !contents.has_the_property(target, property) {
-        return Err(format!(
-            "\"{}\" cannot be animated for what the keyframes are of: it has none",
-            document.property
-        ));
+        return Err(match property.effect() {
+            Some(effect) => format!(
+                "\"{}\" cannot be animated for what the keyframes are of: it does not have the {effect} effect",
+                document.property
+            ),
+            None => format!(
+                "\"{}\" cannot be animated for what the keyframes are of: it has none",
+                document.property
+            ),
+        });
     }
     let mut rack = Rack::new(id, target, property);
     for keyframe in document.keyframes {
@@ -132,7 +139,7 @@ fn rack_from_document(
         return Err(format!("it has no keyframes of \"{}\"", document.property));
     }
     Ok(match length {
-        Some(length) => rack.truncated_by_its_own_curve(length),
+        Some(length) => rack.truncated_to(length),
         None => rack,
     })
 }

@@ -3,8 +3,8 @@
 use egui::{CursorIcon, Key, Modifiers, PointerButton, Pos2, Shape, vec2};
 
 use super::test_window::{VIDEO, Window, project_of};
-use crate::application::clip_moving::{DECENT_DISTANCE_IN_POINTS, HELD_WITHIN_POINTS};
 use crate::application::commands::Command;
+use crate::application::start_time_hold::{DECENT_DISTANCE_IN_POINTS, HELD_WITHIN_POINTS};
 use crate::application::theme;
 use crate::project::{
     Clip, MediaClip, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TextClip, TextObject,

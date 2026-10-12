@@ -87,12 +87,15 @@ impl Project {
         )
     }
 
-    /// The value that `property` of the clip `clip` has when it is not animated.
-    fn static_value_of_a_clip(&self, clip: &Clip, property: PropertyId) -> Option<PropertyValue> {
+    /// The value that `property` of the clip `placement` is has when it is not animated. `None` if the clip does not have the
+    /// property (a value of an effect that it does not have is not one of its properties).
+    fn static_value_of_a_clip(&self, placement: &ClipPlacement<'_>, property: PropertyId) -> Option<PropertyValue> {
+        let clip = placement.clip;
         if !property.applies_to_a_clip_of_kind(clip.kind()) {
             return None;
         }
         match property {
+            PropertyId::HueShift => placement.effects.value_of(property),
             PropertyId::Gain => clip
                 .as_media()
                 .map(|media| PropertyValue::Number(media.gain().decibels())),
@@ -112,7 +115,8 @@ impl Project {
         match property {
             PropertyId::Gain => Some(PropertyValue::Number(track.gain().decibels())),
             PropertyId::Muted => Some(PropertyValue::Flag(track.is_muted())),
-            _ => None,
+            // (A value of an effect that the track does not have is not one of its properties.)
+            _ => track.effects().value_of(property),
         }
     }
 
@@ -136,6 +140,9 @@ impl Project {
             return Err(wrong().into());
         }
         match (property, value) {
+            (PropertyId::HueShift, _) => Ok(self
+                .track_holding_mut_or_error(clip_id)?
+                .set_effect_value_of_the_clip(clip_id, property, value)?),
             (PropertyId::Gain, PropertyValue::Number(decibels)) => {
                 self.set_clip_gain(clip_id, Gain::from_decibels(*decibels))
             }
@@ -166,6 +173,13 @@ impl Project {
                 self.set_track_gain(track, Gain::from_decibels(*decibels))
             }
             (PropertyId::Muted, PropertyValue::Flag(muted)) => self.set_track_muted(track, *muted),
+            (property, value) if property.effect().is_some() => {
+                if self.track_mut_or_error(track)?.set_effect_value(property, value) {
+                    Ok(())
+                } else {
+                    Err(EditError::NotAPropertyOfTheTrack { track, property })
+                }
+            }
             _ => Err(EditError::NotAPropertyOfTheTrack { track, property }),
         }
     }
@@ -187,16 +201,16 @@ impl Project {
         match target {
             AnimationTarget::Clip(clip) => {
                 let placement = self.placement_of(clip)?;
-                if !property.applies_to_a_clip_of_kind(placement.clip.kind()) {
+                if !property.is_had_by_a_clip(placement.clip.kind(), placement.effects) {
                     return None;
                 }
                 self.keyframes_of(target, property)
                     .value_at(the_frame_the_clip_is_at(&placement, timeline_frame))
-                    .or_else(|| self.static_value_of_a_clip(placement.clip, property))
+                    .or_else(|| self.static_value_of_a_clip(&placement, property))
             }
             AnimationTarget::Track(track) => {
                 let track = self.track(track)?;
-                if !property.applies_to_a_track() {
+                if !property.is_had_by_a_track(track.effects()) {
                     return None;
                 }
                 self.keyframes_of(target, property)
@@ -395,12 +409,12 @@ impl Project {
         property: PropertyId,
         frame_in_the_rack: u64,
     ) -> Option<NewKeyframe> {
-        let rack = self.drawer_of(target)?.rack_for(target, property)?;
+        let rack = self.drawer_of(target)?.first_rack_for(target, property)?;
         let keyframe = rack.at(frame_in_the_rack)?;
         Some(NewKeyframe {
             owner: target,
             rack: rack.id(),
-            keyframe: rack.id_of(keyframe),
+            keyframe: keyframe.id(),
         })
     }
 }

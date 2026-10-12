@@ -5,8 +5,9 @@ use egui::{Rect, Sense, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use super::strip_view::StripView;
 use super::view_state::TimelineViewState;
-use super::{ADD_TRACK_LABEL, RULER_LABEL, TimelineContent, icons, ruler};
+use super::{ADD_TRACK_LABEL, RULER_LABEL, TimelineContent, ruler};
 use crate::application::commands::Command;
+use crate::application::plus_button;
 use crate::application::theme;
 use crate::application::timeline_geometry::TimelineGeometry;
 
@@ -59,44 +60,16 @@ pub(super) fn show(
 /// The big round button that adds a track, in the middle of the part of `top_row` that is over the
 /// title boxes.
 pub(super) fn show_add_track_button(ui: &mut Ui, top_row: Rect, can_edit: bool, commands: &mut Vec<Command>) {
-    let button_rectangle = Rect::from_center_size(
-        pos2(top_row.left() + theme::TRACK_HEADER_WIDTH / 2.0, top_row.center().y),
-        vec2(theme::ADD_TRACK_BUTTON_DIAMETER, theme::ADD_TRACK_BUTTON_DIAMETER),
+    let centre = pos2(top_row.left() + theme::TRACK_HEADER_WIDTH / 2.0, top_row.center().y);
+    let response = plus_button::show(
+        ui,
+        centre,
+        "add track",
+        ADD_TRACK_LABEL,
+        can_edit,
+        theme::TRACK_HEADER_BACKGROUND,
     );
-    // Not focusable, so that the keys of the keyboard keep their meanings as shortcuts of the window.
-    let response = ui.interact(
-        button_rectangle,
-        ui.id().with("add track"),
-        if can_edit { Sense::CLICK } else { Sense::hover() },
-    );
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, can_edit, ADD_TRACK_LABEL));
-    let painter = ui.painter();
-    let fill = if !can_edit {
-        theme::TRACK_HEADER_BACKGROUND
-    } else if response.is_pointer_button_down_on() {
-        theme::ICON_BUTTON_PRESSED
-    } else if response.hovered() {
-        theme::ICON_BUTTON_HOVER
-    } else {
-        theme::TRACK_HEADER_BACKGROUND
-    };
-    painter.circle_filled(button_rectangle.center(), theme::ADD_TRACK_BUTTON_DIAMETER / 2.0, fill);
-    painter.circle_stroke(
-        button_rectangle.center(),
-        theme::ADD_TRACK_BUTTON_DIAMETER / 2.0,
-        egui::Stroke::new(1.5, theme::TRACK_BORDER),
-    );
-    icons::draw_plus(
-        painter,
-        button_rectangle.center(),
-        theme::ADD_TRACK_BUTTON_DIAMETER * 0.24,
-        3.0,
-        if can_edit { theme::ICON } else { theme::ICON_DISABLED },
-    );
-    if can_edit {
-        if response.clicked() {
-            commands.push(Command::AddTrack);
-        }
-        response.on_hover_text(ADD_TRACK_LABEL);
+    if can_edit && response.clicked() {
+        commands.push(Command::AddTrack);
     }
 }

@@ -17,12 +17,19 @@ use crate::project::{
 };
 
 #[test]
-fn the_file_menu_has_the_five_items_in_the_requested_order() {
+fn the_file_menu_has_its_items_in_the_requested_order() {
     let mut window = Window::showing(project_of(300));
     window.harness.get_by_label("File").click();
     window.settle();
 
-    let items = ["New project", "Save project", "Load project", "Import", "Export"];
+    let items = [
+        "New project",
+        "Save project",
+        "Save project as",
+        "Load project",
+        "Import",
+        "Export",
+    ];
     let heights: Vec<f32> = items.iter().map(|item| window.rectangle_of(item).top()).collect();
     assert!(
         heights.windows(2).all(|pair| pair[0] < pair[1]),

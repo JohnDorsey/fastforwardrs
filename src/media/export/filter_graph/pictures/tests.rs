@@ -1,4 +1,5 @@
 use super::*;
+use crate::colour_effects::ColourMatrix;
 
 fn frame_rate_30() -> FrameRate {
     FrameRate::new(30, 1).unwrap()
@@ -36,6 +37,7 @@ fn video_layer(source_input: usize, first: u64, end: u64, factor: u32, place: Pl
     LayerToExport {
         content: LayerContentToExport::Video(video(source_input, first, end, factor)),
         place,
+        colour: ColourMatrix::NOTHING_CHANGES,
     }
 }
 
@@ -47,6 +49,7 @@ fn still_layer(picture_input: usize, left: i32, top: i32) -> LayerToExport {
             scaled_to_its_place: false,
         },
         place: place(left, top, 40, 20, 0.0),
+        colour: ColourMatrix::NOTHING_CHANGES,
     }
 }
 
@@ -58,6 +61,7 @@ fn picture_layer(picture_input: usize, place: PlaceToExport) -> LayerToExport {
             scaled_to_its_place: true,
         },
         place,
+        colour: ColourMatrix::NOTHING_CHANGES,
     }
 }
 
@@ -357,6 +361,7 @@ fn a_turned_picture_that_reaches_out_is_laid_over_with_the_corner_of_the_picture
             scaled_to_its_place: false,
         },
         place: place(-30, -20, 100, 60, 30.0),
+        colour: ColourMatrix::NOTHING_CHANGES,
     });
     let statements = statements_of(&specification(vec![section]));
     assert!(
@@ -388,6 +393,7 @@ fn a_still_picture_that_is_turned_is_turned_into_a_picture_of_its_own_with_clear
             scaled_to_its_place: false,
         },
         place: place(100, 50, 40, 20, 90.0),
+        colour: ColourMatrix::NOTHING_CHANGES,
     });
     let statements = statements_of(&specification(vec![section]));
     assert_eq!(
@@ -698,5 +704,164 @@ fn a_source_used_by_two_layers_of_one_section_is_split_for_each() {
     assert_eq!(
         statements[0],
         "[0:v:0]fps=30/1:round=near,split=2[clip_source_video_0_0][clip_source_video_0_1]"
+    );
+}
+
+// --- how the colours of a picture are changed ---
+
+fn the_filter_for_a_turn_of(degrees: f32) -> String {
+    ColourMatrix::hue_rotation(degrees).ffmpeg_filter()
+}
+
+fn with_the_colours_turned(mut layer: LayerToExport, degrees: f32) -> LayerToExport {
+    layer.colour = ColourMatrix::hue_rotation(degrees);
+    layer
+}
+
+#[test]
+fn a_video_that_fills_the_picture_has_its_colours_changed_right_after_it_is_scaled() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers[0] = with_the_colours_turned(section.layers[0], 90.0);
+    assert_eq!(
+        statements_of(&specification(vec![section]))[1],
+        format!(
+            "[clip_source_video_0_0]trim=start_frame=0:end_frame=60,setpts=N*1/(30*TB),scale=320:180,setsar=1,{}[finished_clip_0]",
+            the_filter_for_a_turn_of(90.0)
+        )
+    );
+}
+
+#[test]
+fn a_video_at_the_back_that_does_not_fill_the_picture_has_its_colours_changed_before_it_is_put_on_black() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers[0].place = place(110, 0, 100, 180, 0.0);
+    section.layers[0] = with_the_colours_turned(section.layers[0], -45.0);
+    assert_eq!(
+        statements_of(&specification(vec![section]))[1],
+        format!(
+            "[clip_source_video_0_0]trim=start_frame=0:end_frame=60,setpts=N*1/(30*TB),scale=100:180,setsar=1,{},pad=320:180:110:0[finished_clip_0]",
+            the_filter_for_a_turn_of(-45.0)
+        )
+    );
+}
+
+#[test]
+fn a_video_laid_over_another_has_its_colours_changed_after_it_is_scaled_and_before_it_is_turned() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers.push(with_the_colours_turned(
+        video_layer(1, 100, 160, 1, place(100, 50, 100, 60, 30.0)),
+        120.0,
+    ));
+
+    let statement = statements_of(&specification(vec![section]))
+        .into_iter()
+        .find(|statement| statement.ends_with("[clip_layer_0_1]"))
+        .expect("the layer has a statement of its own");
+
+    let scaled = statement.find("scale=100:60,setsar=1").unwrap();
+    let changed = statement.find(&the_filter_for_a_turn_of(120.0)).unwrap();
+    let turned = statement.find("rotate=").unwrap();
+    assert!(scaled < changed && changed < turned, "{statement}");
+}
+
+#[test]
+fn only_the_layer_that_has_effects_that_change_colours_has_a_filter_that_does() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers.push(with_the_colours_turned(
+        video_layer(1, 100, 160, 1, place(30, 40, 160, 90, 0.0)),
+        15.0,
+    ));
+    section
+        .layers
+        .push(video_layer(2, 200, 260, 1, place(60, 70, 160, 90, 0.0)));
+
+    let statements = statements_of(&specification(vec![section]));
+
+    let with_a_colour_filter: Vec<&String> = statements
+        .iter()
+        .filter(|statement| statement.contains("colorchannelmixer"))
+        .collect();
+    assert_eq!(with_a_colour_filter.len(), 1, "{statements:?}");
+    assert!(with_a_colour_filter[0].ends_with("[clip_layer_0_1]"), "{statements:?}");
+}
+
+#[test]
+fn a_still_picture_has_its_colours_changed_in_a_statement_of_its_own_before_it_is_laid_over() {
+    let mut section = clip_section(0, 60, 1);
+    section.layers.push(with_the_colours_turned(still_layer(1, 5, 6), 90.0));
+    let statements = statements_of(&specification(vec![section]));
+    assert_eq!(
+        statements[1..5],
+        [
+            "[1:v]split=1[still_picture_1_copy_0]".to_owned(),
+            "[clip_source_video_0_0]trim=start_frame=0:end_frame=60,setpts=N*1/(30*TB),scale=320:180,setsar=1[clip_picture_0]"
+                .to_owned(),
+            format!("[still_picture_1_copy_0]{}[clip_layer_0_1]", the_filter_for_a_turn_of(90.0)),
+            "[clip_picture_0][clip_layer_0_1]overlay=x=5:y=6:format=auto[finished_clip_0]".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn a_still_picture_that_is_turned_has_its_colours_changed_before_it_is_turned() {
+    let mut section = black_section(30);
+    let mut layer = with_the_colours_turned(still_layer(0, 100, 50), 90.0);
+    layer.place = place(100, 50, 40, 20, 90.0);
+    section.layers = vec![layer];
+
+    let statement = statements_of(&specification(vec![section]))
+        .into_iter()
+        .find(|statement| statement.ends_with("[clip_layer_0_0]"))
+        .expect("the layer has a statement of its own");
+
+    assert!(
+        statement.starts_with(&format!("[still_picture_0_copy_0]{},", the_filter_for_a_turn_of(90.0))),
+        "{statement}"
+    );
+    assert!(statement.contains(",rotate="), "{statement}");
+}
+
+#[test]
+fn a_picture_from_a_file_is_scaled_then_has_its_colours_changed_and_then_is_turned() {
+    let mut section = black_section(30);
+    section.layers = vec![with_the_colours_turned(
+        picture_layer(0, place(100, 50, 100, 60, 30.0)),
+        200.0,
+    )];
+
+    let statement = statements_of(&specification(vec![section]))
+        .into_iter()
+        .find(|statement| statement.ends_with("[clip_layer_0_0]"))
+        .expect("the layer has a statement of its own");
+
+    assert!(
+        statement.starts_with(&format!(
+            "[still_picture_0_copy_0]scale=100:60,setsar=1,{},",
+            the_filter_for_a_turn_of(200.0)
+        )),
+        "{statement}"
+    );
+    assert!(statement.contains(",format=rgba,rotate="), "{statement}");
+}
+
+#[test]
+fn colours_that_are_changed_by_nothing_make_no_filter_for_any_kind_of_layer() {
+    let mut section = clip_section(0, 60, 1);
+    section
+        .layers
+        .push(video_layer(1, 100, 160, 1, place(30, 40, 160, 90, 0.0)));
+    section.layers.push(still_layer(2, 5, 6));
+    section.layers.push(picture_layer(3, place(10, 10, 40, 20, 0.0)));
+    for layer in &mut section.layers {
+        layer.colour = ColourMatrix::hue_rotation(360.0);
+    }
+
+    let statements = statements_of(&specification(vec![section]));
+
+    assert!(
+        statements
+            .iter()
+            .all(|statement| !statement.contains("colorchannelmixer")),
+        "{statements:?}"
     );
 }

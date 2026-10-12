@@ -9,8 +9,8 @@
 mod pictures;
 mod sound;
 
-pub use pictures::{Layer, LayerContent, PicturePlan, PictureSection, VisibleVideo, plan_pictures};
+pub use pictures::{Layer, LayerContent, LayerEffect, PicturePlan, PictureSection, VisibleVideo, plan_pictures};
 pub use sound::{DecibelsAt, Loudness, SoundClip, SoundItem, SoundPlan, SoundStrip, plan_sound};
 
 #[cfg(test)]
-mod test_projects;
+pub(crate) mod test_projects;

@@ -40,6 +40,7 @@ impl FastForwardApplication {
             }
             Command::SetTrackGain { track, .. } => is_animated(AnimationTarget::Track(*track), &[PropertyId::Gain]),
             Command::SetTrackMuted { track, .. } => is_animated(AnimationTarget::Track(*track), &[PropertyId::Muted]),
+            Command::SetEffectValue { target, property, .. } => is_animated(*target, &[*property]),
             _ => false,
         }
     }

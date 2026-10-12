@@ -1,6 +1,7 @@
-//! What the mouse does to the preview: a click picks a layer, dragging a layer moves it, dragging a corner of
-//! the selected layer resizes it, dragging round from just outside a corner turns it, and the fast-forward
-//! symbol is moved and resized the same way.
+//! What the mouse does to the preview: a click picks a layer, dragging a layer moves it (and with Shift held it is held to
+//! the edges of the picture, where it comes near them), dragging a corner of the selected layer resizes it, dragging round
+//! from just outside a corner turns it (with Shift held by whole steps of 15 degrees), and the fast-forward symbol is moved
+//! and resized the same way.
 //!
 //! The widgets that take every click and drag on the preview (the "catchers") are made once for the panel
 //! and once for each place of the selected layer that can be taken hold of, and what each press is about is
@@ -24,6 +25,10 @@ use crate::project::{Angle, ClipId, Placement};
 /// A layer that is turned with Shift held is turned to a whole number of these many degrees.
 const SNAP_STEP_DEGREES: f32 = 15.0;
 
+/// A layer that is moved with Shift held is held to an edge of the picture when one of its edges is within this many points of
+/// it (counted on the screen, so it is as near to the eye whatever the size of the picture is).
+const EDGE_HOLD_DISTANCE_IN_POINTS: f32 = 12.0;
+
 /// How far the pointer has to go for a change of where a layer is to count as a change, in fractions
 /// of the picture, or of a turn in degrees. A pointer that is held still can still make the same
 /// place come out a hair different from where it was, because of rounding, and that is not a change
@@ -37,6 +42,11 @@ struct Gesture {
     grab: Grab,
     /// For turning a layer: how far it has been turned.
     turn: Option<Turning>,
+    /// For moving a layer: where it is where the pointer has taken it, without being held to the edges of the picture (which it
+    /// is while Shift is held, and is shown so). What the pointer does goes on from here and not from where the layer is shown,
+    /// so that a layer that is held to an edge is let go of once the pointer has gone far enough from it, however slowly it goes.
+    /// `None` until the layer has been moved.
+    carried: Option<Placement>,
 }
 
 /// What turning a layer remembers: which way the pointer was from the middle of the layer the last time, and how far the
@@ -142,7 +152,11 @@ fn begin(
         }
         Grab::Handle { .. } | Grab::Symbol | Grab::SymbolCorner => {}
     }
-    Some(Gesture { grab, turn })
+    Some(Gesture {
+        grab,
+        turn,
+        carried: None,
+    })
 }
 
 /// Carries on what a drag took hold of, by adding the command that puts it where the pointer has taken
@@ -161,11 +175,23 @@ fn carry_on(
         Grab::Layer(clip) => {
             let layer = content.layer(clip)?;
             let delta = catchers.drag_delta();
-            let moved = layer.placement.moved_by(
+            let carried = gesture.carried.get_or_insert(layer.placement);
+            *carried = carried.moved_by(
                 delta.x / picture.rectangle.width().max(1.0),
                 delta.y / picture.rectangle.height().max(1.0),
             );
-            push_if_changed(commands, layer, moved);
+            let shown = if ui.input(|input| input.modifiers.shift) {
+                carried.snapped_to_the_edges_of_the_picture(
+                    (
+                        EDGE_HOLD_DISTANCE_IN_POINTS / picture.rectangle.width().max(1.0),
+                        EDGE_HOLD_DISTANCE_IN_POINTS / picture.rectangle.height().max(1.0),
+                    ),
+                    picture.size_in_pixels,
+                )
+            } else {
+                *carried
+            };
+            push_if_changed(commands, layer, shown);
         }
         Grab::Handle { layer, corner } => {
             let layer = content.layer(layer)?;

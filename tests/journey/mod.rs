@@ -273,7 +273,16 @@ impl Journey {
 
     /// Clicks with Ctrl held, which adds what is clicked to what is selected.
     pub fn click_with_control(&mut self, position: Pos2) {
-        self.harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+        self.click_holding(position, Modifiers::COMMAND);
+    }
+
+    /// Clicks with Shift held, which opens a drawer over the rows under it instead of pushing them down.
+    pub fn click_with_shift(&mut self, position: Pos2) {
+        self.click_holding(position, Modifiers::SHIFT);
+    }
+
+    fn click_holding(&mut self, position: Pos2, modifiers: Modifiers) {
+        self.harness.event(Event::ModifiersChanged(modifiers));
         self.harness.step();
         self.move_pointer_to(position);
         for pressed in [true, false] {
@@ -281,7 +290,7 @@ impl Journey {
                 pos: position,
                 button: PointerButton::Primary,
                 pressed,
-                modifiers: Modifiers::COMMAND,
+                modifiers,
             });
             self.harness.step();
         }

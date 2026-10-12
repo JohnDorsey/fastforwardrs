@@ -48,11 +48,11 @@ fn keyframes_of_the_rack_of(window: &Window, clip: ClipId, property: PropertyId)
         .drawer_of(AnimationTarget::Clip(clip))
         .unwrap();
     let rack = drawer
-        .rack_for(AnimationTarget::Clip(clip), property)
+        .first_rack_for(AnimationTarget::Clip(clip), property)
         .expect("the clip has a rack for it");
     (
         rack.id(),
-        rack.keyframes().iter().map(|keyframe| rack.id_of(keyframe)).collect(),
+        rack.keyframes().iter().map(|keyframe| keyframe.id()).collect(),
     )
 }
 
@@ -255,6 +255,7 @@ fn moving_keyframes_with_the_command_moves_them_and_dragging_them_is_one_step_of
     for to_frame in [21, 22, 23] {
         window.do_this(Command::MoveKeyframes(vec![KeyframeMove {
             keyframe: keyframes[0],
+            to_rack: rack,
             to_frame,
         }]));
     }
@@ -296,6 +297,7 @@ fn moving_a_rack_with_the_command_moves_it_to_the_drawer_it_is_told_to() {
         rack,
         to: RackDestination::Drawer(AnimationTarget::Track(track)),
         shift_in_frames: 0,
+        slot: None,
     });
 
     let project = window.application().project();
@@ -324,7 +326,259 @@ fn a_rack_that_cannot_go_where_it_is_told_to_is_not_moved() {
         rack,
         to: RackDestination::Drawer(nowhere),
         shift_in_frames: 0,
+        slot: None,
     });
 
     assert_eq!(window.application().project(), &before);
+}
+
+// --- selecting, taking away, merging racks and copying keyframes ---
+
+fn selected_racks(window: &Window) -> Vec<RackId> {
+    window
+        .application()
+        .selected_items()
+        .into_iter()
+        .filter_map(|item| match item {
+            SelectionItem::Rack(rack) => Some(rack),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Two racks of the loudness of the clip: the one in the drawer of the track, which has a keyframe at frame 20, and the one in the
+/// drawer of the clip, which has one at frame 40.
+fn two_racks_of_the_loudness(window: &mut Window, clip: ClipId) -> (RackId, RackId) {
+    add_a_keyframe(window, AnimationTarget::Clip(clip), PropertyId::Gain, 20);
+    let (first, _) = keyframes_of_the_rack_of(window, clip, PropertyId::Gain);
+    let track = window.application().project().tracks()[0].id();
+    window.do_this(Command::MoveRack {
+        rack: first,
+        to: RackDestination::Drawer(AnimationTarget::Track(track)),
+        shift_in_frames: 0,
+        slot: None,
+    });
+    add_a_keyframe(window, AnimationTarget::Clip(clip), PropertyId::Gain, 40);
+    let (second, _) = keyframes_of_the_rack_of(window, clip, PropertyId::Gain);
+    assert_ne!(first, second);
+    (first, second)
+}
+
+#[test]
+fn racks_are_selected_with_the_command_that_selects_items_beside_keyframes_and_forgotten_when_taken_away() {
+    let (mut window, clip) = window_with_a_video();
+    let (first, second) = two_racks_of_the_loudness(&mut window, clip);
+    let keyframe_of_the_first = window
+        .application()
+        .project()
+        .located_rack(first)
+        .unwrap()
+        .rack
+        .keyframes()[0]
+        .id();
+
+    window.do_this(Command::SelectItems {
+        items: vec![
+            SelectionItem::Rack(first),
+            SelectionItem::Keyframe(keyframe_of_the_first),
+        ],
+        change: SelectionChange::Replace,
+    });
+    assert_eq!(selected_racks(&window), vec![first]);
+    assert_eq!(
+        selected_keyframes(&window),
+        vec![keyframe_of_the_first],
+        "a rack and a keyframe at the same time"
+    );
+
+    window.do_this(Command::SelectItems {
+        items: vec![
+            SelectionItem::Rack(second),
+            SelectionItem::Rack(RackId::new(clip.origin(), 99)),
+        ],
+        change: SelectionChange::Toggle,
+    });
+    assert_eq!(
+        selected_racks(&window),
+        vec![first, second],
+        "the second was added and the one that is not there was not selected"
+    );
+
+    window.do_this(Command::DeleteRacks(vec![second]));
+    assert_eq!(
+        selected_racks(&window),
+        vec![first],
+        "a rack that is gone is not selected"
+    );
+    assert_eq!(
+        selected_keyframes(&window),
+        vec![keyframe_of_the_first],
+        "the keyframe of the rack that is not taken away is as it was"
+    );
+}
+
+#[test]
+fn deleting_racks_takes_them_away_with_their_keyframes_and_it_is_one_edit_that_can_be_undone() {
+    let (mut window, clip) = window_with_a_video();
+    let (first, second) = two_racks_of_the_loudness(&mut window, clip);
+    window.application_mut().note_everything_is_saved();
+
+    window.do_this(Command::DeleteRacks(vec![first, second]));
+
+    let project = window.application().project();
+    assert!(project.located_rack(first).is_none() && project.located_rack(second).is_none());
+    assert!(!project.is_animated(AnimationTarget::Clip(clip), PropertyId::Gain));
+    assert!(window.application().has_unsaved_changes());
+    window.do_this(Command::Undo);
+    assert!(
+        window.application().project().located_rack(first).is_some()
+            && window.application().project().located_rack(second).is_some(),
+        "both are back"
+    );
+}
+
+#[test]
+fn deleting_a_rack_that_is_not_there_changes_nothing() {
+    let (mut window, clip) = window_with_a_video();
+    add_a_keyframe(&mut window, AnimationTarget::Clip(clip), PropertyId::Gain, 20);
+    let before = window.application().project().clone();
+
+    window.do_this(Command::DeleteRacks(vec![RackId::new(clip.origin(), 99)]));
+
+    assert_eq!(window.application().project(), &before);
+}
+
+#[test]
+fn merging_racks_with_the_command_leaves_one_rack_with_all_the_keyframes_and_it_stays_selected() {
+    let (mut window, clip) = window_with_a_video();
+    let (first, second) = two_racks_of_the_loudness(&mut window, clip);
+    window.do_this(Command::SelectItems {
+        items: vec![SelectionItem::Rack(first), SelectionItem::Rack(second)],
+        change: SelectionChange::Replace,
+    });
+    window.application_mut().note_everything_is_saved();
+
+    window.do_this(Command::MergeRacks(vec![first, second]));
+
+    let project = window.application().project();
+    assert!(
+        project.located_rack(second).is_none(),
+        "the one that was under the other is gone"
+    );
+    let kept = project.located_rack(first).expect("the rack that is higher is kept");
+    assert_eq!(
+        kept.rack
+            .keyframes()
+            .iter()
+            .map(|keyframe| keyframe.frame)
+            .collect::<Vec<_>>(),
+        vec![20, 40]
+    );
+    assert_eq!(selected_racks(&window), vec![first]);
+    assert!(window.application().has_unsaved_changes());
+    window.do_this(Command::Undo);
+    assert!(
+        window.application().project().located_rack(second).is_some(),
+        "undone in one step"
+    );
+}
+
+#[test]
+fn the_racks_that_are_merged_away_are_taken_out_of_the_selection_at_once() {
+    let (mut window, clip) = window_with_a_video();
+    let (first, second) = two_racks_of_the_loudness(&mut window, clip);
+    window.do_this(Command::SelectItems {
+        items: vec![SelectionItem::Rack(first), SelectionItem::Rack(second)],
+        change: SelectionChange::Replace,
+    });
+
+    // (At once: the window forgets what is gone from the selection in every frame too, so one frame later this would be so whether
+    // or not merging did it.)
+    window.do_this_and_draw_nothing(Command::MergeRacks(vec![first, second]));
+
+    assert_eq!(selected_racks(&window), vec![first]);
+}
+
+#[test]
+fn racks_that_cannot_be_merged_are_not_and_nothing_changes() {
+    let (mut window, clip) = window_with_a_video();
+    let (first, _) = two_racks_of_the_loudness(&mut window, clip);
+    add_a_keyframe(&mut window, AnimationTarget::Clip(clip), PropertyId::Muted, 5);
+    let (switch, _) = keyframes_of_the_rack_of(&window, clip, PropertyId::Muted);
+    window.application_mut().note_everything_is_saved();
+    let before = window.application().project().clone();
+
+    window.do_this(Command::MergeRacks(vec![first, switch]));
+    window.do_this(Command::MergeRacks(vec![first]));
+
+    assert_eq!(window.application().project(), &before);
+    assert!(!window.application().has_unsaved_changes(), "no edit was made");
+}
+
+#[test]
+fn duplicating_keyframes_with_the_command_copies_them_selects_the_copies_and_is_one_edit_that_can_be_undone() {
+    let (mut window, clip) = window_with_a_video();
+    add_a_keyframe(&mut window, AnimationTarget::Clip(clip), PropertyId::Gain, 20);
+    add_a_keyframe(&mut window, AnimationTarget::Clip(clip), PropertyId::Gain, 30);
+    let (rack, keyframes) = keyframes_of_the_rack_of(&window, clip, PropertyId::Gain);
+    window.application_mut().note_everything_is_saved();
+
+    window.do_this(Command::DuplicateKeyframes {
+        keyframes: keyframes.clone(),
+        towards: crate::project::TimeDirection::Later,
+        gap_in_frames: 4,
+    });
+
+    let frames: Vec<u64> = window
+        .application()
+        .project()
+        .located_rack(rack)
+        .unwrap()
+        .rack
+        .keyframes()
+        .iter()
+        .map(|keyframe| keyframe.frame)
+        .collect();
+    assert_eq!(
+        frames,
+        vec![20, 30, 34, 44],
+        "10 apart, and the copies are 10 + 4 later"
+    );
+    let selected = selected_keyframes(&window);
+    assert_eq!(selected.len(), 2);
+    assert!(
+        selected.iter().all(|copy| !keyframes.contains(copy)),
+        "the copies are what is selected, and not the keyframes that were copied"
+    );
+    assert!(window.application().has_unsaved_changes());
+    window.do_this(Command::Undo);
+    assert_eq!(
+        window.application().project().located_rack(rack).unwrap().rack.len(),
+        2,
+        "one step undoes both copies"
+    );
+}
+
+#[test]
+fn keyframes_that_cannot_all_be_copied_are_not_and_what_was_selected_stays_selected() {
+    let (mut window, clip) = window_with_a_video();
+    add_a_keyframe(&mut window, AnimationTarget::Clip(clip), PropertyId::Gain, 290);
+    let (_, keyframes) = keyframes_of_the_rack_of(&window, clip, PropertyId::Gain);
+    window.do_this(Command::SelectItems {
+        items: keyframes.iter().copied().map(SelectionItem::Keyframe).collect(),
+        change: SelectionChange::Replace,
+    });
+    window.application_mut().note_everything_is_saved();
+    let before = window.application().project().clone();
+
+    // The clip has 300 frames: a copy 20 frames later would be at 310.
+    window.do_this(Command::DuplicateKeyframes {
+        keyframes: keyframes.clone(),
+        towards: crate::project::TimeDirection::Later,
+        gap_in_frames: 20,
+    });
+
+    assert_eq!(window.application().project(), &before);
+    assert_eq!(selected_keyframes(&window), keyframes);
+    assert!(!window.application().has_unsaved_changes());
 }

@@ -6,9 +6,11 @@
 //! A track that is being dragged to another place in the list is drawn last, over the others, with a shadow
 //! under it.
 //!
-//! The drawers that are open hang below their rows over the rows that are under them, and do not make them move. So the
-//! rows are drawn from the last to the first, which puts what hangs from a row over the rows under it (and the tracks in
-//! front over those behind, which is what front means); the rows area has room under its last row for what hangs below it.
+//! The drawers that are open hang below their rows. Those that pushed the rows under them to open make their rows taller, by as
+//! far as they hang, and so push them down; those that were opened with Shift held lie over the rows under them, which do not
+//! move. So the rows are drawn from the last to the first, which puts what lies over the rows under a row over them (and the
+//! tracks in front over those behind, which is what front means); the rows area has room under its last row for what lies below
+//! it.
 
 use egui::{Color32, CornerRadius, Rect, Sense, Shadow, Ui, pos2, vec2};
 
@@ -44,8 +46,12 @@ pub(super) fn show<'a>(
 ) -> Vec<(&'a Track, StripView)> {
     let tracks = content.project.tracks();
     let can_delete = tracks.len() > 1;
-    // A row is as tall as its track. (The drawers that are open hang below it, over what is under it.)
-    let heights: Vec<f32> = tracks.iter().map(|track| track.height().points()).collect();
+    // A row is as tall as its track, and as the drawers that pushed to open on it need under that. (The drawers that lie over the
+    // rows under it are not in it.)
+    let heights: Vec<f32> = tracks
+        .iter()
+        .map(|track| track.height().points() + state.drawers.extra_height_of(track, content.project))
+        .collect();
     let laid_out: Vec<Rect> = heights
         .iter()
         .map(|height| {
@@ -53,13 +59,18 @@ pub(super) fn show<'a>(
                 .0
         })
         .collect();
-    // Room after the last row for what hangs below it, so that it can be scrolled to: as much as the drawer that reaches
-    // furthest down goes beyond the bottom of the last row.
+    // Room after the last row for what lies over the rows under its row and hangs below it, so that it can be scrolled to: as much
+    // as the drawer that reaches furthest down goes beyond the bottom of the last row.
     if let Some(last_row) = laid_out.last() {
         let furthest_down = tracks
             .iter()
             .zip(&laid_out)
-            .map(|(track, row)| row.bottom() + state.drawers.reach_under_the_row_of(track, content.project))
+            .map(|(track, row)| {
+                row.bottom()
+                    + state
+                        .drawers
+                        .reach_over_the_rows_under_the_row_of(track, content.project)
+            })
             .fold(last_row.bottom(), f32::max);
         ui.add_space(furthest_down - last_row.bottom());
     }
@@ -93,7 +104,7 @@ pub(super) fn show<'a>(
     let mut views: Vec<Option<StripView>> = vec![None; tracks.len()];
     for position in drawing_order {
         let track = &tracks[position];
-        // The box and the strip are as tall as the track is: what is under them is the room for the drawers.
+        // The box and the strip are as tall as the track is: what is under them is the room for the drawers that pushed to open.
         let height = track.height().points();
         let top = rows_top + planned.tops[position];
         let row = Rect::from_min_size(

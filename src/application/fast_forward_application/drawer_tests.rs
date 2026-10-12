@@ -1,5 +1,6 @@
 //! Tests of the drawers on clips and on tracks: the button at the bottom edge, which is there when something says it should
-//! be, the drawer that slides open when it is clicked and hangs over the rows under it, and what it is that a drawer takes.
+//! be, the drawer that slides open when it is clicked and pushes the rows under it down (or lies over them, when it was opened with
+//! Shift held), the rows that scroll to bring a drawer that is opening into view, and what it is that a drawer takes.
 
 use egui::{PointerButton, Pos2, Rect, Shape, epaint::RectShape, pos2, vec2};
 use egui_kittest::kittest::Queryable;
@@ -119,6 +120,13 @@ fn move_the_pointer_away(window: &mut Window) {
 fn click_the_button(window: &mut Window, position: usize) {
     let centre = the_button_of(window, position, 0).center();
     window.click(centre);
+}
+
+/// Clicks the button of the drawer of the first clip of the track at `position` with Shift held, which opens it over the rows
+/// under it and not by pushing them down.
+fn shift_click_the_button(window: &mut Window, position: usize) {
+    let centre = the_button_of(window, position, 0).center();
+    window.click_with_shift(centre);
 }
 
 /// Puts a keyframe on the loudness of the clip, so that its drawer has a rack in it.
@@ -427,13 +435,13 @@ fn distance_to_the_row_under(window: &Window) -> f32 {
 }
 
 #[test]
-fn the_row_under_a_drawer_that_opens_stays_where_it_is_the_drawer_hangs_over_it() {
+fn the_row_under_a_drawer_that_is_opened_with_shift_held_stays_where_it_is_the_drawer_hangs_over_it() {
     let mut window = window_with_two_tracks();
     let distance_before = distance_to_the_row_under(&window);
     let strip_before = window.strip_of_track(0);
     let ruler_before = window.rectangle_of("Ruler");
 
-    click_the_button(&mut window, 0);
+    shift_click_the_button(&mut window, 0);
     let_the_drawers_finish(&mut window);
 
     assert_eq!(drawers_drawn(&window).len(), 1, "it is open");
@@ -458,14 +466,16 @@ fn the_row_under_a_drawer_that_opens_stays_where_it_is_the_drawer_hangs_over_it(
 }
 
 #[test]
-fn the_row_under_does_not_move_at_any_moment_while_the_drawer_slides() {
+fn the_row_under_does_not_move_at_any_moment_while_a_drawer_that_is_opened_with_shift_held_slides() {
     let mut window = window_with_two_tracks();
     let distance_before = distance_to_the_row_under(&window);
     hover_over_the_clip(&mut window, 0);
     let centre = the_button_of(&window, 0, 0).center();
     window.move_pointer_to(centre);
+    window.hold_shift();
     window.press(centre, PointerButton::Primary);
     window.release(centre, PointerButton::Primary);
+    window.let_go_of_shift();
 
     for _ in 0..30 {
         window.harness.step();
@@ -478,9 +488,9 @@ fn the_row_under_does_not_move_at_any_moment_while_the_drawer_slides() {
 }
 
 #[test]
-fn an_open_drawer_is_drawn_over_the_clips_of_the_row_under_it() {
+fn a_drawer_that_lies_over_the_rows_under_it_is_drawn_over_the_clips_of_the_row_under_it() {
     let mut window = window_with_two_tracks();
-    click_the_button(&mut window, 0);
+    shift_click_the_button(&mut window, 0);
     let_the_drawers_finish(&mut window);
 
     let shapes = window.shapes_drawn();
@@ -518,7 +528,7 @@ fn clicking_where_a_drawer_hangs_over_the_row_under_it_takes_hold_of_the_drawer_
     ));
     assert_eq!(window.application().selected_clips(), vec![]);
 
-    click_the_button(&mut window, 0);
+    shift_click_the_button(&mut window, 0);
     let_the_drawers_finish(&mut window);
     window.click(in_the_video_under_the_drawer);
 
@@ -533,7 +543,7 @@ fn clicking_where_a_drawer_hangs_over_the_row_under_it_takes_hold_of_the_drawer_
 fn the_rows_have_room_under_the_last_one_for_a_drawer_that_hangs_below_it() {
     let mut window = window_with_a_short_clip();
     let ruler_before = window.rectangle_of("Ruler");
-    click_the_button(&mut window, 0);
+    shift_click_the_button(&mut window, 0);
     let_the_drawers_finish(&mut window);
 
     let (clip_rectangle_of_the_drawer, drawer) = window
@@ -617,7 +627,7 @@ fn the_drawer_of_a_track_slides_open_as_wide_as_its_strip_under_it_with_square_c
     let strip = window.strip_of_track(0);
     let row_under = window.strip_of_track(1);
     let button = the_button_of_the_track(&window, 0).center();
-    window.click(button);
+    window.click_with_shift(button);
     let_the_drawers_finish(&mut window);
 
     let drawers = drawers_drawn(&window);
@@ -663,14 +673,13 @@ fn the_drawer_of_a_track_and_the_drawers_of_its_clips_are_opened_and_shut_apart(
 #[test]
 fn the_drawer_of_a_track_hangs_below_the_drawers_of_its_clips_that_are_open_and_follows_them_as_they_slide() {
     let mut window = window_with_two_tracks();
-    let strip = window.strip_of_track(0);
     let button = the_button_of_the_track(&window, 0).center();
     window.click(button);
     let_the_drawers_finish(&mut window);
     let drawer_of_the_track = drawers_drawn(&window)[0].clone();
     assert_close(
         drawer_of_the_track.rect.top(),
-        strip.bottom(),
+        window.strip_of_track(0).bottom(),
         "right under the strip while no clip's drawer is open",
     );
 
@@ -678,6 +687,8 @@ fn the_drawer_of_a_track_hangs_below_the_drawers_of_its_clips_that_are_open_and_
     click_the_button(&mut window, 0);
     let_the_drawers_finish(&mut window);
 
+    // (The timeline has grown upward, to have room for the drawers that pushed the row under them down.)
+    let strip = window.strip_of_track(0);
     let drawers = drawers_drawn(&window);
     assert_eq!(drawers.len(), 2);
     let of_the_track = drawers
@@ -699,7 +710,6 @@ fn the_drawer_of_a_track_hangs_below_the_drawers_of_its_clips_that_are_open_and_
 #[test]
 fn the_drawer_of_a_track_moves_down_with_the_drawers_of_its_clips_as_they_slide_open() {
     let mut window = window_with_two_tracks();
-    let strip = window.strip_of_track(0);
     let button = the_button_of_the_track(&window, 0).center();
     window.click(button);
     let_the_drawers_finish(&mut window);
@@ -712,6 +722,8 @@ fn the_drawer_of_a_track_moves_down_with_the_drawers_of_its_clips_as_they_slide_
     let mut gaps_below_the_strip = Vec::new();
     for _ in 0..12 {
         window.harness.step();
+        // (The timeline grows upward as the drawers that push the rows under them down slide open: the strip moves.)
+        let strip = window.strip_of_track(0);
         let drawers = drawers_drawn(&window);
         let of_the_clip = drawers
             .iter()
@@ -744,6 +756,8 @@ fn the_button_of_a_track_stays_while_its_drawer_is_open_or_has_something_in_it()
     move_the_pointer_away(&mut window);
     assert_eq!(buttons_drawn(&window).len(), 1, "open");
 
+    // (The timeline grew upward when the drawer pushed the row under it down: the button is where it is now.)
+    let button = the_button_of_the_track(&window, 0).center();
     window.click(button);
     let_the_drawers_finish(&mut window);
     move_the_pointer_away(&mut window);
@@ -915,4 +929,382 @@ fn a_drawer_is_drawn_behind_its_clip_so_that_what_reaches_up_into_the_clip_is_no
         .expect("the button is drawn");
     assert!(drawer < clip, "the drawer is drawn at {drawer} and the clip at {clip}");
     assert!(clip < button, "and the button over the clip, at {button}");
+}
+
+// --- a drawer that pushes the rows under it ---
+
+#[test]
+fn a_drawer_opened_by_clicking_its_button_pushes_the_row_under_it_down_by_as_far_as_it_hangs_and_the_row_comes_back_when_it_shuts()
+ {
+    let mut window = window_with_two_tracks();
+    let distance_before = distance_to_the_row_under(&window);
+
+    click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+
+    assert_eq!(drawers_drawn(&window).len(), 1, "it is open");
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before + EMPTY_DRAWER_HEIGHT,
+        "the row under it is as much further down as the drawer is tall",
+    );
+    let drawer = &drawers_drawn(&window)[0];
+    assert!(
+        drawer.rect.bottom() <= window.strip_of_track(1).top() + 0.6,
+        "the drawer is between the strip it hangs from and the row under it: {:?} over {:?}",
+        drawer.rect,
+        window.strip_of_track(1)
+    );
+
+    click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before,
+        "shut, it gives the room back",
+    );
+}
+
+#[test]
+fn the_row_under_goes_down_at_every_moment_as_a_drawer_slides_open_and_comes_back_as_it_slides_shut() {
+    let mut window = window_with_two_tracks();
+    let distance_before = distance_to_the_row_under(&window);
+    hover_over_the_clip(&mut window, 0);
+    let centre = the_button_of(&window, 0, 0).center();
+    window.move_pointer_to(centre);
+    window.press(centre, PointerButton::Primary);
+    window.release(centre, PointerButton::Primary);
+
+    let mut pushed_by = Vec::new();
+    for _ in 0..20 {
+        window.harness.step();
+        pushed_by.push(distance_to_the_row_under(&window) - distance_before);
+    }
+    assert!(
+        pushed_by.windows(2).all(|pair| pair[1] >= pair[0] - 0.01),
+        "it only goes down: {pushed_by:?}"
+    );
+    assert!(
+        pushed_by[0] > 0.0 && pushed_by[0] < EMPTY_DRAWER_HEIGHT,
+        "it has begun but not finished: {pushed_by:?}"
+    );
+    assert_close(*pushed_by.last().unwrap(), EMPTY_DRAWER_HEIGHT, "and arrives");
+
+    click_the_button(&mut window, 0);
+    let mut shutting = Vec::new();
+    for _ in 0..20 {
+        window.harness.step();
+        shutting.push(distance_to_the_row_under(&window) - distance_before);
+    }
+    assert!(
+        shutting.windows(2).all(|pair| pair[1] <= pair[0] + 0.01),
+        "it only comes back: {shutting:?}"
+    );
+    assert_close(*shutting.last().unwrap(), 0.0, "all the way");
+}
+
+#[test]
+fn a_drawer_that_is_opened_to_show_a_keyframe_that_was_put_in_it_pushes_the_row_under_it_too() {
+    let mut window = window_with_two_tracks();
+    let distance_before = distance_to_the_row_under(&window);
+
+    put_a_rack_in_the_drawer_of_the_first_clip_of(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before + EMPTY_DRAWER_HEIGHT + theme::RACK_HEIGHT,
+        "as far as the drawer with a rack in it hangs",
+    );
+}
+
+#[test]
+fn the_drawer_of_a_track_pushes_the_rows_under_it_when_it_is_opened_with_a_click_and_lies_over_them_when_it_is_opened_with_shift()
+ {
+    let mut window = window_with_two_tracks();
+    let distance_before = distance_to_the_row_under(&window);
+    let button = the_button_of_the_track(&window, 0).center();
+
+    window.click(button);
+    let_the_drawers_finish(&mut window);
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before + EMPTY_DRAWER_HEIGHT,
+        "pushed by a click",
+    );
+
+    // Shut with a click, whichever way it opened; and opened again with Shift held, it lies over the row.
+    let button = the_button_of_the_track(&window, 0).center();
+    window.click(button);
+    let_the_drawers_finish(&mut window);
+    assert_close(distance_to_the_row_under(&window), distance_before, "shut");
+    let button = the_button_of_the_track(&window, 0).center();
+    window.click_with_shift(button);
+    let_the_drawers_finish(&mut window);
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before,
+        "not pushed when it is opened with Shift held",
+    );
+    assert_eq!(drawers_drawn(&window).len(), 1, "though it is open");
+}
+
+#[test]
+fn a_drawer_that_was_opened_with_shift_held_is_shut_by_a_plain_click_and_one_that_pushed_by_a_click_with_shift_held() {
+    let mut window = window_with_two_tracks();
+    shift_click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(drawers_drawn(&window).len(), 1);
+    click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    assert!(drawers_drawn(&window).is_empty(), "shut by a click");
+
+    click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(drawers_drawn(&window).len(), 1);
+    shift_click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    assert!(
+        drawers_drawn(&window).is_empty(),
+        "shift decides how a drawer opens, not whether it shuts"
+    );
+}
+
+#[test]
+fn a_drawer_of_the_track_that_pushes_makes_the_row_taller_by_the_drawers_of_its_clips_too_as_they_hang_over_the_rows_it_pushes()
+ {
+    let mut window = window_with_two_tracks();
+    let distance_before = distance_to_the_row_under(&window);
+    // The drawer of the clip, with Shift held: it lies over the rows under it. The drawer of the track, with a click: it hangs
+    // from the end of the clip's, and pushes, so the room of the clip's drawer is in the row too.
+    hover_over_the_clip(&mut window, 0);
+    shift_click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before,
+        "the clip's drawer alone pushes nothing",
+    );
+    let button = the_button_of_the_track(&window, 0).center();
+    window.click(button);
+    let_the_drawers_finish(&mut window);
+
+    assert_close(
+        distance_to_the_row_under(&window),
+        distance_before + 2.0 * EMPTY_DRAWER_HEIGHT,
+        "both drawers are in the row",
+    );
+}
+
+// --- bringing a drawer that is opening into view ---
+
+/// A window with several tracks, so that the rows scroll, the one at the back (which has the video) being the last, and the rows
+/// scrolled down as far as they go.
+fn window_with_many_tracks_scrolled_to_the_bottom() -> Window {
+    let mut project = project_of(60);
+    for _ in 0..6 {
+        project.add_track_in_front();
+    }
+    let mut window = Window::showing(project);
+    window.application_mut().timeline_view.rows_scroll_offset = 1.0e6;
+    window.harness.run_steps(5);
+    window
+}
+
+/// How far down the rows can be seen: where the view of them ends at the bottom.
+fn the_bottom_of_what_can_be_seen_of_the_rows(window: &Window) -> f32 {
+    window
+        .application()
+        .timeline_view
+        .timeline_area_in_the_last_frame
+        .expect("the timeline was drawn")
+        .bottom()
+}
+
+/// Where the first drawer that was drawn is, and where what it is drawn in is cut off.
+fn the_drawer_and_where_it_is_cut_off(window: &Window) -> (Rect, Rect) {
+    window
+        .clipped_shapes_drawn()
+        .into_iter()
+        .find_map(|(clip_rectangle, shape)| match shape {
+            Shape::Rect(rectangle) if rectangle.fill == theme::DRAWER_BACKGROUND => {
+                Some((rectangle.rect, clip_rectangle))
+            }
+            _ => None,
+        })
+        .expect("a drawer is drawn")
+}
+
+#[test]
+fn the_rows_scroll_down_to_bring_a_drawer_into_view_when_it_is_opened_on_a_clip_in_the_bottom_track() {
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let last = window.application().project().tracks().len() - 1;
+    let scroll_before = window.application().timeline_view.rows_scroll_offset;
+    assert!(
+        scroll_before > 0.0,
+        "the setup: the rows are scrolled down, and there is more of them above"
+    );
+
+    hover_over_the_clip(&mut window, last);
+    click_the_button(&mut window, last);
+    let_the_drawers_finish(&mut window);
+
+    let (drawer, cut_off_at) = the_drawer_and_where_it_is_cut_off(&window);
+    assert!(
+        cut_off_at.bottom() >= drawer.bottom() - 0.01,
+        "all of the drawer is in view: it goes down to {} and is cut off at {}",
+        drawer.bottom(),
+        cut_off_at.bottom()
+    );
+    assert!(
+        window.application().timeline_view.rows_scroll_offset > scroll_before,
+        "the rows were scrolled down to bring it into view"
+    );
+}
+
+#[test]
+fn a_drawer_that_is_brought_into_view_with_rows_under_it_is_scrolled_to_with_some_room_under_it() {
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let tracks = window.application().project().tracks();
+    let the_one_over_the_last = tracks.len() - 2;
+    let track = tracks[the_one_over_the_last].id();
+    // Scrolled up until the bottom of the strip of the track that is over the last is a little way above the bottom of what is
+    // in view, and the drawer of that track, which hangs under the strip, goes beyond it: with the last track under it, the rows
+    // can be scrolled as far as that takes.
+    let bottom_of_the_view = the_bottom_of_what_can_be_seen_of_the_rows(&window);
+    let bottom_of_the_strip = window.strip_of_track(the_one_over_the_last).bottom();
+    window.application_mut().timeline_view.rows_scroll_offset -= bottom_of_the_view - 10.0 - bottom_of_the_strip;
+    window.harness.run_steps(5);
+    let scroll_before = window.application().timeline_view.rows_scroll_offset;
+
+    window
+        .application_mut()
+        .timeline_view
+        .open_the_drawer_of(AnimationTarget::Track(track));
+    let_the_drawers_finish(&mut window);
+
+    assert!(
+        window.application().timeline_view.rows_scroll_offset > scroll_before + 10.0,
+        "the drawer did not fit in what was in view, and the rows were scrolled down to it"
+    );
+    let (drawer, _) = the_drawer_and_where_it_is_cut_off(&window);
+    assert_close(
+        the_bottom_of_what_can_be_seen_of_the_rows(&window) - drawer.bottom(),
+        theme::MARGIN_UNDER_A_DRAWER_BROUGHT_INTO_VIEW,
+        "the room under the drawer, which is not at the very edge of what is in view",
+    );
+}
+
+#[test]
+fn a_drawer_that_lies_over_the_rows_is_brought_into_view_too_when_it_hangs_below_the_last_row() {
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let last = window.application().project().tracks().len() - 1;
+
+    hover_over_the_clip(&mut window, last);
+    shift_click_the_button(&mut window, last);
+    let_the_drawers_finish(&mut window);
+
+    let (drawer, cut_off_at) = the_drawer_and_where_it_is_cut_off(&window);
+    assert!(
+        cut_off_at.bottom() >= drawer.bottom() - 0.01,
+        "it goes down to {} and is cut off at {}",
+        drawer.bottom(),
+        cut_off_at.bottom()
+    );
+}
+
+#[test]
+fn the_drawer_of_the_bottom_track_is_brought_into_view_as_well() {
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let last = window.application().project().tracks().len() - 1;
+    let button = the_button_of_the_track(&window, last).center();
+
+    window.click(button);
+    let_the_drawers_finish(&mut window);
+
+    let (drawer, cut_off_at) = the_drawer_and_where_it_is_cut_off(&window);
+    assert!(
+        cut_off_at.bottom() >= drawer.bottom() - 0.01,
+        "it goes down to {} and is cut off at {}",
+        drawer.bottom(),
+        cut_off_at.bottom()
+    );
+}
+
+#[test]
+fn the_rows_scroll_down_as_the_drawer_slides_so_that_its_bottom_is_in_view_at_every_moment_it_can_be() {
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let last = window.application().project().tracks().len() - 1;
+    hover_over_the_clip(&mut window, last);
+    let centre = the_button_of(&window, last, 0).center();
+    window.move_pointer_to(centre);
+    window.press(centre, PointerButton::Primary);
+    window.release(centre, PointerButton::Primary);
+
+    let mut offsets = Vec::new();
+    for _ in 0..20 {
+        window.harness.step();
+        offsets.push(window.application().timeline_view.rows_scroll_offset);
+    }
+
+    // (Never back up, except by what the rows are held to by the end of them: a fraction of a point.)
+    assert!(
+        offsets.windows(2).all(|pair| pair[1] >= pair[0] - 0.5),
+        "it only goes down: {offsets:?}"
+    );
+    assert!(
+        offsets[0] < *offsets.last().unwrap(),
+        "and it goes on while the drawer slides: {offsets:?}"
+    );
+}
+
+#[test]
+fn a_drawer_that_is_in_view_when_it_opens_does_not_scroll_the_rows_and_one_above_the_view_does_not_scroll_them_up() {
+    // At the top: the drawer of the first track is in view.
+    let mut project = project_of(60);
+    for _ in 0..6 {
+        project.add_track_in_front();
+    }
+    let mut window = Window::showing(project);
+    let button = the_button_of_the_track(&window, 0).center();
+    window.click(button);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(
+        window.application().timeline_view.rows_scroll_offset,
+        0.0,
+        "nothing was scrolled"
+    );
+
+    // Scrolled to the bottom: a drawer that is opened on a track that cannot be seen is not brought into view by going up.
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let scroll_before = window.application().timeline_view.rows_scroll_offset;
+    let top_track = window.application().project().tracks()[0].id();
+    window
+        .application_mut()
+        .timeline_view
+        .open_the_drawer_of(AnimationTarget::Track(top_track));
+    let_the_drawers_finish(&mut window);
+    assert_eq!(
+        window.application().timeline_view.rows_scroll_offset,
+        scroll_before,
+        "the rows were not scrolled up to it"
+    );
+}
+
+#[test]
+fn the_rows_are_left_alone_once_the_drawer_has_stopped_sliding_so_that_scrolling_back_up_stays_scrolled() {
+    let mut window = window_with_many_tracks_scrolled_to_the_bottom();
+    let last = window.application().project().tracks().len() - 1;
+    hover_over_the_clip(&mut window, last);
+    click_the_button(&mut window, last);
+    let_the_drawers_finish(&mut window);
+
+    window.application_mut().timeline_view.rows_scroll_offset = 0.0;
+    window.harness.run_steps(20);
+
+    assert_eq!(
+        window.application().timeline_view.rows_scroll_offset,
+        0.0,
+        "scrolled up by hand, the rows are not taken down again to the drawer"
+    );
 }

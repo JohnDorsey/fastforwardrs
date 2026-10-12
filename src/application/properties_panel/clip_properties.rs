@@ -8,7 +8,7 @@ use egui::Ui;
 
 use super::animatable::{self, Animatable, flag_at_the_playhead, number_at_the_playhead};
 use super::controls::{gain_slider, labelled_row, speed_slider};
-use super::{PropertiesContent, kind_box, placement_controls, text_properties};
+use super::{PropertiesContent, effects, kind_box, placement_controls, text_properties};
 use crate::application::commands::Command;
 use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
@@ -34,6 +34,13 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         // (A crate has nothing of its own to change: what it holds is in its racks, which are shown in the timeline.)
         Clip::Crate(_) => {}
     }
+    effects::show(
+        ui,
+        content,
+        AnimationTarget::Clip(clip),
+        Some(placement.clip.kind()),
+        commands,
+    );
 }
 
 /// The name of the file a clip is made from, quietly.

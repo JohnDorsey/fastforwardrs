@@ -31,11 +31,11 @@ fn press_with_control_and_shift(window: &mut Window, key: Key) {
     window.settle();
 }
 
-fn undo(window: &mut Window) {
+pub(super) fn undo(window: &mut Window) {
     press_with_control(window, Key::Z);
 }
 
-fn redo(window: &mut Window) {
+pub(super) fn redo(window: &mut Window) {
     press_with_control(window, Key::Y);
 }
 

@@ -17,6 +17,11 @@
 //! (its outline, its corners, the places to turn it from) is drawn over all of the window and taken hold
 //! of wherever it is, over the other panels too. The widgets that take the mouse are made in
 //! `catchers`, and the names the parts of the preview are known by are in `names`.
+//!
+//! The picture can be zoomed out, to half the size it fits the panel at, and in, until its pixels can be seen, with the wheel
+//! (see `zooming`), and moved about when it is bigger than the panel. Where it is drawn is worked out in `view`, from how it is
+//! zoomed; the layers and what the mouse does to them are all in terms of where the picture is, so they are the same whatever
+//! the zoom is. A button in the bottom right corner of the panel brings the picture back to where it fits, while it is not there.
 
 mod catchers;
 mod geometry;
@@ -27,6 +32,14 @@ mod names;
 mod speed_indicator_overlay;
 #[cfg(test)]
 mod test_content;
+mod view;
+#[cfg(test)]
+mod zoomed_pictures_tests;
+mod zooming;
+
+pub use view::PreviewView;
+#[cfg(test)]
+pub use zooming::FIT_BUTTON_LABEL;
 
 // The names the layers and their handles are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
@@ -41,7 +54,7 @@ use egui::{Rect, Ui, vec2};
 
 use super::commands::Command;
 use super::textures::Textures;
-use super::theme;
+use crate::colour_effects::ColourMatrix;
 use crate::media::ThumbnailLibrary;
 use crate::playback::SuppliedPicture;
 use crate::project::{
@@ -85,6 +98,10 @@ pub struct PreviewLayer<'a> {
     pub track: TrackId,
     /// Where the layer is at the current frame: where the clip says, or, if it has keyframes, as they change that.
     pub placement: Placement,
+    /// How the effects of the layer change the colours of its picture at the current frame, all of them together. (The picture that
+    /// stands in for a video until its own arrives, a blurry thumbnail, has them changed too, so that the colours do not jump when
+    /// the sharp picture comes.)
+    pub colour: ColourMatrix,
     pub content: PreviewLayerContent<'a>,
 }
 
@@ -147,30 +164,36 @@ impl<'a> PreviewContent<'a> {
     }
 }
 
-/// Fills the rest of the window with the preview.
+/// Fills the rest of the window with the preview, with the picture zoomed and moved as `view` says (which the wheel and the mouse
+/// change).
 pub fn show(
     ui: &mut Ui,
     content: &PreviewContent<'_>,
+    view: &mut PreviewView,
     textures: &mut Textures,
     text_renderer: &mut LazyTextRenderer,
     commands: &mut Vec<Command>,
 ) {
     let panel_rectangle = ui.available_rect_before_wrap();
 
-    let Some((picture_width, picture_height)) = content.picture_size else {
+    let Some(picture_size) = content.picture_size else {
         return;
     };
-    let picture_rectangle = fit_inside(panel_rectangle.shrink(theme::SPACING), picture_width, picture_height);
+    zooming::handle_the_wheel_and_the_mouse(ui, view, panel_rectangle, picture_size);
+    let picture_rectangle = view.picture_rectangle(panel_rectangle, picture_size);
+    // (What is drawn is cut off at the edge of the panel, as everything is.)
     ui.painter().rect_filled(picture_rectangle, 0.0, egui::Color32::BLACK);
+    let filter = view.filter(panel_rectangle, picture_size, ui.ctx().pixels_per_point());
     layers::show(
         ui,
         content,
-        PictureOnScreen::new(picture_rectangle, picture_width, picture_height),
+        PictureOnScreen::new(picture_rectangle, picture_size.0, picture_size.1).shown_as(filter),
         panel_rectangle,
         textures,
         text_renderer,
         commands,
     );
+    zooming::show_the_button_that_makes_the_picture_fit(ui, view, panel_rectangle);
 }
 
 /// The largest rectangle of the shape `width` by `height` that fits inside `available`, centred.

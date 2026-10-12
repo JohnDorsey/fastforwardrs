@@ -411,6 +411,26 @@ impl Placement {
         }
     }
 
+    /// The same place, moved so that it is held to the edges of the picture: where the rectangle, as it is turned, has an
+    /// edge that is within `within` of an edge of the picture (`within` is how far, as fractions of the picture's width
+    /// and of its height), it is moved so that the two are exactly together. It is the farthest left, right, top and bottom of
+    /// the rectangle that count, so a turned rectangle is held by the corner that is nearest to the edge. Along each way, if
+    /// both of its edges are near the picture's (it is nearly as wide as the picture), the one that is nearer is held.
+    /// Nothing else about it changes, and it is not moved farther than [`Self::moved_by`] lets it be.
+    #[must_use]
+    pub fn snapped_to_the_edges_of_the_picture(&self, within: (f32, f32), picture_size: PictureDimensions) -> Self {
+        let corners = Corner::ALL.map(|corner| self.corner_position(corner, picture_size));
+        let across_the_corners = corners.map(|(x, _)| x);
+        let down_the_corners = corners.map(|(_, y)| y);
+        let across = move_that_holds_to_an_edge(
+            smallest_of(across_the_corners),
+            largest_of(across_the_corners),
+            within.0,
+        );
+        let down = move_that_holds_to_an_edge(smallest_of(down_the_corners), largest_of(down_the_corners), within.1);
+        self.moved_by(across, down)
+    }
+
     /// The place after `corner` is dragged to `point` (which can be outside the picture). The corner
     /// diagonally across stays where it is on the screen (unless that would take the middle of the
     /// rectangle off the picture), and the rectangle stays turned as it was. With `keep_shape` the
@@ -501,6 +521,25 @@ impl Placement {
     fn centre_in_pixels(&self, picture_size: PictureDimensions) -> (f32, f32) {
         in_pixels(self.centre(), picture_size)
     }
+}
+
+/// How far something that goes from `near` to `far` along a line that the picture goes from 0 to 1 along has to move to have
+/// `near` at 0 or `far` at 1, when that is no further than `within`: the shorter of the two moves when both are, and none
+/// when neither is.
+fn move_that_holds_to_an_edge(near: f32, far: f32, within: f32) -> f32 {
+    [-near, 1.0 - far]
+        .into_iter()
+        .filter(|distance| distance.abs() <= within)
+        .min_by(|first, second| first.abs().total_cmp(&second.abs()))
+        .unwrap_or(0.0)
+}
+
+fn smallest_of(values: [f32; 4]) -> f32 {
+    values.into_iter().fold(f32::INFINITY, f32::min)
+}
+
+fn largest_of(values: [f32; 4]) -> f32 {
+    values.into_iter().fold(f32::NEG_INFINITY, f32::max)
 }
 
 fn in_pixels((x, y): PointOnThePicture, (picture_width, picture_height): PictureDimensions) -> (f32, f32) {
@@ -1093,6 +1132,196 @@ mod tests {
         assert_close(snapped(-725.0), -720.0);
         assert_close(Angle::from_degrees(33.3).snapped_to(0.0).degrees(), 33.3);
         assert_close(Angle::from_degrees(33.3).snapped_to(f32::NAN).degrees(), 33.3);
+    }
+
+    // --- being held to the edges of the picture ---
+
+    /// How far from the edges of the picture a place has its sides, as (left, top, right, bottom) of the rectangle that has
+    /// all of it in, turned as it is.
+    fn sides_of(place: &Placement, picture_size: PictureDimensions) -> (f32, f32, f32, f32) {
+        let corners = Corner::ALL.map(|corner| place.corner_position(corner, picture_size));
+        (
+            corners.iter().map(|corner| corner.0).fold(f32::INFINITY, f32::min),
+            corners.iter().map(|corner| corner.1).fold(f32::INFINITY, f32::min),
+            corners.iter().map(|corner| corner.0).fold(f32::NEG_INFINITY, f32::max),
+            corners.iter().map(|corner| corner.1).fold(f32::NEG_INFINITY, f32::max),
+        )
+    }
+
+    const A_FIFTIETH: (f32, f32) = (0.02, 0.02);
+
+    #[test]
+    fn a_place_with_a_side_near_an_edge_of_the_picture_is_moved_until_the_side_is_at_the_edge() {
+        let size = SQUARE_PICTURE;
+        let near_the_left = Placement::upright(CanvasArea::new(0.015, 0.4, 0.3, 0.2));
+        let (left, top, ..) = sides_of(
+            &near_the_left.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            size,
+        );
+        assert_close(left, 0.0);
+        assert_close(top, 0.4);
+
+        let near_the_right = Placement::upright(CanvasArea::new(0.685, 0.4, 0.3, 0.2));
+        let (_, _, right, _) = sides_of(
+            &near_the_right.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            size,
+        );
+        assert_close(right, 1.0);
+
+        let near_the_top = Placement::upright(CanvasArea::new(0.4, 0.019, 0.3, 0.2));
+        let (_, top, ..) = sides_of(
+            &near_the_top.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            size,
+        );
+        assert_close(top, 0.0);
+
+        let near_the_bottom = Placement::upright(CanvasArea::new(0.4, 0.78, 0.3, 0.2));
+        let (_, _, _, bottom) = sides_of(
+            &near_the_bottom.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            size,
+        );
+        assert_close(bottom, 1.0);
+    }
+
+    #[test]
+    fn a_place_whose_side_is_past_the_edge_of_the_picture_by_less_than_the_distance_is_held_to_it_too() {
+        let size = SQUARE_PICTURE;
+        let just_past_the_left = Placement::upright(CanvasArea::new(-0.015, 0.4, 0.3, 0.2));
+        let held = just_past_the_left.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size);
+        assert_close(held.area.left(), 0.0);
+        let far_past = Placement::upright(CanvasArea::new(-0.1, 0.4, 0.3, 0.2));
+        assert_eq!(
+            far_past.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            far_past,
+            "not near it: it is out where it was put"
+        );
+    }
+
+    #[test]
+    fn a_place_that_is_not_near_an_edge_is_not_moved_and_one_that_is_at_an_edge_stays() {
+        let size = SQUARE_PICTURE;
+        let in_the_middle = Placement::upright(CanvasArea::new(0.3, 0.4, 0.4, 0.2));
+        assert_eq!(
+            in_the_middle.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            in_the_middle
+        );
+        let at_the_edge = Placement::upright(CanvasArea::new(0.0, 0.4, 0.4, 0.2));
+        assert_eq!(
+            at_the_edge.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            at_the_edge
+        );
+        let just_too_far = Placement::upright(CanvasArea::new(0.0201, 0.4, 0.4, 0.2));
+        assert_eq!(
+            just_too_far.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size),
+            just_too_far
+        );
+        let just_near_enough = Placement::upright(CanvasArea::new(0.0199, 0.4, 0.4, 0.2));
+        assert_close(
+            just_near_enough
+                .snapped_to_the_edges_of_the_picture(A_FIFTIETH, size)
+                .area
+                .left(),
+            0.0,
+        );
+        assert_eq!(
+            Placement::upright(CanvasArea::new(0.001, 0.4, 0.4, 0.2))
+                .snapped_to_the_edges_of_the_picture((0.0, 0.0), size),
+            Placement::upright(CanvasArea::new(0.001, 0.4, 0.4, 0.2)),
+            "no distance, no holding"
+        );
+    }
+
+    #[test]
+    fn the_two_ways_across_and_down_are_held_on_their_own_with_their_own_distances() {
+        let size = SQUARE_PICTURE;
+        let near_the_top_left = Placement::upright(CanvasArea::new(0.01, 0.01, 0.3, 0.2));
+        let held = near_the_top_left.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size);
+        assert_close(held.area.left(), 0.0);
+        assert_close(held.area.top(), 0.0);
+
+        let near_across_only = Placement::upright(CanvasArea::new(0.01, 0.4, 0.3, 0.2));
+        let held = near_across_only.snapped_to_the_edges_of_the_picture((0.02, 0.0), size);
+        assert_close(held.area.left(), 0.0);
+        assert_close(held.area.top(), 0.4);
+
+        // (A wide picture: the same number of points is a smaller fraction of its width than of its height: the distances are
+        // given for each way.)
+        let near_down_only = Placement::upright(CanvasArea::new(0.01, 0.01, 0.3, 0.2));
+        let held = near_down_only.snapped_to_the_edges_of_the_picture((0.005, 0.02), WIDE_PICTURE);
+        assert_close(held.area.left(), 0.01);
+        assert_close(held.area.top(), 0.0);
+    }
+
+    #[test]
+    fn of_two_edges_of_a_place_that_is_nearly_as_wide_as_the_picture_the_nearer_is_held() {
+        let size = SQUARE_PICTURE;
+        // Nearly the whole width: 0.01 from the left and 0.015 from the right.
+        let nearly_as_wide = Placement::upright(CanvasArea::new(0.01, 0.4, 0.975, 0.2));
+        let held = nearly_as_wide.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size);
+        assert_close(held.area.left(), 0.0);
+        let other_way = Placement::upright(CanvasArea::new(0.015, 0.4, 0.975, 0.2));
+        let held = other_way.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size);
+        assert_close(held.area.right(), 1.0);
+    }
+
+    #[test]
+    fn a_turned_place_is_held_by_the_corner_that_is_nearest_to_an_edge() {
+        let size = SQUARE_PICTURE;
+        // A square 0.2 across, turned an eighth of a turn: its corners are 0.1414 from the middle, up, down, left and right. Its
+        // middle at 0.15: the left corner is 0.0086 from the left edge.
+        let turned_square = Placement::new(CanvasArea::new(0.05, 0.4, 0.2, 0.2), Angle::from_degrees(45.0));
+        let (left_before, ..) = sides_of(&turned_square, size);
+        assert!(left_before > 0.005 && left_before < 0.01, "{left_before}");
+
+        let held = turned_square.snapped_to_the_edges_of_the_picture(A_FIFTIETH, size);
+
+        let (left, top, right, bottom) = sides_of(&held, size);
+        assert_close(left, 0.0);
+        assert_close(right - left, 0.2 * 2.0_f32.sqrt());
+        assert_close(bottom - top, 0.2 * 2.0_f32.sqrt());
+        assert_close(top, 0.5 - 0.2 * 2.0_f32.sqrt() / 2.0);
+        assert_eq!(held.rotation, turned_square.rotation, "still turned as far");
+        assert_eq!(
+            (held.area.width(), held.area.height()),
+            (turned_square.area.width(), turned_square.area.height()),
+            "and as big"
+        );
+    }
+
+    #[test]
+    fn being_held_to_the_edges_never_takes_the_middle_off_the_picture_or_changes_the_size() {
+        let mut random = DeterministicRandomNumbers::with_seed(41);
+        let unit = |random: &mut DeterministicRandomNumbers| random.next_below(10_001) as f32 / 10_000.0;
+        for _ in 0..400 {
+            let area = CanvasArea::new(
+                unit(&mut random) * 1.6 - 0.3,
+                unit(&mut random) * 1.6 - 0.3,
+                0.02 + unit(&mut random) * 0.98,
+                0.02 + unit(&mut random) * 0.98,
+            );
+            let place = Placement::new(area, Angle::from_degrees(unit(&mut random) * 360.0 - 180.0));
+            let held = place.snapped_to_the_edges_of_the_picture((0.03, 0.03), WIDE_PICTURE);
+            assert_area_is_valid(held.area);
+            assert_eq!((held.area.width(), held.area.height()), (area.width(), area.height()));
+            assert_eq!(held.rotation, place.rotation);
+            let (before_left, before_top, ..) = sides_of(&place, WIDE_PICTURE);
+            let (left, top, right, bottom) = sides_of(&held, WIDE_PICTURE);
+            // Whatever is held is exactly at an edge, and what is not has not moved.
+            let moved_across = (left - before_left).abs() > 1e-5;
+            let moved_down = (top - before_top).abs() > 1e-5;
+            if moved_across {
+                assert!(
+                    left.abs() < 1e-4 || (right - 1.0).abs() < 1e-4,
+                    "{place:?} became {held:?}"
+                );
+            }
+            if moved_down {
+                assert!(
+                    top.abs() < 1e-4 || (bottom - 1.0).abs() < 1e-4,
+                    "{place:?} became {held:?}"
+                );
+            }
+        }
     }
 
     // --- turning ---

@@ -65,7 +65,7 @@ fn seen(layer: &Layer) -> Seen {
 }
 
 /// A picture of the wide file, shown for `duration` frames.
-fn picture(duration: u64) -> Clip {
+pub(super) fn picture(duration: u64) -> Clip {
     Clip::Image(ImageClip::new(WIDE_PICTURE, duration).unwrap())
 }
 

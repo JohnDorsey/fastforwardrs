@@ -12,9 +12,13 @@
 mod animating;
 mod animation;
 mod duplicating;
+mod effect_editing;
+mod effects;
 mod frame_index;
 mod frame_rate;
+mod keyframe_copying;
 mod rack_editing;
+mod rack_merging;
 mod racks;
 mod settings;
 mod source_media;
@@ -31,13 +35,15 @@ use thiserror::Error;
 pub use animating::AnimationTarget;
 pub use animation::{
     Animation, Keyframe, Keyframes, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, PropertyId, PropertyValue,
-    RemovedKeyframe, ValueKind, placement_value, text_value, with_placement_value, with_text_value,
+    ValueKind, placement_value, text_value, with_placement_value, with_text_value,
 };
 pub use duplicating::{ClipSide, TrackSide};
+pub use effects::{Effect, EffectKind, Effects};
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
-pub use rack_editing::{KeyframeMove, RackDestination};
-pub use racks::{DrawerExtent, KeyframeLocation, LocatedRack, NewKeyframe, ResolvedAnimations};
+pub use keyframe_copying::TimeDirection;
+pub use rack_editing::{KeyframeDestination, KeyframeMove, RackDestination};
+pub use racks::{DrawerExtent, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations};
 pub use settings::{
     AnySetting, ProjectSettings, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
 };
@@ -152,6 +158,12 @@ pub enum EditError {
     CannotDeleteTheOnlyTrack { track: TrackId },
     #[error("{property:?} is not a property of a track")]
     NotAPropertyOfTheTrack { track: TrackId, property: PropertyId },
+    #[error("{track} cannot have the {kind} effect")]
+    NotAnEffectOfTheTrack { track: TrackId, kind: EffectKind },
+    #[error("{target} has the {kind} effect already")]
+    AlreadyHasThatEffect { target: AnimationTarget, kind: EffectKind },
+    #[error("{target} does not have the {kind} effect")]
+    DoesNotHaveThatEffect { target: AnimationTarget, kind: EffectKind },
     #[error(transparent)]
     Clip(#[from] ClipEditError),
     #[error("the project has no {rack}")]
@@ -160,11 +172,14 @@ pub enum EditError {
     Rack(#[from] RackEditError),
     #[error("the keyframes would not all be at frames that the drawer they are to be in has")]
     NoRoomForTheKeyframes,
-    #[error("the drawer of {owner} has a rack of {property:?} of the same thing already")]
-    TheDrawerHasARackForThatAlready {
-        owner: AnimationTarget,
-        property: PropertyId,
-    },
+    #[error(
+        "{keyframe} cannot go to {rack}, which does not have the same property of the same thing as the rack it is in"
+    )]
+    KeyframeCannotGoToThatRack { keyframe: KeyframeId, rack: RackId },
+    #[error("racks can only be merged when there are at least two of them")]
+    TooFewRacksToMerge,
+    #[error("racks can only be merged when they have the same property of the same thing")]
+    RacksOfDifferentThingsCannotBeMerged,
     #[error("there is no room next to {clip} for a copy of it")]
     NoRoomForACopy { clip: ClipId },
     #[error(transparent)]
@@ -729,6 +744,7 @@ impl Project {
                     id: placement.id,
                     clip: placement.clip.clone(),
                     drawer: placement.drawer.clone(),
+                    effects: placement.effects.clone(),
                     start: placement.first_timeline_frame.value(),
                     frames_it_lasted_before: placement.timeline_frame_count(),
                 })
@@ -741,6 +757,7 @@ impl Project {
                     id: departure.clip,
                     clip: leaving.clip.clone(),
                     drawer: leaving.drawer.clone(),
+                    effects: leaving.effects.clone(),
                     start: departure.start,
                     frames_it_lasted_before: leaving.timeline_frame_count(),
                 });
@@ -818,32 +835,9 @@ impl Project {
     }
 
     /// Makes a text clip or a picture last `frames` frames, or as long as there is room for if that
-    /// is less. Returns how long it lasts now. What is in its drawer is shortened with it (see
-    /// [`Track::set_clip_duration_with_edges`]).
+    /// is less. Returns how long it lasts now. What is in its drawer is shortened with it (see [`Track::set_clip_duration`]).
     pub fn set_clip_duration(&mut self, clip: ClipId, frames: u64) -> Result<u64, EditError> {
-        let position = self
-            .track_position_holding(clip)
-            .ok_or(ClipEditError::UnknownClip { clip })?;
-        let new_duration = self.tracks[position].duration_a_clip_would_be_given(clip, frames)?;
-        let first_frame = self.tracks[position]
-            .placement_of(clip)
-            .map_or(0, |placement| placement.first_timeline_frame.value());
-        // What the property is at the new end, by all the keyframes there are for it wherever they are kept.
-        let edges: CutEdges = self.tracks[position]
-            .racks_cut_by(clip, new_duration)
-            .into_iter()
-            .map(|cut| {
-                let at_the_end = cut
-                    .keyframes_go_on_beyond
-                    .then(|| {
-                        self.keyframes_of(AnimationTarget::Clip(clip), cut.property)
-                            .value_at(first_frame + new_duration - 1)
-                    })
-                    .flatten();
-                (cut.rack, (at_the_end, None))
-            })
-            .collect();
-        Ok(self.tracks[position].set_clip_duration_with_edges(clip, frames, &edges)?)
+        Ok(self.track_holding_mut_or_error(clip)?.set_clip_duration(clip, frames)?)
     }
 }
 
@@ -858,7 +852,17 @@ mod animating_tests;
 #[cfg(test)]
 mod duplicating_tests;
 #[cfg(test)]
+mod effect_editing_tests;
+#[cfg(test)]
+mod keyframe_copying_tests;
+#[cfg(test)]
+mod keyframe_crossing_tests;
+#[cfg(test)]
 mod rack_editing_tests;
+#[cfg(test)]
+mod rack_merging_tests;
+#[cfg(test)]
+mod rack_ordering_tests;
 #[cfg(test)]
 mod racks_tests;
 #[cfg(test)]

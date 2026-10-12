@@ -1,6 +1,21 @@
 //! Helpers shared by the unit tests in several modules.
 
-use crate::project::{AnimationTarget, Project, PropertyId, PropertyValue, TimelineFrameIndex};
+use crate::project::{AnimationTarget, EffectKind, Project, PropertyId, PropertyValue, TimelineFrameIndex};
+
+/// Puts the hue shift effect on `target` (a clip or a track), turned by `degrees` for what it is when it is not animated.
+pub fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) {
+    project
+        .add_effect(target, EffectKind::HueShift)
+        .expect("it is something that can have the effect");
+    project
+        .set_property_at(
+            target,
+            PropertyId::HueShift,
+            PropertyValue::Number(degrees),
+            TimelineFrameIndex::new(0),
+        )
+        .expect("the effect was just put on");
+}
 
 /// Puts a keyframe at `timeline_frame` that makes `property` of `target` have `value` there. (The property is animated from
 /// then on, if it was not.)

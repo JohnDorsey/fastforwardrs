@@ -11,22 +11,23 @@
 use thiserror::Error;
 
 use super::ids::{KeyframeId, RackId};
+use super::keyframe_fitting::{WhichAreLost, frames_for_keyframes_wanted_at};
 use crate::project::{AnimationTarget, Keyframe, Keyframes, PropertyId, PropertyValue};
 
-/// A value at a frame, in a rack. It has a number of its own, which is how it is told from the others in the rack
-/// whichever frame it is moved to.
+/// A value at a frame, in a rack. It has a name of its own (see [`KeyframeId`]), which is how it is told from every other
+/// keyframe whichever frame it is moved to and whichever rack it is moved to.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RackKeyframe {
-    number: u32,
+    id: KeyframeId,
     /// Counted from the start of what holds the rack.
     pub frame: u64,
     pub value: PropertyValue,
 }
 
 impl RackKeyframe {
-    /// Which of the keyframes made in its rack this is.
-    pub fn number(&self) -> u32 {
-        self.number
+    /// The name of the keyframe.
+    pub fn id(&self) -> KeyframeId {
+        self.id
     }
 }
 
@@ -35,6 +36,8 @@ impl RackKeyframe {
 pub enum RackEditError {
     #[error("the rack has no such keyframe")]
     NoSuchKeyframe,
+    #[error("the rack has that keyframe already")]
+    AlreadyHasThatKeyframe,
     #[error("two keyframes of the rack would be at the same frame")]
     FramesWouldCoincide,
     #[error("that is not the kind of value the property has")]
@@ -110,17 +113,9 @@ impl Rack {
         self.position_of(frame).ok().map(|index| &self.keyframes[index])
     }
 
-    /// The name of `keyframe`, which must be one of this rack's.
-    pub fn id_of(&self, keyframe: &RackKeyframe) -> KeyframeId {
-        KeyframeId::new(self.id, keyframe.number)
-    }
-
-    /// The keyframe called `id`, if it is in this rack.
+    /// The keyframe called `id`, if it is in this rack (whichever rack made it).
     pub fn keyframe(&self, id: KeyframeId) -> Option<&RackKeyframe> {
-        if id.rack() != self.id {
-            return None;
-        }
-        self.keyframes.iter().find(|keyframe| keyframe.number == id.number())
+        self.keyframes.iter().find(|keyframe| keyframe.id == id)
     }
 
     /// What the keyframes say by themselves, as the keyframes of a property are worked out from: with no names.
@@ -140,13 +135,13 @@ impl Rack {
         match self.position_of(frame) {
             Ok(index) => {
                 self.keyframes[index].value = value;
-                Ok(KeyframeId::new(self.id, self.keyframes[index].number))
+                Ok(self.keyframes[index].id)
             }
             Err(index) => {
-                let number = self.next_keyframe_number;
+                let id = KeyframeId::new(self.id, self.next_keyframe_number);
                 self.next_keyframe_number += 1;
-                self.keyframes.insert(index, RackKeyframe { number, frame, value });
-                Ok(KeyframeId::new(self.id, number))
+                self.keyframes.insert(index, RackKeyframe { id, frame, value });
+                Ok(id)
             }
         }
     }
@@ -159,65 +154,101 @@ impl Rack {
 
     /// Takes away the keyframe called `id`, if the rack has it, and gives it.
     pub fn remove(&mut self, id: KeyframeId) -> Option<RackKeyframe> {
-        if id.rack() != self.id {
-            return None;
-        }
-        let index = self
-            .keyframes
-            .iter()
-            .position(|keyframe| keyframe.number == id.number())?;
+        let index = self.keyframes.iter().position(|keyframe| keyframe.id == id)?;
         Some(self.keyframes.remove(index))
     }
 
-    /// Moves keyframes, each to the frame given for it: all of them, or (if one is not in the rack, or two would be at the
-    /// same frame, counting those that stay) none.
-    pub fn move_keyframes(&mut self, moves: &[(KeyframeId, u64)]) -> Result<(), RackEditError> {
-        let mut frames: Vec<(u32, u64)> = self
-            .keyframes
-            .iter()
-            .map(|keyframe| (keyframe.number, keyframe.frame))
-            .collect();
-        for (id, to_frame) in moves {
-            if id.rack() != self.id {
-                return Err(RackEditError::NoSuchKeyframe);
+    /// Puts a keyframe that was made anywhere, with the name it has, in this rack, at the frame it has. Says why not, and
+    /// changes nothing, if the rack has a keyframe at that frame, or that keyframe already, or the value is not the kind the
+    /// property has.
+    pub fn put_in(&mut self, keyframe: RackKeyframe) -> Result<(), RackEditError> {
+        if keyframe.value.kind() != self.property.kind() {
+            return Err(RackEditError::NotTheKindOfValueThePropertyHas);
+        }
+        if self.keyframe(keyframe.id).is_some() {
+            return Err(RackEditError::AlreadyHasThatKeyframe);
+        }
+        match self.position_of(keyframe.frame) {
+            Ok(_) => Err(RackEditError::FramesWouldCoincide),
+            Err(index) => {
+                self.keyframes.insert(index, keyframe);
+                Ok(())
             }
-            let (_, frame) = frames
-                .iter_mut()
-                .find(|(number, _)| *number == id.number())
-                .ok_or(RackEditError::NoSuchKeyframe)?;
-            *frame = *to_frame;
         }
-        let mut seen: Vec<u64> = frames.iter().map(|(_, frame)| *frame).collect();
-        seen.sort_unstable();
-        if seen.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(RackEditError::FramesWouldCoincide);
-        }
-        for keyframe in &mut self.keyframes {
-            keyframe.frame = frames
-                .iter()
-                .find(|(number, _)| *number == keyframe.number)
-                .map_or(keyframe.frame, |(_, frame)| *frame);
-        }
-        self.keyframes.sort_by_key(|keyframe| keyframe.frame);
-        Ok(())
     }
 
-    /// A copy of this rack that has the name `id` and has the keyframes animate `target`. (Its keyframes keep their numbers:
-    /// they are told from those of this rack by the rack they are in.)
+    /// Makes a new keyframe at `frame` that has the value of the keyframe called `id`, which this rack must have. Gives the name
+    /// of the new keyframe, or says why not (and changes nothing): the rack does not have that keyframe, or has a keyframe at
+    /// `frame` already.
+    pub fn add_a_copy_of(&mut self, id: KeyframeId, frame: u64) -> Result<KeyframeId, RackEditError> {
+        let value = self.keyframe(id).ok_or(RackEditError::NoSuchKeyframe)?.value.clone();
+        if self.at(frame).is_some() {
+            return Err(RackEditError::FramesWouldCoincide);
+        }
+        self.set(frame, value)
+    }
+
+    /// A copy of this rack that has the name `id` and has the keyframes animate `target`. Its keyframes are new ones, made in
+    /// it, at the same frames and with the same values: they are not the keyframes of this rack, which keep their names.
     #[must_use]
     pub fn copy_as(&self, id: RackId, target: AnimationTarget) -> Rack {
+        let keyframes: Vec<RackKeyframe> = self
+            .keyframes
+            .iter()
+            .zip(0u32..)
+            .map(|(keyframe, number)| RackKeyframe {
+                id: KeyframeId::new(id, number),
+                frame: keyframe.frame,
+                value: keyframe.value.clone(),
+            })
+            .collect();
         Rack {
             id,
             target,
-            ..self.clone()
+            property: self.property,
+            next_keyframe_number: u32::try_from(keyframes.len()).unwrap_or(u32::MAX),
+            keyframes,
         }
     }
 
-    /// The same rack, with its keyframes animating `target`.
+    /// This rack with no keyframes at all. (A project does not keep a rack like that: it is what is put in place of a rack that is
+    /// to be taken away.)
     #[must_use]
-    pub fn retargeted(mut self, target: AnimationTarget) -> Rack {
-        self.target = target;
-        self
+    pub fn emptied(&self) -> Rack {
+        self.with_keyframes(Vec::new())
+    }
+
+    /// This rack with `keyframes` in place of its own, each with the name it has. They must be in the order of their frames, with no
+    /// two at one frame, and of the kind of value that the property has.
+    #[must_use]
+    pub fn with_keyframes(&self, keyframes: Vec<RackKeyframe>) -> Rack {
+        debug_assert!(
+            keyframes.windows(2).all(|pair| pair[0].frame < pair[1].frame),
+            "the keyframes of a rack are in the order of their frames, each at a frame of its own"
+        );
+        debug_assert!(
+            keyframes
+                .iter()
+                .all(|keyframe| keyframe.value.kind() == self.property.kind())
+        );
+        Rack {
+            id: self.id,
+            target: self.target,
+            property: self.property,
+            keyframes,
+            next_keyframe_number: self.next_keyframe_number,
+        }
+    }
+
+    /// This rack with `keyframes` in place of its own, in whatever order they are given and at whatever frames: a rack that nothing
+    /// in the program makes, for the tests of what finds one.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_keyframes_in_any_order(&self, keyframes: Vec<RackKeyframe>) -> Rack {
+        Rack {
+            keyframes,
+            ..self.clone()
+        }
     }
 
     /// The two racks that what holds this one is cut into, `frames_in` frames after its start: the first is this rack with
@@ -247,7 +278,7 @@ impl Rack {
             keyframes: self.keyframes[cut..]
                 .iter()
                 .map(|keyframe| RackKeyframe {
-                    number: keyframe.number,
+                    id: keyframe.id,
                     frame: keyframe.frame - frames_in,
                     value: keyframe.value.clone(),
                 })
@@ -265,85 +296,65 @@ impl Rack {
         (first, second)
     }
 
-    /// This rack when what holds it is only `length` frames long and was longer: the keyframes it still has a frame for, and
-    /// one at its last frame with `value_at_the_end` if that says what it is to be (unless there is one there already).
+    /// This rack when what holds it is only `length` frames long and was longer: the keyframes it still has frames for stay where
+    /// they are, and those that were at frames that are cut off come in to the last frames, in their order, where there is room
+    /// for them, which the empty frames between the keyframes make. A keyframe is lost only when there are more keyframes than
+    /// frames, and then it is the latest that are (see `keyframe_fitting`).
     #[must_use]
-    pub fn truncated_to(&self, length: u64, value_at_the_end: Option<PropertyValue>) -> Rack {
-        let mut truncated = Rack {
-            keyframes: self
-                .keyframes
-                .iter()
-                .filter(|keyframe| keyframe.frame < length)
-                .cloned()
-                .collect(),
-            ..self.clone()
-        };
-        if let Some(value) = value_at_the_end
-            && let Some(last_frame) = length.checked_sub(1)
-        {
-            truncated.set_if_there_is_none_there(last_frame, value);
-        }
-        truncated
+    pub fn truncated_to(&self, length: u64) -> Rack {
+        self.with_frames_fitted(|frame| frame, Some(length), WhichAreLost::TheLatest)
     }
 
-    /// This rack when what holds it is only `length` frames long and was longer, by what its own keyframes say (see
-    /// [`Self::truncated_to`]): a keyframe is added at its last frame if some were cut off, with the value that the rack's own
-    /// keyframes had there.
-    #[must_use]
-    pub fn truncated_by_its_own_curve(&self, length: u64) -> Rack {
-        let some_were_cut_off = self.keyframes.iter().any(|keyframe| keyframe.frame >= length);
-        let value_at_the_end = some_were_cut_off
-            .then(|| length.checked_sub(1).and_then(|last| self.curve().value_at(last)))
-            .flatten();
-        self.truncated_to(length, value_at_the_end)
-    }
-
-    /// This rack when what holds it is `to_length` frames long and was `from_length`: each keyframe is as far through it as it
-    /// was, as near as the frames allow. Keyframes that land on the same frame are one: the later is kept. Nothing is kept of
-    /// what is `to_length` frames or more through.
+    /// This rack when what holds it is `to_length` frames long and was `from_length`: each keyframe is as far through it as it was,
+    /// as near as the frames allow. Keyframes that would land on one frame are put at frames of their own beside it, which the
+    /// empty frames between the keyframes make room for: a keyframe is lost only when there are more keyframes than frames, and
+    /// then it is every so many of them that are, so that those kept are spread through the whole (see
+    /// `keyframe_fitting`).
     #[must_use]
     pub fn rescaled(&self, from_length: u64, to_length: u64) -> Rack {
         if to_length == 0 {
-            return Rack {
-                keyframes: Vec::new(),
-                ..self.clone()
-            };
+            return self.emptied();
         }
         if from_length == 0 || from_length == to_length {
             return self.clone();
         }
-        self.with_frames_mapped(|frame| {
-            let frame = (frame as f64 * to_length as f64 / from_length as f64).round() as u64;
-            frame.min(to_length - 1)
-        })
+        self.with_frames_fitted(
+            |frame| (frame as f64 * to_length as f64 / from_length as f64).round() as u64,
+            Some(to_length),
+            WhichAreLost::SpreadThroughThem,
+        )
     }
 
-    /// This rack with every keyframe at the frame that `to_frame` says its frame becomes. (Keyframes that land on one frame
-    /// are one: the later is kept.)
+    /// This rack with every keyframe at the frame that `to_frame` says its frame becomes, which must not put a keyframe before
+    /// one that was before it. Keyframes that would land on one frame are put at frames of their own beside it (see
+    /// `keyframe_fitting`), and none is lost.
     #[must_use]
     pub fn with_frames_mapped(&self, to_frame: impl Fn(u64) -> u64) -> Rack {
-        let mut mapped: Vec<RackKeyframe> = self
+        self.with_frames_fitted(to_frame, None, WhichAreLost::TheLatest)
+    }
+
+    /// This rack with its keyframes at the frames that `to_frame` says they want to be at, fitted into `length` frames (or as many
+    /// as they need, if that is `None`): see `keyframe_fitting`.
+    fn with_frames_fitted(
+        &self,
+        to_frame: impl Fn(u64) -> u64,
+        length: Option<u64>,
+        which_are_lost: WhichAreLost,
+    ) -> Rack {
+        let wanted: Vec<u64> = self.keyframes.iter().map(|keyframe| to_frame(keyframe.frame)).collect();
+        let fitted = self
             .keyframes
             .iter()
-            .map(|keyframe| RackKeyframe {
-                number: keyframe.number,
-                frame: to_frame(keyframe.frame),
-                value: keyframe.value.clone(),
+            .zip(frames_for_keyframes_wanted_at(&wanted, length, which_are_lost))
+            .filter_map(|(keyframe, frame)| {
+                Some(RackKeyframe {
+                    id: keyframe.id,
+                    frame: frame?,
+                    value: keyframe.value.clone(),
+                })
             })
             .collect();
-        // (A stable sort: of two at one frame the one that was later stays later.)
-        mapped.sort_by_key(|keyframe| keyframe.frame);
-        let mut kept: Vec<RackKeyframe> = Vec::with_capacity(mapped.len());
-        for keyframe in mapped {
-            match kept.last_mut() {
-                Some(last) if last.frame == keyframe.frame => *last = keyframe,
-                _ => kept.push(keyframe),
-            }
-        }
-        Rack {
-            keyframes: kept,
-            ..self.clone()
-        }
+        self.with_keyframes(fitted)
     }
 
     fn set_if_there_is_none_there(&mut self, frame: u64, value: PropertyValue) {

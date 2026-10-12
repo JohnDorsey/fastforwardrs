@@ -24,9 +24,9 @@ use super::racks;
 use super::strip_view::StripView;
 use super::view_state::{Grabbed, ItemDrag};
 use super::{NewMenuTarget, TimelineContent, TimelineViewState};
-use crate::application::clip_moving::StartTimeMemory;
 use crate::application::commands::Command;
 use crate::application::selection::SelectionChange;
+use crate::application::start_time_hold::StartTimeMemory;
 use crate::application::textures::Textures;
 use crate::application::theme;
 use crate::project::{AnimationTarget, Clip, ClipId, Project, Track, TrackId};
@@ -262,6 +262,7 @@ fn operate_the_drawer_of_the_track(
         ui.id().with(("drawer of track", track.id(), "room")),
         Sense::CLICK | Sense::DRAG,
     );
+    state.drawer_bottoms.push((owner, hanging.bottom()));
     let place = racks::DrawerPlace {
         owner,
         from_x: view.screen_x_of_frame(0),
@@ -349,6 +350,7 @@ fn operate_the_drawer(
             ),
         );
         ui.interact(hanging, drawer_id.with("room"), Sense::CLICK | Sense::DRAG);
+        state.drawer_bottoms.push((owner, hanging.bottom()));
         let place = racks::DrawerPlace {
             owner,
             from_x: rectangles.whole.left(),
@@ -372,7 +374,10 @@ fn operate_the_drawer(
         )
     });
     if response.clicked() {
-        state.drawers.toggle(owner);
+        state.drawers.toggle(
+            owner,
+            drawers::OpenMode::when_clicked(ui.input(|input| input.modifiers.shift)),
+        );
     }
     if drawers::button_is_shown(
         clip_is_hovered || response.hovered(),
@@ -422,10 +427,11 @@ fn drag_the_clip(
         state.item_drag = Some(ItemDrag {
             keyframes: keyframes_dragged_on_their_own(content.project, &clips, &keyframes),
             clips,
-            grabbed: Grabbed::Clip(location),
+            grabbed: Grabbed::Clip {
+                clip: location,
+                start_time: StartTimeMemory::new(placement.first_timeline_frame.value(), track),
+            },
             pointer_frame_at_the_start: frame_under(pointer),
-            grabbed_frame_at_the_start: placement.first_timeline_frame.value(),
-            start_time: Some(StartTimeMemory::new(placement.first_timeline_frame.value(), track)),
         });
     }
 }

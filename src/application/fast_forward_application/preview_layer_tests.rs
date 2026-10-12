@@ -2,7 +2,7 @@
 //! resizing it by a corner and turning it by dragging just outside a corner.
 
 use egui::epaint::ColorMode;
-use egui::{Color32, CursorIcon, Event, Modifiers, PointerButton, Pos2, Shape, Vec2, pos2, vec2};
+use egui::{Color32, CursorIcon, Event, PointerButton, Pos2, Shape, Vec2, pos2, vec2};
 use egui_kittest::kittest::Queryable;
 
 use super::test_window::{
@@ -93,16 +93,6 @@ fn turned_about(point: Pos2, middle: Pos2, degrees: f32) -> Pos2 {
     let (sine, cosine) = degrees.to_radians().sin_cos();
     let offset = point - middle;
     middle + vec2(offset.x * cosine - offset.y * sine, offset.x * sine + offset.y * cosine)
-}
-
-fn hold_shift(window: &mut Window) {
-    window.harness.event(Event::ModifiersChanged(Modifiers::SHIFT));
-    window.harness.step();
-}
-
-fn let_go_of_shift(window: &mut Window) {
-    window.harness.event(Event::ModifiersChanged(Modifiers::NONE));
-    window.harness.step();
 }
 
 fn assert_degrees(actual: Angle, expected: f32, context: &str) {
@@ -205,9 +195,9 @@ fn a_turn_with_shift_held_is_made_a_whole_number_of_fifteen_degrees() {
     let (mut window, text) = window_with_a_text_object_selected();
     let middle = middle_of_the_layer(&window);
     let start = just_outside(&window, Corner::BottomLeft, 18.0);
-    hold_shift(&mut window);
+    window.hold_shift();
     window.drag(start, turned_about(start, middle, 37.0), PointerButton::Primary);
-    let_go_of_shift(&mut window);
+    window.let_go_of_shift();
     assert_eq!(
         placement_of(&window, text).rotation,
         Angle::from_degrees(30.0),
@@ -1358,5 +1348,251 @@ fn the_area_of_a_placement_is_never_bigger_than_the_picture_and_has_its_middle_o
     assert!(
         (-1e-4..=1.0 + 1e-4).contains(&middle_across) && (-1e-4..=1.0 + 1e-4).contains(&middle_down),
         "{area:?}"
+    );
+}
+
+// --- held to the edges of the picture with Shift ---
+
+#[derive(Clone, Copy, Debug)]
+enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+const EVERY_EDGE: [Edge; 4] = [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom];
+
+/// The picture as it is on the screen.
+fn the_picture_on_the_screen(window: &Window) -> egui::Rect {
+    window.rectangle_of(&video_label(window.clip(1, 0)))
+}
+
+/// The left, top, right and bottom sides of the rectangle that has all of `clip` in it, turned as it is, as fractions of the
+/// picture.
+fn sides_of_the_layer(window: &Window, clip: ClipId) -> (f32, f32, f32, f32) {
+    let place = placement_of(window, clip);
+    let (width, height) = window.application().project().picture_size();
+    let corners = Corner::ALL.map(|corner| place.corner_position(corner, (width as f32, height as f32)));
+    (
+        corners.iter().map(|corner| corner.0).fold(f32::INFINITY, f32::min),
+        corners.iter().map(|corner| corner.1).fold(f32::INFINITY, f32::min),
+        corners.iter().map(|corner| corner.0).fold(f32::NEG_INFINITY, f32::max),
+        corners.iter().map(|corner| corner.1).fold(f32::NEG_INFINITY, f32::max),
+    )
+}
+
+/// How many points the side of `clip` that faces `edge` is from that edge of the picture (negative if it is past it).
+fn points_from_the_edge(window: &Window, clip: ClipId, edge: Edge) -> f32 {
+    let picture = the_picture_on_the_screen(window);
+    let (left, top, right, bottom) = sides_of_the_layer(window, clip);
+    match edge {
+        Edge::Left => left * picture.width(),
+        Edge::Right => (1.0 - right) * picture.width(),
+        Edge::Top => top * picture.height(),
+        Edge::Bottom => (1.0 - bottom) * picture.height(),
+    }
+}
+
+/// The way the pointer goes to take a layer towards `edge`.
+fn towards(edge: Edge) -> Vec2 {
+    match edge {
+        Edge::Left => vec2(-1.0, 0.0),
+        Edge::Right => vec2(1.0, 0.0),
+        Edge::Top => vec2(0.0, -1.0),
+        Edge::Bottom => vec2(0.0, 1.0),
+    }
+}
+
+/// Takes hold of the selected layer in the middle and goes towards `edge` with it until its side is about 40 points from it
+/// (which is not near enough to be held), and then in one move until it is `points_away` from it. The button is left down. Gives
+/// where the pointer is, and the way it goes to take the layer towards the edge.
+fn take_the_layer_to_within(window: &mut Window, clip: ClipId, edge: Edge, points_away: f32) -> (Pos2, Vec2) {
+    let direction = towards(edge);
+    let middle = middle_of_the_layer(window);
+    let first_stop = middle + direction * (points_from_the_edge(window, clip, edge) - 40.0);
+    window.drag_and_hold(middle, first_stop, PointerButton::Primary);
+    let pointer = first_stop + direction * (points_from_the_edge(window, clip, edge) - points_away);
+    window.move_pointer_to(pointer);
+    (pointer, direction)
+}
+
+#[test]
+fn a_layer_that_is_dragged_with_shift_held_is_held_to_the_edge_of_the_picture_it_comes_near() {
+    for edge in EVERY_EDGE {
+        let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+        window.hold_shift();
+        let (pointer, _) = take_the_layer_to_within(&mut window, text, edge, 6.0);
+        window.release(pointer, PointerButton::Primary);
+        window.let_go_of_shift();
+
+        assert!(
+            points_from_the_edge(&window, text, edge).abs() < 0.01,
+            "{edge:?}: the pointer was 6 points from the edge, and the layer is held to it: {}",
+            points_from_the_edge(&window, text, edge)
+        );
+        assert_eq!(
+            placement_of(&window, text).rotation,
+            Angle::ZERO,
+            "only where it is changes"
+        );
+    }
+}
+
+#[test]
+fn a_layer_is_held_from_as_many_points_away_at_the_top_and_the_bottom_as_at_the_sides() {
+    // (The picture is wider than it is tall, so a distance that was counted in fractions of the width for the sides that face the
+    // top and the bottom, or of the height for the others, would be a different number of points there.)
+    for edge in EVERY_EDGE {
+        let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+        window.hold_shift();
+        let (pointer, _) = take_the_layer_to_within(&mut window, text, edge, 11.0);
+        window.release(pointer, PointerButton::Primary);
+        window.let_go_of_shift();
+        assert!(
+            points_from_the_edge(&window, text, edge).abs() < 0.01,
+            "{edge:?}: held from 11 points away: {}",
+            points_from_the_edge(&window, text, edge)
+        );
+
+        let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+        window.hold_shift();
+        let (pointer, _) = take_the_layer_to_within(&mut window, text, edge, 13.0);
+        window.release(pointer, PointerButton::Primary);
+        window.let_go_of_shift();
+        let away = points_from_the_edge(&window, text, edge);
+        assert!(
+            (away - 13.0).abs() < 0.3,
+            "{edge:?}: not held from 13 points away: {away}"
+        );
+    }
+}
+
+#[test]
+fn without_shift_a_layer_is_not_held_to_the_edge_however_near_it_comes() {
+    for edge in EVERY_EDGE {
+        let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+        let (pointer, _) = take_the_layer_to_within(&mut window, text, edge, 6.0);
+        window.release(pointer, PointerButton::Primary);
+
+        let away = points_from_the_edge(&window, text, edge);
+        assert!(
+            (away - 6.0).abs() < 0.3,
+            "{edge:?}: {away} points from the edge, where the pointer took it"
+        );
+    }
+}
+
+#[test]
+fn a_layer_that_is_further_from_the_edge_than_the_distance_it_is_held_from_goes_where_the_pointer_takes_it() {
+    for edge in EVERY_EDGE {
+        let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+        window.hold_shift();
+        let (pointer, _) = take_the_layer_to_within(&mut window, text, edge, 20.0);
+        window.release(pointer, PointerButton::Primary);
+        window.let_go_of_shift();
+
+        let away = points_from_the_edge(&window, text, edge);
+        assert!((away - 20.0).abs() < 0.3, "{edge:?}: {away} points from the edge");
+    }
+}
+
+#[test]
+fn a_layer_is_let_go_of_by_the_edge_when_the_pointer_has_gone_far_enough_from_where_it_would_hold_it_however_slowly() {
+    let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+    window.hold_shift();
+    let (pointer, direction) = take_the_layer_to_within(&mut window, text, Edge::Left, 6.0);
+    assert!(points_from_the_edge(&window, text, Edge::Left).abs() < 0.01, "held");
+
+    // Back from the edge a point or two at a time: it stays held while the pointer is within the distance, and then it follows.
+    let mut pointer = pointer;
+    for (steps_back, held) in [(1.0, true), (2.0, true), (2.0, true), (3.0, false)] {
+        pointer -= direction * steps_back;
+        window.move_pointer_to(pointer);
+        let away = points_from_the_edge(&window, text, Edge::Left);
+        if held {
+            assert!(
+                away.abs() < 0.01,
+                "the pointer is {} points from where it holds it: {away}",
+                6.0 + steps_back
+            );
+        }
+    }
+    let away = points_from_the_edge(&window, text, Edge::Left);
+    assert!(
+        (away - 14.0).abs() < 0.3,
+        "the pointer has gone back 8 points from where it was 6 from the edge: it is 14 from it, and not held: {away}"
+    );
+    window.release(pointer, PointerButton::Primary);
+    window.let_go_of_shift();
+}
+
+#[test]
+fn letting_go_of_shift_while_dragging_puts_the_layer_where_the_pointer_has_it() {
+    let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+    window.hold_shift();
+    let (pointer, direction) = take_the_layer_to_within(&mut window, text, Edge::Right, 6.0);
+    assert!(points_from_the_edge(&window, text, Edge::Right).abs() < 0.01, "held");
+
+    window.let_go_of_shift();
+    window.move_pointer_to(pointer - direction * 1.0);
+
+    let away = points_from_the_edge(&window, text, Edge::Right);
+    assert!((away - 7.0).abs() < 0.3, "not held: {away} points from the edge");
+    window.release(pointer - direction * 1.0, PointerButton::Primary);
+}
+
+#[test]
+fn a_turned_layer_is_held_by_the_corner_that_comes_nearest_to_the_edge() {
+    let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+    let turned = Placement::new(CanvasArea::new(0.3, 0.4, 0.4, 0.2), Angle::from_degrees(40.0));
+    window.do_this(Command::SetClipPlacement {
+        clip: text,
+        placement: turned,
+    });
+    window.hold_shift();
+    let (pointer, _) = take_the_layer_to_within(&mut window, text, Edge::Left, 6.0);
+    window.release(pointer, PointerButton::Primary);
+    window.let_go_of_shift();
+
+    assert!(
+        points_from_the_edge(&window, text, Edge::Left).abs() < 0.01,
+        "its leftmost corner is at the edge: {}",
+        points_from_the_edge(&window, text, Edge::Left)
+    );
+    assert_degrees(placement_of(&window, text).rotation, 40.0, "still turned the same");
+}
+
+#[test]
+fn being_held_to_an_edge_is_one_step_of_the_history_and_undoing_it_puts_the_layer_back() {
+    let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+    let before = placement_of(&window, text);
+    window.application_mut().note_everything_is_saved();
+    window.hold_shift();
+    let (pointer, _) = take_the_layer_to_within(&mut window, text, Edge::Top, 6.0);
+    window.release(pointer, PointerButton::Primary);
+    window.let_go_of_shift();
+    assert!(window.application().has_unsaved_changes());
+
+    window.do_this(Command::Undo);
+
+    assert_eq!(placement_of(&window, text), before, "one undo is enough");
+}
+
+#[test]
+fn a_corner_that_is_dragged_with_shift_held_is_not_held_to_the_edge_of_the_picture() {
+    // (Shift has a meaning of its own when a layer is turned, which is whole steps of 15 degrees, and none when it is resized:
+    // only moving a layer is held to the edges.)
+    let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
+    let picture = the_picture_on_the_screen(&window);
+    let corner = corner_position(&window, Corner::BottomRight);
+    window.hold_shift();
+    window.drag(corner, pos2(picture.right() - 6.0, corner.y), PointerButton::Primary);
+    window.let_go_of_shift();
+
+    let away = points_from_the_edge(&window, text, Edge::Right);
+    assert!(
+        (away - 6.0).abs() < 0.5,
+        "{away} points from the edge: the corner is where the pointer put it"
     );
 }

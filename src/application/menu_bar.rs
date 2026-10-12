@@ -34,6 +34,12 @@ pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Com
             {
                 commands.push(Command::SaveProject);
             }
+            if ui
+                .add_enabled(idle && availability.can_save, Button::new("Save project as"))
+                .clicked()
+            {
+                commands.push(Command::SaveProjectAs);
+            }
             if ui.add_enabled(idle, Button::new("Load project")).clicked() {
                 commands.push(Command::LoadProject);
             }

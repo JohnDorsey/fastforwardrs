@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{FastForwardApplication, OpeningPurpose};
 use crate::application::file_chooser::{FileKind, FileQuestion};
+use crate::application::preview_panel::PreviewView;
 use crate::project::Project;
 use crate::project_file::{read_project_file, write_project_file};
 
@@ -24,6 +25,7 @@ impl FastForwardApplication {
         let Some(path) = self.file_chooser.choose_a_file_to_open(&FileQuestion {
             title: "Load a project",
             suggested_file_name: None,
+            starting_directory: None,
             kinds: &[
                 FileKind {
                     name: "Project files",
@@ -57,11 +59,22 @@ impl FastForwardApplication {
             Some(path) => path.clone(),
             None => {
                 self.pause_playback_for_dialog();
-                let Some(path) = self.ask_where_to_save_project() else {
+                let Some(path) = self.ask_where_to_save_project("Save the project") else {
                     return;
                 };
                 path
             }
+        };
+        self.save_project_to(path);
+    }
+
+    /// Asks where to save the project, even if it has a file already (the dialog opens in the folder of that file, with its
+    /// name offered), and saves it there: that file is the project's from then on, and the file it came from is left as it
+    /// was. Nothing happens if no place is chosen.
+    pub(super) fn save_project_as(&mut self) {
+        self.pause_playback_for_dialog();
+        let Some(path) = self.ask_where_to_save_project("Save the project as") else {
+            return;
         };
         self.save_project_to(path);
     }
@@ -77,17 +90,30 @@ impl FastForwardApplication {
         }
     }
 
-    fn ask_where_to_save_project(&self) -> Option<PathBuf> {
-        let first_file_name = self
-            .project
-            .sources()
-            .first()
-            .and_then(|source| source.link.absolute_path.file_stem())
-            .map_or_else(|| "project".to_owned(), |stem| stem.to_string_lossy().into_owned());
-        let suggested_file_name = format!("{first_file_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}");
+    /// Asks where to save the project, offering the name of the file it has now, or if it has none the name of the first
+    /// file in it, and the folder of the file it has now (if it has one).
+    fn ask_where_to_save_project(&self, title: &str) -> Option<PathBuf> {
+        let suggested_file_name = match self
+            .project_file_path
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+        {
+            Some(name_of_the_file_it_has) => name_of_the_file_it_has,
+            None => {
+                let first_file_name = self
+                    .project
+                    .sources()
+                    .first()
+                    .and_then(|source| source.link.absolute_path.file_stem())
+                    .map_or_else(|| "project".to_owned(), |stem| stem.to_string_lossy().into_owned());
+                format!("{first_file_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}")
+            }
+        };
         let path = self.file_chooser.choose_where_to_save(&FileQuestion {
-            title: "Save the project",
+            title,
             suggested_file_name: Some(&suggested_file_name),
+            starting_directory: self.project_file_path.as_deref().and_then(Path::parent),
             kinds: &[FileKind {
                 name: "Project files",
                 extensions: &[PROJECT_FILE_EXTENSION],
@@ -108,6 +134,7 @@ impl FastForwardApplication {
         self.preview_pictures.set_setup(None);
         self.textures.clear();
         self.timeline_view.reset();
+        self.preview_view = PreviewView::default();
         self.project = project;
         self.project_file_path = project_file_path;
         self.history.reset();

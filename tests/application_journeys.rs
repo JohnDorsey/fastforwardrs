@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 
 use egui::{Key, Modifiers, PointerButton, vec2};
 use egui_kittest::kittest::Queryable;
+use fastforwardrs::colour_effects::ColourMatrix;
 use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::project::{Clip, Project, SourceMediaIdentifier, TimelineFrameIndex};
+use fastforwardrs::project::{AnimationTarget, Clip, EffectKind, Project, SourceMediaIdentifier, TimelineFrameIndex};
 use journey::Journey;
 use support::{
     TestVideoSpecification, counter_video, decode_video, expected_source_frames, is_black, picture_shown_in_frame,
@@ -1247,7 +1248,11 @@ fn a_video_animated_with_the_stopwatch_and_the_panel_is_saved_with_its_keyframes
     let project_path = scratch.path().join("animated.fastforwardrs.json");
     journey.application_mut().save_project_to(project_path.clone());
     let (text_of_file, saved) = read_project_file_as_json(&project_path);
-    assert_eq!(saved["file_format_version"], 7, "{text_of_file}");
+    assert_eq!(
+        saved["file_format_version"],
+        fastforwardrs::project_file::FILE_FORMAT_VERSION,
+        "{text_of_file}"
+    );
     // (The keyframes are in racks, in the drawer of the clip.)
     let rack_of = |property: &str| {
         saved["tracks"][0]["clips"][0]["drawer"]
@@ -1568,4 +1573,59 @@ fn an_animation_that_is_too_much_to_export_is_refused_with_a_message_that_says_s
         !destination.with_extension("exporting.mp4").exists(),
         "and no half-written file was left"
     );
+}
+
+#[test]
+fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_with_the_clip_and_exported_turned() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let orange = (200u8, 100u8, 50u8);
+    let video = support::flat_colour_video(&toolchain, scratch.path(), orange);
+    let mut journey = Journey::importing(&toolchain, &video);
+
+    // Put on with the plus button of the properties panel, and turned a third of the way round with its slider.
+    journey.select_the_clip_at(10);
+    let plus = journey.rectangle_of("Add an effect");
+    journey.click(plus.center());
+    let item = journey.rectangle_of("Hue shift");
+    journey.click(item.center());
+    journey.set_slider("Turn", 120.0);
+
+    // Saved with the clip, and a fresh editor has it.
+    let project_path = scratch.path().join("turned.fastforwardrs.json");
+    journey.application_mut().save_project_to(project_path.clone());
+    let (text_of_file, saved) = read_project_file_as_json(&project_path);
+    assert_eq!(
+        saved["tracks"][0]["clips"][0]["effects"],
+        serde_json::json!([{"effect": "hue shift", "values": [120.0]}]),
+        "{text_of_file}"
+    );
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().load_project_from(project_path);
+    fresh.wait_until_idle();
+    let clip = fresh.application().project().tracks()[0].entries()[0].id();
+    assert!(
+        fresh
+            .application()
+            .project()
+            .has_the_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+    );
+
+    // The export has the colours turned as the arithmetic of the effect says, in every frame.
+    let exported = scratch.path().join("turned.mp4");
+    export_to(&mut fresh, &exported);
+    let decoded = decode_video(&toolchain, &exported, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(decoded.pictures.len(), 60);
+    let mut turned = [orange.0, orange.1, orange.2, 255];
+    ColourMatrix::hue_rotation(120.0).apply_to_rgba_pixels(&mut turned);
+    for frame in [0, 30, 59] {
+        let middle = (VIDEO_HEIGHT as usize / 2 * VIDEO_WIDTH as usize + VIDEO_WIDTH as usize / 2) * 3;
+        let found = &decoded.pictures[frame][middle..middle + 3];
+        for (channel, (found, wanted)) in found.iter().zip(turned).enumerate() {
+            assert!(
+                found.abs_diff(wanted) <= 10,
+                "frame {frame}, channel {channel}: {found} where the turned colour {turned:?} has {wanted}"
+            );
+        }
+    }
 }

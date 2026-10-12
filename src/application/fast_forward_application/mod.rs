@@ -8,6 +8,7 @@
 //!   timeline);
 //! * `command_execution`: what each [`Command`] does;
 //! * `dialog_flow`: messages, questions, the export's progress and the missing-files warning;
+//! * `losing_keyframes`: the question that is asked before a change that would lose keyframes is made;
 //! * `source_media_flow`: finding, opening and relinking the source files (videos and sounds),
 //!   and making the thumbnails and waveforms for the timeline;
 //! * `project_file_flow`: new, load and save;
@@ -32,6 +33,8 @@ mod drawer_tests;
 mod drawing;
 #[cfg(test)]
 mod duplicate_tests;
+#[cfg(test)]
+mod effect_tests;
 mod export_flow;
 #[cfg(test)]
 mod file_question_tests;
@@ -42,13 +45,18 @@ mod interaction_tests;
 #[cfg(test)]
 mod keyframe_drag_tests;
 #[cfg(test)]
+mod keyframe_loss_tests;
+#[cfg(test)]
 mod keyframe_panel_tests;
 #[cfg(test)]
 mod keyframe_tests;
+mod losing_keyframes;
 #[cfg(test)]
 mod picture_tests;
 #[cfg(test)]
 mod preview_layer_tests;
+#[cfg(test)]
+mod preview_zoom_tests;
 mod programmatic_interface;
 mod project_file_flow;
 #[cfg(test)]
@@ -58,6 +66,10 @@ mod rack_command_tests;
 #[cfg(test)]
 mod rack_drag_tests;
 #[cfg(test)]
+mod rack_mouse_tests;
+#[cfg(test)]
+mod rack_selection_tests;
+#[cfg(test)]
 mod rack_tests;
 #[cfg(test)]
 mod selection_tests;
@@ -65,6 +77,8 @@ mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
 mod source_media_flow;
+#[cfg(test)]
+mod still_window_tests;
 #[cfg(test)]
 mod test_window;
 #[cfg(test)]
@@ -96,6 +110,7 @@ use super::file_chooser::{FileChooser, NativeFileChooser, RefusingFileChooser};
 use super::history::History;
 use super::keyboard::{self, KeyboardState};
 use super::opening::OpeningOutcome;
+use super::preview_panel::PreviewView;
 use super::selection::Selection;
 use super::settings_windows::{self, SettingsWindowsOpen};
 use super::textures::Textures;
@@ -265,6 +280,8 @@ pub struct FastForwardApplication {
     sound_effects: SoundEffects,
     textures: Textures,
     timeline_view: TimelineViewState,
+    /// How the picture of the preview is zoomed, and where it is.
+    preview_view: PreviewView,
     dialog: Option<Dialog>,
     /// Whether the "source files not found" warning is showing.
     missing_sources_warning_open: bool,
@@ -348,6 +365,7 @@ impl FastForwardApplication {
             font_families: None,
             textures: Textures::default(),
             timeline_view: TimelineViewState::default(),
+            preview_view: PreviewView::default(),
             dialog: startup_dialog,
             missing_sources_warning_open: false,
             export: None,
@@ -504,6 +522,7 @@ impl FastForwardApplication {
                 timeline_is_empty: frame_state.total_frames == 0,
                 selected_clips: self.selection.to_vec(),
                 selected_keyframes: self.selection.keyframes_to_vec(),
+                selected_racks: self.selection.racks_to_vec(),
                 selected_clips_at_the_current_frame,
                 can_undo: self.history.can_undo(),
                 can_redo: self.history.can_redo(),
@@ -541,8 +560,10 @@ impl FastForwardApplication {
             self.global_settings,
             &mut commands,
         );
-        self.show_dialogs(&context);
+        let agreed_to = self.show_dialogs(&context);
         self.execute_all(commands, now, &context);
+        // (What the user has just agreed to was asked about already: it is carried out without being asked about again.)
+        self.carry_out_all(agreed_to, now, &context);
         self.autosave_when_quiet_for_long_enough(&context, now);
 
         self.textures.forget_thumbnails_not_used_this_frame();

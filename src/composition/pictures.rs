@@ -16,9 +16,11 @@ use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
+use crate::colour_effects::ColourMatrix;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, FrameRate, Project, PropertyId, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    Animation, AnimationTarget, EffectKind, FrameRate, Project, PropertyId, PropertyValue, ResolvedAnimations,
+    SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -49,6 +51,50 @@ pub enum LayerContent {
     Text(TextObject),
 }
 
+/// An effect that is on a layer: one that its clip has, or that its track has, with what its values are and the keyframes of them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayerEffect {
+    pub kind: EffectKind,
+    /// What its values are when they are not animated, one for each of the properties of the kind of effect, in their order.
+    pub values: Vec<PropertyValue>,
+    /// The keyframes of its values, from all the racks that animate them wherever they are kept. Their frames are frames of the
+    /// timeline.
+    pub animation: Animation,
+}
+
+impl LayerEffect {
+    /// Whether any of the values of the effect has keyframes, so that it is not the same at every frame.
+    pub fn is_animated(&self) -> bool {
+        !self.animation.is_empty()
+    }
+
+    /// What the values of the effect are at `timeline_frame`: what the keyframes say for each that has some, and what it is for
+    /// each that has none.
+    pub fn values_at(&self, timeline_frame: u64) -> Vec<PropertyValue> {
+        self.kind
+            .properties()
+            .iter()
+            .zip(&self.values)
+            .map(|(property, value)| {
+                self.animation
+                    .value_at(*property, timeline_frame)
+                    .unwrap_or_else(|| value.clone())
+            })
+            .collect()
+    }
+
+    /// The effect as it is at `timeline_frame`, with what its keyframes say worked out: it has no keyframes, being the same at
+    /// every frame.
+    #[must_use]
+    pub fn as_it_is_at(&self, timeline_frame: TimelineFrameIndex) -> LayerEffect {
+        LayerEffect {
+            kind: self.kind,
+            values: self.values_at(timeline_frame.value()),
+            animation: Animation::default(),
+        }
+    }
+}
+
 /// A video, a picture or a text object that is seen during a section, and where it is on the picture.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
@@ -61,8 +107,11 @@ pub struct Layer {
     /// where it is fitted.) Where it is at a frame is [`Self::placement_at`].
     pub placement: Placement,
     /// The keyframes of what is seen of the clip, from all the racks that animate it wherever they are kept: where it is, and
-    /// for a text object how it looks. Their frames are frames of the timeline.
+    /// for a text object how it looks. Their frames are frames of the timeline. (Those of its effects are in the effects.)
     pub animation: Animation,
+    /// What is done to the picture of the layer, one after another: the effects of its clip, in the order they were put on in, and
+    /// then those of its track.
+    pub effects: Vec<LayerEffect>,
 }
 
 impl Layer {
@@ -74,9 +123,10 @@ impl Layer {
         }
     }
 
-    /// Whether the layer has keyframes for where it is or how it looks, so that it is not the same at every frame.
+    /// Whether the layer has keyframes for where it is, how it looks or what its effects do, so that it is not the same at every
+    /// frame.
     pub fn has_keyframes(&self) -> bool {
-        !self.animation.is_empty()
+        !self.animation.is_empty() || self.effects.iter().any(LayerEffect::is_animated)
     }
 
     /// The layer as it is at `timeline_frame` (a frame it is seen at), with what its keyframes say worked out: where it is, and
@@ -92,7 +142,30 @@ impl Layer {
             },
             placement: self.placement_at(timeline_frame),
             animation: Animation::default(),
+            effects: self
+                .effects
+                .iter()
+                .map(|effect| effect.as_it_is_at(timeline_frame))
+                .collect(),
         }
+    }
+
+    /// How the effects of the layer change the colours of its picture at `timeline_frame` (a frame it is seen at), all of them
+    /// together: the matrix that changes nothing if none of them changes colours.
+    pub fn colour_matrix_at(&self, timeline_frame: TimelineFrameIndex) -> ColourMatrix {
+        self.effects
+            .iter()
+            .filter_map(|effect| effect.kind.colour_matrix(&effect.values_at(timeline_frame.value())))
+            .fold(ColourMatrix::NOTHING_CHANGES, ColourMatrix::then)
+    }
+
+    /// How the effects of the layer change the colours of its picture, all of them together, with the values they have when they
+    /// are not animated. (For a layer that is as it is at a frame, which has no keyframes: see [`Self::as_it_is_at`].)
+    pub fn colour_matrix(&self) -> ColourMatrix {
+        self.effects
+            .iter()
+            .filter_map(|effect| effect.kind.colour_matrix(&effect.values))
+            .fold(ColourMatrix::NOTHING_CHANGES, ColourMatrix::then)
     }
 
     /// Whether where the layer is on the picture is changed by keyframes, so that it is not in the same place at every frame.
@@ -259,6 +332,8 @@ struct Candidate<'project> {
     placement: Placement,
     /// The keyframes of what is seen of the clip.
     animation: Animation,
+    /// What is done to its picture: the effects of the clip, and then of its track.
+    effects: Vec<LayerEffect>,
 }
 
 impl Candidate<'_> {
@@ -270,6 +345,7 @@ impl Candidate<'_> {
             content,
             placement: self.placement,
             animation: self.animation.clone(),
+            effects: self.effects.clone(),
         }
     }
 
@@ -293,6 +369,25 @@ impl Candidate<'_> {
             (limit - first_source_frame).div_ceil(speed).min(end - first)
         }
     }
+}
+
+/// The effects that `target` (a clip or a track) has, as a layer has them: with the keyframes of their values.
+fn effects_of<'a>(
+    project: &'a Project,
+    animations: &'a ResolvedAnimations,
+    target: AnimationTarget,
+) -> impl Iterator<Item = LayerEffect> + 'a {
+    project
+        .effects_of(target)
+        .into_iter()
+        .flat_map(|effects| effects.iter())
+        .map(move |effect| LayerEffect {
+            kind: effect.kind(),
+            values: effect.values().to_vec(),
+            animation: animations
+                .of(target)
+                .restricted_to(|property| effect.kind().properties().contains(&property)),
+        })
 }
 
 /// Works out the picture at every frame of the project. A video from a file that is not `usable`
@@ -327,9 +422,14 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 content: placement.clip,
                 source_frame_count,
                 placement: where_it_is,
+                // (What the effects of the clip and of the track do is in the layer's effects, not here: both have their own
+                // value of the same property.)
                 animation: animations
                     .of(AnimationTarget::Clip(placement.id))
-                    .restricted_to(PropertyId::is_seen),
+                    .restricted_to(|property| property.is_seen() && property.effect().is_none()),
+                effects: effects_of(project, &animations, AnimationTarget::Clip(placement.id))
+                    .chain(effects_of(project, &animations, AnimationTarget::Track(track.id())))
+                    .collect(),
             });
         }
     }
@@ -504,9 +604,9 @@ fn layers_carried_on(previous: &PictureSection, section: &PictureSection) -> Opt
                 return None;
             }
             debug_assert_eq!(
-                (before.placement, &before.animation),
-                (after.placement, &after.animation),
-                "a clip is in one place, with the same keyframes, for as long as it lasts"
+                (before.placement, &before.animation, &before.effects),
+                (after.placement, &after.animation, &after.effects),
+                "a clip is in one place, with the same keyframes and effects, for as long as it lasts"
             );
             match (&before.content, &after.content) {
                 (LayerContent::Text(first), LayerContent::Text(second)) if first == second => Some(before.clone()),
@@ -540,5 +640,7 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod effects_tests;
 #[cfg(test)]
 mod tests;

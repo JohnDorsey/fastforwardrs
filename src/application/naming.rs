@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use super::timeline_panel::SourceLook;
-use crate::project::{AnimationTarget, Clip, ClipKind, Project, PropertyId, Rack, SourceMediaIdentifier};
+use crate::project::{AnimationTarget, Clip, ClipKind, EffectKind, Project, PropertyId, Rack, SourceMediaIdentifier};
 
 /// How many letters of the words of a text object are used to tell it from the others.
 const MOST_LETTERS_OF_WORDS: usize = 24;
@@ -48,14 +48,23 @@ pub fn detail_of_a_clip(clip: &Clip, source_looks: &SourceLooks<'_>) -> String {
     }
 }
 
-/// What a property is called: its name, with a capital letter.
-pub fn what_a_property_is_called(property: PropertyId) -> String {
-    let name = property.name();
+/// `name` with a capital letter at the start.
+fn with_a_capital_letter(name: &str) -> String {
     let mut letters = name.chars();
     match letters.next() {
         Some(first) => first.to_uppercase().chain(letters).collect(),
         None => String::new(),
     }
+}
+
+/// What a property is called: its name, with a capital letter.
+pub fn what_a_property_is_called(property: PropertyId) -> String {
+    with_a_capital_letter(property.name())
+}
+
+/// What a kind of effect is called: its name, with a capital letter.
+pub fn what_an_effect_is_called(kind: EffectKind) -> String {
+    with_a_capital_letter(kind.name())
 }
 
 /// What a clip or a track is called, in a few words: a clip by what tells it from the others of its kind, or if nothing does

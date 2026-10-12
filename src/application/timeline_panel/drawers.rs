@@ -7,7 +7,8 @@
 //! rounding of the clip's corners leaves outside them, so that the clip and the drawer look like one thing. The drawer of a
 //! track is as wide as the strip, and hangs from the bottom of the strip, or if drawers of clips are open, from the bottom of
 //! the lowest of them, so that it does not cover them. A drawer opens over the rows of the tracks that are under it (see
-//! [`super::rows`]): it does not push them down.
+//! [`super::rows`]): a drawer pushes the rows under it down to make room for itself, unless it was opened with Shift held,
+//! when it lies over them and they stay where they are.
 //!
 //! The button is only there when something says it should be: when the clip (or the box of the track) is hovered over, when
 //! its drawer is open and when there is something in the drawer.
@@ -15,7 +16,7 @@
 //! Which drawers are open is not part of the project: it is not saved, and opening or shutting one is not an edit
 //! that can be undone.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
@@ -171,33 +172,89 @@ pub(super) fn track_drawer_shape(strip: Rect, below_the_strip: f32, openness: f3
     })
 }
 
-/// Which drawers are open, and how far each has slid.
+/// How a drawer opened, which is whether it makes room for itself (the rows under it are pushed down) or lies over them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum OpenMode {
+    /// The rows under the drawer are pushed down, as far as it hangs, to make room for it. This is how a drawer opens when
+    /// its button is clicked, and when a keyframe is put in it.
+    #[default]
+    PushingTheRowsUnder,
+    /// The rows under the drawer stay where they are, and the drawer is drawn over them. This is how a drawer opens when its
+    /// button is clicked with Shift held.
+    LyingOverTheRowsUnder,
+}
+
+impl OpenMode {
+    /// How a drawer opens when its button is clicked while `shift_is_held` or not.
+    pub(super) fn when_clicked(shift_is_held: bool) -> Self {
+        if shift_is_held {
+            Self::LyingOverTheRowsUnder
+        } else {
+            Self::PushingTheRowsUnder
+        }
+    }
+}
+
+/// How far one drawer has slid, and how it opened.
+#[derive(Clone, Copy, Debug)]
+struct Slide {
+    /// How far open the drawer is, from 0 (shut) to 1 (open), evenly with time. (What is seen is [`Drawers::openness`],
+    /// which slows down as it arrives.)
+    level: f32,
+    /// Whether the drawer is open or is opening, and not shut or shutting.
+    is_open: bool,
+    /// How the drawer opened, which it keeps until it has shut.
+    mode: OpenMode,
+}
+
+impl Slide {
+    fn is_sliding(&self) -> bool {
+        self.level != if self.is_open { 1.0 } else { 0.0 }
+    }
+}
+
+/// Which drawers are open, how far each has slid, and how each opened.
 #[derive(Debug, Default)]
 pub(super) struct Drawers {
-    open: HashSet<AnimationTarget>,
-    /// How far open each drawer that is open, or has not finished shutting, is: from 0 (shut) to 1 (open),
-    /// evenly with time. (What is seen is [`Self::openness`], which slows down as it arrives.)
-    levels: HashMap<AnimationTarget, f32>,
+    /// The drawers that are open, or have not finished shutting.
+    slides: HashMap<AnimationTarget, Slide>,
+    /// The drawer that has just been opened, whose bottom is to be brought into view as it slides (see [`Self::revealing`]).
+    revealing: Option<AnimationTarget>,
 }
 
 impl Drawers {
     pub(super) fn is_open(&self, owner: AnimationTarget) -> bool {
-        self.open.contains(&owner)
+        self.slides.get(&owner).is_some_and(|slide| slide.is_open)
     }
 
-    /// Opens the drawer of `owner` if it is shut, and shuts it if it is open: from where it is now, if it was sliding.
-    pub(super) fn toggle(&mut self, owner: AnimationTarget) {
-        if !self.open.remove(&owner) {
-            self.open.insert(owner);
+    /// How the drawer of `owner` is open (or was, if it is shutting): pushing the rows under it down if it is not known.
+    pub(super) fn mode_of(&self, owner: AnimationTarget) -> OpenMode {
+        self.slides.get(&owner).map_or(OpenMode::default(), |slide| slide.mode)
+    }
+
+    /// Opens the drawer of `owner` if it is shut, the way `mode` says, and shuts it if it is open: from where it is now, if it was
+    /// sliding. (A drawer that is still sliding shut and is opened again goes on the way it was open, so that the rows under it do
+    /// not jump.) An opening drawer is the one that is to be brought into view.
+    pub(super) fn toggle(&mut self, owner: AnimationTarget, mode: OpenMode) {
+        let slide = self.slides.entry(owner).or_insert(Slide {
+            level: 0.0,
+            is_open: false,
+            mode,
+        });
+        slide.is_open = !slide.is_open;
+        if slide.is_open {
+            if slide.level == 0.0 {
+                slide.mode = mode;
+            }
+            self.revealing = Some(owner);
         }
-        self.levels.entry(owner).or_insert(0.0);
     }
 
-    /// Opens the drawer of `owner` if it is shut (and leaves it alone if it is open): from where it is now, if it was
-    /// sliding shut.
+    /// Opens the drawer of `owner` if it is shut (and leaves it alone if it is open), pushing the rows under it down: from where it
+    /// is now, if it was sliding shut.
     pub(super) fn open_it(&mut self, owner: AnimationTarget) {
         if !self.is_open(owner) {
-            self.toggle(owner);
+            self.toggle(owner, OpenMode::PushingTheRowsUnder);
         }
     }
 
@@ -205,30 +262,44 @@ impl Drawers {
     /// any of them is still sliding, which is when the window has to be drawn again soon.
     pub(super) fn advance(&mut self, seconds: f32) -> bool {
         let step = seconds / SECONDS_TO_SLIDE;
-        let open = &self.open;
         let mut is_sliding = false;
-        self.levels.retain(|owner, level| {
-            let target = if open.contains(owner) { 1.0 } else { 0.0 };
-            *level = if *level < target {
-                (*level + step).min(target)
+        self.slides.retain(|_, slide| {
+            let target = if slide.is_open { 1.0 } else { 0.0 };
+            slide.level = if slide.level < target {
+                (slide.level + step).min(target)
             } else {
-                (*level - step).max(target)
+                (slide.level - step).max(target)
             };
-            is_sliding |= *level != target;
+            is_sliding |= slide.is_sliding();
             // A shut drawer that has finished shutting is no longer remembered.
-            *level > 0.0 || target > 0.0
+            slide.level > 0.0 || slide.is_open
         });
         is_sliding
     }
 
     /// How far open the drawer of `owner` is as it is seen, from 0 to 1: it starts quickly and slows as it arrives.
     pub(super) fn openness(&self, owner: AnimationTarget) -> f32 {
-        ease_out(self.levels.get(&owner).copied().unwrap_or(0.0))
+        ease_out(self.slides.get(&owner).map_or(0.0, |slide| slide.level))
     }
 
     /// Whether the drawer of `owner` is open, or still sliding shut: whether any of it is to be seen.
     pub(super) fn is_to_be_seen(&self, owner: AnimationTarget) -> bool {
         self.is_open(owner) || self.openness(owner) > 0.0
+    }
+
+    /// The drawer whose bottom is to be brought into view while it slides open, if there is one: the one that was opened last, and
+    /// only until it has finished sliding (see [`Self::stop_revealing_if_it_has_stopped_sliding`]).
+    pub(super) fn revealing(&self) -> Option<AnimationTarget> {
+        self.revealing
+    }
+
+    /// Lets go of the drawer that was being brought into view if it has stopped sliding, or is not there any more.
+    pub(super) fn stop_revealing_if_it_has_stopped_sliding(&mut self) {
+        if let Some(owner) = self.revealing
+            && !self.slides.get(&owner).is_some_and(Slide::is_sliding)
+        {
+            self.revealing = None;
+        }
     }
 
     /// How far down from the bottom of what the drawer of `owner` is of it reaches now, as it slides: as tall as it is when it
@@ -242,15 +313,39 @@ impl Drawers {
     }
 
     /// How far the drawers of the clips of `track` reach under the bottom of its row, as far as the one that reaches
-    /// furthest does. (A keyframe crate has no drawer to open, but it reaches below the strip when it has more racks than fit in
-    /// it: see [`crate_layout`].)
+    /// furthest does, however they opened. (A keyframe crate has no drawer to open, but it reaches below the strip when it has
+    /// more racks than fit in it: see [`crate_layout`].)
     pub(super) fn reach_of_the_drawers_of_the_clips_of(&self, track: &Track, project: &Project) -> f32 {
+        self.furthest_reach_of_the_clips_of(track, project, |_| true)
+    }
+
+    /// How far the drawers of the clips of `track` that pushed the rows under them to open reach under the bottom of its row, as
+    /// far as the one that reaches furthest does. (A keyframe crate does not push: it lies over what is under it.)
+    fn reach_of_the_drawers_of_the_clips_of_that_push(&self, track: &Track, project: &Project) -> f32 {
+        self.furthest_reach_of_the_clips_of(track, project, |mode| mode == Some(OpenMode::PushingTheRowsUnder))
+    }
+
+    /// How far under the bottom of its row the drawers of the clips of `track` reach, as far as the one that reaches furthest
+    /// does, of those that `counts` says count (given how each opened, or `None` for a keyframe crate, which does not open).
+    fn furthest_reach_of_the_clips_of(
+        &self,
+        track: &Track,
+        project: &Project,
+        counts: impl Fn(Option<OpenMode>) -> bool,
+    ) -> f32 {
         track
             .placements()
             .map(|placement| match placement.clip {
-                Clip::Crate(_) => crate_layout(track.height().points(), placement.drawer.len()).reach_below_the_strip,
+                Clip::Crate(_) if counts(None) => {
+                    crate_layout(track.height().points(), placement.drawer.len()).reach_below_the_strip
+                }
                 other if has_an_accessible_drawer(other) => {
-                    self.hanging_height_of(AnimationTarget::Clip(placement.id), project)
+                    let owner = AnimationTarget::Clip(placement.id);
+                    if counts(Some(self.mode_of(owner))) {
+                        self.hanging_height_of(owner, project)
+                    } else {
+                        0.0
+                    }
                 }
                 _ => 0.0,
             })
@@ -264,11 +359,32 @@ impl Drawers {
             + self.hanging_height_of(AnimationTarget::Track(track.id()), project)
     }
 
+    /// How far the row of `track` is made taller by the drawers that hang from it, for them: the rows under it are pushed down
+    /// by that much. The drawers of its clips that pushed to open are in it, as far as the lowest of them reaches; and so is
+    /// everything above the drawer of the track if that pushed to open, because it hangs from the end of them. What lies over
+    /// the rows under it, whichever it is, is not.
+    pub(super) fn extra_height_of(&self, track: &Track, project: &Project) -> f32 {
+        let of_the_track = AnimationTarget::Track(track.id());
+        let hanging = self.hanging_height_of(of_the_track, project);
+        if hanging > 0.0 && self.mode_of(of_the_track) == OpenMode::PushingTheRowsUnder {
+            return self.reach_of_the_drawers_of_the_clips_of(track, project) + hanging;
+        }
+        self.reach_of_the_drawers_of_the_clips_of_that_push(track, project)
+    }
+
+    /// How far the drawers that hang from the row of `track` reach under the row as the rows are laid out (which is the track and
+    /// [`Self::extra_height_of`] it): what lies over the rows under it.
+    pub(super) fn reach_over_the_rows_under_the_row_of(&self, track: &Track, project: &Project) -> f32 {
+        (self.reach_under_the_row_of(track, project) - self.extra_height_of(track, project)).max(0.0)
+    }
+
     /// Forgets the drawers of clips and tracks that are not in `project` any more.
     pub(super) fn forget_what_is_gone(&mut self, project: &Project) {
         let is_there = |owner: &AnimationTarget| project.drawer_of(*owner).is_some();
-        self.open.retain(is_there);
-        self.levels.retain(|owner, _| is_there(owner));
+        self.slides.retain(|owner, _| is_there(owner));
+        if self.revealing.is_some_and(|owner| !is_there(&owner)) {
+            self.revealing = None;
+        }
     }
 }
 
@@ -305,7 +421,7 @@ pub(super) fn operate_the_button_of_a_track(
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, track_drawer_button_label(track.title())));
     if response.clicked() {
-        drawers.toggle(owner);
+        drawers.toggle(owner, OpenMode::when_clicked(ui.input(|input| input.modifiers.shift)));
     }
     if button_is_shown(
         box_is_hovered || response.hovered(),
@@ -631,9 +747,9 @@ mod tests {
         let mut drawers = Drawers::default();
         assert!(!drawers.is_open(clip(1)));
         assert_eq!(drawers.openness(clip(1)), 0.0);
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         assert!(drawers.is_open(clip(1)));
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         assert!(!drawers.is_open(clip(1)));
         assert!(!drawers.is_open(clip(2)), "the drawer of another clip is not touched");
     }
@@ -645,7 +761,7 @@ mod tests {
         assert!(drawers.is_open(clip(1)));
         drawers.open_it(clip(1));
         assert!(drawers.is_open(clip(1)), "opening what is open leaves it open");
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         assert!(!drawers.is_open(clip(1)));
         drawers.open_it(clip(1));
         assert!(drawers.is_open(clip(1)), "and what was shut is opened");
@@ -655,7 +771,7 @@ mod tests {
     #[test]
     fn the_drawer_of_a_track_is_not_the_drawer_of_a_clip_whatever_their_numbers() {
         let mut drawers = Drawers::default();
-        drawers.toggle(track(1));
+        drawers.toggle(track(1), OpenMode::PushingTheRowsUnder);
         assert!(drawers.is_open(track(1)));
         assert!(!drawers.is_open(clip(1)));
         assert!(!drawers.is_open(track(2)));
@@ -664,7 +780,7 @@ mod tests {
     #[test]
     fn a_drawer_slides_open_in_a_quick_animation_and_is_then_still() {
         let mut drawers = Drawers::default();
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         let mut seen = vec![drawers.openness(clip(1))];
         let mut frames_sliding = 0;
         loop {
@@ -688,9 +804,23 @@ mod tests {
     }
 
     #[test]
+    fn a_drawer_that_has_just_been_opened_is_not_forgotten_by_a_frame_in_which_no_time_has_gone_by() {
+        let mut drawers = Drawers::default();
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
+
+        let is_sliding = drawers.advance(0.0);
+
+        assert!(is_sliding, "it has not begun to slide, and is to");
+        assert!(drawers.is_open(clip(1)), "it is still open");
+        assert_eq!(drawers.openness(clip(1)), 0.0, "and has not slid yet");
+        advance_for(&mut drawers, 0.5);
+        assert_eq!(drawers.openness(clip(1)), 1.0, "it slides open afterwards");
+    }
+
+    #[test]
     fn it_starts_quickly_and_slows_as_it_arrives() {
         let mut drawers = Drawers::default();
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         let mut openness = vec![0.0];
         for _ in 0..11 {
             drawers.advance(1.0 / 60.0);
@@ -704,10 +834,10 @@ mod tests {
     #[test]
     fn a_drawer_shuts_the_same_way_and_is_forgotten_when_it_has_shut() {
         let mut drawers = Drawers::default();
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
         assert_eq!(drawers.openness(clip(1)), 1.0);
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         assert!(drawers.advance(1.0 / 60.0), "sliding shut");
         assert!(drawers.openness(clip(1)) < 1.0);
         assert!(
@@ -718,7 +848,7 @@ mod tests {
         assert_eq!(drawers.openness(clip(1)), 0.0);
         assert!(!drawers.is_to_be_seen(clip(1)));
         assert!(
-            drawers.levels.is_empty(),
+            drawers.slides.is_empty(),
             "nothing is remembered of a drawer that is shut"
         );
         assert!(!drawers.advance(1.0 / 60.0));
@@ -727,11 +857,11 @@ mod tests {
     #[test]
     fn a_drawer_toggled_while_it_slides_goes_back_from_where_it_is() {
         let mut drawers = Drawers::default();
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.09);
         let half_way = drawers.openness(clip(1));
         assert!(half_way > 0.3 && half_way < 1.0, "{half_way}");
-        drawers.toggle(clip(1));
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         drawers.advance(1.0 / 60.0);
         let after = drawers.openness(clip(1));
         assert!(
@@ -743,10 +873,10 @@ mod tests {
     #[test]
     fn a_long_frame_goes_as_far_as_the_same_time_in_short_ones() {
         let mut one_long = Drawers::default();
-        one_long.toggle(clip(1));
+        one_long.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         one_long.advance(0.05);
         let mut short_ones = Drawers::default();
-        short_ones.toggle(clip(1));
+        short_ones.toggle(clip(1), OpenMode::PushingTheRowsUnder);
         advance_for(&mut short_ones, 0.05);
         assert!((one_long.openness(clip(1)) - short_ones.openness(clip(1))).abs() < 1e-5);
     }
@@ -756,15 +886,15 @@ mod tests {
         let project = Project::empty();
         let track_that_is_there = AnimationTarget::Track(project.tracks()[0].id());
         let mut drawers = Drawers::default();
-        drawers.toggle(clip(1));
-        drawers.toggle(track(77));
-        drawers.toggle(track_that_is_there);
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
+        drawers.toggle(track(77), OpenMode::PushingTheRowsUnder);
+        drawers.toggle(track_that_is_there, OpenMode::PushingTheRowsUnder);
         drawers.advance(0.05);
         drawers.forget_what_is_gone(&project);
         assert!(!drawers.is_open(clip(1)));
         assert!(!drawers.is_open(track(77)));
         assert!(drawers.is_open(track_that_is_there));
-        assert_eq!(drawers.levels.len(), 1);
+        assert_eq!(drawers.slides.len(), 1);
     }
 
     #[test]
@@ -773,7 +903,7 @@ mod tests {
         let owner = AnimationTarget::Track(project.tracks()[0].id());
         let mut drawers = Drawers::default();
         assert_eq!(drawers.hanging_height_of(owner, &project), 0.0);
-        drawers.toggle(owner);
+        drawers.toggle(owner, OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
         assert_eq!(drawers.hanging_height_of(owner, &project), drawer_height(0));
         assert_eq!(
@@ -795,11 +925,11 @@ mod tests {
             )
             .unwrap();
         let mut drawers = Drawers::default();
-        drawers.toggle(AnimationTarget::Clip(text));
+        drawers.toggle(AnimationTarget::Clip(text), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
         let by_the_clips = drawers.reach_of_the_drawers_of_the_clips_of(&project.tracks()[0], &project);
         assert_eq!(by_the_clips, drawer_height(0));
-        drawers.toggle(AnimationTarget::Track(track_id));
+        drawers.toggle(AnimationTarget::Track(track_id), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
         assert_eq!(
             drawers.reach_under_the_row_of(&project.tracks()[0], &project),
@@ -809,6 +939,347 @@ mod tests {
             drawers.reach_of_the_drawers_of_the_clips_of(&project.tracks()[0], &project),
             by_the_clips,
             "the track's own drawer is not one of its clips'"
+        );
+    }
+
+    // --- how a drawer opens, and what it does to the rows under it ---
+
+    const PUSHING: OpenMode = OpenMode::PushingTheRowsUnder;
+    const LYING_OVER: OpenMode = OpenMode::LyingOverTheRowsUnder;
+
+    #[test]
+    fn a_drawer_opens_by_pushing_the_rows_under_it_unless_shift_is_held_when_it_is_clicked() {
+        assert_eq!(OpenMode::when_clicked(false), PUSHING);
+        assert_eq!(OpenMode::when_clicked(true), LYING_OVER);
+        assert_eq!(
+            OpenMode::default(),
+            PUSHING,
+            "which is how a drawer opens when nothing says how"
+        );
+    }
+
+    #[test]
+    fn a_drawer_opens_the_way_it_is_asked_to_and_goes_on_that_way_until_it_has_shut() {
+        let mut drawers = Drawers::default();
+        assert_eq!(
+            drawers.mode_of(clip(1)),
+            PUSHING,
+            "a drawer that is not open: pushing, as far as that goes"
+        );
+        drawers.toggle(clip(1), LYING_OVER);
+        drawers.toggle(clip(2), PUSHING);
+        advance_for(&mut drawers, 0.5);
+        assert_eq!(
+            (drawers.mode_of(clip(1)), drawers.mode_of(clip(2))),
+            (LYING_OVER, PUSHING)
+        );
+
+        drawers.toggle(clip(1), PUSHING);
+        assert!(!drawers.is_open(clip(1)));
+        assert_eq!(
+            drawers.mode_of(clip(1)),
+            LYING_OVER,
+            "shutting does not change the way it opened"
+        );
+        advance_for(&mut drawers, 0.09);
+        assert_eq!(drawers.mode_of(clip(1)), LYING_OVER, "nor while it is sliding shut");
+        advance_for(&mut drawers, 0.5);
+        assert!(
+            !drawers.slides.contains_key(&clip(1)),
+            "when it has shut it is forgotten"
+        );
+        drawers.toggle(clip(1), PUSHING);
+        assert_eq!(
+            drawers.mode_of(clip(1)),
+            PUSHING,
+            "and opens the way it is asked to when it is next opened"
+        );
+        advance_for(&mut drawers, 0.5);
+        drawers.toggle(clip(1), LYING_OVER);
+        advance_for(&mut drawers, 0.5);
+        drawers.toggle(clip(1), LYING_OVER);
+        assert_eq!(drawers.mode_of(clip(1)), LYING_OVER);
+    }
+
+    #[test]
+    fn a_drawer_that_is_opened_again_while_it_slides_shut_goes_on_the_way_it_was_so_that_the_rows_do_not_jump() {
+        let mut drawers = Drawers::default();
+        drawers.toggle(clip(1), LYING_OVER);
+        advance_for(&mut drawers, 0.5);
+        drawers.toggle(clip(1), PUSHING);
+        advance_for(&mut drawers, 0.05);
+        assert!(
+            drawers.openness(clip(1)) > 0.0,
+            "it is sliding shut, and some of it is open"
+        );
+
+        drawers.toggle(clip(1), PUSHING);
+
+        assert!(drawers.is_open(clip(1)));
+        assert_eq!(drawers.mode_of(clip(1)), LYING_OVER);
+    }
+
+    #[test]
+    fn a_drawer_that_is_opened_to_show_what_was_put_in_it_pushes_the_rows_under_it() {
+        let mut drawers = Drawers::default();
+        drawers.open_it(clip(1));
+        assert_eq!(drawers.mode_of(clip(1)), PUSHING);
+        drawers.toggle(clip(2), LYING_OVER);
+        drawers.open_it(clip(2));
+        assert_eq!(
+            drawers.mode_of(clip(2)),
+            LYING_OVER,
+            "one that is open is left as it is"
+        );
+    }
+
+    /// A track with two text objects, and the drawers of the two clips and of the track, which are opened in the ways given
+    /// (`None` for a drawer that is shut) and have finished sliding. Gives the track and what is needed to ask about its
+    /// drawers.
+    fn a_track_with_drawers_opened_like(
+        first_clip: Option<OpenMode>,
+        second_clip: Option<OpenMode>,
+        the_track: Option<OpenMode>,
+    ) -> (Project, Drawers) {
+        use crate::project::{TextObject, TimelineFrameIndex};
+
+        let mut project = Project::empty();
+        let track_id = project.tracks()[0].id();
+        let (first, _) = project
+            .insert_text(track_id, TimelineFrameIndex::new(0), TextObject::default(), 10)
+            .unwrap();
+        let (second, _) = project
+            .insert_text(track_id, TimelineFrameIndex::new(20), TextObject::default(), 10)
+            .unwrap();
+        // The second clip's drawer is taller by a rack, so that the two reach different distances.
+        project
+            .add_keyframe(
+                AnimationTarget::Clip(second),
+                crate::project::PropertyId::Rotation,
+                TimelineFrameIndex::new(22),
+            )
+            .unwrap();
+        let mut drawers = Drawers::default();
+        for (owner, mode) in [
+            (AnimationTarget::Clip(first), first_clip),
+            (AnimationTarget::Clip(second), second_clip),
+            (AnimationTarget::Track(track_id), the_track),
+        ] {
+            if let Some(mode) = mode {
+                drawers.toggle(owner, mode);
+            }
+        }
+        advance_for(&mut drawers, 0.5);
+        (project, drawers)
+    }
+
+    #[test]
+    fn the_rows_under_a_row_are_pushed_down_by_as_far_as_the_lowest_drawer_of_a_clip_that_pushed_reaches() {
+        let (project, drawers) = a_track_with_drawers_opened_like(Some(PUSHING), Some(PUSHING), None);
+        let track = &project.tracks()[0];
+
+        assert_eq!(
+            drawers.extra_height_of(track, &project),
+            drawer_height(1),
+            "the second has a rack in its drawer, and the first none: the lowest is the second's"
+        );
+        assert_eq!(
+            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            0.0,
+            "all of what hangs from the row is in the row"
+        );
+        let (project, nothing_open) = a_track_with_drawers_opened_like(None, None, None);
+        assert_eq!(nothing_open.extra_height_of(&project.tracks()[0], &project), 0.0);
+    }
+
+    #[test]
+    fn a_drawer_of_a_clip_that_lies_over_the_rows_under_it_does_not_push_them_and_the_one_that_pushes_does() {
+        let (project, drawers) = a_track_with_drawers_opened_like(Some(PUSHING), Some(LYING_OVER), None);
+        let track = &project.tracks()[0];
+        let pushing = drawer_height(0);
+        let lying_over = drawer_height(1);
+
+        assert_eq!(
+            drawers.extra_height_of(track, &project),
+            pushing,
+            "only the first pushes"
+        );
+        assert_eq!(
+            drawers.reach_under_the_row_of(track, &project),
+            lying_over,
+            "the second reaches further"
+        );
+        assert_eq!(
+            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            lying_over - pushing,
+            "the rest of it is over the rows under"
+        );
+    }
+
+    #[test]
+    fn a_drawer_of_a_clip_that_lies_over_the_rows_under_it_alone_makes_its_row_no_taller() {
+        let (project, drawers) = a_track_with_drawers_opened_like(None, Some(LYING_OVER), None);
+        let track = &project.tracks()[0];
+
+        assert_eq!(drawers.extra_height_of(track, &project), 0.0);
+        assert_eq!(
+            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawer_height(1)
+        );
+    }
+
+    #[test]
+    fn the_drawer_of_a_track_that_pushes_makes_room_for_what_it_hangs_from_the_end_of_as_well_as_for_itself() {
+        // The drawer of the second clip, which lies over the rows under it, is what the drawer of the track hangs under: that
+        // is in the row, because the drawer of the track that is under it pushes.
+        let (project, drawers) = a_track_with_drawers_opened_like(None, Some(LYING_OVER), Some(PUSHING));
+        let track = &project.tracks()[0];
+
+        assert_eq!(
+            drawers.extra_height_of(track, &project),
+            drawer_height(1) + drawer_height(0)
+        );
+        assert_eq!(drawers.reach_over_the_rows_under_the_row_of(track, &project), 0.0);
+    }
+
+    #[test]
+    fn the_drawer_of_a_track_that_lies_over_the_rows_under_it_pushes_nothing_and_the_drawers_of_its_clips_that_pushed_still_do()
+     {
+        let (project, drawers) = a_track_with_drawers_opened_like(Some(PUSHING), None, Some(LYING_OVER));
+        let track = &project.tracks()[0];
+
+        assert_eq!(
+            drawers.extra_height_of(track, &project),
+            drawer_height(0),
+            "the clip's drawer pushes"
+        );
+        assert_eq!(
+            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawer_height(0),
+            "and the drawer of the track, which hangs under it, is over the rows under"
+        );
+    }
+
+    #[test]
+    fn what_pushes_grows_with_how_far_the_drawer_has_slid_and_what_lies_over_the_rows_does_not_push_at_any_moment() {
+        use crate::project::{TextObject, TimelineFrameIndex};
+
+        let mut project = Project::empty();
+        let track_id = project.tracks()[0].id();
+        let (clip, _) = project
+            .insert_text(track_id, TimelineFrameIndex::new(0), TextObject::default(), 10)
+            .unwrap();
+        let mut pushing = Drawers::default();
+        pushing.toggle(AnimationTarget::Clip(clip), PUSHING);
+        let mut lying_over = Drawers::default();
+        lying_over.toggle(AnimationTarget::Clip(clip), LYING_OVER);
+        let mut extras = Vec::new();
+        for _ in 0..12 {
+            pushing.advance(1.0 / 60.0);
+            lying_over.advance(1.0 / 60.0);
+            extras.push(pushing.extra_height_of(&project.tracks()[0], &project));
+            assert_eq!(lying_over.extra_height_of(&project.tracks()[0], &project), 0.0);
+        }
+        assert!(
+            extras.windows(2).all(|pair| pair[1] >= pair[0]) && extras[0] < extras[11],
+            "{extras:?}"
+        );
+        assert_eq!(
+            *extras.last().unwrap(),
+            pushing.reach_under_the_row_of(&project.tracks()[0], &project)
+        );
+    }
+
+    // --- bringing a drawer that opens into view ---
+
+    #[test]
+    fn the_drawer_that_was_opened_last_is_the_one_that_is_brought_into_view_until_it_has_stopped_sliding() {
+        let mut drawers = Drawers::default();
+        assert_eq!(drawers.revealing(), None);
+        drawers.toggle(clip(1), PUSHING);
+        assert_eq!(drawers.revealing(), Some(clip(1)));
+        drawers.toggle(clip(2), PUSHING);
+        assert_eq!(drawers.revealing(), Some(clip(2)), "the last one");
+
+        drawers.advance(0.05);
+        drawers.stop_revealing_if_it_has_stopped_sliding();
+        assert_eq!(drawers.revealing(), Some(clip(2)), "while it slides");
+        advance_for(&mut drawers, 0.5);
+        drawers.stop_revealing_if_it_has_stopped_sliding();
+        assert_eq!(drawers.revealing(), None, "when it has stopped");
+    }
+
+    #[test]
+    fn a_drawer_that_is_shut_is_not_brought_into_view_and_one_that_is_gone_is_forgotten() {
+        let mut drawers = Drawers::default();
+        drawers.toggle(clip(1), PUSHING);
+        advance_for(&mut drawers, 0.5);
+        drawers.stop_revealing_if_it_has_stopped_sliding();
+        drawers.toggle(clip(1), PUSHING);
+        assert_eq!(drawers.revealing(), None, "shutting is not opening");
+
+        let project = Project::empty();
+        drawers.toggle(clip(3), PUSHING);
+        assert_eq!(drawers.revealing(), Some(clip(3)));
+        drawers.forget_what_is_gone(&project);
+        assert_eq!(drawers.revealing(), None, "there is no such clip");
+    }
+
+    #[test]
+    fn a_keyframe_crate_with_more_racks_than_fit_in_it_lies_over_the_rows_under_it_and_does_not_push_them() {
+        use crate::project::{PropertyId, RackDestination, TextObject, TimelineFrameIndex};
+
+        let mut project = Project::empty();
+        let text_track = project.tracks()[0].id();
+        let (text, _) = project
+            .insert_text(text_track, TimelineFrameIndex::new(0), TextObject::default(), 90)
+            .unwrap();
+        let crate_track = project.add_track_in_front();
+        let crate_clip = project
+            .insert_crate(crate_track, TimelineFrameIndex::new(0), 90)
+            .unwrap();
+        let properties_of_a_text = [
+            PropertyId::Position,
+            PropertyId::Size,
+            PropertyId::Rotation,
+            PropertyId::Text,
+            PropertyId::FontFamily,
+            PropertyId::FontSize,
+            PropertyId::Colour,
+        ];
+        for property in properties_of_a_text {
+            let made = project
+                .add_keyframe(AnimationTarget::Clip(text), property, TimelineFrameIndex::new(10))
+                .unwrap()
+                .unwrap();
+            project
+                .move_rack(
+                    made.rack,
+                    RackDestination::Drawer(AnimationTarget::Clip(crate_clip)),
+                    0,
+                    None,
+                )
+                .unwrap();
+        }
+        let drawers = Drawers::default();
+        let track = project.track(crate_track).unwrap();
+        let overhang = crate_layout(track.height().points(), properties_of_a_text.len()).reach_below_the_strip;
+        assert!(overhang > 0.0, "the racks do not fit in the crate");
+
+        assert_eq!(
+            drawers.reach_under_the_row_of(track, &project),
+            overhang,
+            "the crate hangs below its row"
+        );
+        assert_eq!(
+            drawers.extra_height_of(track, &project),
+            0.0,
+            "and does not make the row taller: what is under it is not pushed down"
+        );
+        assert_eq!(
+            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            overhang,
+            "all of it is over the rows under"
         );
     }
 
@@ -834,10 +1305,15 @@ mod tests {
             .unwrap()
             .unwrap();
         project
-            .move_rack(made.rack, RackDestination::Drawer(AnimationTarget::Clip(crate_clip)), 0)
+            .move_rack(
+                made.rack,
+                RackDestination::Drawer(AnimationTarget::Clip(crate_clip)),
+                0,
+                None,
+            )
             .unwrap();
         let mut drawers = Drawers::default();
-        drawers.toggle(AnimationTarget::Clip(crate_clip));
+        drawers.toggle(AnimationTarget::Clip(crate_clip), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
 
         assert_eq!(

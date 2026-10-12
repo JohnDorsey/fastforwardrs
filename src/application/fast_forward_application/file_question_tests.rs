@@ -1,10 +1,15 @@
 //! What the editor asks when it needs a file, checked with a chooser that gives the answers a test
 //! tells it to (a real file dialog would wait for someone to answer it).
 
+use std::path::{Path, PathBuf};
+
+use egui_kittest::kittest::{NodeT, Queryable};
+
 use super::test_window::{Window, project_of};
 use crate::application::commands::Command;
 use crate::application::dialogs::{AfterConfirmation, Dialog};
 use crate::application::file_chooser::{AskedQuestion, ScriptedFileChooser};
+use crate::project::Project;
 
 /// A window showing a project made from `holiday.mp4`, with a chooser that will be asked for files.
 fn window_that_asks(chooser: &ScriptedFileChooser) -> Window {
@@ -106,6 +111,207 @@ fn saving_for_the_first_time_asks_where_and_suggests_the_name_of_the_first_file_
         None,
         "it was not saved anywhere"
     );
+}
+
+/// A window showing a project that has been saved to `file_name` in `folder`, with a chooser that will be asked for files.
+fn window_with_a_project_file(chooser: &ScriptedFileChooser, folder: &Path, file_name: &str) -> (Window, PathBuf) {
+    let mut window = window_that_asks(chooser);
+    let path = folder.join(file_name);
+    window.application_mut().save_project_to(path.clone());
+    (window, path)
+}
+
+#[test]
+fn saving_as_asks_where_even_when_the_project_has_a_file_and_offers_its_name_and_its_folder() {
+    let folder = tempfile::tempdir().unwrap();
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let (mut window, path) = window_with_a_project_file(&chooser, folder.path(), "trip.fastforwardrs.json");
+
+    window.do_this(Command::SaveProjectAs);
+
+    let asked = chooser.questions_asked();
+    assert_eq!(asked.len(), 1, "one question, though the project has a file");
+    assert!(asked[0].saving, "where to save");
+    assert_eq!(asked[0].title, "Save the project as");
+    assert_eq!(asked[0].suggested_file_name.as_deref(), Some("trip.fastforwardrs.json"));
+    assert_eq!(asked[0].starting_directory.as_deref(), Some(folder.path()));
+    assert_eq!(names_of_the_kinds(&asked[0]), ["Project files"]);
+    assert_eq!(
+        window.application().project_file_path(),
+        Some(path.as_path()),
+        "nothing changed"
+    );
+}
+
+#[test]
+fn saving_as_a_project_that_has_no_file_yet_offers_the_name_of_its_first_file_and_no_folder() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks(&chooser);
+
+    window.do_this(Command::SaveProjectAs);
+
+    let asked = chooser.questions_asked();
+    assert_eq!(asked[0].title, "Save the project as");
+    assert_eq!(
+        asked[0].suggested_file_name.as_deref(),
+        Some("holiday.fastforwardrs.json")
+    );
+    assert_eq!(asked[0].starting_directory, None);
+}
+
+#[test]
+fn saving_for_the_first_time_does_not_pick_a_folder_but_leaves_it_to_the_system() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks(&chooser);
+
+    window.do_this(Command::SaveProject);
+
+    assert_eq!(chooser.questions_asked()[0].starting_directory, None);
+}
+
+#[test]
+fn saving_as_writes_the_project_to_the_file_chosen_which_is_the_projects_file_from_then_on() {
+    let folder = tempfile::tempdir().unwrap();
+    let chooser = ScriptedFileChooser::default();
+    let (mut window, old_path) = window_with_a_project_file(&chooser, folder.path(), "first.fastforwardrs.json");
+    let old_text = std::fs::read_to_string(&old_path).unwrap();
+    window.do_this(Command::AddTrack);
+    assert!(window.application().has_unsaved_changes());
+    // (No ending is typed: the one of project files is put on.)
+    chooser.will_answer(Some(folder.path().join("second")));
+
+    window.do_this(Command::SaveProjectAs);
+
+    let new_path = folder.path().join("second.json");
+    assert!(new_path.exists(), "written where it was said");
+    assert_eq!(window.application().project_file_path(), Some(new_path.as_path()));
+    assert!(!window.application().has_unsaved_changes(), "everything is saved");
+    assert_eq!(
+        std::fs::read_to_string(&old_path).unwrap(),
+        old_text,
+        "the file the project came from is as it was"
+    );
+    assert_ne!(
+        std::fs::read_to_string(&new_path).unwrap(),
+        old_text,
+        "the new file has the track that was added since"
+    );
+
+    // From then on saving is to the new file, without a question.
+    window.do_this(Command::AddTrack);
+    window.do_this(Command::SaveProject);
+    assert_eq!(
+        chooser.questions_asked().len(),
+        1,
+        "only the question about where to save as"
+    );
+    assert_eq!(
+        crate::project_file::read_project_file(&new_path)
+            .unwrap()
+            .tracks()
+            .len(),
+        3,
+        "the new file has the second track added: it is the one that is saved to"
+    );
+    assert_eq!(
+        crate::project_file::read_project_file(&old_path)
+            .unwrap()
+            .tracks()
+            .len(),
+        1,
+        "and the old one is still as it was"
+    );
+}
+
+#[test]
+fn choosing_no_place_to_save_as_changes_nothing_and_leaves_the_changes_unsaved() {
+    let folder = tempfile::tempdir().unwrap();
+    let chooser = ScriptedFileChooser::default();
+    let (mut window, path) = window_with_a_project_file(&chooser, folder.path(), "kept.fastforwardrs.json");
+    window.do_this(Command::AddTrack);
+    chooser.will_answer(None);
+
+    window.do_this(Command::SaveProjectAs);
+
+    assert_eq!(window.application().project_file_path(), Some(path.as_path()));
+    assert!(window.application().has_unsaved_changes(), "nothing was saved");
+    assert_eq!(window.application().message_showing(), None);
+}
+
+#[test]
+fn saving_as_is_the_item_after_save_project_and_is_there_to_use_when_there_is_something_to_save() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks(&chooser);
+    window.harness.get_by_label("File").click();
+    window.settle();
+    assert!(
+        !window
+            .harness
+            .get_by_label("Save project as")
+            .accesskit_node()
+            .is_disabled()
+    );
+
+    window.harness.get_by_label("Save project as").click();
+    window.settle();
+
+    assert_eq!(
+        chooser.questions_asked()[0].title,
+        "Save the project as",
+        "the item asks"
+    );
+}
+
+#[test]
+fn saving_as_cannot_be_chosen_when_there_is_nothing_in_the_project_to_save() {
+    let mut window = Window::showing(Project::empty());
+    window.harness.get_by_label("File").click();
+    window.settle();
+
+    assert!(
+        window
+            .harness
+            .get_by_label("Save project")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        window
+            .harness
+            .get_by_label("Save project as")
+            .accesskit_node()
+            .is_disabled()
+    );
+}
+
+#[test]
+fn nothing_in_the_file_menu_can_be_chosen_while_a_message_is_up() {
+    let mut window = Window::showing(project_of(300));
+    window.harness.get_by_label("File").click();
+    window.settle();
+    window.application_mut().dialog = Some(Dialog::Message {
+        title: "Note".into(),
+        text: "Read me".into(),
+    });
+    window.settle();
+
+    for item in [
+        "New project",
+        "Save project",
+        "Save project as",
+        "Load project",
+        "Import",
+        "Export",
+    ] {
+        assert!(
+            window.harness.get_by_label(item).accesskit_node().is_disabled(),
+            "{item} cannot be chosen while a message is up"
+        );
+    }
 }
 
 #[test]

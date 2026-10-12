@@ -12,7 +12,7 @@ use crate::project::tracks::ids::{ClipId, RackId};
 use crate::project::tracks::placement::Placement;
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
-use crate::project::{AnimationTarget, PropertyId, PropertyValue};
+use crate::project::{AnimationTarget, EffectKind, Effects, PropertyId, PropertyValue};
 use crate::project::{SpeedFactor, TimelineFrameIndex};
 
 /// What a cut puts at the edges of the two parts, in each of the racks of the cut clip's own keyframes: the value that the
@@ -68,6 +68,8 @@ pub enum ClipEditError {
     NotAPropertyOfThisClip { clip: ClipId, property: PropertyId },
     #[error("{clip} is not as long as {frames_in} frames, so it has nothing at that frame")]
     NotWithinTheClip { clip: ClipId, frames_in: u64 },
+    #[error("{clip} cannot have the {kind} effect")]
+    NotAnEffectOfThisClip { clip: ClipId, kind: EffectKind },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -184,6 +186,8 @@ impl Track {
 
         let second_id = self.take_next_clip_id();
         let first_id = self.entries[index].id;
+        // (Both halves have the effects the clip had.)
+        let effects = self.entries[index].effects.clone();
         let drawer_before = std::mem::take(&mut self.entries[index].drawer);
         let mut first_drawer = Drawer::default();
         let mut second_drawer = Drawer::default();
@@ -220,6 +224,7 @@ impl Track {
                 id: second_id,
                 clip: second_half,
                 drawer: second_drawer,
+                effects,
                 gap_before_frames: 0,
             },
         );
@@ -328,43 +333,13 @@ impl Track {
 
     /// Makes the clip `clip`, which is a text object or a picture, last `duration_in_frames`
     /// frames, or as long as there is room for before the next clip if that is less (and at least
-    /// one frame). Nothing else moves. Returns how many frames it lasts now. What is in its drawer is shortened with it: see
-    /// [`Self::set_clip_duration_with_edges`].
+    /// one frame). Nothing else moves. Returns how many frames it lasts now.
+    ///
+    /// What is in its drawer is shortened with it. The keyframes that it has no frame for any more come in to its last frames,
+    /// where there is room for them (the empty frames between the keyframes are what is given up), and are lost only if there
+    /// is not: see [`crate::project::Rack::truncated_to`]. (A clip made longer keeps the keyframes it had, which are all before
+    /// its old end.)
     pub fn set_clip_duration(&mut self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
-        let new_duration = self.duration_a_clip_would_be_given(clip, duration_in_frames)?;
-        let edges = self.edges_by_the_own_keyframes_of_the_clip_shortened_to(clip, new_duration);
-        self.set_clip_duration_with_edges(clip, duration_in_frames, &edges)
-    }
-
-    /// The values that making `clip` `new_duration` frames long needs at the end of the racks of its own keyframes, by what
-    /// those keyframes say by themselves.
-    fn edges_by_the_own_keyframes_of_the_clip_shortened_to(&self, clip: ClipId, new_duration: u64) -> CutEdges {
-        let Some(placement) = self.placement_of(clip) else {
-            return CutEdges::new();
-        };
-        self.racks_cut_by(clip, new_duration)
-            .into_iter()
-            .filter_map(|cut| {
-                let curve = placement.drawer.rack(cut.rack)?.curve();
-                let at_the_end = cut
-                    .keyframes_go_on_beyond
-                    .then(|| new_duration.checked_sub(1).and_then(|last| curve.value_at(last)))
-                    .flatten();
-                Some((cut.rack, (at_the_end, None)))
-            })
-            .collect()
-    }
-
-    /// Makes the clip `clip` last as long as [`Self::set_clip_duration`] does, with `edges` for the racks of its own
-    /// keyframes (only the value at the first part's last frame counts: see [`CutEdges`]). The keyframes in its drawer that
-    /// it has no frame for any more are gone, with the value the rack has at the clip's end kept in the racks that have
-    /// something that goes on beyond it (a clip made longer keeps the keyframes it had, which are all before its old end).
-    pub fn set_clip_duration_with_edges(
-        &mut self,
-        clip: ClipId,
-        duration_in_frames: u64,
-        edges: &CutEdges,
-    ) -> Result<u64, ClipEditError> {
         let new_duration = self.duration_a_clip_would_be_given(clip, duration_in_frames)?;
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
         let start = self.first_timeline_frames[index];
@@ -375,15 +350,9 @@ impl Track {
         if let Some(changed) = self.entries[index].clip.with_duration_in_frames_it_says(new_duration) {
             let old_end = start + old_duration;
             self.entries[index].clip = changed;
-            self.entries[index].drawer = self.entries[index].drawer.with_each_rack_changed(|rack| {
-                if rack.target() == AnimationTarget::Clip(clip) {
-                    let value_at_the_end = edges.get(&rack.id()).and_then(|(at_the_end, _)| at_the_end.clone());
-                    rack.truncated_to(new_duration, value_at_the_end)
-                } else {
-                    // (The keyframes of something else that are kept here are shortened by what they say themselves.)
-                    rack.truncated_by_its_own_curve(new_duration)
-                }
-            });
+            self.entries[index].drawer = self.entries[index]
+                .drawer
+                .with_each_rack_changed(|rack| rack.truncated_to(new_duration));
             if let Some(next) = self.entries.get_mut(index + 1) {
                 // The next clip stays where it is, so the gap before it takes up the difference.
                 next.gap_before_frames = next.gap_before_frames + old_end - (start + new_duration);
@@ -455,6 +424,7 @@ impl Track {
                 id,
                 clip,
                 drawer: Drawer::default(),
+                effects: Effects::none(),
                 gap_before_frames: new_start - from_frame,
             },
         );

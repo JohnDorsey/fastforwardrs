@@ -165,6 +165,21 @@ pub fn draw_rack(painter: &Painter, visible: Rect, corners: CornerRadius, grain:
     );
 }
 
+/// Draws the outline of a rack that is selected, in the colour that the outline of a selected clip is, inside the rack's edge
+/// (`visible` is where the rack is, and `corners` how round its corners are).
+pub fn draw_the_outline_of_a_selected_rack(painter: &Painter, visible: Rect, corners: CornerRadius) {
+    painter.rect_stroke(
+        visible,
+        corners,
+        Stroke::new(SELECTED_RACK_OUTLINE_WIDTH, theme::SELECTION_OUTLINE),
+        StrokeKind::Inside,
+    );
+}
+
+/// How thick the outline of a selected rack is, in points: a rack is only as tall as a keyframe, so it is thinner than the
+/// outline of a clip.
+pub const SELECTED_RACK_OUTLINE_WIDTH: f32 = 2.0;
+
 /// The four corners of the diamond of a keyframe whose middle is at `centre`: a square turned a quarter of a turn, as tall
 /// as [`KEYFRAME_HEIGHT`], from the top one clockwise.
 pub fn diamond_corners(centre: Pos2) -> [Pos2; 4] {

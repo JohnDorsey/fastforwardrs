@@ -29,7 +29,7 @@ fn clip_number(project: &Project, number: usize) -> ClipId {
 
 /// A project edited the way a user would: split in three, with the middle clip sped up and the
 /// fast-forward symbol moved.
-fn edited_project(link: SourceMediaLink) -> Project {
+pub(super) fn edited_project(link: SourceMediaLink) -> Project {
     let mut project = Project::empty();
     project
         .import_source(
@@ -45,7 +45,7 @@ fn edited_project(link: SourceMediaLink) -> Project {
     project
 }
 
-fn link_to_missing_video() -> SourceMediaLink {
+pub(super) fn link_to_missing_video() -> SourceMediaLink {
     SourceMediaLink {
         absolute_path: PathBuf::from("/videos/holiday.mp4"),
         relative_path: Some(PathBuf::from("../videos/holiday.mp4")),
@@ -68,7 +68,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 7,
+  "file_format_version": 8,
   "sources": [
     {
       "kind": "video",
@@ -188,7 +188,14 @@ fn every_setting_in_the_table_survives_a_trip_through_the_file_in_every_state() 
 }
 
 /// What the line that says the version looks like in a file of the version this build writes.
-pub(super) const CURRENT_VERSION_LINE: &str = "\"file_format_version\": 7";
+pub(super) fn current_version_line() -> String {
+    version_line(FILE_FORMAT_VERSION)
+}
+
+/// What the line that says the version looks like in a file of the version `version`.
+pub(super) fn version_line(version: u32) -> String {
+    format!("\"file_format_version\": {version}")
+}
 
 /// Valid project text with one thing replaced, for the "bad file" tests below.
 pub(super) fn valid_text_with(replacing: &str, with: &str) -> String {
@@ -332,7 +339,7 @@ fn an_earlier_file_with_a_clip_that_has_no_frames_is_rejected_and_the_clip_is_na
 fn an_earlier_file_is_saved_in_the_current_layout_and_that_loads_to_the_same_project() {
     let loaded = project_from_json_text(VERSION_2_TEXT).unwrap();
     let text = saved(&loaded);
-    assert!(text.contains(CURRENT_VERSION_LINE), "{text}");
+    assert!(text.contains(&current_version_line()), "{text}");
     assert!(text.contains("\"tracks\""), "{text}");
     assert!(!text.contains("video_track"), "{text}");
     assert_same_content(&project_from_json_text(&text).unwrap(), &loaded);
@@ -358,7 +365,7 @@ fn a_track_of_another_height_is_saved_with_it_and_comes_back_and_one_of_the_norm
 
 #[test]
 fn a_file_of_version_3_has_no_heights_and_its_tracks_are_of_the_normal_height() {
-    let text = valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 3");
+    let text = valid_text_with(&current_version_line(), &version_line(3));
     let project = project_from_json_text(&text).unwrap();
     assert!(
         project
@@ -527,10 +534,14 @@ fn json_that_is_not_a_fastforwardrs_project_is_rejected() {
 
 #[test]
 fn a_project_from_a_newer_version_is_refused_rather_than_misread() {
-    let error =
-        project_from_json_text(&valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 8")).unwrap_err();
+    let newer = FILE_FORMAT_VERSION + 1;
+    let error = project_from_json_text(&valid_text_with(&current_version_line(), &version_line(newer))).unwrap_err();
     assert!(
-        matches!(error, ProjectFileError::NewerFileFormat { found: 8, supported: 7 }),
+        matches!(
+            error,
+            ProjectFileError::NewerFileFormat { found, supported }
+                if found == newer && supported == FILE_FORMAT_VERSION
+        ),
         "{error:?}"
     );
 }
@@ -586,7 +597,7 @@ fn videos_of_different_frame_rates_survive_a_trip_through_the_file_with_the_edit
 
 #[test]
 fn a_file_of_version_4_has_no_frame_rate_of_its_own_and_the_project_follows_its_first_video() {
-    let text = valid_text_with(CURRENT_VERSION_LINE, "\"file_format_version\": 4");
+    let text = valid_text_with(&current_version_line(), &version_line(4));
     let project = project_from_json_text(&text).unwrap();
     assert_eq!(project.chosen_frame_rate(), None);
     assert_eq!(
@@ -761,6 +772,27 @@ pub(super) fn project_with_everything() -> Project {
     project
         .set_clip_placement(placed_video, a_place_for_the_video())
         .unwrap();
+
+    // Effects: a hue shift on the first video (as it begins, and the animation tests give it keyframes), on the second video
+    // (turned a quarter of the way round), on the text object (as it begins), and on the track of the text (turned back a
+    // twelfth).
+    let first_video = project.tracks()[2].entries()[0].id();
+    let text = project.tracks()[0].entries()[0].id();
+    let turned_hue_shifts = [
+        (AnimationTarget::Clip(placed_video), 90.0),
+        (AnimationTarget::Track(captions), -30.0),
+    ];
+    for target in [AnimationTarget::Clip(first_video), AnimationTarget::Clip(text)]
+        .into_iter()
+        .chain(turned_hue_shifts.map(|(target, _)| target))
+    {
+        project.add_effect(target, EffectKind::HueShift).unwrap();
+    }
+    for (target, degrees) in turned_hue_shifts {
+        project
+            .set_property_at(target, PropertyId::HueShift, PropertyValue::Number(degrees), frame(0))
+            .unwrap();
+    }
     project
 }
 
@@ -1242,11 +1274,40 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
         "the drawer of the video has no keyframes of its loudness"
     );
     let caption_drawer = project.tracks()[0].entries()[0].drawer();
-    assert_eq!(caption_drawer.len(), 2);
+    assert_eq!(
+        caption_drawer.len(),
+        3,
+        "how it fades in, the loudness of the video, and the turn of its colours"
+    );
     assert_eq!(
         caption_drawer.racks()[1].target(),
         AnimationTarget::Clip(video),
         "the rack kept in the drawer of the caption is of the video"
+    );
+    // The effects the example shows: the caption's colours go a whole turn round in 60 frames (with the keyframes in a rack of its
+    // drawer), the picture's are turned a quarter of the way, and the track of the videos turns the colours of both of them.
+    let caption = AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
+    let picture = AnimationTarget::Clip(project.tracks()[0].entries()[1].id());
+    let videos_track = AnimationTarget::Track(project.tracks()[1].id());
+    let hue_at = |target: AnimationTarget, frame: u64| {
+        project.property_value_at(target, PropertyId::HueShift, TimelineFrameIndex::new(frame))
+    };
+    assert_eq!(
+        hue_at(caption, 90),
+        Some(PropertyValue::Number(180.0)),
+        "the caption starts at frame 60: half way is 30 frames in"
+    );
+    assert_eq!(
+        hue_at(caption, 120),
+        Some(PropertyValue::Number(360.0)),
+        "a whole turn after 60 frames"
+    );
+    assert_eq!(hue_at(picture, 200), Some(PropertyValue::Number(90.0)));
+    assert_eq!(hue_at(videos_track, 0), Some(PropertyValue::Number(15.0)));
+    assert!(project.has_the_effect(caption, EffectKind::HueShift));
+    assert!(
+        !project.has_the_effect(AnimationTarget::Clip(video), EffectKind::HueShift),
+        "the video has only its track's"
     );
     assert_eq!(
         project

@@ -4,6 +4,7 @@ use egui::{Rect, pos2, vec2};
 
 use super::geometry::PictureOnScreen;
 use super::{PreviewContent, PreviewLayer, PreviewLayerContent, VideoInThePicture};
+use crate::colour_effects::ColourMatrix;
 use crate::project::{CanvasArea, ClipId, Placement, SpeedIndicatorLayout, TrackId};
 
 /// A picture of 1600 by 900 pixels drawn 800 by 450 points, with its top left corner at (100, 50).
@@ -22,6 +23,7 @@ pub fn layer(number: u32, placement: Placement) -> PreviewLayer<'static> {
         clip: clip(number),
         track: TrackId::new(number),
         placement,
+        colour: ColourMatrix::NOTHING_CHANGES,
         content: PreviewLayerContent::Video(VideoInThePicture::Waiting),
     }
 }

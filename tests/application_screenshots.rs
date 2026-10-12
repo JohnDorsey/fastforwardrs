@@ -892,3 +892,229 @@ fn write_screenshots_of_the_keyframe_buttons_and_an_animated_video() {
         "85_the_properties_of_a_text_object_with_its_place",
     );
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_selected_racks_the_menus_of_racks_and_keyframes_and_drawers_that_push() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    // A track in front with a text object on it from frame 10, which has a keyframe of how far it is turned: the drawer that
+    // opens for it pushes the track of the video down.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 10);
+    journey.harness.run_steps(40);
+    let on_the_video = journey.point_on_the_strip_at_frame(1, 100);
+    journey.click(on_the_video);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(&mut journey, &folder, "104_before_a_drawer_is_opened");
+    journey.move_playhead_to_frame(40);
+    let on_the_text = journey.point_on_the_strip_at_frame(0, 40);
+    journey.click(on_the_text);
+    let stopwatch = journey.rectangle_of("Make a keyframe of rotation here");
+    journey.click(stopwatch.center());
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "105_the_drawer_of_the_text_pushes_the_track_of_the_video_down",
+    );
+
+    // The drawer of the video opened with Shift held lies over what is under it (here there is nothing but its own room).
+    let on_the_video = journey.point_on_the_strip_at_frame(1, 100);
+    journey.click(on_the_video);
+    for frame in [30, 90, 150] {
+        journey.move_playhead_to_frame(frame);
+        let stopwatch = journey.rectangle_of("Make a keyframe of gain here");
+        journey.click(stopwatch.center());
+    }
+    journey.move_playhead_to_frame(60);
+    let stopwatch = journey.rectangle_of("Make a keyframe of position here");
+    journey.click(stopwatch.center());
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "106_two_racks_in_the_drawer_of_the_video");
+
+    // A rack clicked is selected, and another with Ctrl as well.
+    let racks_strip = journey.strip_of_track(1);
+    let first_rack = egui::pos2(racks_strip.left() + 500.0, racks_strip.bottom() + 8.0 + 8.0);
+    let second_rack = egui::pos2(
+        racks_strip.left() + 500.0,
+        racks_strip.bottom() + 8.0 + 16.0 + 4.0 + 8.0,
+    );
+    journey.click(first_rack);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "107_a_rack_selected");
+    journey.click_with_control(second_rack);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "108_two_racks_selected_and_their_properties_listed",
+    );
+
+    // The menu of the racks: they are not of one property, so they cannot be merged.
+    journey.right_click(second_rack);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "109_the_menu_of_two_racks_of_different_properties",
+    );
+    journey.press_key(egui::Key::Escape);
+
+    // The menu of a keyframe.
+    journey.click(on_the_video);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    let first_keyframe = egui::pos2(journey.point_on_the_strip_at_frame(1, 90).x, first_rack.y);
+    journey.right_click(first_keyframe);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "110_the_menu_of_a_keyframe");
+
+    // The project, for opening in the real program.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("demo_selected_racks.fastforwardrs.json"));
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_question_asked_before_keyframes_are_lost() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    // A text object on a track in front, with four keyframes of how far it is turned, which are put at frames of their own
+    // when it is made to last less.
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 10);
+    for frame in [10, 20, 30, 40] {
+        journey.move_playhead_to_frame(frame);
+        let stopwatch = journey.rectangle_of("Make a keyframe of rotation here");
+        journey.click(stopwatch.center());
+    }
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "111_a_text_with_four_keyframes");
+
+    // Short enough for all the keyframes to be put at a frame of their own: no question.
+    journey.set_slider("Shown for", 0.2);
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "112_made_so_short_that_the_keyframes_are_a_frame_apart",
+    );
+
+    // Shorter than that: the user is asked.
+    journey.set_slider("Shown for", 0.1);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "113_the_question_about_losing_a_keyframe");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_preview_zoomed_in_out_and_in_to_the_pixels() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.harness.run_steps(40);
+    let on_the_preview = egui::pos2(800.0, 220.0);
+    let twice_as_big = 200.0 * 2.0_f32.ln();
+
+    // In to twice the size, about a point that is not the middle, which stays where it is.
+    journey.scroll_the_wheel(on_the_preview, egui::vec2(0.0, twice_as_big), egui::Modifiers::NONE);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "114_the_preview_zoomed_in_twice");
+
+    // All the way in, to the clock in the corner of the test picture, until its pixels can be seen.
+    let the_clock = egui::pos2(520.0, 60.0);
+    journey.scroll_the_wheel(the_clock, egui::vec2(0.0, twice_as_big * 5.0), egui::Modifiers::NONE);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "115_the_preview_zoomed_in_until_the_pixels_can_be_seen",
+    );
+
+    // Back out as far as it goes: half the size the picture has when it fits.
+    journey.scroll_the_wheel(
+        on_the_preview,
+        egui::vec2(0.0, -twice_as_big * 8.0),
+        egui::Modifiers::NONE,
+    );
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "116_the_preview_zoomed_out_to_half");
+
+    // And the button in the corner brings it back.
+    let fit = journey.rectangle_of("Fit");
+    journey.click(fit.center());
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "117_the_preview_fitting_again");
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_plus_button_that_puts_an_effect_on_and_the_hue_shift() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    journey.harness.run_steps(40);
+    journey.select_the_clip_at(100);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "118_a_clip_selected_with_the_plus_button_for_effects",
+    );
+
+    // The menu of the button: one row for each effect there is.
+    let plus = journey.rectangle_of("Add an effect");
+    journey.click(plus.center());
+    save_what_is_drawn(&mut journey, &folder, "119_the_menu_of_the_plus_button");
+
+    // The effect is put on: its box, with the slider of its one value.
+    let item = journey.rectangle_of("Hue shift");
+    journey.click(item.center());
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "120_the_box_of_the_hue_shift");
+
+    // Turned a third of the way round: the colours of the picture are different.
+    journey.set_slider("Turn", 120.0);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "121_the_colours_turned_by_120_degrees");
+
+    // With keyframes: the colours go round between them.
+    let row = journey.rectangle_of("Turn");
+    journey.move_pointer_to(row.center());
+    let stopwatch = journey.rectangle_of("Make a keyframe of hue shift here");
+    journey.click(stopwatch.center());
+    journey.move_playhead_to_frame(300);
+    journey.set_slider("Turn", 300.0);
+    journey.move_playhead_to_frame(200);
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "122_the_hue_shift_with_keyframes_part_of_the_way_round",
+    );
+
+    // The menu of its box takes it off.
+    let heading = journey.rectangle_of("Hue shift");
+    journey.right_click(heading.center());
+    save_what_is_drawn(&mut journey, &folder, "123_the_menu_of_the_box_of_the_effect");
+}

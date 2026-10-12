@@ -18,6 +18,9 @@
 mod animation_tests;
 mod copying;
 mod editing;
+mod effects;
+#[cfg(test)]
+mod effects_tests;
 mod keyframing;
 mod layout;
 mod moving;
@@ -32,9 +35,8 @@ use super::clip::Clip;
 use super::drawer::Drawer;
 use super::gain::Gain;
 use super::ids::{ClipId, RackId, TrackId};
-use super::rack::Rack;
 use super::track_height::TrackHeight;
-use crate::project::{Animation, AnimationTarget, SourceFrameIndex, SpeedFactor, TimelineFrameIndex};
+use crate::project::{Animation, AnimationTarget, Effects, SourceFrameIndex, SpeedFactor, TimelineFrameIndex};
 
 /// A clip on a track, and where it is in relation to the clip before it.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +46,8 @@ pub struct TrackEntry {
     /// The racks of keyframes that are kept with the clip, counted in frames from the clip's first frame. They belong to
     /// the clip: they go where it goes, and are cut, stretched and shortened as it is, whatever they are the keyframes of.
     drawer: Drawer,
+    /// The effects the clip has: what is done to its picture on its way to the finished picture.
+    effects: Effects,
     /// How many frames of empty timeline come before the clip: after the end of the clip before
     /// it, or after the start of the timeline for the first clip.
     gap_before_frames: u64,
@@ -61,6 +65,11 @@ impl TrackEntry {
     /// The racks of keyframes that are kept with the clip.
     pub fn drawer(&self) -> &Drawer {
         &self.drawer
+    }
+
+    /// The effects the clip has.
+    pub fn effects(&self) -> &Effects {
+        &self.effects
     }
 
     /// What the clip's own racks say of the clip's own properties, counted in frames from its first frame. (The racks in
@@ -99,6 +108,8 @@ pub struct Track {
     /// The racks of keyframes that are kept with the track, counted in frames from the start of the timeline: those of
     /// its own properties (its loudness, and whether it is muted) and any other.
     drawer: Drawer,
+    /// The effects the track has: what is done to the pictures of all its clips, after what their own effects do.
+    effects: Effects,
     entries: Vec<TrackEntry>,
     /// The number the next new clip of this track is given (see [`ClipId`]).
     next_clip_number: u32,
@@ -123,6 +134,8 @@ pub struct ClipPlacement<'track> {
     pub clip: &'track Clip,
     /// The racks of keyframes that are kept with the clip, counted in frames from `first_timeline_frame`.
     pub drawer: &'track Drawer,
+    /// The effects the clip has.
+    pub effects: &'track Effects,
     pub first_timeline_frame: TimelineFrameIndex,
     /// The frame just after the clip's last frame (the end is exclusive).
     pub end_timeline_frame: TimelineFrameIndex,
@@ -184,6 +197,7 @@ impl Track {
             muted: false,
             height: TrackHeight::DEFAULT,
             drawer: Drawer::default(),
+            effects: Effects::none(),
             entries: Vec::new(),
             next_clip_number: 0,
             next_rack_number: 0,
@@ -195,30 +209,11 @@ impl Track {
     /// A track holding `clips`, each with the number of empty frames before it.
     #[must_use]
     pub fn with_clips(self, clips: impl IntoIterator<Item = (u64, Clip)>) -> Self {
-        self.with_animated_clips(
+        self.with_clips_and_drawers(
             clips
                 .into_iter()
-                .map(|(gap_before_frames, clip)| (gap_before_frames, clip, Animation::default())),
+                .map(|(gap_before_frames, clip)| (gap_before_frames, clip, Drawer::default())),
         )
-    }
-
-    /// A track holding `clips`, each with the number of empty frames before it and its own animation (which is kept in
-    /// racks in the clip's drawer). Keyframes at or after a clip's end are left out: a clip has none there.
-    #[must_use]
-    pub fn with_animated_clips(mut self, clips: impl IntoIterator<Item = (u64, Clip, Animation)>) -> Self {
-        for (gap_before_frames, clip, animation) in clips {
-            let id = self.take_next_clip_id();
-            let animation = animation.truncated_to(clip.timeline_frame_count(self.speed));
-            let drawer = self.drawer_of_the_racks_for(AnimationTarget::Clip(id), &animation);
-            self.entries.push(TrackEntry {
-                id,
-                clip,
-                drawer,
-                gap_before_frames,
-            });
-        }
-        self.rebuild_derived_values();
-        self
     }
 
     /// A track holding `clips`, each with the number of empty frames before it and its drawer of racks, which is used as
@@ -234,6 +229,7 @@ impl Track {
                 id,
                 clip,
                 drawer,
+                effects: Effects::none(),
                 gap_before_frames,
             });
         }
@@ -257,29 +253,6 @@ impl Track {
         if id.origin() == self.id {
             self.next_rack_number = self.next_rack_number.max(id.number().saturating_add(1));
         }
-    }
-
-    /// The same track with `animation` for its own properties (which is kept in racks in its drawer).
-    #[must_use]
-    pub fn with_animation(mut self, animation: Animation) -> Self {
-        let own_racks = self.drawer_of_the_racks_for(AnimationTarget::Track(self.id), &animation);
-        for rack in own_racks.racks() {
-            self.drawer.put(rack.clone());
-        }
-        self
-    }
-
-    /// A drawer with a rack for each property that `animation` animates, all of them for `target`.
-    fn drawer_of_the_racks_for(&mut self, target: AnimationTarget, animation: &Animation) -> Drawer {
-        let mut drawer = Drawer::default();
-        for (property, keyframes) in animation.properties() {
-            let mut rack = Rack::new(self.take_next_rack_id(), target, property);
-            for keyframe in keyframes.iter() {
-                let _ = rack.set(keyframe.frame, keyframe.value.clone());
-            }
-            drawer.push(rack);
-        }
-        drawer
     }
 
     #[must_use]
@@ -338,6 +311,11 @@ impl Track {
         &self.drawer
     }
 
+    /// The effects the track has.
+    pub fn effects(&self) -> &Effects {
+        &self.effects
+    }
+
     /// What the track's own racks say of the track's own properties, counted in frames from the start of the timeline.
     /// (What the racks kept somewhere else say of them is not in it: what they all say together is the project's to work out.)
     pub fn own_animation(&self) -> Animation {
@@ -390,6 +368,7 @@ impl Track {
             id: entry.id,
             clip: &entry.clip,
             drawer: &entry.drawer,
+            effects: &entry.effects,
             first_timeline_frame: TimelineFrameIndex::new(first),
             end_timeline_frame: TimelineFrameIndex::new(first + entry.clip.timeline_frame_count(self.speed)),
             effective_speed: entry.clip.effective_speed(self.speed),

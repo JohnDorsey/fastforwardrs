@@ -50,6 +50,24 @@ pub(super) fn gain_at(project: &Project, target: AnimationTarget, at: u64) -> f3
     }
 }
 
+/// The frames the keyframes of the rack are at, counted from the start of the drawer it is in.
+pub(super) fn frames_in_the_rack(project: &Project, rack: RackId) -> Vec<u64> {
+    project
+        .located_rack(rack)
+        .expect("the rack is in the project")
+        .rack
+        .keyframes()
+        .iter()
+        .map(|keyframe| keyframe.frame)
+        .collect()
+}
+
+/// The names of the keyframes in the rack, the earliest first.
+pub(super) fn names_of_the_keyframes_in(project: &Project, rack: RackId) -> Vec<KeyframeId> {
+    let rack = project.located_rack(rack).expect("the rack is in the project").rack;
+    rack.keyframes().iter().map(RackKeyframe::id).collect()
+}
+
 /// The names of the racks in the drawer of `owner`, in the order they are in.
 pub(super) fn names_of_the_racks_in(project: &Project, owner: AnimationTarget) -> Vec<RackId> {
     project
@@ -270,7 +288,7 @@ fn a_keyframe_made_for_a_clip_whose_other_keyframes_are_kept_elsewhere_goes_in_i
         .placement_of(video)
         .unwrap()
         .drawer
-        .rack_for(big, PropertyId::Gain)
+        .first_rack_for(big, PropertyId::Gain)
         .unwrap();
     assert_eq!(own.id(), made.rack);
     assert_eq!(own.keyframe(made.keyframe).unwrap().frame, 300);
@@ -567,10 +585,11 @@ fn whatever_racks_there_are_a_cut_leaves_every_frame_of_the_clips_with_the_value
 // --- making a clip shorter ---
 
 #[test]
-fn making_a_clip_shorter_cuts_off_the_keyframes_it_holds_and_the_clip_that_they_animate_goes_on_having_the_rest() {
+fn making_a_clip_shorter_brings_in_the_keyframes_it_holds_that_it_has_no_frame_for_and_the_clip_they_animate_goes_on_having_the_last()
+ {
     let (mut project, video, text) = a_big_video_and_a_small_text();
     let big = AnimationTarget::Clip(video);
-    put_a_rack_in(
+    let rack = put_a_rack_in(
         &mut project,
         AnimationTarget::Clip(text),
         big,
@@ -581,24 +600,68 @@ fn making_a_clip_shorter_cuts_off_the_keyframes_it_holds_and_the_clip_that_they_
     let lasts = project.set_clip_duration(text, 30).unwrap();
 
     assert_eq!(lasts, 30);
-    // What is kept: the keyframe at 10 and, at the new last frame, the value the keyframes had there.
+    // The keyframe at 10 stays, and the one at 50, which the clip has no frame for any more, is at its last frame, with its value.
     assert_eq!(keyframe_frames(&project, big, PropertyId::Gain), vec![110, 129]);
-    assert!(
-        (gain_at(&project, big, 129) + 10.5).abs() < 1e-4,
-        "19 of the 40 frames of the way from -20 dB to 0 dB"
-    );
+    assert_eq!(frames_in_the_rack(&project, rack), vec![10, 29]);
+    assert_eq!(gain_at(&project, big, 129), 0.0, "the value the keyframe had");
+    assert_eq!(gain_at(&project, big, 500), 0.0, "the video goes on having the last");
     assert_the_racks_are_sound(&project);
 }
 
+/// The bug of this round, at the level of the project: a clip that is made shorter lost the keyframes it had no frame for, with
+/// room for them left.
 #[test]
-fn making_a_clip_shorter_keeps_its_own_keyframes_as_they_were_by_all_the_keyframes_there_are_for_it() {
+fn making_a_clip_shorter_loses_none_of_the_keyframes_it_holds_while_it_has_as_many_frames_as_keyframes() {
+    let (mut project, _, text) = a_big_video_and_a_small_text();
+    let mine = AnimationTarget::Clip(text);
+    let keyframes: Vec<(u64, PropertyValue)> = (0..6).map(|number| (number * 10, db(number as f32))).collect();
+    let rack = put_a_rack_in(&mut project, mine, mine, PropertyId::Rotation, &keyframes);
+    let names_before = names_of_the_keyframes_in(&project, rack);
+
+    for new_length in [50, 20, 6] {
+        project.set_clip_duration(text, new_length).unwrap();
+        assert_eq!(
+            names_of_the_keyframes_in(&project, rack),
+            names_before,
+            "shortened to {new_length} frames, which has a frame for each of the six"
+        );
+        assert!(
+            frames_in_the_rack(&project, rack)
+                .iter()
+                .all(|frame| *frame < new_length)
+        );
+    }
+    assert_eq!(
+        frames_in_the_rack(&project, rack),
+        vec![0, 1, 2, 3, 4, 5],
+        "at every one of the six frames"
+    );
+    assert_eq!(project.keyframe_count(), 6);
+    assert_the_racks_are_sound(&project);
+
+    project.set_clip_duration(text, 5).unwrap();
+    assert_eq!(
+        project.keyframe_count(),
+        5,
+        "with one frame less than keyframes, one is lost and the rest have a frame each"
+    );
+    assert_eq!(frames_in_the_rack(&project, rack), vec![0, 1, 2, 3, 4]);
+    assert_the_racks_are_sound(&project);
+}
+
+/// Whatever keyframes a clip holds, making it shorter loses only those it has no frame for: those of its drawer that are still
+/// in it are as many as it has frames for, the earliest of them, in their order, and what is kept elsewhere is not touched.
+#[test]
+fn making_a_clip_shorter_keeps_as_many_of_its_keyframes_as_it_has_frames_for_in_their_order_and_leaves_what_is_kept_elsewhere()
+ {
+    let (mut losses, mut rounds_with_a_crowd) = (0, 0);
     for seed in 1..=100u64 {
         let mut random = DeterministicRandomNumbers::with_seed(seed);
         let (mut project, _, text) = a_big_video_and_a_small_text();
         let mine = AnimationTarget::Clip(text);
         let front = project.tracks()[0].id();
         let mut random_keyframes = |limit: u64| -> Vec<(u64, PropertyValue)> {
-            (0..1 + random.next_below(4))
+            (0..1 + random.next_below(8))
                 .map(|_| {
                     (
                         random.next_below(limit),
@@ -609,34 +672,200 @@ fn making_a_clip_shorter_keeps_its_own_keyframes_as_they_were_by_all_the_keyfram
         };
         let own = random_keyframes(60);
         let held_by_the_track = random_keyframes(400);
-        put_a_rack_in(&mut project, mine, mine, PropertyId::Rotation, &own);
-        put_a_rack_in(
+        let own_rack = put_a_rack_in(&mut project, mine, mine, PropertyId::Rotation, &own);
+        let track_rack = put_a_rack_in(
             &mut project,
             AnimationTarget::Track(front),
             mine,
             PropertyId::Rotation,
             &held_by_the_track,
         );
-        let rotation_at =
-            |project: &Project, at: u64| match project.property_value_at(mine, PropertyId::Rotation, frame(at)) {
-                Some(PropertyValue::Number(degrees)) => degrees,
-                other => panic!("not a rotation: {other:?}"),
-            };
-        let before: Vec<f32> = (100..160).map(|at| rotation_at(&project, at)).collect();
+        let names_before = names_of_the_keyframes_in(&project, own_rack);
+        let track_rack_before = project.located_rack(track_rack).unwrap().rack.clone();
         let new_length = 1 + random.next_below(59);
 
         project.set_clip_duration(text, new_length).unwrap();
 
-        for (index, expected) in before.iter().take(new_length as usize).enumerate() {
-            let now = rotation_at(&project, 100 + index as u64);
-            assert!(
-                (now - expected).abs() < 1e-3,
-                "seed {seed}, shortened to {new_length}: frame {} is {now} and was {expected}",
-                100 + index
-            );
-        }
+        let kept = names_before.len().min(new_length as usize);
+        assert_eq!(
+            names_of_the_keyframes_in(&project, own_rack),
+            names_before[..kept],
+            "seed {seed}, shortened to {new_length}: the earliest {kept} of {} are kept, in their order",
+            names_before.len()
+        );
+        assert!(
+            frames_in_the_rack(&project, own_rack)
+                .iter()
+                .all(|frame| *frame < new_length),
+            "seed {seed}"
+        );
+        assert_eq!(
+            project.located_rack(track_rack).unwrap().rack,
+            &track_rack_before,
+            "seed {seed}: the keyframes that the track holds are not in the clip, and are as they were"
+        );
         assert_eq!(project.problems_with_the_racks(), Vec::<String>::new(), "seed {seed}");
+        losses += usize::from(names_before.len() > kept);
+        rounds_with_a_crowd += usize::from(own.len() > 1 && new_length < 8);
     }
+    assert!(losses > 3, "some of the rounds lose keyframes: {losses}");
+    assert!(
+        rounds_with_a_crowd > 5,
+        "some of the rounds make the clip very short: {rounds_with_a_crowd}"
+    );
+}
+
+// --- how long things last ---
+
+/// The frames of the keyframes of each rack in the drawer of `clip`.
+fn frames_of_the_racks_in_the_drawer_of(project: &Project, clip: ClipId) -> Vec<Vec<u64>> {
+    project
+        .drawer_of(AnimationTarget::Clip(clip))
+        .map(|drawer| {
+            drawer
+                .racks()
+                .iter()
+                .map(|rack| rack.keyframes().iter().map(|keyframe| keyframe.frame).collect())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// How many keyframes there would be fewer of if each of those of the racks `racks` were put at the frame that is as far through
+/// what lasts `to` frames as it was through what lasted `from`, and of two that land on one frame the later was kept: the way it was
+/// done before keyframes were put at frames of their own.
+fn keyframes_that_the_old_way_of_stretching_would_have_merged(racks: &[Vec<u64>], from: u64, to: u64) -> usize {
+    racks
+        .iter()
+        .map(|frames| {
+            let mut stretched: Vec<u64> = frames
+                .iter()
+                .map(|frame| ((*frame as f64 * to as f64 / from as f64).round() as u64).min(to - 1))
+                .collect();
+            stretched.dedup();
+            frames.len() - stretched.len()
+        })
+        .sum()
+}
+
+/// The bug of this round, at the level of the project: speeding a clip up, or a track, or counting the project again at another
+/// frame rate, or putting a clip on a faster track, or shortening a clip lost keyframes that were close together, though the clips
+/// had a frame for each of their keyframes. Whatever is done, none is lost while every clip has at least as many frames as it has
+/// keyframes.
+#[test]
+fn whatever_is_done_to_how_long_things_last_no_keyframe_is_lost_while_every_clip_has_a_frame_for_each_of_its_keyframes()
+{
+    let (mut would_have_been_merged, mut lengths_changed) = (0, 0);
+    for seed in 1..=60u64 {
+        let mut random = DeterministicRandomNumbers::with_seed(seed);
+        let (mut project, video, text) = a_big_video_and_a_small_text();
+        let front = project.tracks()[0].id();
+        let back = project.tracks()[1].id();
+        project.set_track_speed(front, SpeedFactor::new(2).unwrap()).unwrap();
+        // The keyframes are all in a narrow stretch of what has them, so that making it shorter crowds them.
+        let keyframes_in = |random: &mut DeterministicRandomNumbers, limit: u64| -> Vec<(u64, PropertyValue)> {
+            let mut frames = std::collections::BTreeSet::new();
+            while frames.len() < 6 {
+                frames.insert(random.next_below(limit));
+            }
+            frames
+                .into_iter()
+                .enumerate()
+                .map(|(number, frame)| (frame, db(number as f32)))
+                .collect()
+        };
+        let of_the_video = keyframes_in(&mut random, 40);
+        let of_the_text = keyframes_in(&mut random, 20);
+        put_a_rack_in(
+            &mut project,
+            AnimationTarget::Clip(video),
+            AnimationTarget::Clip(video),
+            PropertyId::Gain,
+            &of_the_video,
+        );
+        put_a_rack_in(
+            &mut project,
+            AnimationTarget::Clip(text),
+            AnimationTarget::Clip(text),
+            PropertyId::Rotation,
+            &of_the_text,
+        );
+        let keyframes_to_keep = project.keyframe_count();
+        assert_eq!(keyframes_to_keep, 12, "seed {seed}");
+
+        for step in 0..10 {
+            let length_of = |project: &Project, clip| project.placement_of(clip).unwrap().timeline_frame_count();
+            let (video_before, text_before) = (length_of(&project, video), length_of(&project, text));
+            let racks_before = [
+                frames_of_the_racks_in_the_drawer_of(&project, video),
+                frames_of_the_racks_in_the_drawer_of(&project, text),
+            ];
+            let context = format!("seed {seed}, step {step}");
+            let operation = random.next_below(5);
+            match operation {
+                0 => project
+                    .set_clip_speed(video, SpeedFactor::new(1 + random.next_below(4) as u32).unwrap())
+                    .unwrap(),
+                1 => project
+                    .set_track_speed(back, SpeedFactor::new(1 + random.next_below(3) as u32).unwrap())
+                    .unwrap(),
+                2 => {
+                    let rates = [24, 25, 30, 50, 60];
+                    project.set_frame_rate(FrameRate::new(rates[random.next_below(5) as usize], 1).unwrap());
+                }
+                3 => {
+                    project.set_clip_duration(text, 12 + random.next_below(89)).unwrap();
+                }
+                _ => {
+                    let to_track = if random.next_below(2) == 0 { front } else { back };
+                    // (A move that cannot be made, because something is in the way, is not made.)
+                    let _ = project.move_clips(&[ClipMove {
+                        clip: video,
+                        to_track,
+                        start: frame(300 + random.next_below(3) * 200),
+                    }]);
+                }
+            }
+            let (video_after, text_after) = (length_of(&project, video), length_of(&project, text));
+            for (racks, from, to) in [
+                (&racks_before[0], video_before, video_after),
+                (&racks_before[1], text_before, text_after),
+            ] {
+                if from != to {
+                    lengths_changed += 1;
+                    // (A clip that is made shorter by being asked to last less loses what is cut off, not what lands on one frame.)
+                    if operation != 3 {
+                        would_have_been_merged +=
+                            keyframes_that_the_old_way_of_stretching_would_have_merged(racks, from, to);
+                    }
+                }
+            }
+            for (clip, frames) in [(video, video_after), (text, text_after)] {
+                let keyframes = frames_of_the_racks_in_the_drawer_of(&project, clip)
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>();
+                assert!(
+                    frames >= keyframes as u64,
+                    "{context}: {clip} has {frames} frames for {keyframes} keyframes"
+                );
+            }
+            assert_eq!(
+                project.keyframe_count(),
+                keyframes_to_keep,
+                "{context}: a keyframe was lost"
+            );
+            assert_eq!(project.problems_with_the_racks(), Vec::<String>::new(), "{context}");
+        }
+    }
+    assert!(
+        lengths_changed > 300,
+        "the lengths of clips are changed a lot: {lengths_changed}"
+    );
+    assert!(
+        would_have_been_merged > 0,
+        "in some of those the old way would have merged keyframes, or this does not test what it is for"
+    );
 }
 
 // --- the checks themselves ---
@@ -679,4 +908,62 @@ fn a_project_whose_racks_are_in_order_has_no_problems_and_what_is_wrong_is_said(
     );
     assert!(problems.iter().any(|problem| problem.contains("is not there")));
     assert!(problems.iter().any(|problem| problem.contains("does not have it")));
+}
+
+/// The racks of a text object's drawer that two racks of the loudness of the video are put in, at frames 5 and 9 of the first.
+fn a_text_with_a_rack_of_the_loudness_of_the_video() -> (Project, AnimationTarget, RackId) {
+    let (mut project, video, text) = a_big_video_and_a_small_text();
+    let owner = AnimationTarget::Clip(text);
+    let rack = put_a_rack_in(
+        &mut project,
+        owner,
+        AnimationTarget::Clip(video),
+        PropertyId::Gain,
+        &[(5, db(-1.0)), (9, db(-2.0))],
+    );
+    (project, owner, rack)
+}
+
+#[test]
+fn a_keyframe_that_is_in_two_racks_under_one_name_is_found() {
+    let (mut project, owner, first) = a_text_with_a_rack_of_the_loudness_of_the_video();
+    let the_keyframe = project.located_rack(first).unwrap().rack.keyframes()[0].clone();
+    let target = project.located_rack(first).unwrap().rack.target();
+    let mut second = Rack::new(RackId::new(project.tracks()[0].id(), 99), target, PropertyId::Gain);
+    second.put_in(the_keyframe.clone()).unwrap();
+    project.drawer_mut(owner).unwrap().push(second);
+
+    let problems = project.problems_with_the_racks();
+
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(
+        problems[0].contains(&format!("there is more than one {}", the_keyframe.id())),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn keyframes_that_are_not_in_the_order_of_their_frames_or_are_two_to_a_frame_are_found() {
+    for (name, frames_of_the_keyframes) in [("backwards", [9, 5]), ("two to one frame", [5, 5])] {
+        let (mut project, owner, rack) = a_text_with_a_rack_of_the_loudness_of_the_video();
+        assert_eq!(project.problems_with_the_racks(), Vec::<String>::new(), "{name}");
+        let mut keyframes = project.located_rack(rack).unwrap().rack.keyframes().to_vec();
+        for (keyframe, frame) in keyframes.iter_mut().zip(frames_of_the_keyframes) {
+            keyframe.frame = frame;
+        }
+        let unsound = project
+            .located_rack(rack)
+            .unwrap()
+            .rack
+            .with_keyframes_in_any_order(keyframes);
+        *project.drawer_mut(owner).unwrap().rack_mut(rack).unwrap() = unsound;
+
+        let problems = project.problems_with_the_racks();
+
+        assert_eq!(problems.len(), 1, "{name}: {problems:?}");
+        assert!(
+            problems[0].contains("not in the order of their frames, each at a frame of its own"),
+            "{name}: {problems:?}"
+        );
+    }
 }

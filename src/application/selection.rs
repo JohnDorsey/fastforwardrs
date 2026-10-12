@@ -1,4 +1,5 @@
-//! What is selected: any number of clips, on any of the tracks, and any number of tracks.
+//! What is selected: any number of clips, on any of the tracks, any number of tracks, any number of keyframes and any number
+//! of racks of keyframes, all at once if that is how they were chosen.
 //!
 //! Selecting is something the person doing the editing does, not something the project is made of,
 //! so the project knows nothing about it. A clip is named by its [`ClipId`], which does not
@@ -8,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::project::{ClipId, KeyframeId, Project, TrackId};
+use crate::project::{ClipId, KeyframeId, Project, RackId, TrackId};
 
 /// One thing that can be selected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -18,17 +19,18 @@ pub enum SelectionItem {
     Track(TrackId),
     /// A keyframe, in whichever rack it is.
     Keyframe(KeyframeId),
+    /// A rack of keyframes itself, which is not all the keyframes in it.
+    Rack(RackId),
 }
 
 impl SelectionItem {
-    /// Whether `project` has what this is of: the clip, the track, or the keyframe.
+    /// Whether `project` has what this is of: the clip, the track, the keyframe or the rack.
     pub fn is_in(&self, project: &Project) -> bool {
         match self {
             Self::Clip(clip) => project.placement_of(*clip).is_some(),
             Self::Track(track) => project.track(*track).is_some(),
-            Self::Keyframe(keyframe) => project
-                .located_rack(keyframe.rack())
-                .is_some_and(|located| located.rack.keyframe(*keyframe).is_some()),
+            Self::Keyframe(keyframe) => project.locate_keyframe(*keyframe).is_some(),
+            Self::Rack(rack) => project.located_rack(*rack).is_some(),
         }
     }
 }
@@ -88,12 +90,17 @@ impl Selection {
         self.items.contains(&SelectionItem::Keyframe(keyframe))
     }
 
+    /// Whether the rack `rack` is selected.
+    pub fn contains_rack(&self, rack: RackId) -> bool {
+        self.items.contains(&SelectionItem::Rack(rack))
+    }
+
     /// The selected clips, in the order of their ids (which is by the track they were made on, and then
     /// the order they were made in).
     pub fn iter(&self) -> impl Iterator<Item = ClipId> + '_ {
         self.items.iter().filter_map(|item| match item {
             SelectionItem::Clip(clip) => Some(*clip),
-            SelectionItem::Track(_) | SelectionItem::Keyframe(_) => None,
+            SelectionItem::Track(_) | SelectionItem::Keyframe(_) | SelectionItem::Rack(_) => None,
         })
     }
 
@@ -102,17 +109,30 @@ impl Selection {
         self.iter().collect()
     }
 
-    /// The selected keyframes, in the order of their ids (by the rack they are in, and then the order they were made in).
+    /// The selected keyframes, in the order of their ids (by the rack they were made in, and then the order they were made in).
     pub fn keyframes(&self) -> impl Iterator<Item = KeyframeId> + '_ {
         self.items.iter().filter_map(|item| match item {
             SelectionItem::Keyframe(keyframe) => Some(*keyframe),
-            SelectionItem::Clip(_) | SelectionItem::Track(_) => None,
+            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Rack(_) => None,
         })
     }
 
     /// The selected keyframes.
     pub fn keyframes_to_vec(&self) -> Vec<KeyframeId> {
         self.keyframes().collect()
+    }
+
+    /// The selected racks, in the order of their names.
+    pub fn racks(&self) -> impl Iterator<Item = RackId> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            SelectionItem::Rack(rack) => Some(*rack),
+            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Keyframe(_) => None,
+        })
+    }
+
+    /// The selected racks.
+    pub fn racks_to_vec(&self) -> Vec<RackId> {
+        self.racks().collect()
     }
 
     /// Everything that is selected, the clips first.
@@ -159,7 +179,7 @@ impl Selection {
         }
     }
 
-    /// Lets go of the clips, the tracks and the keyframes that `project` does not have (any more).
+    /// Lets go of the clips, the tracks, the keyframes and the racks that `project` does not have (any more).
     pub fn forget_what_is_gone(&mut self, project: &Project) {
         self.items.retain(|item| item.is_in(project));
     }
@@ -406,5 +426,110 @@ mod tests {
         selection.forget_what_is_gone(&project);
 
         assert_eq!(selection.to_items(), vec![SelectionItem::Track(first)]);
+    }
+
+    fn rack(number: u32) -> RackId {
+        RackId::new(TrackId::new(0), number)
+    }
+
+    #[test]
+    fn a_rack_can_be_selected_beside_clips_tracks_and_keyframes_and_is_none_of_them() {
+        let mut selection = Selection::from_clips([clip(0, 1)]);
+        selection.change_items(
+            [
+                SelectionItem::Rack(rack(4)),
+                SelectionItem::Rack(rack(2)),
+                SelectionItem::Keyframe(keyframe(0, 3)),
+                SelectionItem::Track(TrackId::new(2)),
+            ],
+            SelectionChange::Toggle,
+        );
+
+        assert!(
+            selection.contains_rack(rack(4)) && selection.contains_rack(rack(2)) && !selection.contains_rack(rack(3))
+        );
+        assert_eq!(
+            selection.racks_to_vec(),
+            vec![rack(2), rack(4)],
+            "in the order of their names"
+        );
+        assert_eq!(selection.to_vec(), vec![clip(0, 1)], "the clips are the clips");
+        assert_eq!(
+            selection.keyframes_to_vec(),
+            vec![keyframe(0, 3)],
+            "the keyframes are the keyframes"
+        );
+        assert!(selection.contains_track(TrackId::new(2)));
+        assert_eq!(selection.items().count(), 5);
+        assert_eq!(selection.single_item(), None);
+        assert_eq!(selection.single(), None);
+    }
+
+    #[test]
+    fn a_rack_that_is_the_only_thing_selected_is_the_single_item_and_there_is_no_single_clip() {
+        let selection = Selection::from_items([SelectionItem::Rack(rack(1))]);
+        assert_eq!(selection.single_item(), Some(SelectionItem::Rack(rack(1))));
+        assert_eq!(selection.single(), None);
+        assert!(selection.to_vec().is_empty() && selection.keyframes_to_vec().is_empty());
+    }
+
+    #[test]
+    fn toggling_a_rack_lets_go_of_it_when_it_is_selected_and_replacing_lets_go_of_the_rest() {
+        let mut selection = Selection::from_items([SelectionItem::Rack(rack(1)), SelectionItem::Clip(clip(0, 0))]);
+        selection.change_items([SelectionItem::Rack(rack(1))], SelectionChange::Toggle);
+        assert_eq!(selection.to_items(), vec![SelectionItem::Clip(clip(0, 0))]);
+        selection.change_items(
+            [SelectionItem::Rack(rack(2)), SelectionItem::Rack(rack(3))],
+            SelectionChange::Replace,
+        );
+        assert_eq!(
+            selection.to_items(),
+            vec![SelectionItem::Rack(rack(2)), SelectionItem::Rack(rack(3))]
+        );
+    }
+
+    #[test]
+    fn a_rack_is_in_a_project_that_has_it_and_not_in_one_that_does_not_and_is_forgotten_once_it_is_gone() {
+        use crate::project::{AnimationTarget, PropertyId, TimelineFrameIndex};
+
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let (text, _) = project
+            .insert_text(
+                track,
+                TimelineFrameIndex::new(0),
+                crate::project::TextObject::default(),
+                30,
+            )
+            .unwrap();
+        let made = project
+            .add_keyframe(
+                AnimationTarget::Clip(text),
+                PropertyId::Rotation,
+                TimelineFrameIndex::new(3),
+            )
+            .unwrap()
+            .expect("a keyframe is made");
+
+        assert!(SelectionItem::Rack(made.rack).is_in(&project));
+        assert!(!SelectionItem::Rack(rack(77)).is_in(&project), "no such rack");
+
+        let mut selection = Selection::from_items([
+            SelectionItem::Rack(made.rack),
+            SelectionItem::Rack(rack(77)),
+            SelectionItem::Clip(text),
+        ]);
+        selection.forget_what_is_gone(&project);
+        assert_eq!(
+            selection.to_items(),
+            vec![SelectionItem::Clip(text), SelectionItem::Rack(made.rack)]
+        );
+        project.remove_racks(&[made.rack]).unwrap();
+        selection.forget_what_is_gone(&project);
+        assert_eq!(
+            selection.to_items(),
+            vec![SelectionItem::Clip(text)],
+            "the rack was taken away"
+        );
     }
 }

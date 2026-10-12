@@ -91,25 +91,27 @@ impl fmt::Display for RackId {
     }
 }
 
-/// Tells the keyframes of one project apart: the rack that has it, and which of the keyframes that rack has made it is. A
-/// keyframe keeps its id when it is moved to another frame, so that what points at it (the selection, a drag) goes on
-/// pointing at it.
+/// Tells the keyframes of one project apart, the same way [`ClipId`] does clips: the rack the keyframe was made in, and which
+/// of the keyframes that rack has made it is. A keyframe keeps its id when it is moved to another frame and when it is moved
+/// to another rack (or its rack is merged with another), so that what points at it (the selection, a drag) goes on pointing
+/// at it. (Which rack it is in now is found by looking: see `Project::locate_keyframe`.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyframeId {
-    rack: RackId,
+    origin: RackId,
     number: u32,
 }
 
 impl KeyframeId {
-    pub const fn new(rack: RackId, number: u32) -> Self {
-        Self { rack, number }
+    pub const fn new(origin: RackId, number: u32) -> Self {
+        Self { origin, number }
     }
 
-    /// The rack the keyframe is in.
-    pub const fn rack(self) -> RackId {
-        self.rack
+    /// The rack the keyframe was made in, which is not the rack it is in if it has been moved to another.
+    pub const fn origin(self) -> RackId {
+        self.origin
     }
 
+    /// Which of the keyframes made in its origin rack this is.
     pub const fn number(self) -> u32 {
         self.number
     }
@@ -117,6 +119,7 @@ impl KeyframeId {
 
 impl fmt::Display for KeyframeId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "keyframe {} of {}", self.number, self.rack)
+        // (Of the rack it was made in, which is what makes it this keyframe and no other.)
+        write!(formatter, "keyframe {} of {}", self.number, self.origin)
     }
 }

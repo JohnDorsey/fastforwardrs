@@ -31,7 +31,7 @@ fn rack_of_the_loudness_of(window: &mut Window, video: ClipId, frames: &[u64]) -
         .project()
         .drawer_of(AnimationTarget::Clip(video))
         .unwrap()
-        .rack_for(AnimationTarget::Clip(video), PropertyId::Gain)
+        .first_rack_for(AnimationTarget::Clip(video), PropertyId::Gain)
         .unwrap()
         .id()
 }
@@ -379,20 +379,28 @@ fn the_words_go_when_the_pointer_comes_to_a_place_where_the_rack_fits() {
 }
 
 #[test]
-fn a_rack_cannot_be_dragged_into_a_drawer_that_has_a_rack_for_the_same_thing_already_and_nothing_is_said_of_space() {
+fn a_rack_can_be_dragged_into_a_drawer_that_has_a_rack_for_the_same_thing_already_and_the_two_are_not_merged() {
     let (mut window, video, text) = window_with_a_video_and_a_text();
     let first = rack_of_the_loudness_of(&mut window, video, &[60, 80]);
     make_a_keyframe(&mut window, AnimationTarget::Clip(text), PropertyId::Rotation, 50);
-    // Another rack of the loudness of the video goes in the drawer of the text, and a new keyframe makes another in the drawer of
-    // the video.
+    // A rack of the loudness of the video goes in the drawer of the text, and a new keyframe makes another in the drawer of the
+    // video: that is dragged into the drawer of the text, which has a rack of the loudness of the video already.
     window.do_this(Command::MoveRack {
         rack: first,
         to: RackDestination::Drawer(AnimationTarget::Clip(text)),
         shift_in_frames: 0,
+        slot: None,
     });
-    make_a_keyframe(&mut window, AnimationTarget::Clip(video), PropertyId::Gain, 200);
+    let in_the_drawer_of_the_video = make_a_keyframe(&mut window, AnimationTarget::Clip(video), PropertyId::Gain, 200);
+    let second = window
+        .application()
+        .project()
+        .locate_keyframe(in_the_drawer_of_the_video)
+        .unwrap()
+        .rack
+        .rack
+        .id();
     window.harness.run_steps(40);
-    let before = window.application().project().clone();
     let racks = racks_drawn(&window);
     let in_the_video = *racks.last().unwrap();
     let in_the_text = racks[0];
@@ -406,9 +414,147 @@ fn a_rack_cannot_be_dragged_into_a_drawer_that_has_a_rack_for_the_same_thing_alr
         the_words_drawn_by_the_pointer(&window).is_none(),
         "it is not a matter of room"
     );
-    assert_eq!(cursor_shown(&window), CursorIcon::NotAllowed);
     window.release(to, PointerButton::Primary);
     window.settle();
+    let project = window.application().project();
+    let video_target = AnimationTarget::Clip(video);
+    let drawer_of_the_text = project.drawer_of(AnimationTarget::Clip(text)).unwrap();
+    assert_eq!(
+        drawer_of_the_text.len(),
+        3,
+        "the rack of the rotation of the text and the two of the loudness"
+    );
+    let mut loudness_racks: Vec<RackId> = drawer_of_the_text
+        .racks_for(video_target, PropertyId::Gain)
+        .map(|rack| rack.id())
+        .collect();
+    loudness_racks.sort();
+    assert_eq!(loudness_racks, vec![first, second], "the two are not one rack");
+    assert_eq!(project.drawer_of(video_target).unwrap().len(), 0);
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
+}
+
+// --- up and down in a drawer ---
+
+/// A window in which the drawer of the video has three racks, in this order from the top: its loudness, whether it is muted, and
+/// how far it is turned. Gives the window and the racks in that order.
+fn window_with_three_racks_in_the_drawer_of_the_video() -> (Window, ClipId, [RackId; 3]) {
+    let (mut window, video, _) = window_with_a_video_and_a_text();
+    let target = AnimationTarget::Clip(video);
+    for property in [PropertyId::Gain, PropertyId::Muted, PropertyId::Rotation] {
+        make_a_keyframe(&mut window, target, property, 100);
+    }
+    let racks = window
+        .application()
+        .project()
+        .drawer_of(target)
+        .unwrap()
+        .racks()
+        .iter()
+        .map(|rack| rack.id())
+        .collect::<Vec<_>>();
+    window.application_mut().note_everything_is_saved();
+    window.harness.run_steps(40);
+    (window, video, [racks[0], racks[1], racks[2]])
+}
+
+fn racks_in_the_drawer_of(window: &Window, video: ClipId) -> Vec<RackId> {
+    window
+        .application()
+        .project()
+        .drawer_of(AnimationTarget::Clip(video))
+        .unwrap()
+        .racks()
+        .iter()
+        .map(|rack| rack.id())
+        .collect()
+}
+
+#[test]
+fn a_rack_dragged_up_past_the_middle_of_the_rack_above_it_changes_places_with_it_and_not_before() {
+    let (mut window, video, [loudness, muted, turn]) = window_with_three_racks_in_the_drawer_of_the_video();
+    let rectangles = racks_drawn(&window);
+    let (from, near_the_one_above) = (
+        at_frame(&window, 150, rectangles[2].center().y),
+        at_frame(&window, 150, rectangles[1].bottom() - 1.0),
+    );
+
+    // Up to just short of the middle of the rack above: it is still below it.
+    window.drag_and_hold(from, near_the_one_above, PointerButton::Primary);
+    assert_eq!(racks_in_the_drawer_of(&window, video), vec![loudness, muted, turn]);
+    // And on past the middle of it.
+    window.move_pointer_to(at_frame(&window, 150, rectangles[1].center().y - 1.0));
+    assert_eq!(racks_in_the_drawer_of(&window, video), vec![loudness, turn, muted]);
+    window.release(
+        at_frame(&window, 150, rectangles[1].center().y - 1.0),
+        PointerButton::Primary,
+    );
+}
+
+#[test]
+fn a_rack_dragged_to_the_top_of_its_drawer_is_the_first_and_a_rack_dragged_to_the_bottom_is_the_last() {
+    let (mut window, video, [loudness, muted, turn]) = window_with_three_racks_in_the_drawer_of_the_video();
+    let rectangles = racks_drawn(&window);
+
+    window.drag(
+        at_frame(&window, 150, rectangles[2].center().y),
+        at_frame(&window, 150, rectangles[0].top() + 1.0),
+        PointerButton::Primary,
+    );
+    assert_eq!(racks_in_the_drawer_of(&window, video), vec![turn, loudness, muted]);
+
+    let rectangles = racks_drawn(&window);
+    window.drag(
+        at_frame(&window, 150, rectangles[0].center().y),
+        at_frame(&window, 150, rectangles[2].bottom() + 4.0),
+        PointerButton::Primary,
+    );
+    assert_eq!(racks_in_the_drawer_of(&window, video), vec![loudness, muted, turn]);
+}
+
+#[test]
+fn changing_places_in_the_drawer_takes_nothing_but_the_order_and_a_whole_drag_is_one_step_of_the_history() {
+    let (mut window, video, [loudness, muted, turn]) = window_with_three_racks_in_the_drawer_of_the_video();
+    let rectangles = racks_drawn(&window);
+    let before = window.application().project().clone();
+
+    window.drag(
+        at_frame(&window, 150, rectangles[0].center().y),
+        at_frame(&window, 150, rectangles[2].center().y + 3.0),
+        PointerButton::Primary,
+    );
+
+    assert_eq!(racks_in_the_drawer_of(&window, video), vec![muted, turn, loudness]);
+    let after = window.application().project();
+    for rack in [loudness, muted, turn] {
+        assert_eq!(
+            after.located_rack(rack).unwrap().rack,
+            before.located_rack(rack).unwrap().rack,
+            "{rack} has the keyframes it had, where it had them"
+        );
+    }
+    assert!(window.application().has_unsaved_changes());
+    window.do_this(Command::Undo);
+    assert_eq!(
+        racks_in_the_drawer_of(&window, video),
+        vec![loudness, muted, turn],
+        "one undo is enough"
+    );
+}
+
+#[test]
+fn a_rack_that_the_pointer_moves_a_little_in_its_own_place_does_not_change_places_or_the_project() {
+    let (mut window, video, racks) = window_with_three_racks_in_the_drawer_of_the_video();
+    let rectangles = racks_drawn(&window);
+    let before = window.application().project().clone();
+
+    window.drag(
+        at_frame(&window, 150, rectangles[1].center().y - 2.0),
+        at_frame(&window, 150, rectangles[1].center().y + 3.0),
+        PointerButton::Primary,
+    );
+
+    assert_eq!(racks_in_the_drawer_of(&window, video), racks.to_vec());
     assert_eq!(window.application().project(), &before);
 }
 
@@ -433,15 +579,18 @@ fn a_rack_cannot_be_dragged_onto_a_place_that_is_not_a_drawer_or_an_empty_part_o
 }
 
 #[test]
-fn pressing_a_rack_does_not_select_anything_or_change_the_project() {
+fn clicking_a_rack_selects_it_and_does_not_change_the_project() {
     let (mut window, video, _) = window_with_a_video_and_a_text();
-    rack_of_the_loudness_of(&mut window, video, &[60, 80]);
+    let rack = rack_of_the_loudness_of(&mut window, video, &[60, 80]);
     window.application_mut().note_everything_is_saved();
     let on_the_rack = racks_drawn(&window)[0];
 
     window.click(at_frame(&window, 70, on_the_rack.center().y));
 
-    assert!(window.application().selected_items().is_empty());
+    assert_eq!(
+        window.application().selected_items(),
+        vec![crate::application::selection::SelectionItem::Rack(rack)]
+    );
     assert!(!window.application().has_unsaved_changes());
 }
 
@@ -497,7 +646,7 @@ fn a_crate_with_more_racks_than_fit_in_the_height_of_the_track_reaches_below_it_
                 .project()
                 .drawer_of(target)
                 .unwrap()
-                .rack_for(target, property)
+                .first_rack_for(target, property)
                 .unwrap()
                 .id(),
         );
@@ -509,7 +658,7 @@ fn a_crate_with_more_racks_than_fit_in_the_height_of_the_track_reaches_below_it_
             .project()
             .drawer_of(AnimationTarget::Clip(text))
             .unwrap()
-            .rack_for(AnimationTarget::Clip(text), PropertyId::Rotation)
+            .first_rack_for(AnimationTarget::Clip(text), PropertyId::Rotation)
             .unwrap()
             .id(),
     );
@@ -522,6 +671,7 @@ fn a_crate_with_more_racks_than_fit_in_the_height_of_the_track_reaches_below_it_
             length: 200,
         },
         shift_in_frames: 0,
+        slot: None,
     });
     let crate_clip = window.application().project().tracks()[0]
         .placement_at_index(1)
@@ -532,6 +682,7 @@ fn a_crate_with_more_racks_than_fit_in_the_height_of_the_track_reaches_below_it_
             rack: *rack,
             to: RackDestination::Drawer(AnimationTarget::Clip(crate_clip)),
             shift_in_frames: if index == 5 { 100 } else { 0 },
+            slot: None,
         });
     }
     window.harness.run_steps(40);
@@ -609,9 +760,10 @@ fn a_rack_is_put_in_a_drawer_that_has_finished_sliding_open_and_not_before() {
     rack_of_the_loudness_of(&mut window, video, &[60, 80]);
     assert_eq!(racks_drawn(&window).len(), 1);
     let from = at_frame(&window, 70, racks_drawn(&window)[0].center().y);
-    // Under the strip of the text, which is where its drawer, shut now and with nothing in it, will be as it slides open.
-    let under_the_text = at_frame(&window, 70, window.strip_of_track(0).bottom() + 12.0);
-    window.drag_and_hold(from, under_the_text, PointerButton::Primary);
+    // Under the strip of the text, which is where its drawer, shut now and with nothing in it, will be as it slides open. (The
+    // timeline grows upward as the drawer pushes the row under it down, so where that is moves: the pointer follows it.)
+    let under_the_text = |window: &Window| at_frame(window, 70, window.strip_of_track(0).bottom() + 12.0);
+    window.drag_and_hold(from, under_the_text(&window), PointerButton::Primary);
     assert_eq!(
         racks_in(&window, AnimationTarget::Clip(video)),
         1,
@@ -623,7 +775,7 @@ fn a_rack_is_put_in_a_drawer_that_has_finished_sliding_open_and_not_before() {
         .timeline_view
         .open_the_drawer_of(AnimationTarget::Clip(text));
     for _ in 0..3 {
-        window.move_pointer_to(under_the_text);
+        window.move_pointer_to(under_the_text(&window));
     }
     assert_eq!(
         racks_in(&window, AnimationTarget::Clip(text)),
@@ -633,6 +785,7 @@ fn a_rack_is_put_in_a_drawer_that_has_finished_sliding_open_and_not_before() {
     assert_eq!(racks_in(&window, AnimationTarget::Clip(video)), 1);
 
     window.harness.run_steps(30);
+    let under_the_text = under_the_text(&window);
     window.move_pointer_to(under_the_text);
     assert_eq!(
         racks_in(&window, AnimationTarget::Clip(text)),
@@ -737,6 +890,17 @@ fn a_rack_let_go_where_two_open_drawers_overlap_goes_in_the_one_that_is_on_top()
     ] {
         make_a_keyframe(&mut window, AnimationTarget::Clip(text), property, 50);
     }
+    // The keyframes opened the drawer of the text so that it pushes the row under it down. Shut and opened again with Shift held
+    // it lies over the row under it instead, and so over the drawer of the video that hangs from that.
+    let button_of_the_text = |window: &Window| {
+        window
+            .rectangle_of(&drawer_button_label(&window.title_of_track(0), text))
+            .center()
+    };
+    window.click(button_of_the_text(&window));
+    window.harness.run_steps(40);
+    window.click_with_shift(button_of_the_text(&window));
+    window.harness.run_steps(40);
     let racks = racks_drawn(&window);
     assert_eq!(
         racks.len(),

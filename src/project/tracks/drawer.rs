@@ -6,8 +6,10 @@
 //! to bundle keyframes with the clips that they need to be moved with. (A keyframe crate is a clip that has nothing but a
 //! drawer, which is always open.)
 //!
-//! A drawer has at most one rack for a property of a thing: its racks are told apart by what they animate. Its racks
-//! are in order, the one at the top first, which is the order they are shown in.
+//! A drawer can have several racks of one property of one thing: they are told apart by their names (see [`RackId`]), and
+//! are not merged unless that is asked for. Its racks are in order, the one at the top first, which is the order they are
+//! shown in, and which of two keyframes at one frame counts when the racks are of the same property of the same thing (the one
+//! in the rack that comes later).
 
 use super::ids::RackId;
 use super::rack::Rack;
@@ -20,7 +22,7 @@ pub struct Drawer {
 }
 
 impl Drawer {
-    /// A drawer with these racks (which must not be two of the same property of the same thing).
+    /// A drawer with these racks (which must have names that are not each other's), the first at the top.
     pub fn with_racks(racks: impl IntoIterator<Item = Rack>) -> Self {
         let mut drawer = Self::default();
         for rack in racks {
@@ -47,50 +49,43 @@ impl Drawer {
         self.racks.iter().find(|rack| rack.id() == id)
     }
 
+    /// The place of the rack called `id` in the drawer, counted from the top, which is 0.
+    pub fn position_of(&self, id: RackId) -> Option<usize> {
+        self.racks.iter().position(|rack| rack.id() == id)
+    }
+
     pub fn rack_mut(&mut self, id: RackId) -> Option<&mut Rack> {
         self.racks.iter_mut().find(|rack| rack.id() == id)
     }
 
-    /// The rack of the keyframes of `property` of `target`, if the drawer has one.
-    pub fn rack_for(&self, target: AnimationTarget, property: PropertyId) -> Option<&Rack> {
+    /// The first (the one nearest the top) of the racks of the keyframes of `property` of `target`, if the drawer has any.
+    pub fn first_rack_for(&self, target: AnimationTarget, property: PropertyId) -> Option<&Rack> {
+        self.racks_for(target, property).next()
+    }
+
+    pub fn first_rack_for_mut(&mut self, target: AnimationTarget, property: PropertyId) -> Option<&mut Rack> {
+        self.racks
+            .iter_mut()
+            .find(|rack| rack.target() == target && rack.property() == property)
+    }
+
+    /// Every rack of the keyframes of `property` of `target` that the drawer has, the one at the top first.
+    pub fn racks_for(&self, target: AnimationTarget, property: PropertyId) -> impl Iterator<Item = &Rack> {
         self.racks
             .iter()
-            .find(|rack| rack.target() == target && rack.property() == property)
+            .filter(move |rack| rack.target() == target && rack.property() == property)
     }
 
-    pub fn rack_for_mut(&mut self, target: AnimationTarget, property: PropertyId) -> Option<&mut Rack> {
-        self.racks
-            .iter_mut()
-            .find(|rack| rack.target() == target && rack.property() == property)
-    }
-
-    /// Whether the drawer could take `rack` in without having two racks of one property of one thing.
-    pub fn has_room_for(&self, rack: &Rack) -> bool {
-        self.rack_for(rack.target(), rack.property()).is_none()
-    }
-
-    /// Puts `rack` in the drawer, under the others. (A drawer that has a rack for the same property of the same thing, or
-    /// one of the same name, is not given another: see [`Self::has_room_for`].)
+    /// Puts `rack` in the drawer, under the others. (A drawer does not have two racks of the same name.)
     pub fn push(&mut self, rack: Rack) {
-        debug_assert!(
-            self.has_room_for(&rack),
-            "a drawer has one rack for a property of a thing"
-        );
-        debug_assert!(self.rack(rack.id()).is_none(), "a drawer has a rack once");
-        self.racks.push(rack);
+        self.insert(self.racks.len(), rack);
     }
 
-    /// Puts `rack` in the drawer, in place of the rack for the same property of the same thing if there is one, and under the
-    /// others if there is not.
-    pub fn put(&mut self, rack: Rack) {
-        match self
-            .racks
-            .iter_mut()
-            .find(|existing| existing.target() == rack.target() && existing.property() == rack.property())
-        {
-            Some(existing) => *existing = rack,
-            None => self.push(rack),
-        }
+    /// Puts `rack` in the drawer so that it has `slot` racks above it: at the top if `slot` is 0, and under all the others if
+    /// it is as many as there are (or more).
+    pub fn insert(&mut self, slot: usize, rack: Rack) {
+        debug_assert!(self.rack(rack.id()).is_none(), "a drawer has a rack once");
+        self.racks.insert(slot.min(self.racks.len()), rack);
     }
 
     /// Takes the rack called `id` out of the drawer, and gives it.

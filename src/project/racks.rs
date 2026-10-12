@@ -11,10 +11,10 @@
 //! Everything that makes what is shown and heard (the picture plan, the sound plan) works from [`ResolvedAnimations`], which
 //! is that, worked out once for everything.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::animation::{Animation, Keyframe, Keyframes, PropertyId};
-use super::tracks::{ClipId, Drawer, KeyframeId, Rack, RackId, Track};
+use super::tracks::{ClipId, Drawer, KeyframeId, Rack, RackId, RackKeyframe, Track};
 use super::{AnimationTarget, Project};
 
 /// A rack, with where the drawer it is in is.
@@ -34,6 +34,20 @@ impl LocatedRack<'_> {
     /// The frame of the timeline that the keyframe at `frame_in_the_rack` is at.
     pub fn timeline_frame_of(&self, frame_in_the_rack: u64) -> u64 {
         self.start + frame_in_the_rack
+    }
+}
+
+/// A keyframe, with where the rack it is in is.
+#[derive(Clone, Copy, Debug)]
+pub struct LocatedKeyframe<'project> {
+    pub rack: LocatedRack<'project>,
+    pub keyframe: &'project RackKeyframe,
+}
+
+impl LocatedKeyframe<'_> {
+    /// The frame of the timeline that the keyframe is at.
+    pub fn timeline_frame(&self) -> u64 {
+        self.rack.timeline_frame_of(self.keyframe.frame)
     }
 }
 
@@ -105,9 +119,28 @@ impl Project {
         })
     }
 
+    /// How many keyframes there are in the project, in all its racks. (What a change that is meant to keep them all is held to:
+    /// the keyframes that are lost are the difference.)
+    pub fn keyframe_count(&self) -> usize {
+        self.located_racks().map(|located| located.rack.len()).sum()
+    }
+
     /// The rack called `id`, with where it is.
     pub fn located_rack(&self, id: RackId) -> Option<LocatedRack<'_>> {
         self.located_racks().find(|located| located.rack.id() == id)
+    }
+
+    /// The keyframe called `id`, with where it is: in the rack it was made in, unless it has been moved to another since.
+    pub fn locate_keyframe(&self, id: KeyframeId) -> Option<LocatedKeyframe<'_>> {
+        fn found_in(rack: LocatedRack<'_>, id: KeyframeId) -> Option<LocatedKeyframe<'_>> {
+            rack.rack
+                .keyframe(id)
+                .map(|keyframe| LocatedKeyframe { rack, keyframe })
+        }
+        // (Nearly always it is where it was made, which is quick to look at: all the racks are looked in only if it is not.)
+        self.located_rack(id.origin())
+            .and_then(|rack| found_in(rack, id))
+            .or_else(|| self.located_racks().find_map(|rack| found_in(rack, id)))
     }
 
     /// The drawer of the clip or the track `owner`.
@@ -205,25 +238,40 @@ impl Project {
     }
 
     /// What is wrong with the racks of the project, in words, if anything is: a rack that animates what is not there or a
-    /// property that what it animates does not have, keyframes that are not in the drawer they are in, two racks of one
-    /// property of one thing in a drawer, or two racks of the same name. The edits of the project leave none of these; this is
-    /// for what is loaded from a file, and for the tests, which check it after every edit they make.
+    /// property that what it animates does not have, keyframes that are not in the drawer they are in or not in the order of
+    /// their frames, two racks of the same name, or two keyframes of the same name. The edits of the project leave none of
+    /// these; this is for what is loaded from a file, and for the tests, which check it after every edit they make.
     pub fn problems_with_the_racks(&self) -> Vec<String> {
         let mut problems = Vec::new();
-        let mut names_seen = std::collections::HashSet::new();
+        let mut names_seen = HashSet::new();
+        let mut keyframe_names_seen = HashSet::new();
         for located in self.located_racks() {
             let rack = located.rack;
             if !names_seen.insert(rack.id()) {
                 problems.push(format!("there is more than one {}", rack.id()));
             }
+            for keyframe in rack.keyframes() {
+                if !keyframe_names_seen.insert(keyframe.id()) {
+                    problems.push(format!("there is more than one {}", keyframe.id()));
+                }
+            }
+            if rack.keyframes().windows(2).any(|pair| pair[0].frame >= pair[1].frame) {
+                problems.push(format!(
+                    "the keyframes of {} are not in the order of their frames, each at a frame of its own",
+                    rack.id()
+                ));
+            }
             if rack.is_empty() {
                 problems.push(format!("{} has no keyframes", rack.id()));
             }
             let does_the_target_have_the_property = match rack.target() {
-                AnimationTarget::Clip(clip) => self
-                    .placement_of(clip)
-                    .map(|placement| rack.property().applies_to_a_clip_of_kind(placement.clip.kind())),
-                AnimationTarget::Track(track) => self.track(track).map(|_| rack.property().applies_to_a_track()),
+                AnimationTarget::Clip(clip) => self.placement_of(clip).map(|placement| {
+                    rack.property()
+                        .is_had_by_a_clip(placement.clip.kind(), placement.effects)
+                }),
+                AnimationTarget::Track(track) => self
+                    .track(track)
+                    .map(|track| rack.property().is_had_by_a_track(track.effects())),
             };
             match does_the_target_have_the_property {
                 None => problems.push(format!(
@@ -258,26 +306,6 @@ impl Project {
                     rack.id(),
                     rack.property()
                 ));
-            }
-        }
-        for track in &self.tracks {
-            let drawers = std::iter::once((AnimationTarget::Track(track.id()), track.drawer())).chain(
-                track
-                    .entries()
-                    .iter()
-                    .map(|entry| (AnimationTarget::Clip(entry.id()), entry.drawer())),
-            );
-            for (owner, drawer) in drawers {
-                let mut animated = std::collections::HashSet::new();
-                for rack in drawer.racks() {
-                    if !animated.insert((rack.target(), rack.property())) {
-                        problems.push(format!(
-                            "the drawer of {owner:?} has more than one rack of {:?} of {:?}",
-                            rack.property(),
-                            rack.target()
-                        ));
-                    }
-                }
             }
         }
         problems

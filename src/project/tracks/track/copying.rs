@@ -22,7 +22,10 @@ impl Track {
         let index = self.index_of(clip)?;
         let copied_clip = self.entries[index].clip.clone();
         let copied_drawer = self.entries[index].drawer.clone();
+        let copied_effects = self.entries[index].effects.clone();
         let copy = self.insert_clip_at(timeline_frame, copied_clip).ok()?;
+        let copy_index = self.index_of(copy)?;
+        self.entries[copy_index].effects = copied_effects;
         let racks: Vec<_> = copied_drawer
             .racks()
             .iter()
@@ -58,6 +61,7 @@ impl Track {
             muted: self.muted,
             height: self.height,
             drawer: Drawer::default(),
+            effects: self.effects.clone(),
             entries: Vec::with_capacity(self.entries.len()),
             next_clip_number: 0,
             next_rack_number: 0,
@@ -91,6 +95,7 @@ impl Track {
                 id: names_of_the_copies[&entry.id],
                 clip: entry.clip.clone(),
                 drawer,
+                effects: entry.effects.clone(),
                 gap_before_frames: entry.gap_before_frames,
             });
         }

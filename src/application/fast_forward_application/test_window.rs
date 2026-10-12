@@ -5,6 +5,8 @@
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use egui::accesskit::{Action, ActionData, ActionRequest, Role};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Shape, vec2};
@@ -149,9 +151,27 @@ pub(super) fn button_released_at(position: Pos2, button: PointerButton) -> Event
     }
 }
 
+/// Makes `project` the project of `application`, all of whose source files are there and can be used.
+fn replace_project_with_all_its_files_available(application: &mut FastForwardApplication, project: Project) {
+    let sources: Vec<(SourceMediaIdentifier, PathBuf)> = project
+        .sources()
+        .iter()
+        .map(|source| (source.identifier, source.link.absolute_path.clone()))
+        .collect();
+    application.replace_project(project, None);
+    for (identifier, path) in sources {
+        application
+            .source_files
+            .insert(identifier, SourceFileState::new(SourceStatus::Available { path }));
+    }
+}
+
 /// A window showing the editor, and a way to use it like a person.
 pub(super) struct Window {
     pub(super) harness: Harness<'static, FastForwardApplication>,
+    /// How many pictures the frames of the window have put on the graphics card, or changed there, so far (see
+    /// [`Self::textures_uploaded_while`]).
+    textures_uploaded: Arc<AtomicUsize>,
 }
 
 impl Window {
@@ -164,17 +184,7 @@ impl Window {
             }),
         );
         application.dialog = None; // the "ffmpeg was not found" message
-        let sources: Vec<(SourceMediaIdentifier, PathBuf)> = project
-            .sources()
-            .iter()
-            .map(|source| (source.identifier, source.link.absolute_path.clone()))
-            .collect();
-        application.replace_project(project, None);
-        for (identifier, path) in sources {
-            application
-                .source_files
-                .insert(identifier, SourceFileState::new(SourceStatus::Available { path }));
-        }
+        replace_project_with_all_its_files_available(&mut application, project);
         let mut harness = Harness::builder()
             .with_size(vec2(WINDOW_SIZE[0], WINDOW_SIZE[1]))
             // A frame is a sixtieth of a second long, as on a screen, so that the two clicks of a
@@ -184,10 +194,39 @@ impl Window {
                 |ui, application: &mut FastForwardApplication| application.show(ui),
                 application,
             );
+        // (The harness has no graphics card to give the pictures to, so they are counted at the end of each frame, and not given
+        // to it.)
+        let textures_uploaded = Arc::new(AtomicUsize::new(0));
+        harness.ctx.on_end_pass("count the pictures put on the graphics card", {
+            let textures_uploaded = Arc::clone(&textures_uploaded);
+            Arc::new(move |ui: &mut egui::Ui| {
+                let mut changes = ui.ctx().tex_manager().write().take_delta();
+                textures_uploaded.fetch_add(changes.set.len(), Ordering::Relaxed);
+                changes.clear();
+            })
+        });
         harness.run();
-        let mut window = Self { harness };
+        let mut window = Self {
+            harness,
+            textures_uploaded,
+        };
         window.settle();
         window
+    }
+
+    /// How many pictures were put on the graphics card, or changed there, in the frames drawn while `what` was done to the window.
+    /// (A picture that is changed twice in one frame counts once: it is only sent as it is at the end of the frame. A window that is
+    /// not changing is meant to put none: what is on the graphics card stays as it is.)
+    pub(super) fn textures_uploaded_while(&mut self, what: impl FnOnce(&mut Self)) -> usize {
+        self.textures_uploaded.store(0, Ordering::Relaxed);
+        what(self);
+        self.textures_uploaded.load(Ordering::Relaxed)
+    }
+
+    /// Shows another project in the window, as loading one does, all of whose source files are there and can be used.
+    pub(super) fn show_another_project(&mut self, project: Project) {
+        replace_project_with_all_its_files_available(self.application_mut(), project);
+        self.settle();
     }
 
     pub(super) fn application(&self) -> &FastForwardApplication {
@@ -314,7 +353,27 @@ impl Window {
 
     /// Clicks with the control key (Command on a Mac) held down.
     pub(super) fn click_with_control(&mut self, position: Pos2) {
-        self.harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+        self.click_holding(position, Modifiers::COMMAND);
+    }
+
+    /// Clicks with the shift key held down.
+    pub(super) fn click_with_shift(&mut self, position: Pos2) {
+        self.click_holding(position, Modifiers::SHIFT);
+    }
+
+    /// Holds the shift key down, until [`Self::let_go_of_shift`].
+    pub(super) fn hold_shift(&mut self) {
+        self.harness.event(Event::ModifiersChanged(Modifiers::SHIFT));
+        self.harness.step();
+    }
+
+    pub(super) fn let_go_of_shift(&mut self) {
+        self.harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        self.harness.step();
+    }
+
+    fn click_holding(&mut self, position: Pos2, modifiers: Modifiers) {
+        self.harness.event(Event::ModifiersChanged(modifiers));
         self.harness.step();
         self.move_pointer_to(position);
         for pressed in [true, false] {
@@ -322,7 +381,7 @@ impl Window {
                 pos: position,
                 button: PointerButton::Primary,
                 pressed,
-                modifiers: Modifiers::COMMAND,
+                modifiers,
             });
             self.harness.step();
         }
@@ -596,6 +655,13 @@ impl Window {
         self.application_mut()
             .execute_all(vec![command], std::time::Instant::now(), &egui::Context::default());
         self.settle();
+    }
+
+    /// Does what `command` asks, like [`Self::do_this`], and draws no frame after it: for looking at what the command did by itself,
+    /// before anything that the window does every frame has had its turn.
+    pub(super) fn do_this_and_draw_nothing(&mut self, command: Command) {
+        self.application_mut()
+            .execute_all(vec![command], std::time::Instant::now(), &egui::Context::default());
     }
 
     /// Makes the current frame `frame`, as if the playhead had been moved there.

@@ -1,6 +1,7 @@
 //! What can be animated, and the values it takes: the properties of clips and of tracks that can change over
 //! time, each with the kind of value it has.
 
+use crate::project::effects::{EffectKind, Effects};
 use crate::project::tracks::{ClipKind, TextColour};
 
 /// A property that can be animated: given keyframes, so that it is not the same at every frame.
@@ -28,6 +29,9 @@ pub enum PropertyId {
     FontSize,
     /// The colour of the letters of a text object.
     Colour,
+    /// How far the colours of a picture are turned round the wheel of colours, in degrees: the one value of the hue shift effect (and a
+    /// property only of what has that effect).
+    HueShift,
 }
 
 /// What a property's value is made of, which says how it changes between two keyframes.
@@ -47,7 +51,7 @@ pub enum ValueKind {
 
 impl PropertyId {
     /// Every property, in the order they are kept and shown in.
-    pub const ALL: [PropertyId; 9] = [
+    pub const ALL: [PropertyId; 10] = [
         Self::Gain,
         Self::Muted,
         Self::Position,
@@ -57,12 +61,13 @@ impl PropertyId {
         Self::FontFamily,
         Self::FontSize,
         Self::Colour,
+        Self::HueShift,
     ];
 
     /// What the value of the property is made of.
     pub fn kind(self) -> ValueKind {
         match self {
-            Self::Gain | Self::Rotation | Self::FontSize => ValueKind::Number,
+            Self::Gain | Self::Rotation | Self::FontSize | Self::HueShift => ValueKind::Number,
             Self::Position | Self::Size => ValueKind::Pair,
             Self::Colour => ValueKind::Colour,
             Self::Muted => ValueKind::Flag,
@@ -82,6 +87,7 @@ impl PropertyId {
             Self::FontFamily => "font",
             Self::FontSize => "font size",
             Self::Colour => "colour",
+            Self::HueShift => "hue shift",
         }
     }
 
@@ -89,9 +95,17 @@ impl PropertyId {
         Self::ALL.into_iter().find(|property| property.name() == name)
     }
 
-    /// Whether a track has this property of its own. (How loud it is, and whether it is silent.)
+    /// The effect that this property is a value of, if it is one: it is a property only of what has the effect.
+    pub fn effect(self) -> Option<EffectKind> {
+        EffectKind::ALL
+            .into_iter()
+            .find(|kind| kind.properties().contains(&self))
+    }
+
+    /// Whether a track has this property of its own: how loud it is, and whether it is silent, and the values of the effects a
+    /// track can have.
     pub fn applies_to_a_track(self) -> bool {
-        self.is_heard()
+        self.is_heard() || self.effect().is_some_and(EffectKind::applies_to_a_track)
     }
 
     /// Whether what the property is can be heard: how loud something is, and whether it is silent.
@@ -114,7 +128,20 @@ impl PropertyId {
                 matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text)
             }
             Self::Text | Self::FontFamily | Self::FontSize | Self::Colour => kind == ClipKind::Text,
+            Self::HueShift => EffectKind::HueShift.applies_to_a_clip_of_kind(kind),
         }
+    }
+
+    /// Whether a clip of kind `kind` that has the effects `effects` has this property: one that a clip of its kind can have and, if
+    /// it is a value of an effect, only if the clip has that effect.
+    pub fn is_had_by_a_clip(self, kind: ClipKind, effects: &Effects) -> bool {
+        self.applies_to_a_clip_of_kind(kind) && self.effect().is_none_or(|effect| effects.contains(effect))
+    }
+
+    /// Whether a track that has the effects `effects` has this property: one that a track can have and, if it is a value of an
+    /// effect, only if the track has that effect.
+    pub fn is_had_by_a_track(self, effects: &Effects) -> bool {
+        self.applies_to_a_track() && self.effect().is_none_or(|effect| effects.contains(effect))
     }
 }
 
@@ -211,18 +238,23 @@ mod tests {
                 .collect()
         };
         use PropertyId::*;
-        assert_eq!(of(ClipKind::Video), vec![Gain, Muted, Position, Size, Rotation]);
+        // (The values of effects are those of what can have the effect: of the effects that it has, as far as it does.)
+        assert_eq!(
+            of(ClipKind::Video),
+            vec![Gain, Muted, Position, Size, Rotation, HueShift]
+        );
         assert_eq!(of(ClipKind::Audio), vec![Gain, Muted]);
-        assert_eq!(of(ClipKind::Image), vec![Position, Size, Rotation]);
+        assert_eq!(of(ClipKind::Image), vec![Position, Size, Rotation, HueShift]);
         assert_eq!(
             of(ClipKind::Text),
-            vec![Position, Size, Rotation, Text, FontFamily, FontSize, Colour]
+            vec![Position, Size, Rotation, Text, FontFamily, FontSize, Colour, HueShift]
         );
+        assert_eq!(of(ClipKind::Crate), Vec::<PropertyId>::new());
         let of_a_track: Vec<PropertyId> = PropertyId::ALL
             .into_iter()
             .filter(|property| property.applies_to_a_track())
             .collect();
-        assert_eq!(of_a_track, vec![Gain, Muted]);
+        assert_eq!(of_a_track, vec![Gain, Muted, HueShift]);
     }
 
     #[test]

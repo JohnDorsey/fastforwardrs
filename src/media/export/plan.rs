@@ -10,6 +10,7 @@ use super::filter_graph::{
     PictureGraphSpecification, PlaceToExport, SectionToExport, SoundClipToExport, SoundGraphSpecification,
     SoundItemToExport, SoundStripToExport, VideoToExport, build_filter_graph,
 };
+use crate::colour_effects::ColourMatrix;
 use crate::composition::{LayerContent, Loudness, PictureSection, SoundItem, SoundPlan, plan_pictures, plan_sound};
 use crate::project::{
     ClipId, FrameRate, Placement, Project, Settings, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextObject,
@@ -290,12 +291,13 @@ fn section_to_export(
     symbol_places: &BTreeMap<SpeedFactor, StillPicturePlace>,
     text_inputs: &HashMap<(ClipId, TextAppearance), usize>,
 ) -> SectionToExport {
-    let still = |place: &StillPicturePlace| LayerToExport {
+    let still = |place: &StillPicturePlace, colour: ColourMatrix| LayerToExport {
         content: LayerContentToExport::Still {
             picture_input: place.picture_input,
             scaled_to_its_place: false,
         },
         place: place.place,
+        colour,
     };
     // The symbol belongs to the video that is in front, so it goes right over it, and what is
     // in front of that video goes over both.
@@ -311,6 +313,7 @@ fn section_to_export(
                     speed_factor: video.speed,
                 }),
                 place: place_to_export(layer.placement, picture_size),
+                colour: layer.colour_matrix(),
             }),
             LayerContent::Image { source } => layers.push(LayerToExport {
                 content: LayerContentToExport::Still {
@@ -318,20 +321,24 @@ fn section_to_export(
                     scaled_to_its_place: true,
                 },
                 place: place_to_export(layer.placement, picture_size),
+                colour: layer.colour_matrix(),
             }),
             LayerContent::Text(object) => {
                 let appearance = TextAppearance::of(object, picture_size.0, picture_size.1);
-                layers.push(still(&StillPicturePlace {
-                    picture_input: text_inputs[&(layer.clip, appearance)],
-                    place: place_to_export(layer.placement, picture_size),
-                }));
+                layers.push(still(
+                    &StillPicturePlace {
+                        picture_input: text_inputs[&(layer.clip, appearance)],
+                        place: place_to_export(layer.placement, picture_size),
+                    },
+                    layer.colour_matrix(),
+                ));
             }
         }
         if Some(layer.clip) == clip_of_the_front_video
             && let Some((_, video)) = section.front_video()
             && let Some(symbol) = symbol_places.get(&video.speed)
         {
-            layers.push(still(symbol));
+            layers.push(still(symbol, ColourMatrix::NOTHING_CHANGES));
         }
     }
     SectionToExport {
@@ -348,5 +355,7 @@ fn even(size: u32) -> u32 {
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod effects_tests;
 #[cfg(test)]
 mod tests;

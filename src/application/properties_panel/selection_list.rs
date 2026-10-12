@@ -4,7 +4,7 @@
 
 use egui::{Button, CornerRadius, Frame, Margin, Stroke, Ui};
 
-use super::{PropertiesContent, keyframe_properties, track_properties};
+use super::{PropertiesContent, keyframe_properties, rack_properties, track_properties};
 use crate::application::commands::Command;
 use crate::application::naming::{detail_of_a_clip, kind_name};
 use crate::application::selection::{SelectionChange, SelectionItem};
@@ -23,6 +23,10 @@ pub(super) fn describe(content: &PropertiesContent<'_>, item: SelectionItem) -> 
         SelectionItem::Keyframe(keyframe) => {
             let (what, when) = keyframe_properties::description(content, keyframe)?;
             Some(format!("{}: {what} (at {when})", keyframe_properties::KIND_NAME))
+        }
+        SelectionItem::Rack(rack) => {
+            let (what, how_many) = rack_properties::description(content, rack)?;
+            Some(format!("{}: {what} ({how_many})", rack_properties::KIND_NAME))
         }
         SelectionItem::Clip(clip) => {
             let placement = content.project.placement_of(clip)?;
@@ -43,7 +47,7 @@ fn select_only(item: SelectionItem) -> Command {
     match item {
         SelectionItem::Clip(clip) => Command::select_clips(vec![clip], SelectionChange::Replace),
         SelectionItem::Track(track) => Command::select_track(track, SelectionChange::Replace),
-        SelectionItem::Keyframe(_) => Command::SelectItems {
+        SelectionItem::Keyframe(_) | SelectionItem::Rack(_) => Command::SelectItems {
             items: vec![item],
             change: SelectionChange::Replace,
         },

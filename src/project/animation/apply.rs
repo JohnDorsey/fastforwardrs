@@ -77,7 +77,7 @@ pub fn text_value(object: &TextObject, property: PropertyId) -> Option<PropertyV
         PropertyId::Position | PropertyId::Size | PropertyId::Rotation => {
             placement_value(&object.placement(), property)
         }
-        PropertyId::Gain | PropertyId::Muted => None,
+        PropertyId::Gain | PropertyId::Muted | PropertyId::HueShift => None,
     }
 }
 
@@ -207,16 +207,17 @@ mod tests {
         }
     }
 
-    /// What the window changes is a loudness or a mute switch, a place on the picture or a text object, and a change of one
-    /// of them while it is animated is made a keyframe by the one thing that knows how. A property that is none of the three
-    /// would be changed by nothing.
+    /// What the window changes is a loudness or a mute switch, a place on the picture, a text object or a value of an effect, and a
+    /// change of one of them while it is animated is made a keyframe by the one thing that knows how. A property that is none of the
+    /// four would be changed by nothing.
     #[test]
-    fn every_property_is_a_loudness_or_a_mute_switch_or_one_of_a_placement_or_of_a_text_object() {
+    fn every_property_is_a_loudness_or_a_mute_switch_or_one_of_a_placement_or_of_a_text_object_or_of_an_effect() {
         for property in PropertyId::ALL {
             assert!(
                 property.is_heard()
                     || PROPERTIES_OF_A_PLACEMENT.contains(&property)
-                    || PROPERTIES_OF_A_TEXT_OBJECT.contains(&property),
+                    || PROPERTIES_OF_A_TEXT_OBJECT.contains(&property)
+                    || property.effect().is_some(),
                 "{property:?} is not changed by anything the window does"
             );
         }

@@ -3,6 +3,7 @@
 
 use egui::{Align2, Context, Id, Modal, ProgressBar, RichText, Window, vec2};
 
+use super::commands::Command;
 use crate::project::SourceMediaIdentifier;
 
 /// What to do once the user has agreed to throw away unsaved changes.
@@ -14,12 +15,15 @@ pub enum AfterConfirmation {
 }
 
 /// A window that has to be dealt with before anything else can be done.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Dialog {
     /// Something to read, closed with "OK".
     Message { title: String, text: String },
     /// A warning that unsaved changes would be lost.
     ConfirmDiscardChanges { then: AfterConfirmation },
+    /// A warning that a change would lose `how_many` keyframes, because it makes something last so little time that there is no
+    /// frame for them. The `change` is carried out if the user agrees, and not otherwise.
+    ConfirmLosingKeyframes { change: Box<Command>, how_many: usize },
 }
 
 /// What the user did to a dialog.
@@ -58,6 +62,31 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui.button("Discard changes").clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                });
+            }
+            Dialog::ConfirmLosingKeyframes { change, how_many } => {
+                let (keyframes, them, would_be) = if *how_many == 1 {
+                    ("1 keyframe".to_owned(), "it", "it would be")
+                } else {
+                    (format!("{how_many} keyframes"), "them", "they would be")
+                };
+                let what_would_be_done = change
+                    .name_in_a_question_about_losing_keyframes()
+                    .unwrap_or("This change");
+                ui.heading(format!("Lose {keyframes}?"));
+                ui.add_space(6.0);
+                ui.label(format!(
+                    "{what_would_be_done} leaves no room for {keyframes} in the drawers of what gets shorter, so {would_be} lost. \
+                     Every other keyframe stays, closer together where it has to be."
+                ));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button(format!("Lose {them}")).clicked() {
                         answer = DialogAnswer::Confirmed;
                     }
                     if ui.button("Cancel").clicked() {

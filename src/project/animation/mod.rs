@@ -23,14 +23,6 @@ pub use apply::{
 pub use keyframes::{Keyframe, Keyframes};
 pub use property::{PropertyId, PropertyValue, ValueKind};
 
-/// A keyframe that was taken away, and whether it left the property with none.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RemovedKeyframe {
-    pub value: PropertyValue,
-    /// Whether the property is not animated any more: it was the last keyframe it had.
-    pub was_the_last: bool,
-}
-
 /// The keyframes of the properties of one clip or one track.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Animation {
@@ -116,73 +108,13 @@ impl Animation {
 
     /// Puts a keyframe with `value` for `property` at `frame`, in place of the one there if there is one. Returns
     /// false, and changes nothing, if `value` is not the kind of value the property has.
+    #[cfg(test)]
     pub fn set_keyframe(&mut self, property: PropertyId, frame: u64, value: PropertyValue) -> bool {
         if value.kind() != property.kind() {
             return false;
         }
         self.properties.entry(property).or_default().set(frame, value);
         true
-    }
-
-    /// Takes away the keyframe of `property` at `frame`, if there is one.
-    pub fn remove_keyframe(&mut self, property: PropertyId, frame: u64) -> Option<RemovedKeyframe> {
-        let keyframes = self.properties.get_mut(&property)?;
-        let value = keyframes.remove(frame)?;
-        let was_the_last = keyframes.is_empty();
-        if was_the_last {
-            self.properties.remove(&property);
-        }
-        Some(RemovedKeyframe { value, was_the_last })
-    }
-
-    /// The animations of the two parts that what they belong to is cut into `frames_in` frames after its start (more than
-    /// nothing): see [`Keyframes::split_at`].
-    #[must_use]
-    pub fn split_at(&self, frames_in: u64) -> (Animation, Animation) {
-        let mut first = Self::default();
-        let mut second = Self::default();
-        for (property, keyframes) in &self.properties {
-            let (before, after) = keyframes.split_at(frames_in);
-            first.properties.insert(*property, before);
-            second.properties.insert(*property, after);
-        }
-        (first, second)
-    }
-
-    /// The same animation with every keyframe at the frame that `to_frame` says its frame becomes (keyframes that
-    /// land on one frame are one: the later is kept).
-    #[must_use]
-    pub fn mapped_frames(&self, to_frame: impl Fn(u64) -> u64) -> Animation {
-        Self::from_keyframes(self.properties.iter().map(|(property, keyframes)| {
-            (
-                *property,
-                Keyframes::from_unordered(keyframes.iter().map(|keyframe| Keyframe {
-                    frame: to_frame(keyframe.frame),
-                    value: keyframe.value.clone(),
-                })),
-            )
-        }))
-    }
-
-    /// The animation of what it belongs to when it is `length` frames long and was longer.
-    #[must_use]
-    pub fn truncated_to(&self, length: u64) -> Animation {
-        self.mapped(|keyframes| keyframes.truncated_to(length))
-    }
-
-    /// The animation of what it belongs to when it is `to_length` frames long and was `from_length`: see
-    /// [`Keyframes::rescaled`].
-    #[must_use]
-    pub fn rescaled(&self, from_length: u64, to_length: u64) -> Animation {
-        self.mapped(|keyframes| keyframes.rescaled(from_length, to_length))
-    }
-
-    fn mapped(&self, change: impl Fn(&Keyframes) -> Keyframes) -> Animation {
-        Self::from_keyframes(
-            self.properties
-                .iter()
-                .map(|(property, keyframes)| (*property, change(keyframes))),
-        )
     }
 }
 
@@ -195,55 +127,32 @@ mod tests {
     }
 
     fn animated_gain_and_muted() -> Animation {
-        let mut animation = Animation::default();
-        assert!(animation.set_keyframe(PropertyId::Gain, 0, gain(0.0)));
-        assert!(animation.set_keyframe(PropertyId::Gain, 20, gain(-20.0)));
-        assert!(animation.set_keyframe(PropertyId::Muted, 10, PropertyValue::Flag(true)));
-        animation
+        let keyframe = |frame, value| Keyframe { frame, value };
+        Animation::from_keyframes([
+            (
+                PropertyId::Gain,
+                Keyframes::from_unordered([keyframe(0, gain(0.0)), keyframe(20, gain(-20.0))]),
+            ),
+            (
+                PropertyId::Muted,
+                Keyframes::from_unordered([keyframe(10, PropertyValue::Flag(true))]),
+            ),
+        ])
     }
 
     #[test]
-    fn nothing_is_animated_until_a_keyframe_is_set() {
-        let mut animation = Animation::default();
-        assert!(animation.is_empty());
-        assert!(!animation.is_animated(PropertyId::Gain));
-        assert_eq!(animation.value_at(PropertyId::Gain, 5), None);
-        animation.set_keyframe(PropertyId::Gain, 5, gain(3.0));
+    fn what_has_no_keyframes_is_not_animated_and_what_has_some_says_what_it_is_at_every_frame() {
+        let nothing = Animation::default();
+        assert!(nothing.is_empty());
+        assert!(!nothing.is_animated(PropertyId::Gain));
+        assert_eq!(nothing.value_at(PropertyId::Gain, 5), None);
+
+        let animation = animated_gain_and_muted();
         assert!(!animation.is_empty() && animation.is_animated(PropertyId::Gain));
-        assert!(!animation.is_animated(PropertyId::Muted), "only what has a keyframe");
-        assert_eq!(animation.value_at(PropertyId::Gain, 99), Some(gain(3.0)));
-    }
-
-    #[test]
-    fn a_keyframe_of_the_wrong_kind_of_value_is_refused_and_changes_nothing() {
-        let mut animation = Animation::default();
-        assert!(!animation.set_keyframe(PropertyId::Gain, 0, PropertyValue::Flag(true)));
-        assert!(!animation.set_keyframe(PropertyId::Position, 0, gain(1.0)));
-        assert!(animation.is_empty());
-    }
-
-    #[test]
-    fn removing_the_last_keyframe_of_a_property_says_so_and_makes_it_not_animated() {
-        let mut animation = animated_gain_and_muted();
-        assert_eq!(
-            animation.remove_keyframe(PropertyId::Gain, 0),
-            Some(RemovedKeyframe {
-                value: gain(0.0),
-                was_the_last: false
-            })
-        );
-        assert!(animation.is_animated(PropertyId::Gain));
-        assert_eq!(
-            animation.remove_keyframe(PropertyId::Gain, 20),
-            Some(RemovedKeyframe {
-                value: gain(-20.0),
-                was_the_last: true
-            })
-        );
-        assert!(!animation.is_animated(PropertyId::Gain));
-        assert!(animation.is_animated(PropertyId::Muted), "the others are as they were");
-        assert_eq!(animation.remove_keyframe(PropertyId::Gain, 20), None);
-        assert_eq!(animation.remove_keyframe(PropertyId::Rotation, 3), None);
+        assert!(!animation.is_animated(PropertyId::Rotation), "only what has a keyframe");
+        assert_eq!(animation.value_at(PropertyId::Gain, 10), Some(gain(-10.0)));
+        assert_eq!(animation.value_at(PropertyId::Gain, 99), Some(gain(-20.0)));
+        assert_eq!(animation.value_at(PropertyId::Rotation, 10), None);
     }
 
     #[test]
@@ -251,64 +160,6 @@ mod tests {
         let animation = animated_gain_and_muted();
         let listed: Vec<PropertyId> = animation.properties().map(|(property, _)| property).collect();
         assert_eq!(listed, vec![PropertyId::Gain, PropertyId::Muted]);
-    }
-
-    #[test]
-    fn cutting_cuts_every_property_and_both_parts_stay_animated_where_the_whole_was() {
-        let (first, second) = animated_gain_and_muted().split_at(15);
-        for part in [&first, &second] {
-            assert!(part.is_animated(PropertyId::Gain) && part.is_animated(PropertyId::Muted));
-        }
-        assert_eq!(first.value_at(PropertyId::Gain, 14), Some(gain(-14.0)));
-        assert_eq!(second.value_at(PropertyId::Gain, 0), Some(gain(-15.0)));
-        assert_eq!(first.value_at(PropertyId::Muted, 14), Some(PropertyValue::Flag(true)));
-        assert_eq!(second.value_at(PropertyId::Muted, 0), Some(PropertyValue::Flag(true)));
-    }
-
-    #[test]
-    fn the_frames_of_the_keyframes_can_be_changed_and_those_that_land_together_are_one() {
-        let animation = animated_gain_and_muted();
-        let doubled = animation.mapped_frames(|frame| frame * 2);
-        assert_eq!(doubled.value_at(PropertyId::Gain, 40), Some(gain(-20.0)));
-        assert_eq!(doubled.value_at(PropertyId::Gain, 20), Some(gain(-10.0)));
-        assert_eq!(
-            doubled
-                .keyframes_of(PropertyId::Muted)
-                .unwrap()
-                .iter()
-                .next()
-                .unwrap()
-                .frame,
-            20
-        );
-        let all_together = animation.mapped_frames(|_| 7);
-        assert_eq!(all_together.keyframes_of(PropertyId::Gain).unwrap().len(), 1);
-        assert_eq!(
-            all_together.value_at(PropertyId::Gain, 7),
-            Some(gain(-20.0)),
-            "the later is kept"
-        );
-    }
-
-    #[test]
-    fn shortening_and_stretching_apply_to_every_property() {
-        let animation = animated_gain_and_muted();
-        let shorter = animation.truncated_to(12);
-        assert_eq!(shorter.keyframes_of(PropertyId::Gain).unwrap().len(), 2);
-        assert_eq!(
-            shorter.value_at(PropertyId::Gain, 11),
-            animation.value_at(PropertyId::Gain, 11)
-        );
-        let longer = animation.rescaled(21, 42);
-        assert_eq!(
-            longer
-                .keyframes_of(PropertyId::Muted)
-                .unwrap()
-                .iter()
-                .map(|keyframe| keyframe.frame)
-                .collect::<Vec<_>>(),
-            vec![20]
-        );
     }
 
     #[test]

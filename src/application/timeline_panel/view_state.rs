@@ -7,8 +7,8 @@ use super::drawers::Drawers;
 use super::flash::CutFlashes;
 use super::racks::{DropTarget, RackLabel};
 use super::track_reordering::{RowMotion, TrackReorder};
-use crate::application::clip_moving::StartTimeMemory;
 use crate::application::selection::SelectionItem;
+use crate::application::start_time_hold::StartTimeMemory;
 use crate::application::timeline_geometry::TimelineGeometry;
 use crate::project::{ClipId, KeyframeId, RackId, TimelineFrameIndex, TrackId};
 
@@ -32,11 +32,28 @@ pub(super) struct TrackResize {
     pub(super) rows_area_height: f32,
 }
 
-/// What was taken hold of to be dragged.
+/// What was taken hold of to be dragged, and where it was then, which it is held to when it is in another row (see
+/// [`StartTimeMemory`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Grabbed {
-    Clip(ClipId),
-    Keyframe(KeyframeId),
+    Clip {
+        clip: ClipId,
+        start_time: StartTimeMemory<TrackId>,
+    },
+    Keyframe {
+        keyframe: KeyframeId,
+        start_time: StartTimeMemory<RackId>,
+    },
+}
+
+impl Grabbed {
+    /// The frame of the timeline that the grabbed clip started at, or the grabbed keyframe was at, when it was taken hold of.
+    pub(super) fn frame_at_the_start(&self) -> u64 {
+        match self {
+            Self::Clip { start_time, .. } => start_time.start(),
+            Self::Keyframe { start_time, .. } => start_time.start(),
+        }
+    }
 }
 
 /// Clips and keyframes that are being dragged along the timeline (the clips along their tracks and to the other tracks).
@@ -52,11 +69,6 @@ pub(super) struct ItemDrag {
     pub(super) grabbed: Grabbed,
     /// The frame that was under the pointer when it was taken hold of.
     pub(super) pointer_frame_at_the_start: u64,
-    /// The frame of the timeline that the grabbed clip started at, or the grabbed keyframe was at, then.
-    pub(super) grabbed_frame_at_the_start: u64,
-    /// Where the grabbed clip was then, which it is held to when it is on another track (see [`StartTimeMemory`]). `None`
-    /// when what was taken hold of is a keyframe.
-    pub(super) start_time: Option<StartTimeMemory>,
 }
 
 /// A rack of keyframes that is being dragged, to another drawer or onto a track.
@@ -111,8 +123,9 @@ pub struct TimelineViewState {
     /// them along only while the pointer is over them.
     pub(super) strips_area_in_the_last_frame: Option<Rect>,
     /// Where the whole timeline (the title boxes too) was in the last frame, so that the mouse
-    /// wheel with Alt held scrolls the rows up and down only while the pointer is over it.
-    pub(super) timeline_area_in_the_last_frame: Option<Rect>,
+    /// wheel with Alt held scrolls the rows up and down only while the pointer is over it. (The bottom of it is the bottom of what
+    /// can be seen of the rows.)
+    pub(in crate::application) timeline_area_in_the_last_frame: Option<Rect>,
     /// Where the "New" menu was last opened.
     pub(super) new_menu_target: Option<NewMenuTarget>,
     /// The flashes of light at the cuts that were just made.
@@ -132,6 +145,13 @@ pub struct TimelineViewState {
     /// Where each keyframe that can be taken hold of is on the screen, as it was drawn in this frame, which is what the
     /// rectangle drawn round things to select them goes round. (Made again in every frame.)
     pub(super) keyframe_grips: Vec<(KeyframeId, Rect)>,
+    /// How far down the screen each open drawer reaches, as it was drawn in this frame, which is how far down the rows are
+    /// scrolled to bring a drawer that is opening into view. (Made again in every frame.)
+    pub(super) drawer_bottoms: Vec<(crate::project::AnimationTarget, f32)>,
+    /// Where each rack that can be touched is on the screen (as far as it can be seen), as it was drawn in this frame, which is
+    /// what a keyframe that is dragged to another rack is put in the rack that the pointer is over by. (Made again in every
+    /// frame.)
+    pub(super) rack_rectangles: Vec<(RackId, Rect)>,
 }
 
 impl TimelineViewState {

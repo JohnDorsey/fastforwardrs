@@ -506,6 +506,7 @@ impl FastForwardApplication {
         self.file_chooser.choose_a_file_to_open(&FileQuestion {
             title,
             suggested_file_name: None,
+            starting_directory: None,
             kinds: &[
                 FileKind {
                     name: "Video, sound and picture files",

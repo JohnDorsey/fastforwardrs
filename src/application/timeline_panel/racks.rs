@@ -5,10 +5,13 @@
 //! to where it ends (for the drawer of a track, from the start of the timeline for ever), and racks are one under another in
 //! the order they are in the drawer. Each keyframe in a rack is a diamond at the frame it is at.
 //!
-//! * Clicking a keyframe selects it (with Ctrl held it is added to what is selected, or let go of if it was).
-//! * Dragging a keyframe moves it, and what is selected with it, along the timeline (see the `item_dragging` module).
-//! * Dragging a rack takes it, with its keyframes, to another drawer or to an empty place on a track (see the
-//!   `rack_dragging` module).
+//! * Clicking a keyframe, or a rack, selects it (with Ctrl held it is added to what is selected, or let go of if it was).
+//! * Right-clicking a keyframe or a rack selects it too, unless it is one of what is selected, and opens a menu (see the
+//!   `rack_menus` module).
+//! * Dragging a keyframe moves it, and what is selected with it, along the timeline and to other racks (see the `item_dragging`
+//!   module).
+//! * Dragging a rack takes it, with its keyframes, to another drawer or to an empty place on a track, or to another place in
+//!   the drawer it is in (see the `rack_dragging` module).
 //! * With the pointer over a rack or a keyframe a label comes to the left of the rack, which says what it animates.
 
 use egui::{
@@ -19,12 +22,14 @@ use egui::{
 use super::grip_dots::{self, Arrangement};
 use super::item_dragging::keyframes_dragged_on_their_own;
 use super::rack_look::{self, KEYFRAME_HEIGHT};
+use super::rack_menus;
 use super::strip_view::StripView;
 use super::view_state::{Grabbed, ItemDrag, RackDrag};
 use super::{TimelineContent, TimelineViewState};
 use crate::application::commands::Command;
 use crate::application::naming::what_a_rack_is_called;
 use crate::application::selection::{SelectionChange, SelectionItem};
+use crate::application::start_time_hold::StartTimeMemory;
 use crate::application::textures::Textures;
 use crate::application::theme;
 use crate::project::{AnimationTarget, KeyframeId, Rack, RackDestination, RackId};
@@ -48,9 +53,10 @@ pub fn rack_label(rack: RackId) -> String {
     format!("Rack {} of {}", rack.number(), rack.origin())
 }
 
-/// What a keyframe is known by to screen readers (and the tests).
+/// What a keyframe is known by to screen readers (and the tests): the rack it was made in (see [`KeyframeId`]), which is
+/// what tells it from the others whichever rack it is in.
 pub fn keyframe_label(keyframe: KeyframeId) -> String {
-    format!("Keyframe {} of {}", keyframe.number(), rack_label(keyframe.rack()))
+    format!("Keyframe {} of {}", keyframe.number(), rack_label(keyframe.origin()))
 }
 
 /// A label that is drawn over everything at the left of a rack that the pointer is over, which says what the rack animates.
@@ -66,6 +72,10 @@ pub(super) struct RackLabel {
 pub(super) struct DropTarget {
     pub(super) rectangle: Rect,
     pub(super) destination: RackDestination,
+    /// Where the top of the first rack in it is, on the screen, and how many racks it has, which is where a rack that is put in
+    /// goes among them.
+    pub(super) first_rack_top: f32,
+    pub(super) rack_count: usize,
 }
 
 /// Where the racks of one drawer (or crate) are on the screen.
@@ -93,6 +103,27 @@ pub(super) fn top_of_the_rack(first_top: f32, index: usize) -> f32 {
     first_top + index as f32 * (theme::RACK_HEIGHT + theme::SPACE_BETWEEN_RACKS)
 }
 
+/// How many frames a keyframe is wide on the screen when a frame is `points_per_frame` wide, and so how many frames there must be
+/// between two keyframes for them not to be one on the other (at least one: they are never at the same frame).
+pub(super) fn frames_that_a_keyframe_is_wide(points_per_frame: f64) -> u64 {
+    if points_per_frame <= 0.0 || !points_per_frame.is_finite() {
+        return 1;
+    }
+    ((f64::from(KEYFRAME_HEIGHT) / points_per_frame).ceil() as u64).max(1)
+}
+
+/// The command that selects (or, with `adding_to_the_selection`, adds to or lets go of) just `item`.
+fn select(item: SelectionItem, adding_to_the_selection: bool) -> Command {
+    Command::SelectItems {
+        items: vec![item],
+        change: if adding_to_the_selection {
+            SelectionChange::Toggle
+        } else {
+            SelectionChange::Replace
+        },
+    }
+}
+
 /// Draws the racks of the drawer at `place` (the racks that are in it, in `content`'s project), and adds a command for what is
 /// done to them.
 pub(super) fn show(
@@ -115,6 +146,8 @@ pub(super) fn show(
         state.drop_targets.push(DropTarget {
             rectangle: place.shown_in,
             destination: RackDestination::Drawer(place.owner),
+            first_rack_top: place.top,
+            rack_count: drawer.len(),
         });
     }
     if drawer.is_empty() {
@@ -140,6 +173,10 @@ pub(super) fn show(
             whole.right() > place.shown_in.right(),
         );
         rack_look::draw_rack(&painter, visible, corners, grain, pos2(whole.left(), top));
+        let is_selected = content.selection.contains_rack(rack.id());
+        if is_selected {
+            rack_look::draw_the_outline_of_a_selected_rack(&painter, visible, corners);
+        }
         let dots = Arrangement::FOR_A_RACK.size();
         if visible.width() >= LEAST_WIDTH_FOR_THE_DOTS {
             grip_dots::draw(
@@ -161,11 +198,31 @@ pub(super) fn show(
             },
         );
         body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, can_touch, rack_label(rack.id())));
+        let adding_to_the_selection = ui.input(|input| input.modifiers.command);
+        if can_touch {
+            state.rack_rectangles.push((rack.id(), visible));
+            if body.secondary_clicked() {
+                // Right-clicking a rack that is one of several selected ones leaves them selected.
+                if !is_selected {
+                    commands.push(select(SelectionItem::Rack(rack.id()), false));
+                }
+            } else if body.clicked() {
+                commands.push(select(SelectionItem::Rack(rack.id()), adding_to_the_selection));
+            }
+            body.context_menu(|ui| {
+                let racks = rack_menus::racks_the_menu_is_about(&content.selection.racks_to_vec(), rack.id());
+                rack_menus::show_for_racks(ui, &racks, content.project, commands);
+            });
+        }
         if can_touch
             && body.drag_started_by(PointerButton::Primary)
             && let Some(press) = ui.input(|input| input.pointer.press_origin())
             && let Some(first_frame) = rack.first_frame()
         {
+            // (Taking hold of a rack that is not selected selects it, as taking hold of a clip does.)
+            if !is_selected {
+                commands.push(select(SelectionItem::Rack(rack.id()), adding_to_the_selection));
+            }
             state.rack_drag = Some(RackDrag {
                 rack: rack.id(),
                 pointer_frame_at_the_start: view.frame_at(press.x).map_or(0, |frame| frame.value()),
@@ -208,7 +265,8 @@ fn show_the_keyframes(
             continue;
         }
         let centre = pos2(x, visible.center().y);
-        let id = rack.id_of(keyframe);
+        let id = keyframe.id();
+        let is_selected = content.selection.contains_keyframe(id);
         let response = ui.interact(
             rack_look::keyframe_grip(centre),
             ui.id().with(("keyframe", id)),
@@ -223,20 +281,20 @@ fn show_the_keyframes(
         if can_touch {
             state.keyframe_grips.push((id, rack_look::keyframe_grip(centre)));
         }
-        rack_look::draw_keyframe(
-            painter,
-            centre,
-            content.selection.contains_keyframe(id),
-            response.hovered(),
-        );
-        if response.clicked() {
-            commands.push(Command::SelectItems {
-                items: vec![SelectionItem::Keyframe(id)],
-                change: if adding_to_the_selection {
-                    SelectionChange::Toggle
-                } else {
-                    SelectionChange::Replace
-                },
+        rack_look::draw_keyframe(painter, centre, is_selected, response.hovered());
+        if can_touch {
+            if response.secondary_clicked() {
+                // Right-clicking a keyframe that is one of several selected ones leaves them selected.
+                if !is_selected {
+                    commands.push(select(SelectionItem::Keyframe(id), false));
+                }
+            } else if response.clicked() {
+                commands.push(select(SelectionItem::Keyframe(id), adding_to_the_selection));
+            }
+            response.context_menu(|ui| {
+                let keyframes = rack_menus::keyframes_the_menu_is_about(&content.selection.keyframes_to_vec(), id);
+                let gap = frames_that_a_keyframe_is_wide(view.points_per_frame());
+                rack_menus::show_for_keyframes(ui, &keyframes, content.project, gap, commands);
             });
         }
         if can_touch
@@ -244,7 +302,7 @@ fn show_the_keyframes(
             && let Some(press) = ui.input(|input| input.pointer.press_origin())
         {
             take_hold_of_the_keyframe(
-                (id, place.first_frame + keyframe.frame, press),
+                (id, rack.id(), place.first_frame + keyframe.frame, press),
                 (content, view),
                 (state, commands),
                 adding_to_the_selection,
@@ -254,11 +312,11 @@ fn show_the_keyframes(
     is_hovered
 }
 
-/// Takes hold of the keyframe `keyframe`, which is at frame `frame` of the timeline, when it begins to be dragged, the pointer
-/// having been pressed at `press`: what is dragged is what is selected if it is one of what is selected, and otherwise it
-/// alone (which is selected, with Ctrl added to what was selected).
+/// Takes hold of the keyframe `keyframe`, which is in the rack `rack` at frame `frame` of the timeline, when it begins to be
+/// dragged, the pointer having been pressed at `press`: what is dragged is what is selected if it is one of what is selected,
+/// and otherwise it alone (which is selected, with Ctrl added to what was selected).
 fn take_hold_of_the_keyframe(
-    (keyframe, frame, press): (KeyframeId, u64, Pos2),
+    (keyframe, rack, frame, press): (KeyframeId, RackId, u64, Pos2),
     (content, view): (&TimelineContent<'_>, &StripView),
     (state, commands): (&mut TimelineViewState, &mut Vec<Command>),
     adding_to_the_selection: bool,
@@ -266,14 +324,7 @@ fn take_hold_of_the_keyframe(
     let (clips, keyframes) = if content.selection.contains_keyframe(keyframe) {
         (content.selection.to_vec(), content.selection.keyframes_to_vec())
     } else {
-        commands.push(Command::SelectItems {
-            items: vec![SelectionItem::Keyframe(keyframe)],
-            change: if adding_to_the_selection {
-                SelectionChange::Toggle
-            } else {
-                SelectionChange::Replace
-            },
-        });
+        commands.push(select(SelectionItem::Keyframe(keyframe), adding_to_the_selection));
         let (clips, mut keyframes) = if adding_to_the_selection {
             (content.selection.to_vec(), content.selection.keyframes_to_vec())
         } else {
@@ -285,10 +336,11 @@ fn take_hold_of_the_keyframe(
     state.item_drag = Some(ItemDrag {
         keyframes: keyframes_dragged_on_their_own(content.project, &clips, &keyframes),
         clips,
-        grabbed: Grabbed::Keyframe(keyframe),
+        grabbed: Grabbed::Keyframe {
+            keyframe,
+            start_time: StartTimeMemory::new(frame, rack),
+        },
         pointer_frame_at_the_start: view.frame_at(press.x).map_or(0, |frame| frame.value()),
-        grabbed_frame_at_the_start: frame,
-        start_time: None,
     });
 }
 
@@ -439,6 +491,25 @@ mod tests {
         let in_the_corner = message_rectangle(words, pos2(1279.0, 799.0), screen);
         assert!(in_the_corner.right() <= 1280.0 - LABEL_MARGIN + 1e-4);
         assert!(in_the_corner.bottom() <= 800.0 - LABEL_MARGIN + 1e-4);
+    }
+
+    #[test]
+    fn two_keyframes_must_be_as_many_frames_apart_as_a_keyframe_is_wide_and_never_less_than_one() {
+        assert_eq!(frames_that_a_keyframe_is_wide(12.0), 1, "a frame as wide as a keyframe");
+        assert_eq!(frames_that_a_keyframe_is_wide(100.0), 1, "wider than a keyframe");
+        assert_eq!(frames_that_a_keyframe_is_wide(6.0), 2);
+        assert_eq!(
+            frames_that_a_keyframe_is_wide(5.0),
+            3,
+            "2 frames of 5 points are 10, which is less than 12"
+        );
+        assert_eq!(frames_that_a_keyframe_is_wide(0.5), 24);
+        assert_eq!(
+            frames_that_a_keyframe_is_wide(0.0),
+            1,
+            "a scale that is nonsense makes no gap"
+        );
+        assert_eq!(frames_that_a_keyframe_is_wide(f64::NAN), 1);
     }
 
     #[test]

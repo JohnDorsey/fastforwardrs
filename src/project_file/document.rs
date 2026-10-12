@@ -1,4 +1,4 @@
-//! The exact shape of a project file on disk (the current version, 7).
+//! The exact shape of a project file on disk (the current version, 8).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -99,6 +99,10 @@ pub(super) struct TrackDocument {
     /// start of the timeline. Left out for a track that has none, and in the files of versions before 7.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drawer: Vec<RackDocument>,
+    /// The effects the track has, in the order they were put on in. Left out for a track that has none, and in the files of
+    /// versions before 8.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectDocument>,
     pub clips: Vec<ClipDocument>,
 }
 
@@ -138,6 +142,10 @@ pub(super) enum ClipDocument {
         /// the clip's first frame. Left out for a clip that has none, and in the files of versions before 7.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
+        /// The effects the video has, in the order they were put on in. Left out for a video that has none, and in the files
+        /// of versions before 8.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
     },
     Audio {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -168,6 +176,8 @@ pub(super) enum ClipDocument {
         animation: AnimationDocument,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
     },
     Text {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -186,6 +196,8 @@ pub(super) enum ClipDocument {
         animation: AnimationDocument,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
     },
     /// A keyframe crate: a stretch of the track that has racks of keyframes in its drawer and nothing else.
     Crate {
@@ -195,6 +207,18 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
     },
+}
+
+/// An effect that a clip or a track has.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EffectDocument {
+    /// The name of the kind of effect (see [`crate::project::EffectKind::name`]).
+    pub effect: String,
+    /// What its values are when they are not animated, one for each of the properties of the kind of effect, in their order.
+    /// Left out when they are what the effect begins with. (The keyframes of its values are racks, like any other.)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<KeyframeValueDocument>,
 }
 
 /// The keyframes of one property that are kept together, in a drawer.

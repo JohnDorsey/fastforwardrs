@@ -28,7 +28,7 @@ pub(super) fn video_source(identifier: u32, width: u32, height: u32, frames: u64
     )
 }
 
-fn picture_source(identifier: u32, width: u32, height: u32) -> SourceMedia {
+pub(super) fn picture_source(identifier: u32, width: u32, height: u32) -> SourceMedia {
     SourceMedia::image(
         SourceMediaIdentifier::new(identifier),
         SourceMediaLink::from_absolute_path(PathBuf::from(format!("/pictures/{identifier}.png"))),

@@ -1,7 +1,8 @@
 //! What each [`Command`] does.
 //!
-//! The commands of one frame of the window are carried out together ([`FastForwardApplication::execute_all`]),
-//! and if they changed the project they are one edit of the history, which undoing takes back.
+//! The commands of one frame of the window are carried out together ([`FastForwardApplication::execute_all`], after the user has
+//! been asked about any that would lose keyframes), and if they changed the project they are one edit of the history, which
+//! undoing takes back.
 
 use std::time::Instant;
 
@@ -15,7 +16,7 @@ use crate::application::editing::{
     set_track_speed_keeping_the_picture,
 };
 use crate::application::history::{EditKey, Restored};
-use crate::application::selection::{Selection, SelectionItem};
+use crate::application::selection::{Selection, SelectionChange, SelectionItem};
 use crate::playback::SoundEffect;
 use crate::project::{
     AnimationTarget, ClipId, ClipSide, EditError, FrameRate, SpeedFactor, TextObject, TimelineFrameIndex, TrackId,
@@ -26,10 +27,17 @@ use crate::project::{
 const SECONDS_A_NEW_TEXT_OBJECT_LASTS: f64 = 3.0;
 
 impl FastForwardApplication {
-    /// Carries out the commands of one frame of the window, one after another. If that changed the
-    /// project, the change is one edit of the history (joined to the edit before it if both are the
-    /// same gesture, see [`crate::application::history`]).
+    /// Carries out the commands of one frame of the window, one after another, except the one that would lose keyframes if there is
+    /// one, which the user is asked about instead (see [`Self::ask_before_losing_keyframes`]).
     pub(super) fn execute_all(&mut self, commands: Vec<Command>, now: Instant, context: &Context) {
+        let commands = self.ask_before_losing_keyframes(commands, context);
+        self.carry_out_all(commands, now, context);
+    }
+
+    /// Carries out `commands` one after another, without asking about anything: for those that the user has been asked about, and
+    /// agreed to. If that changed the project, the change is one edit of the history (joined to the edit before it if both are
+    /// the same gesture, see [`crate::application::history`]).
+    pub(super) fn carry_out_all(&mut self, commands: Vec<Command>, now: Instant, context: &Context) {
         let may_edit = commands.iter().any(Command::may_change_the_project);
         // An edit that makes or changes a keyframe is about the frame it is at as well: what is done at another frame is
         // another edit, not more of this gesture, however soon after it.
@@ -73,6 +81,7 @@ impl FastForwardApplication {
         match command {
             Command::LoadProject => self.ask_before_discarding(AfterConfirmation::LoadProject),
             Command::SaveProject => self.save_project(),
+            Command::SaveProjectAs => self.save_project_as(),
             Command::NewProject => self.ask_before_discarding(AfterConfirmation::NewProject),
             Command::ImportFile => self.import_file(),
             Command::ExportVideo => self.export_video(),
@@ -152,6 +161,19 @@ impl FastForwardApplication {
                 let _ = self.project.set_clip_duration(clip, frames);
             }
 
+            Command::AddEffect { target, kind } => {
+                let _ = self.project.add_effect(target, kind);
+            }
+            Command::RemoveEffect { target, kind } => {
+                let _ = self.project.remove_effect(target, kind);
+                self.selection.forget_what_is_gone(&self.project);
+            }
+            Command::SetEffectValue {
+                target,
+                property,
+                value,
+            } => self.change_a_property_at_the_playhead(target, property, value, now),
+
             Command::AddKeyframe {
                 target,
                 property,
@@ -173,18 +195,46 @@ impl FastForwardApplication {
             Command::MoveKeyframes(moves) => {
                 // Keyframes that cannot all be moved where they are asked to go are not moved.
                 let _ = self.project.move_keyframes(&moves);
+                self.selection.forget_what_is_gone(&self.project);
             }
             Command::DeleteKeyframes(keyframes) => {
                 let _ = self.project.remove_keyframes(&keyframes);
+                self.selection.forget_what_is_gone(&self.project);
+            }
+            Command::DuplicateKeyframes {
+                keyframes,
+                towards,
+                gap_in_frames,
+            } => {
+                // Keyframes that cannot all be copied are not copied. The copies are what is selected afterwards, so that copying
+                // again goes on from them.
+                if let Ok(copies) = self.project.duplicate_keyframes(&keyframes, towards, gap_in_frames)
+                    && !copies.is_empty()
+                {
+                    self.selection.change_items(
+                        copies.into_iter().map(SelectionItem::Keyframe),
+                        SelectionChange::Replace,
+                    );
+                }
+            }
+            Command::DeleteRacks(racks) => {
+                let _ = self.project.remove_racks(&racks);
+                self.selection.forget_what_is_gone(&self.project);
+            }
+            Command::MergeRacks(racks) => {
+                // (The rack that is kept stays selected if it was: the others are gone.)
+                let _ = self.project.merge_racks(&racks);
                 self.selection.forget_what_is_gone(&self.project);
             }
             Command::MoveRack {
                 rack,
                 to,
                 shift_in_frames,
+                slot,
             } => {
                 // A rack that cannot go where it is asked to is not moved.
-                let _ = self.project.move_rack(rack, to, shift_in_frames);
+                let _ = self.project.move_rack(rack, to, shift_in_frames, slot);
+                self.selection.forget_what_is_gone(&self.project);
             }
 
             Command::SetSpeedIndicatorLayout(layout) => self.project.set_speed_indicator_layout(layout),

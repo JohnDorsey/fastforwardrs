@@ -18,14 +18,16 @@ use thiserror::Error;
 
 use crate::atomic_file::write_file_atomically;
 use crate::project::{
-    Angle, AnimationTarget, CanvasArea, Clip, ClipId, CrateClip, Drawer, FontSize, ImageClip, MediaClip, Placement,
-    Project, ProjectSettings, PropertyId, PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia,
-    SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip,
-    TextObject, Track, TrackHeight, TrackId, ValueKind,
+    Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect, EffectKind, Effects,
+    FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings, PropertyId, PropertyValue,
+    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaLink, SourceMediaProperties,
+    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track, TrackHeight, TrackId,
+    ValueKind,
 };
 use document::{
-    AnimationDocument, CanvasAreaDocument, ClipDocument, ColourDocument, KeyframeValueDocument, PlacementDocument,
-    ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument, TrackDocument,
+    AnimationDocument, CanvasAreaDocument, ClipDocument, ColourDocument, EffectDocument, KeyframeValueDocument,
+    PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument,
+    TrackDocument,
 };
 use legacy::LegacyProjectDocument;
 pub use relative_path::relative_path_between;
@@ -45,8 +47,9 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// Version 6 added keyframes, of the clips and of the tracks (a file of version 5 has none: nothing in it
 /// is animated). Version 7 keeps keyframes in racks, in the drawers of the clips and of the tracks, which may be of any clip or
 /// track and not only the one that has the drawer (a file of version 6 has an `animation` object in each clip and track: it is read
-/// as a rack of the keyframes of its own properties in its own drawer), and has keyframe crates.
-pub const FILE_FORMAT_VERSION: u32 = 7;
+/// as a rack of the keyframes of its own properties in its own drawer), and has keyframe crates. Version 8 added the effects of
+/// clips and of tracks (a file of version 7 has none).
+pub const FILE_FORMAT_VERSION: u32 = 8;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -263,11 +266,74 @@ fn value_from_document(document: KeyframeValueDocument, property: PropertyId) ->
     }
 }
 
+/// The effect that `document` describes, if it describes one: of a kind there is, with a value of the kind it has for each of its
+/// properties, or none (which are what it begins with).
+fn effect_from_document(document: EffectDocument) -> Result<Effect, String> {
+    let kind = EffectKind::from_name(&document.effect)
+        .ok_or_else(|| format!("\"{}\" is not an effect there is", document.effect))?;
+    if document.values.is_empty() {
+        return Ok(Effect::new(kind));
+    }
+    if document.values.len() != kind.properties().len() {
+        return Err(format!(
+            "the values of the {kind} effect should be a list of {}, and the file's list is of {}",
+            kind.properties().len(),
+            document.values.len()
+        ));
+    }
+    let values = document
+        .values
+        .into_iter()
+        .zip(kind.properties())
+        .map(|(value, property)| {
+            value_from_document(value, *property).map_err(|reason| format!("the {kind} effect: {reason}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Effect::with_values(kind, values).ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
+}
+
+/// The effects that the documents describe, in their order. It is an error to put an effect on a clip that cannot have it (a
+/// sound), or to put on one twice.
+fn effects_from_documents(
+    documents: Vec<EffectDocument>,
+    can_have: impl Fn(EffectKind) -> bool,
+) -> Result<Effects, String> {
+    let mut effects = Effects::none();
+    for document in documents {
+        let effect = effect_from_document(document)?;
+        let kind = effect.kind();
+        if !can_have(kind) {
+            return Err(format!("it cannot have the {kind} effect"));
+        }
+        if !effects.put_on(effect) {
+            return Err(format!("it has the {kind} effect twice"));
+        }
+    }
+    Ok(effects)
+}
+
+/// The documents of the effects `effects`, in their order, with the values left out of each that has the values it begins with.
+fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
+    effects
+        .iter()
+        .map(|effect| EffectDocument {
+            effect: effect.kind().name().to_owned(),
+            values: if effect.values() == effect.kind().default_values() {
+                Vec::new()
+            } else {
+                effect.values().iter().map(value_document_of).collect()
+            },
+        })
+        .collect()
+}
+
 /// A clip as a document describes it.
 struct ClipFromDocument {
     /// How many empty frames come before it.
     gap_before_frames: u64,
     clip: Clip,
+    /// The effects the clip has.
+    effects: Effects,
     /// The keyframes that a file of a version before 7 had in an `animation` object of the clip.
     legacy_animation: AnimationDocument,
     /// The racks that are in the drawer of the clip.
@@ -289,6 +355,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             placement,
             animation,
             drawer,
+            effects,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
                 .map_err(|error| error.to_string())?;
@@ -300,6 +367,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
                         .with_muted(muted)
                         .with_placement(placement.map(placement_from_document)),
                 ),
+                effects: effects_from_documents(effects, |kind| kind.applies_to_a_clip_of_kind(ClipKind::Video))?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -320,6 +388,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Audio(media.with_gain(gain_decibels).with_muted(muted)),
+                effects: Effects::none(),
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -331,11 +400,13 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             placement,
             animation,
             drawer,
+            effects,
         } => {
             let image = ImageClip::new(source_identifier, duration_in_frames).map_err(|error| error.to_string())?;
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Image(image.with_placement(placement.map(placement_from_document))),
+                effects: effects_from_documents(effects, |kind| kind.applies_to_a_clip_of_kind(ClipKind::Image))?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -351,6 +422,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             rotation_degrees,
             animation,
             drawer,
+            effects,
         } => {
             let object = TextObject {
                 text,
@@ -364,6 +436,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Text(clip),
+                effects: effects_from_documents(effects, |kind| kind.applies_to_a_clip_of_kind(ClipKind::Text))?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -377,6 +450,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Crate(crate_clip),
+                effects: Effects::none(),
                 legacy_animation: AnimationDocument::default(),
                 racks: drawer,
             })
@@ -431,8 +505,11 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             height_in_points,
             animation,
             drawer,
+            effects,
             clips: clip_documents,
         } = track;
+        let effects = effects_from_documents(effects, EffectKind::applies_to_a_track)
+            .map_err(|reason| invalid_project(format!("track number {}: {reason}", track_number + 1)))?;
         let mut clips = Vec::with_capacity(clip_documents.len());
         for (clip_number, clip) in clip_documents.into_iter().enumerate() {
             clips.push(clip_from_document(clip).map_err(|reason| {
@@ -448,12 +525,20 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .with_speed(speed_factor)
             .with_muted(muted)
             .with_height(TrackHeight::from_points(height_in_points));
-        loaded_tracks.push((parts, animation, drawer, clips));
+        loaded_tracks.push((parts.with_effects(effects), animation, drawer, clips));
     }
     let contents = drawers::FileContents {
         kinds_of_the_clips: loaded_tracks
             .iter()
             .map(|(_, _, _, clips)| clips.iter().map(|clip| clip.clip.kind()).collect())
+            .collect(),
+        effects_of_the_clips: loaded_tracks
+            .iter()
+            .map(|(_, _, _, clips)| clips.iter().map(|clip| clip.effects.clone()).collect())
+            .collect(),
+        effects_of_the_tracks: loaded_tracks
+            .iter()
+            .map(|(track, ..)| track.effects().clone())
             .collect(),
     };
 
@@ -471,6 +556,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
         )
         .map_err(|reason| invalid_project(format!("track number {}: {reason}", track_number + 1)))?;
         let mut entries = Vec::with_capacity(clips.len());
+        let mut effects_of_the_clips = Vec::with_capacity(clips.len());
         for (clip_number, loaded) in clips.into_iter().enumerate() {
             let clip_id = ClipId::new(track.id(), u32::try_from(clip_number).unwrap_or(u32::MAX));
             let length = loaded.clip.timeline_frame_count(track.speed());
@@ -491,8 +577,14 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
                 ))
             })?;
             entries.push((loaded.gap_before_frames, loaded.clip, drawer_of_the_clip));
+            effects_of_the_clips.push(loaded.effects);
         }
-        tracks.push(track.with_drawer(drawer_of_the_track).with_clips_and_drawers(entries));
+        tracks.push(
+            track
+                .with_drawer(drawer_of_the_track)
+                .with_clips_and_drawers(entries)
+                .with_effects_on_its_clips(effects_of_the_clips),
+        );
     }
 
     let layout = speed_indicator_from_document(&document.speed_indicator);
@@ -605,6 +697,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                 height_in_points: track.height().points(),
                 animation: AnimationDocument::default(),
                 drawer: racks_of(AnimationTarget::Track(track.id()), track.drawer())?,
+                effects: effect_documents_of(track.effects()),
                 clips: track
                     .entries()
                     .iter()
@@ -613,6 +706,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                             entry.gap_before_frames(),
                             entry.clip(),
                             racks_of(AnimationTarget::Clip(entry.id()), entry.drawer())?,
+                            effect_documents_of(entry.effects()),
                         ))
                     })
                     .collect::<Result<Vec<_>, ProjectFileError>>()?,
@@ -641,7 +735,14 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
     })
 }
 
-fn clip_document_of(gap_before_frames: u64, clip: &Clip, drawer: Vec<RackDocument>) -> ClipDocument {
+/// The document of `clip`, with the racks of its drawer and its effects. (A sound and a crate have no effects: those it is
+/// given are not written.)
+fn clip_document_of(
+    gap_before_frames: u64,
+    clip: &Clip,
+    drawer: Vec<RackDocument>,
+    effects: Vec<EffectDocument>,
+) -> ClipDocument {
     let animation = AnimationDocument::default();
     match clip {
         Clip::Video(media) => ClipDocument::Video {
@@ -655,6 +756,7 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip, drawer: Vec<RackDocumen
             placement: media.placement().map(placement_document_of),
             animation,
             drawer,
+            effects,
         },
         Clip::Audio(media) => ClipDocument::Audio {
             gap_before_frames,
@@ -674,6 +776,7 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip, drawer: Vec<RackDocumen
             placement: image.placement().map(placement_document_of),
             animation,
             drawer,
+            effects,
         },
         Clip::Text(text) => ClipDocument::Text {
             gap_before_frames,
@@ -686,6 +789,7 @@ fn clip_document_of(gap_before_frames: u64, clip: &Clip, drawer: Vec<RackDocumen
             rotation_degrees: text.object.rotation.degrees(),
             animation,
             drawer,
+            effects,
         },
         Clip::Crate(crate_clip) => ClipDocument::Crate {
             gap_before_frames,
@@ -729,5 +833,7 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod effects_tests;
 #[cfg(test)]
 mod tests;
