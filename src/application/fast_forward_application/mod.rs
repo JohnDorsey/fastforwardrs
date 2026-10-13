@@ -40,6 +40,8 @@ mod drawing;
 mod duplicate_tests;
 #[cfg(test)]
 mod effect_tests;
+#[cfg(test)]
+mod embed_and_import_tests;
 mod export_flow;
 #[cfg(test)]
 mod file_question_tests;
@@ -85,6 +87,9 @@ mod rack_mouse_tests;
 mod rack_selection_tests;
 #[cfg(test)]
 mod rack_tests;
+mod saving;
+#[cfg(test)]
+mod saving_tests;
 #[cfg(test)]
 mod selection_tests;
 mod settings_flow;
@@ -97,6 +102,8 @@ mod still_window_tests;
 mod test_window;
 #[cfg(test)]
 mod text_object_tests;
+#[cfg(test)]
+mod tidying_tests;
 #[cfg(test)]
 mod track_height_tests;
 #[cfg(test)]
@@ -135,8 +142,8 @@ use super::timeline_panel::{DrawerSound, TimelineViewState};
 use crate::composition::{PicturePlan, plan_pictures};
 use crate::media::export::VideoExport;
 use crate::media::{
-    FfmpegToolchain, FinerThumbnails, ThumbnailExtraction, ThumbnailLibrary, ToolchainError, UserInterfaceWakeUp,
-    Waveform, WaveformExtraction,
+    FfmpegToolchain, FinerThumbnails, MediaLocation, ThumbnailExtraction, ThumbnailLibrary, ToolchainError,
+    UserInterfaceWakeUp, Waveform, WaveformExtraction,
 };
 use crate::playback::{
     AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
@@ -154,8 +161,8 @@ use crate::text_rendering::LazyTextRenderer;
 enum SourceStatus {
     /// The file is being looked for and opened.
     Opening,
-    /// The file is found and opens.
-    Available { path: PathBuf },
+    /// The file is found and opens, and its bytes are at `location`.
+    Available { location: MediaLocation },
     /// The file cannot be found or opened.
     Unavailable { reason: String },
 }
@@ -163,8 +170,10 @@ enum SourceStatus {
 /// Why a file is being looked for, which decides what happens when it is found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OpeningPurpose {
-    /// A file was chosen to be put on the timeline, at the current frame.
+    /// A file was chosen to be put on the timeline, at the current frame, where it stays the file that it is.
     ImportNewSource,
+    /// A file was chosen to be put on the timeline, at the current frame, and in the project file too.
+    ImportNewSourceAndEmbedIt,
     /// A file was chosen to replace a source file of the project that cannot be found. The edits
     /// are kept.
     RelinkMissingSource(SourceMediaIdentifier),
@@ -234,16 +243,12 @@ impl SourceFileState {
         }
     }
 
-    fn path_if_available(&self) -> Option<&std::path::Path> {
+    /// Where the bytes of the file are, if it can be used.
+    fn location_if_available(&self) -> Option<&MediaLocation> {
         match &self.status {
-            SourceStatus::Available { path } => Some(path),
+            SourceStatus::Available { location } => Some(location),
             _ => None,
         }
-    }
-
-    /// Where the file is, if it can be used.
-    fn status_path(&self) -> Option<PathBuf> {
-        self.path_if_available().map(std::path::Path::to_owned)
     }
 }
 
@@ -313,6 +318,22 @@ pub struct FastForwardApplication {
     /// Whether the "source files not found" warning is showing.
     missing_sources_warning_open: bool,
     export: Option<RunningExport>,
+    /// A save that is being written on a thread of its own, because it copies a great deal.
+    running_save: Option<saving::RunningSave>,
+    /// How many bytes of files a save copies without doing it in the background.
+    most_bytes_copied_at_once: u64,
+    /// For tests: makes a copy in the background wait to be let go.
+    #[cfg(test)]
+    copy_gate: Option<std::sync::Arc<saving::Gate>>,
+    /// For tests: why each file that was asked to be opened was (there may be no ffmpeg to open it with, in a test).
+    #[cfg(test)]
+    opening_purposes_started: Vec<OpeningPurpose>,
+    /// Whether writing the project file again without its garbage has been tried (or looked at, and was not worth it) since the
+    /// window was asked to close: it is tried once.
+    tidying_before_closing_was_tried: bool,
+    /// Whether the window is to be closed as soon as nothing is being done in the background and no message is up (it was asked
+    /// to close, and was kept open for that).
+    close_when_not_busy: bool,
     /// Set once the user has agreed to close the window with unsaved changes.
     close_confirmed: bool,
     /// What asks the person which file to open or where to save one.
@@ -401,6 +422,14 @@ impl FastForwardApplication {
             dialog: startup_dialog,
             missing_sources_warning_open: false,
             export: None,
+            running_save: None,
+            most_bytes_copied_at_once: saving::MOST_BYTES_COPIED_AT_ONCE,
+            #[cfg(test)]
+            copy_gate: None,
+            #[cfg(test)]
+            opening_purposes_started: Vec::new(),
+            tidying_before_closing_was_tried: false,
+            close_when_not_busy: false,
             close_confirmed: false,
             file_chooser: Box::new(RefusingFileChooser),
             wake_up,
@@ -411,14 +440,14 @@ impl FastForwardApplication {
     fn source_is_available(&self, identifier: SourceMediaIdentifier) -> bool {
         self.source_files
             .get(&identifier)
-            .is_some_and(|state| state.path_if_available().is_some())
+            .is_some_and(|state| state.location_if_available().is_some())
     }
 
-    /// Where each source file that can be used is.
-    fn available_source_paths(&self) -> HashMap<SourceMediaIdentifier, PathBuf> {
+    /// Where the bytes of each source file that can be used are.
+    fn available_source_locations(&self) -> HashMap<SourceMediaIdentifier, MediaLocation> {
         self.source_files
             .iter()
-            .filter_map(|(identifier, state)| Some((*identifier, state.path_if_available()?.to_owned())))
+            .filter_map(|(identifier, state)| Some((*identifier, state.location_if_available()?.clone())))
             .collect()
     }
 
@@ -431,7 +460,7 @@ impl FastForwardApplication {
 
     /// Whether a dialog or an export is in the way of editing.
     fn is_blocked(&self) -> bool {
-        self.dialog.is_some() || self.export.is_some()
+        self.dialog.is_some() || self.export.is_some() || self.running_save.is_some()
     }
 
     /// Everything that has to be done at the start of a frame: collecting what background work has
@@ -502,11 +531,11 @@ impl FastForwardApplication {
                 let video = source.properties.video()?;
                 Some(PreviewVideo {
                     source: source.identifier,
-                    video_path: self
+                    location: self
                         .source_files
                         .get(&source.identifier)?
-                        .path_if_available()?
-                        .to_owned(),
+                        .location_if_available()?
+                        .clone(),
                     display_size_in_pixels: (video.display_width_in_pixels, video.display_height_in_pixels),
                     frame_rate: video.frame_rate,
                 })
@@ -528,19 +557,23 @@ impl FastForwardApplication {
         }
     }
 
-    /// Starts, keeps in step, or stops the sound of the preview: it plays while the video plays.
-    fn update_the_sound(&mut self, now: Instant, total_frames: u64) {
-        let clock = ClockReading {
+    fn clock_reading(&self, now: Instant, total_frames: u64) -> ClockReading {
+        ClockReading {
             frame: self.clock.position(now, total_frames),
             seconds: self.clock.position_in_seconds(now, total_frames),
             is_playing: self.clock.is_playing(),
-        };
+        }
+    }
+
+    /// Starts, keeps in step, or stops the sound of the preview: it plays while the video plays.
+    fn update_the_sound(&mut self, now: Instant, total_frames: u64) {
+        let clock = self.clock_reading(now, total_frames);
         let sped_up_clip_sound = self.effective_settings().sped_up_clip_sound;
-        let source_paths = self.available_source_paths();
+        let source_locations = self.available_source_locations();
         // There is sound to play when some file that can be read is there to make it from.
-        let content = (!source_paths.is_empty()).then_some(AudioContent {
+        let content = (!source_locations.is_empty()).then_some(AudioContent {
             project: &self.project,
-            source_paths: &source_paths,
+            source_locations: &source_locations,
             sped_up_clip_sound,
         });
         self.audio_supplier.update(content, clock, now);

@@ -36,7 +36,7 @@ fn export_and_wait_with(
     destination: &Path,
 ) -> ExportOutcome {
     let plan = plan_export(project, settings, &transparent_text_picture).expect("the project can be exported");
-    let export = VideoExport::start(toolchain, &plan, &[source.to_path_buf()], destination, Arc::new(|| {}))
+    let export = VideoExport::start(toolchain, &plan, &[source.into()], destination, Arc::new(|| {}))
         .expect("the export starts");
     wait_for_export(&export)
 }
@@ -745,7 +745,7 @@ fn exporting_over_the_source_video_is_refused_before_anything_is_touched() {
         let result = VideoExport::start(
             &toolchain,
             &plan,
-            std::slice::from_ref(&source_copy),
+            &[source_copy.clone().into()],
             &destination,
             Arc::new(|| {}),
         );
@@ -837,7 +837,7 @@ fn cancelling_stops_the_export_and_leaves_no_file_and_an_existing_file_untouched
     let export = VideoExport::start(
         &toolchain,
         &plan,
-        std::slice::from_ref(&video.path),
+        &[video.path.clone().into()],
         &destination,
         Arc::new(|| {}),
     )
@@ -881,7 +881,7 @@ fn dropping_a_running_export_cancels_it() {
     let export = VideoExport::start(
         &toolchain,
         &plan,
-        std::slice::from_ref(&video.path),
+        &[video.path.clone().into()],
         &destination,
         Arc::new(|| {}),
     )

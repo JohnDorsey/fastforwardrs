@@ -8,7 +8,6 @@
 
 use std::ffi::OsString;
 use std::io::Read;
-use std::path::Path;
 use std::sync::mpsc::SyncSender;
 
 use thiserror::Error;
@@ -16,6 +15,7 @@ use thiserror::Error;
 use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
+use super::location::MediaLocation;
 
 /// How many peaks a second of sound has.
 pub const PEAKS_PER_SECOND: u32 = 100;
@@ -144,15 +144,15 @@ pub struct WaveformExtraction {
 }
 
 impl WaveformExtraction {
-    /// Starts decoding the sound of the file at `path`. The `wake_up` callback is called each time
+    /// Starts decoding the sound of the file at `location`. The `wake_up` callback is called each time
     /// something new is waiting.
     pub fn start(
         toolchain: &FfmpegToolchain,
-        path: &Path,
+        location: impl Into<MediaLocation>,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, WaveformError> {
         let mut command = background_command(toolchain.ffmpeg_path());
-        command.args(waveform_arguments(path));
+        command.args(waveform_arguments(location));
         let tool = StreamingTool::start(
             command,
             BATCHES_BUFFERED_AHEAD,
@@ -219,11 +219,11 @@ fn read_peaks(
 }
 
 /// The ffmpeg command line that decodes the sound of a file into the samples the peaks are made from.
-pub fn waveform_arguments(path: &Path) -> Vec<OsString> {
+pub fn waveform_arguments(location: impl Into<MediaLocation>) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]
         .map(OsString::from)
         .to_vec();
-    arguments.push(path.into());
+    arguments.push(location.into().ffmpeg_input());
     arguments.extend(["-vn", "-sn", "-dn", "-ac", "1", "-ar"].map(OsString::from));
     arguments.push(SAMPLE_RATE.to_string().into());
     arguments.extend(["-f", "s16le", "pipe:1"].map(OsString::from));
@@ -232,6 +232,7 @@ pub fn waveform_arguments(path: &Path) -> Vec<OsString> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::Arc;
     use std::sync::mpsc;
 

@@ -5,13 +5,22 @@
 use egui::{Context, ViewportCommand};
 
 use super::FastForwardApplication;
+use super::saving::WhatToDoAboutClosing;
 use crate::application::commands::Command;
-use crate::application::dialogs::{self, AfterConfirmation, Dialog, DialogAnswer, show_dialog, show_export_progress};
+use crate::application::dialogs::{
+    self, AfterConfirmation, Dialog, DialogAnswer, show_copy_progress, show_dialog, show_export_progress,
+};
 
 impl FastForwardApplication {
     /// Asks before closing the window if there are unsaved changes. (With autosave on and a file
     /// to save to, they are saved instead, and nothing is asked.)
     pub(super) fn handle_close_request(&mut self, context: &Context) {
+        if self.close_when_not_busy && self.running_save.is_none() && self.dialog.is_none() {
+            // (The window was kept open to write the project file again, which is done, or was stopped, or went wrong.)
+            self.close_when_not_busy = false;
+            context.send_viewport_cmd(ViewportCommand::Close);
+            return;
+        }
         let close_requested = context.input(|input| input.viewport().close_requested());
         if !close_requested {
             return;
@@ -23,6 +32,8 @@ impl FastForwardApplication {
             self.dialog = Some(Dialog::ConfirmDiscardChanges {
                 then: AfterConfirmation::CloseWindow,
             });
+        } else if self.tidy_the_project_file_before_closing() == WhatToDoAboutClosing::KeepTheWindowOpen {
+            context.send_viewport_cmd(ViewportCommand::CancelClose);
         }
     }
 
@@ -34,6 +45,11 @@ impl FastForwardApplication {
             && show_export_progress(context, export.frames_written, export.total_frames)
         {
             export.export.cancel();
+        }
+        if let Some((heading, copied, to_copy)) = self.progress_of_the_running_save()
+            && show_copy_progress(context, heading, copied, to_copy)
+        {
+            self.stop_the_running_save();
         }
         if let Some(dialog) = self.dialog.clone() {
             match show_dialog(context, &dialog) {
@@ -49,6 +65,9 @@ impl FastForwardApplication {
                         Dialog::ConfirmLosingKeyframes { change, .. } => agreed_to.push(*change),
                         Dialog::MustSaveAsAnArchiveToIncludeFiles { files, .. } => {
                             self.save_as_an_archive_with_files_included(&files);
+                        }
+                        Dialog::MustSaveAsAnArchiveToEmbedAFile { .. } => {
+                            self.save_as_an_archive_and_ask_for_a_file_to_embed();
                         }
                         Dialog::Message { .. } => {}
                     }

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use egui::accesskit::{Action, ActionData, ActionRequest, Role};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, ViewportCommand, ViewportEvent, ViewportId, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
@@ -82,7 +82,7 @@ impl Journey {
     /// Imports the file at `path` (what choosing it in the Import dialog does) and waits until it
     /// is fully opened. It goes on the timeline at the current frame.
     pub fn import(&mut self, path: &Path) {
-        self.application_mut().import_file_from(path.to_owned());
+        self.application_mut().link_and_import_file_from(path.to_owned());
         self.wait_until_idle();
         assert!(
             !self.application().project().sources().is_empty() && self.application().every_source_file_is_available(),
@@ -151,6 +151,30 @@ impl Journey {
     /// Draws a few frames, so that whatever the last action set going has been carried out.
     pub fn settle(&mut self) {
         self.harness.run_steps(3);
+    }
+
+    /// Asks the window to close, as its close button does, and draws a frame. Says what the window told its viewport to do in it
+    /// (`CancelClose` if it is to stay open).
+    pub fn ask_to_close(&mut self) -> Vec<ViewportCommand> {
+        self.harness
+            .input_mut()
+            .viewports
+            .entry(ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(ViewportEvent::Close);
+        self.harness.step();
+        self.viewport_commands_of_the_last_frame()
+    }
+
+    /// What the window told its viewport to do in the last frame.
+    pub fn viewport_commands_of_the_last_frame(&self) -> Vec<ViewportCommand> {
+        self.harness
+            .output()
+            .viewport_output
+            .get(&ViewportId::ROOT)
+            .map(|output| output.commands.clone())
+            .unwrap_or_default()
     }
 
     // --- looking ---

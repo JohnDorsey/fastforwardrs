@@ -43,8 +43,11 @@ pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Com
             if ui.add_enabled(idle, Button::new("Load project")).clicked() {
                 commands.push(Command::LoadProject);
             }
-            if ui.add_enabled(idle, Button::new("Import")).clicked() {
-                commands.push(Command::ImportFile);
+            if ui.add_enabled(idle, Button::new("Embed and import")).clicked() {
+                commands.push(Command::EmbedAndImportFile);
+            }
+            if ui.add_enabled(idle, Button::new("Link and import")).clicked() {
+                commands.push(Command::LinkAndImportFile);
             }
             if ui
                 .add_enabled(idle && availability.can_export, Button::new("Export"))

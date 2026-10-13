@@ -162,7 +162,10 @@ impl FastForwardApplication {
             has_selection: !self.selection.is_empty(),
             can_undo: self.history.can_undo(),
             can_redo: self.history.can_redo(),
-            busy: self.export.is_some() || !self.openings.is_empty() || self.dialog.is_some(),
+            busy: self.export.is_some()
+                || self.running_save.is_some()
+                || !self.openings.is_empty()
+                || self.dialog.is_some(),
         }
     }
 }
@@ -283,7 +286,7 @@ fn source_looks_of<'a>(
         .iter()
         .map(|source| {
             let state = source_files.get(&source.identifier);
-            let is_available = state.is_some_and(|state| state.path_if_available().is_some());
+            let is_available = state.is_some_and(|state| state.location_if_available().is_some());
             let look = SourceLook {
                 is_available,
                 thumbnails: state

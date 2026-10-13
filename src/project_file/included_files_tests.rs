@@ -30,7 +30,7 @@ fn the_video_to_include(contents: &[u8]) -> FilesToInclude {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("a copy of the video.mp4");
     fs::write(&path, contents).unwrap();
-    let paths = HashMap::from([(identifier(1), path)]);
+    let paths = HashMap::from([(identifier(1), path.into())]);
     FilesToInclude { folder, paths }
 }
 
@@ -73,7 +73,7 @@ fn a_project_with_a_file_included_is_saved_as_an_archive_and_read_back_as_it_was
     let files = the_video_to_include(b"the bytes of the video");
     let destination = files.folder.path().join("holiday.ffrs");
 
-    write_project_file_including(&project, &destination, &files.paths).unwrap();
+    write_project_file_including(&project, &destination, &files.paths, HowToWrite::Anew).unwrap();
 
     assert!(archive::is_an_archive(&destination));
     assert_eq!(
@@ -93,7 +93,7 @@ fn the_project_in_an_archive_is_the_text_a_plain_project_file_of_the_same_folder
     let project = edited_project(link_to_an_included_video());
     let files = the_video_to_include(b"x");
     let destination = files.folder.path().join("holiday.ffrs");
-    write_project_file_including(&project, &destination, &files.paths).unwrap();
+    write_project_file_including(&project, &destination, &files.paths, HowToWrite::Anew).unwrap();
 
     let text = archive::read_project_text(&destination).unwrap();
 
@@ -201,7 +201,7 @@ fn the_places_a_file_was_at_stay_as_they_were_when_the_project_is_saved_in_anoth
     fs::create_dir_all(&somewhere_else).unwrap();
     let destination = somewhere_else.join("holiday.ffrs");
 
-    write_project_file_including(&project, &destination, &files.paths).unwrap();
+    write_project_file_including(&project, &destination, &files.paths, HowToWrite::Anew).unwrap();
 
     let loaded = read_project_file(&destination).unwrap();
     let (video, picture) = (&loaded.sources()[0].link, &loaded.sources()[1].link);
@@ -236,7 +236,7 @@ fn the_places_of_an_included_file_stay_as_they_were_even_when_the_file_is_still_
     fs::create_dir_all(&somewhere_else).unwrap();
     let destination = somewhere_else.join("holiday.ffrs");
 
-    write_project_file_including(&project, &destination, &files.paths).unwrap();
+    write_project_file_including(&project, &destination, &files.paths, HowToWrite::Anew).unwrap();
 
     let link = read_project_file(&destination).unwrap().sources()[0].link.clone();
     assert_eq!(
@@ -262,11 +262,11 @@ fn every_kind_of_source_can_be_included_at_once_and_each_has_its_own_entry() {
     ] {
         let path = folder.path().join(name);
         fs::write(&path, bytes).unwrap();
-        paths.insert(identifier(number), path);
+        paths.insert(identifier(number), path.into());
     }
     let destination = folder.path().join("all.ffrs");
 
-    write_project_file_including(&project, &destination, &paths).unwrap();
+    write_project_file_including(&project, &destination, &paths, HowToWrite::Anew).unwrap();
 
     assert_eq!(
         names_of_the_entries(&destination),
@@ -296,7 +296,7 @@ fn a_plain_project_file_cannot_have_files_included_and_nothing_is_written() {
     let files = the_video_to_include(b"x");
     let destination = files.folder.path().join("holiday.fastforwardrs.json");
 
-    let error = write_project_file_including(&project, &destination, &files.paths).unwrap_err();
+    let error = write_project_file_including(&project, &destination, &files.paths, HowToWrite::Anew).unwrap_err();
 
     assert!(
         matches!(error, ProjectFileError::IncludedFilesNeedAnArchive { .. }),
@@ -330,9 +330,9 @@ fn an_included_file_that_cannot_be_read_stops_the_save_and_leaves_the_old_projec
     let destination = folder.path().join("holiday.ffrs");
     write_project_file(&edited_project(link_to_missing_video()), &destination).unwrap();
     let before = fs::read(&destination).unwrap();
-    let paths = HashMap::from([(identifier(1), folder.path().join("gone.mp4"))]);
+    let paths = HashMap::from([(identifier(1), folder.path().join("gone.mp4").into())]);
 
-    let error = write_project_file_including(&project, &destination, &paths).unwrap_err();
+    let error = write_project_file_including(&project, &destination, &paths, HowToWrite::Anew).unwrap_err();
 
     assert!(matches!(error, ProjectFileError::CouldNotRead { .. }), "{error:?}");
     assert_eq!(fs::read(&destination).unwrap(), before);
@@ -414,9 +414,10 @@ fn two_files_that_are_included_as_one_entry_are_refused_when_saving() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("x");
     fs::write(&path, "x").unwrap();
-    let paths = HashMap::from([(identifier(1), path.clone()), (identifier(2), path)]);
+    let paths = HashMap::from([(identifier(1), path.clone().into()), (identifier(2), path.into())]);
 
-    let error = write_project_file_including(&project, &folder.path().join("two.ffrs"), &paths).unwrap_err();
+    let error =
+        write_project_file_including(&project, &folder.path().join("two.ffrs"), &paths, HowToWrite::Anew).unwrap_err();
 
     assert!(matches!(error, ProjectFileError::InvalidProject { .. }), "{error:?}");
 }

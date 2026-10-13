@@ -31,6 +31,12 @@ pub enum Dialog {
         /// Whether the project has a project file (a plain one), and has not just never been saved.
         has_a_plain_project_file: bool,
     },
+    /// A file cannot be embedded in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked
+    /// where to save it as one, and if the user agrees it is, and then the file to embed is asked for.
+    MustSaveAsAnArchiveToEmbedAFile {
+        /// Whether the project has a project file (a plain one), and has not just never been saved.
+        has_a_plain_project_file: bool,
+    },
 }
 
 /// What the user did to a dialog.
@@ -106,6 +112,30 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                     }
                 });
             }
+            Dialog::MustSaveAsAnArchiveToEmbedAFile {
+                has_a_plain_project_file,
+            } => {
+                ui.heading("Save as a .ffrs file to embed a file");
+                ui.add_space(6.0);
+                ui.label(format!(
+                    "A file can only be embedded in a project file that is a .ffrs file, and this project is {}. \
+                     Save it as a .ffrs file first, and then choose the file to embed?",
+                    if *has_a_plain_project_file {
+                        "saved as a plain .json file"
+                    } else {
+                        "not saved yet"
+                    },
+                ));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Choose where to save it").clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                });
+            }
             Dialog::ConfirmLosingKeyframes { change, how_many } => {
                 let (keyframes, them, would_be) = if *how_many == 1 {
                     ("1 keyframe".to_owned(), "it", "it would be")
@@ -150,6 +180,28 @@ pub fn show_export_progress(context: &Context, frames_written: u64, total_frames
             0.0
         } else {
             (frames_written as f32 / total_frames as f32).clamp(0.0, 1.0)
+        };
+        ui.add(ProgressBar::new(fraction).show_percentage());
+        ui.add_space(12.0);
+        if ui.button("Cancel").clicked() {
+            cancel_pressed = true;
+        }
+    });
+    cancel_pressed
+}
+
+/// Shows how far the copying of files into a project file has got (`copied` of `to_copy` bytes), with a button to stop it. Returns
+/// whether the button was pressed.
+pub fn show_copy_progress(context: &Context, heading: &str, copied: u64, to_copy: u64) -> bool {
+    let mut cancel_pressed = false;
+    Modal::new(Id::new("copy progress")).show(context, |ui| {
+        ui.set_width(DIALOG_WIDTH);
+        ui.heading(heading);
+        ui.add_space(8.0);
+        let fraction = if to_copy == 0 {
+            0.0
+        } else {
+            (copied as f32 / to_copy as f32).clamp(0.0, 1.0)
         };
         ui.add(ProgressBar::new(fraction).show_percentage());
         ui.add_space(12.0);

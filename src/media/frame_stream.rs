@@ -9,7 +9,6 @@
 
 use std::ffi::OsString;
 use std::io::{self, Read};
-use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
 
 use thiserror::Error;
@@ -17,6 +16,7 @@ use thiserror::Error;
 use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
+use super::location::MediaLocation;
 use crate::project::{FrameRate, SourceFrameIndex, SpeedFactor, fit_inside_picture};
 
 /// How many decoded pictures may wait to be shown before decoding pauses. Small, because each
@@ -28,7 +28,8 @@ const BYTES_PER_PIXEL: usize = 4;
 /// What to decode.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameStreamRequest {
-    pub video_path: PathBuf,
+    /// Where the bytes of the video are.
+    pub video: MediaLocation,
     /// The frame rate of the project: the rate at which the pictures are delivered, and the one the
     /// numbers of the frames in this request are at.
     pub project_frame_rate: FrameRate,
@@ -293,7 +294,7 @@ pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
     arguments.push("-t".into());
     arguments.push(microseconds_as_seconds(timing.duration_read).into());
     arguments.push("-i".into());
-    arguments.push(request.video_path.clone().into());
+    arguments.push(request.video.ffmpeg_input());
     arguments.extend(["-an", "-sn", "-dn", "-vf"].map(OsString::from));
     arguments.push(filters.into());
     let pictures_wanted = request
@@ -308,13 +309,14 @@ pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::sync::mpsc;
 
     use super::*;
 
     fn request(first_source_frame: u64, source_frame_count: u64, speed_factor: u32) -> FrameStreamRequest {
         FrameStreamRequest {
-            video_path: PathBuf::from("holiday.mp4"),
+            video: MediaLocation::from("holiday.mp4"),
             project_frame_rate: FrameRate::new(30, 1).unwrap(),
             video_frame_rate: FrameRate::new(30, 1).unwrap(),
             first_source_frame: SourceFrameIndex::new(first_source_frame),

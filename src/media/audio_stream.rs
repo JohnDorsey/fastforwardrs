@@ -10,7 +10,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc::SyncSender;
 
 use tempfile::TempDir;
@@ -20,6 +20,7 @@ use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
 use super::export::{AudioGraph, SoundGraphSpecification, build_audio_graph, filter_graph_file_option};
 use super::ffmpeg_toolchain::FfmpegToolchain;
+use super::location::MediaLocation;
 
 /// How many sets of samples may wait to be played before decoding pauses. The decoder is far
 /// faster than playback, and without a limit it would decode the whole rest of the video at once.
@@ -44,7 +45,7 @@ pub struct AudioFormat {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioStreamRequest {
     /// The files the sound is made from, which are ffmpeg's inputs 0, 1, ... in this order.
-    pub source_files: Vec<PathBuf>,
+    pub source_files: Vec<MediaLocation>,
     /// What the sound is: the frame rate and length, what each track sounds like, and what the
     /// sound of sped-up clips is like. Its clips name the files by their place in `source_files`.
     pub sound: SoundGraphSpecification,
@@ -199,7 +200,7 @@ pub fn audio_stream_arguments(
         .to_vec();
     for source_file in &request.source_files {
         arguments.push("-i".into());
-        arguments.push(source_file.clone().into());
+        arguments.push(source_file.ffmpeg_input());
     }
     arguments.push(filter_graph_file_option(toolchain).into());
     arguments.push(graph_file.into());
@@ -215,6 +216,7 @@ pub fn audio_stream_arguments(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::sync::mpsc;
 
     use super::*;
@@ -344,7 +346,7 @@ mod tests {
 
     fn request() -> AudioStreamRequest {
         AudioStreamRequest {
-            source_files: vec![PathBuf::from("holiday.mp4")],
+            source_files: vec![MediaLocation::from("holiday.mp4")],
             sound: SoundGraphSpecification {
                 frame_rate: FrameRate::new(30, 1).unwrap(),
                 total_frame_count: 90,
@@ -436,7 +438,7 @@ mod tests {
         let toolchain =
             FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), Some(9));
         let mut several = request();
-        several.source_files = ["a.mp4", "b.mp3"].map(PathBuf::from).to_vec();
+        several.source_files = ["a.mp4", "b.mp3"].map(MediaLocation::from).to_vec();
         let graph = AudioGraph {
             text: String::new(),
             output_label: "finished_audio",

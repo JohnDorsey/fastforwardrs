@@ -21,7 +21,7 @@ fn request_for(
     speed_factor: u32,
 ) -> FrameStreamRequest {
     FrameStreamRequest {
-        video_path: video.path.clone(),
+        video: video.path.clone().into(),
         project_frame_rate: FrameRate::new(30, 1).unwrap(),
         video_frame_rate: video.specification.frame_rate.parse().expect("a frame rate"),
         first_source_frame: SourceFrameIndex::new(first_source_frame),
@@ -450,7 +450,7 @@ fn a_file_that_cannot_be_decoded_finishes_with_an_explanation_and_no_frames() {
     let not_a_video = scratch.path().join("not_a_video.mp4");
     std::fs::write(&not_a_video, "just some text").unwrap();
     let mut request = request_for(&video, 0, 10, 1);
-    request.video_path = not_a_video;
+    request.video = not_a_video.into();
 
     let (frame_numbers, error_output) = frame_numbers_delivered(&toolchain, &request);
 

@@ -520,7 +520,7 @@ fn a_file_that_is_not_a_video_or_a_sound_is_refused_with_a_message_and_the_proje
     std::fs::write(&not_a_video, "this is not a video").unwrap();
     let mut journey = Journey::start(&toolchain);
 
-    journey.application_mut().import_file_from(not_a_video);
+    journey.application_mut().link_and_import_file_from(not_a_video);
     journey.wait_until_idle();
 
     let (title, text) = journey.application().message_showing().expect("a message explains");
@@ -569,7 +569,9 @@ fn a_new_project_forgets_everything_about_the_old_one() {
     journey.application_mut().start_empty_project();
     assert!(journey.application().project().sources().is_empty());
     assert_eq!(journey.application().project_file_path(), None);
-    journey.application_mut().import_file_from(second_video.path.clone());
+    journey
+        .application_mut()
+        .link_and_import_file_from(second_video.path.clone());
     journey.wait_until_idle();
 
     assert_eq!(journey.application().message_showing(), None);
@@ -1649,10 +1651,9 @@ fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_wh
     journey.right_click(journey.point_on_the_track_at_frame(100));
     journey.press_button("Include in project file");
     assert!(
-        journey.application().has_unsaved_changes(),
-        "which file is kept where is saved with the project"
+        !journey.application().has_unsaved_changes(),
+        "the video is put in the project file as it is included, and the project is saved with it"
     );
-    journey.application_mut().save_project_to(archive_path.clone());
     assert_eq!(journey.application().message_showing(), None);
     assert!(
         journey.application().project().sources()[0].link.is_included(),
@@ -1689,14 +1690,21 @@ fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_wh
         "it is included still: that is not changed by loading"
     );
     assert!(!fresh.application().has_unsaved_changes());
-    let taken_out: Vec<_> = walk_files(&cache);
-    assert_eq!(taken_out.len(), 1, "one file in the cache: {taken_out:?}");
-    assert_eq!(
-        std::fs::read(&taken_out[0]).unwrap(),
-        original_bytes,
-        "the video as it was"
+    assert!(
+        walk_files(&cache).is_empty(),
+        "nothing was taken out of the project file: the video is read where it is in it"
     );
-    assert_eq!(taken_out[0].file_name().unwrap(), "holiday.mp4");
+    let location = fresh
+        .application()
+        .location_of_the_source(THE_VIDEO)
+        .expect("the video is there");
+    let stretch = location.stretch().expect("it is a stretch of the project file");
+    assert_eq!(location.file(), std::path::absolute(&archive_path).unwrap());
+    assert_eq!(
+        stretch.length,
+        original_bytes.len() as u64,
+        "all of the video, as it was"
+    );
     assert_exports_exactly_what_the_project_describes(
         &toolchain,
         &mut fresh,
@@ -1718,9 +1726,15 @@ fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_wh
     assert!(!fresh.application().project().sources()[0].link.is_included());
     assert!(fresh.application().every_source_file_is_available());
     fresh.application_mut().save_project_to(archive_path.clone());
+    let state = fastforwardrs::project_file::archive::state_of_archive(&archive_path).unwrap();
     assert!(
-        std::fs::metadata(&archive_path).unwrap().len() < original_bytes.len() as u64 / 2,
-        "the video is no longer in the project file"
+        !state.entries.keys().any(|name| name.starts_with("resources/")),
+        "the video is no longer in the project file: {:?}",
+        state.entries.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        state.bytes_of_garbage >= original_bytes.len() as u64,
+        "its bytes are in the file still, as what is no use, until the project file is written anew"
     );
 
     // A third editor finds the video where it is again, and has the same clips.
@@ -1730,6 +1744,225 @@ fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_wh
     assert_eq!(third.application().message_showing(), None);
     assert!(third.application().every_source_file_is_available());
     assert_eq!(third.clips(), clips_of_the_first_editor);
+}
+
+#[test]
+fn a_video_that_is_embedded_and_imported_is_in_the_project_file_at_once_and_is_read_there_and_the_original_is_not_needed()
+ {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let footage = scratch.path().join("footage");
+    std::fs::create_dir_all(&footage).unwrap();
+    let original = footage.join("holiday.mp4");
+    std::fs::copy(&video.path, &original).unwrap();
+    let original_bytes = std::fs::read(&original).unwrap();
+    let archive_path = scratch.path().join("trip.ffrs");
+
+    // A project whose file is an archive; the video is embedded as it is imported.
+    let mut journey = Journey::start(&toolchain);
+    assert!(journey.application_mut().save_project_to(archive_path.clone()));
+    journey.application_mut().embed_and_import_file_from(original.clone());
+    journey.wait_until_idle();
+    assert_eq!(journey.application().message_showing(), None);
+    assert!(journey.application().every_source_file_is_available());
+    assert!(journey.application().project().sources()[0].link.is_included());
+    assert!(
+        !journey.application().has_unsaved_changes(),
+        "the project is saved with the video in it"
+    );
+    let state = fastforwardrs::project_file::archive::state_of_archive(&archive_path).unwrap();
+    assert!(
+        state.bytes_of_included_files() >= original_bytes.len() as u64,
+        "the video is in the project file"
+    );
+    let location = journey
+        .application()
+        .location_of_the_source(THE_VIDEO)
+        .expect("the video is there");
+    assert_eq!(
+        location.stretch().expect("a stretch of the project file").length,
+        original_bytes.len() as u64
+    );
+    assert_eq!(journey.application().thumbnail_progress(THE_VIDEO), (20, 20));
+
+    // The original is gone, as on another computer: a fresh editor has the video from the project file alone.
+    let clips_of_the_first_editor = journey.clips();
+    drop(journey);
+    delete_when_nothing_has_it_open(&original);
+    std::fs::remove_dir(&footage).unwrap();
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().load_project_from(archive_path);
+    fresh.wait_until_idle();
+    assert_eq!(fresh.application().message_showing(), None);
+    assert!(fresh.application().every_source_file_is_available());
+    assert_eq!(fresh.clips(), clips_of_the_first_editor);
+    assert_eq!(fresh.application().thumbnail_progress(THE_VIDEO), (20, 20));
+    assert_exports_exactly_what_the_project_describes(
+        &toolchain,
+        &mut fresh,
+        &scratch.path().join("from the archive.mp4"),
+    );
+}
+
+/// A window that has a project file with a video embedded in it (the video is read in the project file, so on Windows it is open
+/// in it) and as much garbage as a sound that was embedded and taken out of it again, with the menu of its clip, and the project saved
+/// with the menu. (The file cannot be written again yet, with the video read in it.) The sound is about 4.8 megabytes: more than is
+/// worth writing the file again for.
+fn window_with_a_video_read_in_a_project_file_that_has_garbage_in_it(
+    toolchain: &FfmpegToolchain,
+    video: &Path,
+    archive_path: &Path,
+) -> Journey {
+    let tone = support::tone_file(toolchain, 330, 50);
+    let mut journey = Journey::start(toolchain);
+    assert!(journey.application_mut().save_project_to(archive_path.to_owned()));
+    journey.application_mut().embed_and_import_file_from(video.to_owned());
+    journey.wait_until_idle();
+    journey.application_mut().embed_and_import_file_from(tone);
+    journey.wait_until_idle();
+    assert_eq!(journey.application().message_showing(), None);
+    journey.right_click(journey.point_on_the_track_at_frame(100));
+    journey.press_button("Remove from project file");
+    assert_eq!(journey.application().message_showing(), None);
+    journey.press_button("File");
+    journey.press_button("Save project");
+    journey.wait_until_idle();
+    assert_eq!(journey.application().message_showing(), None);
+    let state = fastforwardrs::project_file::archive::state_of_archive(archive_path).unwrap();
+    assert!(
+        state.bytes_of_garbage >= 4_000_000,
+        "the sound that was taken out is still in the file: {state:?}"
+    );
+    journey.wait_for_the_preview_to_show_the_current_frame();
+    journey
+}
+
+#[test]
+fn closing_the_window_writes_the_project_file_again_without_what_was_taken_out_of_it_though_a_video_is_read_in_it() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let archive_path = scratch.path().join("trip.ffrs");
+    let mut journey =
+        window_with_a_video_read_in_a_project_file_that_has_garbage_in_it(&toolchain, &video.path, &archive_path);
+    let length_before = std::fs::metadata(&archive_path).unwrap().len();
+
+    // Closing lets go of the video, writes the file again, and lets the window close.
+    let commands = journey.ask_to_close();
+    journey.wait_until_idle();
+
+    assert_eq!(journey.application().message_showing(), None);
+    assert!(
+        !commands.contains(&egui::ViewportCommand::CancelClose),
+        "it was little to copy: {commands:?}"
+    );
+    let after = fastforwardrs::project_file::archive::state_of_archive(&archive_path).unwrap();
+    assert_eq!(after.bytes_of_garbage, 0);
+    assert!(
+        std::fs::metadata(&archive_path).unwrap().len() + 4_000_000 <= length_before,
+        "the file is shorter by what was garbage"
+    );
+    drop(journey);
+
+    // The video is read where it is now, in what is left: a fresh editor has its pictures.
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().load_project_from(archive_path.clone());
+    fresh.wait_until_idle();
+    assert_eq!(fresh.application().message_showing(), None);
+    assert!(fresh.application().every_source_file_is_available());
+    assert_eq!(fresh.application().thumbnail_progress(THE_VIDEO), (20, 20));
+    fresh.wait_for_the_preview_to_show_the_current_frame();
+    assert_eq!(fresh.frame_number_in_the_preview(), 0);
+    let location = fresh.application().location_of_the_source(THE_VIDEO).unwrap();
+    assert_eq!(
+        location.stretch().unwrap().length,
+        std::fs::metadata(&video.path).unwrap().len()
+    );
+}
+
+/// Makes a project file for looking at with a real window of the program (`trip.ffrs` in the folder that the variable names): a video
+/// embedded in it, and the garbage that a sound that was embedded and taken out of it leaves, so that closing the window writes the file
+/// again. The file is left there. (Run with `--ignored`.)
+#[test]
+#[ignore = "makes a file for a real window to be looked at with; run with --ignored and FASTFORWARDRS_REAL_WINDOW_FOLDER set"]
+fn write_a_project_file_that_has_garbage_for_a_real_window() {
+    let toolchain = toolchain_or_skip!();
+    let folder = PathBuf::from(
+        std::env::var_os("FASTFORWARDRS_REAL_WINDOW_FOLDER").expect("set FASTFORWARDRS_REAL_WINDOW_FOLDER to a folder"),
+    );
+    std::fs::create_dir_all(&folder).unwrap();
+    let video = counter_video(&toolchain);
+    let archive_path = folder.join("trip.ffrs");
+    let _ = std::fs::remove_file(&archive_path);
+    let journey =
+        window_with_a_video_read_in_a_project_file_that_has_garbage_in_it(&toolchain, &video.path, &archive_path);
+    drop(journey);
+    let state = fastforwardrs::project_file::archive::state_of_archive(&archive_path).unwrap();
+    println!(
+        "{}: {} bytes, of which {} are garbage",
+        archive_path.display(),
+        std::fs::metadata(&archive_path).unwrap().len(),
+        state.bytes_of_garbage
+    );
+}
+
+#[test]
+fn closing_the_window_while_the_sound_plays_from_the_project_file_lets_go_of_the_sound_too() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let archive_path = scratch.path().join("trip.ffrs");
+    let mut journey =
+        window_with_a_video_read_in_a_project_file_that_has_garbage_in_it(&toolchain, &video.path, &archive_path);
+    let speakers = journey::speakers::RecordingSpeakers::new();
+    journey.application_mut().play_sound_through(speakers.opener());
+    journey.press_button("Play");
+    journey.keep_drawing_for(std::time::Duration::from_millis(600));
+    assert!(
+        journey.application().sound_is_running(),
+        "the sound is being decoded from the project file"
+    );
+
+    let commands = journey.ask_to_close();
+    journey.wait_until_idle();
+
+    assert_eq!(
+        journey.application().message_showing(),
+        None,
+        "the program that decodes the sound has not got the project file open any more"
+    );
+    assert!(!commands.contains(&egui::ViewportCommand::CancelClose), "{commands:?}");
+    let after = fastforwardrs::project_file::archive::state_of_archive(&archive_path).unwrap();
+    assert_eq!(after.bytes_of_garbage, 0);
+}
+
+#[test]
+fn closing_the_window_while_an_export_is_going_on_does_not_write_the_project_file_again() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let archive_path = scratch.path().join("trip.ffrs");
+    let mut journey =
+        window_with_a_video_read_in_a_project_file_that_has_garbage_in_it(&toolchain, &video.path, &archive_path);
+    let length_before = std::fs::metadata(&archive_path).unwrap().len();
+    journey
+        .application_mut()
+        .export_video_to(scratch.path().join("export.mp4"));
+    assert!(
+        journey.application().is_working_in_the_background(),
+        "the export started"
+    );
+
+    let commands = journey.ask_to_close();
+
+    assert_eq!(journey.application().message_showing(), None);
+    assert!(!commands.contains(&egui::ViewportCommand::CancelClose), "{commands:?}");
+    assert_eq!(
+        std::fs::metadata(&archive_path).unwrap().len(),
+        length_before,
+        "the project file is as it was: the export is reading it"
+    );
 }
 
 /// Deletes `path`, trying for a little while: a program that has just been closed may take a moment to let go of a file.

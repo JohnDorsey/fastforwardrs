@@ -22,6 +22,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::atomic_file::write_file_atomically;
+use crate::media::MediaLocation;
 use crate::project::{
     Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect, EffectKind, Effects,
     FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings, PropertyId, PropertyValue,
@@ -29,7 +30,7 @@ use crate::project::{
     SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
     TrackHeight, TrackId, ValueKind,
 };
-use archive::{ArchiveError, FileToInclude};
+use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
     AnimationDocument, CanvasAreaDocument, ClipDocument, ColourDocument, EffectDocument, KeyframeValueDocument,
     PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument,
@@ -44,10 +45,28 @@ pub const ARCHIVE_FILE_EXTENSION: &str = "ffrs";
 /// What the name of a project file ends with when it is plain JSON, which cannot.
 pub const PLAIN_FILE_EXTENSION: &str = "json";
 
-/// Where the files that are included in a project can be read from, when it is saved: for each source file that is included, the
-/// file that has the same bytes as it. (It is the one in the folder that the project was last loaded from an archive into, or the
-/// one that the file was at, if it was included just now.)
-pub type IncludedFiles = HashMap<SourceMediaIdentifier, PathBuf>;
+/// Where the files that are included in a project can be read from, when it is saved: for each source file that is included, where
+/// the same bytes as it are. (A stretch of the archive that the project was loaded from, if it was in it; or the file that it was, if it
+/// was included just now.)
+pub type IncludedFiles = HashMap<SourceMediaIdentifier, MediaLocation>;
+
+/// How a project that is saved as an archive is written when there is an archive at the place already.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HowToWrite {
+    /// All of it is new, and replaces what is there. (There is nothing of no use in it, and the files in it are written again.)
+    Anew,
+    /// If an archive is there, what is new is added to it: the files that are in it already stay where they are (nothing writes them
+    /// again, and what reads them where they are goes on reading them), and so does what is no longer of use, which takes room until the
+    /// archive is written anew. If there is none, it is written anew.
+    AddingToWhatIsThere,
+}
+
+/// What was written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Written {
+    /// What the archive has in it now and where, if what was written is an archive.
+    pub archive: Option<ArchiveState>,
+}
 
 /// The value of the `file_format` field that marks a JSON file as a fastforwardrs project.
 pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
@@ -94,6 +113,8 @@ pub enum ProjectFileError {
     IncludedFilesNeedAnArchive { path: PathBuf },
     #[error("the file {file_name} is to be in the project file, and there is nowhere to read it from just now")]
     IncludedFileNotAvailable { file_name: String },
+    #[error("it was stopped before it was done")]
+    Stopped,
 }
 
 impl From<ArchiveError> for ProjectFileError {
@@ -101,6 +122,7 @@ impl From<ArchiveError> for ProjectFileError {
         match error {
             ArchiveError::CouldNotRead { path, source } => Self::CouldNotRead { path, source },
             ArchiveError::CouldNotWrite { path, source } => Self::CouldNotWrite { path, source },
+            ArchiveError::Stopped => Self::Stopped,
             other @ (ArchiveError::Unreadable { .. } | ArchiveError::NoSuchEntry { .. }) => Self::NotAProjectFile {
                 reason: other.to_string(),
             },
@@ -143,16 +165,124 @@ pub fn read_project_file(path: &Path) -> Result<Project, ProjectFileError> {
 /// never leave an existing project file half-written. (A project that has files included needs the places to read them from: see
 /// [`write_project_file_including`].)
 pub fn write_project_file(project: &Project, destination: &Path) -> Result<(), ProjectFileError> {
-    write_project_file_including(project, destination, &IncludedFiles::new())
+    write_project_file_including(project, destination, &IncludedFiles::new(), HowToWrite::Anew).map(|_| ())
 }
 
-/// Like [`write_project_file`], for a project that may have files included in it: `files` says where to read each of them from.
-/// Only an archive can have them: nothing is written to a file that is not one, if the project has any.
+/// Like [`write_project_file`], for a project that may have files included in it: `files` says where to read each of them from, and
+/// `how` how an archive that is there already is written. Only an archive can have files included: nothing is written to a file that
+/// is not one, if the project has any.
 pub fn write_project_file_including(
     project: &Project,
     destination: &Path,
     files: &IncludedFiles,
-) -> Result<(), ProjectFileError> {
+    how: HowToWrite,
+) -> Result<Written, ProjectFileError> {
+    plan_the_write(project, destination, files, how)?.carry_out(&mut |_| Ok(()))
+}
+
+/// What writing a project file is going to do, worked out before anything is written, so that how much of a file is to be copied is
+/// known first (and a copy that takes a long time can be done in the background, and be stopped).
+#[derive(Debug)]
+pub struct WritePlan {
+    /// Where it is written (as an absolute path).
+    destination: PathBuf,
+    /// The text of the project.
+    text: String,
+    what: WhatToWrite,
+}
+
+#[derive(Debug)]
+enum WhatToWrite {
+    PlainJson,
+    /// An archive that is written anew, with these files in it.
+    ArchiveAnew {
+        files: Vec<FileToInclude>,
+    },
+    /// The archive that is there is added to: the files that are in it and are named in `keep` stay, and `new_files` are put in.
+    AddToTheArchive {
+        keep: Vec<String>,
+        new_files: Vec<FileToInclude>,
+    },
+    /// The archive that is there is written again without the garbage in it (see [`archive::compact_archive`]), which is as long as
+    /// copying the `bytes_in_use`. Nothing in the project is written: the text of the project in the archive stays as it is.
+    CompactTheArchive {
+        bytes_in_use: u64,
+    },
+}
+
+impl WritePlan {
+    /// How many bytes of files are to be copied into the archive. (The text of the project is not counted.)
+    pub fn bytes_to_copy(&self) -> u64 {
+        let files = match &self.what {
+            WhatToWrite::PlainJson => return 0,
+            WhatToWrite::ArchiveAnew { files } => files,
+            WhatToWrite::AddToTheArchive { new_files, .. } => new_files,
+            WhatToWrite::CompactTheArchive { bytes_in_use } => return *bytes_in_use,
+        };
+        files.iter().map(|file| length_of(&file.source)).sum()
+    }
+
+    /// Writes it. `on_progress` is told how many bytes of files have been copied so far, and an error from it (of kind
+    /// [`io::ErrorKind::Interrupted`]) stops the writing, which leaves what is there as it was.
+    pub fn carry_out(self, on_progress: archive::OnProgress<'_>) -> Result<Written, ProjectFileError> {
+        let could_not_write = |source: io::Error| ProjectFileError::CouldNotWrite {
+            path: self.destination.clone(),
+            source,
+        };
+        let state = match self.what {
+            WhatToWrite::PlainJson => {
+                write_file_atomically(&self.destination, &self.text).map_err(could_not_write)?;
+                return Ok(Written { archive: None });
+            }
+            WhatToWrite::ArchiveAnew { files } => {
+                // (The text of the project is written first, and is not counted in what is to be copied: nor is it told.)
+                let text_bytes = self.text.len() as u64;
+                let mut only_of_the_files = |copied: u64| on_progress(copied.saturating_sub(text_bytes));
+                archive::write_archive_telling(&self.destination, &self.text, &files, &mut only_of_the_files)?;
+                archive::state_of_archive(&self.destination)?
+            }
+            WhatToWrite::AddToTheArchive { keep, new_files } => {
+                let text_bytes = self.text.len() as u64;
+                let mut only_of_the_files = |copied: u64| on_progress(copied.saturating_sub(text_bytes));
+                archive::append_to_archive(&self.destination, &self.text, &keep, &new_files, &mut only_of_the_files)?
+            }
+            WhatToWrite::CompactTheArchive { .. } => archive::compact_archive(&self.destination, on_progress)?,
+        };
+        Ok(Written { archive: Some(state) })
+    }
+}
+
+/// Works out what writing the archive at `archive` again without its garbage is going to do, if it is worth doing (see
+/// [`archive::ArchiveState::is_worth_compacting`]): `None` if `archive` is not an archive that can be read, or has too little garbage.
+/// **The files in it are in other places afterwards**, so nothing may be reading them in place when the plan is carried out.
+pub fn plan_the_compaction(archive: &Path) -> Option<WritePlan> {
+    let absolute_archive = std::path::absolute(archive).ok()?;
+    let state = archive::state_of_archive(&absolute_archive).ok()?;
+    state.is_worth_compacting().then(|| WritePlan {
+        destination: absolute_archive,
+        text: String::new(),
+        what: WhatToWrite::CompactTheArchive {
+            bytes_in_use: state.bytes_in_use,
+        },
+    })
+}
+
+/// How long the bytes at `location` are, as far as can be told (a file that cannot be found has none).
+fn length_of(location: &MediaLocation) -> u64 {
+    location
+        .stretch()
+        .map(|stretch| stretch.length)
+        .or_else(|| fs::metadata(location.file()).ok().map(|metadata| metadata.len()))
+        .unwrap_or(0)
+}
+
+/// Works out what writing `project` to `destination` is going to do (see [`write_project_file_including`]).
+pub fn plan_the_write(
+    project: &Project,
+    destination: &Path,
+    files: &IncludedFiles,
+    how: HowToWrite,
+) -> Result<WritePlan, ProjectFileError> {
     let could_not_write = |source: io::Error| ProjectFileError::CouldNotWrite {
         path: destination.to_owned(),
         source,
@@ -173,31 +303,50 @@ pub fn write_project_file_including(
             });
         }
         let text = project_to_json_text(project, project_directory)?;
-        return write_file_atomically(&absolute_destination, &text).map_err(could_not_write);
+        return Ok(WritePlan {
+            destination: absolute_destination,
+            text,
+            what: WhatToWrite::PlainJson,
+        });
     }
-    let files_to_include = files_to_include_in_an_archive(&included_sources, files)?;
+    let entries = entries_of_the_included_sources(&included_sources)?;
     let text = project_to_json_text(project, project_directory)?;
-    archive::write_archive(&absolute_destination, &text, &files_to_include).map_err(ProjectFileError::from)
+    let what = if how == HowToWrite::AddingToWhatIsThere && archive::is_an_archive(&absolute_destination) {
+        let state = archive::state_of_archive(&absolute_destination)?;
+        let (in_it_already, not_yet): (Vec<_>, Vec<_>) = entries
+            .iter()
+            .cloned()
+            .partition(|(entry_name, _)| state.entries.contains_key(entry_name));
+        let keep = in_it_already.into_iter().map(|(entry_name, _)| entry_name).collect();
+        WhatToWrite::AddToTheArchive {
+            keep,
+            new_files: files_to_include_in_an_archive(&not_yet, files)?,
+        }
+    } else {
+        WhatToWrite::ArchiveAnew {
+            files: files_to_include_in_an_archive(&entries, files)?,
+        }
+    };
+    Ok(WritePlan {
+        destination: absolute_destination,
+        text,
+        what,
+    })
 }
 
-/// The entry and the place to read the file from, for each of the sources that are included. Their entries must be names that an
-/// archive has for the files included in it, and no two of them the same.
-fn files_to_include_in_an_archive(
-    included_sources: &[&SourceMedia],
-    files: &IncludedFiles,
-) -> Result<Vec<FileToInclude>, ProjectFileError> {
+/// The entry of each of the sources that are included. Their entries must be names that an archive has for the files included in it,
+/// and no two of them the same.
+fn entries_of_the_included_sources<'a>(
+    included_sources: &[&'a SourceMedia],
+) -> Result<Vec<(String, &'a SourceMedia)>, ProjectFileError> {
     let mut entry_names = HashSet::new();
-    let mut files_to_include = Vec::with_capacity(included_sources.len());
+    let mut entries = Vec::with_capacity(included_sources.len());
     for source in included_sources {
-        let file_name = source
-            .link
-            .absolute_path
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         let entry_name = source.link.included_as.clone().unwrap_or_default();
         if !archive::is_a_resource_entry_name(&entry_name) {
             return Err(invalid_project(format!(
-                "the file {file_name} is to be included as \"{entry_name}\", which is not a name for it in a project file"
+                "the file {} is to be included as \"{entry_name}\", which is not a name for it in a project file",
+                file_name_of(source)
             )));
         }
         if !entry_names.insert(entry_name.clone()) {
@@ -205,15 +354,38 @@ fn files_to_include_in_an_archive(
                 "more than one file is to be included as \"{entry_name}\""
             )));
         }
-        let path = files
-            .get(&source.identifier)
-            .ok_or(ProjectFileError::IncludedFileNotAvailable { file_name })?;
-        files_to_include.push(FileToInclude {
-            entry_name,
-            path: path.clone(),
-        });
+        entries.push((entry_name, *source));
     }
-    Ok(files_to_include)
+    Ok(entries)
+}
+
+fn file_name_of(source: &SourceMedia) -> String {
+    source
+        .link
+        .absolute_path
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+/// The entry and the place to read the file from, for each of `entries`.
+fn files_to_include_in_an_archive(
+    entries: &[(String, &SourceMedia)],
+    files: &IncludedFiles,
+) -> Result<Vec<FileToInclude>, ProjectFileError> {
+    entries
+        .iter()
+        .map(|(entry_name, source)| {
+            let location = files
+                .get(&source.identifier)
+                .ok_or_else(|| ProjectFileError::IncludedFileNotAvailable {
+                    file_name: file_name_of(source),
+                })?;
+            Ok(FileToInclude {
+                entry_name: entry_name.clone(),
+                source: location.clone(),
+            })
+        })
+        .collect()
 }
 
 /// Whether the archive has an entry for each file that the project in it says is included, which it must for the project to be

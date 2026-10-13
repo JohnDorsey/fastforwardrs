@@ -6,19 +6,17 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{FastForwardApplication, OpeningPurpose, SourceStatus};
+use super::{FastForwardApplication, OpeningPurpose};
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::application::preview_panel::PreviewView;
 use crate::project::Project;
-use crate::project_file::{
-    ARCHIVE_FILE_EXTENSION, IncludedFiles, PLAIN_FILE_EXTENSION, read_project_file, write_project_file_including,
-};
+use crate::project_file::{ARCHIVE_FILE_EXTENSION, PLAIN_FILE_EXTENSION, read_project_file};
 
 impl FastForwardApplication {
     /// Starts an empty project and asks for the first video or sound to put in it.
     pub(super) fn start_new_project(&mut self) {
         self.replace_project(Project::empty(), None);
-        self.import_file();
+        self.link_and_import_file();
     }
 
     /// Asks which project file to load, and loads it.
@@ -67,7 +65,9 @@ impl FastForwardApplication {
                 path
             }
         };
-        self.save_project_to(path);
+        if self.save_project_to(path) {
+            self.tidy_the_project_file_after_saving();
+        }
     }
 
     /// Asks where to save the project, even if it has a file already (the dialog opens in the folder of that file, with its
@@ -79,63 +79,6 @@ impl FastForwardApplication {
             return;
         };
         self.save_project_to(path);
-    }
-
-    /// Saves the project to `path`, which from then on is the project's file, if that can be done: the project file is an archive
-    /// if the name ends in `.ffrs`, with the files that are included in it (a project that has some cannot be saved as anything
-    /// else). Says whether it was saved, and if it was not the user is told why, and nothing has changed.
-    pub fn save_project_to(&mut self, path: PathBuf) -> bool {
-        let included_files = match self.included_files_to_save() {
-            Ok(files) => files,
-            Err(problem) => {
-                self.show_message("The project could not be saved", problem);
-                return false;
-            }
-        };
-        match write_project_file_including(&self.project, &path, &included_files) {
-            Ok(()) => {
-                self.project_file_path = Some(path);
-                self.note_everything_is_saved();
-                true
-            }
-            Err(error) => {
-                self.show_message("The project could not be saved", error.to_string());
-                false
-            }
-        }
-    }
-
-    /// Where the file of each source file that is included in the project file can be read from, to be put in it again when the
-    /// project is saved. The files that are included must all be found and opened for that.
-    fn included_files_to_save(&self) -> Result<IncludedFiles, String> {
-        let mut files = IncludedFiles::new();
-        for source in self.project.sources().iter().filter(|source| source.link.is_included()) {
-            let name = source.link.absolute_path.file_name().map_or_else(
-                || source.identifier.to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            );
-            match self.source_files.get(&source.identifier).map(|state| &state.status) {
-                Some(SourceStatus::Available { path }) => {
-                    files.insert(source.identifier, path.clone());
-                }
-                Some(SourceStatus::Opening) => {
-                    return Err(format!(
-                        "The file {name} is included in the project file, and is still being taken out of it. Save the project again in a moment."
-                    ));
-                }
-                Some(SourceStatus::Unavailable { reason }) => {
-                    return Err(format!(
-                        "The file {name} is included in the project file, and cannot be used just now ({reason}), so it cannot be written to the project file again."
-                    ));
-                }
-                None => {
-                    return Err(format!(
-                        "The file {name} is included in the project file, and has not been taken out of it yet."
-                    ));
-                }
-            }
-        }
-        Ok(files)
     }
 
     /// The name that a project file is offered as when it is saved: the one it has now, or if it has none, the name of the first

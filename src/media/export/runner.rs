@@ -19,6 +19,7 @@ use super::progress::frames_written_in_progress_line;
 use crate::media::UserInterfaceWakeUp;
 use crate::media::child_process::{background_command, collect_error_output_in_background};
 use crate::media::ffmpeg_toolchain::FfmpegToolchain;
+use crate::media::location::MediaLocation;
 
 /// How often the export checks whether ffmpeg has finished, once it has stopped printing.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -70,29 +71,31 @@ pub struct VideoExport {
 }
 
 impl VideoExport {
-    /// Starts exporting. `source_file_paths` are where the plan's source files are, in the order
+    /// Starts exporting. `source_file_locations` are where the plan's source files are, in the order
     /// the plan lists them ([`ExportPlan::source_files`]). The video is written to a temporary
     /// file beside `destination` and moved into place only when it is complete, so a cancelled or
     /// failed export never damages a file that is already at `destination`.
     pub fn start(
         toolchain: &FfmpegToolchain,
         plan: &ExportPlan,
-        source_file_paths: &[PathBuf],
+        source_file_locations: &[MediaLocation],
         destination: &Path,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, ExportError> {
-        if source_file_paths.len() != plan.source_files.len() {
+        if source_file_locations.len() != plan.source_files.len() {
             return Err(ExportError::WrongNumberOfSourceFiles {
                 needed: plan.source_files.len(),
-                given: source_file_paths.len(),
+                given: source_file_locations.len(),
             });
         }
-        if let Some(source_file_path) = source_file_paths
+        // (A source file that is a stretch of another file, such as a project file, is the file that it is in, for this: writing
+        // over that would destroy it as much.)
+        if let Some(location) = source_file_locations
             .iter()
-            .find(|source_file_path| is_the_same_file(source_file_path, destination))
+            .find(|location| is_the_same_file(location.file(), destination))
         {
             return Err(ExportError::DestinationIsASourceFile {
-                path: source_file_path.clone(),
+                path: location.file().to_owned(),
             });
         }
 
@@ -101,7 +104,7 @@ impl VideoExport {
             .tempdir()
             .map_err(ExportError::CouldNotPrepare)?;
         let temporary_output = temporary_output_path(destination);
-        let files = write_working_files(&working_directory, plan, source_file_paths, &temporary_output)?;
+        let files = write_working_files(&working_directory, plan, source_file_locations, &temporary_output)?;
         let arguments = export_arguments(toolchain, &files, &plan.filter_graph, VideoEncoder::choose(toolchain));
 
         let mut child = background_command(toolchain.ffmpeg_path())
@@ -278,13 +281,13 @@ fn temporary_output_path(destination: &Path) -> PathBuf {
 fn write_working_files(
     working_directory: &TempDir,
     plan: &ExportPlan,
-    source_file_paths: &[PathBuf],
+    source_file_locations: &[MediaLocation],
     output: &Path,
 ) -> Result<ExportFiles, ExportError> {
     let filter_graph_file = working_directory.path().join("filter_graph.txt");
     fs::write(&filter_graph_file, &plan.filter_graph.text).map_err(ExportError::CouldNotPrepare)?;
 
-    let mut inputs = source_file_paths.to_vec();
+    let mut inputs = source_file_locations.to_vec();
     for (number, still_picture) in plan.still_pictures.iter().enumerate() {
         let path = working_directory.path().join(format!("still_picture_{number}.png"));
         let png_bytes = still_picture
@@ -292,7 +295,7 @@ fn write_working_files(
             .to_png_bytes()
             .map_err(|error| ExportError::CouldNotPrepare(io::Error::other(error)))?;
         fs::write(&path, png_bytes).map_err(ExportError::CouldNotPrepare)?;
-        inputs.push(path);
+        inputs.push(path.into());
     }
 
     Ok(ExportFiles {

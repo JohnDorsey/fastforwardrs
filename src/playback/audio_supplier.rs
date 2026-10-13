@@ -23,14 +23,13 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::composition::plan_sound;
 use crate::media::export::{sound_graph_specification, sources_of_sound};
 use crate::media::{
-    AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain,
+    AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain, MediaLocation,
     UserInterfaceWakeUp,
 };
 use crate::project::{
@@ -148,7 +147,7 @@ impl AudioStreamStarter for FfmpegAudioStreamStarter {
 pub struct AudioContent<'a> {
     pub project: &'a Project,
     /// Where each source file is that can be used. The sound of a file that is not here is left out.
-    pub source_paths: &'a HashMap<SourceMediaIdentifier, PathBuf>,
+    pub source_locations: &'a HashMap<SourceMediaIdentifier, MediaLocation>,
     pub sped_up_clip_sound: SpedUpClipSound,
 }
 
@@ -167,7 +166,7 @@ impl AudioContent<'_> {
             source.identifier.hash(&mut hasher);
             source.properties.has_sound().hash(&mut hasher);
             source.properties.frame_count_at(frame_rate).hash(&mut hasher);
-            self.source_paths.get(&source.identifier).hash(&mut hasher);
+            self.source_locations.get(&source.identifier).hash(&mut hasher);
         }
         // (What is heard of every keyframe there is, wherever it is kept: a rack of the loudness of a clip in a drawer of another
         // clip, or in a crate, changes the sound as much as one in the clip's own drawer.)
@@ -408,7 +407,7 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
             return StartOutcome::NotNow;
         }
         let plan = plan_sound(content.project, clock.frame, |source| {
-            content.source_paths.contains_key(&source)
+            content.source_locations.contains_key(&source)
         });
         if plan.strips.is_empty() {
             return StartOutcome::NothingToPlay;
@@ -417,7 +416,7 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         let request = AudioStreamRequest {
             source_files: source_identifiers
                 .iter()
-                .map(|identifier| content.source_paths[identifier].clone())
+                .map(|identifier| content.source_locations[identifier].clone())
                 .collect(),
             sound: sound_graph_specification(&plan, &source_identifiers, content.sped_up_clip_sound),
             format: sink.format(),

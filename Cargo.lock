@@ -1166,6 +1166,7 @@ dependencies = [
  "ab_glyph",
  "cosmic-text",
  "cpal",
+ "crc32fast",
  "dirs",
  "eframe",
  "egui",

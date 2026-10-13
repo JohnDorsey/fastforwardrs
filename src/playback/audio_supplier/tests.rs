@@ -163,7 +163,7 @@ struct Bench {
     starter: FakeStarter,
     speakers: Rc<RefCell<SpeakerState>>,
     project: Project,
-    source_paths: HashMap<SourceMediaIdentifier, PathBuf>,
+    source_locations: HashMap<SourceMediaIdentifier, MediaLocation>,
     now: Instant,
     sped_up_clip_sound: SpedUpClipSound,
     channel_count: u16,
@@ -253,7 +253,7 @@ impl Bench {
             starter,
             speakers,
             project,
-            source_paths: HashMap::from([(VIDEO, PathBuf::from("holiday.mp4"))]),
+            source_locations: HashMap::from([(VIDEO, MediaLocation::from("holiday.mp4"))]),
             now: Instant::now(),
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
             channel_count,
@@ -280,7 +280,7 @@ impl Bench {
     fn update_at(&mut self, seconds: f64, is_playing: bool) {
         let content = AudioContent {
             project: &self.project,
-            source_paths: &self.source_paths,
+            source_locations: &self.source_locations,
             sped_up_clip_sound: self.sped_up_clip_sound,
         };
         self.supplier
@@ -392,7 +392,7 @@ fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
 
     assert_eq!(bench.streams_started(), 1);
     let request = bench.starter.requests.borrow()[0].clone();
-    assert_eq!(request.source_files, vec![PathBuf::from("holiday.mp4")]);
+    assert_eq!(request.source_files, vec![MediaLocation::from("holiday.mp4")]);
     assert_eq!(request.sound.frame_rate, frame_rate());
     assert_eq!(request.sound.total_frame_count, 80);
     assert_eq!(
@@ -1122,10 +1122,10 @@ fn without_any_speakers_given_there_is_no_sound_and_no_complaint() {
     };
     let mut supplier = AudioSupplier::new(starter.clone());
     let project = project_of_clips(&[(0, 600, 1)]);
-    let source_paths = HashMap::from([(VIDEO, PathBuf::from("holiday.mp4"))]);
+    let source_locations = HashMap::from([(VIDEO, MediaLocation::from("holiday.mp4"))]);
     let content = AudioContent {
         project: &project,
-        source_paths: &source_paths,
+        source_locations: &source_locations,
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };
     supplier.update(Some(content), Bench::clock_at(1.0, true), Instant::now());

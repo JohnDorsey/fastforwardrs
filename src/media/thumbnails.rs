@@ -9,7 +9,6 @@
 //! are actually on screen are ever decompressed.
 
 use std::io::{self, Read};
-use std::path::Path;
 use std::sync::mpsc::SyncSender;
 
 use image::codecs::jpeg::JpegEncoder;
@@ -20,6 +19,7 @@ use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::frame_stream::DecodedFrame;
+use super::location::MediaLocation;
 use crate::project::{FrameRate, SourceFrameIndex};
 
 /// The most pictures that one run of ffmpeg is asked for when finer ones are made for the part of the
@@ -277,21 +277,21 @@ pub struct ThumbnailExtraction {
 }
 
 impl ThumbnailExtraction {
-    /// Starts making a thumbnail of `size` for every second of the video at `video_path`. The
+    /// Starts making a thumbnail of `size` for every second of the video at `video`. The
     /// `wake_up` callback is called each time something new is waiting.
     pub fn start(
         toolchain: &FfmpegToolchain,
-        video_path: &Path,
+        video: impl Into<MediaLocation>,
         size: PictureSize,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, ThumbnailError> {
-        Self::start_range(toolchain, video_path, size, ThumbnailRange::EVERY_SECOND, wake_up)
+        Self::start_range(toolchain, video, size, ThumbnailRange::EVERY_SECOND, wake_up)
     }
 
     /// Starts making the thumbnails of `range` (see [`ThumbnailRange`]).
     pub fn start_range(
         toolchain: &FfmpegToolchain,
-        video_path: &Path,
+        video: impl Into<MediaLocation>,
         size: PictureSize,
         range: ThumbnailRange,
         wake_up: UserInterfaceWakeUp,
@@ -301,7 +301,7 @@ impl ThumbnailExtraction {
         }
         let lead_in = range.lead_in();
         let mut command = background_command(toolchain.ffmpeg_path());
-        command.args(thumbnail_range_arguments(video_path, size, range));
+        command.args(thumbnail_range_arguments(video, size, range));
         let tool = StreamingTool::start(
             command,
             THUMBNAILS_BUFFERED_AHEAD,
@@ -367,8 +367,8 @@ fn read_thumbnails(
 }
 
 /// The ffmpeg command line that makes one thumbnail per second.
-pub fn thumbnail_arguments(video_path: &Path, size: PictureSize) -> Vec<std::ffi::OsString> {
-    thumbnail_range_arguments(video_path, size, ThumbnailRange::EVERY_SECOND)
+pub fn thumbnail_arguments(video: impl Into<MediaLocation>, size: PictureSize) -> Vec<std::ffi::OsString> {
+    thumbnail_range_arguments(video, size, ThumbnailRange::EVERY_SECOND)
 }
 
 /// The ffmpeg command line that makes the thumbnails of `range`.
@@ -381,7 +381,7 @@ pub fn thumbnail_arguments(video_path: &Path, size: PictureSize) -> Vec<std::ffi
 /// with a duplicate of it in front). So the pictures from there to the first moment are made too, and
 /// thrown away by the one that reads them.
 pub fn thumbnail_range_arguments(
-    video_path: &Path,
+    video: impl Into<MediaLocation>,
     size: PictureSize,
     range: ThumbnailRange,
 ) -> Vec<std::ffi::OsString> {
@@ -400,7 +400,7 @@ pub fn thumbnail_range_arguments(
         ]);
     }
     arguments.push(OsString::from("-i"));
-    arguments.push(video_path.into());
+    arguments.push(video.into().ffmpeg_input());
     arguments.extend(["-an", "-sn", "-dn", "-vf"].map(OsString::from));
     arguments.push(
         format!(
@@ -421,6 +421,8 @@ pub fn thumbnail_range_arguments(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     fn size(width: u32, height: u32) -> PictureSize {

@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use super::filter_graph::FilterGraph;
 use crate::media::child_process::background_command;
 use crate::media::ffmpeg_toolchain::FfmpegToolchain;
+use crate::media::location::MediaLocation;
 
 /// The files an export hands to ffmpeg.
 #[derive(Clone, Debug)]
 pub struct ExportFiles {
     /// The files ffmpeg reads, in the order they are its inputs 0, 1, ...: the source files, then
     /// the still pictures (the fast-forward symbols and the text).
-    pub inputs: Vec<PathBuf>,
+    pub inputs: Vec<MediaLocation>,
     /// The filter graph, saved in a file: for a project with many clips it is far longer than the
     /// command line allows.
     pub filter_graph_file: PathBuf,
@@ -84,7 +85,7 @@ pub fn export_arguments(
         .to_vec();
     for input in &files.inputs {
         arguments.push("-i".into());
-        arguments.push(input.clone().into());
+        arguments.push(input.ffmpeg_input());
     }
 
     arguments.push(filter_graph_file_option(toolchain).into());
@@ -135,8 +136,8 @@ mod tests {
     /// Files for an export that reads `holiday.mp4` and then `picture_count` still pictures.
     fn files(picture_count: usize, output: &str) -> ExportFiles {
         ExportFiles {
-            inputs: std::iter::once(PathBuf::from("holiday.mp4"))
-                .chain((0..picture_count).map(|number| PathBuf::from(format!("picture_{number}.png"))))
+            inputs: std::iter::once(MediaLocation::from("holiday.mp4"))
+                .chain((0..picture_count).map(|number| MediaLocation::from(format!("picture_{number}.png").as_str())))
                 .collect(),
             filter_graph_file: PathBuf::from("graph.txt"),
             output: PathBuf::from(output),
@@ -211,7 +212,7 @@ mod tests {
     #[test]
     fn every_input_is_read_with_its_own_dash_i_in_the_order_given() {
         let files = ExportFiles {
-            inputs: ["a.mp4", "b.mp3", "c.png"].map(PathBuf::from).to_vec(),
+            inputs: ["a.mp4", "b.mp3", "c.png"].map(MediaLocation::from).to_vec(),
             filter_graph_file: PathBuf::from("graph.txt"),
             output: PathBuf::from("out.mp4"),
         };

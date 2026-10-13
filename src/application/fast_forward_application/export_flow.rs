@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::{FastForwardApplication, RunningExport};
 use crate::application::file_chooser::{FileKind, FileQuestion};
+use crate::media::MediaLocation;
 use crate::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
 use crate::project::{SourceMediaIdentifier, TextObject};
 use crate::rgba_picture::RgbaPicture;
@@ -105,15 +106,15 @@ impl FastForwardApplication {
                 return;
             }
         };
-        let source_file_paths: Vec<PathBuf> = plan
+        let source_file_locations: Vec<MediaLocation> = plan
             .source_files
             .iter()
-            .filter_map(|identifier| Some(self.source_files.get(identifier)?.path_if_available()?.to_owned()))
+            .filter_map(|identifier| Some(self.source_files.get(identifier)?.location_if_available()?.clone()))
             .collect();
         match VideoExport::start(
             &toolchain,
             &plan,
-            &source_file_paths,
+            &source_file_locations,
             &destination,
             Arc::clone(&self.wake_up),
         ) {

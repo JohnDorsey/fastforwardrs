@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use egui::accesskit::{Action, ActionData, ActionRequest, Role};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Shape, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Shape, ViewportCommand, ViewportEvent, ViewportId, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
@@ -160,9 +160,10 @@ fn replace_project_with_all_its_files_available(application: &mut FastForwardApp
         .collect();
     application.replace_project(project, None);
     for (identifier, path) in sources {
-        application
-            .source_files
-            .insert(identifier, SourceFileState::new(SourceStatus::Available { path }));
+        application.source_files.insert(
+            identifier,
+            SourceFileState::new(SourceStatus::Available { location: path.into() }),
+        );
     }
 }
 
@@ -263,6 +264,29 @@ impl Window {
                 break;
             }
         }
+    }
+
+    /// What the window told its viewport to do in the last frame (to close, or not to).
+    pub(super) fn viewport_commands_of_the_last_frame(&self) -> Vec<ViewportCommand> {
+        self.harness
+            .output()
+            .viewport_output
+            .get(&ViewportId::ROOT)
+            .map(|output| output.commands.clone())
+            .unwrap_or_default()
+    }
+
+    /// Asks the window to close, as its close button does, draws a frame, and says what the window told its viewport to do.
+    pub(super) fn ask_to_close(&mut self) -> Vec<ViewportCommand> {
+        self.harness
+            .input_mut()
+            .viewports
+            .entry(ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(ViewportEvent::Close);
+        self.harness.step();
+        self.viewport_commands_of_the_last_frame()
     }
 
     pub(super) fn rectangle_of(&self, label: &str) -> Rect {

@@ -2,27 +2,28 @@
 //!
 //! A project file that is a `.ffrs` archive can have files in it (see [`crate::project_file::archive`]): the ones that the user
 //! chose, from the menu of a clip, to include. Which ones is part of the project (see [`crate::project::SourceMediaLink`]) but is
-//! not an edit that can be undone, as choosing a file again is not: it is where a file is kept, and not what is done with it. The
-//! files are put in the archive when the project is saved.
+//! not an edit that can be undone, as choosing a file again is not: it is where a file is kept, and not what is done with it. A
+//! file that is included is read where it is in the archive.
 //!
-//! * **Including** a file that is found, in a project whose file is an archive, only says so: the file is read, and put in the
-//!   archive, the next time the project is saved. If the project's file is not an archive (it has none yet, or it is plain JSON),
-//!   the user is told that it has to be one, and asked where to save it as one; and when they choose, the files are included and the
-//!   project is saved there, as one step.
+//! * **Including** a file that is found, in a project whose file is an archive, writes it into the archive now, with the project
+//!   (which says that it is included): the files that are in the archive already are not written again. If the project's file is not
+//!   an archive (it has none yet, or it is plain JSON), the user is told that it has to be one, and asked where to save it as one;
+//!   and when they choose, the files are included and the project is saved there, as one step.
 //! * **Taking out** a file puts it back where it was when it was included (the place it had then, and if that has gone, the same
 //!   place relative to the folder the project file is in now): where the same file is already, nothing is copied; where another file
 //!   is, the place is not used, and where nothing is, the file is put there if the folder is. If there is no place, it stays in the
-//!   project file, and the user is told.
+//!   project file, and the user is told. (Its bytes stay in the archive until the next time the archive is written anew.)
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{FastForwardApplication, SourceStatus};
+use super::{FastForwardApplication, OpeningPurpose, SourceStatus};
 use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::atomic_file::replace_file_atomically;
+use crate::media::MediaLocation;
 use crate::project::{SourceMediaIdentifier, SourceMediaLink};
-use crate::project_file::archive::{have_the_same_contents, resource_entry_name};
+use crate::project_file::archive::{copy_bytes_of, have_the_same_contents, resource_entry_name};
 use crate::project_file::{ARCHIVE_FILE_EXTENSION, is_the_name_of_an_archive, relative_path_between};
 
 impl FastForwardApplication {
@@ -42,14 +43,15 @@ impl FastForwardApplication {
             )
     }
 
-    /// Where the file of the source file `identifier` is now, if it has been found and opens.
-    fn place_of_the_file_of(&self, identifier: SourceMediaIdentifier) -> Option<PathBuf> {
-        self.source_files.get(&identifier)?.status_path()
+    /// Where the bytes of the file of the source file `identifier` are now, if it has been found and opens.
+    fn location_of_the_file_of(&self, identifier: SourceMediaIdentifier) -> Option<MediaLocation> {
+        self.source_files.get(&identifier)?.location_if_available().cloned()
     }
 
     /// Puts the files of the source files `identifiers` in the project file: the ones that are found, and are not included
     /// already. If the project's file is not an archive, the user is asked first to save it as one (see
-    /// [`Self::save_as_an_archive_with_files_included`]). A file that cannot be found is not included, and is said so.
+    /// [`Self::save_as_an_archive_with_files_included`]). A file that cannot be found is not included, and is said so. (The project is
+    /// saved as the files are put in it, with all else that was changed in it.)
     pub(super) fn include_files_in_the_project_file(&mut self, identifiers: &[SourceMediaIdentifier]) {
         let (to_include, not_found) = self.files_that_can_be_included(identifiers);
         if to_include.is_empty() {
@@ -58,11 +60,15 @@ impl FastForwardApplication {
             }
             return;
         }
-        if self.project_file_is_an_archive() {
+        if let Some(archive) = self
+            .project_file_path
+            .clone()
+            .filter(|_| self.project_file_is_an_archive())
+        {
             let project_directory = self.project_directory();
+            let project_before = self.project.clone();
             self.mark_as_included(&to_include, project_directory.as_deref());
-            self.note_unsaved_change();
-            if !not_found.is_empty() {
+            if self.save_the_project(archive, Some(project_before)) && !not_found.is_empty() {
                 self.show_message_about_files_that_are_not_found(&not_found);
             }
         } else {
@@ -89,7 +95,7 @@ impl FastForwardApplication {
             if source.link.is_included() || to_include.contains(identifier) {
                 continue;
             }
-            if self.place_of_the_file_of(*identifier).is_some() {
+            if self.location_of_the_file_of(*identifier).is_some() {
                 to_include.push(*identifier);
             } else {
                 not_found.push(self.name_of_the_file_of(*identifier));
@@ -124,9 +130,10 @@ impl FastForwardApplication {
     /// from `project_directory` (the folder of the project file they are to be included in, if it is known).
     fn mark_as_included(&mut self, identifiers: &[SourceMediaIdentifier], project_directory: Option<&Path>) {
         for identifier in identifiers {
-            let Some(place) = self.place_of_the_file_of(*identifier) else {
+            let Some(location) = self.location_of_the_file_of(*identifier) else {
                 continue;
             };
+            let place = location.file().to_owned();
             let absolute_path = std::path::absolute(&place).unwrap_or(place);
             let relative_path = project_directory.and_then(|folder| relative_path_between(folder, &absolute_path));
             let file_name = absolute_path
@@ -155,8 +162,39 @@ impl FastForwardApplication {
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf));
         self.mark_as_included(identifiers, project_directory.as_deref());
-        if !self.save_project_to(path) {
-            self.project = project_before;
+        self.save_the_project(path, Some(project_before));
+    }
+
+    /// Asks the user for a video, a sound or a picture and puts all of it on the timeline, at the current frame, and in the project
+    /// file. The project file has to be an archive for that: if it is not one the user is asked first to save it as one, and
+    /// only if they agree (and it is saved) is the file asked for (see [`Self::save_as_an_archive_and_ask_for_a_file_to_embed`]).
+    pub(super) fn embed_and_import_file(&mut self) {
+        self.pause_playback_for_dialog();
+        if self.project_file_is_an_archive() {
+            self.ask_for_a_file_to_embed();
+        } else {
+            self.dialog = Some(Dialog::MustSaveAsAnArchiveToEmbedAFile {
+                has_a_plain_project_file: self.project_file_path.is_some(),
+            });
+        }
+    }
+
+    fn ask_for_a_file_to_embed(&mut self) {
+        if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound or a picture to embed") {
+            self.start_opening(OpeningPurpose::ImportNewSourceAndEmbedIt, vec![path]);
+        }
+    }
+
+    /// Asks where to save the project as an archive (with nothing included yet, so that it is written at once), and then asks for
+    /// the file to embed in it. Nothing more happens if no place is chosen, or the project cannot be saved there (and the user is told
+    /// why).
+    pub(super) fn save_as_an_archive_and_ask_for_a_file_to_embed(&mut self) {
+        self.pause_playback_for_dialog();
+        let Some(path) = self.ask_where_to_save_an_archive("Save the project to embed a file in it") else {
+            return;
+        };
+        if self.save_the_project(path, None) && self.project_file_is_an_archive() && self.running_save.is_none() {
+            self.ask_for_a_file_to_embed();
         }
     }
 
@@ -202,7 +240,7 @@ impl FastForwardApplication {
                 continue;
             }
             let name = self.name_of_the_file_of(*identifier);
-            let Some(bytes_at) = self.place_of_the_file_of(*identifier) else {
+            let Some(bytes_at) = self.location_of_the_file_of(*identifier) else {
                 problems.push(format!("{name}: it cannot be found or opened just now"));
                 continue;
             };
@@ -222,7 +260,9 @@ impl FastForwardApplication {
                     );
                     // (It is the same file, wherever it is: what was made from it stays.)
                     if let Some(state) = self.source_files.get_mut(identifier) {
-                        state.status = SourceStatus::Available { path: place };
+                        state.status = SourceStatus::Available {
+                            location: MediaLocation::of_a_file(place),
+                        };
                     }
                     took_out_any = true;
                 }
@@ -258,12 +298,14 @@ fn places_it_was_at(link: &SourceMediaLink, project_directory: Option<&Path>) ->
     places
 }
 
-/// Puts the file at `bytes_at` at the first of `places` that it can be, and says which. Where a file is that has just what `bytes_at`
-/// has in it, that is where it is (nothing is copied); where there is another file, or anything else, it is left alone, and that
-/// place is not used; and where there is nothing, the file is put there, if the folder it is to be in is there.
-fn put_back(bytes_at: &Path, places: &[PathBuf]) -> Result<PathBuf, String> {
+/// Puts the file at `bytes_at` (a file, or a stretch of one: where it is in the archive) at the first of `places` that it can be, and
+/// says which. Where a file is that has just what `bytes_at` has in it, that is where it is (nothing is copied); where there is another
+/// file, or anything else, it is left alone, and that place is not used; and where there is nothing, the file is put there, if the
+/// folder it is to be in is there.
+fn put_back(bytes_at: impl Into<MediaLocation>, places: &[PathBuf]) -> Result<PathBuf, String> {
+    let bytes_at = bytes_at.into();
     for place in places {
-        if place.is_file() && have_the_same_contents(bytes_at, place).unwrap_or(false) {
+        if place.is_file() && have_the_same_contents(&bytes_at, place.as_path()).unwrap_or(false) {
             return Ok(place.clone());
         }
     }
@@ -274,10 +316,7 @@ fn put_back(bytes_at: &Path, places: &[PathBuf]) -> Result<PathBuf, String> {
         if fs::symlink_metadata(place).is_ok() || !folder_is_there {
             continue;
         }
-        let copied = replace_file_atomically(place, |file| {
-            let mut source = fs::File::open(bytes_at)?;
-            std::io::copy(&mut source, file).map(|_| ())
-        });
+        let copied = replace_file_atomically(place, |file| copy_bytes_of(&bytes_at, file).map(|_| ()));
         match copied {
             Ok(()) => return Ok(place.clone()),
             Err(error) => return Err(format!("it could not be put back at {}: {error}", place.display())),

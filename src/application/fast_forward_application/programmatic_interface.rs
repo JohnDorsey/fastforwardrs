@@ -10,16 +10,26 @@ use std::time::Instant;
 
 use super::{FastForwardApplication, OpeningPurpose};
 use crate::application::selection::SelectionItem;
+use crate::media::MediaLocation;
 use crate::playback::{AudioSinkOpener, EffectSpeakersOpener, SuppliedPicture};
 use crate::project::{ClipId, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
 
 impl FastForwardApplication {
     /// Puts the video or sound file at `path` on the timeline at the current frame, as choosing it
-    /// in the Import dialog does.
+    /// after "Link and import" does.
     ///
     /// The file is opened in the background; see [`Self::is_working_in_the_background`].
-    pub fn import_file_from(&mut self, path: PathBuf) {
+    pub fn link_and_import_file_from(&mut self, path: PathBuf) {
         self.start_opening(OpeningPurpose::ImportNewSource, vec![path]);
+    }
+
+    /// Puts the video or sound file at `path` on the timeline at the current frame, and in the project file, as choosing it
+    /// after "Embed and import" does. (Unlike the menu item, this does not first ask that the project file be a `.ffrs` file: if it
+    /// is not one the file is put on the timeline, and the user is asked as for any file that is included.)
+    ///
+    /// The file is opened in the background; see [`Self::is_working_in_the_background`].
+    pub fn embed_and_import_file_from(&mut self, path: PathBuf) {
+        self.start_opening(OpeningPurpose::ImportNewSourceAndEmbedIt, vec![path]);
     }
 
     /// Uses the file at `path` in place of the source file `identifier` of the project, as
@@ -89,6 +99,18 @@ impl FastForwardApplication {
             .all(|source| self.source_is_available(source.identifier))
     }
 
+    /// Where the bytes of the source file `identifier` are, if it has been found and opens: a file of its own, or (for one that is
+    /// included in the project file) the stretch of the project file that it is.
+    pub fn location_of_the_source(&self, identifier: SourceMediaIdentifier) -> Option<MediaLocation> {
+        self.source_files.get(&identifier)?.location_if_available().cloned()
+    }
+
+    /// Sets how many bytes of files a save copies without doing it in the background (where there is a window that says how it goes,
+    /// and a button to stop it). For a test that makes a save a small one cannot be.
+    pub fn copy_in_the_background_from(&mut self, bytes: u64) {
+        self.most_bytes_copied_at_once = bytes;
+    }
+
     /// Whether the warning that source files must be chosen again is showing.
     pub fn missing_sources_warning_is_showing(&self) -> bool {
         self.missing_sources_warning_open && !self.missing_sources().is_empty()
@@ -99,6 +121,7 @@ impl FastForwardApplication {
     pub fn is_working_in_the_background(&self) -> bool {
         !self.openings.is_empty()
             || self.export.is_some()
+            || self.running_save.is_some()
             || self.text_renderer.is_loading()
             || self.source_files.values().any(|state| {
                 state.thumbnails.extraction.is_some()

@@ -37,7 +37,7 @@ fn importing_asks_for_a_video_a_sound_or_a_picture_with_all_of_those_offered_fir
     chooser.will_answer(None);
     let mut window = window_that_asks(&chooser);
 
-    window.do_this(Command::ImportFile);
+    window.do_this(Command::LinkAndImportFile);
 
     let asked = chooser.questions_asked();
     assert_eq!(asked.len(), 1, "one question");
@@ -77,7 +77,7 @@ fn choosing_no_file_to_import_changes_nothing() {
     let mut window = window_that_asks(&chooser);
     let clips_before = window.clips();
 
-    window.do_this(Command::ImportFile);
+    window.do_this(Command::LinkAndImportFile);
 
     assert_eq!(window.clips(), clips_before);
     assert!(
@@ -310,7 +310,8 @@ fn nothing_in_the_file_menu_can_be_chosen_while_a_message_is_up() {
         "Save project",
         "Save project as",
         "Load project",
-        "Import",
+        "Embed and import",
+        "Link and import",
         "Export",
     ] {
         assert!(

@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use super::*;
 use crate::playback::scripted_streams::{Script, ScriptedStarter};
 use crate::project::TrackId;
@@ -15,7 +13,7 @@ fn supplier() -> (PictureSupplier<ScriptedStarter>, Script) {
         picture_height_in_pixels: 36,
         videos: vec![PreviewVideo {
             source: VIDEO,
-            video_path: PathBuf::from("holiday.mp4"),
+            location: MediaLocation::from("holiday.mp4"),
             display_size_in_pixels: (1280, 720),
             frame_rate: FrameRate::new(25, 1).unwrap(),
         }],
@@ -78,7 +76,7 @@ fn the_first_request_starts_a_stream_at_the_wanted_picture_that_runs_to_the_end_
     assert_eq!(
         script.requests(),
         vec![FrameStreamRequest {
-            video_path: PathBuf::from("holiday.mp4"),
+            video: MediaLocation::from("holiday.mp4"),
             project_frame_rate: FrameRate::new(30, 1).unwrap(),
             video_frame_rate: FrameRate::new(25, 1).unwrap(),
             first_source_frame: SourceFrameIndex::new(50),

@@ -141,6 +141,6 @@ fn a_file_that_is_not_a_picture_is_an_error_with_what_ffmpeg_said() {
     let error = decode_picture(&toolchain, &path, (10, 10)).unwrap_err();
     assert!(error.to_string().contains("could not be decoded"), "{error}");
 
-    let missing = decode_picture(&toolchain, &folder.path().join("nothing.png"), (10, 10)).unwrap_err();
+    let missing = decode_picture(&toolchain, folder.path().join("nothing.png"), (10, 10)).unwrap_err();
     assert!(missing.to_string().contains("could not be decoded"), "{missing}");
 }

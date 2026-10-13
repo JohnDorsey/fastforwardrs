@@ -2,26 +2,40 @@
 //! and the files that the user chose to include in it (see [`crate::project::SourceMediaLink::included_as`]).
 //!
 //! Nothing in an archive is compressed: the files are the kind that are compressed already (videos, sounds, pictures), so it would
-//! take time and give nothing, and as they are stored they are in the archive as they are, which any zip program can read and
-//! which a program could read from where they are without taking them out first. An archive is written all at once to a
-//! temporary file that replaces the old archive when it is whole, so a failure never leaves half of one.
+//! take time and give nothing, and as they are stored they are in the archive as they are. Any zip program can read it, and the
+//! editor reads a file *where it is in the archive*, as a stretch of it (see [`crate::media::MediaLocation`]), without taking it out.
+//!
+//! **A file in an archive is written once and never changes or moves.** Saving a project that has several gigabytes of video included
+//! in it must not write the video again (and on Windows could not replace the archive while a program has it open for reading: the
+//! video is read in place). So a save *adds* to the archive: the new project text, a new directory and a new end record, after what is
+//! there (see the `layout` module for how that is done so that a save that is cut off leaves the archive as it was). What the archive had
+//! before is garbage in the middle of it, which is left, and is counted: [`compact_archive`] writes the archive again without it, as a
+//! new file that replaces the old, which can be done when no program is reading the archive. An archive that is written *anew*
+//! ([`write_archive`]) has no garbage in it.
 //!
 //! The entries are `project.fastforwardrs.json` and, for each file that is included, `resources/<number>-<file name>` (the
 //! number is the identifier of the source file in the project, so that two files of one name are two entries). Names of entries
 //! that come from a file are never used as paths: they are looked up in the archive, and a file that is taken out of one is put
 //! where the program says, under a name the program makes.
 
-use std::fs::{self, File};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use zip::ZipArchive;
 use zip::result::ZipError;
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+mod layout;
 
 use crate::atomic_file::replace_file_atomically;
+use crate::media::MediaLocation;
 use crate::project::SourceMediaIdentifier;
+use layout::{
+    Directory, FirstBytesOf, LayoutProblem, Placed, Writer, Zip64Thresholds, cut_off_the_unfinished_save,
+    read_directory,
+};
 
 /// The name of the entry that has the project.
 pub const PROJECT_ENTRY_NAME: &str = "project.fastforwardrs.json";
@@ -42,6 +56,10 @@ const COPY_BUFFER_BYTES: usize = 1 << 20;
 /// The first four bytes of a zip file that has something in it.
 const MARK_OF_A_ZIP_FILE: [u8; 4] = *b"PK\x03\x04";
 
+/// What a program that is told how far a copy has got is told: how many bytes of the included files have been written so far, of all
+/// that are to be. It may stop the writing by giving an error (of kind [`io::ErrorKind::Interrupted`]), and nothing is changed then.
+pub type OnProgress<'a> = &'a mut dyn FnMut(u64) -> io::Result<()>;
+
 #[derive(Debug, Error)]
 pub enum ArchiveError {
     #[error("{path} could not be read: {source}")]
@@ -52,6 +70,9 @@ pub enum ArchiveError {
     Unreadable { path: PathBuf, reason: String },
     #[error("the archive {path} has no \"{entry_name}\" in it")]
     NoSuchEntry { path: PathBuf, entry_name: String },
+    /// The progress said to stop, and the archive is as it was.
+    #[error("it was stopped before it was done")]
+    Stopped,
 }
 
 /// A file to put in an archive.
@@ -59,8 +80,8 @@ pub enum ArchiveError {
 pub struct FileToInclude {
     /// The name of its entry (see [`resource_entry_name`]).
     pub entry_name: String,
-    /// Where the file is, which it is read from.
-    pub path: PathBuf,
+    /// Where its bytes are, which they are read from: a file of its own, or a stretch of another (an archive that has it).
+    pub source: MediaLocation,
 }
 
 /// What an archive says about one of its entries, without taking it out.
@@ -70,6 +91,81 @@ pub struct EntryFacts {
     pub size: u64,
     /// The CRC-32 of the file, which is what tells it from another file of the same size.
     pub crc32: u32,
+}
+
+/// Where the bytes of an entry are in its archive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntryPlace {
+    /// How far into the archive the first byte of the file is.
+    pub data_start: u64,
+    /// How many bytes of the archive it takes up, which is how long the file is if it is stored as it is.
+    pub stored_length: u64,
+    /// How long the file is.
+    pub length: u64,
+    pub crc32: u32,
+    /// Whether the file is stored as it is (all that this program writes), and so can be read where it is. A file that another program
+    /// compressed cannot.
+    pub is_stored: bool,
+}
+
+impl EntryPlace {
+    /// Where the file can be read where it is in the archive `archive`, if it is stored as it is.
+    pub fn as_a_location_in(&self, archive: &Path) -> Option<MediaLocation> {
+        self.is_stored
+            .then(|| MediaLocation::of_a_stretch_of(archive, self.data_start, self.length))
+    }
+}
+
+/// What an archive has in it, and how much of it is of no use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArchiveState {
+    pub entries: HashMap<String, EntryPlace>,
+    /// How many bytes of the file are the entries, the directory and the end record.
+    pub bytes_in_use: u64,
+    /// How many bytes are what was in the archive before (see the beginning of this file), which [`compact_archive`] takes away.
+    pub bytes_of_garbage: u64,
+}
+
+impl ArchiveState {
+    fn of(directory: &Directory) -> Self {
+        let entries = directory
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.name.clone(),
+                    EntryPlace {
+                        data_start: entry.data_start,
+                        stored_length: entry.stored_length,
+                        length: entry.length,
+                        crc32: entry.crc32,
+                        is_stored: entry.is_stored(),
+                    },
+                )
+            })
+            .collect();
+        Self {
+            entries,
+            bytes_in_use: directory.bytes_in_use(),
+            bytes_of_garbage: directory.bytes_of_garbage(),
+        }
+    }
+
+    /// How many bytes of the archive are in the files that are included in it (not the project text, nor the garbage).
+    pub fn bytes_of_included_files(&self) -> u64 {
+        self.entries
+            .iter()
+            .filter(|(name, _)| name.as_str() != PROJECT_ENTRY_NAME)
+            .map(|(_, place)| place.stored_length)
+            .sum()
+    }
+
+    /// Whether the garbage is enough to be worth taking away by writing the archive again, which takes as long as copying what is in
+    /// use: some megabytes of it, and at least as many as half of that (so that a project of a few gigabytes of video is not written
+    /// again to take away a few hundred kilobytes of text that saves left).
+    pub fn is_worth_compacting(&self) -> bool {
+        self.bytes_of_garbage >= (4 << 20).max(self.bytes_in_use / 2)
+    }
 }
 
 /// Whether the file at `path` is a zip file, by the first bytes of it (a project file that is only JSON begins with a brace).
@@ -145,67 +241,296 @@ pub fn file_name_of_a_resource_entry(name: &str) -> Option<&str> {
         .map(|(_, file_name)| file_name)
 }
 
-/// How long a file has to be to be written in the zip64 form, which is the way that the zip format has for files that are too long
-/// for its ordinary one (which says how long a file is in four bytes, and so cannot say it for one of four gigabytes or more): the
-/// zip crate's own limit, one byte short of 4 GiB.
-const LENGTH_FROM_WHICH_A_FILE_IS_IN_THE_ZIP64_FORM: u64 = zip::ZIP64_BYTES_THR;
+// --- writing ---
 
-/// Writes the archive at `destination`, replacing the file there if there is one, with the project as `project_text` and the files
-/// `files` in it. Nothing is changed unless the whole of it is written.
-pub fn write_archive(destination: &Path, project_text: &str, files: &[FileToInclude]) -> Result<(), ArchiveError> {
-    write_archive_with_the_zip64_form_from(
-        destination,
-        project_text,
-        files,
-        LENGTH_FROM_WHICH_A_FILE_IS_IN_THE_ZIP64_FORM,
-    )
+/// Where the bytes of an entry that is being written come from.
+struct Opened {
+    reader: Box<dyn Read>,
+    length: u64,
+    /// What the CRC-32 of the bytes must be, if it is known (a file that is copied from an archive has it).
+    known_crc: Option<u32>,
 }
 
-/// [`write_archive`], with the files that are `zip64_from` bytes long or longer written in the zip64 form. (The length that the real
-/// limit is, is too much to write in a test, so that a test brings it down.)
-fn write_archive_with_the_zip64_form_from(
+impl Opened {
+    fn text(text: &str) -> Self {
+        Self {
+            length: text.len() as u64,
+            reader: Box::new(Cursor::new(text.as_bytes().to_vec())),
+            known_crc: None,
+        }
+    }
+
+    /// The bytes at `location`: all of a file, or the stretch of one that it is.
+    fn at(location: &MediaLocation) -> io::Result<Self> {
+        let mut file = File::open(location.file())?;
+        let length = match location.stretch() {
+            Some(stretch) => {
+                file.seek(SeekFrom::Start(stretch.start))?;
+                stretch.length
+            }
+            None => file.metadata()?.len(),
+        };
+        Ok(Self {
+            reader: Box::new(file.take(length)),
+            length,
+            known_crc: None,
+        })
+    }
+}
+
+/// Opens the project text and everything in `files`, before anything is written, so that one that cannot be read is said so as that.
+fn open_what_is_to_be_written(
+    project_text: &str,
+    files: &[FileToInclude],
+) -> Result<Vec<(String, Opened)>, ArchiveError> {
+    let mut opened = vec![(PROJECT_ENTRY_NAME.to_owned(), Opened::text(project_text))];
+    for included in files {
+        let source = Opened::at(&included.source).map_err(|source| ArchiveError::CouldNotRead {
+            path: included.source.file().to_owned(),
+            source,
+        })?;
+        opened.push((included.entry_name.clone(), source));
+    }
+    Ok(opened)
+}
+
+/// Writes all of `opened` with `writer`, telling `on_progress` how many bytes of them have been written in all.
+fn write_all_of(
+    writer: &mut Writer<'_>,
+    opened: Vec<(String, Opened)>,
+    on_progress: OnProgress<'_>,
+) -> io::Result<Vec<(String, Placed)>> {
+    let mut written_before = 0_u64;
+    let mut placed = Vec::with_capacity(opened.len());
+    for (name, mut source) in opened {
+        let length = source.length;
+        let at = writer.write_entry(&name, length, source.known_crc, &mut source.reader, &mut |written| {
+            on_progress(written_before + written)
+        })?;
+        written_before += length;
+        placed.push((name, at));
+    }
+    Ok(placed)
+}
+
+/// What an error of writing is, for the user.
+fn error_of_writing(path: &Path, error: io::Error) -> ArchiveError {
+    if error.kind() == io::ErrorKind::Interrupted {
+        ArchiveError::Stopped
+    } else {
+        ArchiveError::CouldNotWrite {
+            path: path.to_owned(),
+            source: error,
+        }
+    }
+}
+
+fn error_of_the_layout(path: &Path, problem: LayoutProblem) -> ArchiveError {
+    match problem {
+        LayoutProblem::Io(source) => ArchiveError::CouldNotRead {
+            path: path.to_owned(),
+            source,
+        },
+        LayoutProblem::NoDirectory => ArchiveError::Unreadable {
+            path: path.to_owned(),
+            reason: "it has no whole list of the files in it".to_owned(),
+        },
+    }
+}
+
+/// Writes the archive at `destination`, replacing the file there if there is one, with the project as `project_text` and the files
+/// `files` in it, all of it new: there is no garbage in it. Nothing is changed unless the whole of it is written.
+pub fn write_archive(destination: &Path, project_text: &str, files: &[FileToInclude]) -> Result<(), ArchiveError> {
+    write_archive_telling(destination, project_text, files, &mut |_| Ok(()))
+}
+
+/// [`write_archive`], telling `on_progress` how it goes.
+pub fn write_archive_telling(
     destination: &Path,
     project_text: &str,
     files: &[FileToInclude],
-    zip64_from: u64,
+    on_progress: OnProgress<'_>,
 ) -> Result<(), ArchiveError> {
-    // The files are opened first, so that one that cannot be read is said so, and not as a failure to write.
-    let mut sources = Vec::with_capacity(files.len());
-    for included in files {
-        let could_not_read = |source| ArchiveError::CouldNotRead {
-            path: included.path.clone(),
-            source,
-        };
-        let source = File::open(&included.path).map_err(could_not_read)?;
-        let length = source.metadata().map_err(could_not_read)?.len();
-        sources.push((&included.entry_name, source, length));
-    }
-    let could_not_write = |source: io::Error| ArchiveError::CouldNotWrite {
-        path: destination.to_owned(),
-        source,
-    };
+    write_archive_using(destination, project_text, files, Zip64Thresholds::REAL, on_progress)
+}
+
+/// [`write_archive_telling`], with `thresholds` for what is too big for the ordinary fields of a zip file (the real ones are
+/// too much to write in a test, so that a test brings them down).
+fn write_archive_using(
+    destination: &Path,
+    project_text: &str,
+    files: &[FileToInclude],
+    thresholds: Zip64Thresholds,
+    on_progress: OnProgress<'_>,
+) -> Result<(), ArchiveError> {
+    let opened = open_what_is_to_be_written(project_text, files)?;
     replace_file_atomically(destination, |file| {
-        let mut writer = ZipWriter::new(BufWriter::new(file));
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-        writer.start_file(PROJECT_ENTRY_NAME, options).map_err(io_error_of)?;
-        writer.write_all(project_text.as_bytes())?;
-        let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
-        for (entry_name, mut source, length) in sources {
-            // (The zip crate cannot go back and say that a file is a long one once it has begun to write it: it says so before, and
-            // stops with an error when a file that was not said to be goes on past four gigabytes.)
-            let options = options.large_file(length >= zip64_from);
-            writer.start_file(entry_name.as_str(), options).map_err(io_error_of)?;
-            loop {
-                let read = source.read(&mut buffer)?;
-                if read == 0 {
-                    break;
-                }
-                writer.write_all(&buffer[..read])?;
+        let mut writer = Writer::starting_at(file, 0, thresholds)?;
+        write_all_of(&mut writer, opened, on_progress)?;
+        writer.finish().map(|_| ())
+    })
+    .map_err(|error| error_of_writing(destination, error))
+}
+
+/// Adds to the archive at `archive`: the project text `project_text` (which replaces the one that is there), and the files
+/// `new_files`; and of the files that are in it already, those named in `keep` stay as they are, and the others are no longer
+/// in it (their bytes stay in the file as garbage until [`compact_archive`]). The files that stay are not written again, and none
+/// moves: where a program is reading one in place, it goes on reading it. If it does not work, or `on_progress` stops it, the archive
+/// is as it was.
+pub fn append_to_archive(
+    archive: &Path,
+    project_text: &str,
+    keep: &[String],
+    new_files: &[FileToInclude],
+    on_progress: OnProgress<'_>,
+) -> Result<ArchiveState, ArchiveError> {
+    append_using(
+        archive,
+        project_text,
+        keep,
+        new_files,
+        Zip64Thresholds::REAL,
+        on_progress,
+    )
+}
+
+fn append_using(
+    archive: &Path,
+    project_text: &str,
+    keep: &[String],
+    new_files: &[FileToInclude],
+    thresholds: Zip64Thresholds,
+    on_progress: OnProgress<'_>,
+) -> Result<ArchiveState, ArchiveError> {
+    let opened = open_what_is_to_be_written(project_text, new_files)?;
+    let could_not_write = |source: io::Error| error_of_writing(archive, source);
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(archive)
+        .map_err(could_not_write)?;
+    let directory = read_directory(&mut file).map_err(|problem| error_of_the_layout(archive, problem))?;
+    // (What a save that did not finish left is cut off first, so that the file is as it was after the last that did.)
+    cut_off_the_unfinished_save(&mut file, &directory).map_err(could_not_write)?;
+    let position = file.metadata().map_err(could_not_write)?.len();
+    let written = (|| {
+        let mut writer = Writer::starting_at(&mut file, position, thresholds)?;
+        for entry in &directory.entries {
+            let is_replaced =
+                entry.name == PROJECT_ENTRY_NAME || new_files.iter().any(|new| new.entry_name == entry.name);
+            if keep.contains(&entry.name) && !is_replaced {
+                writer.keep(entry)?;
             }
         }
-        writer.finish().map_err(io_error_of)?.flush()
+        write_all_of(&mut writer, opened, on_progress)?;
+        writer.finish().map(|_| ())
+    })();
+    if let Err(error) = written {
+        // Back to what the archive was: the end record that was last whole is still the last, and what was added after it is gone.
+        let _ = file.set_len(position);
+        return Err(error_of_writing(archive, error));
+    }
+    drop(file);
+    state_of_archive(archive)
+}
+
+/// Writes the archive at `archive` again without the garbage in it, as a new file that replaces it. The files in it are copied as
+/// they are, and are checked as they are copied against the CRC-32 that the archive says they have: one that is damaged stops it, and
+/// nothing is changed. **The files are in other places in the archive afterwards**, so nothing may be reading them in place (on Windows
+/// a file that is open cannot be replaced: that fails, and nothing is changed).
+pub fn compact_archive(archive: &Path, on_progress: OnProgress<'_>) -> Result<ArchiveState, ArchiveError> {
+    let directory = directory_of(archive)?;
+    let mut opened = Vec::with_capacity(directory.entries.len());
+    for entry in &directory.entries {
+        let could_not_read = |source: io::Error| ArchiveError::CouldNotRead {
+            path: archive.to_owned(),
+            source,
+        };
+        let source = if entry.is_stored() {
+            let mut file = File::open(archive).map_err(could_not_read)?;
+            file.seek(SeekFrom::Start(entry.data_start)).map_err(could_not_read)?;
+            Opened {
+                length: entry.length,
+                reader: Box::new(file.take(entry.length)),
+                known_crc: Some(entry.crc32),
+            }
+        } else {
+            // (A file that another program compressed is written stored: it is taken out first, into a file that is gone when it is done.)
+            let mut taken_out = tempfile::tempfile().map_err(could_not_read)?;
+            extract_entry_into(archive, &entry.name, &mut taken_out)?;
+            taken_out.seek(SeekFrom::Start(0)).map_err(could_not_read)?;
+            Opened {
+                length: entry.length,
+                reader: Box::new(taken_out),
+                known_crc: Some(entry.crc32),
+            }
+        };
+        opened.push((entry.name.clone(), source));
+    }
+    replace_file_atomically(archive, |file| {
+        let mut writer = Writer::starting_at(file, 0, Zip64Thresholds::REAL)?;
+        write_all_of(&mut writer, opened, on_progress)?;
+        writer.finish().map(|_| ())
     })
-    .map_err(could_not_write)
+    .map_err(|error| error_of_writing(archive, error))?;
+    state_of_archive(archive)
+}
+
+// --- reading ---
+
+/// What is in the archive at `archive`, and how much of it is garbage.
+pub fn state_of_archive(archive: &Path) -> Result<ArchiveState, ArchiveError> {
+    Ok(ArchiveState::of(&directory_of(archive)?))
+}
+
+fn directory_of(archive: &Path) -> Result<Directory, ArchiveError> {
+    let mut file = File::open(archive).map_err(|source| ArchiveError::CouldNotRead {
+        path: archive.to_owned(),
+        source,
+    })?;
+    read_directory(&mut file).map_err(|problem| error_of_the_layout(archive, problem))
+}
+
+/// Where the file `entry_name` is in the archive at `archive`.
+pub fn entry_place(archive: &Path, entry_name: &str) -> Result<EntryPlace, ArchiveError> {
+    let state = state_of_archive(archive)?;
+    state
+        .entries
+        .get(entry_name)
+        .copied()
+        .ok_or_else(|| ArchiveError::NoSuchEntry {
+            path: archive.to_owned(),
+            entry_name: entry_name.to_owned(),
+        })
+}
+
+/// What an archive says about the entry `entry_name`: how long the file is, and its CRC-32.
+pub fn facts_of_entry(archive: &Path, entry_name: &str) -> Result<EntryFacts, ArchiveError> {
+    let place = entry_place(archive, entry_name)?;
+    Ok(EntryFacts {
+        size: place.length,
+        crc32: place.crc32,
+    })
+}
+
+/// The archive for the zip crate to read: as far as the last end record that is whole (what a save that was cut off wrote after it is
+/// not there for the crate), and the file itself is not changed.
+type OpenedArchive = ZipArchive<BufReader<FirstBytesOf<File>>>;
+
+fn open_archive(path: &Path) -> Result<OpenedArchive, ArchiveError> {
+    let mut file = File::open(path).map_err(|source| ArchiveError::CouldNotRead {
+        path: path.to_owned(),
+        source,
+    })?;
+    let directory = read_directory(&mut file).map_err(|problem| error_of_the_layout(path, problem))?;
+    let whole_part = FirstBytesOf::new(file, directory.end_of_the_last_end_record);
+    ZipArchive::new(BufReader::new(whole_part)).map_err(|error| match error {
+        ZipError::Io(source) => ArchiveError::CouldNotRead {
+            path: path.to_owned(),
+            source,
+        },
+        other => unreadable(path, &other),
+    })
 }
 
 /// The text of the project in the archive at `archive`.
@@ -238,46 +563,19 @@ pub fn read_project_text(archive: &Path) -> Result<String, ArchiveError> {
     Ok(text)
 }
 
-/// What the archive at `archive` says about the entry `entry_name`: how long the file is, and its CRC-32.
-pub fn facts_of_entry(archive: &Path, entry_name: &str) -> Result<EntryFacts, ArchiveError> {
-    let mut zip = open_archive(archive)?;
-    let entry = entry_of(&mut zip, archive, entry_name)?;
-    Ok(EntryFacts {
-        size: entry.size(),
-        crc32: entry.crc32(),
-    })
-}
-
 /// Takes the entry `entry_name` out of the archive at `archive` and puts it in a file at `destination`, which is replaced if it is
 /// there, and is there whole or not at all. The CRC-32 of what was taken out is checked against the archive's.
 pub fn extract_entry(archive: &Path, entry_name: &str, destination: &Path) -> Result<(), ArchiveError> {
-    let mut zip = open_archive(archive)?;
-    let mut entry = entry_of(&mut zip, archive, entry_name)?;
     let mut problem_with_the_archive = None;
     let result = replace_file_atomically(destination, |file| {
-        let mut writer = BufWriter::new(file);
-        let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
-        loop {
-            // (A damaged file is found out at the end of it, where the zip file's check of it is made: that is an error of reading.)
-            let read = match entry.read(&mut buffer) {
-                Ok(read) => read,
-                Err(error) => {
-                    problem_with_the_archive = Some(error);
-                    return Err(io::Error::other("the archive could not be read"));
-                }
-            };
-            if read == 0 {
-                break;
-            }
-            writer.write_all(&buffer[..read])?;
-        }
-        writer.flush()
+        extract_entry_into(archive, entry_name, file).map_err(|error| {
+            let message = error.to_string();
+            problem_with_the_archive = Some(error);
+            io::Error::other(message)
+        })
     });
     if let Some(error) = problem_with_the_archive {
-        return Err(ArchiveError::Unreadable {
-            path: archive.to_owned(),
-            reason: format!("\"{entry_name}\" in it is damaged: {error}"),
-        });
+        return Err(error);
     }
     result.map_err(|source| ArchiveError::CouldNotWrite {
         path: destination.to_owned(),
@@ -285,32 +583,32 @@ pub fn extract_entry(archive: &Path, entry_name: &str, destination: &Path) -> Re
     })
 }
 
-fn open_archive(path: &Path) -> Result<ZipArchive<BufReader<File>>, ArchiveError> {
-    let file = File::open(path).map_err(|source| ArchiveError::CouldNotRead {
-        path: path.to_owned(),
-        source,
-    })?;
-    ZipArchive::new(BufReader::new(file)).map_err(|error| match error {
-        ZipError::Io(source) => ArchiveError::CouldNotRead {
-            path: path.to_owned(),
-            source,
-        },
-        other => unreadable(path, &other),
-    })
-}
-
-fn entry_of<'a>(
-    zip: &'a mut ZipArchive<BufReader<File>>,
-    archive: &Path,
-    entry_name: &str,
-) -> Result<zip::read::ZipFile<'a, BufReader<File>>, ArchiveError> {
-    zip.by_name(entry_name).map_err(|error| match error {
+/// Writes the file `entry_name` of the archive at `archive` into `destination`.
+fn extract_entry_into(archive: &Path, entry_name: &str, destination: &mut File) -> Result<(), ArchiveError> {
+    let mut zip = open_archive(archive)?;
+    let mut entry = zip.by_name(entry_name).map_err(|error| match error {
         ZipError::FileNotFound => ArchiveError::NoSuchEntry {
             path: archive.to_owned(),
             entry_name: entry_name.to_owned(),
         },
         other => unreadable(archive, &other),
-    })
+    })?;
+    let could_not_write = |source: io::Error| ArchiveError::CouldNotWrite {
+        path: archive.to_owned(),
+        source,
+    };
+    let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
+    loop {
+        // (A damaged file is found out at the end of it, where the zip file's check of it is made: that is an error of reading.)
+        let read = entry.read(&mut buffer).map_err(|error| ArchiveError::Unreadable {
+            path: archive.to_owned(),
+            reason: format!("\"{entry_name}\" in it is damaged: {error}"),
+        })?;
+        if read == 0 {
+            return destination.flush().map_err(could_not_write);
+        }
+        destination.write_all(&buffer[..read]).map_err(could_not_write)?;
+    }
 }
 
 fn unreadable(path: &Path, error: &ZipError) -> ArchiveError {
@@ -320,24 +618,23 @@ fn unreadable(path: &Path, error: &ZipError) -> ArchiveError {
     }
 }
 
-fn io_error_of(error: ZipError) -> io::Error {
-    match error {
-        ZipError::Io(error) => error,
-        other => io::Error::other(other.to_string()),
-    }
+/// Writes all the bytes at `location` into `destination`, and says how many there were.
+pub fn copy_bytes_of(location: &MediaLocation, destination: &mut impl Write) -> io::Result<u64> {
+    let mut opened = Opened::at(location)?;
+    io::copy(&mut opened.reader, destination)
 }
 
-/// Whether the two files have exactly the same contents (not by their names or when they were made, but byte for byte).
-pub fn have_the_same_contents(first: &Path, second: &Path) -> io::Result<bool> {
-    let (mut first_file, mut second_file) = (File::open(first)?, File::open(second)?);
-    if first_file.metadata()?.len() != second_file.metadata()?.len() {
+/// Whether the two places have exactly the same bytes (not by their names or when they were made, but byte for byte).
+pub fn have_the_same_contents(first: impl Into<MediaLocation>, second: impl Into<MediaLocation>) -> io::Result<bool> {
+    let (mut first, mut second) = (Opened::at(&first.into())?, Opened::at(&second.into())?);
+    if first.length != second.length {
         return Ok(false);
     }
     let mut first_buffer = vec![0_u8; COPY_BUFFER_BYTES];
     let mut second_buffer = vec![0_u8; COPY_BUFFER_BYTES];
     loop {
-        let read = read_as_much_as_there_is(&mut first_file, &mut first_buffer)?;
-        let read_of_the_second = read_as_much_as_there_is(&mut second_file, &mut second_buffer)?;
+        let read = read_as_much_as_there_is(&mut first.reader, &mut first_buffer)?;
+        let read_of_the_second = read_as_much_as_there_is(&mut second.reader, &mut second_buffer)?;
         if read != read_of_the_second || first_buffer[..read] != second_buffer[..read] {
             return Ok(false);
         }
@@ -347,11 +644,11 @@ pub fn have_the_same_contents(first: &Path, second: &Path) -> io::Result<bool> {
     }
 }
 
-/// Reads into `buffer` until it is full or the file has no more, and says how many bytes that was.
-fn read_as_much_as_there_is(file: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
+/// Reads into `buffer` until it is full or there is no more, and says how many bytes that was.
+fn read_as_much_as_there_is(reader: &mut dyn Read, buffer: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buffer.len() {
-        let read = file.read(&mut buffer[filled..])?;
+        let read = reader.read(&mut buffer[filled..])?;
         if read == 0 {
             break;
         }

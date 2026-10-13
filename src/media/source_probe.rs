@@ -1,13 +1,13 @@
 //! Asking ffprobe what a file contains: a video, a sound, or a picture.
 
 use std::io;
-use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
 
 use super::child_process::{background_command, end_of_error_output};
 use super::ffmpeg_toolchain::FfmpegToolchain;
+use super::location::MediaLocation;
 use crate::project::{
     FrameRate, SourceAudioProperties, SourceImageProperties, SourceMediaProperties, SourceVideoProperties,
 };
@@ -16,8 +16,8 @@ use crate::project::{
 pub enum ProbeError {
     #[error("ffprobe could not be started: {0}")]
     CouldNotRunFfprobe(#[source] io::Error),
-    #[error("{path} could not be opened as a video: {message}")]
-    CouldNotOpen { path: PathBuf, message: String },
+    #[error("{location} could not be opened as a video: {message}")]
+    CouldNotOpen { location: MediaLocation, message: String },
     #[error("ffprobe's answer could not be understood: {0}")]
     UnreadableAnswer(String),
     #[error("the file contains no video picture")]
@@ -30,25 +30,33 @@ pub enum ProbeError {
     UnknownLength,
 }
 
-/// Opens `video_path` with ffprobe and reports what the project needs to know about it.
-pub fn probe_video(toolchain: &FfmpegToolchain, video_path: &Path) -> Result<SourceVideoProperties, ProbeError> {
-    let probe_output_json = run_ffprobe(toolchain, video_path)?;
+/// Opens the video at `video` with ffprobe and reports what the project needs to know about it.
+pub fn probe_video(
+    toolchain: &FfmpegToolchain,
+    video: impl Into<MediaLocation>,
+) -> Result<SourceVideoProperties, ProbeError> {
+    let video = video.into();
+    let probe_output_json = run_ffprobe(toolchain, &video)?;
     properties_from_probe_output(&probe_output_json, |video_stream_index| {
-        count_video_packets(toolchain, video_path, video_stream_index)
+        count_video_packets(toolchain, &video, video_stream_index)
     })
 }
 
-/// Opens `path` with ffprobe and reports what the project needs to know about it, whether it is a
+/// Opens the media file at `location` with ffprobe and reports what the project needs to know about it, whether it is a
 /// picture (a still image), a video (a file with moving pictures) or a sound file (a file with only sound).
-pub fn probe_source_media(toolchain: &FfmpegToolchain, path: &Path) -> Result<SourceMediaProperties, ProbeError> {
-    let probe_output_json = run_ffprobe(toolchain, path)?;
+pub fn probe_source_media(
+    toolchain: &FfmpegToolchain,
+    location: impl Into<MediaLocation>,
+) -> Result<SourceMediaProperties, ProbeError> {
+    let location = location.into();
+    let probe_output_json = run_ffprobe(toolchain, &location)?;
     source_properties_from_probe_output(&probe_output_json, |video_stream_index| {
-        count_video_packets(toolchain, path, video_stream_index)
+        count_video_packets(toolchain, &location, video_stream_index)
     })
 }
 
-/// Runs ffprobe on `path` and returns the JSON it prints.
-fn run_ffprobe(toolchain: &FfmpegToolchain, path: &Path) -> Result<String, ProbeError> {
+/// Runs ffprobe on `location` and returns the JSON it prints.
+fn run_ffprobe(toolchain: &FfmpegToolchain, location: &MediaLocation) -> Result<String, ProbeError> {
     let output = background_command(toolchain.ffprobe_path())
         .args([
             "-v",
@@ -59,12 +67,12 @@ fn run_ffprobe(toolchain: &FfmpegToolchain, path: &Path) -> Result<String, Probe
             "-show_streams",
             "-i",
         ])
-        .arg(path)
+        .arg(location.ffmpeg_input())
         .output()
         .map_err(ProbeError::CouldNotRunFfprobe)?;
     if !output.status.success() {
         return Err(ProbeError::CouldNotOpen {
-            path: path.to_owned(),
+            location: location.clone(),
             message: end_of_error_output(&output.stderr),
         });
     }
@@ -74,7 +82,11 @@ fn run_ffprobe(toolchain: &FfmpegToolchain, path: &Path) -> Result<String, Probe
 /// Counts the packets (which is to say the frames) of one stream by reading through the file
 /// without decoding it. It takes well under a tenth of a second even for a file of hundreds of
 /// megabytes.
-fn count_video_packets(toolchain: &FfmpegToolchain, video_path: &Path, stream_index: u32) -> Result<u64, ProbeError> {
+fn count_video_packets(
+    toolchain: &FfmpegToolchain,
+    video: &MediaLocation,
+    stream_index: u32,
+) -> Result<u64, ProbeError> {
     let output = background_command(toolchain.ffprobe_path())
         .args([
             "-v",
@@ -88,7 +100,7 @@ fn count_video_packets(toolchain: &FfmpegToolchain, video_path: &Path, stream_in
         ])
         .arg(stream_index.to_string())
         .arg("-i")
-        .arg(video_path)
+        .arg(video.ffmpeg_input())
         .output()
         .map_err(ProbeError::CouldNotRunFfprobe)?;
     String::from_utf8_lossy(&output.stdout)

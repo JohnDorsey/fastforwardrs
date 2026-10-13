@@ -100,7 +100,7 @@ mod tests {
             "project",
             &[FileToInclude {
                 entry_name: entry_name.clone(),
-                path: original,
+                source: original.into(),
             }],
         )
         .unwrap();

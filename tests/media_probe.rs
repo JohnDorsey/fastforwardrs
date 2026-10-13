@@ -4,7 +4,7 @@ mod support;
 
 use std::process::Command;
 
-use fastforwardrs::media::{ProbeError, probe_source_media, probe_video};
+use fastforwardrs::media::{MediaLocation, ProbeError, probe_source_media, probe_video};
 use fastforwardrs::project::{FrameRate, SourceMediaProperties};
 use support::{TestVideoSpecification, counter_video, scratch_directory, test_video};
 
@@ -165,8 +165,8 @@ fn a_file_that_does_not_exist_is_reported_with_its_path() {
     let scratch = scratch_directory();
     let missing_path = scratch.path().join("no_such_video.mp4");
     match probe_video(&toolchain, &missing_path) {
-        Err(ProbeError::CouldNotOpen { path, message }) => {
-            assert_eq!(path, missing_path);
+        Err(ProbeError::CouldNotOpen { location, message }) => {
+            assert_eq!(location, MediaLocation::from(missing_path.as_path()));
             assert!(!message.is_empty());
         }
         other => panic!("expected CouldNotOpen, got {other:?}"),

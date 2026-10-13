@@ -10,7 +10,9 @@ use fastforwardrs::composition::plan_sound;
 use fastforwardrs::media::export::{
     ExportResult, VideoExport, plan_export, sound_graph_specification, sources_of_sound,
 };
-use fastforwardrs::media::{AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain};
+use fastforwardrs::media::{
+    AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain, MediaLocation,
+};
 use fastforwardrs::project::{
     AnimationTarget, Project, PropertyId, PropertyValue, Settings, SpedUpClipSound, TimelineFrameIndex,
 };
@@ -33,7 +35,7 @@ fn request_for(project: &Project, from_frame: u64, sped_up_clip_sound: SpedUpCli
     AudioStreamRequest {
         source_files: sources
             .iter()
-            .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
+            .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone().into())
             .collect(),
         sound: sound_graph_specification(&plan, &sources, sped_up_clip_sound),
         format: STEREO_AT_48000,
@@ -236,10 +238,10 @@ fn sound_of_the_export_of(toolchain: &FfmpegToolchain, project: &Project) -> Vec
     let scratch = scratch_directory();
     let exported_path = scratch.path().join("exported.mp4");
     let plan = plan_export(project, Settings::DEFAULT, &transparent_text_picture).unwrap();
-    let source_paths: Vec<_> = plan
+    let source_paths: Vec<MediaLocation> = plan
         .source_files
         .iter()
-        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
+        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone().into())
         .collect();
     let export = VideoExport::start(toolchain, &plan, &source_paths, &exported_path, Arc::new(|| {})).unwrap();
     let started = Instant::now();
@@ -295,7 +297,7 @@ fn a_video_that_cannot_be_read_ends_the_stream_with_ffmpegs_complaint() {
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
     let mut request = request_for(&project, 0, SpedUpClipSound::MaintainPitch);
-    request.source_files = vec![video.path.with_file_name("there_is_no_such_video.mp4")];
+    request.source_files = vec![video.path.with_file_name("there_is_no_such_video.mp4").into()];
 
     let (samples, error_output) = everything_from(&toolchain, &request);
 

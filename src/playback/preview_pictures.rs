@@ -86,9 +86,8 @@ impl<Starter: PictureStreamStarter + Clone> PreviewPictures<Starter> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use crate::media::MediaLocation;
     use crate::playback::scripted_streams::{Script, ScriptedStarter};
     use crate::playback::supplier::PreviewVideo;
     use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
@@ -104,13 +103,13 @@ mod tests {
             videos: vec![
                 PreviewVideo {
                     source: VIDEO,
-                    video_path: PathBuf::from("holiday.mp4"),
+                    location: MediaLocation::from("holiday.mp4"),
                     display_size_in_pixels: (1280, 720),
                     frame_rate: FrameRate::new(30, 1).unwrap(),
                 },
                 PreviewVideo {
                     source: ANOTHER_VIDEO,
-                    video_path: PathBuf::from("birthday.mp4"),
+                    location: MediaLocation::from("birthday.mp4"),
                     display_size_in_pixels: (720, 1280),
                     frame_rate: FrameRate::new(25, 1).unwrap(),
                 },
@@ -154,9 +153,9 @@ mod tests {
 
         let requests = script.requests();
         assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].video_path, PathBuf::from("holiday.mp4"));
+        assert_eq!(requests[0].video, MediaLocation::from("holiday.mp4"));
         assert_eq!(requests[0].first_source_frame, SourceFrameIndex::new(50));
-        assert_eq!(requests[1].video_path, PathBuf::from("birthday.mp4"));
+        assert_eq!(requests[1].video, MediaLocation::from("birthday.mp4"));
         assert_eq!(requests[1].first_source_frame, SourceFrameIndex::new(7));
     }
 

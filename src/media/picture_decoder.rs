@@ -5,12 +5,12 @@
 
 use std::ffi::OsString;
 use std::io;
-use std::path::Path;
 
 use thiserror::Error;
 
 use super::child_process::{background_command, end_of_error_output};
 use super::ffmpeg_toolchain::FfmpegToolchain;
+use super::location::MediaLocation;
 use crate::rgba_picture::RgbaPicture;
 
 #[derive(Debug, Error)]
@@ -54,14 +54,14 @@ pub fn size_to_decode_at(display_size: (u32, u32), largest: (u32, u32)) -> (u32,
     (scaled_width.max(1), scaled_height.max(1))
 }
 
-/// The arguments that make ffmpeg print the first picture of the file at `path`, scaled to `size`
+/// The arguments that make ffmpeg print the first picture of the file at `location`, scaled to `size`
 /// (width, height) pixels, as raw RGBA pixels with straight alpha.
-pub fn picture_decoding_arguments(path: &Path, size: (u32, u32)) -> Vec<OsString> {
+pub fn picture_decoding_arguments(location: impl Into<MediaLocation>, size: (u32, u32)) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]
         .into_iter()
         .map(OsString::from)
         .collect();
-    arguments.push(path.as_os_str().to_owned());
+    arguments.push(location.into().ffmpeg_input());
     arguments.extend(
         [
             "-frames:v".to_owned(),
@@ -79,15 +79,15 @@ pub fn picture_decoding_arguments(path: &Path, size: (u32, u32)) -> Vec<OsString
     arguments
 }
 
-/// Decodes the picture in the file at `path` at `size` (width, height) pixels, which takes as
+/// Decodes the picture in the file at `location` at `size` (width, height) pixels, which takes as
 /// long as ffmpeg does (about a tenth of a second for a photograph).
 pub fn decode_picture(
     toolchain: &FfmpegToolchain,
-    path: &Path,
+    location: impl Into<MediaLocation>,
     size: (u32, u32),
 ) -> Result<RgbaPicture, PictureDecodeError> {
     let output = background_command(toolchain.ffmpeg_path())
-        .args(picture_decoding_arguments(path, size))
+        .args(picture_decoding_arguments(location, size))
         .output()
         .map_err(PictureDecodeError::CouldNotRunFfmpeg)?;
     if !output.status.success() {
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn the_arguments_read_one_picture_of_the_file_and_give_raw_rgba_pixels_of_the_size() {
-        let arguments: Vec<String> = picture_decoding_arguments(&PathBuf::from("logo.png"), (640, 360))
+        let arguments: Vec<String> = picture_decoding_arguments(PathBuf::from("logo.png"), (640, 360))
             .into_iter()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect();

@@ -27,7 +27,8 @@ fn the_file_menu_has_its_items_in_the_requested_order() {
         "Save project",
         "Save project as",
         "Load project",
-        "Import",
+        "Embed and import",
+        "Link and import",
         "Export",
     ];
     let heights: Vec<f32> = items.iter().map(|item| window.rectangle_of(item).top()).collect();
@@ -814,7 +815,7 @@ fn the_import_item_is_available_whatever_state_the_files_of_the_project_are_in()
             reason: "gone".to_owned(),
         },
         SourceStatus::Available {
-            path: std::path::PathBuf::from("holiday.mp4"),
+            location: "holiday.mp4".into(),
         },
         SourceStatus::Opening,
     ] {
@@ -827,8 +828,10 @@ fn the_import_item_is_available_whatever_state_the_files_of_the_project_are_in()
         window.settle();
         window.harness.get_by_label("File").click();
         window.settle();
-        let import = window.harness.get_by_label("Import");
-        assert!(!import.accesskit_node().is_disabled(), "{status:?}");
+        for item in ["Embed and import", "Link and import"] {
+            let import = window.harness.get_by_label(item);
+            assert!(!import.accesskit_node().is_disabled(), "{item}: {status:?}");
+        }
     }
 }
 

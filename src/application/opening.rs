@@ -1,34 +1,32 @@
 //! Finding out whether a source file can be used: trying the places it might be until one of
 //! them opens as a video or a sound.
 
-use std::path::{Path, PathBuf};
-
-use crate::media::ProbeError;
+use crate::media::{MediaLocation, ProbeError};
 use crate::project::SourceMediaProperties;
 
 /// What happened when a source file was looked for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum OpeningOutcome {
-    /// The file was found at `path` and opens.
+    /// The file was found at `location` and opens.
     Opened {
-        path: PathBuf,
+        location: MediaLocation,
         properties: SourceMediaProperties,
     },
     /// None of the places worked. `attempts` has each place tried and why it did not.
-    Failed { attempts: Vec<(PathBuf, String)> },
+    Failed { attempts: Vec<(MediaLocation, String)> },
 }
 
 /// Tries each of `candidates` in order, with `probe`, and uses the first that opens as a video or a sound.
 pub fn open_first_that_works(
-    candidates: &[PathBuf],
-    probe: impl Fn(&Path) -> Result<SourceMediaProperties, ProbeError>,
+    candidates: &[MediaLocation],
+    probe: impl Fn(&MediaLocation) -> Result<SourceMediaProperties, ProbeError>,
 ) -> OpeningOutcome {
     let mut attempts = Vec::new();
     for candidate in candidates {
         match probe(candidate) {
             Ok(properties) => {
                 return OpeningOutcome::Opened {
-                    path: candidate.clone(),
+                    location: candidate.clone(),
                     properties,
                 };
             }
@@ -38,9 +36,9 @@ pub fn open_first_that_works(
     OpeningOutcome::Failed { attempts }
 }
 
-/// Why `path` could not be used, for showing to the user.
-fn reason_in_words(path: &Path, error: &ProbeError) -> String {
-    if !path.exists() {
+/// Why the file at `location` could not be used, for showing to the user.
+fn reason_in_words(location: &MediaLocation, error: &ProbeError) -> String {
+    if !location.file_exists() {
         return "there is no file there".to_owned();
     }
     match error {
@@ -60,7 +58,7 @@ impl OpeningOutcome {
             Self::Opened { .. } => String::new(),
             Self::Failed { attempts } => attempts
                 .iter()
-                .map(|(path, reason)| format!("{}: {reason}", path.display()))
+                .map(|(location, reason)| format!("{location}: {reason}"))
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
@@ -96,7 +94,7 @@ mod tests {
 
     fn failure() -> ProbeError {
         ProbeError::CouldNotOpen {
-            path: PathBuf::from("x"),
+            location: MediaLocation::from("x"),
             message: "Invalid data found".to_owned(),
         }
     }
@@ -104,10 +102,10 @@ mod tests {
     #[test]
     fn the_first_place_that_works_is_used_and_later_ones_are_not_tried() {
         let tried = RefCell::new(Vec::new());
-        let candidates = [PathBuf::from("a.mp4"), PathBuf::from("b.mp4"), PathBuf::from("c.mp4")];
-        let outcome = open_first_that_works(&candidates, |path| {
-            tried.borrow_mut().push(path.to_owned());
-            if path == Path::new("b.mp4") {
+        let candidates = ["a.mp4", "b.mp4", "c.mp4"].map(MediaLocation::from);
+        let outcome = open_first_that_works(&candidates, |location| {
+            tried.borrow_mut().push(location.clone());
+            if *location == MediaLocation::from("b.mp4") {
                 Ok(properties())
             } else {
                 Err(failure())
@@ -116,22 +114,25 @@ mod tests {
         assert_eq!(
             outcome,
             OpeningOutcome::Opened {
-                path: PathBuf::from("b.mp4"),
+                location: MediaLocation::from("b.mp4"),
                 properties: properties()
             }
         );
-        assert_eq!(*tried.borrow(), vec![PathBuf::from("a.mp4"), PathBuf::from("b.mp4")]);
+        assert_eq!(
+            *tried.borrow(),
+            vec![MediaLocation::from("a.mp4"), MediaLocation::from("b.mp4")]
+        );
     }
 
     #[test]
     fn when_nothing_works_every_attempt_is_reported_with_its_reason() {
-        let candidates = [PathBuf::from("/no/such/folder/a.mp4"), PathBuf::from("/no/such/b.mp4")];
+        let candidates = ["/no/such/folder/a.mp4", "/no/such/b.mp4"].map(MediaLocation::from);
         let outcome = open_first_that_works(&candidates, |_| Err(failure()));
         let OpeningOutcome::Failed { attempts } = &outcome else {
             panic!("expected a failure, got {outcome:?}")
         };
         assert_eq!(attempts.len(), 2);
-        assert_eq!(attempts[0].0, PathBuf::from("/no/such/folder/a.mp4"));
+        assert_eq!(attempts[0].0, MediaLocation::from("/no/such/folder/a.mp4"));
         assert_eq!(attempts[0].1, "there is no file there");
         let description = outcome.describe_failure();
         assert!(description.contains("a.mp4: there is no file there"), "{description}");
@@ -142,8 +143,8 @@ mod tests {
     #[test]
     fn a_file_that_exists_but_is_not_a_video_says_so_instead_of_claiming_it_is_missing() {
         let folder = tempfile::tempdir().unwrap();
-        let file = folder.path().join("notes.mp4");
-        std::fs::write(&file, "text").unwrap();
+        let file = MediaLocation::of_a_file(folder.path().join("notes.mp4"));
+        std::fs::write(file.file(), "text").unwrap();
         let outcome = open_first_that_works(std::slice::from_ref(&file), |_| Err(failure()));
         let OpeningOutcome::Failed { attempts } = outcome else {
             panic!("expected a failure")
@@ -168,11 +169,11 @@ mod tests {
         let sound = SourceMediaProperties::Audio(crate::project::SourceAudioProperties {
             duration_in_microseconds: 2_000_000,
         });
-        let outcome = open_first_that_works(&[PathBuf::from("song.mp3")], |_| Ok(sound));
+        let outcome = open_first_that_works(&[MediaLocation::from("song.mp3")], |_| Ok(sound));
         assert_eq!(
             outcome,
             OpeningOutcome::Opened {
-                path: PathBuf::from("song.mp3"),
+                location: MediaLocation::from("song.mp3"),
                 properties: sound
             }
         );
@@ -187,14 +188,13 @@ mod tests {
 
     #[test]
     fn when_the_place_is_shown_separately_a_single_attempt_only_says_why_it_failed() {
-        let one_place = open_first_that_works(&[PathBuf::from("/no/such/a.mp4")], |_| Err(failure()));
+        let one_place = open_first_that_works(&[MediaLocation::from("/no/such/a.mp4")], |_| Err(failure()));
         assert_eq!(one_place.describe_failure_for_a_known_place(), "there is no file there");
 
         // With several places the paths are what tells the lines apart, so they stay.
-        let two_places = open_first_that_works(
-            &[PathBuf::from("/no/such/a.mp4"), PathBuf::from("/no/such/b.mp4")],
-            |_| Err(failure()),
-        );
+        let two_places = open_first_that_works(&["/no/such/a.mp4", "/no/such/b.mp4"].map(MediaLocation::from), |_| {
+            Err(failure())
+        });
         assert_eq!(
             two_places.describe_failure_for_a_known_place(),
             two_places.describe_failure()
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn a_success_has_no_failure_to_describe() {
         let outcome = OpeningOutcome::Opened {
-            path: PathBuf::from("a.mp4"),
+            location: MediaLocation::from("a.mp4"),
             properties: properties(),
         };
         assert_eq!(outcome.describe_failure(), "");

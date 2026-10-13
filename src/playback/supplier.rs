@@ -16,14 +16,13 @@
 //! Streams are started through the [`PictureStreamStarter`] trait. The real one runs ffmpeg; the
 //! tests use a scripted one, which is what lets all of the decisions above be tested exactly.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::wanted::{UpcomingVideo, WantedPicture};
 use crate::media::{
-    DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest,
+    DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, MediaLocation,
     UserInterfaceWakeUp,
 };
 use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
@@ -96,7 +95,8 @@ static NEXT_SERIAL_NUMBER: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreviewVideo {
     pub source: SourceMediaIdentifier,
-    pub video_path: PathBuf,
+    /// Where the bytes of the video are.
+    pub location: MediaLocation,
     /// How big the video's picture is as it is shown, so that a video of another shape than the
     /// preview's picture can be fitted inside it.
     pub display_size_in_pixels: (u32, u32),
@@ -457,7 +457,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         let setup = self.setup.as_ref()?;
         let video = setup.videos.iter().find(|video| video.source == source)?;
         Some(FrameStreamRequest {
-            video_path: video.video_path.clone(),
+            video: video.location.clone(),
             project_frame_rate: setup.frame_rate,
             video_frame_rate: video.frame_rate,
             first_source_frame,

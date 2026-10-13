@@ -1,6 +1,9 @@
 use std::fs;
 use std::io::{Read, Write};
 
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
+
 use super::*;
 
 fn identifier(number: u32) -> SourceMediaIdentifier {
@@ -45,7 +48,7 @@ fn a_file(folder: &Path, name: &str, contents: &[u8]) -> FileToInclude {
     fs::write(&path, contents).unwrap();
     FileToInclude {
         entry_name: resource_entry_name(identifier(1), name),
-        path,
+        source: path.into(),
     }
 }
 
@@ -375,7 +378,7 @@ fn a_file_that_cannot_be_read_stops_the_archive_before_anything_of_the_old_one_i
     write_archive(&archive, "the old one", &[]).unwrap();
     let missing = FileToInclude {
         entry_name: resource_entry_name(identifier(1), "gone.mp4"),
-        path: folder.path().join("gone.mp4"),
+        source: folder.path().join("gone.mp4").into(),
     };
 
     let error = write_archive(&archive, "the new one", &[missing]).unwrap_err();
@@ -549,7 +552,7 @@ fn files_have_the_same_contents_when_every_byte_is_the_same() {
     assert!(!have_the_same_contents(&first, &shorter).unwrap(), "one byte shorter");
     assert!(have_the_same_contents(&empty, &other_empty).unwrap());
     assert!(!have_the_same_contents(&first, &empty).unwrap());
-    assert!(have_the_same_contents(&first, &folder.path().join("missing")).is_err());
+    assert!(have_the_same_contents(&first, folder.path().join("missing")).is_err());
 }
 
 #[test]
@@ -624,7 +627,17 @@ fn a_file_that_is_too_long_for_the_ordinary_form_of_a_zip_file_is_written_in_the
     let archive = folder.path().join("a.ffrs");
 
     // (The real limit is a file of 4 GiB, which is too much to write in a test: it is brought down to 1000 bytes.)
-    write_archive_with_the_zip64_form_from(&archive, "p", &files, 1_000).unwrap();
+    write_archive_using(
+        &archive,
+        "p",
+        &files,
+        Zip64Thresholds {
+            length: 1_000,
+            ..Zip64Thresholds::REAL
+        },
+        &mut |_| Ok(()),
+    )
+    .unwrap();
 
     assert_eq!(
         lengths_of_the_extra_fields_of_the_local_headers(&archive),
@@ -660,7 +673,7 @@ fn files_of_the_usual_length_are_not_written_in_the_zip64_form_by_write_archive(
 #[test]
 fn a_file_is_in_the_zip64_form_from_the_length_at_which_the_ordinary_form_cannot_say_how_long_it_is() {
     assert_eq!(
-        LENGTH_FROM_WHICH_A_FILE_IS_IN_THE_ZIP64_FORM,
+        Zip64Thresholds::REAL.length,
         u64::from(u32::MAX),
         "the largest number of four bytes: one byte short of 4 GiB"
     );
@@ -700,7 +713,7 @@ fn a_file_of_more_than_four_gigabytes_is_kept_whole_and_found_whole() {
     }
     let included = FileToInclude {
         entry_name: resource_entry_name(identifier(1), "huge.mkv"),
-        path: path.clone(),
+        source: path.clone().into(),
     };
     let archive = folder.path().join("huge.ffrs");
 
@@ -720,4 +733,339 @@ fn a_file_of_more_than_four_gigabytes_is_kept_whole_and_found_whole() {
         assert_eq!(found, mark, "at {at}");
     }
     assert!(have_the_same_contents(&path, &taken_out).unwrap(), "every byte of it");
+}
+
+// --- what an archive says about itself ---
+
+#[test]
+fn only_a_file_that_is_stored_as_it_is_can_be_read_where_it_is_in_the_archive() {
+    let folder = tempfile::tempdir().unwrap();
+    let video = bytes_that_do_not_compress(3_000, 11);
+    let stored = folder.path().join("stored.ffrs");
+    write_archive(&stored, "{}", &[a_file(folder.path(), "clip.mov", &video)]).unwrap();
+
+    let place = state_of_archive(&stored).unwrap().entries["resources/1-clip.mov"];
+    let location = place.as_a_location_in(&stored).expect("it is stored as it is");
+
+    assert_eq!(location.file(), stored.as_path());
+    let stretch = location.stretch().expect("a stretch of the archive");
+    assert_eq!((stretch.start, stretch.length), (place.data_start, 3_000));
+    let whole_archive = fs::read(&stored).unwrap();
+    assert_eq!(
+        &whole_archive[stretch.start as usize..(stretch.start + stretch.length) as usize],
+        video.as_slice(),
+        "the bytes there are the file"
+    );
+
+    // (A file that another zip program compressed is not there as it is: there is nothing to read where it is.)
+    let compressed = folder.path().join("compressed.ffrs");
+    {
+        let mut writer = ZipWriter::new(File::create(&compressed).unwrap());
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        writer.start_file(PROJECT_ENTRY_NAME, options).unwrap();
+        writer.write_all(b"{}").unwrap();
+        writer.start_file("resources/1-clip.mov", options).unwrap();
+        writer.write_all(&vec![7_u8; 40_000]).unwrap();
+        writer.finish().unwrap();
+    }
+    let place = state_of_archive(&compressed).unwrap().entries["resources/1-clip.mov"];
+    assert!(!place.is_stored);
+    assert_eq!(place.as_a_location_in(&compressed), None);
+}
+
+#[test]
+fn the_bytes_of_the_included_files_are_those_of_the_files_and_not_those_of_the_project() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    let project_text = "a project that has a good deal to say, ".repeat(300);
+    write_archive(&archive, &project_text, &[]).unwrap();
+    assert_eq!(state_of_archive(&archive).unwrap().bytes_of_included_files(), 0);
+
+    let first = FileToInclude {
+        entry_name: resource_entry_name(identifier(1), "one.mp4"),
+        ..a_file(folder.path(), "one.mp4", &bytes_that_do_not_compress(1_000, 1))
+    };
+    let second = FileToInclude {
+        entry_name: resource_entry_name(identifier(2), "two.mp4"),
+        ..a_file(folder.path(), "two.mp4", &bytes_that_do_not_compress(2_500, 2))
+    };
+    write_archive(&archive, &project_text, &[first, second]).unwrap();
+
+    assert_eq!(state_of_archive(&archive).unwrap().bytes_of_included_files(), 3_500);
+}
+
+#[test]
+fn garbage_is_worth_taking_away_when_it_is_some_megabytes_and_at_least_half_of_what_is_in_use() {
+    let state = |bytes_in_use: u64, bytes_of_garbage: u64| ArchiveState {
+        entries: HashMap::new(),
+        bytes_in_use,
+        bytes_of_garbage,
+    };
+    let megabyte = 1_u64 << 20;
+
+    // Of a small file, some megabytes of garbage are worth it, and not much less.
+    assert!(!state(0, 0).is_worth_compacting());
+    assert!(!state(10_000, 4 * megabyte - 1).is_worth_compacting());
+    assert!(state(10_000, 4 * megabyte).is_worth_compacting());
+    assert!(
+        !state(10_000, 100_000).is_worth_compacting(),
+        "a hundred kilobytes of it are not"
+    );
+    // Of a big file, it must also be at least half of what is in use.
+    assert!(!state(100 * megabyte, 20 * megabyte).is_worth_compacting());
+    assert!(!state(100 * megabyte, 50 * megabyte - 1).is_worth_compacting());
+    assert!(state(100 * megabyte, 50 * megabyte).is_worth_compacting());
+    assert!(state(100 * megabyte, 500 * megabyte).is_worth_compacting());
+    // Half of a file that is under 8 MiB is less than 4 MiB: the 4 MiB is what counts.
+    assert!(!state(6 * megabyte, 3 * megabyte).is_worth_compacting());
+    assert!(state(6 * megabyte, 4 * megabyte).is_worth_compacting());
+}
+
+// --- adding to an archive ---
+
+fn a_file_named(folder: &Path, entry_name: &str, contents: &[u8]) -> FileToInclude {
+    let path = folder.join(format!("source for {}", entry_name.replace('/', "_")));
+    fs::write(&path, contents).unwrap();
+    FileToInclude {
+        entry_name: entry_name.to_owned(),
+        source: path.into(),
+    }
+}
+
+#[test]
+fn adding_to_an_archive_keeps_the_files_that_are_named_leaves_the_others_as_garbage_and_replaces_the_text() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    let first = bytes_that_do_not_compress(40_000, 1);
+    let second = bytes_that_do_not_compress(30_000, 2);
+    let third = bytes_that_do_not_compress(20_000, 3);
+    write_archive(
+        &archive,
+        "the first text",
+        &[
+            a_file_named(folder.path(), "resources/1-one.mp4", &first),
+            a_file_named(folder.path(), "resources/2-two.mp4", &second),
+        ],
+    )
+    .unwrap();
+    let before = state_of_archive(&archive).unwrap();
+    assert_eq!(before.bytes_of_garbage, 0);
+
+    let after = append_to_archive(
+        &archive,
+        "the second text",
+        &["resources/1-one.mp4".to_owned()],
+        &[a_file_named(folder.path(), "resources/3-three.mp4", &third)],
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        names_of_the_entries(&archive),
+        vec![
+            PROJECT_ENTRY_NAME.to_owned(),
+            "resources/1-one.mp4".to_owned(),
+            "resources/3-three.mp4".to_owned()
+        ]
+    );
+    assert_eq!(read_project_text(&archive).unwrap(), "the second text");
+    assert_eq!(
+        after.entries["resources/1-one.mp4"], before.entries["resources/1-one.mp4"],
+        "the file that stays is where it was: not written again, and not moved"
+    );
+    assert_eq!(
+        after,
+        state_of_archive(&archive).unwrap(),
+        "what is told is what the archive says"
+    );
+    assert!(
+        after.bytes_of_garbage >= second.len() as u64,
+        "the file that was dropped is still in it, as garbage: {} bytes",
+        after.bytes_of_garbage
+    );
+    let taken_out = folder.path().join("out");
+    extract_entry(&archive, "resources/3-three.mp4", &taken_out).unwrap();
+    assert_eq!(fs::read(&taken_out).unwrap(), third);
+    extract_entry(&archive, "resources/1-one.mp4", &taken_out).unwrap();
+    assert_eq!(fs::read(&taken_out).unwrap(), first);
+}
+
+#[test]
+fn a_file_that_is_new_replaces_the_one_of_the_same_name_that_is_named_to_stay() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    write_archive(
+        &archive,
+        "text",
+        &[a_file_named(folder.path(), "resources/1-one.mp4", b"the old bytes")],
+    )
+    .unwrap();
+
+    append_to_archive(
+        &archive,
+        "text",
+        &["resources/1-one.mp4".to_owned()],
+        &[a_file_named(folder.path(), "resources/1-one.mp4", b"the new bytes")],
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        names_of_the_entries(&archive),
+        vec![PROJECT_ENTRY_NAME.to_owned(), "resources/1-one.mp4".to_owned()],
+        "one file of that name"
+    );
+    let taken_out = folder.path().join("out");
+    extract_entry(&archive, "resources/1-one.mp4", &taken_out).unwrap();
+    assert_eq!(fs::read(&taken_out).unwrap(), b"the new bytes");
+}
+
+#[test]
+fn files_that_are_not_named_to_stay_are_not_kept_even_if_nothing_new_is_added() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    write_archive(
+        &archive,
+        "text",
+        &[a_file_named(folder.path(), "resources/1-one.mp4", b"some bytes")],
+    )
+    .unwrap();
+
+    append_to_archive(&archive, "text again", &[], &[], &mut |_| Ok(())).unwrap();
+
+    assert_eq!(names_of_the_entries(&archive), vec![PROJECT_ENTRY_NAME.to_owned()]);
+    assert_eq!(read_project_text(&archive).unwrap(), "text again");
+}
+
+#[test]
+fn a_save_that_is_stopped_leaves_the_archive_as_it_was_byte_for_byte() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    write_archive(
+        &archive,
+        "text",
+        &[a_file_named(
+            folder.path(),
+            "resources/1-one.mp4",
+            &bytes_that_do_not_compress(5_000, 1),
+        )],
+    )
+    .unwrap();
+    let bytes_before = fs::read(&archive).unwrap();
+
+    let stopped = append_to_archive(
+        &archive,
+        "text that is never kept",
+        &["resources/1-one.mp4".to_owned()],
+        &[a_file_named(
+            folder.path(),
+            "resources/2-two.mp4",
+            &bytes_that_do_not_compress(3 * COPY_BUFFER_BYTES, 2),
+        )],
+        &mut |copied| {
+            if copied > COPY_BUFFER_BYTES as u64 {
+                Err(io::Error::new(io::ErrorKind::Interrupted, "stopped"))
+            } else {
+                Ok(())
+            }
+        },
+    );
+
+    assert!(matches!(stopped, Err(ArchiveError::Stopped)), "{stopped:?}");
+    assert_eq!(fs::read(&archive).unwrap(), bytes_before);
+}
+
+#[test]
+fn the_old_text_of_the_project_is_never_kept_even_if_it_is_named_to_stay() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    write_archive(&archive, "the first text", &[]).unwrap();
+
+    append_to_archive(
+        &archive,
+        "the second text",
+        &[PROJECT_ENTRY_NAME.to_owned()],
+        &[],
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+
+    assert_eq!(names_of_the_entries(&archive), vec![PROJECT_ENTRY_NAME.to_owned()]);
+    assert_eq!(read_project_text(&archive).unwrap(), "the second text");
+}
+
+#[test]
+fn what_a_save_that_was_cut_off_left_after_the_last_whole_end_record_is_cut_off_before_the_next_is_added() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    let untouched = folder.path().join("b.ffrs");
+    let file = a_file_named(
+        folder.path(),
+        "resources/1-one.mp4",
+        &bytes_that_do_not_compress(20_000, 1),
+    );
+    write_archive(&archive, "text", std::slice::from_ref(&file)).unwrap();
+    fs::copy(&archive, &untouched).unwrap();
+    // A save that was cut off: it began a new entry, and the power went.
+    let mut cut_off = fs::OpenOptions::new().append(true).open(&archive).unwrap();
+    cut_off.write_all(b"PK\x03\x04").unwrap();
+    cut_off.write_all(&bytes_that_do_not_compress(10_000, 2)).unwrap();
+    drop(cut_off);
+    assert!(fs::metadata(&archive).unwrap().len() > fs::metadata(&untouched).unwrap().len() + 10_000);
+
+    for path in [&archive, &untouched] {
+        append_to_archive(
+            path,
+            "newer text",
+            &["resources/1-one.mp4".to_owned()],
+            &[],
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        fs::read(&archive).unwrap(),
+        fs::read(&untouched).unwrap(),
+        "what was left was cut off, and the file is as if it had never been there"
+    );
+    assert_eq!(read_project_text(&archive).unwrap(), "newer text");
+}
+
+#[test]
+fn writing_an_archive_again_stores_a_file_that_another_zip_program_compressed_and_keeps_all_of_it() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("recompressed.ffrs");
+    let video = bytes_that_do_not_compress(60_000, 9)
+        .into_iter()
+        .map(|byte| byte & 0x0f) // (something that a compressor does shrink)
+        .collect::<Vec<u8>>();
+    {
+        let mut writer = ZipWriter::new(File::create(&archive).unwrap());
+        let compressed = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        writer.start_file(PROJECT_ENTRY_NAME, compressed).unwrap();
+        writer.write_all(b"{\"a project\": 1}").unwrap();
+        writer.start_file("resources/1-v.mp4", compressed).unwrap();
+        writer.write_all(&video).unwrap();
+        writer.finish().unwrap();
+    }
+    assert!(
+        !state_of_archive(&archive).unwrap().entries["resources/1-v.mp4"].is_stored,
+        "the setup: it is compressed"
+    );
+
+    let state = compact_archive(&archive, &mut |_| Ok(())).unwrap();
+
+    let place = state.entries["resources/1-v.mp4"];
+    assert!(
+        place.is_stored,
+        "it is stored as it is now, so it can be read where it is"
+    );
+    assert_eq!(place.length, video.len() as u64);
+    assert_eq!(place.crc32, crc32_of(&video));
+    let taken_out = folder.path().join("out");
+    extract_entry(&archive, "resources/1-v.mp4", &taken_out).unwrap();
+    assert_eq!(fs::read(&taken_out).unwrap(), video);
+    assert_eq!(read_project_text(&archive).unwrap(), "{\"a project\": 1}");
+    assert_eq!(state.bytes_of_garbage, 0);
 }

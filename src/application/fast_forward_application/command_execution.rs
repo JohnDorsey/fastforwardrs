@@ -88,7 +88,8 @@ impl FastForwardApplication {
             Command::SaveProject => self.save_project(),
             Command::SaveProjectAs => self.save_project_as(),
             Command::NewProject => self.ask_before_discarding(AfterConfirmation::NewProject),
-            Command::ImportFile => self.import_file(),
+            Command::EmbedAndImportFile => self.embed_and_import_file(),
+            Command::LinkAndImportFile => self.link_and_import_file(),
             Command::ExportVideo => self.export_video(),
 
             Command::Undo => self.undo(now),

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use fastforwardrs::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
-use fastforwardrs::media::{FfmpegToolchain, probe_source_media, probe_video};
+use fastforwardrs::media::{FfmpegToolchain, MediaLocation, probe_source_media, probe_video};
 use fastforwardrs::project::{
     AnimationTarget, Clip, ClipId, MediaClip, Project, PropertyId, PropertyValue, Settings, SourceAudioProperties,
     SourceFrameIndex, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SpeedFactor, SpeedIndicatorLayout,
@@ -696,10 +696,10 @@ pub fn export_with_text_pictures(
     render_text: &dyn Fn(&TextObject, u32, u32) -> RgbaPicture,
 ) {
     let plan = plan_export(project, Settings::DEFAULT, render_text).expect("the project can be exported");
-    let source_paths: Vec<PathBuf> = plan
+    let source_paths: Vec<MediaLocation> = plan
         .source_files
         .iter()
-        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone())
+        .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone().into())
         .collect();
     let export = VideoExport::start(toolchain, &plan, &source_paths, destination, Arc::new(|| {})).expect("it starts");
     let started = Instant::now();

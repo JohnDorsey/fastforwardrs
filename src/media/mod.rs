@@ -12,6 +12,7 @@ pub mod export;
 mod ffmpeg_toolchain;
 mod finer_thumbnails;
 mod frame_stream;
+mod location;
 mod picture_decoder;
 mod source_probe;
 mod thumbnail_library;
@@ -28,6 +29,7 @@ pub use finer_thumbnails::FinerThumbnails;
 pub use frame_stream::{
     DecodedFrame, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, frame_stream_arguments,
 };
+pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
 pub use source_probe::{
     ProbeError, probe_source_media, probe_video, properties_from_probe_output, source_properties_from_probe_output,

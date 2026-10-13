@@ -15,7 +15,7 @@ use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::application::opening::{OpeningOutcome, open_first_that_works};
 use crate::application::theme;
 use crate::media::{
-    PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailKey, ThumbnailLibrary, WaveformEvent,
+    MediaLocation, PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailKey, ThumbnailLibrary, WaveformEvent,
     WaveformExtraction, decode_picture, probe_source_media, size_to_decode_at,
 };
 use crate::playback::preview_picture_size;
@@ -23,6 +23,7 @@ use crate::project::{
     SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
     SourceVideoProperties,
 };
+use crate::project_file::archive::entry_place;
 use crate::project_file::relative_path_between;
 
 /// The kinds of file offered first in the dialog that asks for a video.
@@ -42,7 +43,8 @@ const PICTURE_FILE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp",
 impl FastForwardApplication {
     /// Asks the user for a video, a sound or a picture and puts all of it on the timeline, at the
     /// current frame: on the front-most track that has nothing on it, or on a new track in front.
-    pub(super) fn import_file(&mut self) {
+    /// The project remembers where the file is, and does not hold it.
+    pub(super) fn link_and_import_file(&mut self) {
         self.pause_playback_for_dialog();
         if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound or a picture") {
             self.start_opening(OpeningPurpose::ImportNewSource, vec![path]);
@@ -61,38 +63,53 @@ impl FastForwardApplication {
         }
     }
 
-    /// Starts taking the file `entry_name` of the archive `archive` (the project file, which has the file of the source file
-    /// `identifier` included in it) out of it, and opening it, in the background.
+    /// Starts opening the file `entry_name` of the archive `archive` (the project file, which has the file of the source file
+    /// `identifier` included in it), in the background. It is read where it is in the archive, as a stretch of it; only a file that
+    /// another program compressed cannot be, and that is taken out into the cache first.
     pub(super) fn start_opening_an_included_file(
         &mut self,
         identifier: SourceMediaIdentifier,
         archive: PathBuf,
         entry_name: String,
     ) {
-        let (Some(toolchain), Some(cache)) = (self.toolchain.clone(), self.archive_cache.clone()) else {
-            let reason = if self.toolchain.is_none() {
-                "ffmpeg could not be found"
-            } else {
-                "there is nowhere to keep the files that are taken out of the project file"
-            };
+        let Some(toolchain) = self.toolchain.clone() else {
             self.source_files.insert(
                 identifier,
                 SourceFileState::new(SourceStatus::Unavailable {
-                    reason: reason.to_owned(),
+                    reason: "ffmpeg could not be found".to_owned(),
                 }),
             );
             self.missing_sources_warning_open = true;
             return;
         };
+        let cache = self.archive_cache.clone();
         self.source_files
             .insert(identifier, SourceFileState::new(SourceStatus::Opening));
+        let archive = std::path::absolute(&archive).unwrap_or(archive);
         let task = BackgroundTask::start(Arc::clone(&self.wake_up), move || {
-            match cache.take_out(&archive, &entry_name) {
-                Ok(path) => open_first_that_works(&[path], |path| probe_source_media(&toolchain, path)),
-                Err(error) => OpeningOutcome::Failed {
-                    attempts: vec![(PathBuf::from(&entry_name), error.to_string())],
+            let failed = |reason: String| OpeningOutcome::Failed {
+                attempts: vec![(MediaLocation::of_a_file(&entry_name), reason)],
+            };
+            let place = match entry_place(&archive, &entry_name) {
+                Ok(place) => place,
+                Err(error) => return failed(error.to_string()),
+            };
+            let location = match place.as_a_location_in(&archive) {
+                Some(location) => location,
+                None => match &cache {
+                    Some(cache) => match cache.take_out(&archive, &entry_name) {
+                        Ok(path) => MediaLocation::of_a_file(path),
+                        Err(error) => return failed(error.to_string()),
+                    },
+                    None => {
+                        return failed(
+                            "it is compressed in the project file, and there is nowhere to keep the files that are taken out of it"
+                                .to_owned(),
+                        );
+                    }
                 },
-            }
+            };
+            open_first_that_works(&[location], |location| probe_source_media(&toolchain, location))
         });
         self.openings.push(OpeningTask {
             purpose: OpeningPurpose::LocateForLoadedProject(identifier),
@@ -102,6 +119,8 @@ impl FastForwardApplication {
 
     /// Starts trying `candidates`, in order, in the background.
     pub(super) fn start_opening(&mut self, purpose: OpeningPurpose, candidates: Vec<PathBuf>) {
+        #[cfg(test)]
+        self.opening_purposes_started.push(purpose);
         let Some(toolchain) = self.toolchain.clone() else {
             if let OpeningPurpose::LocateForLoadedProject(identifier) = purpose {
                 self.source_files.insert(
@@ -121,8 +140,9 @@ impl FastForwardApplication {
             self.source_files
                 .insert(identifier, SourceFileState::new(SourceStatus::Opening));
         }
+        let candidates: Vec<MediaLocation> = candidates.into_iter().map(MediaLocation::of_a_file).collect();
         let task = BackgroundTask::start(Arc::clone(&self.wake_up), move || {
-            open_first_that_works(&candidates, |path| probe_source_media(&toolchain, path))
+            open_first_that_works(&candidates, |location| probe_source_media(&toolchain, location))
         });
         self.openings.push(OpeningTask { purpose, task });
     }
@@ -135,6 +155,7 @@ impl FastForwardApplication {
         self.collect_waveforms();
         self.collect_pictures();
         self.collect_export_events();
+        self.collect_the_running_save();
     }
 
     fn collect_opening_results(&mut self) {
@@ -149,7 +170,7 @@ impl FastForwardApplication {
                 TaskStatus::Finished(outcome) => outcome,
                 TaskStatus::Lost => OpeningOutcome::Failed {
                     attempts: vec![(
-                        PathBuf::new(),
+                        MediaLocation::of_a_file(PathBuf::new()),
                         "the program that checks files stopped unexpectedly".to_owned(),
                     )],
                 },
@@ -162,21 +183,32 @@ impl FastForwardApplication {
         }
     }
 
-    fn finish_opening(&mut self, purpose: OpeningPurpose, outcome: OpeningOutcome) {
+    pub(super) fn finish_opening(&mut self, purpose: OpeningPurpose, outcome: OpeningOutcome) {
         match (purpose, outcome) {
-            (OpeningPurpose::ImportNewSource, OpeningOutcome::Opened { path, properties }) => {
-                self.put_opened_file_on_the_timeline(path, properties);
+            (OpeningPurpose::ImportNewSource, OpeningOutcome::Opened { location, properties }) => {
+                self.put_opened_file_on_the_timeline(location, properties);
             }
             (OpeningPurpose::ImportNewSource, failure @ OpeningOutcome::Failed { .. }) => {
                 self.show_message("The file could not be opened", failure.describe_failure());
             }
 
-            (OpeningPurpose::RelinkMissingSource(identifier), OpeningOutcome::Opened { path, properties }) => {
-                let link = self.link_to(&path);
+            (OpeningPurpose::ImportNewSourceAndEmbedIt, OpeningOutcome::Opened { location, properties }) => {
+                // The file is on the timeline whatever happens next: if it cannot be put in the project file, it stays where it is, and
+                // the user is told why (as for any file that is included).
+                if let Some(identifier) = self.put_opened_file_on_the_timeline(location, properties) {
+                    self.include_files_in_the_project_file(&[identifier]);
+                }
+            }
+            (OpeningPurpose::ImportNewSourceAndEmbedIt, failure @ OpeningOutcome::Failed { .. }) => {
+                self.show_message("The file could not be opened", failure.describe_failure());
+            }
+
+            (OpeningPurpose::RelinkMissingSource(identifier), OpeningOutcome::Opened { location, properties }) => {
+                let link = self.link_to(location.file());
                 match self.project.relink_source(identifier, link, properties) {
                     Ok(relinked) => {
                         self.note_unsaved_change();
-                        self.source_is_now_available(identifier, path, properties);
+                        self.source_is_now_available(identifier, location, properties);
                         if relinked.frame_count_before != relinked.frame_count_after {
                             self.show_message(
                                 "The file is not the same length",
@@ -195,8 +227,8 @@ impl FastForwardApplication {
                 self.show_message("The file could not be opened", failure.describe_failure());
             }
 
-            (OpeningPurpose::LocateForLoadedProject(identifier), OpeningOutcome::Opened { path, properties }) => {
-                self.finish_locating_a_file_of_the_loaded_project(identifier, path, properties);
+            (OpeningPurpose::LocateForLoadedProject(identifier), OpeningOutcome::Opened { location, properties }) => {
+                self.finish_locating_a_file_of_the_loaded_project(identifier, location, properties);
             }
             (OpeningPurpose::LocateForLoadedProject(identifier), failure @ OpeningOutcome::Failed { .. }) => {
                 // The warning shows where the file was last known to be, so that is not repeated.
@@ -206,12 +238,16 @@ impl FastForwardApplication {
     }
 
     /// A file the user chose was opened: it becomes a source file of the project, with a clip of
-    /// all of it at the current frame.
-    fn put_opened_file_on_the_timeline(&mut self, path: PathBuf, properties: SourceMediaProperties) {
+    /// all of it at the current frame. Gives the source file, if it could be put on the timeline.
+    fn put_opened_file_on_the_timeline(
+        &mut self,
+        location: MediaLocation,
+        properties: SourceMediaProperties,
+    ) -> Option<SourceMediaIdentifier> {
         let identifier = self.project.next_source_identifier();
         let source = SourceMedia {
             identifier,
-            link: self.link_to(&path),
+            link: self.link_to(location.file()),
             properties,
         };
         let frame_rate_before = self.project.frame_rate();
@@ -230,9 +266,13 @@ impl FastForwardApplication {
                     self.clock.reset_for_frame_rate(self.project.frame_rate());
                     self.timeline_view.reset();
                 }
-                self.source_is_now_available(identifier, path, properties);
+                self.source_is_now_available(identifier, location, properties);
+                Some(identifier)
             }
-            Err(error) => self.show_message("The file could not be imported", error.to_string()),
+            Err(error) => {
+                self.show_message("The file could not be imported", error.to_string());
+                None
+            }
         }
     }
 
@@ -242,7 +282,7 @@ impl FastForwardApplication {
     fn finish_locating_a_file_of_the_loaded_project(
         &mut self,
         identifier: SourceMediaIdentifier,
-        path: PathBuf,
+        location: MediaLocation,
         properties: SourceMediaProperties,
     ) {
         let Some(source) = self.project.source(identifier).cloned() else {
@@ -252,21 +292,18 @@ impl FastForwardApplication {
             let (expected, found) = (source.properties.kind().description(), properties.kind().description());
             self.mark_source_unavailable(
                 identifier,
-                format!(
-                    "{} is {found}, but the project was edited on {expected}",
-                    path.display()
-                ),
+                format!("{location} is {found}, but the project was edited on {expected}"),
             );
             return;
         }
         // A file that is included in the project file was taken out of it, and is where it was put: that is not where it is linked
         // to, which is where it was and is what it is put back at.
         if !source.link.is_included() {
-            let link = self.link_to(&path);
+            let link = self.link_to(location.file());
             // Only the link changes: the project keeps the properties it was edited with.
             let _ = self.project.relink_source(identifier, link, source.properties);
         }
-        self.source_is_now_available(identifier, path, properties);
+        self.source_is_now_available(identifier, location, properties);
     }
 
     /// The source file cannot be used: say so, and show the warning.
@@ -280,21 +317,23 @@ impl FastForwardApplication {
     fn source_is_now_available(
         &mut self,
         identifier: SourceMediaIdentifier,
-        path: PathBuf,
+        location: MediaLocation,
         properties: SourceMediaProperties,
     ) {
         self.textures.clear();
         self.source_files.insert(
             identifier,
-            SourceFileState::new(SourceStatus::Available { path: path.clone() }),
+            SourceFileState::new(SourceStatus::Available {
+                location: location.clone(),
+            }),
         );
         if self.missing_sources().is_empty() {
             self.missing_sources_warning_open = false;
         }
         match properties {
-            SourceMediaProperties::Video(video) => self.start_thumbnails(identifier, &path, video),
-            SourceMediaProperties::Audio(_) => self.start_waveform(identifier, &path),
-            SourceMediaProperties::Image(image) => self.start_loading_the_picture(identifier, &path, image),
+            SourceMediaProperties::Video(video) => self.start_thumbnails(identifier, &location, video),
+            SourceMediaProperties::Audio(_) => self.start_waveform(identifier, &location),
+            SourceMediaProperties::Image(image) => self.start_loading_the_picture(identifier, &location, image),
         }
     }
 
@@ -303,7 +342,7 @@ impl FastForwardApplication {
     fn start_loading_the_picture(
         &mut self,
         identifier: SourceMediaIdentifier,
-        path: &Path,
+        location: &MediaLocation,
         properties: SourceImageProperties,
     ) {
         let (picture_width, picture_height) = self.project.picture_size();
@@ -319,9 +358,9 @@ impl FastForwardApplication {
         let Some(toolchain) = self.toolchain.clone() else {
             return;
         };
-        let path = path.to_owned();
+        let location = location.clone();
         state.picture.load = Some(BackgroundTask::start(Arc::clone(&self.wake_up), move || {
-            decode_picture(&toolchain, &path, size).map_err(|error| error.to_string())
+            decode_picture(&toolchain, &location, size).map_err(|error| error.to_string())
         }));
     }
 
@@ -353,7 +392,12 @@ impl FastForwardApplication {
         }
     }
 
-    fn start_thumbnails(&mut self, identifier: SourceMediaIdentifier, path: &Path, properties: SourceVideoProperties) {
+    fn start_thumbnails(
+        &mut self,
+        identifier: SourceMediaIdentifier,
+        location: &MediaLocation,
+        properties: SourceVideoProperties,
+    ) {
         let seconds_of_video = properties
             .frame_rate
             .seconds_at_frame(properties.total_frame_count)
@@ -371,7 +415,7 @@ impl FastForwardApplication {
             properties.display_height_in_pixels,
             theme::THUMBNAIL_HEIGHT_IN_PIXELS,
         );
-        match ThumbnailExtraction::start(toolchain, path, size, Arc::clone(&self.wake_up)) {
+        match ThumbnailExtraction::start(toolchain, location, size, Arc::clone(&self.wake_up)) {
             Ok(extraction) => state.thumbnails.extraction = Some(extraction),
             Err(error) => {
                 let problem = error.to_string();
@@ -380,13 +424,13 @@ impl FastForwardApplication {
         }
     }
 
-    fn start_waveform(&mut self, identifier: SourceMediaIdentifier, path: &Path) {
+    fn start_waveform(&mut self, identifier: SourceMediaIdentifier, location: &MediaLocation) {
         let Some(state) = self.source_files.get_mut(&identifier) else {
             return;
         };
         state.waveform = WaveformState::default();
         let Some(toolchain) = &self.toolchain else { return };
-        match WaveformExtraction::start(toolchain, path, Arc::clone(&self.wake_up)) {
+        match WaveformExtraction::start(toolchain, location, Arc::clone(&self.wake_up)) {
             Ok(extraction) => state.waveform.extraction = Some(extraction),
             Err(error) => {
                 let problem = error.to_string();
@@ -449,9 +493,9 @@ impl FastForwardApplication {
             if thumbnails.finer.is_running() || thumbnails.extraction.is_some() {
                 continue;
             }
-            let (Some(toolchain), Some(path), Some(video)) = (
+            let (Some(toolchain), Some(location), Some(video)) = (
                 &self.toolchain,
-                state.status_path(),
+                state.location_if_available().cloned(),
                 self.project
                     .source(*identifier)
                     .and_then(|source| source.properties.video()),
@@ -470,7 +514,7 @@ impl FastForwardApplication {
             // (If ffmpeg cannot be started the pictures are simply not made: they were asked for, so
             // they are not asked for again, and the coarser ones stay on show.)
             if let Ok(extraction) =
-                ThumbnailExtraction::start_range(toolchain, &path, size, range, Arc::clone(&self.wake_up))
+                ThumbnailExtraction::start_range(toolchain, &location, size, range, Arc::clone(&self.wake_up))
             {
                 thumbnails.finer.start(range, extraction);
             }
@@ -544,7 +588,7 @@ impl FastForwardApplication {
 
     /// Asks which video, sound or picture file to use, offering all the kinds there are first.
     /// `None` if none was chosen.
-    fn ask_for_a_media_file(&self, title: &str) -> Option<PathBuf> {
+    pub(super) fn ask_for_a_media_file(&self, title: &str) -> Option<PathBuf> {
         let everything_we_know: Vec<&str> = VIDEO_FILE_EXTENSIONS
             .iter()
             .chain(SOUND_FILE_EXTENSIONS.iter())

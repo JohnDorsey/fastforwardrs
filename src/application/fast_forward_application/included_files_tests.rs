@@ -14,6 +14,7 @@ use super::{SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::ScriptedFileChooser;
+use crate::media::MediaLocation;
 use crate::project::{
     FrameRate, Project, SourceAudioProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
     SourceVideoProperties, TimelineFrameIndex,
@@ -25,22 +26,22 @@ const INCLUDE: &str = "Include in project file";
 const REMOVE: &str = "Remove from project file";
 
 /// The bytes of the video that the fixtures have, which are not a video: nothing here opens it.
-const THE_VIDEO: &[u8] = b"not really a video, but some bytes that are kept as they are";
+pub(super) const THE_VIDEO: &[u8] = b"not really a video, but some bytes that are kept as they are";
 
 /// A folder with a video and a sound file in it, a project made from those two, and a window showing it with a chooser that
 /// answers what it is told to.
-struct Fixture {
-    folder: tempfile::TempDir,
-    chooser: ScriptedFileChooser,
-    window: Window,
+pub(super) struct Fixture {
+    pub(super) folder: tempfile::TempDir,
+    pub(super) chooser: ScriptedFileChooser,
+    pub(super) window: Window,
 }
 
-fn the_sound() -> SourceMediaIdentifier {
+pub(super) fn the_sound() -> SourceMediaIdentifier {
     SourceMediaIdentifier::new(2)
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let folder = tempfile::tempdir().unwrap();
         fs::create_dir(folder.path().join("media")).unwrap();
         fs::write(folder.path().join("media").join("holiday.mp4"), THE_VIDEO).unwrap();
@@ -84,18 +85,18 @@ impl Fixture {
         }
     }
 
-    fn path(&self, name: &str) -> PathBuf {
+    pub(super) fn path(&self, name: &str) -> PathBuf {
         self.folder.path().join(name)
     }
 
     /// Saves the project as an archive called `name` in the folder, which is its file from then on.
-    fn save_as(&mut self, name: &str) -> PathBuf {
+    pub(super) fn save_as(&mut self, name: &str) -> PathBuf {
         let path = self.path(name);
         assert!(self.window.application_mut().save_project_to(path.clone()));
         path
     }
 
-    fn the_link_of(&self, identifier: SourceMediaIdentifier) -> SourceMediaLink {
+    pub(super) fn the_link_of(&self, identifier: SourceMediaIdentifier) -> SourceMediaLink {
         self.window
             .application()
             .project()
@@ -105,19 +106,19 @@ impl Fixture {
             .clone()
     }
 
-    fn is_included(&self, identifier: SourceMediaIdentifier) -> bool {
+    pub(super) fn is_included(&self, identifier: SourceMediaIdentifier) -> bool {
         self.the_link_of(identifier).is_included()
     }
 }
 
-fn names_of_the_entries(archive_path: &Path) -> Vec<String> {
+pub(super) fn names_of_the_entries(archive_path: &Path) -> Vec<String> {
     let zip = zip::ZipArchive::new(fs::File::open(archive_path).unwrap()).unwrap();
     let mut names: Vec<String> = zip.file_names().map(|name| name.unwrap().into_owned()).collect();
     names.sort();
     names
 }
 
-fn dialog_showing(window: &Window) -> Option<&Dialog> {
+pub(super) fn dialog_showing(window: &Window) -> Option<&Dialog> {
     window.application().dialog.as_ref()
 }
 
@@ -139,7 +140,8 @@ fn is_anything_offered_that_says(window: &Window, word: &str) -> bool {
 // --- including, in a project whose file is an archive ---
 
 #[test]
-fn including_a_file_in_a_project_whose_file_is_an_archive_says_so_and_changes_nothing_on_the_disk_yet() {
+fn including_a_file_in_a_project_whose_file_is_an_archive_puts_it_in_the_archive_now_and_the_project_is_saved_with_it()
+{
     let mut fixture = Fixture::new();
     let archive_path = fixture.save_as("trip.ffrs");
     assert_eq!(names_of_the_entries(&archive_path), vec![PROJECT_ENTRY_NAME.to_owned()]);
@@ -161,30 +163,15 @@ fn including_a_file_in_a_project_whose_file_is_an_archive_says_so_and_changes_no
         "and where that is from the project"
     );
     assert!(!fixture.is_included(the_sound()), "the other file was not asked for");
-    assert!(fixture.window.application().has_unsaved_changes());
+    assert!(
+        !fixture.window.application().has_unsaved_changes(),
+        "the project says that it is included, so it is saved with the file"
+    );
     assert_eq!(dialog_showing(&fixture.window), None, "nothing is asked");
     assert_eq!(
         names_of_the_entries(&archive_path),
-        vec![PROJECT_ENTRY_NAME.to_owned()],
-        "the file is put in the project file when the project is saved"
-    );
-    assert!(fixture.chooser.questions_asked().is_empty());
-}
-
-#[test]
-fn the_file_that_was_included_is_in_the_project_file_when_the_project_is_saved() {
-    let mut fixture = Fixture::new();
-    let archive_path = fixture.save_as("trip.ffrs");
-    fixture
-        .window
-        .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
-
-    fixture.window.do_this(Command::SaveProject);
-
-    assert!(!fixture.window.application().has_unsaved_changes());
-    assert_eq!(
-        names_of_the_entries(&archive_path),
-        vec![PROJECT_ENTRY_NAME.to_owned(), "resources/1-holiday.mp4".to_owned()]
+        vec![PROJECT_ENTRY_NAME.to_owned(), "resources/1-holiday.mp4".to_owned()],
+        "the file is in the project file now"
     );
     let taken_out = fixture.path("taken out.mp4");
     archive::extract_entry(&archive_path, "resources/1-holiday.mp4", &taken_out).unwrap();
@@ -192,6 +179,67 @@ fn the_file_that_was_included_is_in_the_project_file_when_the_project_is_saved()
     let loaded = read_project_file(&archive_path).unwrap();
     assert!(loaded.sources()[0].link.is_included());
     assert!(!loaded.sources()[1].link.is_included());
+    assert!(fixture.chooser.questions_asked().is_empty());
+}
+
+#[test]
+fn a_file_that_is_included_is_read_where_it_is_in_the_project_file_and_not_where_it_was() {
+    let mut fixture = Fixture::new();
+    let archive_path = fixture.save_as("trip.ffrs");
+
+    fixture
+        .window
+        .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
+
+    let place = archive::entry_place(&archive_path, "resources/1-holiday.mp4").unwrap();
+    let SourceStatus::Available { location } = &fixture.window.application().source_files[&VIDEO].status else {
+        panic!("the file is available");
+    };
+    assert_eq!(
+        *location,
+        MediaLocation::of_a_stretch_of(
+            std::path::absolute(&archive_path).unwrap(),
+            place.data_start,
+            THE_VIDEO.len() as u64
+        )
+    );
+    assert_eq!(
+        fixture.window.application().source_files[&the_sound()].status,
+        SourceStatus::Available {
+            location: fixture.path("media").join("song.mp3").into()
+        },
+        "a file that is not included is read where it is"
+    );
+}
+
+#[test]
+fn saving_a_project_that_has_a_file_included_does_not_write_the_file_again_and_the_file_stays_where_it_is() {
+    let mut fixture = Fixture::new();
+    let archive_path = fixture.save_as("trip.ffrs");
+    fixture
+        .window
+        .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
+    let entry = "resources/1-holiday.mp4";
+    let place_before = archive::entry_place(&archive_path, entry).unwrap();
+    let length_before = fs::metadata(&archive_path).unwrap().len();
+    let tracks_before = fixture.window.application().project().tracks().len();
+
+    fixture.window.do_this(Command::AddTrack);
+    fixture.window.do_this(Command::SaveProject);
+
+    assert!(!fixture.window.application().has_unsaved_changes());
+    assert_eq!(archive::entry_place(&archive_path, entry).unwrap(), place_before);
+    assert!(
+        fs::metadata(&archive_path).unwrap().len() < length_before + (1 << 20),
+        "only text was added to the archive"
+    );
+    let loaded = read_project_file(&archive_path).unwrap();
+    assert_eq!(loaded.tracks().len(), tracks_before + 1);
+    assert!(loaded.sources()[0].link.is_included());
+    assert_eq!(
+        names_of_the_entries(&archive_path),
+        vec![PROJECT_ENTRY_NAME.to_owned(), entry.to_owned()]
+    );
 }
 
 #[test]
@@ -623,7 +671,7 @@ fn fixture_with_the_video_included_and_the_original_gone() -> (Fixture, PathBuf,
     fixture.window.application_mut().source_files.insert(
         VIDEO,
         SourceFileState::new(SourceStatus::Available {
-            path: in_the_cache.clone(),
+            location: in_the_cache.clone().into(),
         }),
     );
     fs::remove_file(&original).unwrap();
@@ -645,7 +693,9 @@ fn a_file_that_is_taken_out_is_put_back_where_it_was_and_is_no_longer_included()
     assert_eq!(link.relative_path, Some(PathBuf::from("media/holiday.mp4")));
     assert_eq!(
         fixture.window.application().source_files[&VIDEO].status,
-        SourceStatus::Available { path: original },
+        SourceStatus::Available {
+            location: original.into()
+        },
         "it is the file that is used from now on"
     );
     assert!(
@@ -854,64 +904,44 @@ fn choosing_remove_in_the_menu_of_a_clip_takes_its_file_out_of_the_project_file(
 // --- autosave ---
 
 #[test]
-fn a_project_that_has_a_great_deal_included_is_not_autosaved_but_one_that_has_a_little_is() {
+fn autosave_of_a_project_that_has_a_great_deal_included_adds_only_the_text_of_the_project_to_the_archive() {
     let mut fixture = Fixture::new();
+    // The video is made a great deal bigger before it is included (it is zeros, which a disk that can make sparse files keeps in no room).
+    let big = fixture.path("media").join("holiday.mp4");
+    let file = fs::OpenOptions::new().write(true).open(&big).unwrap();
+    file.set_len(70 << 20).unwrap();
+    drop(file);
     let archive_path = fixture.save_as("trip.ffrs");
     fixture
         .window
         .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
-    fixture.window.do_this(Command::SaveProject);
+    // (So much is copied in the background, with a window that says how far it has got: it is waited for.)
+    super::saving_tests::wait_until_the_save_is_done(&mut fixture.window);
+    let entry = "resources/1-holiday.mp4";
+    let place_before = archive::entry_place(&archive_path, entry).unwrap();
+    let length_before = fs::metadata(&archive_path).unwrap().len();
+    assert!(length_before > 70 << 20, "the setup: the video is in the archive");
     fixture.window.application_mut().global_settings.autosave = true;
     let context = egui::Context::default();
     let tracks_at_the_start = fixture.window.application().project().tracks().len();
 
-    // A little: autosaved, with the file in it.
     fixture.window.do_this(Command::AddTrack);
     fixture
         .window
         .application_mut()
         .autosave_when_quiet_for_long_enough(&context, Instant::now() + Duration::from_secs(5));
+
     assert!(!fixture.window.application().has_unsaved_changes(), "saved by itself");
     assert_eq!(
         read_project_file(&archive_path).unwrap().tracks().len(),
         tracks_at_the_start + 1
     );
-
-    // A great deal: the file is made bigger than the most that is autosaved.
-    let big = fixture.path("media").join("holiday.mp4");
-    let file = fs::OpenOptions::new().write(true).open(&big).unwrap();
-    file.set_len(super::autosave::MOST_BYTES_INCLUDED_FOR_AUTOSAVE + 1)
-        .unwrap();
-    drop(file);
-    fixture.window.do_this(Command::AddTrack);
-    fixture
-        .window
-        .application_mut()
-        .autosave_when_quiet_for_long_enough(&context, Instant::now() + Duration::from_secs(5));
-    assert!(
-        fixture.window.application().has_unsaved_changes(),
-        "not saved by itself: it would write all of that again"
-    );
     assert_eq!(
-        read_project_file(&archive_path).unwrap().tracks().len(),
-        tracks_at_the_start + 1,
-        "the archive is as it was"
+        archive::entry_place(&archive_path, entry).unwrap(),
+        place_before,
+        "the video is where it was: it was not written again"
     );
+    let added = fs::metadata(&archive_path).unwrap().len() - length_before;
+    assert!(added < 1 << 20, "only the text of the project was added: {added} bytes");
     assert_eq!(dialog_showing(&fixture.window), None, "and nothing is said about it");
-}
-
-#[test]
-fn the_bytes_that_are_included_are_counted_from_the_files_that_are_found() {
-    let mut fixture = Fixture::new();
-    fixture.save_as("trip.ffrs");
-    assert_eq!(fixture.window.application().bytes_included_in_the_project_file(), 0);
-
-    fixture
-        .window
-        .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO, the_sound()]));
-
-    assert_eq!(
-        fixture.window.application().bytes_included_in_the_project_file(),
-        THE_VIDEO.len() as u64 + b"some sound".len() as u64
-    );
 }
