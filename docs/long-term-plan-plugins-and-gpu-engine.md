@@ -1,5 +1,9 @@
 # Long-term plan (draft): plugins, a wgpu engine, and how much of ffmpeg stays
 
+**Update 2026-10-13:** the maintainer answered the questions of section 11 (the answers are at the end of that section), chose **GPLv3**, shelved
+OpenFX and asked for groups; the features that follow from all of it are in `plugin-system-features.md`, and the deeper answers (colour and ACES, a
+node-graph model, a render process, groups, test machines, licensing) in `plugin-system-design-notes.md`.
+
 Status: **abstract draft for discussion**, written 2026-10-12 after round 10. Nothing in it is decided or started, except the four
 preparatory steps the maintainer already agreed to (section 9, phase 0). It answers: how should the data model change to take
 ISF shaders, `.cube` LUTs, LADSPA audio plugins and eventually OpenFX plugins, and more such things later; what does the move from
@@ -539,6 +543,20 @@ Dependencies: 0 before everything; 1 needs 0; 2 needs 1; 3a can precede 1; 3b ne
 6. **Platforms**: which of macOS and Linux do you need to support and test, and is a CI machine available for them?
 7. **Text objects**: should they eventually be generator effects (one idea for everything generated), or stay a model concept of their
    own?
+
+### Answers (the maintainer, 2026-10-13)
+
+1. **Distribution:** GPLv3. (This removes the LGPL-or-GPL fork of section 6: a GPL ffmpeg build may be used and shipped, with its source offered; see
+   the design notes, section 6.)
+2. **Performance goals:** acceptable for now.
+3. **Colour:** linear-light compositing is an important feature; wants more colour spaces and asks whether ACES AP0 can be supported (design notes,
+   section 1).
+4. **First plugin family:** `.cube` first, then ISF; embedding a shader is the default, configurable in the project settings and the global settings.
+5. **Transitions:** the model of 3.4 is acceptable.
+6. **Platforms:** Windows, macOS and Linux eventually; no Mac for the far future; a Linux VM in VirtualBox, or WSL, for Linux testing (design notes, section 5).
+7. **Text objects:** should eventually be generator effects.
+
+OpenFX is shelved (section 7.4 and phase 6 are kept for reference only). Groups (clip groups and track groups with effects of their own) are wanted.
 
 ---
 

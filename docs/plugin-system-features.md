@@ -1,0 +1,564 @@
+# Plugin system: features list (draft 1, to be made concrete by questions)
+
+Status: **draft 1**, written 2026-10-13. It turns the long-term plan (`long-term-plan-plugins-and-gpu-engine.md`) and the maintainer's
+answers of 2026-10-13 into a list of features that the final plan of action can be built from. It is *not* the plan: it says **what
+the system must do**, not in what order, or how. Every line that is not yet concrete enough to plan from is marked **[Q]** and has a
+matching entry in section 19 (open questions). The list is finished when no **[Q]** is left in a line that the plan depends on.
+
+Background reading: the long-term plan (the data model, the engine options, the ffmpeg question) and the design notes
+(`plugin-system-design-notes.md`: colour, node graphs, a render-server process, groups, test machines).
+
+## How to read it
+
+Each feature has an identifier (area letters and a number; the identifiers do not change when the list is edited), a status, a priority
+and a sentence that can be checked.
+
+| Status | Meaning |
+|---|---|
+| **[D]** | decided by the maintainer (the date is given) |
+| **[P]** | proposed by me; it stands unless the maintainer objects |
+| **[Q]** | not decided: a question in section 19 has to be answered before a plan can rely on it |
+| **[S]** | shelved on purpose: written down so that it is not forgotten, and not planned |
+
+| Priority | Meaning |
+|---|---|
+| **M** | must be there for the plugin system to be called done (the first release of it) |
+| **S** | should be there for that release, and can slip |
+| **C** | could be there |
+| **L** | later: a release after that one; the design must not make it impossible |
+
+Words used with one meaning: an **effect type** is what a plugin or a built-in provides (its descriptor); an **effect instance** is one
+use of it on a clip, a track or a group; a **host** is the part of the program that can run effect types of one family (the built-in
+host, the LUT host, the ISF host, the LADSPA host, the CLAP host); a **resource** is a file an effect needs (a `.cube` table, a shader
+source, an image).
+
+---
+
+## 1. Scope (SC)
+
+* **SC-01 [D] M** The plugin families, in the order they are built: built-in effects; `.cube` LUTs; ISF shaders; LADSPA audio plugins;
+  CLAP audio plugins. (2026-10-13: ".cube first, then ISF"; LADSPA was in the original request; CLAP is my addition, see AU-02.)
+* **SC-02 [S]** OpenFX plugins are shelved (2026-10-13). Nothing in the model may *depend* on them; nothing is planned for them. (What
+  the model keeps possible is in section 9 of the plan.)
+* **SC-03 [D] M** The program is licensed GPLv3 (2026-10-13). Consequences are collected in LG-01 to LG-08.
+* **SC-04 [P] M** The user-facing word is **effect** (for pictures and sound alike); **plugin** is used only for what comes from a file
+  or a library. A `.cube` table is a *resource* of a built-in effect, not a plugin. (See Q-01.)
+* **SC-05 [D] L** Text objects become generator effects, eventually (2026-10-13). When is Q-17.
+* **SC-06 [D] M** Clip groups and track groups, with effects of their own, are wanted (2026-10-13). Their place in the order is argued in
+  the design notes, section 4; their features are in section 13.
+* **SC-07 [P]** Not in scope of this list: masks and shapes with keyframed paths, motion tracking, time remapping beyond constant speed,
+  scripting or expressions for parameters, a node-editor interface, VST3 and LV2 hosting, WASM plugins. Each may be asked for later; the
+  model must not make them impossible. (See Q-30 for the node editor.)
+
+---
+
+## 2. Effect types and descriptors (ID)
+
+* **ID-01 [P] M** An effect type has a **key**: a string `kind:stable-id` with a namespace (`builtin:hue_shift`, `lut3d:...`,
+  `isf:<name>`, `ladspa:<UniqueID>/<label>`, `clap:<id>`). The key never contains a file path and never an index. *Note: this changes
+  one thing in the long-term plan: there the key of an ISF shader or a LUT contained a hash of its content. That makes every edit of a
+  shader a different effect type, which contradicts ID-04. The hash is the **version**, not the key. See Q-08.*
+* **ID-02 [P] M** An effect type has a **descriptor**: name, description, category, domain (picture or sound), role (filter, generator,
+  transition, or for sound: insert, generator), input slots, parameters, resource slots, a statement of what it needs across frames, and
+  the **colour domain** it works in (CM-10).
+* **ID-03 [P] M** A **parameter** has a string id that is stable and unique in its effect type; a label; a group; a type (ID-05); a default;
+  a range and step where they mean something; whether it can be animated; and the version of the effect type it appeared in.
+* **ID-04 [P] M** Versions: an effect type has a version (major, minor). Same major means compatible: the instance uses the newest
+  minor. A different major makes the instance behave as if the effect type were missing (ID-08) and says so. An alias table can say that
+  a parameter id was renamed.
+* **ID-05 [P] M** Parameter types, at least: number (with range, step, and a linear or logarithmic scale), integer, flag, choice (by id,
+  with labels), pair (two numbers: point, size), colour (float RGBA, with a colour space: Q-06), text, resource (a file of a kind), and
+  trigger (an event). Needed by ISF: float, bool, long, color, point2D, event, image. Needed by LADSPA and CLAP: number with scales, toggle,
+  integer, choice. *Needs a decision:* font as a type (for text generators): Q-17.
+* **ID-06 [P] M** The built-in effects are descriptors like any other (the hue shift becomes `builtin:hue_shift`, parameter `degrees`).
+  There is no code path that is only for built-ins, except the host that runs them.
+* **ID-07 [P] S** The descriptor of an effect type can say which of its parameters are **on-canvas handles** (a point on the preview that
+  can be dragged). Q-20.
+* **ID-08 [P] M** An effect type that is not installed is **missing**: its instances keep everything (section 3, MD-07).
+* **ID-09 [P] M** Each host turns what it reads (an ISF file header, a CLAP plugin's parameter list, a LADSPA port list) into
+  descriptors, and reports why it could not (a parse error with a line number; a plugin that crashed while being scanned).
+
+---
+
+## 3. Instances and the project model (MD)
+
+* **MD-01 [P] M** An **effect instance** has an instance id (unique in the project, like clip and rack ids), the key and version of its
+  effect type, an enabled flag (bypass), parameter values keyed by parameter id, and an opaque `extra` value that is saved and not read.
+* **MD-02 [P] M** A clip, a track, a clip group and a track group each have an **ordered list** of effect instances. Several instances of
+  one effect type on one object are allowed (today there is at most one of each kind).
+* **MD-03 [P] M** Picture effects and sound effects are in the same list and are applied by domain.
+* **MD-04 [P] M** What identifies a parameter inside the program is *(instance id, parameter slot)*, so that keyframe racks, undo, the
+  selection and drawers keep working with a `Copy` key; what is **saved** is the instance id and the parameter id (a string). Slots are
+  worked out when a project is read. (The "slot trick" of the plan, section 3.3; to be confirmed by a spike before the plan relies on
+  it: see QA-07.)
+* **MD-05 [P] M** The project keeps **a snapshot of each descriptor it uses** (once per key and version), so that it can be read, shown and
+  edited without the plugin being installed, and so that a project's model needs no registry.
+* **MD-06 [P] M** The keyframes of a parameter belong to the project, are typed by the parameter's type, and are the program's own
+  (racks, drawers, stopwatch buttons). A plugin is only given the value at the frame.
+* **MD-07 [P] M** **Missing or changed effect types**: the instance is kept with all values and keyframes, is saved back unchanged,
+  shows a badge, and renders as a pass-through. When the effect type is found again (same key, compatible version) it binds again. A
+  changed range clamps on use and keeps the stored value. What an *export* does with a missing effect: Q-12.
+* **MD-08 [P] M** Effect instances are copied with their clips and tracks (duplicate, copy keyframes), and a duplicate gets new instance
+  ids.
+* **MD-09 [P] M** Adding, removing, reordering, enabling and editing an effect instance and its values are steps of the history (undo
+  and redo), like today's effect edits. Putting a resource in the project file is not one (as including a media file is not).
+* **MD-10 [P] M** The project file (format 10) saves `plugins` (descriptor snapshots), instances with values by parameter id, racks that
+  point at `(instance, parameter id)`, and `resources`. Format 9 is read (hue shift becomes `builtin:hue_shift`). An unknown field is
+  kept and written back (so a newer program's file survives an older one).
+* **MD-11 [Q] M** Colour parameters and any value that has a colour space: where the space is stored. Q-06.
+* **MD-12 [P] C** An instance can have a user-given name and a colour label.
+
+---
+
+## 4. Resources (RS)
+
+* **RS-01 [P] M** A **resource** is a file an effect needs: a `.cube` table, an ISF shader's source, an image an ISF shader imports. It
+  has an id, a kind, a link (absolute path, relative path, `included_as` entry name: the same shape as a source media link), and a content
+  hash.
+* **RS-02 [D] M** **Embedding is the default** for resources (2026-10-13): a shader or a LUT that is added to a project is put in the
+  project file as `resources/<id>-<name>`.
+* **RS-03 [D] M** The default is **configurable in the project settings and in the global settings** (2026-10-13). *Open details:*
+  what the values are (embed / link / ask), which wins (the project's, I propose), whether the setting changes resources already in the
+  project (I propose: no, only new ones), and what happens when the project's file is plain JSON, which cannot embed anything (Q-03).
+* **RS-04 [P] M** Each resource can be switched between embedded and linked afterwards with the same two actions media has ("Include in
+  project file", "Remove from project file"), and the project can say so for all of them at once.
+* **RS-05 [P] M** Two instances that use one LUT use one resource (dedupe by content hash).
+* **RS-06 [P] M** A resource that is missing (a linked file that is gone) makes its instances behave as missing effects (MD-07) and is
+  listed in the same warning window as missing source files, with "choose the file again".
+* **RS-07 [P] M** A resource is read into memory when the project is loaded; resources are small. (A 65-point 3D table is about 6 MB of
+  text.) A limit on the size of one resource is needed against a project that tries to exhaust memory: Q-26.
+* **RS-08 [P] M** A resource in an embedded project is only ever found by its entry name inside the project file: an ISF shader that
+  imports `texture.png` finds a resource of the project, never a path on the computer. (Safety: SF-03.)
+* **RS-09 [P] S** When the project file has an embedded copy of a shader and the library has a different version of the same shader, the
+  **embedded copy wins** (the project renders as it did), and the user is offered "update to the library version". (Q-08.)
+
+---
+
+## 5. Colour (CM)
+
+*Maintainer, 2026-10-13: linear-light compositing is an important feature; wants to know about more colour spaces; asks whether ACES AP0
+can be supported. The design notes answer that at length; here is what the system must do.*
+
+* **CM-01 [D] M** Pictures are composited in **linear light** in a floating-point working format (`Rgba16Float`) (2026-10-13).
+* **CM-02 [P] M** The **working colour space** is a project setting: its primaries and its (linear) encoding. At least linear
+  sRGB/Rec.709 primaries (the default for new projects); proposed to be offered from the start: linear Rec.2020, and **ACEScg (AP1)**.
+  Which exactly: Q-04.
+* **CM-03 [P] M** Every source has an **input colour space** (primaries, transfer function, range, matrix for YUV): detected from the
+  file's tags where there are some, overridable per source (a drop-down of known spaces), with an assumption for untagged files that is
+  said in the interface (BT.709 for HD, BT.601 for SD: Q-05).
+* **CM-04 [P] M** The picture on the preview is converted from the working space to the **display** by an output transform: at least
+  sRGB display. Which display spaces: Q-04. *The window cannot take linear `Rgba16Float` directly* (egui expects gamma-encoded 8-bit and
+  `register_native_texture` needs `Rgba8Unorm`): the engine ends with its own pass (display transform, then the display's encoding) into an
+  8-bit texture that egui shows.
+* **CM-05 [P] M** An export converts the working space to the **output colour space** the user chooses (at least Rec.709 with the
+  BT.1886 transfer function, which is what the encoders' YUV is tagged as), and writes the right tags (primaries, transfer, matrix, range)
+  into the file.
+* **CM-06 [Q] S** ACES: **AP0 (ACES2065-1)** is supported as an **interchange** space (a source's input space; an output space) and, as I propose,
+  **not as the working space** (it has an imaginary blue primary: verified; ACES itself recommends AP1/**ACEScg** for compositing). ACES
+  **view transforms** (the "ACES look": the 2.0 output transform is an algorithm that needs small hue tables, or can be baked to a 3-D table;
+  OpenColorIO can bake it) are a **later** step that goes through the LUT host. What "support" means for the first release, and whether EXR files are
+  needed: Q-04, Q-18.
+* **CM-07 [P] S** Known transfer functions to start with: sRGB, BT.709, BT.1886, gamma 2.2/2.4/2.6, linear; later PQ and HLG (HDR) and
+  camera log curves (Q-04).
+* **CM-08 [P] M** The conversions are **fixed-function**: a 1-D curve and a 3x3 matrix per step, written once in Rust (a reference
+  implementation, tested against published values) and once in WGSL (checked against the Rust one). Creative or view transforms that are
+  not a curve and a matrix use a 3-D table.
+* **CM-09 [P] M** Colour and its precision: no 8-bit stage between the source and the output in the picture path.
+* **CM-10 [P] M** An effect type declares the **colour domain** it works in: *scene-linear*, *display-referred* (encoded with the
+  sRGB curve, which is how most ISF shaders and today's hue shift are written), or *log* (named). The engine converts around the effect
+  when the working space is not its domain. An instance can override it. (This is the main addition that linear-light needs: without
+  it, every existing effect changes its look. See the design notes, section 1.)
+* **CM-11 [P] M** **`.cube` tables** say in which space they expect their input and what space they produce (the format does not):
+  two choices on the instance, default *display-referred in, display-referred out*.
+* **CM-12 [Q] M** What happens to projects made before linear-light (format 9): they keep their look (a project colour version that
+  says "legacy: effects in display-referred space") or they are converted. Q-05.
+* **CM-13 [P] L** HDR: PQ and HLG sources, an HDR-capable display, HDR export. The working format already holds it; the interface for it
+  is later.
+* **CM-14 [P] M** Colour **settings** live in: working space and input defaults in the *project* settings; the display transform in the
+  *global* settings (it describes the monitor), with a project override only if asked for. (Q-04.)
+* **CM-15 [P] S** A colour space list is data (a table of primaries, white point, transfer), so adding one is a row, not code.
+* **CM-16 [P] M** A **colour-managed test**: every conversion pair has a round-trip test and a test against published numbers; the
+  linear-light compositing of two known colours (50 % of white over black is 0.5 in linear light, 0.735 in sRGB code) is a test.
+* **CM-17 [P] M** **YUV to RGB happens on the GPU**: ffmpeg decodes and does nothing to the colours (raw frames in their native pixel format, 8-bit
+  or 10-bit), the engine reads the file's tags (ffprobe: primaries, transfer function, matrix, range; a missing tag means unspecified) and
+  converts with the matrix and range that apply, or with the assumption of CM-03. **Verified today: ffmpeg converts untagged video with the BT.601
+  limited-range matrix at every size, 4K included**, so today's preview and export show untagged HD material with the wrong matrix; the assumption
+  chosen here changes the look of such files (Q-05).
+* **CM-18 [P] S** Camera log curves as input spaces (ARRI LogC3 and LogC4, Sony S-Log3, Panasonic V-Log, RED Log3G10, Canon Log 3, Blackmagic Film Gen5):
+  each is a published formula and a matrix (specifications or open implementations exist; nothing found suggests a licence problem), written as
+  a row of the colour space table (CM-15). Which ones are wanted: Q-04.
+* **CM-20 [P] M** **Parity before linear light.** The engine is first run in a **display-referred compatibility mode** that reproduces today's pipeline (so that
+  parity with the oracle can be *proved*, EN-02); linear light is then switched on as **a separate, reviewed change** whose visible differences are listed
+  (edges of scaled pictures, blends, blurs). Otherwise the port and the new look arrive together and neither can be checked.
+* **CM-19 [P] L** OpenColorIO as an **optional** tool (to read an OCIO config or to bake a view transform to a table): a C++ library with no WGSL output and no
+  established Rust binding, so it is not on the path of the first release. Q-35.
+
+---
+
+## 6. The engine (EN)
+
+* **EN-01 [P] M** One renderer for the picture, on wgpu, used for **both the preview and the export** (the long-term plan's option A).
+  ffmpeg stays as the decode and encode pipe.
+* **EN-02 [P] M** Until parity is shown, the old path (the egui layers and the ffmpeg filter graph) stays as the **oracle**. Parity
+  means: random projects compared frame by frame within a tolerance (one level on one machine, a stated larger one across vendors).
+* **EN-03 [P] M** Preview and export are **bit-identical on one machine** and within a tolerance across machines (documented).
+* **EN-04 [P] M** A render of a frame is a **graph of passes** built from the plan: decode -> upload -> colour conversion -> placement ->
+  effect stack -> composite -> (group effects) -> track effects -> output transform. Textures come from a pool.
+* **EN-05 [P] M** A **bad shader never hangs the program**: compile errors give a message with a line; a pass that takes too long, or a
+  lost device, disables that instance and says which; the device is recreated.
+* **EN-06 [P] M** An effect that depends on earlier frames (ISF persistent buffers, feedback) is marked so in its descriptor; a seek
+  re-simulates from the clip's start or a checkpoint; the export is sequential. The interface says "this effect depends on earlier
+  frames". Which limit on re-simulation: Q-21.
+* **EN-07 [P] M** Performance goals (2026-10-13: "acceptable for now"): a typical stack (four layers, two blurs and a LUT) plays at
+  **1080p60 on the integrated GPU** and at **4K on a discrete GPU**. These are measured by a benchmark that is part of the repository,
+  not by feel. (What happens when the machine cannot keep up: Q-13.)
+* **EN-08 [P] S** Preview quality is adaptive: at full speed on a slow machine the engine renders at a lower resolution rather than
+  dropping frames, and a still frame (paused, scrubbing stopped) is rendered at full resolution.
+* **EN-09 [P] S** Rendered frames are cached (the frame at the playhead, and frames around it) and the cache is dropped when an edit
+  changes what they show.
+* **EN-10 [P] M** Export reads frames back from the GPU in a pipelined way and converts to the encoder's YUV on the GPU first.
+* **EN-11 [P] C** A render of a project can be started with no window (a command-line export), which also gives the engine tests a way
+  to run. (It is what option D, a render process, would also need: Q-31.)
+* **EN-12 [P] M** The engine's interface is **message-shaped**, so that a render process stays possible later (the design notes, section 3): the
+  scene is an **immutable, serialisable value** (what to render, parameter values, times, sizes; resources referred to by content hash; no
+  UI types, no pointers into the program's data); the entry is `request a frame(scene snapshot, time) -> frame`; GPU resources are addressed by
+  id; there is a path that **rebuilds all GPU state from the scene** (needed anyway after a lost device); the engine runs on a thread of its own
+  behind channels first. A command-line export (EN-11) is the first user of that shape.
+* **EN-13 [S]** OpenFX's CPU path is not designed for now.
+
+---
+
+## 7. Kinds of effect (EF)
+
+* **EF-01 [P] M** **Filters**: take the picture of the clip (or of the track, or of a group), give a picture.
+* **EF-02 [P] M** **Generators**: take no picture; give one (ISF source shaders; later the text generator). A generator clip has no media,
+  has a duration the user sets (like a picture clip, 5 seconds by default), and its content is an effect instance.
+* **EF-03 [D] M** **Transitions** are effects with a **backdrop** input on the front clip (2026-10-13: acceptable): the clip is the
+  "end" picture, what is composited behind it is the "start" picture, and `progress` is a number. (Q-09: where `progress` comes from.)
+* **EF-04 [P] S** Other users of the backdrop slot: blend modes, glass and blur-behind effects, adjustment-style effects.
+* **EF-05 [P] M** **Sound effects** (inserts on a clip or a track; generators later): in section 12.
+* **EF-06 [D] L** The **text object** becomes a generator effect with the parameters it has today (text, font, size, colour), as a
+  CPU-drawn picture uploaded to the GPU; the **text generator** is therefore a "CPU image producer", a second kind of host next to the
+  shader hosts (Q-17).
+* **EF-07 [P] S** A minimum set of **built-in effects** in the box, since a plugin system with one built-in effect is hard to judge and
+  to test: Q-10 asks which.
+* **EF-08 [P] C** Presets: a saved set of parameter values for an effect type.
+
+---
+
+## 8. Animation of parameters (AN)
+
+* **AN-01 [P] M** Every parameter that can be animated can have keyframes in a rack, with the stopwatch button, in the drawers, exactly
+  as today's properties.
+* **AN-02 [P] M** Interpolation follows the type: numbers, pairs and colours are interpolated linearly (colours in the working space,
+  in linear light: Q-06), choices, flags and text hold, triggers fire once at their frame.
+* **AN-03 [P] C** Per-keyframe interpolation (hold, linear, ease); today there is one rule per type.
+* **AN-04 [P] M** Editing an animated value pauses playback (as today).
+* **AN-05 [Q] C** Audio-reactive parameters (ISF `audio` and `audioFFT` inputs, about 8 of 327 shaders in the corpus): later, or never.
+  Q-22.
+* **AN-06 [P] M** A transition's `progress` and similar "over the length of the effect" values: Q-09.
+* **AN-07 [P] L** Linking one parameter to another, expressions: not now (SC-07).
+
+---
+
+## 9. Interface (UI)
+
+*The rule from the earlier rounds applies: **no always-visible control is added unless it is asked for.** Everything below that is not a
+menu item or a window opened from one is marked.*
+
+* **UI-01 [P] M** An effect is added with the **+ button** that exists (the menu of effect types), which gets **categories and a search
+  field** because the list will have hundreds of entries. (A new control inside an existing menu; Q-14.)
+* **UI-02 [P] M** The **properties panel** shows an instance's parameters with controls made from the descriptor: sliders, number fields,
+  pairs, colour pickers, choice boxes, toggles, a button for a trigger, a file chooser for a resource; grouped as the descriptor says;
+  each with the stopwatch.
+* **UI-03 [P] M** A missing effect shows a badge and its saved parameters (from the snapshot), not an empty box; a failed one shows its error.
+* **UI-04 [P] M** An instance can be disabled (bypass), reordered (drag), duplicated, removed, from the box's menu.
+* **UI-05 [P] M** "Add effect from file..." in the same menu: choose a `.cube` or an ISF file; it becomes a resource and an instance
+  (embedded or linked by the setting).
+* **UI-06 [D] M** The **embedding default** is a setting in the project settings window and in the global settings window (RS-03).
+* **UI-07 [P] S** The **colour settings** (working space, input space of a source, display transform, output colour space of an export)
+  are in the project settings, the clip's properties and the export window: no new always-visible controls.
+* **UI-08 [P] S** On-canvas handles for point parameters (ID-07), drawn by the preview's transform-box code. Q-20.
+* **UI-09 [P] C** A window that lists the effect types that were found and those that failed, with the reason (the plugin manager).
+* **UI-10 [P] M** All new texts follow the long-descriptive-name and plain-wording conventions of the existing windows.
+
+---
+
+## 10. Finding and managing effect types (DS)
+
+* **DS-01 [Q] M** Where effect types come from: **(a)** library folders scanned at start (a folder per family, per operating system), **(b)**
+  files added to a project ("Add effect from file...", UI-05), **(c)** both. I propose (c). Q-02.
+* **DS-02 [P] M** The folders: a program folder (what is shipped), a user folder (`%APPDATA%`, `~/.config`, the usual place per system),
+  and folders the user adds in the global settings.
+* **DS-03 [P] M** Scanning happens in the background and never blocks the window; the result is cached and refreshed when a folder
+  changes (or by a button in the plugin manager).
+* **DS-04 [P] M** Scanning a **binary plugin** (LADSPA, CLAP) happens in a **child process**, so that a plugin that crashes while it
+  loads does not take the editor down; one that crashed is listed as "failed" and is not tried again until it changes.
+* **DS-05 [P] S** An effect type can be disabled in the manager (it is then treated as missing).
+* **DS-06 [P] M** Duplicate keys (two folders with the same shader name): the user folder wins over the program folder; the manager
+  shows both.
+
+---
+
+## 11. Picture hosts (PH)
+
+### 11.1 The `.cube` LUT host
+
+* **PH-01 [P] M** Reads Adobe `.cube` 1D and 3D tables with `TITLE`, `DOMAIN_MIN/MAX`, `LUT_1D_SIZE` (2 to 65536), `LUT_3D_SIZE` (2 to
+  256); says what is wrong with a file that it refuses (with the line). The Resolve variant with a shaper and input ranges: Q-23.
+* **PH-02 [P] M** Applies a 3-D table on the GPU with **tetrahedral** interpolation; a 1-D table with linear interpolation; the input is
+  clamped to the domain and the output is not clamped to 0 to 1.
+* **PH-03 [P] M** Parameters: *intensity* (a mix with the input, 0 to 1), *input space*, *output space* (CM-11), *interpolation*
+  (tetrahedral or trilinear).
+* **PH-04 [P] S** Matches ffmpeg's `lut3d` tetrahedral within a tolerance (the test of the plan, phase 3a).
+* **PH-05 [P] S** Other table formats later (Hald CLUT image, `.3dl`, `.csp`): L.
+
+### 11.2 The ISF host
+
+* **PH-10 [P] M** Reads ISF 2.0 files: the JSON header (tolerantly: duplicate keys and an integer `ISFVSN` occur) and the GLSL source;
+  turns the header into a descriptor (ID-02) with the parameter mapping float -> number, bool -> flag, long -> choice, color -> colour,
+  point2D -> pair, event -> trigger, image -> input slot.
+* **PH-11 [P] M** Compiles the source through a small rewriting step and naga into WGSL, in a worker thread that survives a panic, and
+  validates it. Compile errors are shown with line and column.
+* **PH-12 [P] M** Multi-pass shaders (`PASSES` with `TARGET`, `WIDTH` and `HEIGHT` expressions) and persistent buffers (EN-06); `IMG_*`
+  macros; `TIME` is clip-local time and `FRAMEINDEX` clip-local frame number, never the wall clock; the y-axis flip.
+* **PH-13 [P] M** Filters, generators and transitions are told apart by their inputs (`inputImage`; none; `startImage`, `endImage`,
+  `progress`) (EF-01 to EF-03).
+* **PH-14 [P] M** Imported images (`IMPORTED`) are resources (RS-08).
+* **PH-15 [P] M** A **golden corpus** of ISF shaders with expected pictures from a reference host guards correctness; the compile rate
+  alone is not accepted as correctness. Which reference host and which shaders: Q-24.
+* **PH-16 [Q] M** What shaders ship in the box: the licence policy of LG-02 decides, and it removes some of the collection. Q-25.
+* **PH-17 [P] L** `audio` and `audioFFT` inputs (AN-05).
+
+### 11.3 Built-in host
+
+* **PH-20 [P] M** Runs the built-in effects (hue shift, and the others of EF-07) as WGSL passes; each is a descriptor plus a shader.
+* **PH-21 [P] C** The same descriptor-plus-WGSL form is offered to users as the program's own plugin format (no ISF shim needed).
+
+---
+
+## 12. Sound hosts (AU)
+
+* **AU-01 [D] M** LADSPA plugins can be used as sound effects on clips and tracks (the original request).
+* **AU-02 [P] S** CLAP plugins as well, because LADSPA binaries are almost only found on Linux; CLAP is the format users on all three
+  systems have. Q-27 asks what the maintainer actually wants to *use* first (a plugin of their own, perhaps).
+* **AU-03 [P] M** Sound plugins run **in the program**, in one block graph that the speakers and the export both call (not through
+  ffmpeg's `ladspa` filter, which is not available on every system). This replaces today's two ffmpeg graphs for sound, with the
+  old one kept as the oracle until the mixes match.
+* **AU-04 [P] M** Parameters are changed **sample-accurately**: blocks are split at keyframe changes or every 32 to 64 samples; gain-like
+  parameters are smoothed.
+* **AU-05 [P] M** A seek **resets** the plugins and runs a pre-roll so that tails and filters are in a sane state.
+* **AU-06 [P] S** Plugins that report latency are compensated (CLAP can; LADSPA has no standard way).
+* **AU-07 [P] M** Mono plugins are instantiated once per channel; channel layouts are handled and said.
+* **AU-08 [P] M** A missing sound plugin passes the sound through unchanged and keeps its settings (MD-07).
+* **AU-09 [P] M** Preview and export give the same sound on one machine (null test against each other).
+* **AU-10 [P] L** Sound generators; a master bus with effects (Q-28).
+* **AU-11 [Q] M** Time stretching (the "maintain pitch" behaviour of sped-up clips) stays ffmpeg's `atempo` until a replacement has been
+  judged by ear and the tests re-baselined. Q-29.
+
+---
+
+## 13. Groups (GR)
+
+*The detail is in the design notes, section 4; the features here are what has to be true whichever structure is chosen.*
+
+* **GR-01 [D] M** There are **track groups** and **clip groups**, and each can have effects of its own (2026-10-13).
+* **GR-02 [P] M** The effects of a group apply to the **composite of what is in the group** (not to what is behind it).
+* **GR-03 [Q] M** A **clip group** is (a) a **compound clip**: an opaque clip that has a timeline of its own with tracks and clips, which can
+  be opened, or (b) a **selection group** (moves and is cut together, and can take an effect that applies to the composite of exactly its
+  clips). Prior art: Kdenlive's groups are (b) and its nested "sequences" are (a); Premiere, Resolve, Final Cut and After Effects have (a). (a) is the
+  largest piece of the group work by far. Q-15.
+* **GR-04 [P] M** A **track group** contains tracks and behaves as one layer; it can be collapsed, muted, soloed (if there is solo),
+  and has a sound **sub-mix** with a gain.
+* **GR-05 [P] M** Groups can be nested; a depth limit is allowed (Q-15).
+* **GR-06 [P] M** A group's effect instances are ordinary instances (MD-01), animated with the same racks.
+* **GR-07 [P] M** Grouping and ungrouping are steps of the history and do not change what the picture and sound are (a test: ungroup
+  gives the same render).
+* **GR-08 [P] S** The model of groups is built on the descriptor-driven effect model, never on the closed enum (the order: design
+  notes, section 4).
+* **GR-09 [Q] S** **Adjustment clips**: a clip with no picture of its own whose effects apply to the composite of everything behind it, for the
+  length of the clip. Under the accepted transition model (EF-03) it costs almost nothing (a filter whose input is the backdrop), it is in
+  Blender, MLT, Resolve and After Effects, and it is the cheapest first use of the backdrop mechanism. Not asked for; Q-32.
+* **GR-10 [P] M** A group is **isolated** (its children are composited together first, then the group's effects and blend mode apply) or
+  **pass-through** (its children are composited straight into what is behind). The model has the flag from the start; the renderer treats a
+  group with no effects and no blend mode as pass-through (free). Whether the user sees the choice: Q-33.
+
+---
+
+## 14. Safety (SF)
+
+* **SF-01 [P] M** A shader that does not finish cannot freeze the window (EN-05). It is run under a watchdog, and it is **never
+  tested on the maintainer's own GPU**; the test is on a software adapter or a machine set aside for it.
+* **SF-02 [P] M** A project from elsewhere that embeds shaders can do no more than a shader can do: draw, and waste time (EN-05). It
+  cannot read files, because the resource lookup is by entry name only (RS-08).
+* **SF-03 [P] M** Names of embedded resources are checked as today's are (no path parts, no control characters, a length limit).
+* **SF-04 [P] M** A binary plugin (CLAP, LADSPA) is **trusted code** that runs with the program's rights: the first time one is added,
+  the manager says so. A project file can **name** such a plugin and can never **contain** one. Q-26 asks whether to ask before
+  loading a project that names one.
+* **SF-05 [P] S** Limits: the size of one resource, the number of instances on one object, the number of passes of one shader, the size
+  of one intermediate texture.
+
+---
+
+## 15. Compatibility and migration (MG)
+
+* **MG-01 [P] M** Format 9 projects open in the new program and look as before (CM-12).
+* **MG-02 [P] M** A project saved by the new program is not expected to open in the old one, and says so clearly (the "newer file
+  format" message exists).
+* **MG-03 [P] M** Every change of the saved form has a version and a reader for the old one, and a fixture file of each version in the
+  tests.
+* **MG-04 [P] M** The refactor that opens up effect identity (phase 0) is done **behind the existing tests**: the behaviour tests of
+  effects, racks, undo and the plan stay and pass unchanged, and only the tests that assert "at most one effect of each kind" and the
+  file-format tests change on purpose.
+
+---
+
+## 16. Platforms (PL)
+
+* **PL-01 [D] M** Windows first (2026-10-13). The program already runs here; every feature must work here.
+* **PL-02 [D] S** Linux eventually (2026-10-13), tested in WSL or a virtual machine (design notes, section 5; **both are absent today and I
+  will not install either without being told to**). What "supported" means: Q-19.
+* **PL-03 [D] L** macOS far in the future (2026-10-13): no Mac to test on, and a macOS virtual machine on other hardware is not permitted. Nothing in the
+  code may assume Windows; the cheap check is a **hosted runner** (GitHub's `macos-latest`, free for a public repository) that builds and runs the headless
+  tests; GPU behaviour there stays unmeasured (Q-19).
+* **PL-04 [P] M** Per platform, the plugin folders and binary suffixes are the usual ones (`.dll`/`.so`/`.dylib`; CLAP `.clap`).
+* **PL-05 [P] M** No feature may assume a particular GPU vendor; the software adapter must run everything (slowly).
+
+---
+
+## 17. Testing and quality (QA)
+
+* **QA-01 [P] M** Each host has **conformance tests** with small known inputs and expected outputs (a table of 8 pixels through a LUT;
+  a trivial shader; a gain plugin with a sine).
+* **QA-02 [P] M** The engine is compared with the oracle on random projects (EN-02), with a tolerance and a budget of differing pixels.
+* **QA-03 [P] M** The **golden corpus** for ISF (PH-15).
+* **QA-04 [P] M** The mutation campaigns of earlier rounds continue; the **tooling moves into the repository** and works on every
+  platform (agreed 2026-10-12): see the list of agreed preparatory work in the plan, phase 0.
+* **QA-05 [P] M** Performance benchmarks (EN-07) are in the repository and can be run on any machine.
+* **QA-06 [P] M** The whole suite runs on **Linux** (WSL2 or a VM; Linux uses a software Vulkan adapter, which is what the tests want) and on **hosted CI
+  for Windows, Ubuntu and macOS**; picture comparisons have per-system tolerances. **WSL2 and VirtualBox on one machine slow each other down**: choose one
+  (I propose WSL2). Q-19.
+* **QA-07 [P] M** A **spike** (a day or two, throwaway) confirms the parameter-slot design (MD-04) against the real code before the plan
+  relies on it, and another confirms one ISF shader through naga to a picture, and one deliberate hang on a software adapter.
+
+---
+
+## 18. Legal and licensing (LG)
+
+*A technical survey, not legal advice: design notes, section 6.*
+
+* **LG-01 [D] M** The program is **GPLv3** (2026-10-13). Whether "or later": Q-34 (I propose `GPL-3.0-or-later`, which is what the FSF recommends and
+  what the dependencies already force at least version 3 for).
+* **LG-02 [P] M** Shaders, LUTs and other content that **ships with the program** are under **MIT, BSD, ISC, Apache-2.0, CC0, Zlib or CC BY**, or are made
+  by us under GPLv3, with the licence written in the file's own header or next to it, and a **manifest** (name, author, licence, URL). Files
+  with no licence are rejected; anything non-commercial or share-alike with non-commercial terms is not bundled (**Boxinator** and the
+  Shadertoy-derived shaders of the ISF collection are out; **gl-transitions** are in, with notices). The user can load any shader or table from disk;
+  that is not bundling. PH-16, Q-25.
+* **LG-03 [P] M** ffmpeg: a **GPL build (with `--enable-version3`) may be used and shipped** (it is GPLv3-or-later; **verified for the build on this PC**), never a
+  `--enable-nonfree` build; **the corresponding source of the ffmpeg we ship is offered** (hosted by us).
+* **LG-04 [P] M** Hosting plugins that are not GPL (CLAP, LADSPA, LV2, VST3): the formats are all licensed compatibly. Whether the project adds an **explicit
+  statement that plugins loaded through a third-party API are not derivative works** (Ardour's "Plugin Clarification"), which only the
+  copyright holder can add and which is easy for a sole author now: Q-34.
+* **LG-05 [P] S** The plugin API of the program's own format (PH-21) is documented with a GPLv3-compatible example.
+* **LG-06 [P] M** The mechanics, as a task of phase 0: a root `LICENSE`; `license = "..."` in `Cargo.toml` (missing today); an SPDX line in each source
+  file (checkable with `reuse lint`); a `THIRD_PARTY` notices file made by `cargo-about` or checked by `cargo-deny`; the ffmpeg source offer; the manifest
+  of LG-02.
+* **LG-07 [P] S** Check the one dependency whose licence is not on the FSF's list: the **Ubuntu Font Licence** of egui's default fonts (ship those
+  fonts as separate files with their notices, or choose others).
+* **LG-08 [P] S** Our own LUTs for the sample set (identity, warm, cool, teal-orange) are made by us and released under GPLv3 (the licence-clear alternative to
+  taking someone's pack); a pack under **CC BY 4.0** (Q-DDL, reported) is possible once its licence file is read.
+
+---
+
+## 19. Open questions
+
+*Round 1 (the ones the data model, the first phases and the file format depend on) is asked in the chat and marked **R1** here; the others
+wait for their turn and keep the default until then. Each has my default, so "defaults" is a valid answer.*
+
+| # | Round | Question | My default |
+|---|---|---|---|
+| Q-01 | | Terminology: **effect** (what the user sees), **effect type**, **effect instance**, **host**, **resource**; **plugin** only for what comes from a file or library. | yes |
+| Q-02 | **R1** | Where do effect types come from: **library folders** scanned at start, **files added to the project**, or both? | both |
+| Q-03 | **R1** | Embedding setting: values *embed / link / ask*; project beats global; changes only resources added later; with a **plain-JSON project file** (which cannot embed) it falls back to link with a note, or asks once to save as `.ffrs`? | embed/link/ask; project beats global; new ones only; ask once to convert |
+| Q-04 | **R1** | Colour spaces for the **first release**: working (which), source inputs (which, including log cameras, PQ/HLG, ACES2065-1), display, export outputs; and is the ACES **view** transform (the look) wanted, or only the space conversions? | working: linear Rec.709 primaries and ACEScg; inputs: Rec.709/sRGB, Rec.2020, ACES2065-1 (as numbers; no EXR files yet); display sRGB; export Rec.709; logs and HDR later; view transform later through a baked table |
+| Q-05 | **R1** | Projects made before linear light, and the **untagged-video assumption** (today BT.601 at every size, which is wrong for HD): keep their look with a "legacy" project flag, or convert them? | legacy flag keeps the look (including the BT.601 assumption); new projects: untagged HD = BT.709, SD = BT.601 |
+| Q-06 | | Colour parameters: their space is always the working space, and colours are interpolated in linear light. | yes |
+| Q-07 | **R1** | The **hue shift** (and other existing effects) run in which domain: display-referred (keeps today's look) or linear? | display-referred; new effects declare their own |
+| Q-08 | **R1** | File-based effect types: **key = the name, version = a hash of the content**; the **embedded copy wins** over a library copy of the same name, with an "update to the library version" offer. | yes |
+| Q-09 | **R1** | Transitions: where does `progress` come from: a keyframed number only, or **derived from a start and end frame on the effect** (with a keyframed override)? | derived from a range, with an override |
+| Q-10 | **R1** | Which **built-in effects** ship in the first release besides hue shift? | brightness/contrast, saturation, exposure, blur, crop, opacity, LUT |
+| Q-11 | | A generator clip's default length (5 s like a picture) and whether it can be dragged longer. | 5 s, extendable |
+| Q-12 | **R1** | Export when an effect is missing: refuse, warn and go ahead, or ask? | refuse, listing what is missing, with an "export anyway" button |
+| Q-13 | | When the machine cannot keep up in the preview: lower resolution, drop frames, or both? | lower resolution first, then drop |
+| Q-14 | | The + menu grows to hundreds of entries: **categories and a search field** inside that menu are acceptable (a new control in an existing menu)? | yes |
+| Q-15 | **R1** | **Clip group**: compound clip (a timeline of its own) or selection group? Depth limit? | selection group first (cheap), compound clip only if you ask for it; depth 8 |
+| Q-16 | | Groups as organisation only (no effects) before the engine exists: acceptable? | yes |
+| Q-17 | **R1** | Text objects become generators: in the same file-format change as the plugin model (v10) or a later one (v11)? Font as a parameter type. | later (v11), once the plugin model has settled |
+| Q-18 | | EXR/DPX image or sequence import and export in the first release? | no |
+| Q-19 | **R1** | Platforms: install **WSL2** now (admin + restart; I can then run the Linux tests myself), or a VirtualBox VM (you create it; cannot be combined with WSL2 without slowdown), or neither yet? Is the GitHub repository public (free hosted CI for Windows/Ubuntu/macOS)? What does "supported" mean per platform? | WSL2; public repo with CI; Linux: tests pass, macOS: builds in CI |
+| Q-20 | | On-canvas handles for point parameters in the first release? | later |
+| Q-21 | | Persistent (feedback) effects: re-simulate up to how many frames on a seek before using the last cached state? | 300 frames |
+| Q-22 | | Audio-reactive shaders: ever? | not in the first release |
+| Q-23 | | The Resolve `.cube` variant (1D shaper plus 3D, non-standard input range): needed? | yes, read only |
+| Q-24 | | Reference host for the ISF golden corpus: the ISF Editor on Windows, by hand, 10 to 20 shaders? | yes |
+| Q-25 | | What ISF and LUT content ships (LG-02)? | gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else |
+| Q-26 | | Resource size limit; ask before loading a project that names a binary plugin? | 64 MiB per resource; ask once per plugin |
+| Q-27 | **R1** | Which **LADSPA/CLAP plugins** do you want to use first (one of your own?), and on which system will you run them? (LADSPA binaries are rare on Windows.) | your own LADSPA plugin(s) first, then CLAP |
+| Q-28 | | A master bus with effects? | later |
+| Q-29 | | Keep ffmpeg's `atempo` for sped-up sound for now? | yes |
+| Q-30 | | Will you ever want a **node-editor** interface (design notes, section 2)? | no, not planned |
+| Q-31 | | A render process (design notes, section 3): keep it possible only through message-shaped interfaces, or build it? | possible only; a command-line export first |
+| Q-32 | **R1** | **Adjustment clips** (an effect over everything behind a clip for its length): wanted? | yes, after the engine |
+| Q-33 | | Isolated / pass-through for groups visible to the user? | a hidden default (isolated if it has effects) |
+| Q-34 | **R1** | **GPL-3.0-or-later or GPL-3.0-only**, and an Ardour-style **plugin clarification** (plugins loaded through a third-party API are not derivative works)? Now, while you are the only copyright holder? | or-later; yes |
+| Q-35 | | OpenColorIO as an optional baker/reader later? | later |
+| Q-36 | | Export formats: 10-bit and other codecs now that a GPL ffmpeg may ship (x264, x265)? Hardware encoders? | later; keep today's formats |
+| Q-37 | **R1** | The plan's idea of shipping **LUTs through ffmpeg's `lut3d` before the engine exists** conflicts with the colour-space features (CM-10, CM-11): drop it (LUTs wait for the engine) or ship a limited version (display-referred in and out) first? | LUTs wait for the engine |
+
+---
+
+## 20. What this list does not say yet
+
+The order, the sizes and the gates: that is the plan of action, which is written when section 19 has no **[Q]** left that a phase depends
+on. A first guess of the order, to be argued about then: phase 0 (open up effect identity generic over the owner, the licence mechanics, the tooling), the
+group *structure* in parallel with the engine skeleton (parity first, in a display-referred compatibility mode), linear light turned on as a reviewed
+change, the LUT host, group effects and adjustment clips, the ISF host, sound (LADSPA, then CLAP), the plugin manager.
+
+## 21. Decision log
+
+| Date | Decision | By |
+|---|---|---|
+| 2026-10-12 | `.ffrs` reads stored entries in place; the program's two import actions are "Embed and import" and "Link and import" | maintainer |
+| 2026-10-12 | the first four opinions of round 9 are agreed: open up effect identity, mutation tooling into the repository, split `FastForwardApplication`'s state, `.ffrs` v2 | maintainer |
+| 2026-10-13 | licence GPLv3 | maintainer |
+| 2026-10-13 | the performance goals of the plan are acceptable for now | maintainer |
+| 2026-10-13 | linear-light compositing is an important feature; ACES AP0 asked about | maintainer |
+| 2026-10-13 | `.cube` first, then ISF; embedding a shader is the default, configurable in the project settings and the global settings | maintainer |
+| 2026-10-13 | the transition model (an effect with a backdrop input on the front clip) is acceptable | maintainer |
+| 2026-10-13 | Windows first; Linux eventually (WSL or a VirtualBox VM); macOS far away | maintainer |
+| 2026-10-13 | text objects should eventually be generator effects | maintainer |
+| 2026-10-13 | OpenFX is shelved | maintainer |
+| 2026-10-13 | clip groups and track groups with their own effects are wanted | maintainer |
+
+## 22. Gaps and inconsistencies found while writing this list
+
+Recorded so that they are not found twice; each points at where it was resolved or is asked.
+
+1. **An effect key that contained a content hash** (the long-term plan) contradicts versioning: every edit of a shader would be a new effect type.
+   Resolved in ID-01 (the hash is the version); the project-versus-library rule is Q-08.
+2. **"Embedding is the default"** cannot hold for a project saved as plain JSON, which cannot embed anything: Q-03.
+3. **Linear light versus existing effects**: the hue shift and nearly all ISF shaders are written for display-referred values and would change look in a
+   linear engine: CM-10, Q-07.
+4. **Today's colour handling is an accident**: untagged video of any size is converted as BT.601 (verified), so choosing a correct assumption
+   changes existing projects: CM-17, CM-12, Q-05.
+5. **LUTs through ffmpeg before the engine** (the plan's phase 3a) conflicts with colour-space-aware LUTs: Q-37.
+6. **Text objects as generators** need a second kind of host (CPU-drawn pictures), a font parameter type and a migration: EF-06, ID-05, Q-17.
+7. **LADSPA was asked for first among audio plugins, but its binaries are rare on Windows**, the development system: AU-02, Q-27.
+8. **The performance goals are stated for an integrated GPU that has not been measured with the real engine**: EN-07 makes them a benchmark in the
+   repository, not a promise.
+9. **Groups were asked for as "clip groups" without saying whether a group is a nested timeline or a selection**: GR-03, Q-15.
+10. **The transition model needs a rule for `progress`** (the user does not keyframe it by hand for every transition): EF-03, Q-09.
+11. **"Support Linux" and "support macOS" were not defined** (build, tests, release files): Q-19.
+12. **Plugins and the licence**: hosting non-GPL plugins in a GPL program is a debated case that the copyright holder can settle in one
+    sentence, which is easy now and hard later: LG-04, Q-34.
+
