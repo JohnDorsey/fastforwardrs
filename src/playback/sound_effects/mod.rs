@@ -7,9 +7,11 @@
 //! speakers play at, and is played by being mixed into whatever else is sounding.
 
 mod device;
+mod drawer;
 #[cfg(test)]
 mod logging_speakers;
 mod snip;
+mod synthesis;
 mod voices;
 
 use std::collections::HashMap;
@@ -17,6 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub use device::{DeviceEffectSpeakers, opener_of_the_default_effect_speakers};
+pub use drawer::SLIDE_SECONDS as DRAWER_SOUND_SLIDE_SECONDS;
 #[cfg(test)]
 pub use logging_speakers::{SpeakersLog, speakers_that_only_keep_a_log};
 
@@ -27,6 +30,10 @@ use super::audio_supplier::MINIMUM_TIME_BETWEEN_FAILED_ATTEMPTS;
 pub enum SoundEffect {
     /// Clips were cut in two.
     Snip,
+    /// A drawer slid open.
+    DrawerOpening,
+    /// A drawer slid shut.
+    DrawerClosing,
 }
 
 impl SoundEffect {
@@ -35,6 +42,8 @@ impl SoundEffect {
     pub fn synthesize(self, sample_rate: u32) -> Vec<f32> {
         match self {
             Self::Snip => snip::snip(sample_rate),
+            Self::DrawerOpening => drawer::opening(sample_rate),
+            Self::DrawerClosing => drawer::closing(sample_rate),
         }
     }
 }

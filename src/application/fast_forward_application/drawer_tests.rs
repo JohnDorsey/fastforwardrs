@@ -872,7 +872,7 @@ fn clicking_in_an_open_drawer_does_not_select_anything_or_let_go_of_what_is_sele
 }
 
 #[test]
-fn the_drawers_of_a_clip_that_is_deleted_and_of_a_track_are_forgotten_and_a_new_project_has_all_its_drawers_shut() {
+fn a_new_project_has_all_its_drawers_shut() {
     let mut window = window_with_a_short_clip();
     click_the_button(&mut window, 0);
     let track_button = the_button_of_the_track(&window, 0).center();
@@ -886,6 +886,69 @@ fn the_drawers_of_a_clip_that_is_deleted_and_of_a_track_are_forgotten_and_a_new_
 
     assert!(drawers_drawn(&window).is_empty());
     assert_eq!(window.application().project().tracks().len(), 1);
+}
+
+#[test]
+fn the_drawer_of_a_clip_that_is_deleted_is_forgotten_so_that_it_is_shut_when_the_deletion_is_undone_and_the_others_are_as_they_were()
+ {
+    let mut window = window_with_two_tracks();
+    click_the_button(&mut window, 0);
+    let_the_drawers_finish(&mut window);
+    click_the_button(&mut window, 1);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(
+        drawers_drawn(&window).len(),
+        2,
+        "the setup: both clips have an open drawer"
+    );
+    let sound = window.clip(0, 0);
+
+    window.do_this(Command::DeleteClips(vec![sound]));
+    let_the_drawers_finish(&mut window);
+    assert_eq!(
+        drawers_drawn(&window).len(),
+        1,
+        "the drawer of the clip that is there is open, and the one of the clip that is gone is not drawn"
+    );
+
+    window.do_this(Command::Undo);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(window.clip(0, 0), sound, "the clip is back, as it was");
+    assert_eq!(
+        drawers_drawn(&window).len(),
+        1,
+        "its drawer was forgotten while it was gone: it is shut, and the drawer of the other clip is still open"
+    );
+}
+
+#[test]
+fn the_drawer_of_a_track_that_is_deleted_is_forgotten_so_that_it_is_shut_when_the_deletion_is_undone() {
+    let mut window = window_with_two_tracks();
+    let in_front = window.application().project().tracks()[0].id();
+    let track_button = the_button_of_the_track(&window, 0).center();
+    window.click(track_button);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(
+        drawers_drawn(&window).len(),
+        1,
+        "the setup: the track in front has an open drawer"
+    );
+
+    window.do_this(Command::DeleteTrack(in_front));
+    let_the_drawers_finish(&mut window);
+    assert!(drawers_drawn(&window).is_empty());
+
+    window.do_this(Command::Undo);
+    let_the_drawers_finish(&mut window);
+    assert_eq!(
+        window.application().project().tracks()[0].id(),
+        in_front,
+        "the track is back"
+    );
+    assert!(
+        drawers_drawn(&window).is_empty(),
+        "its drawer was forgotten while it was gone, so it is shut"
+    );
 }
 
 #[test]

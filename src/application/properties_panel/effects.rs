@@ -21,8 +21,8 @@ use crate::project::{AnimationTarget, ClipKind, EffectKind, Effects, PropertyId,
 /// What the plus button that puts an effect on is called, which it says when the pointer rests on it, and to screen readers.
 pub const ADD_EFFECT_LABEL: &str = "Add an effect";
 
-/// What the item of the menu of a box of an effect that takes the effect off is called.
-pub const REMOVE_EFFECT_LABEL: &str = "Take this effect off";
+/// What the item of the menu of a box of an effect that deletes the effect is called.
+pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
 
 /// How much room there is round the plus button, above and below it, in points.
 const SPACE_ROUND_THE_PLUS_BUTTON: f32 = 12.0;
@@ -43,13 +43,13 @@ pub(super) fn show(
     for effect in has.iter() {
         let kind = effect.kind();
         ui.add_space(8.0);
-        let mut to_be_taken_off = false;
+        let mut to_be_deleted = false;
         kind_box::show_with_a_menu(
             ui,
             &what_an_effect_is_called(kind),
             |ui| {
-                if ui.button(REMOVE_EFFECT_LABEL).clicked() {
-                    to_be_taken_off = true;
+                if ui.button(DELETE_EFFECT_LABEL).clicked() {
+                    to_be_deleted = true;
                     ui.close();
                 }
             },
@@ -59,7 +59,7 @@ pub(super) fn show(
                 }
             },
         );
-        if to_be_taken_off {
+        if to_be_deleted {
             commands.push(Command::RemoveEffect { target, kind });
         }
     }

@@ -1118,3 +1118,45 @@ fn write_screenshots_of_the_plus_button_that_puts_an_effect_on_and_the_hue_shift
     journey.right_click(heading.center());
     save_what_is_drawn(&mut journey, &folder, "123_the_menu_of_the_box_of_the_effect");
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_including_a_video_in_the_project_file() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.cut_at_frame(60);
+
+    // The menu of a clip, which offers to include its video in the project file.
+    let on_the_clip = journey.point_on_the_track_at_frame(30);
+    journey.right_click(on_the_clip);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "120_the_menu_of_a_clip_offering_to_include_its_video",
+    );
+
+    // The project has no file yet, and files can only be included in a .ffrs file: that is what is asked.
+    journey.press_button("Include in project file");
+    journey.harness.run_steps(10);
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "121_the_question_when_the_project_is_not_saved_as_a_project_archive",
+    );
+    journey.press_button("Cancel");
+
+    // Saved as a .ffrs file, the video can be included, and the menu then offers to take it out again.
+    let archive = folder.join("demo_included.ffrs");
+    journey.application_mut().save_project_to(archive.clone());
+    journey.right_click(on_the_clip);
+    journey.press_button("Include in project file");
+    journey.application_mut().save_project_to(archive);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    journey.right_click(on_the_clip);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "122_the_menu_of_a_clip_whose_video_is_included");
+}

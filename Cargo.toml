@@ -18,6 +18,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.152"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+# Only what is needed to read an archive that another zip program wrote (it may compress what it writes): the archives this program
+# writes store everything as it is. (flate2 is in the tree for the PNG reader already; its backend is chosen here so that this does
+# not depend on that.)
+zip = { version = "9.0.2", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["wgpu"] }

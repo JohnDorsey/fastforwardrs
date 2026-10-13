@@ -15,6 +15,12 @@ use super::FastForwardApplication;
 /// fast-forward symbol, say, is saved once when it is let go and not on every frame of it.
 const QUIET_TIME_BEFORE_AUTOSAVING: Duration = Duration::from_secs(2);
 
+/// How many bytes of files may be included in the project file for it to be saved by autosave. A project file that is an archive is
+/// written all of it each time, with all the files in it, and a few minutes of video are some hundreds of megabytes: that is not
+/// to be written every time something is moved a little. A project that has more included than this is saved when the user saves
+/// it (and the user is asked about the changes before the program closes, as when autosave is off).
+pub(super) const MOST_BYTES_INCLUDED_FOR_AUTOSAVE: u64 = 64 << 20;
+
 impl FastForwardApplication {
     /// Whether the project has changes that have not been saved: edits that were made since it was
     /// saved (undoing back to what was saved leaves none), or changes of what is not edited, such
@@ -61,7 +67,22 @@ impl FastForwardApplication {
         // If saving fails the message says so once, and there is no new try until the project
         // changes again; trying again on every frame would only repeat the message.
         self.last_unsaved_change_at = None;
+        if self.bytes_included_in_the_project_file() > MOST_BYTES_INCLUDED_FOR_AUTOSAVE {
+            return;
+        }
         self.save_project_to(path);
+    }
+
+    /// How many bytes the files that are included in the project file have, as far as they can be found.
+    pub(super) fn bytes_included_in_the_project_file(&self) -> u64 {
+        self.project
+            .sources()
+            .iter()
+            .filter(|source| source.link.is_included())
+            .filter_map(|source| self.source_files.get(&source.identifier)?.path_if_available())
+            .filter_map(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .sum()
     }
 
     /// Saves the project if autosave is on and the project has been left alone for long enough.

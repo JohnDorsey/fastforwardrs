@@ -1,7 +1,7 @@
 //! Tests of selecting clips, deselecting them, and deleting the selected one, and of how cutting
 //! with the S key follows the selection.
 
-use egui::Key;
+use egui::{Key, Modifiers};
 use egui_kittest::kittest::Queryable;
 
 use super::test_window::{Window, project_cut_into_three, project_of, project_with_a_video_and_a_sound};
@@ -102,9 +102,11 @@ fn the_other_keys_are_the_menus_while_one_is_open_too() {
     select_the_clip_at(&mut window, 0, 45);
     let empty_part = window.middle_of_the_strip_at(0, 140);
     window.right_click(empty_part);
+    window.move_current_frame_to(45);
     for key in [Key::Delete, Key::Space, Key::S] {
         window.press_key(key);
     }
+    window.press_key_with(Modifiers::SHIFT, Key::S);
     assert_eq!(window.clips().len(), 3, "nothing was deleted or cut");
     assert!(!window.application().is_playing());
 }
@@ -158,10 +160,18 @@ fn the_delete_key_deletes_the_selected_clip_and_the_clips_after_it_move_up() {
 }
 
 #[test]
-fn the_backspace_key_deletes_the_selected_clip_too() {
+fn the_backspace_key_does_not_delete_the_selected_clip_and_the_delete_key_does() {
     let mut window = window_with_three_clips();
     select_the_clip_at(&mut window, 0, 15);
     window.press_key(Key::Backspace);
+    assert_eq!(window.clips().len(), 3, "nothing was deleted");
+    assert!(!window.application().has_unsaved_changes());
+    assert!(
+        window.application().selected_clip().is_some(),
+        "and the clip is still selected"
+    );
+
+    window.press_key(Key::Delete);
     assert_eq!(window.clips(), vec![(30, 60, 1), (60, 90, 1)]);
 }
 
@@ -260,7 +270,7 @@ fn s_cuts_only_the_selected_clip_when_it_is_at_the_current_frame() {
 }
 
 #[test]
-fn s_cuts_everything_at_the_current_frame_when_the_selected_clip_is_somewhere_else() {
+fn s_cuts_nothing_when_the_selected_clip_is_somewhere_else_and_shift_and_s_cuts_everything_at_the_current_frame() {
     let mut window = Window::showing(project_with_a_video_and_a_sound(180, 6));
     // Select the video clip, then cut it in two to have a clip that is not at the playhead.
     window.cut_at_frame(60);
@@ -269,6 +279,16 @@ fn s_cuts_everything_at_the_current_frame_when_the_selected_clip_is_somewhere_el
     window.move_current_frame_to(120);
 
     window.press_key(Key::S);
+
+    assert_eq!(
+        window.clips_of_track(0).len(),
+        2,
+        "the sound was not cut at 120 (it was at 60 before)"
+    );
+    assert_eq!(window.clips_of_track(1).len(), 2, "and nor was the video");
+    assert_eq!(window.application().selected_clip(), selected);
+
+    window.press_key_with(Modifiers::SHIFT, Key::S);
 
     assert_eq!(
         window.clips_of_track(0).len(),

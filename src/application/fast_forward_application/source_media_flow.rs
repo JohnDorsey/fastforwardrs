@@ -61,6 +61,45 @@ impl FastForwardApplication {
         }
     }
 
+    /// Starts taking the file `entry_name` of the archive `archive` (the project file, which has the file of the source file
+    /// `identifier` included in it) out of it, and opening it, in the background.
+    pub(super) fn start_opening_an_included_file(
+        &mut self,
+        identifier: SourceMediaIdentifier,
+        archive: PathBuf,
+        entry_name: String,
+    ) {
+        let (Some(toolchain), Some(cache)) = (self.toolchain.clone(), self.archive_cache.clone()) else {
+            let reason = if self.toolchain.is_none() {
+                "ffmpeg could not be found"
+            } else {
+                "there is nowhere to keep the files that are taken out of the project file"
+            };
+            self.source_files.insert(
+                identifier,
+                SourceFileState::new(SourceStatus::Unavailable {
+                    reason: reason.to_owned(),
+                }),
+            );
+            self.missing_sources_warning_open = true;
+            return;
+        };
+        self.source_files
+            .insert(identifier, SourceFileState::new(SourceStatus::Opening));
+        let task = BackgroundTask::start(Arc::clone(&self.wake_up), move || {
+            match cache.take_out(&archive, &entry_name) {
+                Ok(path) => open_first_that_works(&[path], |path| probe_source_media(&toolchain, path)),
+                Err(error) => OpeningOutcome::Failed {
+                    attempts: vec![(PathBuf::from(&entry_name), error.to_string())],
+                },
+            }
+        });
+        self.openings.push(OpeningTask {
+            purpose: OpeningPurpose::LocateForLoadedProject(identifier),
+            task,
+        });
+    }
+
     /// Starts trying `candidates`, in order, in the background.
     pub(super) fn start_opening(&mut self, purpose: OpeningPurpose, candidates: Vec<PathBuf>) {
         let Some(toolchain) = self.toolchain.clone() else {
@@ -220,9 +259,13 @@ impl FastForwardApplication {
             );
             return;
         }
-        let link = self.link_to(&path);
-        // Only the link changes: the project keeps the properties it was edited with.
-        let _ = self.project.relink_source(identifier, link, source.properties);
+        // A file that is included in the project file was taken out of it, and is where it was put: that is not where it is linked
+        // to, which is where it was and is what it is put back at.
+        if !source.link.is_included() {
+            let link = self.link_to(&path);
+            // Only the link changes: the project keeps the properties it was edited with.
+            let _ = self.project.relink_source(identifier, link, source.properties);
+        }
         self.source_is_now_available(identifier, path, properties);
     }
 
@@ -471,7 +514,11 @@ impl FastForwardApplication {
                 };
                 Some(MissingSource {
                     identifier: source.identifier,
-                    last_known_path: source.link.absolute_path.display().to_string(),
+                    last_known_path: if source.link.is_included() {
+                        format!("{} (included in the project file)", source.link.absolute_path.display())
+                    } else {
+                        source.link.absolute_path.display().to_string()
+                    },
                     reason: reason.clone(),
                 })
             })
@@ -491,6 +538,7 @@ impl FastForwardApplication {
         SourceMediaLink {
             absolute_path,
             relative_path,
+            included_as: None,
         }
     }
 

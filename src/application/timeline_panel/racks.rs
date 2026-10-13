@@ -10,8 +10,10 @@
 //!   `rack_menus` module).
 //! * Dragging a keyframe moves it, and what is selected with it, along the timeline and to other racks (see the `item_dragging`
 //!   module).
-//! * Dragging a rack takes it, with its keyframes, to another drawer or to an empty place on a track, or to another place in
-//!   the drawer it is in (see the `rack_dragging` module).
+//! * Dragging a rack that is the only thing selected takes it, with its keyframes, to another drawer or to an empty place on a
+//!   track, or to another place in the drawer it is in (see the `rack_dragging` module). Dragging a rack that is selected with
+//!   other things (clips, keyframes, other racks) moves all of them along the timeline together, the racks with their keyframes,
+//!   and no further than any of them can go (see the `item_dragging` module).
 //! * With the pointer over a rack or a keyframe a label comes to the left of the rack, which says what it animates.
 
 use egui::{
@@ -20,11 +22,11 @@ use egui::{
 };
 
 use super::grip_dots::{self, Arrangement};
-use super::item_dragging::keyframes_dragged_on_their_own;
+use super::item_dragging::{drag_of, what_is_dragged};
 use super::rack_look::{self, KEYFRAME_HEIGHT};
 use super::rack_menus;
 use super::strip_view::StripView;
-use super::view_state::{Grabbed, ItemDrag, RackDrag};
+use super::view_state::{Grabbed, RackDrag};
 use super::{TimelineContent, TimelineViewState};
 use crate::application::commands::Command;
 use crate::application::naming::what_a_rack_is_called;
@@ -220,14 +222,37 @@ pub(super) fn show(
             && let Some(first_frame) = rack.first_frame()
         {
             // (Taking hold of a rack that is not selected selects it, as taking hold of a clip does.)
-            if !is_selected {
-                commands.push(select(SelectionItem::Rack(rack.id()), adding_to_the_selection));
-            }
-            state.rack_drag = Some(RackDrag {
-                rack: rack.id(),
-                pointer_frame_at_the_start: view.frame_at(press.x).map_or(0, |frame| frame.value()),
-                first_keyframe_frame_at_the_start: place.first_frame + first_frame,
+            let items = what_is_dragged(
+                content,
+                SelectionItem::Rack(rack.id()),
+                adding_to_the_selection,
+                commands,
+            );
+            let pointer_frame_at_the_start = view.frame_at(press.x).map_or(0, |frame| frame.value());
+            let first_keyframe_frame_at_the_start = place.first_frame + first_frame;
+            // A rack that is selected on its own is taken to other drawers; with other things that are selected (a track does not
+            // count: nothing of it is dragged) it is dragged along the timeline with them.
+            let is_alone = items.iter().all(|item| {
+                matches!(item, SelectionItem::Rack(other) if *other == rack.id())
+                    || matches!(item, SelectionItem::Track(_))
             });
+            if is_alone {
+                state.rack_drag = Some(RackDrag {
+                    rack: rack.id(),
+                    pointer_frame_at_the_start,
+                    first_keyframe_frame_at_the_start,
+                });
+            } else {
+                state.item_drag = Some(drag_of(
+                    content.project,
+                    &items,
+                    Grabbed::Rack {
+                        rack: rack.id(),
+                        first_keyframe_frame: first_keyframe_frame_at_the_start,
+                    },
+                    pointer_frame_at_the_start,
+                ));
+            }
         }
         let mut is_hovered = body.hovered();
         is_hovered |= show_the_keyframes(
@@ -313,35 +338,29 @@ fn show_the_keyframes(
 }
 
 /// Takes hold of the keyframe `keyframe`, which is in the rack `rack` at frame `frame` of the timeline, when it begins to be
-/// dragged, the pointer having been pressed at `press`: what is dragged is what is selected if it is one of what is selected,
-/// and otherwise it alone (which is selected, with Ctrl added to what was selected).
+/// dragged, the pointer having been pressed at `press`: what is dragged is everything that is selected (clips, keyframes and racks)
+/// if it is one of what is selected, and otherwise it alone (which is selected, with Ctrl added to what was selected).
 fn take_hold_of_the_keyframe(
     (keyframe, rack, frame, press): (KeyframeId, RackId, u64, Pos2),
     (content, view): (&TimelineContent<'_>, &StripView),
     (state, commands): (&mut TimelineViewState, &mut Vec<Command>),
     adding_to_the_selection: bool,
 ) {
-    let (clips, keyframes) = if content.selection.contains_keyframe(keyframe) {
-        (content.selection.to_vec(), content.selection.keyframes_to_vec())
-    } else {
-        commands.push(select(SelectionItem::Keyframe(keyframe), adding_to_the_selection));
-        let (clips, mut keyframes) = if adding_to_the_selection {
-            (content.selection.to_vec(), content.selection.keyframes_to_vec())
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        keyframes.push(keyframe);
-        (clips, keyframes)
-    };
-    state.item_drag = Some(ItemDrag {
-        keyframes: keyframes_dragged_on_their_own(content.project, &clips, &keyframes),
-        clips,
-        grabbed: Grabbed::Keyframe {
+    let items = what_is_dragged(
+        content,
+        SelectionItem::Keyframe(keyframe),
+        adding_to_the_selection,
+        commands,
+    );
+    state.item_drag = Some(drag_of(
+        content.project,
+        &items,
+        Grabbed::Keyframe {
             keyframe,
             start_time: StartTimeMemory::new(frame, rack),
         },
-        pointer_frame_at_the_start: view.frame_at(press.x).map_or(0, |frame| frame.value()),
-    });
+        view.frame_at(press.x).map_or(0, |frame| frame.value()),
+    ));
 }
 
 /// How big the label for `text` is, and where it goes: at the left of `rack` (which is as far as it can be seen), the middle

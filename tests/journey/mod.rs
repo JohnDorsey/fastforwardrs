@@ -473,11 +473,15 @@ impl Journey {
         self.settle();
     }
 
-    /// Cuts at `frame` the way a person does: puts the playhead there (by clicking the ruler) and
-    /// presses S.
+    /// Cuts at `frame` the way a person does: puts the playhead there (by clicking the ruler) and cuts, with S when some clips are
+    /// selected (which cuts those of them that are there) and with Shift and S when none is (which cuts every clip that is there).
     pub fn cut_at_frame(&mut self, frame: u64) {
         self.move_playhead_to_frame(frame);
-        self.press_key(Key::S);
+        if self.application().selected_clips().is_empty() {
+            self.press_key_with(Modifiers::SHIFT, Key::S);
+        } else {
+            self.press_key(Key::S);
+        }
     }
 
     /// Clicks the text field that shows `shown` and types `text` into it in place of what it has.

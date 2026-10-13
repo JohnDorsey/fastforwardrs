@@ -438,6 +438,7 @@ fn relinking_keeps_every_edit_and_replaces_the_link_and_properties() {
     let new_link = SourceMediaLink {
         absolute_path: PathBuf::from("/elsewhere/copy.mp4"),
         relative_path: Some(PathBuf::from("../elsewhere/copy.mp4")),
+        included_as: None,
     };
     let SourceMediaProperties::Video(mut new_properties) = video_source(1, 30, 302).properties else {
         unreachable!()

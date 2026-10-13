@@ -24,6 +24,13 @@ pub enum Dialog {
     /// A warning that a change would lose `how_many` keyframes, because it makes something last so little time that there is no
     /// frame for them. The `change` is carried out if the user agrees, and not otherwise.
     ConfirmLosingKeyframes { change: Box<Command>, how_many: usize },
+    /// Files cannot be included in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked
+    /// where to save it as one, and if the user agrees the `files` are included as it is.
+    MustSaveAsAnArchiveToIncludeFiles {
+        files: Vec<SourceMediaIdentifier>,
+        /// Whether the project has a project file (a plain one), and has not just never been saved.
+        has_a_plain_project_file: bool,
+    },
 }
 
 /// What the user did to a dialog.
@@ -62,6 +69,36 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui.button("Discard changes").clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                });
+            }
+            Dialog::MustSaveAsAnArchiveToIncludeFiles {
+                files,
+                has_a_plain_project_file,
+            } => {
+                ui.heading(if files.len() == 1 {
+                    "Save as a .ffrs file to include the file"
+                } else {
+                    "Save as a .ffrs file to include the files"
+                });
+                ui.add_space(6.0);
+                ui.label(format!(
+                    "Files can only be included in a project file that is a .ffrs file, and this project is {}. \
+                     Save it as a .ffrs file to include {}?",
+                    if *has_a_plain_project_file {
+                        "saved as a plain .json file"
+                    } else {
+                        "not saved yet"
+                    },
+                    if files.len() == 1 { "it" } else { "them" },
+                ));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Choose where to save it").clicked() {
                         answer = DialogAnswer::Confirmed;
                     }
                     if ui.button("Cancel").clicked() {

@@ -47,6 +47,9 @@ impl FastForwardApplication {
                             self.carry_on_after_confirmation(context, then);
                         }
                         Dialog::ConfirmLosingKeyframes { change, .. } => agreed_to.push(*change),
+                        Dialog::MustSaveAsAnArchiveToIncludeFiles { files, .. } => {
+                            self.save_as_an_archive_with_files_included(&files);
+                        }
                         Dialog::Message { .. } => {}
                     }
                 }

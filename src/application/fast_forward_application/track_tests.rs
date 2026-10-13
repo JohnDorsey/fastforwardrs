@@ -221,6 +221,7 @@ fn the_keys_of_the_keyboard_are_not_shortcuts_while_the_title_is_being_typed() {
     for key in [Key::Space, Key::S, Key::Delete, Key::ArrowLeft, Key::Backspace] {
         window.press_key(key);
     }
+    window.press_key_with(Modifiers::SHIFT, Key::S);
 
     assert!(!window.application().is_playing(), "space did not play");
     assert_eq!(window.clips(), vec![(0, 300, 1)], "S did not cut");

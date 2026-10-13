@@ -24,15 +24,15 @@ const DELETE_KEYFRAME: &str = "Delete keyframe";
 /// A window with a video of 300 frames and a text object in front of it, and in the open drawer of the video three racks, one
 /// under another: `upper` and `lower` are of its loudness (keyframes at 100 and 120, and at 200) and `turn` is of how far it is
 /// turned (a keyframe at 150).
-struct Racks {
-    window: Window,
-    video: ClipId,
-    upper: RackId,
-    lower: RackId,
-    turn: RackId,
+pub(super) struct Racks {
+    pub(super) window: Window,
+    pub(super) video: ClipId,
+    pub(super) upper: RackId,
+    pub(super) lower: RackId,
+    pub(super) turn: RackId,
 }
 
-fn window_with_racks_of_the_video() -> Racks {
+pub(super) fn window_with_racks_of_the_video() -> Racks {
     let (mut window, video, _) = window_with_a_video_and_a_text();
     let target = AnimationTarget::Clip(video);
     for at in [100, 120] {
@@ -82,7 +82,7 @@ fn window_with_racks_of_the_video() -> Racks {
 }
 
 /// The rack that the clip has in its own drawer for `property` of its own.
-fn the_rack_of(window: &Window, clip: ClipId, property: PropertyId) -> RackId {
+pub(super) fn the_rack_of(window: &Window, clip: ClipId, property: PropertyId) -> RackId {
     let target = AnimationTarget::Clip(clip);
     window
         .application()
@@ -96,14 +96,14 @@ fn the_rack_of(window: &Window, clip: ClipId, property: PropertyId) -> RackId {
 
 /// A point on the rack that is `index`th from the top on the screen, at frame `at` of the timeline (where there is no keyframe, in
 /// these windows).
-fn on_the_rack(window: &Window, index: usize, at: u64) -> Pos2 {
+pub(super) fn on_the_rack(window: &Window, index: usize, at: u64) -> Pos2 {
     Pos2::new(
         window.x_of_frame_on_the_strip(0, at),
         racks_drawn(window)[index].center().y,
     )
 }
 
-fn selected_racks(window: &Window) -> Vec<RackId> {
+pub(super) fn selected_racks(window: &Window) -> Vec<RackId> {
     window
         .application()
         .selected_items()
@@ -115,7 +115,7 @@ fn selected_racks(window: &Window) -> Vec<RackId> {
         .collect()
 }
 
-fn select_racks(window: &mut Window, racks: &[RackId]) {
+pub(super) fn select_racks(window: &mut Window, racks: &[RackId]) {
     window.do_this(Command::SelectItems {
         items: racks.iter().copied().map(SelectionItem::Rack).collect(),
         change: SelectionChange::Replace,

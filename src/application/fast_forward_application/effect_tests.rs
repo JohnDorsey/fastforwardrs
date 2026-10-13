@@ -12,7 +12,7 @@ use super::undo_tests::{redo, undo};
 use crate::application::commands::Command;
 use crate::application::naming::what_an_effect_is_called;
 use crate::application::properties_panel::{
-    ADD_EFFECT_LABEL, KeyframeButton, REMOVE_EFFECT_LABEL, keyframe_button_label,
+    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, KeyframeButton, keyframe_button_label,
 };
 use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::project::{AnimationTarget, ClipId, EffectKind, PropertyId, PropertyValue, TextObject, TimelineFrameIndex};
@@ -358,7 +358,7 @@ fn the_slider_of_an_animated_value_shows_what_it_is_at_the_playhead_and_is_dimme
 // --- taking it off ---
 
 #[test]
-fn the_menu_of_the_box_takes_the_effect_off_with_its_keyframes_and_undo_brings_them_all_back() {
+fn the_menu_of_the_box_deletes_the_effect_with_its_keyframes_and_undo_brings_them_all_back() {
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -383,12 +383,18 @@ fn the_menu_of_the_box_takes_the_effect_off_with_its_keyframes_and_undo_brings_t
         .center();
 
     window.right_click(heading);
-    assert!(is_shown(&window, REMOVE_EFFECT_LABEL), "the menu of the box");
+    // (The words themselves, and not the constant that holds them: they are what a person reads.)
+    assert_eq!(DELETE_EFFECT_LABEL, "Delete effect");
+    assert!(is_shown(&window, "Delete effect"), "the menu of the box");
+    assert!(
+        !is_shown(&window, "Take this effect off"),
+        "it is not called what it used to be called"
+    );
     assert!(
         has_the_effect(&window, clip(video), EffectKind::HueShift),
-        "opening it takes nothing off"
+        "opening it deletes nothing"
     );
-    let item = window.rectangle_of(REMOVE_EFFECT_LABEL).center();
+    let item = window.rectangle_of("Delete effect").center();
     window.click(item);
 
     assert!(!has_the_effect(&window, clip(video), EffectKind::HueShift));
@@ -404,7 +410,7 @@ fn the_menu_of_the_box_takes_the_effect_off_with_its_keyframes_and_undo_brings_t
 }
 
 #[test]
-fn taking_an_effect_off_leaves_what_was_selected_that_is_still_there_and_forgets_the_keyframes_that_went() {
+fn deleting_an_effect_leaves_what_was_selected_that_is_still_there_and_forgets_the_keyframes_that_went() {
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -457,7 +463,7 @@ fn taking_an_effect_off_leaves_what_was_selected_that_is_still_there_and_forgets
 // --- the commands ---
 
 #[test]
-fn putting_an_effect_on_and_changing_its_value_and_taking_it_off_are_edits_that_are_undone_one_at_a_time() {
+fn putting_an_effect_on_and_changing_its_value_and_deleting_it_are_edits_that_are_undone_one_at_a_time() {
     let (mut window, video) = window_with_a_video();
     assert!(!window.application().can_undo());
 

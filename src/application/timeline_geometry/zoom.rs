@@ -14,6 +14,12 @@ const SMALLEST_POINTS_PER_SECOND: f64 = 2.0;
 /// aim at with a mouse, and no wider.
 const LARGEST_POINTS_PER_FRAME: f64 = 40.0;
 
+/// How much of the width of the view frames that are framed take up: nearly all of it, with a little room at either end.
+const SHARE_OF_THE_VIEW_THAT_WHAT_IS_FRAMED_TAKES_UP: f64 = 0.92;
+
+/// The least time that is framed, in seconds: one keyframe, or a few frames, are not zoomed in on as far as the strips can be.
+const LEAST_SECONDS_FRAMED: f64 = 1.0;
+
 impl TimelineGeometry {
     /// The most points per second the strips can be zoomed in to at this geometry's frame rate.
     fn largest_points_per_second(&self) -> f64 {
@@ -37,6 +43,21 @@ impl TimelineGeometry {
 
     pub fn points_per_second(&self) -> f64 {
         self.points_per_second
+    }
+
+    /// This geometry zoomed so that the frames from `first_frame` up to (not including) `end_frame` nearly fill a view `view_width`
+    /// points wide (at the most as far in as makes [`LEAST_SECONDS_FRAMED`] seconds fill it, and at the most as far out as the
+    /// strips go), and the scroll offset that puts the middle of them in the middle of the view. (The offset is not kept inside
+    /// the strips: see [`Self::clamp_scroll_offset`].)
+    #[must_use]
+    pub fn framing(self, first_frame: u64, end_frame: u64, view_width: f64) -> (Self, f64) {
+        let first_second = self.frame_rate.seconds_at_frame(first_frame);
+        let end_second = self.frame_rate.seconds_at_frame(end_frame.max(first_frame));
+        let middle_second = (first_second + end_second) / 2.0;
+        let seconds_framed = (end_second - first_second).max(LEAST_SECONDS_FRAMED);
+        let framed =
+            self.with_points_per_second(view_width * SHARE_OF_THE_VIEW_THAT_WHAT_IS_FRAMED_TAKES_UP / seconds_framed);
+        (framed, middle_second * framed.points_per_second - view_width / 2.0)
     }
 
     /// This geometry zoomed by `factor` (above 1 zooms in, below 1 out), and the scroll offset that
@@ -111,6 +132,48 @@ mod tests {
         let (unchanged, scroll_offset) = before.zoomed_about(500.0, 1.0, 100.0);
         assert_close(unchanged.points_per_second(), 185.0);
         assert_close(scroll_offset, 500.0);
+    }
+
+    #[test]
+    fn framing_frames_makes_them_nearly_fill_the_view_with_the_middle_of_them_in_the_middle_of_it() {
+        let (framed, scroll_offset) = geometry_at(30, 1, 185.0).framing(300, 600, 1000.0);
+
+        // Ten seconds, from the tenth to the twentieth, in 92 % of a thousand points.
+        assert_close(framed.points_per_second(), 92.0);
+        assert_close(framed.x_of_frame(600) - framed.x_of_frame(300), 920.0);
+        // (The fifteenth second is the middle of them, and the middle of the view is 500 points from its edge.)
+        assert_close(scroll_offset + 500.0, 15.0 * 92.0);
+        // (What is framed begins a few points in from the edge of the view, and ends as many from the other.)
+        assert_close(framed.x_of_frame(300) - scroll_offset, 40.0);
+        assert_close(scroll_offset + 1000.0 - framed.x_of_frame(600), 40.0);
+    }
+
+    #[test]
+    fn framing_a_few_frames_does_not_zoom_in_further_than_a_second_across_the_view() {
+        let (one_frame, offset_of_one_frame) = geometry_at(30, 1, 185.0).framing(150, 151, 1000.0);
+        assert_close(one_frame.points_per_second(), 920.0);
+        let (middle_of_the_frame, view_middle) = (150.5 / 30.0 * 920.0, offset_of_one_frame + 500.0);
+        assert_close(view_middle, middle_of_the_frame);
+        let (empty, _) = geometry_at(30, 1, 185.0).framing(150, 150, 1000.0);
+        assert_close(empty.points_per_second(), 920.0);
+        let (backwards, _) = geometry_at(30, 1, 185.0).framing(150, 100, 1000.0);
+        assert_close(backwards.points_per_second(), 920.0);
+    }
+
+    #[test]
+    fn framing_more_than_the_strips_can_show_is_as_zoomed_out_as_they_go_and_a_few_frames_no_more_zoomed_in_than_they_go()
+     {
+        let (a_lot, _) = geometry_at(30, 1, 185.0).framing(0, 10_000_000, 1000.0);
+        assert_close(a_lot.points_per_second(), 2.0);
+        let (narrow_view, _) = geometry_at(30, 1, 185.0).framing(0, 3, 1.0e6);
+        assert_close(narrow_view.points_per_second(), 1200.0);
+    }
+
+    #[test]
+    fn framing_keeps_the_frame_rate_of_the_geometry() {
+        let (framed, _) = geometry_at(25, 1, 185.0).framing(0, 250, 1000.0);
+        assert_close(framed.points_per_second(), 92.0);
+        assert_close(framed.x_of_frame(25), 92.0);
     }
 
     #[test]

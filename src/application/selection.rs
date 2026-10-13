@@ -75,6 +75,11 @@ impl Selection {
         self.items.is_empty()
     }
 
+    /// Whether `item` is selected.
+    pub fn contains_item(&self, item: SelectionItem) -> bool {
+        self.items.contains(&item)
+    }
+
     /// Whether `clip` is selected.
     pub fn contains(&self, clip: ClipId) -> bool {
         self.items.contains(&SelectionItem::Clip(clip))
@@ -182,6 +187,40 @@ impl Selection {
     /// Lets go of the clips, the tracks, the keyframes and the racks that `project` does not have (any more).
     pub fn forget_what_is_gone(&mut self, project: &Project) {
         self.items.retain(|item| item.is_in(project));
+    }
+
+    /// The first frame of the timeline that what is selected takes up, and the frame after the last: a clip takes up the frames
+    /// it lasts, a keyframe the frame it is at, and a rack of keyframes the frames from its first keyframe to its last. A track
+    /// takes up none, and nor does what `project` does not have. `None` if what is selected takes up no frame at all.
+    pub fn frames_taken_up(&self, project: &Project) -> Option<(u64, u64)> {
+        let mut taken_up: Option<(u64, u64)> = None;
+        let mut take_up = |first: u64, end: u64| {
+            taken_up = Some(taken_up.map_or((first, end), |(so_far_first, so_far_end)| {
+                (so_far_first.min(first), so_far_end.max(end))
+            }));
+        };
+        for clip in self.iter() {
+            if let Some(placement) = project.placement_of(clip) {
+                take_up(
+                    placement.first_timeline_frame.value(),
+                    placement.end_timeline_frame.value(),
+                );
+            }
+        }
+        for keyframe in self.keyframes() {
+            if let Some(frame) = project.timeline_frame_of_keyframe(keyframe) {
+                take_up(frame, frame + 1);
+            }
+        }
+        for rack in self.racks() {
+            let Some(located) = project.located_rack(rack) else {
+                continue;
+            };
+            if let (Some(first), Some(last)) = (located.rack.first_frame(), located.rack.last_frame()) {
+                take_up(located.timeline_frame_of(first), located.timeline_frame_of(last) + 1);
+            }
+        }
+        taken_up
     }
 }
 
@@ -531,5 +570,130 @@ mod tests {
             vec![SelectionItem::Clip(text)],
             "the rack was taken away"
         );
+    }
+
+    // --- the frames that what is selected takes up ---
+
+    /// A project with a text object that lasts from frame 50 to 100 and another from 200 to 230, and in the first a rack of
+    /// the turn with keyframes at the frames 60 and 80 of the timeline, and one of the size with a keyframe at 70.
+    struct Texts {
+        project: Project,
+        first: ClipId,
+        second: ClipId,
+        turn_keyframes: [KeyframeId; 2],
+        turn: RackId,
+        size_keyframe: KeyframeId,
+        size: RackId,
+    }
+
+    fn two_texts_with_racks() -> Texts {
+        use crate::project::{AnimationTarget, PropertyId, PropertyValue, TextObject, TimelineFrameIndex};
+        use crate::test_support::make_a_keyframe;
+
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let (first, _) = project
+            .insert_text(track, TimelineFrameIndex::new(50), TextObject::default(), 50)
+            .unwrap();
+        let (second, _) = project
+            .insert_text(track, TimelineFrameIndex::new(200), TextObject::default(), 30)
+            .unwrap();
+        let target = AnimationTarget::Clip(first);
+        make_a_keyframe(
+            &mut project,
+            target,
+            PropertyId::Rotation,
+            60,
+            PropertyValue::Number(1.0),
+        );
+        make_a_keyframe(
+            &mut project,
+            target,
+            PropertyId::Rotation,
+            80,
+            PropertyValue::Number(2.0),
+        );
+        make_a_keyframe(
+            &mut project,
+            target,
+            PropertyId::Size,
+            70,
+            PropertyValue::Pair(0.5, 0.5),
+        );
+        let drawer = project.drawer_of(target).unwrap();
+        let turn = drawer.first_rack_for(target, PropertyId::Rotation).unwrap();
+        let size = drawer.first_rack_for(target, PropertyId::Size).unwrap();
+        let turn_keyframes = [turn.keyframes()[0].id(), turn.keyframes()[1].id()];
+        let (turn, size_keyframe, size) = (turn.id(), size.keyframes()[0].id(), size.id());
+        Texts {
+            project,
+            first,
+            second,
+            turn_keyframes,
+            turn,
+            size_keyframe,
+            size,
+        }
+    }
+
+    #[test]
+    fn nothing_selected_and_tracks_take_up_no_frames() {
+        let texts = two_texts_with_racks();
+        assert_eq!(Selection::empty().frames_taken_up(&texts.project), None);
+        let track = texts.project.tracks()[0].id();
+        assert_eq!(
+            Selection::from_items([SelectionItem::Track(track)]).frames_taken_up(&texts.project),
+            None
+        );
+    }
+
+    #[test]
+    fn a_clip_takes_up_the_frames_it_lasts_a_keyframe_the_one_it_is_at_and_a_rack_the_frames_from_its_first_keyframe_to_its_last()
+     {
+        let texts = two_texts_with_racks();
+        let taken_up = |item: SelectionItem| Selection::from_items([item]).frames_taken_up(&texts.project);
+        assert_eq!(taken_up(SelectionItem::Clip(texts.first)), Some((50, 100)));
+        assert_eq!(taken_up(SelectionItem::Clip(texts.second)), Some((200, 230)));
+        assert_eq!(
+            taken_up(SelectionItem::Keyframe(texts.turn_keyframes[1])),
+            Some((80, 81))
+        );
+        assert_eq!(taken_up(SelectionItem::Rack(texts.turn)), Some((60, 81)));
+        assert_eq!(
+            taken_up(SelectionItem::Rack(texts.size)),
+            Some((70, 71)),
+            "a rack of one keyframe takes up the frame it is at"
+        );
+    }
+
+    #[test]
+    fn what_is_selected_together_takes_up_from_the_first_frame_of_any_of_it_to_the_end_of_the_last() {
+        let texts = two_texts_with_racks();
+        let all = Selection::from_items([
+            SelectionItem::Keyframe(texts.size_keyframe),
+            SelectionItem::Rack(texts.turn),
+            SelectionItem::Clip(texts.second),
+        ]);
+        assert_eq!(all.frames_taken_up(&texts.project), Some((60, 230)));
+        let inside_the_clip = Selection::from_items([
+            SelectionItem::Clip(texts.first),
+            SelectionItem::Rack(texts.turn),
+            SelectionItem::Keyframe(texts.turn_keyframes[0]),
+        ]);
+        assert_eq!(inside_the_clip.frames_taken_up(&texts.project), Some((50, 100)));
+    }
+
+    #[test]
+    fn what_the_project_does_not_have_takes_up_no_frame() {
+        let texts = two_texts_with_racks();
+        let selection = Selection::from_items([
+            SelectionItem::Clip(clip(9, 9)),
+            SelectionItem::Keyframe(keyframe(77, 0)),
+            SelectionItem::Rack(rack(77)),
+            SelectionItem::Keyframe(texts.size_keyframe),
+        ]);
+        assert_eq!(selection.frames_taken_up(&texts.project), Some((70, 71)));
+        let only_what_is_not_there = Selection::from_items([SelectionItem::Rack(rack(77))]);
+        assert_eq!(only_what_is_not_there.frames_taken_up(&texts.project), None);
     }
 }

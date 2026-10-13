@@ -49,6 +49,7 @@ pub(super) fn link_to_missing_video() -> SourceMediaLink {
     SourceMediaLink {
         absolute_path: PathBuf::from("/videos/holiday.mp4"),
         relative_path: Some(PathBuf::from("../videos/holiday.mp4")),
+        included_as: None,
     }
 }
 
@@ -68,7 +69,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 8,
+  "file_format_version": 9,
   "sources": [
     {
       "kind": "video",
@@ -733,6 +734,7 @@ pub(super) fn project_with_everything() -> Project {
                 SourceMediaLink {
                     absolute_path: PathBuf::from("/music/song.mp3"),
                     relative_path: None,
+                    included_as: None,
                 },
                 SourceAudioProperties {
                     duration_in_microseconds: 12_500_000,
@@ -1012,6 +1014,7 @@ fn project_with_a_picture(placed: bool) -> Project {
                 SourceMediaLink {
                     absolute_path: PathBuf::from("/pictures/logo.png"),
                     relative_path: Some(PathBuf::from("../pictures/logo.png")),
+                    included_as: None,
                 },
                 SourceImageProperties {
                     display_width_in_pixels: 640,

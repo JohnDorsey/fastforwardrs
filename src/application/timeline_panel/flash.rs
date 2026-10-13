@@ -1,5 +1,5 @@
 //! The flash of white light where a clip was cut in two: a bar of light across the strip at the cut, which
-//! is at its brightest at once and then spreads and fades away in a moment.
+//! is at its brightest, and has all the light it ever has, at once, and then spreads as it fades away in a moment.
 //!
 //! What happened (a cut was made) is told to the timeline when it happens ([`CutFlashes::add`]), and the flash
 //! begins when the next frame of the window is drawn. Its age is measured on the window's own clock (the
@@ -18,7 +18,8 @@ use crate::project::{TimelineFrameIndex, TrackId};
 /// How long a flash lasts, in seconds.
 pub(super) const FLASH_SECONDS: f64 = 0.3;
 
-/// How far the glow of a flash reaches to either side of the cut, in points, as it begins and as it ends.
+/// How far the glow of a flash reaches to either side of the cut, in points, as it would begin and as it ends if it spread freely
+/// (see [`glow_reach`]: it does not, at first).
 const GLOW_REACH_AT_FIRST: f32 = 6.0;
 const GLOW_REACH_AT_LAST: f32 = 28.0;
 
@@ -88,11 +89,35 @@ fn brightness(progress: f32) -> f32 {
     (1.0 - progress).powi(2)
 }
 
-/// How far the glow of a flash reaches to either side of the cut when it is `progress` (0 to 1) of the way
-/// through: it spreads quickly and then slows.
-fn glow_reach(progress: f32) -> f32 {
+/// How far the glow of a flash would reach to either side of the cut when it is `progress` (0 to 1) of the way through, if it
+/// spread freely: it spreads quickly and then slows.
+fn glow_reach_when_it_spreads_freely(progress: f32) -> f32 {
     let spread = 1.0 - (1.0 - progress).powi(3);
     GLOW_REACH_AT_FIRST + (GLOW_REACH_AT_LAST - GLOW_REACH_AT_FIRST) * spread
+}
+
+/// How far through a flash (0 to 1) the glow that spreads freely has the most light, which is how far it reaches times how bright
+/// it is. (Worked out from the two: the light is `reach * (1 - progress)^2`, which is greatest where its slope is nothing.)
+fn progress_with_the_most_light() -> f32 {
+    let reach_range = GLOW_REACH_AT_LAST - GLOW_REACH_AT_FIRST;
+    let how_much_is_left = (2.0 * GLOW_REACH_AT_LAST / (5.0 * reach_range)).cbrt();
+    1.0 - how_much_is_left
+}
+
+/// How far the glow of a flash reaches to either side of the cut when it is `progress` (0 to 1) of the way through.
+///
+/// A glow that spreads freely, from a small one at the start, has more and more light for the first few frames (it spreads faster
+/// than the flash fades) before it has less and less, which looks like a flash that fades in and then out. A flash is to have the
+/// most light it has at once, so until the light of the glow that spreads freely is at its most, the glow reaches just as far as
+/// it needs to for the light of it to stay what it will be then (which is a little more every frame, as the brightness falls, and
+/// is what the glow that spreads freely is, at that point). From then on it spreads as it always did, and the flash fades out as
+/// it always did.
+fn glow_reach(progress: f32) -> f32 {
+    let most_light_at = progress_with_the_most_light();
+    if progress >= most_light_at {
+        return glow_reach_when_it_spreads_freely(progress);
+    }
+    glow_reach_when_it_spreads_freely(most_light_at) * brightness(most_light_at) / brightness(progress)
 }
 
 /// White at `brightness` (0 to 1) of full strength, which shows what is under it less as it is more.
@@ -228,9 +253,74 @@ mod tests {
     }
 
     #[test]
+    fn the_light_of_a_flash_is_the_most_it_ever_is_when_it_begins_and_never_grows_after_that() {
+        // (The light is how far the glow reaches times how bright it is: a glow that spreads faster than it fades is a flash
+        // that seems to swell for a moment before it dies away, which is not one that begins at full strength.)
+        let light = |progress: f32| glow_reach(progress) * brightness(progress);
+        let mut last = light(0.0);
+        for step in 1..=1000 {
+            let now = light(step as f32 / 1000.0);
+            assert!(
+                now <= last * 1.000_001,
+                "at {step} thousandths of the way through: {now} after {last}"
+            );
+            last = now;
+        }
+        assert!(light(1.0) < 0.001 * light(0.0), "and it is gone at the end");
+    }
+
+    #[test]
+    fn a_flash_has_all_of_the_light_it_will_have_at_the_start_and_keeps_it_while_the_glow_that_spreads_freely_would_have_more()
+     {
+        let light = |progress: f32| glow_reach(progress) * brightness(progress);
+        let most_light_at = progress_with_the_most_light();
+        // (Measured: the glow that spreads freely has the most light a fifth of the way through, which is 60 milliseconds.)
+        assert!((most_light_at - 0.2014).abs() < 0.001, "{most_light_at}");
+        let most_light = glow_reach_when_it_spreads_freely(most_light_at) * brightness(most_light_at);
+        for step in 0..=20 {
+            let progress = most_light_at * step as f32 / 20.0;
+            assert!(
+                (light(progress) - most_light).abs() < 1e-3,
+                "{progress}: {} and {most_light}",
+                light(progress)
+            );
+        }
+        assert!(
+            (0..=1000).all(|step| {
+                let progress = step as f32 / 1000.0;
+                glow_reach_when_it_spreads_freely(progress) * brightness(progress) <= most_light + 1e-3
+            }),
+            "that is the most that the glow that spreads freely has, anywhere"
+        );
+    }
+
+    #[test]
+    fn from_the_time_the_light_of_a_flash_is_at_its_most_the_glow_spreads_and_the_flash_fades_as_they_always_did() {
+        let most_light_at = progress_with_the_most_light();
+        for step in 0..=100 {
+            let progress = most_light_at + (1.0 - most_light_at) * step as f32 / 100.0;
+            assert_eq!(
+                glow_reach(progress),
+                glow_reach_when_it_spreads_freely(progress),
+                "{progress}"
+            );
+        }
+        assert_eq!(
+            brightness(0.5),
+            0.25,
+            "the fade is the same: the brightness is what is left, squared"
+        );
+    }
+
+    #[test]
     fn the_glow_spreads_from_a_small_one_to_a_wide_one() {
-        assert_eq!(glow_reach(0.0), GLOW_REACH_AT_FIRST);
+        assert!(
+            glow_reach(0.0) > GLOW_REACH_AT_FIRST,
+            "it begins with the reach that gives it all its light"
+        );
+        assert!(glow_reach(0.0) < glow_reach(progress_with_the_most_light()));
         assert_eq!(glow_reach(1.0), GLOW_REACH_AT_LAST);
+        assert_eq!(glow_reach_when_it_spreads_freely(0.0), GLOW_REACH_AT_FIRST);
         let mut last = glow_reach(0.0);
         for step in 1..=20 {
             let now = glow_reach(step as f32 / 20.0);

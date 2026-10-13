@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use egui::epaint::Mesh;
-use egui::{Color32, Key, Shape};
+use egui::{Color32, Key, Modifiers, Shape};
 
 use super::test_window::{Window, project_of, project_with_a_video_and_a_sound};
 use crate::application::commands::Command;
@@ -26,6 +26,15 @@ struct DrawnFlash {
     bottom: f32,
     /// How bright the light is at the cut, from 0 to 255.
     brightness: u8,
+    /// How far the glow reaches to either side of the cut, in points.
+    reach: f32,
+}
+
+impl DrawnFlash {
+    /// How much light there is in all: how far the glow reaches times how bright it is.
+    fn light(&self) -> f32 {
+        self.reach * f32::from(self.brightness)
+    }
 }
 
 /// Whether `mesh` is the glow of a flash: two rows of three points, the middle ones white and the outer ones clear.
@@ -48,6 +57,7 @@ fn glow_of_a_flash(mesh: &Mesh) -> Option<DrawnFlash> {
         top: middle.pos.y,
         bottom: other_middle.pos.y,
         brightness: middle.color.a(),
+        reach: middle.pos.x - first.pos.x,
     })
 }
 
@@ -216,7 +226,7 @@ fn the_snip_is_made_whatever_the_playhead_is_doing() {
     window.do_this(Command::Play);
     assert!(window.application().is_playing());
 
-    window.press_key(Key::S);
+    window.press_key_with(Modifiers::SHIFT, Key::S);
 
     assert_eq!(log.count_of_sounds_played(), 1);
 }
@@ -326,6 +336,46 @@ fn a_flash_is_brightest_at_first_fades_and_is_over_in_about_a_third_of_a_second(
     assert!(
         brightnesses.last().unwrap() < &20,
         "and at the end there is almost none left: {brightnesses:?}"
+    );
+}
+
+#[test]
+fn the_light_of_a_flash_is_greatest_in_the_first_frame_and_never_grows_after_that() {
+    let mut window = Window::showing(project_of(300));
+    window.move_current_frame_to(100);
+    cut_without_drawing_after(&mut window, 100);
+
+    let mut lights = Vec::new();
+    let mut reaches = Vec::new();
+    loop {
+        window.harness.step();
+        match flashes_drawn(&window).first() {
+            Some(flash) => {
+                lights.push(flash.light());
+                reaches.push(flash.reach);
+            }
+            None => break,
+        }
+        assert!(lights.len() < 60, "it never ends: {lights:?}");
+    }
+
+    assert!(lights.len() >= 15, "{lights:?}");
+    assert!(
+        lights.windows(2).all(|pair| pair[1] <= pair[0] * 1.01),
+        "no frame has more light than the one before (but for the rounding of the colour to a whole number), so none seems to \
+         swell: {lights:?}"
+    );
+    assert!(
+        lights[0] >= 0.99 * lights.iter().copied().fold(0.0, f32::max),
+        "the first frame has the most light there is: {lights:?}"
+    );
+    assert!(
+        lights[lights.len() / 2] < 0.6 * lights[0],
+        "and it fades away: {lights:?}"
+    );
+    assert!(
+        reaches.windows(2).all(|pair| pair[1] >= pair[0]),
+        "(the glow still spreads as it fades: {reaches:?})"
     );
 }
 

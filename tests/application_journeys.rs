@@ -1629,3 +1629,137 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
         }
     }
 }
+
+#[test]
+fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_when_the_original_is_gone() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain);
+    let scratch = scratch_directory();
+    let footage = scratch.path().join("footage");
+    std::fs::create_dir_all(&footage).unwrap();
+    let original = footage.join("holiday.mp4");
+    std::fs::copy(&video.path, &original).unwrap();
+    let original_bytes = std::fs::read(&original).unwrap();
+
+    // Cut, include the video from the menu of its clip, and save as a project archive.
+    let mut journey = Journey::importing(&toolchain, &original);
+    cut_into_three_with_the_middle_at_ten_times(&mut journey);
+    let archive_path = scratch.path().join("trip.ffrs");
+    journey.application_mut().save_project_to(archive_path.clone());
+    journey.right_click(journey.point_on_the_track_at_frame(100));
+    journey.press_button("Include in project file");
+    assert!(
+        journey.application().has_unsaved_changes(),
+        "which file is kept where is saved with the project"
+    );
+    journey.application_mut().save_project_to(archive_path.clone());
+    assert_eq!(journey.application().message_showing(), None);
+    assert!(
+        journey.application().project().sources()[0].link.is_included(),
+        "the video is included in the project file"
+    );
+    let archive_size = std::fs::metadata(&archive_path).unwrap().len();
+    assert!(
+        archive_size > original_bytes.len() as u64,
+        "the video is in the archive ({archive_size} bytes, and the video has {})",
+        original_bytes.len()
+    );
+
+    // The video the project was made from is gone, as it is on another computer. (The first editor is closed first: a file that a
+    // program has open cannot be deleted on every system.)
+    let clips_of_the_first_editor = journey.clips();
+    drop(journey);
+    delete_when_nothing_has_it_open(&original);
+    std::fs::remove_dir(&footage).unwrap();
+
+    // A fresh editor takes the video out of the archive into its cache, and has all that was there: the clips, the pictures
+    // for the timeline, and the video to play and to export.
+    let cache = scratch.path().join("cache of files taken out");
+    let mut fresh = Journey::start(&toolchain);
+    fresh.application_mut().keep_archive_files_in(cache.clone());
+    fresh.application_mut().load_project_from(archive_path.clone());
+    fresh.wait_until_idle();
+    assert_eq!(fresh.application().message_showing(), None);
+    assert!(fresh.application().every_source_file_is_available());
+    assert!(!fresh.application().missing_sources_warning_is_showing());
+    assert_eq!(fresh.clips(), clips_of_the_first_editor);
+    assert_eq!(fresh.application().thumbnail_progress(THE_VIDEO), (20, 20));
+    assert!(
+        fresh.application().project().sources()[0].link.is_included(),
+        "it is included still: that is not changed by loading"
+    );
+    assert!(!fresh.application().has_unsaved_changes());
+    let taken_out: Vec<_> = walk_files(&cache);
+    assert_eq!(taken_out.len(), 1, "one file in the cache: {taken_out:?}");
+    assert_eq!(
+        std::fs::read(&taken_out[0]).unwrap(),
+        original_bytes,
+        "the video as it was"
+    );
+    assert_eq!(taken_out[0].file_name().unwrap(), "holiday.mp4");
+    assert_exports_exactly_what_the_project_describes(
+        &toolchain,
+        &mut fresh,
+        &scratch.path().join("from the archive.mp4"),
+    );
+    fresh.press_button("OK"); // (the message that says the export is finished)
+
+    // Taking it out of the project file puts the video back where it was (the folder is made first: it was taken away),
+    // and the project file is written without it.
+    std::fs::create_dir_all(&footage).unwrap();
+    fresh.right_click(fresh.point_on_the_track_at_frame(100));
+    fresh.press_button("Remove from project file");
+    assert_eq!(fresh.application().message_showing(), None);
+    assert_eq!(
+        std::fs::read(&original).unwrap(),
+        original_bytes,
+        "put back where it was"
+    );
+    assert!(!fresh.application().project().sources()[0].link.is_included());
+    assert!(fresh.application().every_source_file_is_available());
+    fresh.application_mut().save_project_to(archive_path.clone());
+    assert!(
+        std::fs::metadata(&archive_path).unwrap().len() < original_bytes.len() as u64 / 2,
+        "the video is no longer in the project file"
+    );
+
+    // A third editor finds the video where it is again, and has the same clips.
+    let mut third = Journey::start(&toolchain);
+    third.application_mut().load_project_from(archive_path);
+    third.wait_until_idle();
+    assert_eq!(third.application().message_showing(), None);
+    assert!(third.application().every_source_file_is_available());
+    assert_eq!(third.clips(), clips_of_the_first_editor);
+}
+
+/// Deletes `path`, trying for a little while: a program that has just been closed may take a moment to let go of a file.
+fn delete_when_nothing_has_it_open(path: &Path) {
+    let started = std::time::Instant::now();
+    loop {
+        match std::fs::remove_file(path) {
+            Ok(()) => return,
+            Err(error) if started.elapsed() < std::time::Duration::from_secs(10) => {
+                let _ = error;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(error) => panic!("{} could not be deleted: {error}", path.display()),
+        }
+    }
+}
+
+/// Every file under `folder`, however deep.
+fn walk_files(folder: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return files;
+    };
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(walk_files(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files
+}

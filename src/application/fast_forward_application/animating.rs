@@ -5,11 +5,17 @@
 //! it always was. What the window asks for is the new value of a whole thing (a gain, a place on the picture, a text object),
 //! as it always has been, and it is worked out here which of its properties are different from what they are at the
 //! playhead now, and only those are changed.
+//!
+//! "At the playhead" is at the frame the playhead was at when the gesture that asks for the change began (see
+//! [`crate::application::gesture_frame`]), so that a gesture that goes on for a time makes one keyframe and not one at every
+//! frame the playhead goes over; and a change of what has keyframes stops the video that is playing, which is what keeps the
+//! playhead still at the frame it is made at.
 
 use std::time::Instant;
 
 use super::FastForwardApplication;
 use crate::application::commands::Command;
+use crate::application::history::EditKey;
 use crate::project::{
     AnimationTarget, ClipId, Gain, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, Placement, PropertyId,
     PropertyValue, TextObject, TimelineFrameIndex, TrackId, placement_value, text_value,
@@ -19,6 +25,33 @@ impl FastForwardApplication {
     /// The frame of the timeline the playhead is at.
     pub(super) fn frame_at_the_playhead(&self, now: Instant) -> TimelineFrameIndex {
         self.clock.position(now, self.project.total_frame_count())
+    }
+
+    /// The frame of the timeline that the keyframes that the commands being carried out make or change are at: the one that the
+    /// gesture they are of began at (see [`Self::frame_of_the_edits_of_what_has_keyframes`]), and the playhead's if they are of no
+    /// gesture, or are not about what has keyframes.
+    pub(super) fn frame_to_make_keyframes_at(&self, now: Instant) -> TimelineFrameIndex {
+        self.frame_keyframes_are_made_at
+            .unwrap_or_else(|| self.frame_at_the_playhead(now))
+    }
+
+    /// Works out the frame that an edit of what has keyframes is made at, which is where the gesture it is of began (the
+    /// gesture is what `gesture_key` and `press_began_at` say), and stops the video if it is playing.
+    ///
+    /// A video that plays while a value is dragged would put the keyframe that the drag makes at the frame it is at, and then,
+    /// as the drag asks for the same change in every frame of the window, at every frame after that: a keyframe for each, the
+    /// whole movement of the hand written down, when what was wanted was one. So it stops, where it is, and the edit is made
+    /// there. (Things that have no keyframes can be changed while the video plays: they are changed for all of it.)
+    pub(super) fn frame_of_the_edits_of_what_has_keyframes(
+        &mut self,
+        gesture_key: Option<EditKey>,
+        press_began_at: Option<f64>,
+        now: Instant,
+    ) -> TimelineFrameIndex {
+        let total_frames = self.project.total_frame_count();
+        self.clock.pause(now, total_frames);
+        let playhead = self.frame_at_the_playhead(now);
+        self.gesture_frame.frame_for(gesture_key, press_began_at, playhead)
     }
 
     /// Whether `command` changes something that has keyframes, so that what it does is a keyframe at the playhead (as
@@ -55,7 +88,7 @@ impl FastForwardApplication {
         value: PropertyValue,
         now: Instant,
     ) {
-        let frame = self.frame_at_the_playhead(now);
+        let frame = self.frame_to_make_keyframes_at(now);
         // (If that made a keyframe, the drawer it is in opens, so that it is seen where it is.)
         if let Ok(Some(made)) = self.project.set_property_at(target, property, value, frame) {
             self.timeline_view.open_the_drawer_of(made.owner);
@@ -98,12 +131,13 @@ impl FastForwardApplication {
             let _ = self.project.set_clip_placement(clip, placement);
             return;
         }
-        let frame = self.frame_at_the_playhead(now);
+        // (What is different from what it was is worked out from what the window showed, which is what it is at the playhead.)
+        let shown_at = self.frame_at_the_playhead(now);
         for property in PROPERTIES_OF_A_PLACEMENT {
             let Some(wanted) = placement_value(&placement, property) else {
                 continue;
             };
-            if self.project.property_value_at(target, property, frame).as_ref() != Some(&wanted) {
+            if self.project.property_value_at(target, property, shown_at).as_ref() != Some(&wanted) {
                 self.change_a_property_at_the_playhead(target, property, wanted, now);
             }
         }
@@ -119,12 +153,12 @@ impl FastForwardApplication {
             let _ = self.project.set_text_object(clip, object);
             return;
         }
-        let frame = self.frame_at_the_playhead(now);
+        let shown_at = self.frame_at_the_playhead(now);
         for property in PROPERTIES_OF_A_TEXT_OBJECT {
             let Some(wanted) = text_value(&object, property) else {
                 continue;
             };
-            if self.project.property_value_at(target, property, frame).as_ref() != Some(&wanted) {
+            if self.project.property_value_at(target, property, shown_at).as_ref() != Some(&wanted) {
                 self.change_a_property_at_the_playhead(target, property, wanted, now);
             }
         }

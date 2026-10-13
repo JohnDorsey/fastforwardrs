@@ -1,4 +1,4 @@
-//! The exact shape of a project file on disk (the current version, 8).
+//! The exact shape of a project file on disk (the current version, 9).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -53,10 +53,16 @@ pub(super) struct ProjectSettingsDocument {
 pub(super) enum SourceDocument {
     Video {
         identifier: SourceMediaIdentifier,
+        /// Where the file was, or is: where it was when it was included in the project file, for a file that is.
         absolute_path: String,
         /// Relative to the folder that holds the project file. Always written with `/` separators so
         /// that it means the same thing on every operating system.
         relative_path: Option<String>,
+        /// The name of the entry of the project file that has the file in it, if the file is included in the project file
+        /// (which has to be a `.ffrs` file, an archive, to have files in it). Left out for a file that is not, and in the files
+        /// of versions before 9.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        included_as: Option<String>,
         frame_rate: FrameRate,
         total_frame_count: u64,
         display_width_in_pixels: u32,
@@ -67,12 +73,16 @@ pub(super) enum SourceDocument {
         identifier: SourceMediaIdentifier,
         absolute_path: String,
         relative_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        included_as: Option<String>,
         duration_in_microseconds: u64,
     },
     Image {
         identifier: SourceMediaIdentifier,
         absolute_path: String,
         relative_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        included_as: Option<String>,
         display_width_in_pixels: u32,
         display_height_in_pixels: u32,
     },

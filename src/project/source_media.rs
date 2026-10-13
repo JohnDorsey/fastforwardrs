@@ -53,16 +53,20 @@ impl SourceVideoProperties {
     }
 }
 
-/// Where a source video file lives. The project never embeds the video; it remembers the place in
-/// two ways so that it can usually find the file again: the absolute path, and a path relative to
-/// the folder holding the project file (which still works if the project and the video were moved
-/// together).
+/// Where a source video file lives. The project does not embed the video, unless the user chose to include it in the
+/// project file (see [`Self::included_as`]); it remembers the place in two ways so that it can usually find the file again: the
+/// absolute path, and a path relative to the folder holding the project file (which still works if the project and the video were
+/// moved together).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceMediaLink {
     pub absolute_path: PathBuf,
     /// Relative to the folder containing the project file. `None` until the project has been
     /// saved, or when no relative path exists (for example the video is on another drive).
     pub relative_path: Option<PathBuf>,
+    /// The name of the entry of the project file (an archive, which is a `.ffrs` file) that has the file in it, if the user chose to
+    /// include the file there. The file is then in the project file, and the two paths above are where it was when it was
+    /// included: they are kept as they were, so that the file can be taken out of the project file and put back there.
+    pub included_as: Option<String>,
 }
 
 impl SourceMediaLink {
@@ -72,7 +76,13 @@ impl SourceMediaLink {
         Self {
             absolute_path,
             relative_path: None,
+            included_as: None,
         }
+    }
+
+    /// Whether the file is included in the project file.
+    pub fn is_included(&self) -> bool {
+        self.included_as.is_some()
     }
 
     /// The places the video may be, best guess first: the absolute path, then the relative path
@@ -239,6 +249,7 @@ mod tests {
         SourceMediaLink {
             absolute_path: PathBuf::from("/videos/holiday.mp4"),
             relative_path: relative_path.map(PathBuf::from),
+            included_as: None,
         }
     }
 
@@ -269,9 +280,26 @@ mod tests {
     }
 
     #[test]
-    fn a_link_made_from_an_absolute_path_has_no_relative_path_yet() {
+    fn a_link_made_from_an_absolute_path_has_no_relative_path_yet_and_is_not_included() {
         let link = SourceMediaLink::from_absolute_path(PathBuf::from("/videos/holiday.mp4"));
         assert_eq!(link.relative_path, None);
+        assert_eq!(link.included_as, None);
+        assert!(!link.is_included());
+    }
+
+    #[test]
+    fn a_link_of_a_file_that_is_included_is_one_and_still_has_the_places_the_file_was_at() {
+        let included = SourceMediaLink {
+            included_as: Some("resources/1-holiday.mp4".to_owned()),
+            ..link(Some("../videos/holiday.mp4"))
+        };
+
+        assert!(included.is_included());
+        assert_eq!(
+            included.candidate_paths(Some(Path::new("/projects/summer"))),
+            link(Some("../videos/holiday.mp4")).candidate_paths(Some(Path::new("/projects/summer"))),
+            "where it was is what it was: what is done with those places is for the one that reads the project to say"
+        );
     }
 
     #[test]

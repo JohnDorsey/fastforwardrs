@@ -40,10 +40,12 @@ mod view_state;
 
 use std::collections::HashMap;
 
+use egui::containers::panel::PanelState;
 use egui::scroll_area::{DragScroll, ScrollSource};
-use egui::{Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2};
+use egui::{Context, Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2};
 
 // The names the parts of the timeline are known by to screen readers, which the tests look them up by.
+pub use drawers::DrawerSound;
 #[cfg(test)]
 pub use drawers::{drawer_button_label, track_drawer_button_label};
 #[cfg(test)]
@@ -66,8 +68,9 @@ pub fn rows_area_id() -> Id {
 }
 
 use self::clips::rectangles_of;
+use self::rows::RowsLayout;
 use self::scrolling::update_view;
-use self::view_state::{NewMenuTarget, RubberBand};
+use self::view_state::{NewMenuTarget, RowsInTheLastFrame, RubberBand};
 use super::commands::Command;
 use super::selection::{Selection, SelectionItem};
 use super::textures::Textures;
@@ -82,6 +85,9 @@ pub const ADD_TRACK_LABEL: &str = "Add a track";
 
 /// The name the ruler is known by.
 pub const RULER_LABEL: &str = "Ruler";
+
+/// The name of the panel along the bottom of the window that the timeline is drawn on, which [`prepare`] finds it by.
+pub const PANEL_ID: &str = "timeline panel";
 
 /// What the timeline draws of a source file.
 pub struct SourceLook<'a> {
@@ -121,8 +127,56 @@ fn tallest_rows_area() -> f32 {
     rows * TrackHeight::DEFAULT_IN_POINTS + (rows - 1.0) * theme::SPACE_BETWEEN_TRACKS
 }
 
+/// Gets the timeline ready for a frame of the window, before the panel it is drawn on is shown: slides the drawers that are
+/// sliding on, and forgets those of clips and tracks that are gone, and makes the panel (see [`PANEL_ID`]) as tall as it is going
+/// to be.
+///
+/// The timeline is drawn on a panel along the bottom of the window that is as tall as what is in it, and that is, as egui makes
+/// every panel, as tall as what was in it in the frame before. So a panel whose content has grown (a drawer that has slid further
+/// open, a track that was added) was too short for it, and had everything in it drawn lower than it was going to be, by as
+/// much as the content had grown, for the frame: the track under a drawer that was opening jumped down, and crept back up in the
+/// frames that followed, and so did the slider along the bottom of the window. Here, where the rows are known to have grown (or
+/// shrunk) since the last frame, the panel is made as tall as that will make it, so that what is drawn in it is where it will
+/// stay. (If that is wrong, it is wrong as it was: the panel is as tall as what is in it, in the next frame.)
+pub fn prepare(context: &Context, content: &TimelineContent<'_>, state: &mut TimelineViewState) {
+    // The drawers that are sliding go on sliding, and those of clips and tracks that are gone are forgotten.
+    state.drawers.forget_what_is_gone(content.project);
+    if state.drawers.advance(context.input(|input| input.stable_dt)) {
+        context.request_repaint();
+    }
+    let growth = growth_of_the_rows_area(content.project, state);
+    if growth != 0.0
+        && let Some(panel) = PanelState::load(context, Id::new(PANEL_ID))
+    {
+        // (The panel hangs from the bottom of the window, so it grows upward.)
+        let height = (panel.outer_rect.height() + growth).max(0.0);
+        let outer_rect = Rect::from_min_max(
+            pos2(panel.outer_rect.left(), panel.outer_rect.bottom() - height),
+            panel.outer_rect.max,
+        );
+        context.data_mut(|data| data.insert_persisted(Id::new(PANEL_ID), PanelState { outer_rect }));
+    }
+}
+
+/// How much taller the area the rows are in is going to be in this frame than it was in the last, which is how much shorter if it is
+/// negative: the rows are laid out as tall as they were in the last frame and as much more (or less) as the layouts say they have
+/// grown (the drawers having slid on, tracks having been added or taken away), and the area is as tall as they are, until it is as
+/// tall as it goes. (It does not change while a track is being resized, which holds it.)
+fn growth_of_the_rows_area(project: &Project, state: &TimelineViewState) -> f32 {
+    let Some(last) = state.rows_in_the_last_frame else {
+        return 0.0;
+    };
+    if state.track_resize.is_some() {
+        return 0.0;
+    }
+    let height_laid_out_now = RowsLayout::of(project, &state.drawers).total_height();
+    let content_height_now = (last.content_height + height_laid_out_now - last.height_laid_out).max(0.0);
+    let tallest = tallest_rows_area();
+    content_height_now.min(tallest) - last.content_height.min(tallest)
+}
+
 /// Draws the ruler, the rows and the button under them, and adds a command for each thing the
-/// user does to them.
+/// user does to them. ([`prepare`] is called before the panel they are on is shown.)
 pub fn show(
     ui: &mut Ui,
     content: &TimelineContent<'_>,
@@ -141,11 +195,6 @@ pub fn show(
     state.drawer_bottoms.clear();
     state.drop_targets.clear();
     state.pointer_message = None;
-    // The drawers that are sliding go on sliding, and those of clips and tracks that are gone are forgotten.
-    state.drawers.forget_what_is_gone(content.project);
-    if state.drawers.advance(context.input(|input| input.stable_dt)) {
-        context.request_repaint();
-    }
     let width = ui.available_width();
     let strips_offset = theme::TRACK_HEADER_WIDTH + theme::TRACK_HEADER_GAP;
     let strips_width = (width - strips_offset - theme::SCROLL_BAR_ROOM).max(1.0);
@@ -239,6 +288,10 @@ pub fn show(
     state.timeline_area_in_the_last_frame = Some(top_row.rectangle.union(rows.inner_rect));
     state.rows_scroll_offset = rows.state.offset.y;
     state.rows_area_height = rows_scope.response.rect.height();
+    state.rows_in_the_last_frame = Some(RowsInTheLastFrame {
+        content_height: rows.content_size.y,
+        height_laid_out: RowsLayout::of(content.project, &state.drawers).total_height(),
+    });
     bring_the_drawer_that_is_opening_into_view(state, rows.inner_rect, &context);
     // A track dragged to the top or the bottom of the rows brings the rows beyond it into view.
     if state.track_reorder.is_some() {
@@ -359,5 +412,136 @@ fn draw_a_rubber_band(
     }
     if response.drag_stopped() {
         state.rubber_band = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drawers::OpenMode;
+    use super::view_state::TrackResize;
+    use super::*;
+    use crate::project::{AnimationTarget, TextObject};
+
+    /// A project with one track that has a text object, and the target of the drawer of the text.
+    fn project_with_a_text() -> (Project, AnimationTarget) {
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let (text, _) = project
+            .insert_text(track, TimelineFrameIndex::new(0), TextObject::default(), 30)
+            .unwrap();
+        (project, AnimationTarget::Clip(text))
+    }
+
+    /// The state of the timeline after a frame in which the rows were `content_height` tall (which is more than they are laid out
+    /// to be, by the room under the last row for the boundary under it, which `height_laid_out` leaves out) with the drawers as
+    /// they are in `state` already.
+    fn after_a_frame_in_which_the_rows_were(
+        project: &Project,
+        content_height: f32,
+        mut state: TimelineViewState,
+    ) -> TimelineViewState {
+        state.rows_in_the_last_frame = Some(RowsInTheLastFrame {
+            content_height,
+            height_laid_out: RowsLayout::of(project, &state.drawers).total_height(),
+        });
+        state
+    }
+
+    /// Opens the drawer of `owner`, pushing the rows under it down, and lets it finish sliding. Gives how far it hangs.
+    fn open_the_drawer_of(state: &mut TimelineViewState, project: &Project, owner: AnimationTarget) -> f32 {
+        state.drawers.toggle(owner, OpenMode::PushingTheRowsUnder);
+        state.drawers.advance(1.0);
+        state.drawers.hanging_height_of(owner, project)
+    }
+
+    #[test]
+    fn before_the_rows_have_been_laid_out_once_nothing_is_known_to_have_grown() {
+        let (project, text) = project_with_a_text();
+        let mut state = TimelineViewState::default();
+        state.drawers.toggle(text, OpenMode::PushingTheRowsUnder);
+        state.drawers.advance(1.0);
+
+        assert_eq!(growth_of_the_rows_area(&project, &state), 0.0);
+    }
+
+    #[test]
+    fn rows_that_are_taller_because_a_drawer_has_slid_open_make_the_area_taller_by_as_much() {
+        let (project, text) = project_with_a_text();
+        let mut state = after_a_frame_in_which_the_rows_were(&project, 120.0, TimelineViewState::default());
+        let hanging = open_the_drawer_of(&mut state, &project, text);
+        assert!(hanging > 10.0 && 120.0 + hanging < tallest_rows_area(), "the setup");
+
+        assert_eq!(growth_of_the_rows_area(&project, &state), hanging);
+    }
+
+    #[test]
+    fn rows_that_are_shorter_because_a_drawer_has_shut_make_the_area_shorter_by_as_much() {
+        let (project, text) = project_with_a_text();
+        let mut state = TimelineViewState::default();
+        let hanging = open_the_drawer_of(&mut state, &project, text);
+        let mut state = after_a_frame_in_which_the_rows_were(&project, 120.0 + hanging, state);
+        state.drawers.toggle(text, OpenMode::PushingTheRowsUnder);
+        state.drawers.advance(1.0);
+
+        assert_eq!(growth_of_the_rows_area(&project, &state), -hanging);
+    }
+
+    #[test]
+    fn the_area_does_not_grow_further_than_the_tallest_it_goes() {
+        let (project, text) = project_with_a_text();
+        let room_left = 5.0;
+        let mut state = after_a_frame_in_which_the_rows_were(
+            &project,
+            tallest_rows_area() - room_left,
+            TimelineViewState::default(),
+        );
+        let hanging = open_the_drawer_of(&mut state, &project, text);
+        assert!(hanging > room_left, "the setup: the drawer is taller than what is left");
+
+        assert_eq!(growth_of_the_rows_area(&project, &state), room_left);
+    }
+
+    #[test]
+    fn an_area_that_is_as_tall_as_it_goes_does_not_grow_with_the_rows_which_scroll_instead() {
+        let (project, text) = project_with_a_text();
+        let mut state =
+            after_a_frame_in_which_the_rows_were(&project, tallest_rows_area() + 40.0, TimelineViewState::default());
+        open_the_drawer_of(&mut state, &project, text);
+
+        assert_eq!(growth_of_the_rows_area(&project, &state), 0.0);
+    }
+
+    #[test]
+    fn an_area_that_is_as_tall_as_it_goes_shortens_only_by_what_the_rows_have_gone_down_below_it() {
+        let (project, text) = project_with_a_text();
+        let mut state = TimelineViewState::default();
+        let hanging = open_the_drawer_of(&mut state, &project, text);
+        // The rows reach 20 points above the tallest the area goes, with the drawer open: when it shuts they are that much shorter than
+        // the area could be.
+        let mut state = after_a_frame_in_which_the_rows_were(&project, tallest_rows_area() + 20.0, state);
+        state.drawers.toggle(text, OpenMode::PushingTheRowsUnder);
+        state.drawers.advance(1.0);
+        assert!(hanging > 20.0, "the setup");
+
+        assert_eq!(
+            growth_of_the_rows_area(&project, &state),
+            20.0 - hanging,
+            "from as tall as it goes to as tall as the rows are then"
+        );
+    }
+
+    #[test]
+    fn the_area_is_held_while_a_track_is_being_resized_whatever_the_rows_do() {
+        let (project, text) = project_with_a_text();
+        let mut state = after_a_frame_in_which_the_rows_were(&project, 120.0, TimelineViewState::default());
+        open_the_drawer_of(&mut state, &project, text);
+        state.track_resize = Some(TrackResize {
+            track: project.tracks()[0].id(),
+            height_at_the_start: 110.0,
+            pointer_y_at_the_start: 0.0,
+            rows_area_height: 120.0,
+        });
+
+        assert_eq!(growth_of_the_rows_area(&project, &state), 0.0);
     }
 }

@@ -372,6 +372,17 @@ impl Window {
         self.harness.step();
     }
 
+    /// Holds the control key (Command on a Mac) down, until [`Self::let_go_of_control`].
+    pub(super) fn hold_control(&mut self) {
+        self.harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+        self.harness.step();
+    }
+
+    pub(super) fn let_go_of_control(&mut self) {
+        self.harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        self.harness.step();
+    }
+
     fn click_holding(&mut self, position: Pos2, modifiers: Modifiers) {
         self.harness.event(Event::ModifiersChanged(modifiers));
         self.harness.step();
@@ -448,6 +459,13 @@ impl Window {
 
     pub(super) fn press_key(&mut self, key: Key) {
         self.harness.key_press(key);
+        self.harness.step();
+        self.settle();
+    }
+
+    /// Presses `key` with `modifiers` held.
+    pub(super) fn press_key_with(&mut self, modifiers: Modifiers, key: Key) {
+        self.harness.key_press_modifiers(modifiers, key);
         self.harness.step();
         self.settle();
     }
@@ -673,9 +691,14 @@ impl Window {
         self.settle();
     }
 
-    /// Makes the cut a person makes: moves the playhead to `frame` and presses S.
+    /// Makes the cut a person makes: moves the playhead to `frame` and cuts, with S when some clips are selected (which cuts those
+    /// of them that are there) and with Shift and S when none is (which cuts every clip that is there).
     pub(super) fn cut_at_frame(&mut self, frame: u64) {
         self.move_current_frame_to(frame);
-        self.press_key(Key::S);
+        if self.application().selected_clips().is_empty() {
+            self.press_key_with(Modifiers::SHIFT, Key::S);
+        } else {
+            self.press_key(Key::S);
+        }
     }
 }

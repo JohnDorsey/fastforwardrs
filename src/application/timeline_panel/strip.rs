@@ -19,13 +19,13 @@ use super::clip_menu;
 use super::clip_shape::ClipShape;
 use super::clips::{self, rectangles_of};
 use super::drawers::{self, drawer_button_label};
-use super::item_dragging::keyframes_dragged_on_their_own;
+use super::item_dragging::{drag_of, what_is_dragged};
 use super::racks;
 use super::strip_view::StripView;
-use super::view_state::{Grabbed, ItemDrag};
+use super::view_state::Grabbed;
 use super::{NewMenuTarget, TimelineContent, TimelineViewState};
 use crate::application::commands::Command;
-use crate::application::selection::SelectionChange;
+use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::application::start_time_hold::StartTimeMemory;
 use crate::application::textures::Textures;
 use crate::application::theme;
@@ -389,7 +389,7 @@ fn operate_the_drawer(
 }
 
 /// Takes hold of what is to be dragged when `response` (the response of `clip`) begins to
-/// be dragged: the selected clips and the selected keyframes if it is one of the clips, and otherwise it alone (which is
+/// be dragged: everything that is selected (clips, keyframes and racks) if it is one of the clips, and otherwise it alone (which is
 /// selected, with Ctrl added to what was selected). Where they are moved to after that is
 /// [`super::item_dragging`]'s.
 fn drag_the_clip(
@@ -408,30 +408,20 @@ fn drag_the_clip(
     if response.drag_started_by(PointerButton::Primary)
         && let Some(pointer) = ui.input(|input| input.pointer.press_origin())
     {
-        let (clips, keyframes) = if content.selection.contains(location) {
-            (content.selection.to_vec(), content.selection.keyframes_to_vec())
-        } else {
-            commands.push(if adding_to_the_selection {
-                Command::select_clips(vec![location], SelectionChange::Toggle)
-            } else {
-                select_only(location)
-            });
-            let (mut clips, keyframes) = if adding_to_the_selection {
-                (content.selection.to_vec(), content.selection.keyframes_to_vec())
-            } else {
-                (Vec::new(), Vec::new())
-            };
-            clips.push(location);
-            (clips, keyframes)
-        };
-        state.item_drag = Some(ItemDrag {
-            keyframes: keyframes_dragged_on_their_own(content.project, &clips, &keyframes),
-            clips,
-            grabbed: Grabbed::Clip {
+        let items = what_is_dragged(
+            content,
+            SelectionItem::Clip(location),
+            adding_to_the_selection,
+            commands,
+        );
+        state.item_drag = Some(drag_of(
+            content.project,
+            &items,
+            Grabbed::Clip {
                 clip: location,
                 start_time: StartTimeMemory::new(placement.first_timeline_frame.value(), track),
             },
-            pointer_frame_at_the_start: frame_under(pointer),
-        });
+            frame_under(pointer),
+        ));
     }
 }

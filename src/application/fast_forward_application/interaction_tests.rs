@@ -146,19 +146,25 @@ fn left_clicking_a_clip_selects_it_and_changes_nothing_else() {
 }
 
 #[test]
-fn pressing_s_twice_at_the_same_frame_cuts_only_once() {
+fn cutting_twice_at_the_same_frame_cuts_only_once() {
     let mut window = Window::showing(project_of(300));
     window.cut_at_frame(75);
-    window.press_key(Key::S);
+    window.press_key_with(Modifiers::SHIFT, Key::S);
     assert_eq!(window.clips(), vec![(0, 75, 1), (75, 300, 1)]);
 }
 
 #[test]
-fn pressing_s_where_it_is_already_cut_does_nothing() {
+fn cutting_where_it_is_already_cut_does_nothing() {
     let mut window = Window::showing(project_of(300));
     window.cut_at_frame(75);
     window.application_mut().note_everything_is_saved();
-    // Frame 75 is the first frame of the second clip, so cutting there again changes nothing.
+    // Frame 75 is the first frame of the second clip, so cutting there again changes nothing, with Shift and S...
+    window.press_key_with(Modifiers::SHIFT, Key::S);
+    assert_eq!(window.clips(), vec![(0, 75, 1), (75, 300, 1)]);
+    assert!(!window.application().has_unsaved_changes());
+    // ...or with S, of the clip that is selected and is there.
+    window.click(window.middle_of_the_strip_at(0, 100));
+    window.move_current_frame_to(75);
     window.press_key(Key::S);
     assert_eq!(window.clips(), vec![(0, 75, 1), (75, 300, 1)]);
     assert!(!window.application().has_unsaved_changes());
@@ -420,9 +426,10 @@ fn the_red_line_of_the_playhead_goes_along_with_the_strips_when_they_are_scrolle
 }
 
 #[test]
-fn the_s_key_cuts_at_the_current_frame_and_does_not_move_it() {
+fn the_s_key_cuts_the_selected_clip_at_the_current_frame_and_does_not_move_it() {
     let mut window = Window::showing(project_of(300));
     assert!(!window.application().has_unsaved_changes());
+    window.click(window.middle_of_the_strip_at(0, 100));
     window.move_current_frame_to(120);
 
     window.press_key(Key::S);
@@ -433,6 +440,30 @@ fn the_s_key_cuts_at_the_current_frame_and_does_not_move_it() {
         "a cut is an edit that is not saved yet"
     );
     assert_eq!(window.current_frame(), 120, "cutting does not move the current frame");
+}
+
+#[test]
+fn shift_and_the_s_key_cut_every_clip_at_the_current_frame_and_do_not_move_it() {
+    let mut window = Window::showing(project_of(300));
+    assert!(!window.application().has_unsaved_changes());
+    window.move_current_frame_to(120);
+
+    window.press_key_with(Modifiers::SHIFT, Key::S);
+
+    assert_eq!(window.clips(), vec![(0, 120, 1), (120, 300, 1)]);
+    assert!(window.application().has_unsaved_changes());
+    assert_eq!(window.current_frame(), 120);
+}
+
+#[test]
+fn the_s_key_alone_cuts_nothing_when_no_clip_is_selected() {
+    let mut window = Window::showing(project_of(300));
+    window.move_current_frame_to(120);
+
+    window.press_key(Key::S);
+
+    assert_eq!(window.clips(), vec![(0, 300, 1)], "nothing is selected: nothing is cut");
+    assert!(!window.application().has_unsaved_changes());
 }
 
 #[test]
@@ -483,14 +514,19 @@ fn the_tab_key_does_not_stop_at_the_handles_of_the_selected_layer_either() {
 
 #[test]
 fn the_s_key_cuts_even_when_a_button_has_the_keyboard_focus() {
-    let mut window = Window::showing(project_of(300));
-    window.move_current_frame_to(60);
-    window.harness.get_by_label("File").focus();
-    window.settle();
+    for (modifiers, select_the_clip_first) in [(Modifiers::NONE, true), (Modifiers::SHIFT, false)] {
+        let mut window = Window::showing(project_of(300));
+        if select_the_clip_first {
+            window.click(window.middle_of_the_strip_at(0, 100));
+        }
+        window.move_current_frame_to(60);
+        window.harness.get_by_label("File").focus();
+        window.settle();
 
-    window.press_key(Key::S);
+        window.press_key_with(modifiers, Key::S);
 
-    assert_eq!(window.clips(), vec![(0, 60, 1), (60, 300, 1)]);
+        assert_eq!(window.clips(), vec![(0, 60, 1), (60, 300, 1)], "{modifiers:?}");
+    }
 }
 
 #[test]
@@ -561,7 +597,7 @@ fn the_s_key_does_nothing_while_a_dialog_is_open() {
         text: "Read me".into(),
     });
     window.settle();
-    window.press_key(Key::S);
+    window.press_key_with(Modifiers::SHIFT, Key::S);
     assert_eq!(window.clips(), vec![(0, 300, 1)]);
 }
 
@@ -569,6 +605,7 @@ fn the_s_key_does_nothing_while_a_dialog_is_open() {
 fn the_s_key_does_nothing_with_no_video() {
     let mut window = Window::showing(Project::empty());
     window.press_key(Key::S);
+    window.press_key_with(Modifiers::SHIFT, Key::S);
     assert!(window.application().project.has_no_clips());
     assert!(!window.application().has_unsaved_changes());
 }

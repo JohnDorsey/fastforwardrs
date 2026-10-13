@@ -53,6 +53,14 @@ pub enum Command {
     /// Move the current frame this many frames on (or, if negative, back), with the arrow keys.
     MoveCurrentFrameBy(i64),
 
+    // How the window shows things (nothing about the project changes).
+    /// Make the picture of the preview fit its panel, as the button that does so does (with the F key while the pointer is over
+    /// the preview).
+    FitThePreview,
+    /// Scroll and zoom the timeline so that what is selected (clips, keyframes and racks of keyframes) is in the middle of it and
+    /// nearly fills its width (with the F key anywhere else). When nothing is selected nothing happens.
+    FrameTheSelectionInTheTimeline,
+
     /// Change what is selected (by clicking something, or drawing a rectangle round some things): select `items`
     /// and nothing else, or as well as what is selected, or the other way round for each of them, as `change` says.
     /// (A track is selected as itself, which is not all the clips on it.)
@@ -61,8 +69,8 @@ pub enum Command {
         change: SelectionChange,
     },
 
-    /// Cut the clips under this frame in two (with the S key): only those in `only` if that is
-    /// given, and otherwise every clip there is under the frame, on every track.
+    /// Cut the clips under this frame in two: only those in `only` if that is given (with the S key, which cuts the selected
+    /// clips there), and otherwise every clip there is under the frame, on every track (with Shift and the S key).
     SplitAt {
         frame: TimelineFrameIndex,
         only: Option<Vec<ClipId>>,
@@ -101,6 +109,13 @@ pub enum Command {
     },
     /// Choose again the file a clip is made from, because it cannot be found.
     RelinkSource(SourceMediaIdentifier),
+    /// Put the files of these source files in the project file, from the menu of a clip. Only a project file that is a `.ffrs` file
+    /// can have files in it: if it is not one, the user is asked to save it as one first. (It is not an edit that can be undone,
+    /// as choosing a file again is not.)
+    IncludeFilesInTheProjectFile(Vec<SourceMediaIdentifier>),
+    /// Take the files of these source files out of the project file again, from the menu of a clip: each is put back where it was
+    /// when it was included, if that can be done.
+    TakeFilesOutOfTheProjectFile(Vec<SourceMediaIdentifier>),
 
     // The tracks.
     /// Add an empty track in front of the others.
@@ -164,7 +179,8 @@ pub enum Command {
         target: AnimationTarget,
         kind: EffectKind,
     },
-    /// Take an effect off a clip or a track (from the menu of its box in the properties panel), with the keyframes of its values.
+    /// Delete an effect of a clip or a track (with *Delete effect*, in the menu of its box in the properties panel), with the
+    /// keyframes of its values.
     RemoveEffect {
         target: AnimationTarget,
         kind: EffectKind,
@@ -299,8 +315,12 @@ impl Command {
             | Self::Stop
             | Self::SeekTo(_)
             | Self::MoveCurrentFrameBy(_)
+            | Self::FitThePreview
+            | Self::FrameTheSelectionInTheTimeline
             | Self::SelectItems { .. }
-            | Self::RelinkSource(_) => false,
+            | Self::RelinkSource(_)
+            | Self::IncludeFilesInTheProjectFile(_)
+            | Self::TakeFilesOutOfTheProjectFile(_) => false,
         }
     }
 
@@ -335,6 +355,8 @@ impl Command {
             | Self::Stop
             | Self::SeekTo(_)
             | Self::MoveCurrentFrameBy(_)
+            | Self::FitThePreview
+            | Self::FrameTheSelectionInTheTimeline
             | Self::SelectItems { .. }
             | Self::SplitAt { .. }
             | Self::DeleteClips(_)
@@ -343,6 +365,8 @@ impl Command {
             | Self::SetClipMuted { .. }
             | Self::SetClipPlacement { .. }
             | Self::RelinkSource(_)
+            | Self::IncludeFilesInTheProjectFile(_)
+            | Self::TakeFilesOutOfTheProjectFile(_)
             | Self::AddTrack
             | Self::SetTrackTitle { .. }
             | Self::SetTrackGain { .. }
@@ -599,6 +623,9 @@ mod tests {
             Command::SeekTo(TimelineFrameIndex::new(3)),
             Command::select_clips([clip(0)], SelectionChange::Replace),
             Command::SetProjectSettings(ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS),
+            // (Where a file is kept is not what is edited: like choosing a file again, it is not a step that can be undone.)
+            Command::IncludeFilesInTheProjectFile(vec![SourceMediaIdentifier::new(1)]),
+            Command::TakeFilesOutOfTheProjectFile(vec![SourceMediaIdentifier::new(1)]),
         ] {
             assert!(!not_an_edit.may_change_the_project(), "{not_an_edit:?}");
         }

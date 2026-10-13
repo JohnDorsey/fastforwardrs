@@ -526,6 +526,18 @@ impl Project {
     /// one: the clips are stored as frames of the project, which is as much as to say as stretches of
     /// time. Its length may differ; the returned [`RelinkOutcome`] reports by how much (in frames of the
     /// project) so that the caller can tell the user.
+    /// Changes only where the file `identifier` is, and whether it is included in the project file, to what `link` says, and not
+    /// what the project knows of the file (how long it is, how big its picture is). `false` if there is no such source file.
+    pub fn set_source_link(&mut self, identifier: SourceMediaIdentifier, link: SourceMediaLink) -> bool {
+        match self.sources.iter_mut().find(|source| source.identifier == identifier) {
+            Some(source) => {
+                source.link = link;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn relink_source(
         &mut self,
         identifier: SourceMediaIdentifier,

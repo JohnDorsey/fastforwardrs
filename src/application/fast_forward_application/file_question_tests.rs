@@ -100,12 +100,14 @@ fn saving_for_the_first_time_asks_where_and_suggests_the_name_of_the_first_file_
     assert_eq!(asked.len(), 1);
     assert!(asked[0].saving, "where to save");
     assert_eq!(asked[0].title, "Save the project");
+    // (A .ffrs file is the one that is offered first, and suggested: it is the project file that can do all that the other can.)
+    assert_eq!(asked[0].suggested_file_name.as_deref(), Some("holiday.ffrs"));
     assert_eq!(
-        asked[0].suggested_file_name.as_deref(),
-        Some("holiday.fastforwardrs.json")
+        names_of_the_kinds(&asked[0]),
+        ["Project files (.ffrs)", "Plain project files (.json)"]
     );
-    assert_eq!(names_of_the_kinds(&asked[0]), ["Project files"]);
-    assert_eq!(extensions_of(&asked[0], "Project files"), ["json"]);
+    assert_eq!(extensions_of(&asked[0], "Project files (.ffrs)"), ["ffrs"]);
+    assert_eq!(extensions_of(&asked[0], "Plain project files (.json)"), ["json"]);
     assert_eq!(
         window.application().project_file_path(),
         None,
@@ -136,7 +138,10 @@ fn saving_as_asks_where_even_when_the_project_has_a_file_and_offers_its_name_and
     assert_eq!(asked[0].title, "Save the project as");
     assert_eq!(asked[0].suggested_file_name.as_deref(), Some("trip.fastforwardrs.json"));
     assert_eq!(asked[0].starting_directory.as_deref(), Some(folder.path()));
-    assert_eq!(names_of_the_kinds(&asked[0]), ["Project files"]);
+    assert_eq!(
+        names_of_the_kinds(&asked[0]),
+        ["Project files (.ffrs)", "Plain project files (.json)"]
+    );
     assert_eq!(
         window.application().project_file_path(),
         Some(path.as_path()),
@@ -154,10 +159,7 @@ fn saving_as_a_project_that_has_no_file_yet_offers_the_name_of_its_first_file_an
 
     let asked = chooser.questions_asked();
     assert_eq!(asked[0].title, "Save the project as");
-    assert_eq!(
-        asked[0].suggested_file_name.as_deref(),
-        Some("holiday.fastforwardrs.json")
-    );
+    assert_eq!(asked[0].suggested_file_name.as_deref(), Some("holiday.ffrs"));
     assert_eq!(asked[0].starting_directory, None);
 }
 
@@ -180,12 +182,12 @@ fn saving_as_writes_the_project_to_the_file_chosen_which_is_the_projects_file_fr
     let old_text = std::fs::read_to_string(&old_path).unwrap();
     window.do_this(Command::AddTrack);
     assert!(window.application().has_unsaved_changes());
-    // (No ending is typed: the one of project files is put on.)
+    // (No ending is typed: the one of project archives, which is the one that is offered first, is put on.)
     chooser.will_answer(Some(folder.path().join("second")));
 
     window.do_this(Command::SaveProjectAs);
 
-    let new_path = folder.path().join("second.json");
+    let new_path = folder.path().join("second.ffrs");
     assert!(new_path.exists(), "written where it was said");
     assert_eq!(window.application().project_file_path(), Some(new_path.as_path()));
     assert!(!window.application().has_unsaved_changes(), "everything is saved");
@@ -194,8 +196,12 @@ fn saving_as_writes_the_project_to_the_file_chosen_which_is_the_projects_file_fr
         old_text,
         "the file the project came from is as it was"
     );
+    assert!(
+        crate::project_file::archive::is_an_archive(&new_path),
+        "it is an archive, as its name says"
+    );
     assert_ne!(
-        std::fs::read_to_string(&new_path).unwrap(),
+        crate::project_file::archive::read_project_text(&new_path).unwrap(),
         old_text,
         "the new file has the track that was added since"
     );

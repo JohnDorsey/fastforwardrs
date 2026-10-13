@@ -15,6 +15,9 @@
 //!
 //! Which drawers are open is not part of the project: it is not saved, and opening or shutting one is not an edit
 //! that can be undone.
+//!
+//! A drawer makes a sound as it slides open, and another as it slides shut (the editor plays them: [`Drawers`] only says that
+//! a drawer has begun to open or to shut, see [`Drawers::take_the_sounds`]).
 
 use std::collections::HashMap;
 
@@ -195,6 +198,13 @@ impl OpenMode {
     }
 }
 
+/// A sound that a drawer makes: it begins to slide open or shut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawerSound {
+    Opening,
+    Closing,
+}
+
 /// How far one drawer has slid, and how it opened.
 #[derive(Clone, Copy, Debug)]
 struct Slide {
@@ -220,6 +230,8 @@ pub(super) struct Drawers {
     slides: HashMap<AnimationTarget, Slide>,
     /// The drawer that has just been opened, whose bottom is to be brought into view as it slides (see [`Self::revealing`]).
     revealing: Option<AnimationTarget>,
+    /// The sounds that drawers have begun to make since they were last taken (see [`Self::take_the_sounds`]), in order.
+    sounds: Vec<DrawerSound>,
 }
 
 impl Drawers {
@@ -242,12 +254,25 @@ impl Drawers {
             mode,
         });
         slide.is_open = !slide.is_open;
-        if slide.is_open {
+        let is_open = slide.is_open;
+        if is_open {
             if slide.level == 0.0 {
                 slide.mode = mode;
             }
             self.revealing = Some(owner);
         }
+        self.sounds.push(if is_open {
+            DrawerSound::Opening
+        } else {
+            DrawerSound::Closing
+        });
+    }
+
+    /// The sounds that drawers have begun to make since this was last called, in the order they began, which are then forgotten:
+    /// one for each drawer that began to slide open or shut (a drawer that is opened again while it slides shut begins to make
+    /// another).
+    pub(super) fn take_the_sounds(&mut self) -> Vec<DrawerSound> {
+        std::mem::take(&mut self.sounds)
     }
 
     /// Opens the drawer of `owner` if it is shut (and leaves it alone if it is open), pushing the rows under it down: from where it
@@ -766,6 +791,67 @@ mod tests {
         drawers.open_it(clip(1));
         assert!(drawers.is_open(clip(1)), "and what was shut is opened");
         assert!(!drawers.is_open(clip(2)));
+    }
+
+    // --- the sounds ---
+
+    #[test]
+    fn a_drawer_that_begins_to_open_or_to_shut_announces_a_sound_for_it_and_the_sounds_are_taken_once() {
+        let mut drawers = Drawers::default();
+        assert_eq!(drawers.take_the_sounds(), vec![], "none to begin with");
+
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
+        drawers.toggle(track(2), OpenMode::LyingOverTheRowsUnder);
+        assert_eq!(
+            drawers.take_the_sounds(),
+            vec![DrawerSound::Opening, DrawerSound::Opening],
+            "one for each drawer that began to open, in order"
+        );
+        assert_eq!(drawers.take_the_sounds(), vec![], "and they were taken");
+
+        advance_for(&mut drawers, 0.5);
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
+        assert_eq!(drawers.take_the_sounds(), vec![DrawerSound::Closing]);
+    }
+
+    #[test]
+    fn opening_a_drawer_that_is_open_already_makes_no_sound_and_opening_one_that_is_shutting_makes_one() {
+        let mut drawers = Drawers::default();
+        drawers.open_it(clip(1));
+        drawers.open_it(clip(1));
+        assert_eq!(
+            drawers.take_the_sounds(),
+            vec![DrawerSound::Opening],
+            "once, as it opened"
+        );
+
+        advance_for(&mut drawers, 0.5);
+        drawers.toggle(clip(1), OpenMode::PushingTheRowsUnder);
+        advance_for(&mut drawers, 0.05);
+        drawers.open_it(clip(1));
+        assert_eq!(
+            drawers.take_the_sounds(),
+            vec![DrawerSound::Closing, DrawerSound::Opening],
+            "it shut a little, and then opened again from where it was"
+        );
+    }
+
+    #[test]
+    fn a_drawer_that_goes_with_the_clip_that_is_taken_away_makes_no_sound() {
+        let mut drawers = Drawers::default();
+        drawers.toggle(clip(77), OpenMode::PushingTheRowsUnder);
+        drawers.take_the_sounds();
+
+        drawers.forget_what_is_gone(&Project::empty());
+
+        assert_eq!(drawers.take_the_sounds(), vec![]);
+    }
+
+    #[test]
+    fn the_slide_of_the_sounds_is_as_long_as_the_slide_of_the_drawer() {
+        // The sounds are made by the playback module, which knows nothing of the drawers: the two numbers are the same only
+        // because this says so.
+        assert_eq!(SECONDS_TO_SLIDE, crate::playback::DRAWER_SOUND_SLIDE_SECONDS);
     }
 
     #[test]

@@ -1,14 +1,15 @@
-//! Dragging clips and keyframes: where the pointer takes them.
+//! Dragging clips, keyframes and racks of keyframes: where the pointer takes them.
 //!
-//! A drag is begun by pressing a clip or a keyframe and moving the pointer a little (see the `strip` and `racks` modules,
+//! A drag is begun by pressing a clip, a keyframe or a rack and moving the pointer a little (see the `strip` and `racks` modules,
 //! which select what was pressed, if it is not selected, and note what was taken hold of). From then on, in each frame of
 //! the window until the button is let go, what is dragged is moved towards where the pointer is: along the timeline to the
 //! frame it is over, and up and down to the track (for clips) or the rack (for keyframes) it is over. Everything that is
 //! dragged goes the same number of frames, so that it all keeps its place in time in relation to the rest. What is dragged is
-//! the selected clips and the selected keyframes, if the one that was taken hold of is one of them, and otherwise it alone
+//! the selected clips, keyframes and racks, if the one that was taken hold of is one of them, and otherwise it alone
 //! (with Ctrl, as well as what is selected). What was taken hold of says what goes up and down: the clips go to other tracks
 //! when a clip was taken hold of, and the keyframes to other racks when a keyframe was; what is dragged with it goes along the
-//! timeline only.
+//! timeline only, and so does everything when a rack was taken hold of (a rack that is dragged on its own is not dragged here: it
+//! goes to other drawers, which is [`super::rack_dragging`]'s). A rack goes along the timeline by its keyframes going.
 //!
 //! * Clips are moved as far as the clips next to them leave room (see [`crate::application::clip_moving`]), and go to the
 //!   track the pointer is over if there is room for them there.
@@ -26,13 +27,80 @@
 use egui::{CursorIcon, Pos2, Rect, Ui, vec2};
 
 use super::strip_view::StripView;
-use super::view_state::Grabbed;
+use super::view_state::{Grabbed, ItemDrag};
 use super::{TimelineContent, TimelineViewState};
 use crate::application::clip_moving::{MoveBy, Snap, allowed_move_holding, moves_by};
 use crate::application::commands::Command;
 use crate::application::keyframe_moving::{self, Hold};
+use crate::application::selection::SelectionChange;
+use crate::application::selection::SelectionItem;
 use crate::application::theme;
 use crate::project::{AnimationTarget, ClipId, KeyframeId, KeyframeMove, Project, RackId, Track};
+
+/// What is dragged when `taken_hold_of` is taken hold of: what is selected, if it is one of that, and otherwise just it, which
+/// is selected (with Ctrl held it is added to what is selected, or let go of if it was: as it is not selected, it is added), and
+/// is what a command in `commands` selects.
+pub(super) fn what_is_dragged(
+    content: &TimelineContent<'_>,
+    taken_hold_of: SelectionItem,
+    adding_to_the_selection: bool,
+    commands: &mut Vec<Command>,
+) -> Vec<SelectionItem> {
+    if content.selection.contains_item(taken_hold_of) {
+        return content.selection.to_items();
+    }
+    commands.push(Command::SelectItems {
+        items: vec![taken_hold_of],
+        change: if adding_to_the_selection {
+            SelectionChange::Toggle
+        } else {
+            SelectionChange::Replace
+        },
+    });
+    let mut items = if adding_to_the_selection {
+        content.selection.to_items()
+    } else {
+        Vec::new()
+    };
+    items.push(taken_hold_of);
+    items
+}
+
+/// The drag of `items` (which is what [`what_is_dragged`] gave) that begins with `grabbed` taken hold of when the pointer is over
+/// the frame `pointer_frame_at_the_start`: the clips among them, and the keyframes that are among them or are in racks that are
+/// (each once, and not those that go with the clips they are in the drawers of).
+pub(super) fn drag_of(
+    project: &Project,
+    items: &[SelectionItem],
+    grabbed: Grabbed,
+    pointer_frame_at_the_start: u64,
+) -> ItemDrag {
+    let mut clips = Vec::new();
+    let mut keyframes = Vec::new();
+    let mut racks = Vec::new();
+    for item in items {
+        match item {
+            SelectionItem::Clip(clip) => clips.push(*clip),
+            SelectionItem::Keyframe(keyframe) => keyframes.push(*keyframe),
+            SelectionItem::Rack(rack) => {
+                racks.push(*rack);
+                if let Some(located) = project.located_rack(*rack) {
+                    keyframes.extend(located.rack.keyframes().iter().map(|keyframe| keyframe.id()));
+                }
+            }
+            SelectionItem::Track(_) => {}
+        }
+    }
+    keyframes.sort();
+    keyframes.dedup();
+    ItemDrag {
+        keyframes: keyframes_dragged_on_their_own(project, &clips, &keyframes),
+        clips,
+        racks,
+        grabbed,
+        pointer_frame_at_the_start,
+    }
+}
 
 /// Which of `keyframes` are dragged on their own when the clips `clips` are dragged too: those that are not in the drawer of
 /// one of the clips, because the drawer goes with its clip and what is in it with the drawer.
@@ -88,6 +156,9 @@ pub(super) fn keep_dragging(
             .placement_of(clip)
             .map(|placement| placement.first_timeline_frame.value()),
         Grabbed::Keyframe { keyframe, .. } => project.timeline_frame_of_keyframe(keyframe),
+        Grabbed::Rack { rack, .. } => project
+            .located_rack(rack)
+            .and_then(|located| located.rack.first_frame().map(|frame| located.timeline_frame_of(frame))),
     };
     let Some(grabbed_frame_now) = grabbed_frame_now else {
         return;
@@ -96,7 +167,14 @@ pub(super) fn keep_dragging(
     let wanted_frames = frames_the_pointer_has_gone - frames_the_grabbed_has_gone;
 
     let racks_on_the_screen = &state.rack_rectangles;
-    let racks_each_can_go_to = |rack: RackId| racks_a_keyframe_in_can_go_to(project, racks_on_the_screen, rack);
+    // (The keyframes of a rack that is selected stay in it: it is moved whole, whatever else is taken to other racks.)
+    let racks_each_can_go_to = |rack: RackId| {
+        if drag.racks.contains(&rack) {
+            vec![rack]
+        } else {
+            racks_a_keyframe_in_can_go_to(project, racks_on_the_screen, rack)
+        }
+    };
     let mut by = MoveBy {
         tracks_down: 0,
         frames: wanted_frames,
@@ -157,45 +235,78 @@ pub(super) fn keep_dragging(
                     time,
                 });
             }
-            let moved = keyframe_moving::allowed_move_holding(
+            let (frames, moves) = keyframes_lead(
                 project,
-                &drag.keyframes,
+                (&drag.clips, &drag.keyframes),
                 &racks_each_can_go_to,
-                keyframe_moving::MoveBy {
-                    racks_down: racks_the_pointer_is_down,
-                    frames: wanted_frames,
-                },
+                racks_the_pointer_is_down,
                 hold,
+                wanted_frames,
             );
-            by.frames = moved.by.frames;
-            // The clips that are dragged with the keyframes go along the timeline only, and if they are stopped sooner than the
-            // keyframes are, so are the keyframes.
-            let clips_by = allowed_move_holding(
+            by.frames = frames;
+            moves
+        }
+        Grabbed::Rack { .. } => {
+            // A rack goes along the timeline only, in the drawer it is in, and so do the others that go with it.
+            let (frames, moves) = keyframes_lead(
                 project,
-                &drag.clips,
-                MoveBy {
-                    tracks_down: 0,
-                    frames: by.frames,
-                },
+                (&drag.clips, &drag.keyframes),
+                &|rack| vec![rack],
+                0,
                 None,
+                wanted_frames,
             );
-            if clips_by.frames == by.frames {
-                moved.moves
-            } else {
-                by.frames = clips_by.frames;
-                keyframe_moving::moves_by(
-                    project,
-                    &drag.keyframes,
-                    &racks_each_can_go_to,
-                    keyframe_moving::MoveBy {
-                        racks_down: moved.by.racks_down,
-                        frames: by.frames,
-                    },
-                )
-            }
+            by.frames = frames;
+            moves
         }
     };
     push_the_commands(project, (&drag.clips, by), (&drag.keyframes, keyframe_moves), commands);
+}
+
+/// How many frames `keyframes` are moved when they lead `clips`, and the moves of the keyframes. The keyframes go as far as `wanted_frames`
+/// takes them if they can, `racks_down` racks down in the racks that `racks_each_can_go_to` says each can go to (held to
+/// `hold`, if there is one); the clips that are dragged with them go along the timeline only, and if they are stopped sooner than
+/// the keyframes are, so are the keyframes.
+fn keyframes_lead(
+    project: &Project,
+    (clips, keyframes): (&[ClipId], &[KeyframeId]),
+    racks_each_can_go_to: &dyn Fn(RackId) -> Vec<RackId>,
+    racks_down: i64,
+    hold: Option<Hold>,
+    wanted_frames: i64,
+) -> (i64, Vec<KeyframeMove>) {
+    let moved = keyframe_moving::allowed_move_holding(
+        project,
+        keyframes,
+        racks_each_can_go_to,
+        keyframe_moving::MoveBy {
+            racks_down,
+            frames: wanted_frames,
+        },
+        hold,
+    );
+    let clips_by = allowed_move_holding(
+        project,
+        clips,
+        MoveBy {
+            tracks_down: 0,
+            frames: moved.by.frames,
+        },
+        None,
+    );
+    if clips_by.frames == moved.by.frames {
+        return (moved.by.frames, moved.moves);
+    }
+    let moves = keyframe_moving::moves_by(
+        project,
+        keyframes,
+        racks_each_can_go_to,
+        keyframe_moving::MoveBy {
+            racks_down: moved.by.racks_down,
+            frames: clips_by.frames,
+        },
+    );
+    (clips_by.frames, moves)
 }
 
 /// Adds the commands that move the clips `clips` by `by`, and make the moves `moves` of the keyframes `keyframes` (the moves

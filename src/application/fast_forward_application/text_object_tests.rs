@@ -1,7 +1,7 @@
 //! Tests of text objects: making one from the menu that opens on an empty part of a track, the
 //! properties panel it is edited in, and moving and resizing it on the preview.
 
-use egui::{Key, vec2};
+use egui::{Key, Modifiers, vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::test_window::{VIDEO, Window, project_of, video_source};
@@ -226,6 +226,7 @@ fn the_keys_are_not_shortcuts_while_the_words_are_being_typed_in() {
     for key in [Key::Space, Key::S, Key::Delete] {
         window.press_key(key);
     }
+    window.press_key_with(Modifiers::SHIFT, Key::S);
     assert!(
         !window.application().is_playing(),
         "the keys are the text's while it is typed in"

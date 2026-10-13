@@ -16,6 +16,7 @@ use crate::application::editing::{
     set_track_speed_keeping_the_picture,
 };
 use crate::application::history::{EditKey, Restored};
+use crate::application::preview_panel::PreviewView;
 use crate::application::selection::{Selection, SelectionChange, SelectionItem};
 use crate::playback::SoundEffect;
 use crate::project::{
@@ -39,17 +40,20 @@ impl FastForwardApplication {
     /// the same gesture, see [`crate::application::history`]).
     pub(super) fn carry_out_all(&mut self, commands: Vec<Command>, now: Instant, context: &Context) {
         let may_edit = commands.iter().any(Command::may_change_the_project);
+        let (pointer_is_down, press_began_at) =
+            context.input(|input| (input.pointer.any_down(), input.pointer.press_start_time()));
+        let gesture_key = gesture_key_of_the_edits_among(&commands);
         // An edit that makes or changes a keyframe is about the frame it is at as well: what is done at another frame is
         // another edit, not more of this gesture, however soon after it.
-        let changes_a_keyframe = commands.iter().any(|command| self.command_changes_a_keyframe(command));
-        let gesture_key = gesture_key_of_the_edits_among(&commands).map(|key| {
-            if changes_a_keyframe {
-                EditKey::about(&(key, self.frame_at_the_playhead(now)))
-            } else {
-                key
-            }
-        });
-        let pointer_is_down = context.input(|input| input.pointer.any_down());
+        let frame_of_the_keyframes = commands
+            .iter()
+            .any(|command| self.command_changes_a_keyframe(command))
+            .then(|| self.frame_of_the_edits_of_what_has_keyframes(gesture_key, press_began_at, now));
+        let gesture_key = match (gesture_key, frame_of_the_keyframes) {
+            (Some(key), Some(frame)) => Some(EditKey::about(&(key, frame))),
+            (key, _) => key,
+        };
+        self.frame_keyframes_are_made_at = frame_of_the_keyframes;
         // A copy of the project is only made in a frame in which something asks for a change.
         let before = may_edit.then(|| {
             (
@@ -61,6 +65,7 @@ impl FastForwardApplication {
         for command in commands {
             self.execute(command, now, context);
         }
+        self.frame_keyframes_are_made_at = None;
         if let Some((project_before, selection_before, generation)) = before
             // (A project that was loaded or begun in the meantime is not an edit of the one before it.)
             && self.history.generation() == generation
@@ -105,6 +110,15 @@ impl FastForwardApplication {
                 self.clock.seek(now, TimelineFrameIndex::new(moved_frame), total_frames);
             }
 
+            Command::FitThePreview => self.preview_view = PreviewView::FITTING,
+            Command::FrameTheSelectionInTheTimeline => {
+                if let Some((first_frame, end_frame)) = self.selection.frames_taken_up(&self.project) {
+                    let normal = self.timeline_geometry();
+                    self.timeline_view
+                        .frame_these_frames(normal, total_frames, first_frame, end_frame);
+                }
+            }
+
             Command::SelectItems { items, change } => {
                 let asked_for_something = !items.is_empty();
                 let items_that_exist = items
@@ -134,6 +148,8 @@ impl FastForwardApplication {
                 self.set_clip_placement_at_the_playhead(clip, placement, now);
             }
             Command::RelinkSource(identifier) => self.relink_source(identifier),
+            Command::IncludeFilesInTheProjectFile(files) => self.include_files_in_the_project_file(&files),
+            Command::TakeFilesOutOfTheProjectFile(files) => self.take_files_out_of_the_project_file(&files),
 
             Command::AddTrack => {
                 self.project.add_track_in_front();
@@ -271,6 +287,7 @@ impl FastForwardApplication {
 
     /// Makes the project, and what is selected, what undoing or redoing gave back.
     fn put_back(&mut self, restored: Restored, now: Instant) {
+        self.gesture_frame.forget();
         let frame_rate_before = self.project.frame_rate();
         let current_frame = self.clock.position(now, self.project.total_frame_count());
         // The picture that is on screen stays on screen, if it is still there, however the clips moved.

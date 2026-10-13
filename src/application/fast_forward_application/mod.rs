@@ -14,6 +14,7 @@
 //! * `project_file_flow`: new, load and save;
 //! * `settings_flow`: the settings in effect, and keeping the global ones in their file;
 //! * `autosave`: noting unsaved changes, and saving them by itself when the setting is on;
+//! * `included_files_flow`: including files in the project file (which is then an archive) and taking them out again;
 //! * `export_flow`: exporting and its progress;
 //! * `programmatic_interface`: what the window does, without its file dialogs, and a look at the
 //!   state afterwards (for tests, and for scripting).
@@ -29,6 +30,10 @@ mod command_execution;
 mod cut_feedback_tests;
 mod dialog_flow;
 #[cfg(test)]
+mod drawer_motion_tests;
+#[cfg(test)]
+mod drawer_sound_tests;
+#[cfg(test)]
 mod drawer_tests;
 mod drawing;
 #[cfg(test)]
@@ -40,6 +45,9 @@ mod export_flow;
 mod file_question_tests;
 #[cfg(test)]
 mod grip_dot_tests;
+mod included_files_flow;
+#[cfg(test)]
+mod included_files_tests;
 #[cfg(test)]
 mod interaction_tests;
 #[cfg(test)]
@@ -52,7 +60,11 @@ mod keyframe_panel_tests;
 mod keyframe_tests;
 mod losing_keyframes;
 #[cfg(test)]
+mod navigation_key_tests;
+#[cfg(test)]
 mod picture_tests;
+#[cfg(test)]
+mod playing_edit_tests;
 #[cfg(test)]
 mod preview_layer_tests;
 #[cfg(test)]
@@ -65,6 +77,8 @@ mod properties_panel_tests;
 mod rack_command_tests;
 #[cfg(test)]
 mod rack_drag_tests;
+#[cfg(test)]
+mod rack_group_drag_tests;
 #[cfg(test)]
 mod rack_mouse_tests;
 #[cfg(test)]
@@ -103,10 +117,12 @@ use std::time::Instant;
 
 use egui::Context;
 
+use super::archive_cache::ArchiveCache;
 use super::background::BackgroundTask;
 use super::commands::Command;
 use super::dialogs::Dialog;
 use super::file_chooser::{FileChooser, NativeFileChooser, RefusingFileChooser};
+use super::gesture_frame::GestureFrame;
 use super::history::History;
 use super::keyboard::{self, KeyboardState};
 use super::opening::OpeningOutcome;
@@ -115,7 +131,7 @@ use super::selection::Selection;
 use super::settings_windows::{self, SettingsWindowsOpen};
 use super::textures::Textures;
 use super::theme;
-use super::timeline_panel::TimelineViewState;
+use super::timeline_panel::{DrawerSound, TimelineViewState};
 use crate::composition::{PicturePlan, plan_pictures};
 use crate::media::export::VideoExport;
 use crate::media::{
@@ -125,7 +141,7 @@ use crate::media::{
 use crate::playback::{
     AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PicturesReport, PlaybackClock, PreviewPictures, PreviewSetup,
-    PreviewVideo, SoundEffects, opener_of_the_default_effect_speakers, opener_of_the_default_speakers,
+    PreviewVideo, SoundEffect, SoundEffects, opener_of_the_default_effect_speakers, opener_of_the_default_speakers,
     preview_picture_size, wanted_pictures,
 };
 use crate::project::{FrameRate, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
@@ -250,6 +266,11 @@ pub struct FastForwardApplication {
     project_file_path: Option<PathBuf>,
     /// The edits that can be undone, and the ones that were undone.
     history: History,
+    /// The frame that the gesture that is going on (a value dragged, say) makes keyframes at: see [`GestureFrame`].
+    gesture_frame: GestureFrame,
+    /// The frame that the commands that are being carried out make or change keyframes at (`None` when none is being carried
+    /// out, or none of them is about what has keyframes): see [`Self::frame_to_make_keyframes_at`].
+    frame_keyframes_are_made_at: Option<TimelineFrameIndex>,
     /// Whether something that is not in the history was changed since the project was saved: a
     /// setting of the project, or the place a file was found.
     unsaved_change_outside_history: bool,
@@ -261,6 +282,10 @@ pub struct FastForwardApplication {
     /// Where the global settings are kept. `None` keeps them only while the program runs.
     global_settings_path: Option<PathBuf>,
     settings_windows_open: SettingsWindowsOpen,
+    /// Where the files that are taken out of a project file that has files included in it are kept while the project is open.
+    /// `None` keeps none: such a project's included files cannot be opened (a test that wants them gives it a place, see
+    /// [`Self::keep_archive_files_in`]).
+    archive_cache: Option<ArchiveCache>,
     /// What is known about each of the project's source files while the program runs.
     source_files: HashMap<SourceMediaIdentifier, SourceFileState>,
     /// Source files that are being looked for and opened, in the background.
@@ -282,6 +307,8 @@ pub struct FastForwardApplication {
     timeline_view: TimelineViewState,
     /// How the picture of the preview is zoomed, and where it is.
     preview_view: PreviewView,
+    /// Where the preview panel was in the last frame, for the keys that mean something else when the pointer is over it.
+    preview_panel_in_the_last_frame: Option<egui::Rect>,
     dialog: Option<Dialog>,
     /// Whether the "source files not found" warning is showing.
     missing_sources_warning_open: bool,
@@ -304,6 +331,7 @@ impl FastForwardApplication {
             application.keep_global_settings_in(settings_path);
         }
         application.use_the_default_speakers();
+        application.archive_cache = ArchiveCache::in_the_usual_place();
         if let Some(path) = project_to_open {
             application.load_project(path);
         }
@@ -353,11 +381,14 @@ impl FastForwardApplication {
             project,
             project_file_path: None,
             history: History::new(),
+            gesture_frame: GestureFrame::default(),
+            frame_keyframes_are_made_at: None,
             unsaved_change_outside_history: false,
             last_unsaved_change_at: None,
             global_settings: Settings::DEFAULT,
             global_settings_path: None,
             settings_windows_open: SettingsWindowsOpen::default(),
+            archive_cache: None,
             source_files: HashMap::new(),
             openings: Vec::new(),
             selection: Selection::empty(),
@@ -366,6 +397,7 @@ impl FastForwardApplication {
             textures: Textures::default(),
             timeline_view: TimelineViewState::default(),
             preview_view: PreviewView::default(),
+            preview_panel_in_the_last_frame: None,
             dialog: startup_dialog,
             missing_sources_warning_open: false,
             export: None,
@@ -437,6 +469,20 @@ impl FastForwardApplication {
             is_playing,
             picture_plan,
             pictures_report: report,
+        }
+    }
+
+    /// Plays the sounds that drawers began to make in this frame of the window: those of the drawers that a click opened or shut, and
+    /// those that opened because a keyframe was put in them.
+    fn play_the_sounds_of_the_drawers(&mut self, now: Instant) {
+        for sound in self.timeline_view.take_the_drawer_sounds() {
+            self.sound_effects.play(
+                match sound {
+                    DrawerSound::Opening => SoundEffect::DrawerOpening,
+                    DrawerSound::Closing => SoundEffect::DrawerClosing,
+                },
+                now,
+            );
         }
     }
 
@@ -514,6 +560,10 @@ impl FastForwardApplication {
                     .is_some_and(|placement| placement.contains(frame_state.current_frame))
             })
             .collect();
+        let pointer_is_over_the_preview = self
+            .preview_panel_in_the_last_frame
+            .zip(context.input(|input| input.pointer.hover_pos()))
+            .is_some_and(|(panel, pointer)| panel.contains(pointer));
         commands.extend(keyboard::commands_for_the_keys_pressed(
             context,
             KeyboardState {
@@ -524,10 +574,26 @@ impl FastForwardApplication {
                 selected_keyframes: self.selection.keyframes_to_vec(),
                 selected_racks: self.selection.racks_to_vec(),
                 selected_clips_at_the_current_frame,
+                pointer_is_over_the_preview,
+                clip_ends_to_go_between: self.clip_ends_to_go_between(frame_state.total_frames),
                 can_undo: self.history.can_undo(),
                 can_redo: self.history.can_redo(),
             },
         ));
+    }
+
+    /// The frames where the clips begin and end that the keys that go to the end of a clip go between: those of the selected
+    /// clips if some are selected, and otherwise of every clip there is.
+    fn clip_ends_to_go_between(&self, total_frames: u64) -> Vec<TimelineFrameIndex> {
+        let some_clips_are_selected = self.selection.iter().next().is_some();
+        let clips = self
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|track| track.placements())
+            .filter(|placement| !some_clips_are_selected || self.selection.contains(placement.id))
+            .map(|placement| (placement.first_timeline_frame, placement.end_timeline_frame));
+        keyboard::clip_ends_to_go_between(clips, total_frames)
     }
 }
 
@@ -564,6 +630,7 @@ impl FastForwardApplication {
         self.execute_all(commands, now, &context);
         // (What the user has just agreed to was asked about already: it is carried out without being asked about again.)
         self.carry_out_all(agreed_to, now, &context);
+        self.play_the_sounds_of_the_drawers(now);
         self.autosave_when_quiet_for_long_enough(&context, now);
 
         self.textures.forget_thumbnails_not_used_this_frame();

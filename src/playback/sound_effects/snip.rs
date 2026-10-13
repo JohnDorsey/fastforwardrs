@@ -7,7 +7,9 @@
 //!
 //! The noise comes from a generator that always starts the same, so the sound is the same every time.
 
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::TAU;
+
+use super::synthesis::{HighPass, Noise, fade_out, scale_to_the_peak};
 
 /// How long the whole sound lasts, in seconds.
 pub(super) const DURATION_SECONDS: f32 = 0.14;
@@ -65,73 +67,9 @@ pub(super) fn snip(sample_rate: u32) -> Vec<f32> {
         })
         .collect();
 
-    fade_out(&mut sound, rate);
-    scale_to_the_peak(&mut sound);
+    fade_out(&mut sound, FADE_OUT_SECONDS, rate);
+    scale_to_the_peak(&mut sound, PEAK_LOUDNESS);
     sound
-}
-
-/// Makes the last [`FADE_OUT_SECONDS`] of `sound` die away to nothing (along half a wave of cosine).
-fn fade_out(sound: &mut [f32], rate: f32) {
-    let fade_length = ((FADE_OUT_SECONDS * rate) as usize).min(sound.len());
-    let fade_start = sound.len() - fade_length;
-    for (position, value) in sound[fade_start..].iter_mut().enumerate() {
-        let how_far = (position + 1) as f32 / fade_length as f32;
-        *value *= 0.5 + 0.5 * (PI * how_far).cos();
-    }
-}
-
-/// Makes the loudest moment of `sound` exactly [`PEAK_LOUDNESS`].
-fn scale_to_the_peak(sound: &mut [f32]) {
-    let peak = sound.iter().fold(0.0_f32, |peak, value| peak.max(value.abs()));
-    if peak > 0.0 {
-        let scale = PEAK_LOUDNESS / peak;
-        sound.iter_mut().for_each(|value| *value *= scale);
-    }
-}
-
-/// White noise: a different value between -1 and 1 each time, in an order that is always the same.
-struct Noise {
-    state: u32,
-}
-
-impl Noise {
-    fn new() -> Self {
-        Self { state: 0x2545_F491 }
-    }
-
-    /// The next value (a xorshift generator).
-    fn next(&mut self) -> f32 {
-        self.state ^= self.state << 13;
-        self.state ^= self.state >> 17;
-        self.state ^= self.state << 5;
-        self.state as f32 / u32::MAX as f32 * 2.0 - 1.0
-    }
-}
-
-/// Two simple filters one after the other, which let through what is higher than a pitch and take out what
-/// is lower (more and more of it the lower it is).
-struct HighPass {
-    /// How much of the difference from what the low parts have followed is followed on each moment.
-    follow: f32,
-    first_low: f32,
-    second_low: f32,
-}
-
-impl HighPass {
-    fn new(lowest_pitch_hertz: f32, sample_rate: f32) -> Self {
-        Self {
-            follow: 1.0 - (-TAU * lowest_pitch_hertz / sample_rate).exp(),
-            first_low: 0.0,
-            second_low: 0.0,
-        }
-    }
-
-    fn filter(&mut self, value: f32) -> f32 {
-        self.first_low += self.follow * (value - self.first_low);
-        let without_the_lowest = value - self.first_low;
-        self.second_low += self.follow * (without_the_lowest - self.second_low);
-        without_the_lowest - self.second_low
-    }
 }
 
 #[cfg(test)]
@@ -261,18 +199,26 @@ mod tests {
         assert_eq!(snip(48000), snip(48000));
     }
 
+    /// A fingerprint of every moment of `sound`, exactly (it changes if any one of them changes by the least bit).
+    fn fingerprint_of(sound: &[f32]) -> u64 {
+        sound.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, value| {
+            (hash ^ u64::from(value.to_bits())).wrapping_mul(0x0100_0000_01b3)
+        })
+    }
+
+    /// The snip is not changed by changing how it is made (the parts that other effects share were taken out of it): this is what
+    /// it was, moment by moment, before they were. (If the sound is changed on purpose, these are what to change with it.)
     #[test]
-    fn the_noise_is_spread_over_its_range_and_does_not_repeat_at_once() {
-        let mut noise = Noise::new();
-        let values: Vec<f32> = (0..10_000).map(|_| noise.next()).collect();
-        assert!(values.iter().all(|value| (-1.0..=1.0).contains(value)));
-        let mean = values.iter().sum::<f32>() / values.len() as f32;
-        assert!(mean.abs() < 0.03, "mean {mean}");
-        let mean_square = energy(&values) / values.len() as f32;
-        assert!(
-            (mean_square - 1.0 / 3.0).abs() < 0.03,
-            "{mean_square}: uniform noise has 1/3"
-        );
-        assert_ne!(values[..100], values[100..200]);
+    fn the_snip_is_exactly_the_sound_it_was_when_the_parts_other_effects_share_were_taken_out_of_it() {
+        for (rate, length, fingerprint) in [
+            (8000_u32, 1120_usize, 0x9d42_3892_1eae_9c9a_u64),
+            (22050, 3087, 0x0a22_00bf_5056_532b),
+            (44100, 6174, 0x0af2_d6f9_13f8_6568),
+            (48000, 6720, 0x5101_9f86_3a98_b5c0),
+        ] {
+            let sound = snip(rate);
+            assert_eq!(sound.len(), length, "at {rate}");
+            assert_eq!(fingerprint_of(&sound), fingerprint, "at {rate}");
+        }
     }
 }

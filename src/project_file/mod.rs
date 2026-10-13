@@ -1,14 +1,19 @@
-//! Saving and loading projects as pretty, human-readable JSON.
+//! Saving and loading projects as pretty, human-readable JSON, or as the same JSON in an archive.
 //!
-//! A project file never contains the videos or sounds themselves. It links to each source file
-//! twice: by absolute path, and by a path relative to the folder holding the project file as a
-//! backup for when the project and the files have been moved together.
+//! A project file does not contain the videos or sounds themselves, unless the user chose to include some of them: it links to
+//! each source file twice, by absolute path, and by a path relative to the folder holding the project file as a backup for when
+//! the project and the files have been moved together. A project file that has files included is an archive (a zip file that
+//! nothing in is compressed, called `.ffrs`: see [`archive`]), with the JSON in one entry and each file included in another; the
+//! JSON then says of each of those files the name of its entry, besides the two paths it had when it was included. A plain `.json`
+//! project file cannot have files included.
 
+pub mod archive;
 mod document;
 mod drawers;
 mod legacy;
 mod relative_path;
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -20,10 +25,11 @@ use crate::atomic_file::write_file_atomically;
 use crate::project::{
     Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect, EffectKind, Effects,
     FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings, PropertyId, PropertyValue,
-    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaLink, SourceMediaProperties,
-    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track, TrackHeight, TrackId,
-    ValueKind,
+    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
+    TrackHeight, TrackId, ValueKind,
 };
+use archive::{ArchiveError, FileToInclude};
 use document::{
     AnimationDocument, CanvasAreaDocument, ClipDocument, ColourDocument, EffectDocument, KeyframeValueDocument,
     PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument,
@@ -31,6 +37,17 @@ use document::{
 };
 use legacy::LegacyProjectDocument;
 pub use relative_path::relative_path_between;
+
+/// What the name of a project file ends with (after the dot) when it is an archive, which can have files included in it.
+pub const ARCHIVE_FILE_EXTENSION: &str = "ffrs";
+
+/// What the name of a project file ends with when it is plain JSON, which cannot.
+pub const PLAIN_FILE_EXTENSION: &str = "json";
+
+/// Where the files that are included in a project can be read from, when it is saved: for each source file that is included, the
+/// file that has the same bytes as it. (It is the one in the folder that the project was last loaded from an archive into, or the
+/// one that the file was at, if it was included just now.)
+pub type IncludedFiles = HashMap<SourceMediaIdentifier, PathBuf>;
 
 /// The value of the `file_format` field that marks a JSON file as a fastforwardrs project.
 pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
@@ -48,8 +65,9 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// is animated). Version 7 keeps keyframes in racks, in the drawers of the clips and of the tracks, which may be of any clip or
 /// track and not only the one that has the drawer (a file of version 6 has an `animation` object in each clip and track: it is read
 /// as a rack of the keyframes of its own properties in its own drawer), and has keyframe crates. Version 8 added the effects of
-/// clips and of tracks (a file of version 7 has none).
-pub const FILE_FORMAT_VERSION: u32 = 8;
+/// clips and of tracks (a file of version 7 has none). Version 9 added the files that are included in the project file (a file of
+/// version 8 has none).
+pub const FILE_FORMAT_VERSION: u32 = 9;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -70,10 +88,49 @@ pub enum ProjectFileError {
     InvalidProject { reason: String },
     #[error("the path {path:?} cannot be saved in a project file because it is not valid Unicode text")]
     PathIsNotUnicode { path: PathBuf },
+    #[error(
+        "the project has files included in the project file, which only a .ffrs file can have, and {path} is not one: save it as a .ffrs file, or take the files out of the project file first"
+    )]
+    IncludedFilesNeedAnArchive { path: PathBuf },
+    #[error("the file {file_name} is to be in the project file, and there is nowhere to read it from just now")]
+    IncludedFileNotAvailable { file_name: String },
 }
 
-/// Loads a project from a file.
+impl From<ArchiveError> for ProjectFileError {
+    fn from(error: ArchiveError) -> Self {
+        match error {
+            ArchiveError::CouldNotRead { path, source } => Self::CouldNotRead { path, source },
+            ArchiveError::CouldNotWrite { path, source } => Self::CouldNotWrite { path, source },
+            other @ (ArchiveError::Unreadable { .. } | ArchiveError::NoSuchEntry { .. }) => Self::NotAProjectFile {
+                reason: other.to_string(),
+            },
+        }
+    }
+}
+
+/// Whether a project file with the name `path` is an archive when it is written: by what its name ends with (whatever the case of
+/// the letters). A file that is read is known by what is in it, and not by its name.
+pub fn is_the_name_of_an_archive(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(ARCHIVE_FILE_EXTENSION))
+}
+
+/// Whether the project in a project file may have files included in it: only if it is an archive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilesIncluded {
+    Allowed,
+    NotAllowed,
+}
+
+/// Loads a project from a file: an archive (a `.ffrs` file, known by what is in it), or plain JSON.
 pub fn read_project_file(path: &Path) -> Result<Project, ProjectFileError> {
+    if archive::is_an_archive(path) {
+        let text = archive::read_project_text(path)?;
+        let project = project_from_text(&text, FilesIncluded::Allowed)?;
+        check_that_the_archive_has_the_files_included_in_it(path, &project)?;
+        return Ok(project);
+    }
     let text = fs::read_to_string(path).map_err(|source| ProjectFileError::CouldNotRead {
         path: path.to_owned(),
         source,
@@ -81,10 +138,21 @@ pub fn read_project_file(path: &Path) -> Result<Project, ProjectFileError> {
     project_from_json_text(&text)
 }
 
-/// Saves a project to a file, replacing any file already there. The new contents are written to a
-/// temporary file next to the destination and then renamed over it, so a failure part-way can
-/// never leave an existing project file half-written.
+/// Saves a project to a file, replacing any file already there: an archive if the name ends in `.ffrs`, and plain JSON otherwise.
+/// The new contents are written to a temporary file next to the destination and then renamed over it, so a failure part-way can
+/// never leave an existing project file half-written. (A project that has files included needs the places to read them from: see
+/// [`write_project_file_including`].)
 pub fn write_project_file(project: &Project, destination: &Path) -> Result<(), ProjectFileError> {
+    write_project_file_including(project, destination, &IncludedFiles::new())
+}
+
+/// Like [`write_project_file`], for a project that may have files included in it: `files` says where to read each of them from.
+/// Only an archive can have them: nothing is written to a file that is not one, if the project has any.
+pub fn write_project_file_including(
+    project: &Project,
+    destination: &Path,
+    files: &IncludedFiles,
+) -> Result<(), ProjectFileError> {
     let could_not_write = |source: io::Error| ProjectFileError::CouldNotWrite {
         path: destination.to_owned(),
         source,
@@ -93,8 +161,80 @@ pub fn write_project_file(project: &Project, destination: &Path) -> Result<(), P
     let project_directory = absolute_destination
         .parent()
         .ok_or_else(|| could_not_write(io::Error::other("the destination has no containing folder")))?;
+    let included_sources: Vec<&SourceMedia> = project
+        .sources()
+        .iter()
+        .filter(|source| source.link.is_included())
+        .collect();
+    if !is_the_name_of_an_archive(destination) {
+        if !included_sources.is_empty() {
+            return Err(ProjectFileError::IncludedFilesNeedAnArchive {
+                path: destination.to_owned(),
+            });
+        }
+        let text = project_to_json_text(project, project_directory)?;
+        return write_file_atomically(&absolute_destination, &text).map_err(could_not_write);
+    }
+    let files_to_include = files_to_include_in_an_archive(&included_sources, files)?;
     let text = project_to_json_text(project, project_directory)?;
-    write_file_atomically(&absolute_destination, &text).map_err(could_not_write)
+    archive::write_archive(&absolute_destination, &text, &files_to_include).map_err(ProjectFileError::from)
+}
+
+/// The entry and the place to read the file from, for each of the sources that are included. Their entries must be names that an
+/// archive has for the files included in it, and no two of them the same.
+fn files_to_include_in_an_archive(
+    included_sources: &[&SourceMedia],
+    files: &IncludedFiles,
+) -> Result<Vec<FileToInclude>, ProjectFileError> {
+    let mut entry_names = HashSet::new();
+    let mut files_to_include = Vec::with_capacity(included_sources.len());
+    for source in included_sources {
+        let file_name = source
+            .link
+            .absolute_path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let entry_name = source.link.included_as.clone().unwrap_or_default();
+        if !archive::is_a_resource_entry_name(&entry_name) {
+            return Err(invalid_project(format!(
+                "the file {file_name} is to be included as \"{entry_name}\", which is not a name for it in a project file"
+            )));
+        }
+        if !entry_names.insert(entry_name.clone()) {
+            return Err(invalid_project(format!(
+                "more than one file is to be included as \"{entry_name}\""
+            )));
+        }
+        let path = files
+            .get(&source.identifier)
+            .ok_or(ProjectFileError::IncludedFileNotAvailable { file_name })?;
+        files_to_include.push(FileToInclude {
+            entry_name,
+            path: path.clone(),
+        });
+    }
+    Ok(files_to_include)
+}
+
+/// Whether the archive has an entry for each file that the project in it says is included, which it must for the project to be
+/// opened: what it says is looked up in the archive, and made the name of a file, so it is not believed before it is checked.
+fn check_that_the_archive_has_the_files_included_in_it(path: &Path, project: &Project) -> Result<(), ProjectFileError> {
+    for source in project.sources() {
+        let Some(entry_name) = &source.link.included_as else {
+            continue;
+        };
+        match archive::facts_of_entry(path, entry_name) {
+            Ok(_) => {}
+            Err(ArchiveError::NoSuchEntry { .. }) => {
+                return Err(invalid_project(format!(
+                    "the file {} is said to be included in the project file as \"{entry_name}\", which the project file does not have",
+                    source.link.absolute_path.display()
+                )));
+            }
+            Err(other) => return Err(other.into()),
+        }
+    }
+    Ok(())
 }
 
 /// What every version of the file has at its start: enough to tell which version it is.
@@ -105,8 +245,35 @@ struct FileHeader {
 }
 
 /// Turns JSON text into a project, checking that it really is a project file this version can
-/// understand and that its parts agree with each other.
+/// understand and that its parts agree with each other. (It is the text of a plain project file: one that says that a file is
+/// included in it is refused, as only an archive has files in it.)
 pub fn project_from_json_text(text: &str) -> Result<Project, ProjectFileError> {
+    project_from_text(text, FilesIncluded::NotAllowed)
+}
+
+fn project_from_text(text: &str, files_included: FilesIncluded) -> Result<Project, ProjectFileError> {
+    let project = project_from_text_of_any_kind(text)?;
+    for source in project.sources() {
+        let Some(entry_name) = &source.link.included_as else {
+            continue;
+        };
+        if files_included == FilesIncluded::NotAllowed {
+            return Err(invalid_project(format!(
+                "the file {} is said to be included in the project file, and only a project file that is a .ffrs file can have files included in it",
+                source.link.absolute_path.display()
+            )));
+        }
+        if !archive::is_a_resource_entry_name(entry_name) {
+            return Err(invalid_project(format!(
+                "the file {} is said to be included in the project file as \"{entry_name}\", which is not a name that a file included in it has",
+                source.link.absolute_path.display()
+            )));
+        }
+    }
+    Ok(project)
+}
+
+fn project_from_text_of_any_kind(text: &str) -> Result<Project, ProjectFileError> {
     let not_a_project_file = |error: serde_json::Error| ProjectFileError::NotAProjectFile {
         reason: error.to_string(),
     };
@@ -172,10 +339,11 @@ fn speed_indicator_from_document(document: &SpeedIndicatorDocument) -> SpeedIndi
     )
 }
 
-fn link_from(absolute_path: String, relative_path: Option<String>) -> SourceMediaLink {
+fn link_from(absolute_path: String, relative_path: Option<String>, included_as: Option<String>) -> SourceMediaLink {
     SourceMediaLink {
         absolute_path: PathBuf::from(absolute_path),
         relative_path: relative_path.map(PathBuf::from),
+        included_as,
     }
 }
 
@@ -185,6 +353,7 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
             identifier,
             absolute_path,
             relative_path,
+            included_as,
             frame_rate,
             total_frame_count,
             display_width_in_pixels,
@@ -192,7 +361,7 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
             has_audio,
         } => SourceMedia::video(
             identifier,
-            link_from(absolute_path, relative_path),
+            link_from(absolute_path, relative_path, included_as),
             SourceVideoProperties {
                 frame_rate,
                 total_frame_count,
@@ -205,10 +374,11 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
             identifier,
             absolute_path,
             relative_path,
+            included_as,
             duration_in_microseconds,
         } => SourceMedia::audio(
             identifier,
-            link_from(absolute_path, relative_path),
+            link_from(absolute_path, relative_path, included_as),
             SourceAudioProperties {
                 duration_in_microseconds,
             },
@@ -217,11 +387,12 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
             identifier,
             absolute_path,
             relative_path,
+            included_as,
             display_width_in_pixels,
             display_height_in_pixels,
         } => SourceMedia::image(
             identifier,
-            link_from(absolute_path, relative_path),
+            link_from(absolute_path, relative_path, included_as),
             SourceImageProperties {
                 display_width_in_pixels,
                 display_height_in_pixels,
@@ -605,7 +776,7 @@ fn project_from_legacy_document(document: LegacyProjectDocument) -> Result<Proje
         .map(|video| {
             SourceMedia::video(
                 video.identifier,
-                link_from(video.absolute_path, video.relative_path),
+                link_from(video.absolute_path, video.relative_path, None),
                 SourceVideoProperties {
                     frame_rate: video.frame_rate,
                     total_frame_count: video.total_frame_count,
@@ -644,11 +815,14 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         .sources()
         .iter()
         .map(|source| {
-            let relative_path = if source.link.absolute_path.exists() {
+            // (The places a file that is included was at are kept as they were when it was included: it is not where they say any
+            // more, as far as the project knows, and they are what it is put back at.)
+            let relative_path = if !source.link.is_included() && source.link.absolute_path.exists() {
                 relative_path_between(project_directory, &source.link.absolute_path)
             } else {
                 source.link.relative_path.clone()
             };
+            let included_as = source.link.included_as.clone();
             let absolute_path = path_as_unicode_text(&source.link.absolute_path)?;
             let relative_path = relative_path
                 .map(|path| relative_path_as_portable_text(&path))
@@ -658,6 +832,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                     identifier: source.identifier,
                     absolute_path,
                     relative_path,
+                    included_as,
                     frame_rate: video.frame_rate,
                     total_frame_count: video.total_frame_count,
                     display_width_in_pixels: video.display_width_in_pixels,
@@ -668,12 +843,14 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                     identifier: source.identifier,
                     absolute_path,
                     relative_path,
+                    included_as,
                     duration_in_microseconds: audio.duration_in_microseconds,
                 },
                 SourceMediaProperties::Image(image) => SourceDocument::Image {
                     identifier: source.identifier,
                     absolute_path,
                     relative_path,
+                    included_as,
                     display_width_in_pixels: image.display_width_in_pixels,
                     display_height_in_pixels: image.display_height_in_pixels,
                 },
@@ -835,5 +1012,7 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
 mod animation_tests;
 #[cfg(test)]
 mod effects_tests;
+#[cfg(test)]
+mod included_files_tests;
 #[cfg(test)]
 mod tests;

@@ -199,7 +199,7 @@ fn deleting_a_track_lets_go_of_it_and_so_does_undoing_what_made_it() {
 }
 
 #[test]
-fn the_delete_key_does_not_take_a_selected_track_away_and_s_cuts_everywhere_as_with_nothing_selected() {
+fn the_delete_key_does_not_take_a_selected_track_away_and_s_cuts_nothing_but_shift_and_s_cuts_everywhere() {
     let mut window = window_with_a_video_and_a_sound();
     window.move_current_frame_to(40);
     click_beside_the_title_of_track(&mut window, 1);
@@ -218,6 +218,13 @@ fn the_delete_key_does_not_take_a_selected_track_away_and_s_cuts_everywhere_as_w
     );
 
     window.press_key(Key::S);
+    assert_eq!(
+        window.application().project().tracks()[1].entries().len(),
+        1,
+        "S cuts the selected clips, and a track is not one: nothing was cut"
+    );
+
+    window.press_key_with(Modifiers::SHIFT, Key::S);
     assert_eq!(
         window.application().project().tracks()[0].entries().len(),
         2,

@@ -5,6 +5,7 @@
 //! the current frame) are plain functions without any drawing in them, so they can be tested.
 //! The parts that draw are kept thin.
 
+mod archive_cache;
 mod background;
 mod clip_moving;
 mod commands;
@@ -13,6 +14,7 @@ mod duration_control;
 mod editing;
 mod fast_forward_application;
 mod file_chooser;
+mod gesture_frame;
 mod history;
 mod keyboard;
 mod keyframe_moving;

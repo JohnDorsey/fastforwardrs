@@ -7,11 +7,15 @@
 //! says so.
 //!
 //! The copy of a clip has a copy of everything in its drawer too (see [`crate::project::Project::duplicate_clip`]).
+//!
+//! A clip that is made from a file (a video, a sound, a picture) has an item to include that file in the project file, which then
+//! has it in it (see [`crate::project_file`]), and one to take it out of the project file again, whichever it is now. The items are
+//! about the files of the clips the menu is about, one for each file however many of the clips are made from it.
 
 use egui::{Button, Ui};
 
 use crate::application::commands::Command;
-use crate::project::{ClipId, ClipSide, Project};
+use crate::project::{ClipId, ClipSide, Project, SourceMediaIdentifier};
 
 /// What is said of an item that copies a clip when there is no room beside it for the copy.
 const NO_ROOM_FOR_ONE: &str = "There is no room beside it for a copy";
@@ -25,6 +29,22 @@ pub(super) fn delete_label(count: usize) -> String {
     match count {
         1 => "Delete clip".to_owned(),
         _ => format!("Delete {count} clips"),
+    }
+}
+
+/// What the item that includes `count` files in the project file says.
+pub(super) fn include_label(count: usize) -> String {
+    match count {
+        1 => "Include in project file".to_owned(),
+        _ => format!("Include {count} files in project file"),
+    }
+}
+
+/// What the item that takes `count` files out of the project file says.
+pub(super) fn take_out_label(count: usize) -> String {
+    match count {
+        1 => "Remove from project file".to_owned(),
+        _ => format!("Remove {count} files from project file"),
     }
 }
 
@@ -62,6 +82,35 @@ pub(super) fn clips_the_menu_is_about(selected: &[ClipId], clicked: ClipId) -> V
     }
 }
 
+/// The files that `clips` are made from, each once: those that are not included in the project file, and those that are.
+pub(super) fn files_of(
+    clips: &[ClipId],
+    project: &Project,
+) -> (Vec<SourceMediaIdentifier>, Vec<SourceMediaIdentifier>) {
+    let mut not_included = Vec::new();
+    let mut included = Vec::new();
+    for clip in clips {
+        let Some(identifier) = project
+            .placement_of(*clip)
+            .and_then(|placement| placement.clip.source())
+        else {
+            continue;
+        };
+        let Some(source) = project.source(identifier) else {
+            continue;
+        };
+        let list = if source.link.is_included() {
+            &mut included
+        } else {
+            &mut not_included
+        };
+        if !list.contains(&identifier) {
+            list.push(identifier);
+        }
+    }
+    (not_included, included)
+}
+
 /// The menu of `clips` (at least one), which adds a command when something in it is chosen. What deletes them is last, apart
 /// from the others, so that it is not what a click that has hardly moved from the right-click chooses.
 pub(super) fn show(ui: &mut Ui, clips: &[ClipId], project: &Project, commands: &mut Vec<Command>) {
@@ -87,6 +136,18 @@ pub(super) fn show(ui: &mut Ui, clips: &[ClipId], project: &Project, commands: &
             ui.close();
         }
     }
+    let (not_included, included) = files_of(clips, project);
+    if !not_included.is_empty() || !included.is_empty() {
+        ui.separator();
+    }
+    if !not_included.is_empty() && ui.button(include_label(not_included.len())).clicked() {
+        commands.push(Command::IncludeFilesInTheProjectFile(not_included));
+        ui.close();
+    }
+    if !included.is_empty() && ui.button(take_out_label(included.len())).clicked() {
+        commands.push(Command::TakeFilesOutOfTheProjectFile(included));
+        ui.close();
+    }
     ui.separator();
     if ui.button(delete_label(count)).clicked() {
         commands.push(Command::DeleteClips(clips.to_vec()));
@@ -111,6 +172,67 @@ mod tests {
         assert_eq!(duplicate_label(1, ClipSide::Left), "Duplicate to the left");
         assert_eq!(duplicate_label(2, ClipSide::Right), "Duplicate 2 clips to the right");
         assert_eq!(duplicate_label(5, ClipSide::Left), "Duplicate 5 clips to the left");
+    }
+
+    #[test]
+    fn the_items_that_include_a_file_and_take_it_out_say_how_many_files_they_are_about_when_it_is_not_one() {
+        assert_eq!(include_label(1), "Include in project file");
+        assert_eq!(include_label(3), "Include 3 files in project file");
+        assert_eq!(take_out_label(1), "Remove from project file");
+        assert_eq!(take_out_label(2), "Remove 2 files from project file");
+    }
+
+    /// A project with a video cut in two clips and a text object in front of them, and the clips of each.
+    fn a_video_in_two_pieces_and_a_text() -> (Project, [ClipId; 2], ClipId) {
+        use crate::project::{FrameRate, SourceMedia, SourceVideoProperties, TextObject, TimelineFrameIndex};
+
+        let mut project = Project::empty();
+        project
+            .import_source(
+                SourceMedia::video(
+                    SourceMediaIdentifier::new(1),
+                    crate::project::SourceMediaLink::from_absolute_path("holiday.mp4".into()),
+                    SourceVideoProperties {
+                        frame_rate: FrameRate::new(30, 1).unwrap(),
+                        total_frame_count: 60,
+                        display_width_in_pixels: 320,
+                        display_height_in_pixels: 180,
+                        has_audio: false,
+                    },
+                ),
+                TimelineFrameIndex::new(0),
+            )
+            .unwrap();
+        project.split_at(TimelineFrameIndex::new(30), None);
+        let pieces: Vec<ClipId> = project.tracks()[0].placements().map(|placement| placement.id).collect();
+        let in_front = project.add_track_in_front();
+        let (text, _) = project
+            .insert_text(in_front, TimelineFrameIndex::new(0), TextObject::default(), 30)
+            .unwrap();
+        (project, [pieces[0], pieces[1]], text)
+    }
+
+    #[test]
+    fn clips_made_from_one_file_are_one_file_to_include_and_a_text_object_is_made_from_none() {
+        let (project, pieces, text) = a_video_in_two_pieces_and_a_text();
+        let video = SourceMediaIdentifier::new(1);
+
+        assert_eq!(files_of(&pieces, &project), (vec![video], vec![]), "one file, not two");
+        assert_eq!(files_of(&pieces[..1], &project), (vec![video], vec![]));
+        assert_eq!(files_of(&[text], &project), (vec![], vec![]));
+        assert_eq!(files_of(&[pieces[0], text, pieces[1]], &project), (vec![video], vec![]));
+        assert_eq!(files_of(&[], &project), (vec![], vec![]));
+    }
+
+    #[test]
+    fn a_file_that_is_included_is_listed_apart_from_those_that_are_not() {
+        let (mut project, pieces, _) = a_video_in_two_pieces_and_a_text();
+        let video = SourceMediaIdentifier::new(1);
+        let mut link = project.source(video).unwrap().link.clone();
+        link.included_as = Some("resources/1-holiday.mp4".to_owned());
+        project.set_source_link(video, link);
+
+        assert_eq!(files_of(&pieces, &project), (vec![], vec![video]));
     }
 
     #[test]

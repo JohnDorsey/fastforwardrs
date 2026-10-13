@@ -14,13 +14,14 @@
 
 use egui::{Color32, CornerRadius, Rect, Sense, Shadow, Ui, pos2, vec2};
 
+use super::drawers::Drawers;
 use super::strip_view::StripView;
 use super::track_reordering::{follow_the_handles, plan_rows};
 use super::{TimelineContent, TimelineViewState, drawers, header, strip, track_resize};
 use crate::application::commands::Command;
 use crate::application::textures::Textures;
 use crate::application::theme;
-use crate::project::Track;
+use crate::project::{Project, Track};
 
 /// The shadow under the row of a track that is being dragged, which is lifted over the others.
 const SHADOW_UNDER_THE_DRAGGED_ROW: Shadow = Shadow {
@@ -29,6 +30,49 @@ const SHADOW_UNDER_THE_DRAGGED_ROW: Shadow = Shadow {
     spread: 0,
     color: Color32::from_black_alpha(150),
 };
+
+/// How tall each row is, and how much room there is after the last of them: what [`show`] lays out. It is worked out from the
+/// project and the drawers alone, so that how tall the rows are going to be is known before anything is drawn (see
+/// [`super::prepare`]), and `show` lays them out by it, so that it is what they are.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct RowsLayout {
+    /// How tall each row is, in the order of the tracks: as tall as its track, and as the drawers that pushed to open on it need.
+    /// (The drawers that lie over the rows under it are not in it.)
+    pub(super) heights: Vec<f32>,
+    /// Room after the last row for what lies over the rows under its row and hangs below it, so that it can be scrolled to: as much
+    /// as the drawer that reaches furthest down goes beyond the bottom of the last row.
+    pub(super) room_after_the_last_row: f32,
+}
+
+impl RowsLayout {
+    pub(super) fn of(project: &Project, drawers: &Drawers) -> Self {
+        let tracks = project.tracks();
+        let heights: Vec<f32> = tracks
+            .iter()
+            .map(|track| track.height().points() + drawers.extra_height_of(track, project))
+            .collect();
+        let mut top = 0.0;
+        let mut bottom_of_the_last = 0.0;
+        let mut furthest_down = 0.0_f32;
+        for (track, height) in tracks.iter().zip(&heights) {
+            let bottom = top + height;
+            furthest_down = furthest_down.max(bottom + drawers.reach_over_the_rows_under_the_row_of(track, project));
+            bottom_of_the_last = bottom;
+            top = bottom + theme::SPACE_BETWEEN_TRACKS;
+        }
+        Self {
+            heights,
+            room_after_the_last_row: (furthest_down - bottom_of_the_last).max(0.0),
+        }
+    }
+
+    /// How tall the rows are together, with the room between them and after the last of them. (Not counting what comes after
+    /// that: the room for the boundary under the last track to be taken hold of, which is the same whatever the drawers do.)
+    pub(super) fn total_height(&self) -> f32 {
+        let room_between_rows = self.heights.len().saturating_sub(1) as f32 * theme::SPACE_BETWEEN_TRACKS;
+        self.heights.iter().sum::<f32>() + room_between_rows + self.room_after_the_last_row
+    }
+}
 
 /// Draws the rows in `ui`, which is the inside of the area they scroll in: the rows are as wide as `ui` is, the
 /// title boxes at the left of them and then the strips, which are `strips_width` wide and start `strips_offset`
@@ -46,12 +90,9 @@ pub(super) fn show<'a>(
 ) -> Vec<(&'a Track, StripView)> {
     let tracks = content.project.tracks();
     let can_delete = tracks.len() > 1;
-    // A row is as tall as its track, and as the drawers that pushed to open on it need under that. (The drawers that lie over the
-    // rows under it are not in it.)
-    let heights: Vec<f32> = tracks
-        .iter()
-        .map(|track| track.height().points() + state.drawers.extra_height_of(track, content.project))
-        .collect();
+    // A row is as tall as its track, and as the drawers that pushed to open on it need under that.
+    let layout = RowsLayout::of(content.project, &state.drawers);
+    let heights = &layout.heights;
     let laid_out: Vec<Rect> = heights
         .iter()
         .map(|height| {
@@ -59,27 +100,15 @@ pub(super) fn show<'a>(
                 .0
         })
         .collect();
-    // Room after the last row for what lies over the rows under its row and hangs below it, so that it can be scrolled to: as much
-    // as the drawer that reaches furthest down goes beyond the bottom of the last row.
-    if let Some(last_row) = laid_out.last() {
-        let furthest_down = tracks
-            .iter()
-            .zip(&laid_out)
-            .map(|(track, row)| {
-                row.bottom()
-                    + state
-                        .drawers
-                        .reach_over_the_rows_under_the_row_of(track, content.project)
-            })
-            .fold(last_row.bottom(), f32::max);
-        ui.add_space(furthest_down - last_row.bottom());
+    if !laid_out.is_empty() {
+        ui.add_space(layout.room_after_the_last_row);
     }
 
     let rows_top = laid_out.first().map_or_else(|| ui.cursor().top(), |row| row.top());
     let planned = plan_rows(
         &tracks
             .iter()
-            .zip(&heights)
+            .zip(heights)
             .map(|(track, height)| (track.id(), *height))
             .collect::<Vec<_>>(),
         theme::SPACE_BETWEEN_TRACKS,
@@ -163,4 +192,174 @@ pub(super) fn show<'a>(
         .zip(views)
         .filter_map(|(track, view)| Some((track, view?)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::timeline_panel::drawers::{OpenMode, height_when_open};
+    use crate::project::{AnimationTarget, PropertyId, TextObject, TimelineFrameIndex, TrackHeight};
+
+    /// A project with two tracks, each with a text object: the one in front (the first track) and the one behind (the last).
+    struct TwoTracks {
+        project: Project,
+        in_front: AnimationTarget,
+        behind: AnimationTarget,
+    }
+
+    fn two_tracks() -> TwoTracks {
+        let mut project = Project::empty();
+        let track_behind = project.tracks()[0].id();
+        let track_in_front = project.add_track_in_front();
+        let (in_front, _) = project
+            .insert_text(track_in_front, TimelineFrameIndex::new(0), TextObject::default(), 30)
+            .unwrap();
+        let (behind, _) = project
+            .insert_text(track_behind, TimelineFrameIndex::new(0), TextObject::default(), 30)
+            .unwrap();
+        TwoTracks {
+            project,
+            in_front: AnimationTarget::Clip(in_front),
+            behind: AnimationTarget::Clip(behind),
+        }
+    }
+
+    /// Opens the drawer of `owner` the way `mode` says, and lets it finish sliding.
+    fn open(drawers: &mut Drawers, owner: AnimationTarget, mode: OpenMode) {
+        drawers.toggle(owner, mode);
+        drawers.advance(1.0);
+    }
+
+    fn track_height() -> f32 {
+        crate::project::TrackHeight::DEFAULT_IN_POINTS
+    }
+
+    #[test]
+    fn rows_with_every_drawer_shut_are_as_tall_as_their_tracks_with_room_between_them_and_nothing_after_the_last() {
+        let tracks = two_tracks();
+
+        let layout = RowsLayout::of(&tracks.project, &Drawers::default());
+
+        assert_eq!(layout.heights, vec![track_height(), track_height()]);
+        assert_eq!(layout.room_after_the_last_row, 0.0);
+        assert_eq!(
+            layout.total_height(),
+            2.0 * track_height() + theme::SPACE_BETWEEN_TRACKS
+        );
+    }
+
+    #[test]
+    fn a_drawer_that_pushed_to_open_makes_its_row_taller_by_as_far_as_it_hangs_and_nothing_else() {
+        let tracks = two_tracks();
+        let hanging = height_when_open(tracks.in_front, &tracks.project);
+        assert!(hanging > 10.0, "the setup: a drawer has some height");
+
+        let mut drawers = Drawers::default();
+        open(&mut drawers, tracks.in_front, OpenMode::PushingTheRowsUnder);
+        let layout = RowsLayout::of(&tracks.project, &drawers);
+
+        assert_eq!(layout.heights, vec![track_height() + hanging, track_height()]);
+        assert_eq!(layout.room_after_the_last_row, 0.0);
+        let shut = RowsLayout::of(&tracks.project, &Drawers::default());
+        assert_eq!(layout.total_height(), shut.total_height() + hanging);
+    }
+
+    #[test]
+    fn a_drawer_of_the_last_row_that_pushed_to_open_is_in_the_row_and_leaves_no_room_after_it() {
+        let tracks = two_tracks();
+        let hanging = height_when_open(tracks.behind, &tracks.project);
+
+        let mut drawers = Drawers::default();
+        open(&mut drawers, tracks.behind, OpenMode::PushingTheRowsUnder);
+        let layout = RowsLayout::of(&tracks.project, &drawers);
+
+        assert_eq!(layout.heights, vec![track_height(), track_height() + hanging]);
+        assert_eq!(layout.room_after_the_last_row, 0.0);
+    }
+
+    #[test]
+    fn a_drawer_of_the_last_row_that_lies_over_what_is_under_it_makes_room_after_the_row_and_no_row_taller() {
+        let tracks = two_tracks();
+        let hanging = height_when_open(tracks.behind, &tracks.project);
+
+        let mut drawers = Drawers::default();
+        open(&mut drawers, tracks.behind, OpenMode::LyingOverTheRowsUnder);
+        let layout = RowsLayout::of(&tracks.project, &drawers);
+
+        assert_eq!(layout.heights, vec![track_height(), track_height()]);
+        assert_eq!(layout.room_after_the_last_row, hanging, "so that it can be scrolled to");
+        let shut = RowsLayout::of(&tracks.project, &Drawers::default());
+        assert_eq!(layout.total_height(), shut.total_height() + hanging);
+    }
+
+    #[test]
+    fn a_drawer_that_lies_over_the_row_under_it_and_goes_beyond_it_makes_room_after_the_last_row_by_as_far_as_it_goes_beyond_it()
+     {
+        let mut tracks = two_tracks();
+        // The row under the one of the drawer is as short as it can be, and the drawer has three racks in it.
+        let behind_track = tracks.project.tracks()[1].id();
+        tracks
+            .project
+            .set_track_height(behind_track, TrackHeight::from_points(TrackHeight::SMALLEST_IN_POINTS))
+            .unwrap();
+        for property in [PropertyId::Position, PropertyId::Size, PropertyId::Rotation] {
+            tracks
+                .project
+                .add_keyframe(tracks.in_front, property, TimelineFrameIndex::new(5))
+                .unwrap();
+        }
+        let hanging = height_when_open(tracks.in_front, &tracks.project);
+        // It hangs from the bottom of its row, over the room between the rows and the row under it, and then beyond that.
+        let beyond = hanging - theme::SPACE_BETWEEN_TRACKS - TrackHeight::SMALLEST_IN_POINTS;
+        assert!(beyond > 0.0, "the setup: it goes beyond the row under it: {hanging}");
+
+        let mut drawers = Drawers::default();
+        open(&mut drawers, tracks.in_front, OpenMode::LyingOverTheRowsUnder);
+        let layout = RowsLayout::of(&tracks.project, &drawers);
+
+        assert_eq!(
+            layout.heights,
+            vec![track_height(), TrackHeight::SMALLEST_IN_POINTS],
+            "no row is taller, because the drawer lies over the row under it"
+        );
+        assert_eq!(layout.room_after_the_last_row, beyond);
+    }
+
+    #[test]
+    fn a_drawer_that_lies_over_the_row_under_it_and_does_not_go_beyond_that_row_changes_nothing() {
+        let tracks = two_tracks();
+
+        let mut drawers = Drawers::default();
+        open(&mut drawers, tracks.in_front, OpenMode::LyingOverTheRowsUnder);
+        let layout = RowsLayout::of(&tracks.project, &drawers);
+
+        assert_eq!(layout, RowsLayout::of(&tracks.project, &Drawers::default()));
+    }
+
+    #[test]
+    fn a_drawer_that_is_part_of_the_way_open_makes_its_row_that_much_taller_and_the_total_as_much() {
+        let tracks = two_tracks();
+        let mut drawers = Drawers::default();
+        drawers.toggle(tracks.in_front, OpenMode::PushingTheRowsUnder);
+        drawers.advance(0.05);
+        let part_way = drawers.hanging_height_of(tracks.in_front, &tracks.project);
+        assert!(
+            part_way > 0.0 && part_way < height_when_open(tracks.in_front, &tracks.project),
+            "the setup: it is part of the way"
+        );
+
+        let layout = RowsLayout::of(&tracks.project, &drawers);
+
+        assert_eq!(layout.heights[0], track_height() + part_way);
+    }
+
+    #[test]
+    fn a_layout_of_no_rows_has_no_height() {
+        let layout = RowsLayout {
+            heights: Vec::new(),
+            room_after_the_last_row: 0.0,
+        };
+
+        assert_eq!(layout.total_height(), 0.0);
+    }
 }

@@ -116,6 +116,12 @@ impl FastForwardApplication {
             .is_some_and(|state| state.picture.picture.is_some())
     }
 
+    /// Keeps the files that are taken out of project files that have files included in them in the folder `folder` (which is made
+    /// when the first is put there). The program does this in the folder of the computer's cache; a test gives it one of its own.
+    pub fn keep_archive_files_in(&mut self, folder: PathBuf) {
+        self.archive_cache = Some(super::ArchiveCache::at(folder));
+    }
+
     /// The title and text of the message the user has to read, if one is showing.
     pub fn message_showing(&self) -> Option<(&str, &str)> {
         match &self.dialog {

@@ -43,10 +43,19 @@ impl FastForwardApplication {
         let geometry = self.timeline_geometry();
         let can_edit = !self.is_blocked();
         let source_looks = source_looks_of(&self.project, &self.source_files);
+        let timeline_content = TimelineContent {
+            project: &self.project,
+            geometry,
+            current_frame: frame_state.current_frame,
+            selection: &self.selection,
+            source_looks: &source_looks,
+            can_edit,
+        };
+        timeline_panel::prepare(ui.ctx(), &timeline_content, &mut self.timeline_view);
 
         // (The gaps are made by the margins round the panels: half of a gap between two panels is round each
         // of them, and the whole of it between a panel and the edge of the window.)
-        egui::Panel::bottom("timeline panel")
+        egui::Panel::bottom(timeline_panel::PANEL_ID)
             .resizable(false)
             .show_separator_line(false)
             .frame(panel_frame(Margin::symmetric(8, 6), PanelSides::AlongTheBottom))
@@ -64,14 +73,7 @@ impl FastForwardApplication {
                 ui.add_space(6.0);
                 timeline_panel::show(
                     ui,
-                    &TimelineContent {
-                        project: &self.project,
-                        geometry,
-                        current_frame: frame_state.current_frame,
-                        selection: &self.selection,
-                        source_looks: &source_looks,
-                        can_edit,
-                    },
+                    &timeline_content,
                     &mut self.timeline_view,
                     &mut self.textures,
                     commands,
@@ -107,7 +109,7 @@ impl FastForwardApplication {
             frame_state,
             &source_looks,
         );
-        egui::CentralPanel::default()
+        let preview = egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| {
                 preview_panel::show(
@@ -119,6 +121,7 @@ impl FastForwardApplication {
                     commands,
                 );
             });
+        self.preview_panel_in_the_last_frame = Some(preview.response.rect);
     }
 
     /// Looks for the names of the fonts the computer has once a text object is selected, which it

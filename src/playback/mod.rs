@@ -33,7 +33,7 @@ pub use output_stream::AudioDeviceError;
 pub use picture_size::{LARGEST_PREVIEW_HEIGHT_IN_PIXELS, LARGEST_PREVIEW_WIDTH_IN_PIXELS, preview_picture_size};
 pub use preview_pictures::{PicturesReport, PreviewPictures};
 pub use sound_effects::{
-    DeviceEffectSpeakers, EffectSpeakers, EffectSpeakersOpener, SoundEffect, SoundEffects,
+    DRAWER_SOUND_SLIDE_SECONDS, DeviceEffectSpeakers, EffectSpeakers, EffectSpeakersOpener, SoundEffect, SoundEffects,
     opener_of_the_default_effect_speakers,
 };
 #[cfg(test)]

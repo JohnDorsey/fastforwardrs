@@ -1,16 +1,18 @@
 //! Starting a new project, and loading and saving project files.
+//!
+//! A project file is a `.ffrs` file, which is an archive that can have files included in it, or plain JSON, which is a file that
+//! can be read (and edited) by anyone. The first is what is offered first and made when no name is given, for it can do all that the
+//! other can and more; both are read, and the one that a project was loaded from or saved as is the one that it is saved as again.
 
 use std::path::{Path, PathBuf};
 
-use super::{FastForwardApplication, OpeningPurpose};
+use super::{FastForwardApplication, OpeningPurpose, SourceStatus};
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::application::preview_panel::PreviewView;
 use crate::project::Project;
-use crate::project_file::{read_project_file, write_project_file};
-
-/// What a project file's name ends with. The file is JSON, so that it can be read (and edited) by
-/// anyone.
-const PROJECT_FILE_EXTENSION: &str = "json";
+use crate::project_file::{
+    ARCHIVE_FILE_EXTENSION, IncludedFiles, PLAIN_FILE_EXTENSION, read_project_file, write_project_file_including,
+};
 
 impl FastForwardApplication {
     /// Starts an empty project and asks for the first video or sound to put in it.
@@ -29,7 +31,7 @@ impl FastForwardApplication {
             kinds: &[
                 FileKind {
                     name: "Project files",
-                    extensions: &[PROJECT_FILE_EXTENSION],
+                    extensions: &[ARCHIVE_FILE_EXTENSION, PLAIN_FILE_EXTENSION],
                 },
                 FileKind {
                     name: "All files",
@@ -79,19 +81,82 @@ impl FastForwardApplication {
         self.save_project_to(path);
     }
 
-    /// Saves the project to `path`, which from then on is the project's file.
-    pub fn save_project_to(&mut self, path: PathBuf) {
-        match write_project_file(&self.project, &path) {
+    /// Saves the project to `path`, which from then on is the project's file, if that can be done: the project file is an archive
+    /// if the name ends in `.ffrs`, with the files that are included in it (a project that has some cannot be saved as anything
+    /// else). Says whether it was saved, and if it was not the user is told why, and nothing has changed.
+    pub fn save_project_to(&mut self, path: PathBuf) -> bool {
+        let included_files = match self.included_files_to_save() {
+            Ok(files) => files,
+            Err(problem) => {
+                self.show_message("The project could not be saved", problem);
+                return false;
+            }
+        };
+        match write_project_file_including(&self.project, &path, &included_files) {
             Ok(()) => {
                 self.project_file_path = Some(path);
                 self.note_everything_is_saved();
+                true
             }
-            Err(error) => self.show_message("The project could not be saved", error.to_string()),
+            Err(error) => {
+                self.show_message("The project could not be saved", error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Where the file of each source file that is included in the project file can be read from, to be put in it again when the
+    /// project is saved. The files that are included must all be found and opened for that.
+    fn included_files_to_save(&self) -> Result<IncludedFiles, String> {
+        let mut files = IncludedFiles::new();
+        for source in self.project.sources().iter().filter(|source| source.link.is_included()) {
+            let name = source.link.absolute_path.file_name().map_or_else(
+                || source.identifier.to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            match self.source_files.get(&source.identifier).map(|state| &state.status) {
+                Some(SourceStatus::Available { path }) => {
+                    files.insert(source.identifier, path.clone());
+                }
+                Some(SourceStatus::Opening) => {
+                    return Err(format!(
+                        "The file {name} is included in the project file, and is still being taken out of it. Save the project again in a moment."
+                    ));
+                }
+                Some(SourceStatus::Unavailable { reason }) => {
+                    return Err(format!(
+                        "The file {name} is included in the project file, and cannot be used just now ({reason}), so it cannot be written to the project file again."
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "The file {name} is included in the project file, and has not been taken out of it yet."
+                    ));
+                }
+            }
+        }
+        Ok(files)
+    }
+
+    /// The name that a project file is offered as when it is saved: the one it has now, or if it has none, the name of the first
+    /// file in the project with `extension` after it (`.fastforwardrs.json` for a plain project file, as it always was).
+    pub(super) fn suggested_name_for_a_project_file(&self, extension: &str) -> String {
+        let first_file_name = self
+            .project
+            .sources()
+            .first()
+            .and_then(|source| source.link.absolute_path.file_stem())
+            .map_or_else(|| "project".to_owned(), |stem| stem.to_string_lossy().into_owned());
+        if extension == PLAIN_FILE_EXTENSION {
+            format!("{first_file_name}.fastforwardrs.{extension}")
+        } else {
+            format!("{first_file_name}.{extension}")
         }
     }
 
     /// Asks where to save the project, offering the name of the file it has now, or if it has none the name of the first
-    /// file in it, and the folder of the file it has now (if it has one).
+    /// file in it with the ending of an archive, and the folder of the file it has now (if it has one). An archive is what is
+    /// offered first, and what is made if the name chosen has no ending.
     fn ask_where_to_save_project(&self, title: &str) -> Option<PathBuf> {
         let suggested_file_name = match self
             .project_file_path
@@ -100,27 +165,25 @@ impl FastForwardApplication {
             .map(|name| name.to_string_lossy().into_owned())
         {
             Some(name_of_the_file_it_has) => name_of_the_file_it_has,
-            None => {
-                let first_file_name = self
-                    .project
-                    .sources()
-                    .first()
-                    .and_then(|source| source.link.absolute_path.file_stem())
-                    .map_or_else(|| "project".to_owned(), |stem| stem.to_string_lossy().into_owned());
-                format!("{first_file_name}.fastforwardrs.{PROJECT_FILE_EXTENSION}")
-            }
+            None => self.suggested_name_for_a_project_file(ARCHIVE_FILE_EXTENSION),
         };
         let path = self.file_chooser.choose_where_to_save(&FileQuestion {
             title,
             suggested_file_name: Some(&suggested_file_name),
             starting_directory: self.project_file_path.as_deref().and_then(Path::parent),
-            kinds: &[FileKind {
-                name: "Project files",
-                extensions: &[PROJECT_FILE_EXTENSION],
-            }],
+            kinds: &[
+                FileKind {
+                    name: "Project files (.ffrs)",
+                    extensions: &[ARCHIVE_FILE_EXTENSION],
+                },
+                FileKind {
+                    name: "Plain project files (.json)",
+                    extensions: &[PLAIN_FILE_EXTENSION],
+                },
+            ],
         })?;
         Some(if path.extension().is_none() {
-            path.with_extension(PROJECT_FILE_EXTENSION)
+            path.with_extension(ARCHIVE_FILE_EXTENSION)
         } else {
             path
         })
@@ -130,6 +193,7 @@ impl FastForwardApplication {
     pub(super) fn replace_project(&mut self, project: Project, project_file_path: Option<PathBuf>) {
         self.openings.clear();
         self.source_files.clear();
+        self.gesture_frame.forget();
         self.selection.clear();
         self.preview_pictures.set_setup(None);
         self.textures.clear();
@@ -144,17 +208,29 @@ impl FastForwardApplication {
     }
 
     /// Starts looking for the source files of a project that has just been loaded: where the
-    /// project says each was, and then (as a backup) relative to the project file.
+    /// project says each was, and then (as a backup) relative to the project file; and for each that is included in the project
+    /// file, taking it out of it (see [`Self::start_opening_an_included_file`]).
     fn locate_source_files_of_loaded_project(&mut self) {
         let project_directory = self.project_file_path.as_deref().and_then(Path::parent);
         let wanted: Vec<_> = self
             .project
             .sources()
             .iter()
-            .map(|source| (source.identifier, source.link.candidate_paths(project_directory)))
+            .map(|source| {
+                (
+                    source.identifier,
+                    source.link.included_as.clone(),
+                    source.link.candidate_paths(project_directory),
+                )
+            })
             .collect();
-        for (identifier, candidates) in wanted {
-            self.start_opening(OpeningPurpose::LocateForLoadedProject(identifier), candidates);
+        for (identifier, included_as, candidates) in wanted {
+            match (included_as, self.project_file_path.clone()) {
+                (Some(entry_name), Some(archive)) => {
+                    self.start_opening_an_included_file(identifier, archive, entry_name)
+                }
+                _ => self.start_opening(OpeningPurpose::LocateForLoadedProject(identifier), candidates),
+            }
         }
     }
 }
