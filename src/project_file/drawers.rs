@@ -9,9 +9,11 @@
 
 use std::collections::HashMap;
 
-use super::document::{AnimationDocument, KeyframeDocument, RackDocument, TargetDocument};
+use super::document::{AnimationDocument, KeyframeDocument, MemberDocument, RackDocument, TargetDocument};
 use super::value_from_document;
-use crate::project::{AnimationTarget, ClipId, ClipKind, Drawer, Effects, PropertyId, Rack, RackId, Track, TrackId};
+use crate::project::{
+    AnimationTarget, ClipId, ClipKind, Drawer, Effects, GroupId, Member, PropertyId, Rack, RackId, Track, TrackId,
+};
 
 /// What is known of what a file has, which is what the racks it has can be checked against.
 pub(super) struct FileContents {
@@ -163,6 +165,34 @@ impl Positions {
             }
         }
         positions
+    }
+
+    /// What something that is in a group is, as the file says it: a clip by its track's place and its own place on the track, a track by its
+    /// place, a group by its place in the list of groups (`numbers` says what that is for each).
+    pub(super) fn member_document_of(
+        &self,
+        member: Member,
+        numbers: &HashMap<GroupId, usize>,
+    ) -> Result<MemberDocument, String> {
+        match member {
+            Member::Clip(clip) => self
+                .clips
+                .get(&clip)
+                .map(|(track, clip)| MemberDocument::Clip {
+                    track: *track,
+                    clip: *clip,
+                })
+                .ok_or_else(|| format!("a group has {clip} in it, which is not in the project")),
+            Member::Track(track) => self
+                .tracks
+                .get(&track)
+                .map(|position| MemberDocument::Track(*position))
+                .ok_or_else(|| format!("a group has {track} in it, which is not in the project")),
+            Member::Group(group) => numbers
+                .get(&group)
+                .map(|number| MemberDocument::Group(*number))
+                .ok_or_else(|| format!("a group has {group} in it, which is not in the project")),
+        }
     }
 
     fn target_document_of(&self, target: AnimationTarget) -> Result<TargetDocument, String> {

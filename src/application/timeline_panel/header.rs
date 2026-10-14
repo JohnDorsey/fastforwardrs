@@ -15,9 +15,9 @@ use egui::{
 
 use super::grip_dots::{self, Arrangement};
 use crate::application::commands::Command;
-use crate::application::selection::SelectionChange;
+use crate::application::selection::{Selection, SelectionChange};
 use crate::application::theme;
-use crate::project::{Track, TrackSide};
+use crate::project::{GroupKind, Member, Project, Track, TrackId, TrackSide};
 
 /// How tall the box for the title is, in points.
 pub const TITLE_HEIGHT: f32 = 26.0;
@@ -56,9 +56,47 @@ pub const DELETE_TRACK_LABEL: &str = "Delete track";
 pub const DUPLICATE_ABOVE_LABEL: &str = "Duplicate above";
 pub const DUPLICATE_BELOW_LABEL: &str = "Duplicate below";
 
+/// What the menu of the box of a track offers to make a track group of the tracks it is about (the track, or the tracks that are selected
+/// when it is one of them).
+pub const CREATE_TRACK_GROUP_LABEL: &str = "Create track group";
+
+/// What a track group made from the menu of the box of `track` is made of: the tracks that are selected, and the track groups that are,
+/// when `track` is one of the selected tracks, and otherwise `track` alone. The tracks come in the order they are in the list of tracks,
+/// the one in front first.
+fn members_of_a_track_group_made_from_the_menu_of(
+    track: TrackId,
+    project: &Project,
+    selection: &Selection,
+) -> Vec<Member> {
+    if !selection.contains_track(track) {
+        return vec![Member::Track(track)];
+    }
+    let mut tracks: Vec<(usize, TrackId)> = selection
+        .tracks()
+        .filter_map(|selected| Some((project.track_position(selected)?, selected)))
+        .collect();
+    tracks.sort();
+    let groups = selection.groups().filter(|group| {
+        project
+            .group(*group)
+            .is_some_and(|group| group.kind() == GroupKind::TrackGroup)
+    });
+    tracks
+        .into_iter()
+        .map(|(_, track)| Member::Track(track))
+        .chain(groups.map(Member::Group))
+        .collect()
+}
+
 /// The menu that opens when the box of `track` is right-clicked. What deletes the track is last, apart from the others, so that
 /// it is not what a click that has hardly moved from the right-click chooses.
-fn show_the_menu(ui: &mut Ui, track: &Track, can_delete: bool, commands: &mut Vec<Command>) {
+fn show_the_menu(
+    ui: &mut Ui,
+    track: &Track,
+    can_delete: bool,
+    (project, selection): (&Project, &Selection),
+    commands: &mut Vec<Command>,
+) {
     for (label, side) in [
         (DUPLICATE_ABOVE_LABEL, TrackSide::Above),
         (DUPLICATE_BELOW_LABEL, TrackSide::Below),
@@ -70,6 +108,14 @@ fn show_the_menu(ui: &mut Ui, track: &Track, can_delete: bool, commands: &mut Ve
             });
             ui.close();
         }
+    }
+    ui.separator();
+    if ui.button(CREATE_TRACK_GROUP_LABEL).clicked() {
+        commands.push(Command::CreateGroup {
+            kind: GroupKind::TrackGroup,
+            members: members_of_a_track_group_made_from_the_menu_of(track.id(), project, selection),
+        });
+        ui.close();
     }
     ui.separator();
     let item = ui.add_enabled(can_delete, Button::new(DELETE_TRACK_LABEL));
@@ -106,12 +152,14 @@ pub(super) struct Handles {
 
 /// Draws the box of `track` in `header_rectangle` (`is_selected` says whether the track is selected), and adds
 /// a command when it is clicked, when its title is typed in or when the track is deleted from the menu
-/// (`can_delete` says whether it may be: not the last one). Gives what the track can be taken hold of by.
+/// (`can_delete` says whether it may be: not the last one). `context` is the project and what is selected in it, which the menu is about
+/// (it can make a track group of the selected tracks). Gives what the track can be taken hold of by.
 pub(super) fn show(
     ui: &mut Ui,
     header_rectangle: Rect,
     track: &Track,
     (can_edit, can_delete, is_selected): (bool, bool, bool),
+    context: (&Project, &Selection),
     commands: &mut Vec<Command>,
 ) -> Handles {
     ui.painter()
@@ -134,7 +182,7 @@ pub(super) fn show(
             Sense::hover()
         },
     );
-    background.context_menu(|ui| show_the_menu(ui, track, can_delete, commands));
+    background.context_menu(|ui| show_the_menu(ui, track, can_delete, context, commands));
     if background.clicked() {
         select_the_track(ui, track, commands);
     }
@@ -166,7 +214,7 @@ pub(super) fn show(
     );
     title_response
         .widget_info(|| WidgetInfo::text_edit(can_edit, track.title(), title.clone(), "The title of the track"));
-    title_response.context_menu(|ui| show_the_menu(ui, track, can_delete, commands));
+    title_response.context_menu(|ui| show_the_menu(ui, track, can_delete, context, commands));
     if title_response.clicked() {
         select_the_track(ui, track, commands);
     }

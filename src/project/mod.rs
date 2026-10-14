@@ -16,6 +16,7 @@ mod effect_editing;
 mod effects;
 mod frame_index;
 mod frame_rate;
+pub(crate) mod groups;
 mod keyframe_copying;
 mod rack_editing;
 mod rack_merging;
@@ -38,9 +39,12 @@ pub use animation::{
     ValueKind, placement_value, text_value, with_placement_value, with_text_value,
 };
 pub use duplicating::{ClipSide, TrackSide};
-pub use effects::{Effect, EffectKind, Effects};
+pub use effects::{Badge, ChainEntry, ChainItem, ChainItemKey, Effect, EffectKind, Effects, EffectsIter};
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
+pub use groups::{
+    AppliedEffect, ChainRow, EffectOwner, Group, GroupColour, GroupId, GroupKind, GroupProblem, Member, Rectangle,
+};
 pub use keyframe_copying::TimeDirection;
 pub use rack_editing::{KeyframeDestination, KeyframeMove, RackDestination};
 pub use racks::{DrawerExtent, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations};
@@ -77,6 +81,10 @@ pub struct Project {
     /// The number the next new track is given: it names the track (see [`TrackId`]) and, until it
     /// is given another one, its title.
     next_track_number: u32,
+    /// The groups, in the order they were made in. What is in them is for [`groups`] to say, and the rules that they keep are there too.
+    groups: Vec<Group>,
+    /// The number the next new group is given: it names the group (see [`GroupId`]).
+    next_group_number: u32,
     speed_indicator_layout: SpeedIndicatorLayout,
     settings: ProjectSettings,
     /// The frame rate the project was given, or `None` while it follows its first video (and has the
@@ -103,6 +111,8 @@ pub enum InconsistentProject {
     },
     #[error("the racks of keyframes do not agree with what is in the project: {problems}")]
     RacksAreWrong { problems: String },
+    #[error("the groups do not agree with what is in the project: {problem}")]
+    GroupsAreWrong { problem: GroupProblem },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -186,6 +196,33 @@ pub enum EditError {
     Insert(#[from] InsertError),
     #[error(transparent)]
     EmptyCrate(#[from] EmptyCrate),
+    #[error("there is no room for it there")]
+    NoRoomThere,
+    #[error("the project has no {group}")]
+    UnknownGroup { group: GroupId },
+    #[error("there is nothing to make a {kind} of")]
+    NothingToMakeAGroupOf { kind: GroupKind },
+    #[error("a clip group is made of at least two things")]
+    TooFewToMakeAClipGroup,
+    #[error("{member} is in {group} already")]
+    AlreadyInTheGroup { group: GroupId, member: Member },
+    #[error("{member} is not in {group}")]
+    NotInTheGroup { group: GroupId, member: Member },
+    /// An edit that would leave the groups breaking a rule (see [`GroupProblem`]) is not made.
+    #[error("that would break a rule of groups: {0}")]
+    BreaksTheRulesOfGroups(GroupProblem),
+    #[error("that would delete every track, and a project always has a track")]
+    WouldDeleteEveryTrack,
+    #[error("{group} cannot have the {kind} effect")]
+    NotAnEffectOfTheGroup { group: GroupId, kind: EffectKind },
+    #[error("{group} has the {kind} effect already")]
+    TheGroupHasThatEffectAlready { group: GroupId, kind: EffectKind },
+    #[error("{group} does not have the {kind} effect")]
+    TheGroupDoesNotHaveThatEffect { group: GroupId, kind: EffectKind },
+    #[error("{property:?} is not the value of an effect of {group}")]
+    NotAPropertyOfTheGroup { group: GroupId, property: PropertyId },
+    #[error("{item:?} is not in the chain of effects of {owner}")]
+    NotInTheChain { owner: Member, item: ChainItemKey },
 }
 
 /// How many seconds a picture is shown for when it is put on a track, until it is changed.
@@ -198,6 +235,8 @@ impl Project {
             sources: Vec::new(),
             tracks: Vec::new(),
             next_track_number: 0,
+            groups: Vec::new(),
+            next_group_number: 0,
             speed_indicator_layout: SpeedIndicatorLayout::DEFAULT,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
             frame_rate: None,
@@ -260,6 +299,8 @@ impl Project {
             sources,
             tracks,
             next_track_number,
+            groups: Vec::new(),
+            next_group_number: 0,
             speed_indicator_layout,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
             frame_rate: None,
@@ -271,6 +312,23 @@ impl Project {
             });
         }
         Ok(project)
+    }
+
+    /// The same project with `groups` in it, which are used as they are, in that order (the tracks, the clips and the racks are as they
+    /// were made). It is an error if they break a rule (see [`GroupProblem`]): what is in them has to be in the project, and has to be in
+    /// order, as it is checked here whatever the groups came from. (For making a project from its parts, as when a project file is loaded.)
+    pub fn with_groups(mut self, groups: Vec<Group>) -> Result<Self, InconsistentProject> {
+        self.next_group_number = groups
+            .iter()
+            .map(|group| group.id().value() + 1)
+            .max()
+            .unwrap_or(0)
+            .max(u32::try_from(groups.len()).unwrap_or(u32::MAX));
+        self.groups = groups;
+        match self.first_problem_with_the_groups() {
+            None => Ok(self),
+            Some(problem) => Err(InconsistentProject::GroupsAreWrong { problem }),
+        }
     }
 
     /// The same project with this frame rate chosen for it, or with none chosen (`None`), so that it
@@ -374,6 +432,10 @@ impl Project {
     /// Makes `frame_rate` the rate of the project, and counts everything on the timeline again at it, so
     /// that everything lasts as long as it did and starts when it did, to the nearest frame (see
     /// [`Track::retimed`]). The project keeps the rate from now on, whatever videos come.
+    ///
+    /// (This does not look at the rules about groups: counting everything again rounds every start and length to a whole frame, and can put
+    /// a clip a frame inside the rectangle of a clip group that it was a frame beside. Use [`Self::try_set_frame_rate`] where there can be
+    /// groups.)
     pub fn set_frame_rate(&mut self, frame_rate: FrameRate) {
         let before = self.frame_rate();
         self.frame_rate = Some(frame_rate);
@@ -382,6 +444,14 @@ impl Project {
                 *track = track.retimed(before, frame_rate);
             }
         }
+    }
+
+    /// [`Self::set_frame_rate`], which is an error, and changes nothing, if counting everything again would break a rule of groups.
+    pub fn try_set_frame_rate(&mut self, frame_rate: FrameRate) -> Result<(), EditError> {
+        self.keeping_the_groups_valid(|project| {
+            project.set_frame_rate(frame_rate);
+            Ok(())
+        })
     }
 
     /// The size of the finished picture in pixels, as the first video shows it (or a standard size
@@ -420,8 +490,14 @@ impl Project {
     }
 
     /// Takes a track, and everything on it, out of the project. The files its clips were made from
-    /// stay part of the project. A project always has a track, so the last one cannot be deleted.
+    /// stay part of the project. A project always has a track, so the last one cannot be deleted. The track and its clips are taken out
+    /// of the groups they are in, which are dropped if nothing is left in them.
     pub fn delete_track(&mut self, track: TrackId) -> Result<(), EditError> {
+        self.keeping_the_groups_valid(|project| project.delete_track_without_looking_at_the_groups(track))
+    }
+
+    /// [`Self::delete_track`], without checking the rules about groups afterwards (for a caller that does it itself, after more edits).
+    fn delete_track_without_looking_at_the_groups(&mut self, track: TrackId) -> Result<(), EditError> {
         let position = self.track_position(track).ok_or(EditError::UnknownTrack { track })?;
         if self.tracks.len() == 1 {
             return Err(EditError::CannotDeleteTheOnlyTrack { track });
@@ -431,20 +507,27 @@ impl Project {
         // The racks in the drawers of the track and of its clips went with them. Those kept elsewhere that animated them
         // would animate nothing.
         self.remove_the_racks_that_animate(AnimationTarget::Track(track));
-        for clip in clips_that_go {
-            self.remove_the_racks_that_animate(AnimationTarget::Clip(clip));
+        for clip in &clips_that_go {
+            self.remove_the_racks_that_animate(AnimationTarget::Clip(*clip));
         }
+        for clip in clips_that_go {
+            self.take_out_of_the_groups(Member::Clip(clip));
+        }
+        self.take_out_of_the_groups(Member::Track(track));
         Ok(())
     }
 
     /// Moves a track to `position` in the list of tracks (0 is the front): it goes in front of the tracks that are
     /// from that place on and behind those before it, and the other tracks keep their order. A `position` that
-    /// is past the last place is the last place.
+    /// is past the last place is the last place. It is an error, and nothing is changed, if that would break a rule of groups (a track
+    /// that is not in a track group cannot go in the middle of it, and one that is cannot go out of it).
     pub fn move_track(&mut self, track: TrackId, position: usize) -> Result<(), EditError> {
-        let from = self.track_position(track).ok_or(EditError::UnknownTrack { track })?;
-        let moved = self.tracks.remove(from);
-        self.tracks.insert(position.min(self.tracks.len()), moved);
-        Ok(())
+        self.keeping_the_groups_valid(|project| {
+            let from = project.track_position(track).ok_or(EditError::UnknownTrack { track })?;
+            let moved = project.tracks.remove(from);
+            project.tracks.insert(position.min(project.tracks.len()), moved);
+            Ok(())
+        })
     }
 
     /// Adds a file to the project and puts all of it on a track, starting at `at_frame`: on the
@@ -472,8 +555,38 @@ impl Project {
             self.frame_rate = Some(self.frame_rate());
         }
 
-        let (track_id, created_track) = match self.tracks.iter().find(|track| track.is_empty()) {
-            Some(empty_track) => (empty_track.id(), false),
+        let empty_tracks: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|track| track.is_empty())
+            .map(Track::id)
+            .collect();
+        if self.groups.is_empty() {
+            return Ok(self.put_the_source_on_a_track(source, at_frame, empty_tracks.first().copied()));
+        }
+        // A track that has nothing on it can still be in the rectangle of a clip group, where only what is in the group may be: the first
+        // that the file can go on without breaking a rule is the one it goes on, and if there is none it goes on a new track in front,
+        // which is in no group.
+        for empty_track in empty_tracks {
+            let mut attempt = self.clone();
+            let outcome = attempt.put_the_source_on_a_track(source.clone(), at_frame, Some(empty_track));
+            if attempt.first_problem_with_the_groups().is_none() {
+                *self = attempt;
+                return Ok(outcome);
+            }
+        }
+        Ok(self.put_the_source_on_a_track(source, at_frame, None))
+    }
+
+    /// Puts a source file in the project and all of it on the track `track`, which is empty, or on a new track in front if that is `None`.
+    fn put_the_source_on_a_track(
+        &mut self,
+        source: SourceMedia,
+        at_frame: TimelineFrameIndex,
+        track: Option<TrackId>,
+    ) -> ImportOutcome {
+        let (track_id, created_track) = match track {
+            Some(track) => (track, false),
             None => (self.add_track_in_front(), true),
         };
         let identifier = source.identifier;
@@ -512,11 +625,11 @@ impl Project {
                 .and_then(|track| track.insert_clip_at(at_frame, clip).ok()),
             None => None,
         };
-        Ok(ImportOutcome {
+        ImportOutcome {
             track: track_id,
             clip: clip_id,
             created_track,
-        })
+        }
     }
 
     /// Points a source file at a different file, for example after the original was moved. The
@@ -662,6 +775,9 @@ impl Project {
             .collect();
         let outcome = self.tracks[position].split_at_with_edges(timeline_frame, &edges).ok()?;
         self.animate_the_second_half_as_the_first_half_is(outcome);
+        // (Both halves are where the clip was, so the rectangles of its groups are what they were: nothing can be broken by this. The
+        // second half has the badges of the first in its chain already, because it was cut from it.)
+        self.put_the_copy_in_the_groups_of(Member::Clip(outcome.second_half), Member::Clip(outcome.first_half));
         Some(outcome)
     }
 
@@ -690,9 +806,12 @@ impl Project {
         }
     }
 
-    /// Plays a video or sound clip at `speed` (on top of the speed of its track).
+    /// Plays a video or sound clip at `speed` (on top of the speed of its track). It is an error, and nothing is changed, if that would
+    /// break a rule of groups: a clip that lasts longer or shorter can have a clip group's rectangle take in another clip.
     pub fn set_clip_speed(&mut self, clip: ClipId, speed: SpeedFactor) -> Result<(), EditError> {
-        Ok(self.track_holding_mut_or_error(clip)?.set_clip_speed(clip, speed)?)
+        self.keeping_the_groups_valid(|project| {
+            Ok(project.track_holding_mut_or_error(clip)?.set_clip_speed(clip, speed)?)
+        })
     }
 
     pub fn set_clip_gain(&mut self, clip: ClipId, gain: Gain) -> Result<(), EditError> {
@@ -710,9 +829,15 @@ impl Project {
     /// last told to.
     ///
     /// Either all of them move or, if one of them cannot (a clip or a track is not there, or clips would be
-    /// on top of one another), none does. The clips all leave before any arrives, so that clips can swap
-    /// places, or one take the place another leaves.
+    /// on top of one another, or a rule of groups would be broken: a clip that is not in a clip group cannot be moved into its rectangle,
+    /// and one that is cannot be moved so that the rectangle takes in another), none does. The clips all leave before any arrives, so that
+    /// clips can swap places, or one take the place another leaves.
     pub fn move_clips(&mut self, moves: &[ClipMove]) -> Result<(), EditError> {
+        self.keeping_the_groups_valid(|project| project.move_clips_without_looking_at_the_groups(moves))
+    }
+
+    /// [`Self::move_clips`], without checking the rules about groups afterwards.
+    fn move_clips_without_looking_at_the_groups(&mut self, moves: &[ClipMove]) -> Result<(), EditError> {
         /// A clip to move: where it is now (as a place in the list of tracks), where it goes, and where it starts.
         struct Departure {
             clip: ClipId,
@@ -785,10 +910,17 @@ impl Project {
     }
 
     /// Takes a clip off its track. See [`Track::delete_clip`] for what moves. What was in its drawer goes with it, and the
-    /// racks kept elsewhere that animated it are taken away, because they would animate nothing.
+    /// racks kept elsewhere that animated it are taken away, because they would animate nothing. It is taken out of the groups it is in,
+    /// which are dropped if nothing is left in them.
     pub fn delete_clip(&mut self, clip: ClipId) -> Result<(), EditError> {
+        self.keeping_the_groups_valid(|project| project.delete_clip_without_looking_at_the_groups(clip))
+    }
+
+    /// [`Self::delete_clip`], without checking the rules about groups afterwards (for a caller that does it itself, after more edits).
+    fn delete_clip_without_looking_at_the_groups(&mut self, clip: ClipId) -> Result<(), EditError> {
         self.track_holding_mut_or_error(clip)?.delete_clip(clip)?;
         self.remove_the_racks_that_animate(AnimationTarget::Clip(clip));
+        self.take_out_of_the_groups(Member::Clip(clip));
         Ok(())
     }
 
@@ -813,15 +945,19 @@ impl Project {
         Ok(())
     }
 
-    /// Makes everything on a track play `speed` times faster, on top of the clips' own speeds.
+    /// Makes everything on a track play `speed` times faster, on top of the clips' own speeds. It is an error, and nothing is changed, if
+    /// that would break a rule of groups (the clips last longer or shorter).
     pub fn set_track_speed(&mut self, track: TrackId, speed: SpeedFactor) -> Result<(), EditError> {
-        self.track_mut_or_error(track)?.set_speed(speed);
-        Ok(())
+        self.keeping_the_groups_valid(|project| {
+            project.track_mut_or_error(track)?.set_speed(speed);
+            Ok(())
+        })
     }
 
     /// Adds a text object to a track at `timeline_frame`, lasting `wanted_frames` frames or as
     /// long as there is room for if that is less. Returns the new clip and how many frames it
-    /// lasts, or `None` if there is no such track or a clip is at that frame.
+    /// lasts, or `None` if there is no such track or a clip is at that frame, or if the text would be in the rectangle of a clip group
+    /// (where only what is in the group may be).
     pub fn insert_text(
         &mut self,
         track: TrackId,
@@ -829,10 +965,24 @@ impl Project {
         object: TextObject,
         wanted_frames: u64,
     ) -> Option<(ClipId, u64)> {
-        let (clip, duration) = self
-            .track_mut(track)?
-            .insert_text_at(timeline_frame, object, wanted_frames)?;
-        Some((clip, duration))
+        self.try_insert_text(track, timeline_frame, object, wanted_frames).ok()
+    }
+
+    /// [`Self::insert_text`], which says why it could not: [`EditError::NoRoomThere`] if there is no such track or a clip is at that frame,
+    /// and [`EditError::BreaksTheRulesOfGroups`] if the text would be in the rectangle of a clip group.
+    pub fn try_insert_text(
+        &mut self,
+        track: TrackId,
+        timeline_frame: TimelineFrameIndex,
+        object: TextObject,
+        wanted_frames: u64,
+    ) -> Result<(ClipId, u64), EditError> {
+        self.keeping_the_groups_valid(|project| {
+            project
+                .track_mut(track)
+                .and_then(|track| track.insert_text_at(timeline_frame, object, wanted_frames))
+                .ok_or(EditError::NoRoomThere)
+        })
     }
 
     pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), EditError> {
@@ -847,9 +997,15 @@ impl Project {
     }
 
     /// Makes a text clip or a picture last `frames` frames, or as long as there is room for if that
-    /// is less. Returns how long it lasts now. What is in its drawer is shortened with it (see [`Track::set_clip_duration`]).
+    /// is less. Returns how long it lasts now. What is in its drawer is shortened with it (see [`Track::set_clip_duration`]). It is
+    /// an error, and nothing is changed, if that would break a rule of groups (a clip that lasts longer can have a clip group's rectangle
+    /// take in another clip).
     pub fn set_clip_duration(&mut self, clip: ClipId, frames: u64) -> Result<u64, EditError> {
-        Ok(self.track_holding_mut_or_error(clip)?.set_clip_duration(clip, frames)?)
+        self.keeping_the_groups_valid(|project| {
+            Ok(project
+                .track_holding_mut_or_error(clip)?
+                .set_clip_duration(clip, frames)?)
+        })
     }
 }
 

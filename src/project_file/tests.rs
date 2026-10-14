@@ -69,7 +69,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 9,
+  "file_format_version": 10,
   "sources": [
     {
       "kind": "video",
@@ -1329,6 +1329,55 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
     assert_eq!(project.tracks()[1].drawer().len(), 1);
     assert_eq!(project.tracks()[1].drawer().racks()[0].property(), PropertyId::Gain);
     assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
+    // The groups the example shows: a tag of the caption and the first video that turns the colours of each by 30 degrees, a clip group of the
+    // caption and the picture, and a track group of both tracks.
+    use crate::project::{ChainRow, GroupKind, Member};
+    let groups: Vec<(GroupKind, &str)> = project
+        .groups()
+        .iter()
+        .map(|group| (group.kind(), group.name()))
+        .collect();
+    assert_eq!(
+        groups,
+        vec![
+            (GroupKind::Tag, "intro"),
+            (GroupKind::ClipGroup, "titles"),
+            (GroupKind::TrackGroup, "everything")
+        ]
+    );
+    assert_eq!(project.problems_with_the_groups(), vec![]);
+    assert_eq!(project.groups()[0].effects().len(), 1);
+    assert_eq!(
+        project.groups()[0].colour(),
+        crate::project::GroupColour::new(0x4B, 0xD2, 0x54)
+    );
+    let caption_id = project.tracks()[0].entries()[0].id();
+    let first_video = project.tracks()[1].entries()[0].id();
+    let describe = |rows: Vec<ChainRow<'_>>| -> Vec<String> {
+        rows.iter()
+            .map(|row| match row {
+                ChainRow::Effect(effect) => format!("effect {}", effect.kind().name()),
+                ChainRow::TagBadge(group) => format!("tag {}", group.name()),
+                ChainRow::TrackBadge { .. } => "track".to_owned(),
+                ChainRow::ShapeBadge(group) => format!("{} {}", group.kind().name(), group.name()),
+            })
+            .collect()
+    };
+    assert_eq!(
+        describe(project.chain_rows_of(Member::Clip(caption_id))),
+        ["effect hue shift", "tag intro", "clip group titles"],
+        "the caption: its own hue shift, then the effects of the tag, and last those of the group it is in"
+    );
+    assert_eq!(
+        describe(project.chain_rows_of(Member::Clip(first_video))),
+        ["track", "tag intro"],
+        "the first video: the effects of its track first (which turn it by 15 degrees), and then those of the tag"
+    );
+    assert_eq!(
+        project.chain_rows_of(Member::Track(project.tracks()[0].id())).len(),
+        1,
+        "the front track: the group of tracks"
+    );
     // And what the program writes for it is what the example shows (the same project, whichever way it is told).
     let written = saved(&project);
     let again = project_from_json_text(&written).unwrap();

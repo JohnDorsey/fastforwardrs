@@ -10,6 +10,7 @@
 pub mod archive;
 mod document;
 mod drawers;
+mod groups;
 mod legacy;
 mod relative_path;
 
@@ -32,9 +33,9 @@ use crate::project::{
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
-    AnimationDocument, CanvasAreaDocument, ClipDocument, ColourDocument, EffectDocument, KeyframeValueDocument,
-    PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument,
-    TrackDocument,
+    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ColourDocument, EffectDocument,
+    KeyframeValueDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument,
+    SpeedIndicatorDocument, TrackDocument,
 };
 use legacy::LegacyProjectDocument;
 pub use relative_path::relative_path_between;
@@ -85,8 +86,9 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// track and not only the one that has the drawer (a file of version 6 has an `animation` object in each clip and track: it is read
 /// as a rack of the keyframes of its own properties in its own drawer), and has keyframe crates. Version 8 added the effects of
 /// clips and of tracks (a file of version 7 has none). Version 9 added the files that are included in the project file (a file of
-/// version 8 has none).
-pub const FILE_FORMAT_VERSION: u32 = 9;
+/// version 8 has none). Version 10 added groups, and with them the badges in the chains of effects of clips and groups (a file of version 9
+/// has none: it is a project with no group, in which each clip has its effects and then those of its track, as it always had).
+pub const FILE_FORMAT_VERSION: u32 = 10;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -675,7 +677,7 @@ struct ClipFromDocument {
     /// How many empty frames come before it.
     gap_before_frames: u64,
     clip: Clip,
-    /// The effects the clip has.
+    /// The effects the clip has, with the badges that are in its chain.
     effects: Effects,
     /// The keyframes that a file of a version before 7 had in an `animation` object of the clip.
     legacy_animation: AnimationDocument,
@@ -684,8 +686,9 @@ struct ClipFromDocument {
 }
 
 /// The clip a document describes: with what is in its drawer as it is in the document, which is made into racks when what the
-/// racks can be of is known (see [`project_from_document`]).
-fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String> {
+/// racks can be of is known (see [`project_from_document`]). `group_count` is how many groups the file has, which the badges in the
+/// chain of the clip are of.
+fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<ClipFromDocument, String> {
     match document {
         ClipDocument::Video {
             gap_before_frames,
@@ -699,6 +702,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             animation,
             drawer,
             effects,
+            badges,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
                 .map_err(|error| error.to_string())?;
@@ -710,7 +714,12 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
                         .with_muted(muted)
                         .with_placement(placement.map(placement_from_document)),
                 ),
-                effects: effects_from_documents(effects, |kind| kind.applies_to_a_clip_of_kind(ClipKind::Video))?,
+                effects: groups::chain_from_documents(
+                    effects,
+                    badges,
+                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Video),
+                    group_count,
+                )?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -725,13 +734,14 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             muted,
             animation,
             drawer,
+            badges,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
                 .map_err(|error| error.to_string())?;
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Audio(media.with_gain(gain_decibels).with_muted(muted)),
-                effects: Effects::none(),
+                effects: groups::chain_from_documents(Vec::new(), badges, |_| false, group_count)?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -744,12 +754,18 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             animation,
             drawer,
             effects,
+            badges,
         } => {
             let image = ImageClip::new(source_identifier, duration_in_frames).map_err(|error| error.to_string())?;
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Image(image.with_placement(placement.map(placement_from_document))),
-                effects: effects_from_documents(effects, |kind| kind.applies_to_a_clip_of_kind(ClipKind::Image))?,
+                effects: groups::chain_from_documents(
+                    effects,
+                    badges,
+                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Image),
+                    group_count,
+                )?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -766,6 +782,7 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             animation,
             drawer,
             effects,
+            badges,
         } => {
             let object = TextObject {
                 text,
@@ -779,7 +796,12 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Text(clip),
-                effects: effects_from_documents(effects, |kind| kind.applies_to_a_clip_of_kind(ClipKind::Text))?,
+                effects: groups::chain_from_documents(
+                    effects,
+                    badges,
+                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Text),
+                    group_count,
+                )?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -788,12 +810,13 @@ fn clip_from_document(document: ClipDocument) -> Result<ClipFromDocument, String
             gap_before_frames,
             duration_in_frames,
             drawer,
+            badges,
         } => {
             let crate_clip = CrateClip::new(duration_in_frames).map_err(|error| error.to_string())?;
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Crate(crate_clip),
-                effects: Effects::none(),
+                effects: groups::chain_from_documents(Vec::new(), badges, |_| false, group_count)?,
                 legacy_animation: AnimationDocument::default(),
                 racks: drawer,
             })
@@ -835,6 +858,7 @@ fn placement_document_of(placement: Placement) -> PlacementDocument {
 
 fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFileError> {
     let sources = document.sources.into_iter().map(source_from_document).collect();
+    let group_count = document.groups.len();
 
     // The clips are made first: the racks of keyframes may be of any clip of any track, and which clips there are, of what
     // kind, and how long each lasts is what the racks are checked against.
@@ -855,7 +879,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .map_err(|reason| invalid_project(format!("track number {}: {reason}", track_number + 1)))?;
         let mut clips = Vec::with_capacity(clip_documents.len());
         for (clip_number, clip) in clip_documents.into_iter().enumerate() {
-            clips.push(clip_from_document(clip).map_err(|reason| {
+            clips.push(clip_from_document(clip, group_count).map_err(|reason| {
                 invalid_project(format!(
                     "clip number {} of track number {}: {reason}",
                     clip_number + 1,
@@ -870,6 +894,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .with_height(TrackHeight::from_points(height_in_points));
         loaded_tracks.push((parts.with_effects(effects), animation, drawer, clips));
     }
+    let clips_in_each_track: Vec<usize> = loaded_tracks.iter().map(|(_, _, _, clips)| clips.len()).collect();
     let contents = drawers::FileContents {
         kinds_of_the_clips: loaded_tracks
             .iter()
@@ -930,8 +955,10 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
         );
     }
 
+    let groups = groups::groups_from_documents(document.groups, &clips_in_each_track).map_err(invalid_project)?;
     let layout = speed_indicator_from_document(&document.speed_indicator);
     Project::from_parts(sources, tracks, layout)
+        .and_then(|project| project.with_groups(groups))
         .map(|project| {
             project
                 .with_settings(settings_from_document(document.settings))
@@ -1031,6 +1058,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         .collect::<Result<Vec<_>, ProjectFileError>>()?;
 
     let positions = drawers::Positions::of(project.tracks());
+    let group_numbers = groups::numbers_of_the_groups(project);
     let tracks = project
         .tracks()
         .iter()
@@ -1056,6 +1084,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                             entry.clip(),
                             racks_of(AnimationTarget::Clip(entry.id()), entry.drawer())?,
                             effect_documents_of(entry.effects()),
+                            groups::badge_documents_of(entry.effects(), &group_numbers).map_err(invalid_project)?,
                         ))
                     })
                     .collect::<Result<Vec<_>, ProjectFileError>>()?,
@@ -1063,6 +1092,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         })
         .collect::<Result<Vec<_>, ProjectFileError>>()?;
 
+    let groups = groups::group_documents_of(project, &positions, &group_numbers).map_err(invalid_project)?;
     let layout = project.speed_indicator_layout();
     let settings = project.settings();
     Ok(ProjectDocument {
@@ -1070,6 +1100,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         file_format_version: FILE_FORMAT_VERSION,
         sources,
         tracks,
+        groups,
         speed_indicator: SpeedIndicatorDocument {
             left_fraction_of_frame_width: layout.left_fraction_of_frame_width(),
             top_fraction_of_frame_height: layout.top_fraction_of_frame_height(),
@@ -1084,13 +1115,14 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
     })
 }
 
-/// The document of `clip`, with the racks of its drawer and its effects. (A sound and a crate have no effects: those it is
-/// given are not written.)
+/// The document of `clip`, with the racks of its drawer, its effects, and the badges in its chain. (A sound and a crate have no effects:
+/// those it is given are not written.)
 fn clip_document_of(
     gap_before_frames: u64,
     clip: &Clip,
     drawer: Vec<RackDocument>,
     effects: Vec<EffectDocument>,
+    badges: Vec<BadgeDocument>,
 ) -> ClipDocument {
     let animation = AnimationDocument::default();
     match clip {
@@ -1106,6 +1138,7 @@ fn clip_document_of(
             animation,
             drawer,
             effects,
+            badges,
         },
         Clip::Audio(media) => ClipDocument::Audio {
             gap_before_frames,
@@ -1117,6 +1150,7 @@ fn clip_document_of(
             muted: media.is_muted(),
             animation,
             drawer,
+            badges,
         },
         Clip::Image(image) => ClipDocument::Image {
             gap_before_frames,
@@ -1126,6 +1160,7 @@ fn clip_document_of(
             animation,
             drawer,
             effects,
+            badges,
         },
         Clip::Text(text) => ClipDocument::Text {
             gap_before_frames,
@@ -1139,11 +1174,13 @@ fn clip_document_of(
             animation,
             drawer,
             effects,
+            badges,
         },
         Clip::Crate(crate_clip) => ClipDocument::Crate {
             gap_before_frames,
             duration_in_frames: crate_clip.duration_in_frames(),
             drawer,
+            badges,
         },
     }
 }
@@ -1184,6 +1221,8 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
 mod animation_tests;
 #[cfg(test)]
 mod effects_tests;
+#[cfg(test)]
+mod groups_tests;
 #[cfg(test)]
 mod included_files_tests;
 #[cfg(test)]

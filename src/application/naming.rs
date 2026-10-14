@@ -5,7 +5,10 @@
 use std::collections::HashMap;
 
 use super::timeline_panel::SourceLook;
-use crate::project::{AnimationTarget, Clip, ClipKind, EffectKind, Project, PropertyId, Rack, SourceMediaIdentifier};
+use crate::project::{
+    AnimationTarget, Clip, ClipId, ClipKind, EffectKind, Group, Member, Project, PropertyId, Rack,
+    SourceMediaIdentifier, format_timecode,
+};
 
 /// How many letters of the words of a text object are used to tell it from the others.
 const MOST_LETTERS_OF_WORDS: usize = 24;
@@ -86,6 +89,36 @@ pub fn what_a_target_is_called(
             })
         }
     }
+}
+
+/// What a clip is called in a list or a message: its kind, then what tells it from the others of its kind (the name of its file, the
+/// beginning of its words), and where it starts, which tells apart the pieces of one video ("Video clip: holiday.mp4 (at 0:00)"). `None`
+/// for a clip that is not in the project.
+pub fn describe_a_clip(project: &Project, source_looks: &SourceLooks<'_>, clip: ClipId) -> Option<String> {
+    let placement = project.placement_of(clip)?;
+    let detail = detail_of_a_clip(placement.clip, source_looks);
+    let kind = kind_name(placement.clip.kind());
+    let starts = format_timecode(placement.first_timeline_frame, project.frame_rate());
+    Some(if detail.is_empty() {
+        format!("{kind} (at {starts})")
+    } else {
+        format!("{kind}: {detail} (at {starts})")
+    })
+}
+
+/// What a clip, a track or a group is called in a list or a message: a clip as [`describe_a_clip`] says, a track by "Track" and its
+/// title, a group by its kind and its name. `None` for what is not in the project.
+pub fn describe_a_member(project: &Project, source_looks: &SourceLooks<'_>, member: Member) -> Option<String> {
+    match member {
+        Member::Clip(clip) => describe_a_clip(project, source_looks, clip),
+        Member::Track(track) => Some(format!("Track: {}", project.track(track)?.title())),
+        Member::Group(group) => Some(describe_a_group(project.group(group)?)),
+    }
+}
+
+/// What a group is called in a list or on a badge: its kind and its name ("Tag: holiday").
+pub fn describe_a_group(group: &Group) -> String {
+    format!("{}: {}", group.kind().name_with_a_capital(), group.name())
 }
 
 /// What a rack of keyframes is called: the property it animates, and if the rack is not in the drawer of what it animates

@@ -11,6 +11,8 @@
 //!   properties panel). Right-clicking an empty part of a strip opens a menu to put something new there.
 //! * Clicking the box of a track selects the track.
 //! * The mouse wheel (or a trackpad) scrolls the strips without moving the current frame.
+//! * Groups are drawn as outlines in their colours over the clips and under the playhead (see `group_outlines`); they are not clicked or
+//!   dragged there. Dragging clips stops against the rectangle of a clip group (see [`super::clip_moving`]).
 //!
 //! Cutting is done with a key (see the `keyboard` module), not with the mouse.
 
@@ -21,6 +23,7 @@ mod clips;
 mod drawers;
 mod flash;
 mod grip_dots;
+mod group_outlines;
 mod header;
 mod item_dragging;
 mod playhead;
@@ -49,7 +52,8 @@ pub use drawers::DrawerSound;
 #[cfg(test)]
 pub use drawers::{drawer_button_label, track_drawer_button_label};
 #[cfg(test)]
-pub use grip_dots::{Arrangement as GripDotArrangement, VERTICES_PER_DOT as VERTICES_IN_A_GRIP_DOT};
+pub use grip_dots::VERTICES_PER_DOT as VERTICES_IN_A_GRIP_DOT;
+pub use grip_dots::{Arrangement as GripDotArrangement, draw as draw_grip_dots};
 #[cfg(test)]
 pub use header::{HEIGHT_THE_BOX_NEEDS, TITLE_HEIGHT as HEIGHT_OF_THE_ROOM_FOR_A_TITLE};
 #[cfg(test)]
@@ -276,6 +280,33 @@ pub fn show(
     ui.spacing_mut().item_spacing.y = previous_item_spacing;
     item_dragging::keep_dragging(ui, content, state, &strip_views, rows.inner_rect, commands);
     rack_dragging::keep_dragging(ui, content, state, &strip_views, commands);
+    // The outlines of the groups go over the clips and under the playhead. (Not while a track is being moved: the rows are somewhere else for
+    // that while, and the groups are round the tracks as they are in the list.)
+    if state.track_reorder.is_none() {
+        // (The outline of a group is a little way out from the rows it goes round: the top of it, over the first row, goes over the bottom of
+        // the ruler, which is right above, and the left of that of a track group, a little way out from the title boxes that are at the left
+        // edge of the rows, goes as far left as the panel does.)
+        let top = (rows.inner_rect.top() - group_outlines::MOST_ROOM_ABOVE_THE_ROWS).max(ruler_rectangle.top());
+        group_outlines::draw(
+            ui.painter(),
+            content.project,
+            content.selection,
+            group_outlines::WhereTheRowsAre {
+                views: &strip_views,
+                left_of_the_title_boxes: ruler_rectangle.left() - strips_offset,
+            },
+            (
+                Rect::from_min_max(
+                    pos2(ruler_rectangle.left(), top),
+                    pos2(ruler_rectangle.right(), rows.inner_rect.bottom()),
+                ),
+                Rect::from_min_max(
+                    pos2(ui.clip_rect().left().min(rows.inner_rect.left()), top),
+                    rows.inner_rect.max,
+                ),
+            ),
+        );
+    }
     if content.can_edit {
         draw_a_rubber_band(ui, &rows_response, rows_area, &strip_views, content, state, commands);
     }

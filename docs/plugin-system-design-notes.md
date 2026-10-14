@@ -425,7 +425,7 @@ were hard-coded, so it was rewritten) and Kdenlive (it had to refactor per-timel
 | A real window of the program | yes, through WSLg (Windows 10 build 19044 or later; needs the vendor GPU driver) | yes, in the VM's desktop | no |
 | GPU | **no Vulkan GPU adapter in stock Ubuntu** (the Mesa driver for it, `dzn`, is not in Ubuntu's package; NVIDIA's WSL driver has no Vulkan ICD): wgpu gets the **software adapter (lavapipe)**, which is also what the tests want | VMSVGA gives OpenGL only: lavapipe again | software only |
 | Audio | WSLg's PulseAudio server (cpal needs a small `~/.asoundrc` bridge or its Pulse backend) | an emulated sound card that Linux sees as ALSA | none |
-| LADSPA plugins to test the host with | `apt install swh-plugins ladspa-sdk cmt` etc. | same | same |
+| LADSPA plugins to test the host with | `apt install swh-plugins ladspa-sdk cmt` etc. (on Windows the first set is the maintainer's LMMS install: 119 x64 DLLs, verified by a byte check) | same | same |
 | ffmpeg | Ubuntu's is a GPL build with x264 and x265 (version 8.0.1 in Ubuntu 26.04; this PC has 9.0.2, so flags can differ) | same | same |
 | Cost and setup | one admin command and a restart; the repository and `target/` should live in the Linux filesystem, not on `/mnt/c` | create the VM, install Ubuntu, set up SSH | a workflow file; **free for public repositories** |
 | Interaction with the others | **WSL2 and VirtualBox 7 on one machine make VirtualBox fall back to the Hyper-V API and run slowly** ("snail mode"); Microsoft calls the combination unsupported | the same conflict | none |

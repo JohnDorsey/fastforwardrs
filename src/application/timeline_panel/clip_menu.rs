@@ -11,11 +11,25 @@
 //! A clip that is made from a file (a video, a sound, a picture) has an item to include that file in the project file, which then
 //! has it in it (see [`crate::project_file`]), and one to take it out of the project file again, whichever it is now. The items are
 //! about the files of the clips the menu is about, one for each file however many of the clips are made from it.
+//!
+//! The items that make groups are about the clips the menu is about, and the groups that are selected with them: *Create tag* makes a tag
+//! of them, *Create clip group* (for two or more) a clip group, and *Add to tag* lists the tags there are to put them in. A group that is
+//! selected is something that can be put in a group too, as a clip is: a tag can have any, a clip group only clip groups.
 
-use egui::{Button, Ui};
+use egui::text::LayoutJob;
+use egui::{Button, Color32, FontId, TextFormat, Ui};
 
 use crate::application::commands::Command;
-use crate::project::{ClipId, ClipSide, Project, SourceMediaIdentifier};
+use crate::application::selection::Selection;
+use crate::project::{ClipId, ClipSide, Group, GroupId, GroupKind, Member, Project, SourceMediaIdentifier};
+
+/// What the items that make a group of the clips say, and the one that opens the list of tags to put them in.
+pub const CREATE_TAG_LABEL: &str = "Create tag";
+pub const CREATE_CLIP_GROUP_LABEL: &str = "Create clip group";
+pub const ADD_TO_TAG_LABEL: &str = "Add to tag";
+
+/// What is said of the item that makes a clip group when it cannot be used because only one thing is chosen.
+const A_CLIP_GROUP_NEEDS_TWO: &str = "Select more than one clip to make a clip group of them";
 
 /// What is said of an item that copies a clip when there is no room beside it for the copy.
 const NO_ROOM_FOR_ONE: &str = "There is no room beside it for a copy";
@@ -82,6 +96,60 @@ pub(super) fn clips_the_menu_is_about(selected: &[ClipId], clicked: ClipId) -> V
     }
 }
 
+/// The groups that are selected, when the clip `clicked` is selected too: the menu is about them with the clips, as the clips that are
+/// selected are, and when the clip that was clicked is not selected the menu is about it alone.
+pub(super) fn groups_the_menu_is_about(selection: &Selection, clicked: ClipId) -> Vec<GroupId> {
+    if selection.contains(clicked) {
+        selection.groups().collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// What a group of kind `kind` is made of when it is made of `clips` and `groups` (for the groups that are of a kind it can hold): the clips
+/// in the order of where they start (and of their tracks, for those that start together), and then the groups in the order they are in.
+fn members_of_a_group_made_of(project: &Project, kind: GroupKind, clips: &[ClipId], groups: &[GroupId]) -> Vec<Member> {
+    let mut clips: Vec<(u64, usize, ClipId)> = clips
+        .iter()
+        .filter_map(|clip| {
+            let placement = project.placement_of(*clip)?;
+            Some((
+                placement.first_timeline_frame.value(),
+                project.track_position_holding(*clip)?,
+                *clip,
+            ))
+        })
+        .collect();
+    clips.sort();
+    let groups_that_fit = groups.iter().filter(|group| {
+        project
+            .group(**group)
+            .is_some_and(|group| kind.can_hold_a_group_of_kind(group.kind()))
+    });
+    clips
+        .into_iter()
+        .map(|(_, _, clip)| Member::Clip(clip))
+        .chain(groups_that_fit.map(|group| Member::Group(*group)))
+        .collect()
+}
+
+/// What a tag is called in the list of tags to put clips in: its name, with a square in its colour in front of it.
+fn tag_in_the_list(tag: &Group) -> LayoutJob {
+    let colour = tag.colour();
+    let mut job = LayoutJob::default();
+    job.append(
+        "\u{25A0} ",
+        0.0,
+        TextFormat {
+            font_id: FontId::proportional(14.0),
+            color: Color32::from_rgb(colour.red, colour.green, colour.blue),
+            ..TextFormat::default()
+        },
+    );
+    job.append(tag.name(), 0.0, TextFormat::default());
+    job
+}
+
 /// The files that `clips` are made from, each once: those that are not included in the project file, and those that are.
 pub(super) fn files_of(
     clips: &[ClipId],
@@ -111,9 +179,9 @@ pub(super) fn files_of(
     (not_included, included)
 }
 
-/// The menu of `clips` (at least one), which adds a command when something in it is chosen. What deletes them is last, apart
-/// from the others, so that it is not what a click that has hardly moved from the right-click chooses.
-pub(super) fn show(ui: &mut Ui, clips: &[ClipId], project: &Project, commands: &mut Vec<Command>) {
+/// The menu of `clips` (at least one) and the `groups` that go with them, which adds a command when something in it is chosen. What
+/// deletes them is last, apart from the others, so that it is not what a click that has hardly moved from the right-click chooses.
+pub(super) fn show(ui: &mut Ui, clips: &[ClipId], groups: &[GroupId], project: &Project, commands: &mut Vec<Command>) {
     let count = clips.len();
     for side in [ClipSide::Right, ClipSide::Left] {
         let with_room = clips
@@ -149,9 +217,60 @@ pub(super) fn show(ui: &mut Ui, clips: &[ClipId], project: &Project, commands: &
         ui.close();
     }
     ui.separator();
+    show_the_items_that_make_groups(ui, clips, groups, project, commands);
+    ui.separator();
     if ui.button(delete_label(count)).clicked() {
         commands.push(Command::DeleteClips(clips.to_vec()));
         ui.close();
+    }
+}
+
+/// *Create tag*, *Create clip group* and *Add to tag*, which are about `clips` and the `groups` that are selected with them.
+fn show_the_items_that_make_groups(
+    ui: &mut Ui,
+    clips: &[ClipId],
+    groups: &[GroupId],
+    project: &Project,
+    commands: &mut Vec<Command>,
+) {
+    let for_a_tag = members_of_a_group_made_of(project, GroupKind::Tag, clips, groups);
+    if ui.button(CREATE_TAG_LABEL).clicked() {
+        commands.push(Command::CreateGroup {
+            kind: GroupKind::Tag,
+            members: for_a_tag.clone(),
+        });
+        ui.close();
+    }
+    let for_a_clip_group = members_of_a_group_made_of(project, GroupKind::ClipGroup, clips, groups);
+    let can_make_a_clip_group = for_a_clip_group.len() >= 2;
+    let item = ui.add_enabled(can_make_a_clip_group, Button::new(CREATE_CLIP_GROUP_LABEL));
+    if item.clicked() {
+        commands.push(Command::CreateGroup {
+            kind: GroupKind::ClipGroup,
+            members: for_a_clip_group,
+        });
+        ui.close();
+    }
+    if !can_make_a_clip_group {
+        item.on_disabled_hover_text(A_CLIP_GROUP_NEEDS_TWO);
+    }
+    let tags: Vec<&Group> = project
+        .groups()
+        .iter()
+        .filter(|group| group.kind() == GroupKind::Tag)
+        .collect();
+    if !tags.is_empty() {
+        ui.menu_button(ADD_TO_TAG_LABEL, |ui| {
+            for tag in tags {
+                if ui.button(tag_in_the_list(tag)).clicked() {
+                    commands.push(Command::AddToGroup {
+                        group: tag.id(),
+                        members: for_a_tag.clone(),
+                    });
+                    ui.close();
+                }
+            }
+        });
     }
 }
 

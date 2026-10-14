@@ -5,9 +5,10 @@
 use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ClipId, ClipMove, ClipSide, EffectKind, FrameRate, Gain, KeyframeId, KeyframeMove, Placement,
-    ProjectSettings, PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
-    SpeedIndicatorLayout, TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
+    AnimationTarget, ChainItemKey, ClipId, ClipMove, ClipSide, EffectKind, FrameRate, Gain, GroupColour, GroupId,
+    GroupKind, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings, PropertyId, PropertyValue,
+    RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject,
+    TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -198,6 +199,62 @@ pub enum Command {
         value: PropertyValue,
     },
 
+    // Groups.
+    /// Make a group of kind `kind` of `members` (from the menu of a selection of clips, or of tracks), and select it and nothing else.
+    /// A group that cannot be made (see [`crate::project::Project::create_group`]) is not, and the user is told why.
+    CreateGroup {
+        kind: GroupKind,
+        members: Vec<Member>,
+    },
+    /// Put these in a group that is there already (from the menu of a selection of clips), last.
+    AddToGroup {
+        group: GroupId,
+        members: Vec<Member>,
+    },
+    /// Take something out of a group, which it stays in the project (from the menu of an item in the list of what is in the group).
+    RemoveFromGroup {
+        group: GroupId,
+        member: Member,
+    },
+    /// Take a group apart, with *Disband* in the menu of its title bar, and with the Delete key when it is selected: what was in it is in
+    /// the project still (see [`crate::project::Project::disband_group`]).
+    DisbandGroup(GroupId),
+    /// Delete a group and all that is in it, with *Delete all* in the menu of its title bar.
+    DeleteGroupAndEverythingInIt(GroupId),
+    /// Name a group, which is typed in the title bar of its box.
+    RenameGroup {
+        group: GroupId,
+        name: String,
+    },
+    /// Give a group another colour, with the colour control of the title bar of its box.
+    SetGroupColour {
+        group: GroupId,
+        colour: GroupColour,
+    },
+    /// Put an effect on a group (with the plus button of its box), with the values it begins with.
+    AddGroupEffect {
+        group: GroupId,
+        kind: EffectKind,
+    },
+    /// Take an effect off a group.
+    RemoveGroupEffect {
+        group: GroupId,
+        kind: EffectKind,
+    },
+    /// Give a value of an effect of a group a value. (It is not animated.)
+    SetGroupEffectValue {
+        group: GroupId,
+        property: PropertyId,
+        value: PropertyValue,
+    },
+    /// Move something in the chain of effects of a clip, a track or a group (by dragging it in the properties panel): to right before
+    /// `before`, or last (after all that is shown of the chain) if that is `None`.
+    MoveChainItem {
+        owner: Member,
+        item: ChainItemKey,
+        before: Option<ChainItemKey>,
+    },
+
     // Keyframes.
     /// Put a keyframe on a property of a clip or a track at a frame (with the stopwatch), with the value the property
     /// has there now.
@@ -291,6 +348,17 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectValue { .. }
+            | Self::CreateGroup { .. }
+            | Self::AddToGroup { .. }
+            | Self::RemoveFromGroup { .. }
+            | Self::DisbandGroup(_)
+            | Self::DeleteGroupAndEverythingInIt(_)
+            | Self::RenameGroup { .. }
+            | Self::SetGroupColour { .. }
+            | Self::AddGroupEffect { .. }
+            | Self::RemoveGroupEffect { .. }
+            | Self::SetGroupEffectValue { .. }
+            | Self::MoveChainItem { .. }
             | Self::AddKeyframe { .. }
             | Self::RemoveKeyframe { .. }
             | Self::MoveKeyframes(_)
@@ -387,6 +455,17 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectValue { .. }
+            | Self::CreateGroup { .. }
+            | Self::AddToGroup { .. }
+            | Self::RemoveFromGroup { .. }
+            | Self::DisbandGroup(_)
+            | Self::DeleteGroupAndEverythingInIt(_)
+            | Self::RenameGroup { .. }
+            | Self::SetGroupColour { .. }
+            | Self::AddGroupEffect { .. }
+            | Self::RemoveGroupEffect { .. }
+            | Self::SetGroupEffectValue { .. }
+            | Self::MoveChainItem { .. }
             | Self::AddKeyframe { .. }
             | Self::RemoveKeyframe { .. }
             | Self::MoveKeyframes(_)
@@ -427,6 +506,13 @@ impl Command {
             Self::SetEffectValue { target, property, .. } => {
                 Some(EditKey::about(&("the value of the effect", target, property)))
             }
+            Self::RenameGroup { group, .. } => Some(EditKey::about(&("the name of", group))),
+            Self::SetGroupColour { group, .. } => Some(EditKey::about(&("the colour of", group))),
+            Self::SetGroupEffectValue { group, property, .. } => Some(EditKey::about(&(
+                "the value of the effect of the group",
+                group,
+                property,
+            ))),
             Self::MoveKeyframes(moves) => {
                 let mut keyframes: Vec<KeyframeId> = moves.iter().map(|moved| moved.keyframe).collect();
                 keyframes.sort();

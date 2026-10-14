@@ -15,6 +15,7 @@ mod editing;
 mod fast_forward_application;
 mod file_chooser;
 mod gesture_frame;
+mod group_messages;
 mod history;
 mod keyboard;
 mod keyframe_moving;

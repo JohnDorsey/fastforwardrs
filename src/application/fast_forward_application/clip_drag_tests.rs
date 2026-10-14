@@ -26,7 +26,7 @@ fn video_clip(frames: u64) -> Clip {
 
 /// A project whose tracks (the front one first) have clips of these lengths, each with the number
 /// of empty frames before it.
-fn project_of_tracks(tracks: &[&[(u64, u64)]]) -> Project {
+pub(super) fn project_of_tracks(tracks: &[&[(u64, u64)]]) -> Project {
     let built: Vec<Track> = tracks
         .iter()
         .enumerate()
@@ -40,7 +40,7 @@ fn project_of_tracks(tracks: &[&[(u64, u64)]]) -> Project {
 }
 
 /// One track with clips at frames 20..50, 65..95 and 110..140: all in view at the normal zoom.
-fn window_with_three_clips() -> Window {
+pub(super) fn window_with_three_clips() -> Window {
     Window::showing(project_of_tracks(&[&[(20, 30), (15, 30), (15, 30)]]))
 }
 
@@ -53,7 +53,7 @@ fn starts_on_track(window: &Window, position: usize) -> Vec<u64> {
 
 /// A point on the strip of the track at `position`, in the middle of timeline frame `frame` (so that
 /// moving the point by the width of some frames moves it by as many).
-fn in_frame(window: &Window, position: usize, frame: u64) -> Pos2 {
+pub(super) fn in_frame(window: &Window, position: usize, frame: u64) -> Pos2 {
     let start = window.x_of_frame_on_the_strip(position, frame);
     let width = window.x_of_frame_on_the_strip(position, frame + 1) - start;
     Pos2::new(start + width / 2.0, window.strip_of_track(position).center().y)

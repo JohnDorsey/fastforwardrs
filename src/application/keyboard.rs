@@ -4,7 +4,8 @@
 //! * **Space** plays the video, or pauses it while it is playing.
 //! * **S** cuts the selected clips that are at the current frame, there, and **Shift+S** cuts every clip that is at the current
 //!   frame, on every track, whatever is selected.
-//! * **Delete** takes the selected clips off their tracks, and the selected keyframes and racks away.
+//! * **Delete** takes the selected clips off their tracks, the selected keyframes and racks away, and the selected groups apart (what
+//!   was in a group stays).
 //! * **Escape** deselects.
 //! * **Ctrl+Z** undoes the latest edit, and **Ctrl+Y** (or **Ctrl+Shift+Z**) does it again.
 //! * **Left** and **Right** move the current frame back or forward by one frame, while paused or
@@ -27,7 +28,7 @@
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Popup};
 
 use super::commands::Command;
-use crate::project::{ClipId, KeyframeId, RackId, TimelineFrameIndex};
+use crate::project::{ClipId, GroupId, KeyframeId, RackId, TimelineFrameIndex};
 
 /// The shortcut that undoes (with Ctrl, or Command on a Mac), and the ones that redo.
 pub const UNDO_SHORTCUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
@@ -48,6 +49,8 @@ pub struct KeyboardState {
     pub selected_keyframes: Vec<KeyframeId>,
     /// The selected racks of keyframes.
     pub selected_racks: Vec<RackId>,
+    /// The selected groups.
+    pub selected_groups: Vec<GroupId>,
     /// The selected clips that are at the current frame.
     pub selected_clips_at_the_current_frame: Vec<ClipId>,
     /// Whether the pointer is over the preview panel, which gives some keys another meaning than they have elsewhere.
@@ -275,6 +278,9 @@ fn delete_what_is_selected(state: &KeyboardState, _presses: usize) -> Vec<Comman
     if !state.selected_clips.is_empty() {
         commands.push(Command::DeleteClips(state.selected_clips.clone()));
     }
+    // (A group that is selected is taken apart, and what was in it stays: the clips that are deleted with it are those that are selected.
+    // A group that had nothing but those clips in it is gone with them, and has nothing left to take apart.)
+    commands.extend(state.selected_groups.iter().map(|group| Command::DisbandGroup(*group)));
     commands
 }
 
@@ -391,7 +397,7 @@ mod tests {
     use egui::Event;
 
     use super::*;
-    use crate::project::{ClipId, TrackId};
+    use crate::project::{ClipId, GroupId, TrackId};
 
     fn location(clip: u32) -> ClipId {
         ClipId::new(TrackId::new(0), clip)
@@ -404,6 +410,7 @@ mod tests {
             selected_clips: Vec::new(),
             selected_keyframes: Vec::new(),
             selected_racks: Vec::new(),
+            selected_groups: Vec::new(),
             selected_clips_at_the_current_frame: Vec::new(),
             pointer_is_over_the_preview: false,
             clip_ends_to_go_between: Vec::new(),
@@ -543,6 +550,33 @@ mod tests {
             pressing(Key::Delete, state()),
             Vec::<Command>::new(),
             "with nothing selected"
+        );
+    }
+
+    #[test]
+    fn delete_takes_a_selected_group_apart_and_does_so_after_the_selected_clips_are_deleted() {
+        let only_a_group = KeyboardState {
+            selected_groups: vec![GroupId::new(1)],
+            ..state()
+        };
+        assert_eq!(
+            pressing(Key::Delete, only_a_group),
+            vec![Command::DisbandGroup(GroupId::new(1))],
+            "what is in the group is not deleted: the group is"
+        );
+        let clips_and_groups = KeyboardState {
+            selected_clips: vec![location(2)],
+            selected_groups: vec![GroupId::new(1), GroupId::new(4)],
+            ..state()
+        };
+        assert_eq!(
+            pressing(Key::Delete, clips_and_groups),
+            vec![
+                Command::DeleteClips(vec![location(2)]),
+                Command::DisbandGroup(GroupId::new(1)),
+                Command::DisbandGroup(GroupId::new(4)),
+            ],
+            "the clips that are selected go, and the groups that are selected are taken apart"
         );
     }
 

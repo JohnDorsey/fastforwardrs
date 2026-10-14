@@ -6,16 +6,26 @@
 //! * nothing: a hint;
 //! * one clip or one track: its properties, in a box headed with the kind of thing it is (a video clip,
 //!   a sound clip, a picture clip, a text object, a track);
+//! * one group: a box with a thick outline in its colour, a bar at its head with its kind, its name and its colour, and the list of what is in
+//!   it (see `group_properties`);
 //! * several things: their properties cannot be changed together, so they are listed, and clicking one of
 //!   them selects just that one.
+//!
+//! Under the box of a clip, of a track or of a group are its **effects**, with the **badges** among them that say where the effects of the
+//! groups it is in (and, for a clip, of its track) are done to it, and the plus button that puts another effect on (see `chain`). What a badge,
+//! or an item of the list of what is in a group, stands for is selected with a **double click**, so that taking hold of a badge to move it does
+//! not select anything.
 //!
 //! Each change is a command, as it is everywhere in the window, so that it is an edit like any other
 //! (one step of the history for a slider that is dragged).
 
 mod animatable;
+mod badge;
+mod chain;
 mod clip_properties;
 mod controls;
 mod effects;
+mod group_properties;
 mod keyframe_buttons;
 mod keyframe_properties;
 mod kind_box;
@@ -68,6 +78,7 @@ pub fn show(ui: &mut Ui, content: &PropertiesContent<'_>, commands: &mut Vec<Com
             None => selection_list::show(ui, content, commands),
             Some(SelectionItem::Clip(clip)) => clip_properties::show(ui, content, clip, commands),
             Some(SelectionItem::Track(track)) => track_properties::show(ui, content, track, commands),
+            Some(SelectionItem::Group(group)) => group_properties::show(ui, content, group, commands),
             Some(SelectionItem::Keyframe(keyframe)) => keyframe_properties::show(ui, content, keyframe),
             Some(SelectionItem::Rack(rack)) => rack_properties::show(ui, content, rack),
         });

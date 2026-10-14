@@ -266,7 +266,16 @@ impl Project {
         to: RackDestination,
         shift_in_frames: i64,
     ) -> Result<(), EditError> {
-        self.plan_the_move_of_a_rack(rack, to, shift_in_frames).map(|_| ())
+        self.plan_the_move_of_a_rack(rack, to, shift_in_frames)?;
+        if let RackDestination::NewCrate { track, start, length } = to
+            && !self.groups.is_empty()
+        {
+            // (A crate is a clip, and one that is made inside the rectangle of a clip group is inside it without being in it: whether it is
+            // is found out by making it in a copy. Only a move to a new crate can do this, so only that is looked at.)
+            self.clone()
+                .insert_crate(track, TimelineFrameIndex::new(start), length)?;
+        }
+        Ok(())
     }
 
     /// Moves the rack `rack` to another drawer, or to a new keyframe crate, shifting all of its keyframes `shift_in_frames`
@@ -406,7 +415,8 @@ impl Project {
     }
 
     /// Puts a keyframe crate on the track `track`, starting at `timeline_frame` and lasting `length` frames, which holds no
-    /// rack yet. There must be nothing on the track at any of those frames.
+    /// rack yet. There must be nothing on the track at any of those frames, and it must not be inside the rectangle of a clip group
+    /// (where only the clips that are in the group may be), which is the error [`EditError::BreaksTheRulesOfGroups`] says.
     pub fn insert_crate(
         &mut self,
         track: TrackId,
@@ -414,9 +424,11 @@ impl Project {
         length: u64,
     ) -> Result<ClipId, EditError> {
         let crate_clip = CrateClip::new(length)?;
-        Ok(self
-            .track_mut_or_error(track)?
-            .insert_clip_at(timeline_frame, Clip::Crate(crate_clip))?)
+        self.keeping_the_groups_valid(|project| {
+            Ok(project
+                .track_mut_or_error(track)?
+                .insert_clip_at(timeline_frame, Clip::Crate(crate_clip))?)
+        })
     }
 
     /// Takes the clip `owner` off its track if it is a keyframe crate that has no rack in it (nothing else is taken away).
@@ -428,7 +440,9 @@ impl Project {
             .placement_of(clip)
             .is_some_and(|placement| matches!(placement.clip, Clip::Crate(_)) && placement.drawer.is_empty());
         if has_no_rack {
-            self.delete_clip(clip)
+            // (A crate that is taken away moves nothing, so what the groups hold cannot be broken by it, and it is not looked at: the crate
+            // is taken out of the groups it was in, which is all there is to do for them.)
+            self.delete_clip_without_looking_at_the_groups(clip)
                 .expect("the crate was found on a track a moment ago");
         }
     }

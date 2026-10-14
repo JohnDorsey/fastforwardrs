@@ -170,8 +170,9 @@ can be supported. The design notes answer that at length; here is what the syste
   it, every existing effect changes its look. See the design notes, section 1.)
 * **CM-11 [P] M** **`.cube` tables** say in which space they expect their input and what space they produce (the format does not):
   two choices on the instance, default *display-referred in, display-referred out*.
-* **CM-12 [Q] M** What happens to projects made before linear-light (format 9): they keep their look (a project colour version that
-  says "legacy: effects in display-referred space") or they are converted. Q-05.
+* **CM-12 [D] M** Projects made before linear light (format 9) are **converted** (decided 2026-10-13, Q-05 option b): no legacy flag and no second mode; they
+  load with the new colour handling and look slightly different (edges of scaled pictures, blends, and untagged HD video, which is read as BT.709 and not BT.601). The
+  release notes say so.
 * **CM-13 [P] L** HDR: PQ and HLG sources, an HDR-capable display, HDR export. The working format already holds it; the interface for it
   is later.
 * **CM-14 [P] M** Colour **settings** live in: working space and input defaults in the *project* settings; the display transform in the
@@ -286,8 +287,8 @@ menu item or a window opened from one is marked.*
 
 ## 10. Finding and managing effect types (DS)
 
-* **DS-01 [Q] M** Where effect types come from: **(a)** library folders scanned at start (a folder per family, per operating system), **(b)**
-  files added to a project ("Add effect from file...", UI-05), **(c)** both. I propose (c). Q-02.
+* **DS-01 [D] M** Where effect types come from: **(a)** library folders scanned at start (a folder per family, per operating system), **(b)**
+  files added to a project ("Add effect from file...", UI-05), **(c)** both. (c) was chosen (2026-10-13, Q-02).
 * **DS-02 [P] M** The folders: a program folder (what is shipped), a user folder (`%APPDATA%`, `~/.config`, the usual place per system),
   and folders the user adds in the global settings.
 * **DS-03 [P] M** Scanning happens in the background and never blocks the window; the result is cached and refreshed when a folder
@@ -339,9 +340,14 @@ menu item or a window opened from one is marked.*
 
 ## 12. Sound hosts (AU)
 
-* **AU-01 [D] M** LADSPA plugins can be used as sound effects on clips and tracks (the original request).
+* **AU-01 [D] M** LADSPA plugins can be used as sound effects on clips and tracks (the original request), **before** CLAP (2026-10-13).
+* **AU-12 [D] M** The first test set of real plugins is the **LADSPA folder of the maintainer's LMMS 1.2.2 install** (Windows builds: the swh, TAP, CMT and
+  CAPS collections, Calf and others; 119 DLLs). **Verified by me (a read-only byte check): all 119 are 64-bit x64 and contain `ladspa_descriptor`**, so they can be
+  loaded by the 64-bit program; whether each needs other DLLs of the install (the C runtime) is untested. Most of these collections are GPL (not
+  checked file by file): the program **does not bundle them**, it finds them through a folder the user adds (DS-02) or the `LADSPA_PATH` convention. A
+  zero-byte or damaged DLL in a folder is a test case for DS-04 (a plugin that fails to load is listed as failed, never fatal).
 * **AU-02 [P] S** CLAP plugins as well, because LADSPA binaries are almost only found on Linux; CLAP is the format users on all three
-  systems have. Q-27 asks what the maintainer actually wants to *use* first (a plugin of their own, perhaps).
+  systems have. **Decided 2026-10-13: LADSPA first, then CLAP** (Q-27).
 * **AU-03 [P] M** Sound plugins run **in the program**, in one block graph that the speakers and the export both call (not through
   ffmpeg's `ladspa` filter, which is not available on every system). This replaces today's two ffmpeg graphs for sound, with the
   old one kept as the oracle until the mixes match.
@@ -360,11 +366,13 @@ menu item or a window opened from one is marked.*
 
 ## 13. Groups (GR)
 
-*The detail is in the design notes, section 4; the features here are what has to be true whichever structure is chosen.*
+***Superseded 2026-10-13:** groups are specified by the maintainer in `groups-feature-spec.md` (three kinds: scattered group = tag, contiguous group = clip group, track group), and are built **before** the rest of the effects system. Where this section disagrees with that document, that document wins; GR-03 and GR-05 are answered by it, GR-09 and GR-10 stay.*
+
+***Built 2026-10-13** (details in `groups-feature-spec.md`, section 7): the three kinds of group, their rules, the properties panel, the outlines, the file format (version 10). **GR-02 and GR-10 are not true yet:** the effects of a clip group or a track group are a **placeholder**: they are applied to the picture of each member by itself (in the preview and in the export), which is the same picture only where the members are not see-through, and is off, by up to about 100 of the 255 levels of a colour for vivid colours (not the "14" that an earlier version of this document and of the spec said: that was one measured example), at the see-through edges of layers that are over others. Only effects that give the same picture when applied to each member (`on_a_composite` in the table of effects) are offered to those groups, until the engine can make the composite. A tag is exact (its effects are meant to be applied to each member).*
 
 * **GR-01 [D] M** There are **track groups** and **clip groups**, and each can have effects of its own (2026-10-13).
 * **GR-02 [P] M** The effects of a group apply to the **composite of what is in the group** (not to what is behind it).
-* **GR-03 [Q] M** A **clip group** is (a) a **compound clip**: an opaque clip that has a timeline of its own with tracks and clips, which can
+* **GR-03 [D] M** (superseded by the three kinds of `groups-feature-spec.md`; kept for history) A **clip group** is (a) a **compound clip**: an opaque clip that has a timeline of its own with tracks and clips, which can
   be opened, or (b) a **selection group** (moves and is cut together, and can take an effect that applies to the composite of exactly its
   clips). Prior art: Kdenlive's groups are (b) and its nested "sequences" are (a); Premiere, Resolve, Final Cut and After Effects have (a). (a) is the
   largest piece of the group work by far. Q-15.
@@ -376,9 +384,9 @@ menu item or a window opened from one is marked.*
   gives the same render).
 * **GR-08 [P] S** The model of groups is built on the descriptor-driven effect model, never on the closed enum (the order: design
   notes, section 4).
-* **GR-09 [Q] S** **Adjustment clips**: a clip with no picture of its own whose effects apply to the composite of everything behind it, for the
+* **GR-09 [D] S** **Adjustment clips**: a clip with no picture of its own whose effects apply to the composite of everything behind it, for the
   length of the clip. Under the accepted transition model (EF-03) it costs almost nothing (a filter whose input is the backdrop), it is in
-  Blender, MLT, Resolve and After Effects, and it is the cheapest first use of the backdrop mechanism. Not asked for; Q-32.
+  Blender, MLT, Resolve and After Effects, and it is the cheapest first use of the backdrop mechanism. Not asked for by the maintainer; accepted when proposed (2026-10-13, Q-32), to be built after the engine.
 * **GR-10 [P] M** A group is **isolated** (its children are composited together first, then the group's effects and blend mode apply) or
   **pass-through** (its children are composited straight into what is behind). The model has the flag from the start; the renderer treats a
   group with no effects and no blend mode as pass-through (free). Whether the user sees the choice: Q-33.
@@ -402,7 +410,7 @@ menu item or a window opened from one is marked.*
 
 ## 15. Compatibility and migration (MG)
 
-* **MG-01 [P] M** Format 9 projects open in the new program and look as before (CM-12).
+* **MG-01 [P] M** Format 9 projects open in the new program and look **nearly** as before: the differences are the ones CM-12 lists, which the maintainer accepted (2026-10-13).
 * **MG-02 [P] M** A project saved by the new program is not expected to open in the old one, and says so clearly (the "newer file
   format" message exists).
 * **MG-03 [P] M** Every change of the saved form has a version and a reader for the old one, and a fixture file of each version in the
@@ -472,30 +480,30 @@ menu item or a window opened from one is marked.*
 
 ## 19. Open questions
 
-*Round 1 (the ones the data model, the first phases and the file format depend on) is asked in the chat and marked **R1** here; the others
-wait for their turn and keep the default until then. Each has my default, so "defaults" is a valid answer.*
+*Round 1 (the ones the data model, the first phases and the file format depend on) was asked in the chat on 2026-10-13. **A1** = answered
+by accepting my default (2026-10-13); **R1, still open** = not answered yet; the unmarked ones are round 2 and keep the default until reviewed. Each has my default, so "defaults" is a valid answer.*
 
 | # | Round | Question | My default |
 |---|---|---|---|
 | Q-01 | | Terminology: **effect** (what the user sees), **effect type**, **effect instance**, **host**, **resource**; **plugin** only for what comes from a file or library. | yes |
-| Q-02 | **R1** | Where do effect types come from: **library folders** scanned at start, **files added to the project**, or both? | both |
-| Q-03 | **R1** | Embedding setting: values *embed / link / ask*; project beats global; changes only resources added later; with a **plain-JSON project file** (which cannot embed) it falls back to link with a note, or asks once to save as `.ffrs`? | embed/link/ask; project beats global; new ones only; ask once to convert |
-| Q-04 | **R1** | Colour spaces for the **first release**: working (which), source inputs (which, including log cameras, PQ/HLG, ACES2065-1), display, export outputs; and is the ACES **view** transform (the look) wanted, or only the space conversions? | working: linear Rec.709 primaries and ACEScg; inputs: Rec.709/sRGB, Rec.2020, ACES2065-1 (as numbers; no EXR files yet); display sRGB; export Rec.709; logs and HDR later; view transform later through a baked table |
-| Q-05 | **R1** | Projects made before linear light, and the **untagged-video assumption** (today BT.601 at every size, which is wrong for HD): keep their look with a "legacy" project flag, or convert them? | legacy flag keeps the look (including the BT.601 assumption); new projects: untagged HD = BT.709, SD = BT.601 |
+| Q-02 | A1 (default accepted) | Where do effect types come from: **library folders** scanned at start, **files added to the project**, or both? | both |
+| Q-03 | A1 (default accepted) | Embedding setting: values *embed / link / ask*; project beats global; changes only resources added later; with a **plain-JSON project file** (which cannot embed) it falls back to link with a note, or asks once to save as `.ffrs`? | embed/link/ask; project beats global; new ones only; ask once to convert |
+| Q-04 | A1 (default accepted) | Colour spaces for the **first release**: working (which), source inputs (which, including log cameras, PQ/HLG, ACES2065-1), display, export outputs; and is the ACES **view** transform (the look) wanted, or only the space conversions? | working: linear Rec.709 primaries and ACEScg; inputs: Rec.709/sRGB, Rec.2020, ACES2065-1 (as numbers; no EXR files yet); display sRGB; export Rec.709; logs and HDR later; view transform later through a baked table |
+| Q-05 | A2 | Projects made before linear light, and the untagged-video assumption | **answered 2026-10-13: option (b): old projects are CONVERTED (no legacy flag); they get the new colour handling and look slightly different; new and old alike assume untagged HD is BT.709, SD is BT.601** |
 | Q-06 | | Colour parameters: their space is always the working space, and colours are interpolated in linear light. | yes |
-| Q-07 | **R1** | The **hue shift** (and other existing effects) run in which domain: display-referred (keeps today's look) or linear? | display-referred; new effects declare their own |
-| Q-08 | **R1** | File-based effect types: **key = the name, version = a hash of the content**; the **embedded copy wins** over a library copy of the same name, with an "update to the library version" offer. | yes |
-| Q-09 | **R1** | Transitions: where does `progress` come from: a keyframed number only, or **derived from a start and end frame on the effect** (with a keyframed override)? | derived from a range, with an override |
-| Q-10 | **R1** | Which **built-in effects** ship in the first release besides hue shift? | brightness/contrast, saturation, exposure, blur, crop, opacity, LUT |
+| Q-07 | A1 (default accepted) | The **hue shift** (and other existing effects) run in which domain: display-referred (keeps today's look) or linear? | display-referred; new effects declare their own |
+| Q-08 | A1 (default accepted) | File-based effect types: **key = the name, version = a hash of the content**; the **embedded copy wins** over a library copy of the same name, with an "update to the library version" offer. | yes |
+| Q-09 | A1 (default accepted) | Transitions: where does `progress` come from: a keyframed number only, or **derived from a start and end frame on the effect** (with a keyframed override)? | derived from a range, with an override |
+| Q-10 | A1 (default accepted) | Which **built-in effects** ship in the first release besides hue shift? | brightness/contrast, saturation, exposure, blur, crop, opacity, LUT |
 | Q-11 | | A generator clip's default length (5 s like a picture) and whether it can be dragged longer. | 5 s, extendable |
-| Q-12 | **R1** | Export when an effect is missing: refuse, warn and go ahead, or ask? | refuse, listing what is missing, with an "export anyway" button |
+| Q-12 | A1 (default accepted) | Export when an effect is missing: refuse, warn and go ahead, or ask? | refuse, listing what is missing, with an "export anyway" button |
 | Q-13 | | When the machine cannot keep up in the preview: lower resolution, drop frames, or both? | lower resolution first, then drop |
 | Q-14 | | The + menu grows to hundreds of entries: **categories and a search field** inside that menu are acceptable (a new control in an existing menu)? | yes |
-| Q-15 | **R1** | **Clip group**: compound clip (a timeline of its own) or selection group? Depth limit? | selection group first (cheap), compound clip only if you ask for it; depth 8 |
+| Q-15 | A2 | Clip groups | **answered 2026-10-13 by the three-kind specification in `groups-feature-spec.md` (tag, clip group, track group)** |
 | Q-16 | | Groups as organisation only (no effects) before the engine exists: acceptable? | yes |
-| Q-17 | **R1** | Text objects become generators: in the same file-format change as the plugin model (v10) or a later one (v11)? Font as a parameter type. | later (v11), once the plugin model has settled |
+| Q-17 | A1 (default accepted) | Text objects become generators: in the same file-format change as the plugin model (v10) or a later one (v11)? Font as a parameter type. | later (v11), once the plugin model has settled |
 | Q-18 | | EXR/DPX image or sequence import and export in the first release? | no |
-| Q-19 | **R1** | Platforms: install **WSL2** now (admin + restart; I can then run the Linux tests myself), or a VirtualBox VM (you create it; cannot be combined with WSL2 without slowdown), or neither yet? Is the GitHub repository public (free hosted CI for Windows/Ubuntu/macOS)? What does "supported" mean per platform? | WSL2; public repo with CI; Linux: tests pass, macOS: builds in CI |
+| Q-19 | A1 (default accepted) | Platforms: install **WSL2** now (admin + restart; I can then run the Linux tests myself), or a VirtualBox VM (you create it; cannot be combined with WSL2 without slowdown), or neither yet? Is the GitHub repository public (free hosted CI for Windows/Ubuntu/macOS)? What does "supported" mean per platform? | WSL2; public repo with CI; Linux: tests pass, macOS: builds in CI |
 | Q-20 | | On-canvas handles for point parameters in the first release? | later |
 | Q-21 | | Persistent (feedback) effects: re-simulate up to how many frames on a seek before using the last cached state? | 300 frames |
 | Q-22 | | Audio-reactive shaders: ever? | not in the first release |
@@ -503,25 +511,25 @@ wait for their turn and keep the default until then. Each has my default, so "de
 | Q-24 | | Reference host for the ISF golden corpus: the ISF Editor on Windows, by hand, 10 to 20 shaders? | yes |
 | Q-25 | | What ISF and LUT content ships (LG-02)? | gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else |
 | Q-26 | | Resource size limit; ask before loading a project that names a binary plugin? | 64 MiB per resource; ask once per plugin |
-| Q-27 | **R1** | Which **LADSPA/CLAP plugins** do you want to use first (one of your own?), and on which system will you run them? (LADSPA binaries are rare on Windows.) | your own LADSPA plugin(s) first, then CLAP |
+| Q-27 | A1 | Which audio plugins first? | **answered 2026-10-13: LADSPA before CLAP; the LADSPA plugins of the maintainer's LMMS 1.2.2 install are the first test set** |
 | Q-28 | | A master bus with effects? | later |
 | Q-29 | | Keep ffmpeg's `atempo` for sped-up sound for now? | yes |
 | Q-30 | | Will you ever want a **node-editor** interface (design notes, section 2)? | no, not planned |
 | Q-31 | | A render process (design notes, section 3): keep it possible only through message-shaped interfaces, or build it? | possible only; a command-line export first |
-| Q-32 | **R1** | **Adjustment clips** (an effect over everything behind a clip for its length): wanted? | yes, after the engine |
+| Q-32 | A1 (default accepted) | **Adjustment clips** (an effect over everything behind a clip for its length): wanted? | yes, after the engine |
 | Q-33 | | Isolated / pass-through for groups visible to the user? | a hidden default (isolated if it has effects) |
-| Q-34 | **R1** | **GPL-3.0-or-later or GPL-3.0-only**, and an Ardour-style **plugin clarification** (plugins loaded through a third-party API are not derivative works)? Now, while you are the only copyright holder? | or-later; yes |
+| Q-34 | A1 (default accepted) | **GPL-3.0-or-later or GPL-3.0-only**, and an Ardour-style **plugin clarification** (plugins loaded through a third-party API are not derivative works)? Now, while you are the only copyright holder? | or-later; yes |
 | Q-35 | | OpenColorIO as an optional baker/reader later? | later |
 | Q-36 | | Export formats: 10-bit and other codecs now that a GPL ffmpeg may ship (x264, x265)? Hardware encoders? | later; keep today's formats |
-| Q-37 | **R1** | The plan's idea of shipping **LUTs through ffmpeg's `lut3d` before the engine exists** conflicts with the colour-space features (CM-10, CM-11): drop it (LUTs wait for the engine) or ship a limited version (display-referred in and out) first? | LUTs wait for the engine |
+| Q-37 | A1 (default accepted) | The plan's idea of shipping **LUTs through ffmpeg's `lut3d` before the engine exists** conflicts with the colour-space features (CM-10, CM-11): drop it (LUTs wait for the engine) or ship a limited version (display-referred in and out) first? | LUTs wait for the engine |
 
 ---
 
 ## 20. What this list does not say yet
 
 The order, the sizes and the gates: that is the plan of action, which is written when section 19 has no **[Q]** left that a phase depends
-on. A first guess of the order, to be argued about then: phase 0 (open up effect identity generic over the owner, the licence mechanics, the tooling), the
-group *structure* in parallel with the engine skeleton (parity first, in a display-referred compatibility mode), linear light turned on as a reviewed
+on. A first guess of the order, to be argued about then: **the three kinds of group first** (maintainer, 2026-10-13: `groups-feature-spec.md`), then phase 0 (open up effect identity generic over the owner, the licence mechanics, the tooling), the
+engine skeleton (parity first, in a display-referred compatibility mode), linear light turned on as a reviewed
 change, the LUT host, group effects and adjustment clips, the ISF host, sound (LADSPA, then CLAP), the plugin manager.
 
 ## 21. Decision log
@@ -539,6 +547,9 @@ change, the LUT host, group effects and adjustment clips, the ISF host, sound (L
 | 2026-10-13 | text objects should eventually be generator effects | maintainer |
 | 2026-10-13 | OpenFX is shelved | maintainer |
 | 2026-10-13 | clip groups and track groups with their own effects are wanted | maintainer |
+| 2026-10-13 | Q-05: old projects are converted (option b), no legacy flag | maintainer |
+| 2026-10-13 | **groups are built before the effects-system work**; three kinds specified (tag / clip group / track group): `groups-feature-spec.md` | maintainer |
+| 2026-10-13 | round 1 answered by accepting my defaults, except Q-05 and Q-15 (still open) and Q-27 (LADSPA before CLAP; LMMS plugins as the test set; `ladspa-customwave` is not part of this project) | maintainer |
 
 ## 22. Gaps and inconsistencies found while writing this list
 

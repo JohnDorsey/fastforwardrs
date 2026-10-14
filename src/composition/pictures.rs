@@ -19,8 +19,8 @@ use std::collections::BTreeSet;
 use crate::colour_effects::ColourMatrix;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, EffectKind, FrameRate, Project, PropertyId, PropertyValue, ResolvedAnimations,
-    SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    Animation, AnimationTarget, AppliedEffect, EffectKind, FrameRate, Member, Project, PropertyId, PropertyValue,
+    ResolvedAnimations, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -109,8 +109,15 @@ pub struct Layer {
     /// The keyframes of what is seen of the clip, from all the racks that animate it wherever they are kept: where it is, and
     /// for a text object how it looks. Their frames are frames of the timeline. (Those of its effects are in the effects.)
     pub animation: Animation,
-    /// What is done to the picture of the layer, one after another: the effects of its clip, in the order they were put on in, and
-    /// then those of its track.
+    /// What is done to the picture of the layer, one after another: the effects that are applied to its clip, in the order they are
+    /// applied in (see [`Project::effects_applied_to_the_clip`]): those of the clip itself, those of its track where the badge of the
+    /// track is in the chain of the clip, those of the tags the clip is in where their badges are, and then those of the clip groups it
+    /// is in and of the track groups its track is in, the nearest first.
+    ///
+    /// **The effects of a clip group or a track group are a placeholder here.** They are meant to be applied to the picture that the
+    /// members of the group make together, which the preview and the export cannot make yet, so they are applied to the picture of each
+    /// member instead, which is the same picture except where a colour is cut off (see `project::groups::effects_of_groups`, which says
+    /// exactly what the difference is). When the pictures of groups can be made, they will not be in the effects of a layer.
     pub effects: Vec<LayerEffect>,
 }
 
@@ -332,7 +339,8 @@ struct Candidate<'project> {
     placement: Placement,
     /// The keyframes of what is seen of the clip.
     animation: Animation,
-    /// What is done to its picture: the effects of the clip, and then of its track.
+    /// What is done to its picture: the effects that are applied to the clip (those of its groups are a placeholder, see
+    /// [`Layer::effects`]).
     effects: Vec<LayerEffect>,
 }
 
@@ -371,23 +379,25 @@ impl Candidate<'_> {
     }
 }
 
-/// The effects that `target` (a clip or a track) has, as a layer has them: with the keyframes of their values.
-fn effects_of<'a>(
-    project: &'a Project,
-    animations: &'a ResolvedAnimations,
-    target: AnimationTarget,
-) -> impl Iterator<Item = LayerEffect> + 'a {
-    project
-        .effects_of(target)
-        .into_iter()
-        .flat_map(|effects| effects.iter())
-        .map(move |effect| LayerEffect {
-            kind: effect.kind(),
-            values: effect.values().to_vec(),
-            animation: animations
-                .of(target)
-                .restricted_to(|property| effect.kind().properties().contains(&property)),
-        })
+/// An effect that is applied to a clip, as a layer has it: with the keyframes of its values. (The values of an effect of a clip or of a track are
+/// animated by that clip's or track's keyframes; those of the effect of a group are not animated.)
+fn layer_effect_of(animations: &ResolvedAnimations, applied: &AppliedEffect<'_>) -> LayerEffect {
+    let kind = applied.effect.kind();
+    let animation = match applied.owner {
+        Member::Clip(clip) => Some(AnimationTarget::Clip(clip)),
+        Member::Track(track) => Some(AnimationTarget::Track(track)),
+        Member::Group(_) => None,
+    }
+    .map_or_else(Animation::default, |target| {
+        animations
+            .of(target)
+            .restricted_to(|property| kind.properties().contains(&property))
+    });
+    LayerEffect {
+        kind,
+        values: applied.effect.values().to_vec(),
+        animation,
+    }
 }
 
 /// Works out the picture at every frame of the project. A video from a file that is not `usable`
@@ -395,6 +405,7 @@ fn effects_of<'a>(
 pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier) -> bool) -> PicturePlan {
     let picture_size = project.picture_size();
     let animations = project.resolved_animations();
+    let applied_effects = project.effects_applied_to_every_clip();
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
         for placement in track.placements() {
@@ -427,8 +438,11 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 animation: animations
                     .of(AnimationTarget::Clip(placement.id))
                     .restricted_to(|property| property.is_seen() && property.effect().is_none()),
-                effects: effects_of(project, &animations, AnimationTarget::Clip(placement.id))
-                    .chain(effects_of(project, &animations, AnimationTarget::Track(track.id())))
+                effects: applied_effects
+                    .get(&placement.id)
+                    .into_iter()
+                    .flatten()
+                    .map(|applied| layer_effect_of(&animations, applied))
                     .collect(),
             });
         }
@@ -642,5 +656,7 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
 mod animation_tests;
 #[cfg(test)]
 mod effects_tests;
+#[cfg(test)]
+mod group_effects_tests;
 #[cfg(test)]
 mod tests;

@@ -1,6 +1,7 @@
 //! Exporting projects whose clips and tracks have effects with the real ffmpeg, checked colour by colour against what the effect
 //! says: a hue shift of a flat colour comes out as the colour that the arithmetic of the effect says, whether the effect is of the
-//! clip or of the track, and for a picture, a text object, and a value that has keyframes.
+//! clip or of the track, and for a picture, a text object, and a value that has keyframes; and the hue shift of a group, of each of the three
+//! kinds, which is done to the picture of each of the clips that are in it (see the placeholder in `project::groups::effects_of_groups`).
 
 mod support;
 
@@ -9,8 +10,8 @@ use std::path::Path;
 use fastforwardrs::colour_effects::ColourMatrix;
 use fastforwardrs::media::{FfmpegToolchain, probe_source_media};
 use fastforwardrs::project::{
-    AnimationTarget, ClipId, EffectKind, Project, PropertyId, PropertyValue, SourceMedia, SourceMediaIdentifier,
-    SourceMediaLink, TextColour, TextObject, TimelineFrameIndex,
+    AnimationTarget, ClipId, EffectKind, GroupId, GroupKind, Member, Project, PropertyId, PropertyValue, SourceMedia,
+    SourceMediaIdentifier, SourceMediaLink, TextColour, TextObject, TimelineFrameIndex,
 };
 use support::{
     DecodedVideo, decode_video, export, export_with_text_pictures, make_a_keyframe,
@@ -352,4 +353,106 @@ fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
             &format!("the text, frame {number}"),
         );
     }
+}
+
+// --- groups ---
+
+fn put_a_hue_shift_on_the_group(project: &mut Project, group: GroupId, degrees: f32) {
+    project.add_effect_to_the_group(group, EffectKind::HueShift).unwrap();
+    project
+        .set_effect_value_of_the_group(group, PropertyId::HueShift, &PropertyValue::Number(degrees))
+        .unwrap();
+}
+
+/// A project of a video that is all of one colour, cut in two at frame 30, and the clips that are the first half and the second.
+fn project_of_a_flat_colour_video_cut_in_two(toolchain: &FfmpegToolchain, folder: &Path) -> (Project, ClipId, ClipId) {
+    let (mut project, first) = project_of_a_flat_colour_video(toolchain, folder, ORANGE);
+    project.split_at(TimelineFrameIndex::new(30), None);
+    let second = project.tracks()[0].entries()[1].id();
+    (project, first, second)
+}
+
+#[test]
+fn the_hue_shift_of_a_tag_turns_the_colours_of_the_clips_in_it_and_of_no_other() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, first, _) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
+    let tag = project.create_group(GroupKind::Tag, &[Member::Clip(first)]).unwrap();
+    put_a_hue_shift_on_the_group(&mut project, tag, 120.0);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "tag_hue.mp4");
+
+    assert_eq!(decoded.pictures.len(), 60);
+    for (number, picture) in decoded.pictures.iter().enumerate() {
+        let wanted = if number < 30 { turned(ORANGE, 120.0) } else { ORANGE };
+        assert_near(
+            colour_at(picture, WIDTH / 2, HEIGHT / 2),
+            wanted,
+            &format!("frame {number}"),
+        );
+    }
+}
+
+#[test]
+fn the_hue_shift_of_a_clip_group_turns_the_colours_of_the_clips_in_it() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, first, second) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(first), Member::Clip(second)])
+        .unwrap();
+    put_a_hue_shift_on_the_group(&mut project, group, 90.0);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "clip_group_hue.mp4");
+
+    assert_every_picture_is(&decoded, turned(ORANGE, 90.0), "the clip group turned by 90 degrees");
+}
+
+#[test]
+fn the_hue_shift_of_a_track_group_turns_the_colours_of_the_clips_on_its_tracks() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _, _) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
+    let track = project.tracks()[0].id();
+    let group = project
+        .create_group(GroupKind::TrackGroup, &[Member::Track(track)])
+        .unwrap();
+    put_a_hue_shift_on_the_group(&mut project, group, 150.0);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "track_group_hue.mp4");
+
+    assert_every_picture_is(&decoded, turned(ORANGE, 150.0), "the track group turned by 150 degrees");
+}
+
+#[test]
+fn the_effects_of_a_clip_its_track_a_tag_a_clip_group_and_a_track_group_are_all_done() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, first, second) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
+    let track = project.tracks()[0].id();
+    let tag = project
+        .create_group(GroupKind::Tag, &[Member::Clip(first), Member::Clip(second)])
+        .unwrap();
+    let clip_group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(first), Member::Clip(second)])
+        .unwrap();
+    let track_group = project
+        .create_group(GroupKind::TrackGroup, &[Member::Track(track)])
+        .unwrap();
+    // (Turns of the colours add up, so how far they turn it in all is the sum, whatever order they are done in: it is that all five are done that
+    // this shows.)
+    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(first), 10.0);
+    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(second), 10.0);
+    put_a_hue_shift_on(&mut project, AnimationTarget::Track(track), 20.0);
+    put_a_hue_shift_on_the_group(&mut project, tag, 30.0);
+    put_a_hue_shift_on_the_group(&mut project, clip_group, 40.0);
+    put_a_hue_shift_on_the_group(&mut project, track_group, 50.0);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "everything_hue.mp4");
+
+    assert_every_picture_is(
+        &decoded,
+        turned(ORANGE, 150.0),
+        "10 and 20 and 30 and 40 and 50 degrees",
+    );
 }

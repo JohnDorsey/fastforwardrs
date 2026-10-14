@@ -375,6 +375,17 @@ impl Window {
         self.click_with(position, PointerButton::Secondary);
     }
 
+    /// Clicks twice, one frame after the other, as a double click is. (Each frame is a sixtieth of a second long, so the second click
+    /// is well within the time and the distance that egui allows for it.)
+    pub(super) fn double_click(&mut self, position: Pos2) {
+        self.move_pointer_to(position);
+        for _ in 0..2 {
+            self.press(position, PointerButton::Primary);
+            self.release(position, PointerButton::Primary);
+        }
+        self.settle();
+    }
+
     /// Clicks with the control key (Command on a Mac) held down.
     pub(super) fn click_with_control(&mut self, position: Pos2) {
         self.click_holding(position, Modifiers::COMMAND);
@@ -497,6 +508,25 @@ impl Window {
     /// Sets a slider (found by its label) to `value`, the way a screen reader does.
     pub(super) fn set_slider(&mut self, label: &str, value: f64) {
         let (target_node, target_tree) = self.harness.get_by_label(label).accesskit_node().locate();
+        self.harness.event(Event::AccessKitActionRequest(ActionRequest {
+            action: Action::SetValue,
+            target_tree,
+            target_node,
+            data: Some(ActionData::NumericValue(value)),
+        }));
+        self.settle();
+    }
+
+    /// Sets the number box (a drag value, which is a spin button to a screen reader) that shows something that begins with `shown_begins_with`
+    /// ("R " for the box of red in the colour picker, which shows "R 100") to `value`, the way a screen reader does.
+    pub(super) fn set_the_number_box_that_shows(&mut self, shown_begins_with: &str, value: f64) {
+        let (target_node, target_tree) = self
+            .harness
+            .query_all_by_role(Role::SpinButton)
+            .find(|node| node.value().is_some_and(|shown| shown.starts_with(shown_begins_with)))
+            .unwrap_or_else(|| panic!("no number box shows something that begins with {shown_begins_with:?}"))
+            .accesskit_node()
+            .locate();
         self.harness.event(Event::AccessKitActionRequest(ActionRequest {
             action: Action::SetValue,
             target_tree,

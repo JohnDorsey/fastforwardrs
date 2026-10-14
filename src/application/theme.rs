@@ -125,6 +125,16 @@ pub const DRAWER_BUTTON_ARROW: Color32 = Color32::from_rgba_premultiplied(225, 2
 /// The box in the properties panel that has the properties of one thing in it: a little lighter than the panel.
 pub const PROPERTIES_BOX_BACKGROUND: Color32 = Color32::from_rgb(38, 40, 46);
 
+/// The badge of the track that a clip is on, in the chain of effects of the clip: a grey, which no group is (the badges of groups are in
+/// the colours of the groups), with light writing.
+pub const TRACK_BADGE_BACKGROUND: Color32 = Color32::from_rgb(98, 102, 110);
+pub const TRACK_BADGE_TEXT: Color32 = Color32::from_rgb(244, 245, 247);
+
+/// What is drawn over a box or a badge of a chain of effects while it is being dragged, which dims it, and the line that shows where it will
+/// go when it is let go of (the colour that shows what is selected).
+pub const BEING_DRAGGED_VEIL: Color32 = Color32::from_black_alpha(110);
+pub const WHERE_IT_WILL_GO: Color32 = SELECTION_OUTLINE;
+
 pub const SLIDER_TRACK: Color32 = Color32::from_rgb(70, 74, 82);
 pub const SLIDER_FILLED: Color32 = Color32::from_rgb(214, 88, 70);
 pub const SLIDER_KNOB: Color32 = Color32::from_rgb(240, 240, 240);
@@ -218,6 +228,17 @@ mod tests {
         assert!(
             contrast_ratio(DRAWER_BACKGROUND, RACK_BACKGROUND) > 1.6,
             "the racks can be told from the drawer"
+        );
+    }
+
+    #[test]
+    fn the_writing_on_the_badge_of_a_track_can_be_read_and_the_badge_is_not_a_colour_that_a_group_can_be() {
+        assert!(contrast_ratio(TRACK_BADGE_BACKGROUND, TRACK_BADGE_TEXT) > 4.5);
+        let (_, saturation, _) = hue_saturation_lightness(TRACK_BADGE_BACKGROUND);
+        assert!(saturation < 0.15, "a grey, not a colour: {saturation}");
+        assert!(
+            contrast_ratio(TRACK_BADGE_BACKGROUND, PROPERTIES_BOX_BACKGROUND) > 1.8,
+            "it can be told from the box it is under"
         );
     }
 

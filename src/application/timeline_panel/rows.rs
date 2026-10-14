@@ -157,6 +157,7 @@ pub(super) fn show<'a>(
                 can_delete,
                 content.selection.contains_track(track.id()),
             ),
+            (content.project, content.selection),
             commands,
         );
         follow_the_handles(

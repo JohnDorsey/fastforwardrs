@@ -43,10 +43,15 @@ impl Track {
         self.effects.set_value(property, value)
     }
 
-    /// The effects of the clip `clip`.
-    fn effects_of_the_clip_mut(&mut self, clip: ClipId) -> Result<&mut Effects, ClipEditError> {
+    /// The effects of the clip `clip` (with the badges that are in its chain), to change them.
+    pub(in crate::project) fn effects_of_the_clip_mut(&mut self, clip: ClipId) -> Result<&mut Effects, ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
         Ok(&mut self.entries[index].effects)
+    }
+
+    /// The effects of the track itself (its chain), to change them.
+    pub(in crate::project) fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
     }
 
     /// Puts the effect `kind` on the clip `clip`, with the values it begins with. `Ok(false)`, and nothing is changed, if the clip

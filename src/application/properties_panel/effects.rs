@@ -1,22 +1,19 @@
-//! The effects of a clip or of a track in the properties panel: a box for each effect it has, under the box of the thing itself, with
-//! the controls of its values, and the plus button that puts another effect on.
+//! The controls of the values of the effects of a clip, of a track or of a group in the properties panel: the box of each effect (see
+//! `chain`, which lays out the boxes with the badges among them and the plus button) has these in it.
 //!
 //! Every effect is a row of one table (see [`crate::project::EffectKind`]): its box is made from what the row says (its name,
 //! its values), and the menu of the plus button lists the effects the thing can have and does not have yet. What each value is
 //! changed with is in [`control_for`], which has a control for each property that is a value of an effect. A change is a command
-//! like any other, so it is an edit that is undone with one step, and a value that has keyframes is changed at the playhead.
+//! like any other, so it is an edit that is undone with one step, and a value that has keyframes is changed at the playhead. (The values of
+//! the effect of a group have no keyframes: they are not animated.)
 
-use egui::{Popup, Slider, SliderClamping, Ui, pos2, vec2};
+use egui::{Slider, SliderClamping, Ui};
 
 use super::PropertiesContent;
 use super::animatable::{self, Animatable};
 use super::controls::labelled_row;
-use super::kind_box;
 use crate::application::commands::Command;
-use crate::application::naming::what_an_effect_is_called;
-use crate::application::plus_button;
-use crate::application::theme;
-use crate::project::{AnimationTarget, ClipKind, EffectKind, Effects, PropertyId, PropertyValue};
+use crate::project::{AnimationTarget, Effect, EffectKind, Effects, GroupId, PropertyId, PropertyValue};
 
 /// What the plus button that puts an effect on is called, which it says when the pointer rests on it, and to screen readers.
 pub const ADD_EFFECT_LABEL: &str = "Add an effect";
@@ -24,84 +21,9 @@ pub const ADD_EFFECT_LABEL: &str = "Add an effect";
 /// What the item of the menu of a box of an effect that deletes the effect is called.
 pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
 
-/// How much room there is round the plus button, above and below it, in points.
-const SPACE_ROUND_THE_PLUS_BUTTON: f32 = 12.0;
-
-/// Shows the boxes of the effects that `target` has, and the plus button under them, and adds a command for each change made in
-/// them. `clip_kind` is the kind of the clip `target` is (`None` for a track). A thing that no effect can be put on is not
-/// given a plus button, as it would have nothing to put on.
-pub(super) fn show(
-    ui: &mut Ui,
-    content: &PropertiesContent<'_>,
-    target: AnimationTarget,
-    clip_kind: Option<ClipKind>,
-    commands: &mut Vec<Command>,
-) {
-    let Some(has) = content.project.effects_of(target) else {
-        return;
-    };
-    for effect in has.iter() {
-        let kind = effect.kind();
-        ui.add_space(8.0);
-        let mut to_be_deleted = false;
-        kind_box::show_with_a_menu(
-            ui,
-            &what_an_effect_is_called(kind),
-            |ui| {
-                if ui.button(DELETE_EFFECT_LABEL).clicked() {
-                    to_be_deleted = true;
-                    ui.close();
-                }
-            },
-            |ui| {
-                for property in kind.properties() {
-                    show_the_control_of(ui, content, target, *property, commands);
-                }
-            },
-        );
-        if to_be_deleted {
-            commands.push(Command::RemoveEffect { target, kind });
-        }
-    }
-
-    let can_have = |kind: EffectKind| match clip_kind {
-        Some(clip_kind) => kind.applies_to_a_clip_of_kind(clip_kind),
-        None => kind.applies_to_a_track(),
-    };
-    if !EffectKind::ALL.into_iter().any(can_have) {
-        return;
-    }
-    let to_offer = effects_to_offer(EffectKind::ALL, can_have, has);
-    let room = vec2(
-        ui.available_width(),
-        plus_button::DIAMETER + 2.0 * SPACE_ROUND_THE_PLUS_BUTTON,
-    );
-    let (row, _) = ui.allocate_exact_size(room, egui::Sense::hover());
-    let button = plus_button::show(
-        ui,
-        pos2(row.center().x, row.center().y),
-        ("add an effect to", target),
-        ADD_EFFECT_LABEL,
-        ui.is_enabled() && !to_offer.is_empty(),
-        theme::PROPERTIES_BOX_BACKGROUND,
-    );
-    Popup::menu(&button).show(|ui| {
-        for kind in &to_offer {
-            if ui
-                .button(what_an_effect_is_called(*kind))
-                .on_hover_text(kind.description())
-                .clicked()
-            {
-                commands.push(Command::AddEffect { target, kind: *kind });
-                ui.close();
-            }
-        }
-    });
-}
-
 /// The effects among `kinds` that the menu of the plus button offers: those that `can_have` says the thing can have and that it
 /// does not have yet, in the order they are in `kinds`.
-fn effects_to_offer(
+pub(super) fn effects_to_offer(
     kinds: impl IntoIterator<Item = EffectKind>,
     can_have: impl Fn(EffectKind) -> bool,
     has: &Effects,
@@ -112,9 +34,9 @@ fn effects_to_offer(
         .collect()
 }
 
-/// Shows the row of the control of the value of an effect that `property` is, with the buttons of its keyframes, and adds a command
-/// if it is changed.
-fn show_the_control_of(
+/// Shows the row of the control of the value of an effect of a clip or a track that `property` is, with the buttons of its keyframes, and
+/// adds a command if it is changed.
+pub(super) fn show_the_control_of(
     ui: &mut Ui,
     content: &PropertiesContent<'_>,
     target: AnimationTarget,
@@ -136,6 +58,23 @@ fn show_the_control_of(
             property,
             value,
         });
+    }
+}
+
+/// Shows the row of the control of the value of the effect `effect` of the group `group` that `property` is, which has no buttons of
+/// keyframes (its values are not animated), and adds a command if it is changed.
+pub(super) fn show_the_control_of_a_group_effect(
+    ui: &mut Ui,
+    group: GroupId,
+    effect: &Effect,
+    property: PropertyId,
+    commands: &mut Vec<Command>,
+) {
+    let Some(shown) = effect.value_of(property) else {
+        return;
+    };
+    if let Some(value) = labelled_row(ui, |ui| control_for(ui, property, shown)) {
+        commands.push(Command::SetGroupEffectValue { group, property, value });
     }
 }
 

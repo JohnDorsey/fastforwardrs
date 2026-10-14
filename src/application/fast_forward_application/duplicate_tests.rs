@@ -617,6 +617,36 @@ fn a_command_to_copy_a_clip_that_has_no_room_changes_nothing_and_tells_the_user(
 }
 
 #[test]
+fn a_command_to_copy_clips_of_which_only_some_have_room_copies_those_and_says_nothing_of_the_others() {
+    let (mut window, video, text) = window_with_a_video_and_a_text_with_room_beside_it();
+    window.do_this(Command::DuplicateClips {
+        clips: vec![video, text],
+        side: ClipSide::Left,
+    });
+
+    // (The video is at the start of the timeline and has no room at its left; the text has.)
+    assert_eq!(
+        spans_of_the_clips_on(&window, 0),
+        vec![(40, 70), (70, 100)],
+        "the text has a copy before it"
+    );
+    assert_eq!(
+        spans_of_the_clips_on(&window, 1),
+        vec![(0, 30)],
+        "and the video has none"
+    );
+    assert_eq!(
+        window.application().selected_clips().len(),
+        1,
+        "the copy of the text is what is selected"
+    );
+    assert!(
+        window.application().dialog.is_none(),
+        "something was copied, and nothing is said about the clip that had no room"
+    );
+}
+
+#[test]
 fn a_command_to_copy_clips_that_are_not_there_does_nothing() {
     let (mut window, _, text) = window_with_a_video_and_a_text_with_room_beside_it();
     window.do_this(Command::select_clips(vec![text], SelectionChange::Replace));

@@ -88,7 +88,8 @@ pub(super) fn drag_of(
                     keyframes.extend(located.rack.keyframes().iter().map(|keyframe| keyframe.id()));
                 }
             }
-            SelectionItem::Track(_) => {}
+            // (A track, or a group, is not dragged along the timeline: what is in a group is dragged, clip by clip.)
+            SelectionItem::Track(_) | SelectionItem::Group(_) => {}
         }
     }
     keyframes.sort();

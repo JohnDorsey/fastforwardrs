@@ -992,6 +992,59 @@ fn the_keyframes_of_a_rack_that_would_not_all_be_inside_the_new_crate_stop_it_be
 }
 
 #[test]
+fn a_crate_is_not_made_inside_the_rectangle_of_a_clip_group_where_only_its_members_may_be_and_the_check_says_so_beforehand()
+ {
+    // A clip group of the text and the video: frames 0 to 600 across both tracks, with room in it on the front track after the text.
+    let (mut project, video, text) = a_big_video_and_a_small_text();
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(text), Member::Clip(video)])
+        .unwrap();
+    let front = project.tracks()[0].id();
+    let rack = put_a_rack_in(
+        &mut project,
+        AnimationTarget::Clip(text),
+        AnimationTarget::Clip(video),
+        PropertyId::Gain,
+        &[(10, db(-20.0)), (40, db(0.0))],
+    );
+    let before = project.clone();
+    // (The keyframes are at 110 and 140 on the timeline: shifted by 100 they are at 210 and 240, inside a crate that is from 200.)
+    let inside_the_group = RackDestination::NewCrate {
+        track: front,
+        start: 200,
+        length: 100,
+    };
+
+    let asked = project.check_the_move_of_a_rack(rack, inside_the_group, 100);
+    let done = project.move_rack(rack, inside_the_group, 100, None);
+
+    assert!(
+        matches!(
+            done,
+            Err(EditError::BreaksTheRulesOfGroups(GroupProblem::IsInsideAClipGroupWithoutBeingInIt { group: found, .. })) if found == group
+        ),
+        "{done:?}"
+    );
+    assert_eq!(asked, done, "the check says what making the move says");
+    assert_eq!(project, before, "the rack is where it was, and no crate was made");
+
+    // After the end of the rectangle there is nothing to keep out: the same rack goes into a crate there.
+    let after_the_group = RackDestination::NewCrate {
+        track: front,
+        start: 650,
+        length: 100,
+    };
+    assert_eq!(project.check_the_move_of_a_rack(rack, after_the_group, 550), Ok(()));
+    project.move_rack(rack, after_the_group, 550, None).unwrap();
+    assert_eq!(project.problems_with_the_groups(), vec![]);
+    assert_eq!(
+        project.tracks()[0].entries().len(),
+        2,
+        "the text, and the crate after it"
+    );
+}
+
+#[test]
 fn asking_whether_a_rack_can_be_moved_says_what_moving_it_does_and_changes_nothing() {
     let (mut project, video, text) = a_big_video_and_a_small_text();
     let front = project.tracks()[0].id();

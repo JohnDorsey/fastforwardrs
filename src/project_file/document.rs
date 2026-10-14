@@ -1,4 +1,4 @@
-//! The exact shape of a project file on disk (the current version, 9).
+//! The exact shape of a project file on disk (the current version, 10).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::project::{
-    FrameRate, Gain, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TrackHeight,
+    FrameRate, Gain, GroupColour, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
+    TrackHeight,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,6 +23,10 @@ pub(super) struct ProjectDocument {
     pub sources: Vec<SourceDocument>,
     /// The tracks, the one in front first.
     pub tracks: Vec<TrackDocument>,
+    /// The groups, in the order they were made in. A group is named in the rest of the file by its place in this list, counted from 0.
+    /// Left out when there are none, and in the files of versions before 10.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<GroupDocument>,
     pub speed_indicator: SpeedIndicatorDocument,
     /// What the project has set for itself. Left out when it follows every global setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,6 +161,10 @@ pub(super) enum ClipDocument {
         /// of versions before 8.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         effects: Vec<EffectDocument>,
+        /// The badges in the chain of the clip (see [`BadgeDocument`]). Left out for a clip that is in no tag, and has the badge of its
+        /// track last, and in the files of versions before 10.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
     },
     Audio {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -172,6 +181,9 @@ pub(super) enum ClipDocument {
         animation: AnimationDocument,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
+        /// The badges in the chain of the clip: those of the tags it is in. (It has no effects, so each is before none of them.)
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
     },
     Image {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -188,6 +200,8 @@ pub(super) enum ClipDocument {
         drawer: Vec<RackDocument>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         effects: Vec<EffectDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
     },
     Text {
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -208,6 +222,8 @@ pub(super) enum ClipDocument {
         drawer: Vec<RackDocument>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         effects: Vec<EffectDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
     },
     /// A keyframe crate: a stretch of the track that has racks of keyframes in its drawer and nothing else.
     Crate {
@@ -216,7 +232,106 @@ pub(super) enum ClipDocument {
         duration_in_frames: u64,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
     },
+}
+
+/// A group, as the file has it: its kind, its name and colour, what is in it, its effects, and where the badges of the tags that it is in
+/// are in its chain of effects.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GroupDocument {
+    pub kind: GroupKindDocument,
+    pub name: String,
+    pub colour: GroupColourDocument,
+    /// What is in the group, in the order it was put in.
+    pub members: Vec<MemberDocument>,
+    /// The effects the group has, in the order they are applied in. Left out for a group that has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectDocument>,
+    /// The badges in the chain of the group: those of the tags it is in. Left out for a group that is in no tag.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<BadgeDocument>,
+}
+
+/// The kinds of group, as the file names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum GroupKindDocument {
+    Tag,
+    ClipGroup,
+    TrackGroup,
+}
+
+/// What is in a group: a clip or a track, by where it is in the file (the number of its track in the list of tracks and, for a clip, the number
+/// of the clip in the list of its track's clips, both counted from 0, as the racks name what they are of), or a group, by its place in the list
+/// of groups.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum MemberDocument {
+    Clip { track: usize, clip: usize },
+    Track(usize),
+    Group(usize),
+}
+
+/// Where the effects of something else are applied in a chain of effects: the badge of a tag, or the badge of the track that a clip is on,
+/// and how many of the effects of the chain come before it. Of the badges that are in the same place (with the same number of effects before
+/// them) the first in the list is the first in the chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BadgeDocument {
+    pub of: BadgeOfDocument,
+    /// How many of the effects of the chain come before the badge. Left out when none do.
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub effects_before: usize,
+}
+
+/// What a badge is the badge of: a tag, by its place in the list of groups, or the track of the clip that has the chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BadgeOfDocument {
+    Tag(usize),
+    Track,
+}
+
+fn is_zero_count(number: &usize) -> bool {
+    *number == 0
+}
+
+/// The colour of a group, written as `#RRGGBB`: two hexadecimal digits each for red, green and blue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct GroupColourDocument(pub GroupColour);
+
+impl GroupColourDocument {
+    pub(super) fn to_text(self) -> String {
+        let GroupColour { red, green, blue } = self.0;
+        format!("#{red:02X}{green:02X}{blue:02X}")
+    }
+
+    pub(super) fn from_text(text: &str) -> Result<Self, String> {
+        let digits = text
+            .strip_prefix('#')
+            .filter(|digits| digits.len() == 6 && digits.chars().all(|digit| digit.is_ascii_hexdigit()))
+            .ok_or_else(|| format!("\"{text}\" is not a colour; expected \"#RRGGBB\", such as \"#FF0000\" for red"))?;
+        let part = |position: usize| {
+            u8::from_str_radix(&digits[position * 2..position * 2 + 2], 16).expect("the digits were checked")
+        };
+        Ok(Self(GroupColour::new(part(0), part(1), part(2))))
+    }
+}
+
+impl Serialize for GroupColourDocument {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_text())
+    }
+}
+
+impl<'de> Deserialize<'de> for GroupColourDocument {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::from_text(&text).map_err(serde::de::Error::custom)
+    }
 }
 
 /// An effect that a clip or a track has.

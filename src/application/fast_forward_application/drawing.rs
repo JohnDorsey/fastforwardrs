@@ -277,7 +277,7 @@ fn video_in_the_picture<'a>(
 }
 
 /// What the timeline draws of each source file: whether it can be used, and its pictures or waveform.
-fn source_looks_of<'a>(
+pub(super) fn source_looks_of<'a>(
     project: &'a Project,
     source_files: &'a HashMap<SourceMediaIdentifier, SourceFileState>,
 ) -> HashMap<SourceMediaIdentifier, SourceLook<'a>> {

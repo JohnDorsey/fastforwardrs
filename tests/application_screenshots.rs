@@ -1160,3 +1160,84 @@ fn write_screenshots_of_including_a_video_in_the_project_file() {
     journey.harness.run_steps(10);
     save_what_is_drawn(&mut journey, &folder, "122_the_menu_of_a_clip_whose_video_is_included");
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_groups() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    // Four clips on the back track, and a track in front with a text object.
+    journey.cut_at_frame(120);
+    journey.cut_at_frame(240);
+    journey.cut_at_frame(360);
+    journey.move_playhead_to_frame(0);
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 30);
+    journey.harness.run_steps(40);
+    // Zoomed out, so that the whole video is in view.
+    let over_the_strip = journey.point_on_the_strip_at_frame(1, 60);
+    journey.scroll_the_wheel(over_the_strip, egui::vec2(0.0, -200.0), egui::Modifiers::COMMAND);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(&mut journey, &folder, "200_before_there_are_any_groups");
+
+    // Two clips of the back track are selected, and the menu of the clip offers the groups.
+    let first = journey.point_on_the_strip_at_frame(1, 60);
+    let second = journey.point_on_the_strip_at_frame(1, 180);
+    journey.click(first);
+    journey.click_with_control(second);
+    journey.right_click(second);
+    journey.harness.run_steps(10);
+    save_what_is_drawn(&mut journey, &folder, "201_the_menu_of_two_selected_clips");
+    journey.harness.get_by_label("Create clip group").click();
+    journey.settle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "202_a_clip_group_made_and_selected");
+
+    // A tag of the first text object and the last video clip.
+    let text = journey.point_on_the_strip_at_frame(0, 60);
+    let last = journey.point_on_the_strip_at_frame(1, 420);
+    journey.click(text);
+    journey.click_with_control(last);
+    journey.right_click(last);
+    journey.harness.run_steps(10);
+    journey.harness.get_by_label("Create tag").click();
+    journey.settle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "203_a_tag_made_and_selected");
+
+    // A clip that is in the clip group, with its badge in the properties panel.
+    journey.click(first);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "204_a_clip_in_a_clip_group_and_its_badge");
+
+    // The tag gets an effect from its plus button: the clip that is in it has its badge and the effect after it.
+    journey.click(text);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "205_a_text_object_in_a_tag");
+
+    // A track group of the two tracks, from the menu of the box of a track.
+    journey.select_the_track_at(0);
+    let back = journey.application().project().tracks()[1].title().to_owned();
+    let field = journey
+        .harness
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|node| node.value().as_deref() == Some(back.as_str()))
+        .expect("the title of the track is shown")
+        .rect();
+    journey.click_with_control(egui::pos2(field.left() - 4.0, field.center().y));
+    journey.right_click(egui::pos2(field.left() - 4.0, field.center().y));
+    journey.harness.run_steps(10);
+    journey.harness.get_by_label("Create track group").click();
+    journey.settle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "206_a_track_group_made_and_selected");
+
+    // The project, for opening in the real program.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("demo_groups.fastforwardrs.json"));
+}

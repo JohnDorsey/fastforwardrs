@@ -22,6 +22,8 @@
 mod animating;
 mod autosave;
 #[cfg(test)]
+mod chain_tests;
+#[cfg(test)]
 mod clip_drag_tests;
 #[cfg(test)]
 mod clip_look_tests;
@@ -47,6 +49,21 @@ mod export_flow;
 mod file_question_tests;
 #[cfg(test)]
 mod grip_dot_tests;
+#[cfg(test)]
+mod group_box_tests;
+#[cfg(test)]
+mod group_command_fuzz_tests;
+#[cfg(test)]
+mod group_drag_tests;
+mod group_flow;
+#[cfg(test)]
+mod group_menu_tests;
+#[cfg(test)]
+mod group_outline_tests;
+#[cfg(test)]
+mod group_refusal_tests;
+#[cfg(test)]
+mod group_render_tests;
 mod included_files_flow;
 #[cfg(test)]
 mod included_files_tests;
@@ -606,6 +623,7 @@ impl FastForwardApplication {
                 selected_clips: self.selection.to_vec(),
                 selected_keyframes: self.selection.keyframes_to_vec(),
                 selected_racks: self.selection.racks_to_vec(),
+                selected_groups: self.selection.groups().collect(),
                 selected_clips_at_the_current_frame,
                 pointer_is_over_the_preview,
                 clip_ends_to_go_between: self.clip_ends_to_go_between(frame_state.total_frames),

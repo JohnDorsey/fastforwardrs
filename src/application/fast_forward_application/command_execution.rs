@@ -136,8 +136,12 @@ impl FastForwardApplication {
             Command::DeleteClips(clips) => self.delete_clips(clips, now),
             Command::DuplicateClips { clips, side } => self.duplicate_clips(clips, side),
             Command::MoveClips(starts) => {
-                // A move that cannot be made (clips would be on top of one another) is not made.
-                let _ = self.project.move_clips(&starts);
+                // A move that cannot be made (clips would be on top of one another) is not made, and the user is told if the rules of groups
+                // are why. (A drag stops against what is in its way, so this is not what a drag comes to: it is for a move that is asked
+                // for by other means.)
+                if let Err(error) = self.project.move_clips(&starts) {
+                    self.say_why_a_group_edit_was_refused("The clips cannot be moved there", &error);
+                }
             }
 
             Command::SetClipSpeed { clip, speed_factor } => self.set_clip_speed(clip, speed_factor, now),
@@ -158,7 +162,9 @@ impl FastForwardApplication {
             Command::DeleteTrack(track) => self.delete_track(track, now),
             Command::DuplicateTrack { track, side } => self.duplicate_track(track, side),
             Command::MoveTrack { track, to_position } => {
-                let _ = self.project.move_track(track, to_position);
+                if let Err(error) = self.project.move_track(track, to_position) {
+                    self.say_why_a_group_edit_was_refused("The track cannot go there", &error);
+                }
             }
             Command::SetTrackTitle { track, title } => {
                 let _ = self.project.set_track_title(track, title);
@@ -175,7 +181,9 @@ impl FastForwardApplication {
             Command::NewTextObject { track, frame } => self.new_text_object(track, frame, now),
             Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
-                let _ = self.project.set_clip_duration(clip, frames);
+                if let Err(error) = self.project.set_clip_duration(clip, frames) {
+                    self.say_why_a_group_edit_was_refused("The length cannot be changed", &error);
+                }
             }
 
             Command::AddEffect { target, kind } => {
@@ -190,6 +198,30 @@ impl FastForwardApplication {
                 property,
                 value,
             } => self.change_a_property_at_the_playhead(target, property, value, now),
+
+            Command::CreateGroup { kind, members } => self.create_a_group(kind, &members),
+            Command::AddToGroup { group, members } => self.add_to_a_group(group, &members),
+            Command::RemoveFromGroup { group, member } => self.remove_from_a_group(group, member),
+            Command::DisbandGroup(group) => self.disband_a_group(group),
+            Command::DeleteGroupAndEverythingInIt(group) => self.delete_a_group_and_everything_in_it(group, now),
+            Command::RenameGroup { group, name } => {
+                let _ = self.project.rename_group(group, name);
+            }
+            Command::SetGroupColour { group, colour } => {
+                let _ = self.project.set_group_colour(group, colour);
+            }
+            Command::AddGroupEffect { group, kind } => {
+                let _ = self.project.add_effect_to_the_group(group, kind);
+            }
+            Command::RemoveGroupEffect { group, kind } => {
+                let _ = self.project.remove_effect_from_the_group(group, kind);
+            }
+            Command::SetGroupEffectValue { group, property, value } => {
+                let _ = self.project.set_effect_value_of_the_group(group, property, &value);
+            }
+            Command::MoveChainItem { owner, item, before } => {
+                let _ = self.project.move_chain_item(owner, item, before);
+            }
 
             Command::AddKeyframe {
                 target,
@@ -249,8 +281,11 @@ impl FastForwardApplication {
                 shift_in_frames,
                 slot,
             } => {
-                // A rack that cannot go where it is asked to is not moved.
-                let _ = self.project.move_rack(rack, to, shift_in_frames, slot);
+                // A rack that cannot go where it is asked to is not moved (the user is told if the rules of groups are why: a new crate
+                // cannot be made inside the rectangle of a clip group).
+                if let Err(error) = self.project.move_rack(rack, to, shift_in_frames, slot) {
+                    self.say_why_a_group_edit_was_refused("The rack cannot go there", &error);
+                }
                 self.selection.forget_what_is_gone(&self.project);
             }
 
@@ -310,7 +345,12 @@ impl FastForwardApplication {
     fn set_project_frame_rate(&mut self, frame_rate: FrameRate, now: Instant) {
         let rate_before = self.project.frame_rate();
         let current_frame = self.clock.position(now, self.project.total_frame_count());
-        self.project.set_frame_rate(frame_rate);
+        // (Counting everything again rounds each start and length to a whole frame, which can put a clip a frame inside the rectangle of a
+        // clip group that it was a frame beside: that is refused, and the rate stays what it was.)
+        if let Err(error) = self.project.try_set_frame_rate(frame_rate) {
+            self.say_why_a_group_edit_was_refused("The frame rate cannot be changed", &error);
+            return;
+        }
         if frame_rate != rate_before {
             self.clock.reset_for_frame_rate(frame_rate);
             self.timeline_view.reset();
@@ -346,31 +386,41 @@ impl FastForwardApplication {
     /// told, and nothing changes.
     fn duplicate_clips(&mut self, clips: Vec<ClipId>, side: ClipSide) {
         let mut some_had_no_room = false;
+        let mut refused_by_groups = None;
         let mut copies = Vec::new();
         for clip in clips {
             match self.project.duplicate_clip(clip, side) {
                 Ok(copy) => copies.push(copy),
                 Err(EditError::NoRoomForACopy { .. }) => some_had_no_room = true,
+                // (A copy is in the groups that the clip is in: if that would put it inside the rectangle of a clip group that it is not
+                // in, or would break another rule of groups, it is not made, and the user is told which, once.)
+                Err(error @ EditError::BreaksTheRulesOfGroups(_)) => {
+                    refused_by_groups.get_or_insert(error);
+                }
                 Err(_) => {}
             }
         }
-        if copies.is_empty() {
-            if some_had_no_room {
-                self.show_message(
-                    "There is no room for a copy there",
-                    "A copy is put right beside the clip, where nothing else is.",
-                );
-            }
-            return;
+        if let Some(error) = refused_by_groups {
+            self.say_why_a_group_edit_was_refused("The copy cannot be made there", &error);
+        } else if copies.is_empty() && some_had_no_room {
+            self.show_message(
+                "There is no room for a copy there",
+                "A copy is put right beside the clip, where nothing else is.",
+            );
         }
-        self.selection = Selection::from_clips(copies);
+        if !copies.is_empty() {
+            self.selection = Selection::from_clips(copies);
+        }
     }
 
     /// Puts a copy of `track` in front of it or behind it, as `side` says (see [`crate::project::Project::duplicate_track`]),
-    /// and selects the copy.
+    /// and selects the copy. The user is told why if the rules of groups do not let the copy be where it would go.
     fn duplicate_track(&mut self, track: TrackId, side: TrackSide) {
-        if let Ok(copy) = self.project.duplicate_track(track, side) {
-            self.selection = Selection::from_items([SelectionItem::Track(copy)]);
+        match self.project.duplicate_track(track, side) {
+            Ok(copy) => self.selection = Selection::from_items([SelectionItem::Track(copy)]),
+            Err(error) => {
+                self.say_why_a_group_edit_was_refused("The track cannot be copied there", &error);
+            }
         }
     }
 
@@ -395,11 +445,14 @@ impl FastForwardApplication {
             return;
         }
         let current_frame = self.clock.position(now, self.project.total_frame_count());
-        if let Ok(new_current_frame) =
-            set_clip_speed_keeping_the_picture(&mut self.project, current_frame, clip, speed_factor)
-        {
-            let new_total_frames = self.project.total_frame_count();
-            self.clock.seek(now, new_current_frame, new_total_frames);
+        match set_clip_speed_keeping_the_picture(&mut self.project, current_frame, clip, speed_factor) {
+            Ok(new_current_frame) => {
+                let new_total_frames = self.project.total_frame_count();
+                self.clock.seek(now, new_current_frame, new_total_frames);
+            }
+            Err(error) => {
+                self.say_why_a_group_edit_was_refused("The speed cannot be changed", &error);
+            }
         }
     }
 
@@ -412,11 +465,14 @@ impl FastForwardApplication {
             return;
         }
         let current_frame = self.clock.position(now, self.project.total_frame_count());
-        if let Ok(new_current_frame) =
-            set_track_speed_keeping_the_picture(&mut self.project, current_frame, track, speed_factor)
-        {
-            let new_total_frames = self.project.total_frame_count();
-            self.clock.seek(now, new_current_frame, new_total_frames);
+        match set_track_speed_keeping_the_picture(&mut self.project, current_frame, track, speed_factor) {
+            Ok(new_current_frame) => {
+                let new_total_frames = self.project.total_frame_count();
+                self.clock.seek(now, new_current_frame, new_total_frames);
+            }
+            Err(error) => {
+                self.say_why_a_group_edit_was_refused("The speed cannot be changed", &error);
+            }
         }
     }
 
@@ -429,16 +485,23 @@ impl FastForwardApplication {
             .frame_rate()
             .nearest_frame_to_seconds(SECONDS_A_NEW_TEXT_OBJECT_LASTS)
             .max(1);
-        let Some((clip, duration_in_frames)) =
-            self.project
-                .insert_text(track, frame, TextObject::default(), wanted_frames)
-        else {
-            self.show_message(
-                "There is no room for a text object there",
-                "Choose a place on the track that has nothing on it.",
-            );
-            return;
-        };
+        let (clip, duration_in_frames) =
+            match self
+                .project
+                .try_insert_text(track, frame, TextObject::default(), wanted_frames)
+            {
+                Ok(inserted) => inserted,
+                Err(error) => {
+                    // (A place that has nothing on it can still be inside the rectangle of a clip group, where only its clips may be.)
+                    if !self.say_why_a_group_edit_was_refused("A text object cannot be put there", &error) {
+                        self.show_message(
+                            "There is no room for a text object there",
+                            "Choose a place on the track that has nothing on it.",
+                        );
+                    }
+                    return;
+                }
+            };
         self.selection = Selection::only(clip);
         let total_frames = self.project.total_frame_count();
         let current_frame = self.clock.position(now, total_frames);

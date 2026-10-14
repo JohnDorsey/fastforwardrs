@@ -8,13 +8,13 @@ use egui::Ui;
 
 use super::animatable::{self, Animatable, flag_at_the_playhead, number_at_the_playhead};
 use super::controls::{gain_slider, labelled_row, speed_slider};
-use super::{PropertiesContent, effects, kind_box, placement_controls, text_properties};
+use super::{PropertiesContent, chain, kind_box, placement_controls, text_properties};
 use crate::application::commands::Command;
 use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
 use crate::application::timeline_panel::SourceLook;
 use crate::project::{
-    AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, PropertyId, SpeedFactor,
+    AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, Member, PropertyId, SpeedFactor,
 };
 
 /// What the row of how big a video or a picture is is called.
@@ -34,13 +34,7 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         // (A crate has nothing of its own to change: what it holds is in its racks, which are shown in the timeline.)
         Clip::Crate(_) => {}
     }
-    effects::show(
-        ui,
-        content,
-        AnimationTarget::Clip(clip),
-        Some(placement.clip.kind()),
-        commands,
-    );
+    chain::show(ui, content, Member::Clip(clip), commands);
 }
 
 /// The name of the file a clip is made from, quietly.

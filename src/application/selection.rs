@@ -1,5 +1,5 @@
-//! What is selected: any number of clips, on any of the tracks, any number of tracks, any number of keyframes and any number
-//! of racks of keyframes, all at once if that is how they were chosen.
+//! What is selected: any number of clips, on any of the tracks, any number of tracks, any number of groups, any number of keyframes
+//! and any number of racks of keyframes, all at once if that is how they were chosen.
 //!
 //! Selecting is something the person doing the editing does, not something the project is made of,
 //! so the project knows nothing about it. A clip is named by its [`ClipId`], which does not
@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::project::{ClipId, KeyframeId, Project, RackId, TrackId};
+use crate::project::{ClipId, GroupId, KeyframeId, Member, Project, RackId, TrackId};
 
 /// One thing that can be selected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -17,6 +17,8 @@ pub enum SelectionItem {
     Clip(ClipId),
     /// A track itself, which is not all the clips on it.
     Track(TrackId),
+    /// A group itself, which is not all that is in it.
+    Group(GroupId),
     /// A keyframe, in whichever rack it is.
     Keyframe(KeyframeId),
     /// A rack of keyframes itself, which is not all the keyframes in it.
@@ -24,13 +26,35 @@ pub enum SelectionItem {
 }
 
 impl SelectionItem {
-    /// Whether `project` has what this is of: the clip, the track, the keyframe or the rack.
+    /// Whether `project` has what this is of: the clip, the track, the group, the keyframe or the rack.
     pub fn is_in(&self, project: &Project) -> bool {
         match self {
             Self::Clip(clip) => project.placement_of(*clip).is_some(),
             Self::Track(track) => project.track(*track).is_some(),
+            Self::Group(group) => project.group(*group).is_some(),
             Self::Keyframe(keyframe) => project.locate_keyframe(*keyframe).is_some(),
             Self::Rack(rack) => project.located_rack(*rack).is_some(),
+        }
+    }
+
+    /// What this is as something that can be in a group, if it can be: a clip, a track or a group.
+    pub fn as_a_member(&self) -> Option<Member> {
+        match self {
+            Self::Clip(clip) => Some(Member::Clip(*clip)),
+            Self::Track(track) => Some(Member::Track(*track)),
+            Self::Group(group) => Some(Member::Group(*group)),
+            Self::Keyframe(_) | Self::Rack(_) => None,
+        }
+    }
+}
+
+impl From<Member> for SelectionItem {
+    /// What selecting a member of a group is selecting.
+    fn from(member: Member) -> Self {
+        match member {
+            Member::Clip(clip) => Self::Clip(clip),
+            Member::Track(track) => Self::Track(track),
+            Member::Group(group) => Self::Group(group),
         }
     }
 }
@@ -90,6 +114,11 @@ impl Selection {
         self.items.contains(&SelectionItem::Track(track))
     }
 
+    /// Whether the group `group` is selected.
+    pub fn contains_group(&self, group: GroupId) -> bool {
+        self.items.contains(&SelectionItem::Group(group))
+    }
+
     /// Whether `keyframe` is selected.
     pub fn contains_keyframe(&self, keyframe: KeyframeId) -> bool {
         self.items.contains(&SelectionItem::Keyframe(keyframe))
@@ -105,7 +134,29 @@ impl Selection {
     pub fn iter(&self) -> impl Iterator<Item = ClipId> + '_ {
         self.items.iter().filter_map(|item| match item {
             SelectionItem::Clip(clip) => Some(*clip),
-            SelectionItem::Track(_) | SelectionItem::Keyframe(_) | SelectionItem::Rack(_) => None,
+            SelectionItem::Track(_) | SelectionItem::Group(_) | SelectionItem::Keyframe(_) | SelectionItem::Rack(_) => {
+                None
+            }
+        })
+    }
+
+    /// The selected tracks, in the order of their names.
+    pub fn tracks(&self) -> impl Iterator<Item = TrackId> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            SelectionItem::Track(track) => Some(*track),
+            SelectionItem::Clip(_) | SelectionItem::Group(_) | SelectionItem::Keyframe(_) | SelectionItem::Rack(_) => {
+                None
+            }
+        })
+    }
+
+    /// The selected groups, in the order of their names.
+    pub fn groups(&self) -> impl Iterator<Item = GroupId> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            SelectionItem::Group(group) => Some(*group),
+            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Keyframe(_) | SelectionItem::Rack(_) => {
+                None
+            }
         })
     }
 
@@ -118,7 +169,7 @@ impl Selection {
     pub fn keyframes(&self) -> impl Iterator<Item = KeyframeId> + '_ {
         self.items.iter().filter_map(|item| match item {
             SelectionItem::Keyframe(keyframe) => Some(*keyframe),
-            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Rack(_) => None,
+            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Group(_) | SelectionItem::Rack(_) => None,
         })
     }
 
@@ -131,7 +182,9 @@ impl Selection {
     pub fn racks(&self) -> impl Iterator<Item = RackId> + '_ {
         self.items.iter().filter_map(|item| match item {
             SelectionItem::Rack(rack) => Some(*rack),
-            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Keyframe(_) => None,
+            SelectionItem::Clip(_) | SelectionItem::Track(_) | SelectionItem::Group(_) | SelectionItem::Keyframe(_) => {
+                None
+            }
         })
     }
 
@@ -190,8 +243,9 @@ impl Selection {
     }
 
     /// The first frame of the timeline that what is selected takes up, and the frame after the last: a clip takes up the frames
-    /// it lasts, a keyframe the frame it is at, and a rack of keyframes the frames from its first keyframe to its last. A track
-    /// takes up none, and nor does what `project` does not have. `None` if what is selected takes up no frame at all.
+    /// it lasts, a group the frames of the smallest rectangle that has all that is in it, a keyframe the frame it is at, and a rack of
+    /// keyframes the frames from its first keyframe to its last. A track takes up none, and nor does what `project` does not have.
+    /// `None` if what is selected takes up no frame at all.
     pub fn frames_taken_up(&self, project: &Project) -> Option<(u64, u64)> {
         let mut taken_up: Option<(u64, u64)> = None;
         let mut take_up = |first: u64, end: u64| {
@@ -205,6 +259,14 @@ impl Selection {
                     placement.first_timeline_frame.value(),
                     placement.end_timeline_frame.value(),
                 );
+            }
+        }
+        for group in self.groups() {
+            // (The rectangle of a group is all of what is in it, so a track group takes up all of the timeline.)
+            if let Some(rectangle) = project.rectangle_of_the_group(group)
+                && rectangle.end_frame > rectangle.first_frame
+            {
+                take_up(rectangle.first_frame, rectangle.end_frame);
             }
         }
         for keyframe in self.keyframes() {

@@ -120,7 +120,8 @@ pub(super) fn show(
             );
             response.context_menu(|ui| {
                 let clips = clip_menu::clips_the_menu_is_about(&content.selection.to_vec(), location);
-                clip_menu::show(ui, &clips, content.project, commands);
+                let groups = clip_menu::groups_the_menu_is_about(content.selection, location);
+                clip_menu::show(ui, &clips, &groups, content.project, commands);
             });
         }
         operate_the_drawer(

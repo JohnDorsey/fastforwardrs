@@ -1,7 +1,7 @@
 //! Copying a clip, or a track, to the side of itself, with what is in its drawers.
 
 use super::tracks::{ClipId, TrackId};
-use super::{ClipEditError, EditError, Project, TimelineFrameIndex};
+use super::{ClipEditError, EditError, Member, Project, TimelineFrameIndex};
 
 /// Which side of a clip its copy is put on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,21 +64,31 @@ impl Project {
     }
 
     /// Whether there is room on the track for a copy of `clip` right next to it, on `side` of it: nothing else is at any of
-    /// the frames the copy would be at, and it would not start before the start of the timeline.
+    /// the frames the copy would be at, it would not start before the start of the timeline, and the copy, which is in the groups
+    /// that the clip is in, would not break a rule of groups (it can make the rectangle of a clip group take in another clip).
     pub fn room_for_a_copy_of(&self, clip: ClipId, side: ClipSide) -> bool {
         self.where_a_copy_of_a_clip_would_go(clip, side).is_ok()
+            && (self.groups.is_empty()
+                || self
+                    .would_be_allowed(|project| project.duplicate_clip(clip, side).map(|_| ()))
+                    .is_ok())
     }
 
     /// Puts a copy of `clip` on the same track, right next to it on `side` of it, and gives the copy's name. Everything about
     /// the clip is copied, and so is what is in its drawer: each rack is made again, of the same thing as before except that
     /// the keyframes of the clip itself are of the copy. So what the clip does to anything when it is there, the copy does
-    /// when it is there. (The racks kept in other drawers that animate the clip are not copied.) Nothing is changed if there
-    /// is no room for the copy.
+    /// when it is there. (The racks kept in other drawers that animate the clip are not copied.) The copy is in the groups the clip
+    /// is in, with the badges of the tags in the same places of its chain. Nothing is changed if there is no room for the copy, or if
+    /// it would break a rule of groups.
     pub fn duplicate_clip(&mut self, clip: ClipId, side: ClipSide) -> Result<ClipId, EditError> {
-        let (position, start) = self.where_a_copy_of_a_clip_would_go(clip, side)?;
-        self.tracks[position]
-            .insert_a_copy_of_the_clip_at(clip, start)
-            .ok_or(EditError::NoRoomForACopy { clip })
+        self.keeping_the_groups_valid(|project| {
+            let (position, start) = project.where_a_copy_of_a_clip_would_go(clip, side)?;
+            let copy = project.tracks[position]
+                .insert_a_copy_of_the_clip_at(clip, start)
+                .ok_or(EditError::NoRoomForACopy { clip })?;
+            project.put_the_copy_in_the_groups_of(Member::Clip(copy), Member::Clip(clip));
+            Ok(copy)
+        })
     }
 
     /// The title a copy of a track that is titled `title` is given, which no track has: the title with "copy" after it, and
@@ -109,18 +119,33 @@ impl Project {
     /// except that what animated the track animates the copy and what animated one of its clips animates the copy of that
     /// clip. Its title is the track's with "copy" after it (see `title_for_a_copy_of`), so that the tracks can be told apart
     /// in the words that say what a rack of keyframes animates, and by anyone looking for the copy.
+    ///
+    /// The copy is in the groups that the track is in (the track group), and each of its clips is in the groups that the clip it is a copy of
+    /// is in. Nothing is changed if that would break a rule of groups.
     pub fn duplicate_track(&mut self, track: TrackId, side: TrackSide) -> Result<TrackId, EditError> {
-        let position = self.track_position(track).ok_or(EditError::UnknownTrack { track })?;
-        let title = self.title_for_a_copy_of(self.tracks[position].title());
-        let id = TrackId::new(self.next_track_number);
-        self.next_track_number += 1;
-        let copy = self.tracks[position].copy_as(id, title);
-        let place = match side {
-            TrackSide::Above => position,
-            TrackSide::Below => position + 1,
-        };
-        self.tracks.insert(place, copy);
-        Ok(id)
+        self.keeping_the_groups_valid(|project| {
+            let position = project.track_position(track).ok_or(EditError::UnknownTrack { track })?;
+            let title = project.title_for_a_copy_of(project.tracks[position].title());
+            let id = TrackId::new(project.next_track_number);
+            project.next_track_number += 1;
+            let copy = project.tracks[position].copy_as(id, title);
+            let copies_of_the_clips: Vec<(ClipId, ClipId)> = project.tracks[position]
+                .entries()
+                .iter()
+                .zip(copy.entries())
+                .map(|(original, copy)| (original.id(), copy.id()))
+                .collect();
+            let place = match side {
+                TrackSide::Above => position,
+                TrackSide::Below => position + 1,
+            };
+            project.tracks.insert(place, copy);
+            project.put_the_copy_in_the_groups_of(Member::Track(id), Member::Track(track));
+            for (original, copy) in copies_of_the_clips {
+                project.put_the_copy_in_the_groups_of(Member::Clip(copy), Member::Clip(original));
+            }
+            Ok(id)
+        })
     }
 }
 
