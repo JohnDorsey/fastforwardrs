@@ -321,37 +321,6 @@ fn a_clip_group_with_a_clip_to_move() -> (Laid, GroupId) {
 }
 
 #[test]
-fn a_clip_that_is_not_in_a_clip_group_cannot_be_moved_into_its_rectangle() {
-    let (mut laid, group) = a_clip_group_with_a_clip_to_move();
-    let outsider = laid.clip(2, 0);
-    let before = laid.project.clone();
-    assert_eq!(
-        laid.project.move_clips(&[move_to(outsider, laid.tracks[0], 12)]),
-        Err(EditError::BreaksTheRulesOfGroups(
-            GroupProblem::IsInsideAClipGroupWithoutBeingInIt { group, clip: outsider }
-        ))
-    );
-    assert_eq!(laid.project, before, "it did not move");
-
-    laid.project
-        .move_clips(&[move_to(outsider, laid.tracks[0], 30)])
-        .unwrap();
-    assert_eq!(
-        laid.project
-            .placement_of(outsider)
-            .unwrap()
-            .first_timeline_frame
-            .value(),
-        30,
-        "just after the rectangle is not in it"
-    );
-    laid.project
-        .move_clips(&[move_to(outsider, laid.tracks[1], 10)])
-        .unwrap_err();
-    assert_eq!(laid.project.problems_with_the_groups(), []);
-}
-
-#[test]
 fn a_clip_that_is_in_a_clip_group_can_be_moved_inside_its_rectangle_and_the_rectangle_follows_it() {
     let (mut laid, group) = a_clip_group_with_a_clip_to_move();
     laid.project
@@ -697,9 +666,10 @@ fn what_would_be_allowed_is_found_out_without_doing_it() {
     let (laid, _) = a_clip_group_with_a_clip_to_move();
     let outsider = laid.clip(2, 0);
     let before = laid.project.clone();
+    // (The clip of the group that is on the second track, moved to the third: the rectangle would take in the clip that is not in it.)
     assert!(
         laid.project
-            .would_be_allowed(|project| project.move_clips(&[move_to(outsider, laid.tracks[0], 12)]))
+            .would_be_allowed(|project| project.move_clips(&[move_to(laid.clip(1, 0), laid.tracks[2], 20)]))
             .is_err()
     );
     assert!(

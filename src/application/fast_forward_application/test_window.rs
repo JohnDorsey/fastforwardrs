@@ -185,6 +185,9 @@ impl Window {
             }),
         );
         application.dialog = None; // the "ffmpeg was not found" message
+        // (Edits about one thing that follow one another are one step of the history if they come within a second of one another, which
+        // they do unless the computer is so busy that a frame takes that long: here they are one step however long it is between them.)
+        application.history.merge_edits_whenever_they_are_made();
         replace_project_with_all_its_files_available(&mut application, project);
         let mut harness = Harness::builder()
             .with_size(vec2(WINDOW_SIZE[0], WINDOW_SIZE[1]))
@@ -321,6 +324,16 @@ impl Window {
             .iter()
             .max_by(|first, second| first.width().total_cmp(&second.width()))
             .expect("the panels are drawn")
+    }
+
+    /// How far down the rows of the tracks can be seen: where the view of them ends at the bottom. (The rows scroll in a view that
+    /// is only so tall.)
+    pub(super) fn the_bottom_of_what_can_be_seen_of_the_rows(&self) -> f32 {
+        self.application()
+            .timeline_view
+            .timeline_area_in_the_last_frame
+            .expect("the timeline was drawn")
+            .bottom()
     }
 
     /// The two panels above the timeline, the one at the left first: the properties and the preview.

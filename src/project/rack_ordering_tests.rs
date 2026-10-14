@@ -58,7 +58,9 @@ fn a_rack_moved_in_its_drawer_to_a_slot_has_that_many_racks_above_it_not_countin
     } = five_racks();
     let order_after_moving = |rack: RackId, slot: Option<usize>| -> Vec<RackId> {
         let mut project = project.clone();
-        project.move_rack(rack, RackDestination::Drawer(text), 0, slot).unwrap();
+        project
+            .move_racks(&[rack], RackDestination::Drawer(text), 0, slot)
+            .unwrap();
         names_of_the_racks_in(&project, text)
     };
 
@@ -97,7 +99,9 @@ fn moving_a_rack_to_another_slot_of_its_drawer_changes_nothing_but_the_order() {
     };
     let before = turn_of_the_text_at_every_frame(&project);
 
-    project.move_rack(c, RackDestination::Drawer(text), 0, Some(0)).unwrap();
+    project
+        .move_racks(&[c], RackDestination::Drawer(text), 0, Some(0))
+        .unwrap();
 
     assert_eq!(
         frames_in_the_rack(&project, c),
@@ -119,7 +123,9 @@ fn a_rack_can_be_shifted_in_time_and_put_at_another_slot_of_its_drawer_in_one_mo
         ..
     } = five_racks();
 
-    project.move_rack(a, RackDestination::Drawer(text), 7, Some(2)).unwrap();
+    project
+        .move_racks(&[a], RackDestination::Drawer(text), 7, Some(2))
+        .unwrap();
 
     assert_eq!(names_of_the_racks_in(&project, text), vec![b, c, a]);
     assert_eq!(frames_in_the_rack(&project, a), vec![12]);
@@ -142,7 +148,9 @@ fn a_rack_put_in_another_drawer_at_a_slot_has_that_many_racks_above_it_and_goes_
     } = five_racks();
     let order_after_moving = |slot: Option<usize>| -> (Vec<RackId>, Vec<RackId>) {
         let mut project = project.clone();
-        project.move_rack(a, RackDestination::Drawer(video), 0, slot).unwrap();
+        project
+            .move_racks(&[a], RackDestination::Drawer(video), 0, slot)
+            .unwrap();
         (
             names_of_the_racks_in(&project, text),
             names_of_the_racks_in(&project, video),
@@ -180,7 +188,7 @@ fn a_rack_put_at_a_slot_of_a_drawer_that_has_a_rack_of_the_same_property_is_not_
     } = five_racks();
 
     project
-        .move_rack(a, RackDestination::Drawer(video), 0, Some(1))
+        .move_racks(&[a], RackDestination::Drawer(video), 0, Some(1))
         .unwrap();
 
     let loudness_racks: Vec<RackId> = project
@@ -215,12 +223,12 @@ fn the_slot_is_not_looked_at_when_the_rack_goes_to_a_new_crate() {
     let front = project.tracks()[0].id();
 
     project
-        .move_rack(
-            a,
+        .move_racks(
+            &[a],
             RackDestination::NewCrate {
                 track: front,
-                start: 300,
-                length: 50,
+                from_frame: 300,
+                until_frame: 350,
             },
             200,
             Some(5),
@@ -244,7 +252,7 @@ fn a_rack_that_cannot_go_where_it_is_asked_to_does_not_change_places_either() {
 
     // The rack has its keyframe at 105 of the timeline: 5000 frames later there is no frame of the text for it.
     assert_eq!(
-        project.move_rack(a, RackDestination::Drawer(text), 5_000, Some(2)),
+        project.move_racks(&[a], RackDestination::Drawer(text), 5_000, Some(2)),
         Err(EditError::NoRoomForTheKeyframes)
     );
     assert_eq!(project, before);
@@ -276,7 +284,7 @@ fn whatever_slot_a_rack_is_put_at_it_is_there_and_the_other_racks_keep_their_ord
             let from = before.located_rack(rack).unwrap().owner;
             let context = format!("seed {seed}, step {step}: {rack} to {owner:?} at {slot:?}");
 
-            let result = project.move_rack(rack, RackDestination::Drawer(owner), 0, slot);
+            let result = project.move_racks(&[rack], RackDestination::Drawer(owner), 0, slot);
 
             match result {
                 Err(_) => assert_eq!(project, before, "{context}"),

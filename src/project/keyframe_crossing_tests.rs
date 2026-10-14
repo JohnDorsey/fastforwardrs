@@ -50,7 +50,7 @@ fn move_to(keyframe: KeyframeId, to_rack: RackId, to_frame: u64) -> KeyframeMove
     KeyframeMove {
         keyframe,
         to_rack,
-        to_frame,
+        to_frame: i64::try_from(to_frame).unwrap(),
     }
 }
 
@@ -495,10 +495,20 @@ fn the_moves_that_put_keyframes_in_other_racks_count_their_frames_from_the_drawe
         vec![move_to(first_in_the_video, in_the_text, 20)],
         "50 + 70 = 120 of the timeline, which is 20 frames into the text"
     );
+    let before_the_text = project.moves_of_keyframes_by(&[going_to(first_in_the_video, in_the_text)], 10);
     assert_eq!(
-        project.moves_of_keyframes_by(&[going_to(first_in_the_video, in_the_text)], 10),
-        vec![],
-        "60 of the timeline is before the text starts: no frame of its drawer"
+        before_the_text,
+        vec![KeyframeMove {
+            keyframe: first_in_the_video,
+            to_rack: in_the_text,
+            to_frame: -40,
+        }],
+        "60 of the timeline is 40 frames before the text starts: it is said so, as a frame of the drawer that is before its first"
+    );
+    assert_eq!(
+        project.check_the_move_of_keyframes(&before_the_text),
+        Err(EditError::NoRoomForTheKeyframes),
+        "and the drawer of a text has no room for it"
     );
     assert_eq!(
         project.moves_of_keyframes_by(&[going_to(KeyframeId::new(in_the_video, 77), in_the_text)], 0),
@@ -530,7 +540,8 @@ fn a_project_with_racks_of_the_loudness_everywhere(random: &mut DeterministicRan
     let mut racks = Vec::new();
     for owner in owners {
         for _ in 0..1 + random.next_below(2) {
-            let length = project.extent_of_the_drawer_of(owner).unwrap().length.unwrap_or(600);
+            let extent = project.extent_of_the_drawer_of(owner).unwrap();
+            let length = extent.room.end_frame.map_or(600, |end| end - extent.start);
             let mut frames: Vec<u64> = (0..1 + random.next_below(3))
                 .map(|_| random.next_below(length))
                 .collect();
@@ -577,7 +588,17 @@ fn whatever_keyframes_are_moved_where_the_project_stays_sound_and_a_move_that_ca
                 .iter()
                 .map(|keyframe| {
                     let to = racks_there_are[random.next_below(racks_there_are.len() as u64) as usize];
-                    move_to(*keyframe, to.rack.id(), random.next_below(to.length.unwrap_or(600)))
+                    // (Anywhere that its drawer has room for: a keyframe crate has room before where it begins too, which is what
+                    // a frame that is less than 0 is, in the frames of the drawer.)
+                    let first = i64::try_from(to.room.first_frame).unwrap() - i64::try_from(to.start).unwrap();
+                    let end =
+                        i64::try_from(to.room.end_frame.unwrap_or(600)).unwrap() - i64::try_from(to.start).unwrap();
+                    KeyframeMove {
+                        keyframe: *keyframe,
+                        to_rack: to.rack.id(),
+                        to_frame: first
+                            + i64::try_from(random.next_below(u64::try_from(end - first).unwrap())).unwrap(),
+                    }
                 })
                 .collect();
             let before = project.clone();
@@ -594,15 +615,24 @@ fn whatever_keyframes_are_moved_where_the_project_stays_sound_and_a_move_that_ca
                     for moved in &moves {
                         let located = project.locate_keyframe(moved.keyframe).expect(&context);
                         assert_eq!(located.rack.rack.id(), moved.to_rack, "{context}");
-                        assert_eq!(located.keyframe.frame, moved.to_frame, "{context}");
+                        // (Where it is is the frame of the timeline it was told to go to: a crate that was made to begin earlier is
+                        // counted from an earlier frame afterwards.)
+                        let wanted = before.located_rack(moved.to_rack).unwrap().start as i64 + moved.to_frame;
+                        assert_eq!(located.timeline_frame() as i64, wanted, "{context}");
                         let value_before = before.locate_keyframe(moved.keyframe).unwrap().keyframe.value.clone();
                         assert_eq!(located.keyframe.value, value_before, "{context}");
                     }
                     let moving_set: Vec<KeyframeId> = moves.iter().map(|moved| moved.keyframe).collect();
                     for keyframe in all_keyframes.iter().filter(|keyframe| !moving_set.contains(keyframe)) {
+                        // (A keyframe crate that was made longer, at its start, or shorter, counts its frames from another frame
+                        // afterwards: it is where it was in the timeline, in the rack it was in.)
+                        let (then, now) = (
+                            before.locate_keyframe(*keyframe).unwrap(),
+                            project.locate_keyframe(*keyframe).expect(&context),
+                        );
                         assert_eq!(
-                            project.locate_keyframe(*keyframe).expect(&context).keyframe,
-                            before.locate_keyframe(*keyframe).unwrap().keyframe,
+                            (now.rack.rack.id(), now.timeline_frame(), &now.keyframe.value),
+                            (then.rack.rack.id(), then.timeline_frame(), &then.keyframe.value),
                             "a keyframe that was not moved is where it was: {context}"
                         );
                     }

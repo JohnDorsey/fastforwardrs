@@ -78,6 +78,8 @@ pub struct History {
     /// Goes up whenever the history is started afresh, so that someone who made a note of it can
     /// tell that the project was replaced in the meantime.
     generation: u64,
+    /// How soon after one another edits about the same thing are one step, when the mouse button is not held down.
+    merge_window: Duration,
 }
 
 impl Default for History {
@@ -96,9 +98,18 @@ impl History {
             next_state_number: 1,
             saved: None,
             generation: 0,
+            merge_window: MERGE_WINDOW,
         };
         history.reset();
         history
+    }
+
+    /// Makes edits about the same thing one step however long it is between them. (For the tests of a window, which make one edit after
+    /// another in real time: a computer that is busy can take more than [`MERGE_WINDOW`] over a frame, and then what was meant to be
+    /// one step is two. What [`MERGE_WINDOW`] means is tried with times that are given, in the tests of this module.)
+    #[cfg(test)]
+    pub fn merge_edits_whenever_they_are_made(&mut self) {
+        self.merge_window = Duration::MAX;
     }
 
     /// Forgets everything (a different project was made or loaded), and counts the project as saved.
@@ -159,7 +170,7 @@ impl History {
         if let Some(key) = key
             && let Some(latest) = self.undo.last_mut()
             && latest.key == Some(key)
-            && (pointer_is_down || now.saturating_duration_since(latest.last_edited_at) < MERGE_WINDOW)
+            && (pointer_is_down || now.saturating_duration_since(latest.last_edited_at) < self.merge_window)
         {
             latest.last_edited_at = now;
             self.current = state_after;
@@ -361,6 +372,29 @@ mod tests {
         assert_eq!(track_count(&latest.project), 4);
         let earlier = history.undo(&latest.project, Vec::new()).unwrap();
         assert_eq!(track_count(&earlier.project), 1, "the first three edits are one step");
+        assert!(!history.can_undo());
+    }
+
+    #[test]
+    fn edits_about_the_same_thing_are_one_step_however_far_apart_when_the_history_is_asked_to_merge_them_whenever_they_are_made()
+     {
+        let mut history = History::new();
+        history.merge_edits_whenever_they_are_made();
+        let start = Instant::now();
+        record(&mut history, 1, key("text"), start, false);
+        record(&mut history, 2, key("text"), start + Duration::from_secs(3600), false);
+        record(&mut history, 3, None, start + Duration::from_secs(3601), false);
+
+        assert!(
+            history.undo(&project_of(4), Vec::new()).is_some(),
+            "what has no key is a step of its own"
+        );
+        let earlier = history.undo(&project_of(3), Vec::new()).unwrap();
+        assert_eq!(
+            track_count(&earlier.project),
+            1,
+            "the two edits an hour apart are one step"
+        );
         assert!(!history.can_undo());
     }
 

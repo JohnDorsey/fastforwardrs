@@ -14,8 +14,28 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::animation::{Animation, Keyframe, Keyframes, PropertyId};
-use super::tracks::{ClipId, Drawer, KeyframeId, Rack, RackId, RackKeyframe, Track};
+use super::tracks::{Clip, ClipId, Drawer, KeyframeId, Rack, RackId, RackKeyframe, Track};
 use super::{AnimationTarget, Project};
+
+/// The frames of the timeline that the keyframes of the racks in a drawer can be at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameRoom {
+    pub first_frame: u64,
+    /// The frame after the last that they can be at. `None` for the drawer of a track, which goes on as long as the timeline does.
+    pub end_frame: Option<u64>,
+}
+
+impl FrameRoom {
+    /// Whether a keyframe can be at the frame `timeline_frame`.
+    pub fn contains(&self, timeline_frame: u64) -> bool {
+        self.first_frame <= timeline_frame && self.end_frame.is_none_or(|end| timeline_frame < end)
+    }
+
+    /// How many frames there are, if there is an end to them.
+    pub fn length(&self) -> Option<u64> {
+        self.end_frame.map(|end| end - self.first_frame)
+    }
+}
 
 /// A rack, with where the drawer it is in is.
 #[derive(Clone, Copy, Debug)]
@@ -24,9 +44,10 @@ pub struct LocatedRack<'project> {
     pub owner: AnimationTarget,
     /// The frame of the timeline that the frames of the rack are counted from: the first frame of the clip, or 0 for a track.
     pub start: u64,
-    /// How many frames the drawer lasts, which is how many frames the rack has room for: as long as the clip. `None` for the
-    /// drawer of a track, which goes on as long as the timeline does.
-    pub length: Option<u64>,
+    /// The frames the keyframes of the rack can be at: those of the clip, which are as many as it lasts; all of them from the
+    /// start of the timeline, for the drawer of a track; and for a keyframe crate, which lasts as long as its keyframes need, the
+    /// empty frames round it as well as its own, as far as the end of the video. (It is made longer if a keyframe is put there.)
+    pub room: FrameRoom,
     pub rack: &'project Rack,
 }
 
@@ -56,9 +77,8 @@ impl LocatedKeyframe<'_> {
 pub struct DrawerExtent {
     /// The frame of the timeline that the frames of the racks in the drawer are counted from.
     pub start: u64,
-    /// How many frames the drawer lasts, which is how many frames its racks have room for. `None` for the drawer of a track,
-    /// which goes on as long as the timeline does.
-    pub length: Option<u64>,
+    /// The frames its racks can have keyframes at (see [`LocatedRack::room`]).
+    pub room: FrameRoom,
 }
 
 /// A keyframe that was just made, and where.
@@ -100,23 +120,34 @@ impl Project {
     /// one thing at the same frame counts: the one in the rack that comes later. (The tracks from the front; of each its
     /// own drawer first, then the drawers of its clips in order.)
     pub fn located_racks(&self) -> impl Iterator<Item = LocatedRack<'_>> {
-        self.tracks.iter().flat_map(|track| {
+        let end_of_the_video = self.total_frame_count();
+        self.tracks.iter().flat_map(move |track| {
             let in_the_drawer_of_the_track = track.drawer().racks().iter().map(move |rack| LocatedRack {
                 owner: AnimationTarget::Track(track.id()),
                 start: 0,
-                length: None,
+                room: FrameRoom {
+                    first_frame: 0,
+                    end_frame: None,
+                },
                 rack,
             });
-            let in_the_drawers_of_its_clips = track.placements().flat_map(|placement| {
+            let in_the_drawers_of_its_clips = track.placements().flat_map(move |placement| {
+                let room = room_of_the_drawer_of(track, &placement, end_of_the_video);
                 placement.drawer.racks().iter().map(move |rack| LocatedRack {
                     owner: AnimationTarget::Clip(placement.id),
                     start: placement.first_timeline_frame.value(),
-                    length: Some(placement.timeline_frame_count()),
+                    room,
                     rack,
                 })
             });
             in_the_drawer_of_the_track.chain(in_the_drawers_of_its_clips)
         })
+    }
+
+    /// Where an empty stretch of a track that goes up to `until_frame` (for ever, if `None`) stops being room for a keyframe crate:
+    /// at its end, or where the video ends if that comes sooner (a crate does not make the video longer).
+    pub fn end_of_the_room_for_a_crate_in_a_stretch(&self, until_frame: Option<u64>) -> u64 {
+        end_of_the_room_for_a_crate_in_a_stretch(until_frame, self.total_frame_count())
     }
 
     /// How many keyframes there are in the project, in all its racks. (What a change that is meant to keep them all is held to:
@@ -230,17 +261,24 @@ impl Project {
     }
 
     /// Takes away the racks, wherever they are, that animate `target` (a clip or a track that is gone, so that nothing
-    /// is left that animates nothing).
+    /// is left that animates nothing). A keyframe crate that has racks left is made as short as their keyframes need, and one that has
+    /// none left goes.
     pub(super) fn remove_the_racks_that_animate(&mut self, target: AnimationTarget) {
-        for track in &mut self.tracks {
-            track.remove_the_racks_that_animate(target);
-        }
+        let drawers_that_lost_racks: Vec<AnimationTarget> = self
+            .tracks
+            .iter_mut()
+            .flat_map(|track| track.remove_the_racks_that_animate(target))
+            .map(AnimationTarget::Clip)
+            .collect();
+        let fitted = self.fit_the_crates(&drawers_that_lost_racks);
+        debug_assert!(fitted.is_ok(), "a crate that loses racks only gets shorter: {fitted:?}");
     }
 
     /// What is wrong with the racks of the project, in words, if anything is: a rack that animates what is not there or a
     /// property that what it animates does not have, keyframes that are not in the drawer they are in or not in the order of
-    /// their frames, two racks of the same name, or two keyframes of the same name. The edits of the project leave none of
-    /// these; this is for what is loaded from a file, and for the tests, which check it after every edit they make.
+    /// their frames, two racks of the same name, two keyframes of the same name, or a keyframe crate that has no keyframes or does not
+    /// last exactly as long as they need. The edits of the project leave none of these; this is for what is loaded from a file, and
+    /// for the tests, which check it after every edit they make.
     pub fn problems_with_the_racks(&self) -> Vec<String> {
         let mut problems = Vec::new();
         let mut names_seen = HashSet::new();
@@ -287,12 +325,11 @@ impl Project {
                 )),
                 Some(true) => {}
             }
-            if let Some(length) = located.length
-                && let Some(last_frame) = rack.last_frame()
-                && last_frame >= length
+            if let Some(last_frame) = rack.last_frame()
+                && !located.room.contains(located.timeline_frame_of(last_frame))
             {
                 problems.push(format!(
-                    "{} has a keyframe at frame {last_frame}, and the drawer it is in lasts {length} frames",
+                    "{} has a keyframe at frame {last_frame} of the drawer it is in, which has no room for it",
                     rack.id()
                 ));
             }
@@ -308,7 +345,69 @@ impl Project {
                 ));
             }
         }
+        problems.extend(self.problems_with_the_crates());
         problems
+    }
+
+    /// What is wrong with the keyframe crates, in words: a crate lasts exactly as long as the keyframes in it need, from the first of
+    /// them to the last, and has some (see the `crates` module).
+    fn problems_with_the_crates(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        for placement in self.tracks.iter().flat_map(Track::placements) {
+            if !matches!(placement.clip, Clip::Crate(_)) {
+                continue;
+            }
+            let frames = placement
+                .drawer
+                .racks()
+                .iter()
+                .filter_map(|rack| rack.first_frame().zip(rack.last_frame()));
+            let first_and_last = frames.fold(None, |found: Option<(u64, u64)>, (first, last)| {
+                Some(found.map_or((first, last), |(earliest, latest)| {
+                    (earliest.min(first), latest.max(last))
+                }))
+            });
+            match first_and_last {
+                None => problems.push(format!("the keyframe crate {} has no keyframes in it", placement.id)),
+                Some((first, last)) if first != 0 || last + 1 != placement.timeline_frame_count() => {
+                    problems.push(format!(
+                        "the keyframe crate {} lasts {} frames, and its keyframes are at frames {first} to {last} of it",
+                        placement.id,
+                        placement.timeline_frame_count()
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        problems
+    }
+}
+
+/// Where an empty stretch of a track that goes up to `until_frame` (for ever, if `None`) stops being room for a keyframe crate: at its
+/// end, or where the video ends, which is `end_of_the_video`, if that comes sooner (a crate does not make the video longer).
+fn end_of_the_room_for_a_crate_in_a_stretch(until_frame: Option<u64>, end_of_the_video: u64) -> u64 {
+    until_frame.map_or(end_of_the_video, |until| until.min(end_of_the_video))
+}
+
+/// The frames that the racks in the drawer of the clip at `placement` on `track` can have keyframes at: the frames of the clip, and
+/// for a keyframe crate, which lasts as long as its keyframes need, the empty frames round it too (it is made longer if a keyframe is
+/// put there), as far as the end of the video, which is `end_of_the_video`.
+pub(super) fn room_of_the_drawer_of(
+    track: &Track,
+    placement: &crate::project::ClipPlacement<'_>,
+    end_of_the_video: u64,
+) -> FrameRoom {
+    if matches!(placement.clip, Clip::Crate(_))
+        && let Some((from_frame, until_frame)) = track.stretch_around(placement.id)
+    {
+        return FrameRoom {
+            first_frame: from_frame,
+            end_frame: Some(end_of_the_room_for_a_crate_in_a_stretch(until_frame, end_of_the_video)),
+        };
+    }
+    FrameRoom {
+        first_frame: placement.first_timeline_frame.value(),
+        end_frame: Some(placement.end_timeline_frame.value()),
     }
 }
 

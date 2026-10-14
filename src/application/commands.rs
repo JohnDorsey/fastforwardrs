@@ -5,10 +5,10 @@
 use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ChainItemKey, ClipId, ClipMove, ClipSide, EffectKind, FrameRate, Gain, GroupColour, GroupId,
-    GroupKind, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings, PropertyId, PropertyValue,
-    RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject,
-    TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
+    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, EffectKind, FrameRate, Gain,
+    GroupColour, GroupId, GroupKind, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings, PropertyId,
+    PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout,
+    TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -66,6 +66,12 @@ pub enum Command {
     /// Scroll and zoom the timeline so that what is selected (clips, keyframes and racks of keyframes) is in the middle of it and
     /// nearly fills its width (with the F key anywhere else). When nothing is selected nothing happens.
     FrameTheSelectionInTheTimeline,
+    /// Go back to the view the timeline had before the latest thing that was done to it (zooming it, scrolling it, framing what is
+    /// selected), as the Back button of a mouse does. (When it has no earlier view, nothing happens.)
+    GoBackInTheTimelineViewHistory,
+    /// Go forward again to the view the timeline was gone back from, as the Forward button of a mouse does. (When there is none,
+    /// nothing happens.)
+    GoForwardInTheTimelineViewHistory,
 
     /// Change what is selected (by clicking something, or drawing a rectangle round some things): select `items`
     /// and nothing else, or as well as what is selected, or the other way round for each of them, as `change` says.
@@ -92,8 +98,13 @@ pub enum Command {
         side: ClipSide,
     },
 
-    /// Move clips, by dragging them: each to the track and the frame given for it.
-    MoveClips(Vec<ClipMove>),
+    /// Move clips, by dragging them: each to the track and the frame given for it. `before_the_drag` says which clip group each of them was in
+    /// when the drag that this is a move of began (see [`crate::project::Project::move_clips_remembering`], which is what a clip that goes into the
+    /// rectangle of a clip group joins it by, and leaves it by when it goes out again): empty for a move that is not of a drag.
+    MoveClips {
+        moves: Vec<ClipMove>,
+        before_the_drag: Vec<ClipGroupBeforeTheDrag>,
+    },
 
     // The settings of a clip, from the box that opens above it.
     SetClipSpeed {
@@ -216,6 +227,13 @@ pub enum Command {
         group: GroupId,
         member: Member,
     },
+    /// Move the left or the right edge of a clip group, by dragging it on the timeline: the group has the clips that are inside these frames
+    /// (from the first to the end, which is not in them) when it is done (see [`crate::project::Project::set_the_frames_of_the_clip_group`]).
+    SetTheFramesOfAClipGroup {
+        group: GroupId,
+        first_frame: u64,
+        end_frame: u64,
+    },
     /// Take a group apart, with *Disband* in the menu of its title bar, and with the Delete key when it is selected: what was in it is in
     /// the project still (see [`crate::project::Project::disband_group`]).
     DisbandGroup(GroupId),
@@ -287,12 +305,12 @@ pub enum Command {
     /// Make one rack of racks of one property of one thing, which has the keyframes of all of them (see
     /// [`crate::project::Project::merge_racks`]).
     MergeRacks(Vec<RackId>),
-    /// Move a rack of keyframes to another drawer, or onto an empty stretch of a track (where it is put in a keyframe
-    /// crate made for it), by dragging it, with all its keyframes this many frames later in time (earlier, if negative). It
-    /// has `slot` racks above it in the drawer it goes to if that is said (not counting itself), and otherwise it keeps its
-    /// place there, or goes under the others if it is not in that drawer yet.
-    MoveRack {
-        rack: RackId,
+    /// Move racks of keyframes to another drawer, or onto an empty stretch of a track (where they are put in one keyframe
+    /// crate made for them), by dragging them, with all their keyframes this many frames later in time (earlier, if negative). The
+    /// first has `slot` racks above it in the drawer they go to if that is said (not counting themselves), and the others follow it,
+    /// and otherwise each keeps its place there, or goes under the others if it is not in that drawer yet.
+    MoveRacks {
+        racks: Vec<RackId>,
         to: RackDestination,
         shift_in_frames: i64,
         slot: Option<usize>,
@@ -303,6 +321,15 @@ pub enum Command {
 }
 
 impl Command {
+    /// The command that moves clips as asked (and is not a move of a drag: the clip groups they were in are not told).
+    #[cfg(test)]
+    pub fn move_clips(moves: Vec<ClipMove>) -> Self {
+        Self::MoveClips {
+            moves,
+            before_the_drag: Vec::new(),
+        }
+    }
+
     /// The command that changes what is selected by these clips, in the way `change` says.
     pub fn select_clips(clips: impl IntoIterator<Item = ClipId>, change: SelectionChange) -> Self {
         Self::SelectItems {
@@ -328,7 +355,7 @@ impl Command {
             Self::SplitAt { .. }
             | Self::DeleteClips(_)
             | Self::DuplicateClips { .. }
-            | Self::MoveClips(_)
+            | Self::MoveClips { .. }
             | Self::SetClipSpeed { .. }
             | Self::SetClipGain { .. }
             | Self::SetClipMuted { .. }
@@ -351,6 +378,7 @@ impl Command {
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }
             | Self::RemoveFromGroup { .. }
+            | Self::SetTheFramesOfAClipGroup { .. }
             | Self::DisbandGroup(_)
             | Self::DeleteGroupAndEverythingInIt(_)
             | Self::RenameGroup { .. }
@@ -366,7 +394,7 @@ impl Command {
             | Self::DuplicateKeyframes { .. }
             | Self::DeleteRacks(_)
             | Self::MergeRacks(_)
-            | Self::MoveRack { .. }
+            | Self::MoveRacks { .. }
             | Self::SetProjectFrameRate(_)
             | Self::SetSpeedIndicatorLayout(_) => true,
 
@@ -391,6 +419,8 @@ impl Command {
             | Self::MoveCurrentFrameBy(_)
             | Self::FitThePreview
             | Self::FrameTheSelectionInTheTimeline
+            | Self::GoBackInTheTimelineViewHistory
+            | Self::GoForwardInTheTimelineViewHistory
             | Self::SelectItems { .. }
             | Self::RelinkSource(_)
             | Self::IncludeFilesInTheProjectFile(_)
@@ -409,7 +439,7 @@ impl Command {
             Self::SetTrackSpeed { .. } => Some("Playing this track at that speed"),
             Self::SetClipDuration { .. } => Some("Making this clip last that long"),
             Self::SetProjectFrameRate(_) => Some("Counting everything again at that frame rate"),
-            Self::MoveClips(_) => Some("Putting the clips there"),
+            Self::MoveClips { .. } => Some("Putting the clips there"),
 
             Self::LoadProject
             | Self::SaveProject
@@ -432,6 +462,8 @@ impl Command {
             | Self::MoveCurrentFrameBy(_)
             | Self::FitThePreview
             | Self::FrameTheSelectionInTheTimeline
+            | Self::GoBackInTheTimelineViewHistory
+            | Self::GoForwardInTheTimelineViewHistory
             | Self::SelectItems { .. }
             | Self::SplitAt { .. }
             | Self::DeleteClips(_)
@@ -458,6 +490,7 @@ impl Command {
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }
             | Self::RemoveFromGroup { .. }
+            | Self::SetTheFramesOfAClipGroup { .. }
             | Self::DisbandGroup(_)
             | Self::DeleteGroupAndEverythingInIt(_)
             | Self::RenameGroup { .. }
@@ -473,7 +506,7 @@ impl Command {
             | Self::DuplicateKeyframes { .. }
             | Self::DeleteRacks(_)
             | Self::MergeRacks(_)
-            | Self::MoveRack { .. }
+            | Self::MoveRacks { .. }
             | Self::SetSpeedIndicatorLayout(_) => None,
         }
     }
@@ -489,7 +522,7 @@ impl Command {
     /// of the history. `None` for an edit that is to be a step of its own, and for what is no edit.
     pub fn gesture_key(&self) -> Option<EditKey> {
         match self {
-            Self::MoveClips(moves) => {
+            Self::MoveClips { moves, .. } => {
                 let mut clips: Vec<ClipId> = moves.iter().map(|moved| moved.clip).collect();
                 clips.sort();
                 Some(EditKey::about(&("the place of", clips)))
@@ -518,7 +551,11 @@ impl Command {
                 keyframes.sort();
                 Some(EditKey::about(&("the place of the keyframes", keyframes)))
             }
-            Self::MoveRack { rack, .. } => Some(EditKey::about(&("the place of the rack", rack))),
+            Self::MoveRacks { racks, .. } => {
+                let mut racks: Vec<RackId> = racks.clone();
+                racks.sort();
+                Some(EditKey::about(&("the place of the racks", racks)))
+            }
             Self::SetSpeedIndicatorLayout(_) => Some(EditKey::about(&"where the fast-forward symbol is")),
             _ => None,
         }
@@ -594,8 +631,8 @@ mod tests {
         assert!(Command::MoveKeyframes(vec![]).may_change_the_project());
         assert!(Command::DeleteKeyframes(vec![keyframe(0)]).may_change_the_project());
         assert!(
-            Command::MoveRack {
-                rack: RackId::new(TrackId::new(0), 0),
+            Command::MoveRacks {
+                racks: vec![RackId::new(TrackId::new(0), 0)],
                 to: RackDestination::Drawer(AnimationTarget::Clip(clip(0))),
                 shift_in_frames: 4,
                 slot: None,
@@ -634,7 +671,7 @@ mod tests {
                     .map(|(number, to_frame)| KeyframeMove {
                         keyframe: keyframe(*number),
                         to_rack: RackId::new(TrackId::new(0), 0),
-                        to_frame: *to_frame,
+                        to_frame: i64::try_from(*to_frame).unwrap(),
                     })
                     .collect(),
             )
@@ -651,8 +688,8 @@ mod tests {
 
     #[test]
     fn dragging_a_rack_is_one_gesture_for_the_rack_wherever_it_is_taken() {
-        let dragging = |rack: u32, owner: u32, shift: i64| Command::MoveRack {
-            rack: RackId::new(TrackId::new(0), rack),
+        let dragging = |rack: u32, owner: u32, shift: i64| Command::MoveRacks {
+            racks: vec![RackId::new(TrackId::new(0), rack)],
             to: RackDestination::Drawer(AnimationTarget::Clip(clip(owner))),
             shift_in_frames: shift,
             slot: None,
@@ -660,6 +697,24 @@ mod tests {
         assert_eq!(dragging(1, 0, 5).gesture_key(), dragging(1, 3, -8).gesture_key());
         assert!(dragging(1, 0, 5).gesture_key().is_some());
         assert_ne!(dragging(1, 0, 5).gesture_key(), dragging(2, 0, 5).gesture_key());
+    }
+
+    #[test]
+    fn dragging_several_racks_is_one_gesture_for_those_racks_in_whatever_order_they_are_named() {
+        let dragging = |racks: &[u32]| Command::MoveRacks {
+            racks: racks.iter().map(|rack| RackId::new(TrackId::new(0), *rack)).collect(),
+            to: RackDestination::Drawer(AnimationTarget::Clip(clip(0))),
+            shift_in_frames: 3,
+            slot: None,
+        };
+        assert_eq!(dragging(&[1, 2]).gesture_key(), dragging(&[2, 1]).gesture_key());
+        assert!(dragging(&[1, 2]).gesture_key().is_some());
+        assert_ne!(
+            dragging(&[1, 2]).gesture_key(),
+            dragging(&[1]).gesture_key(),
+            "not the same racks"
+        );
+        assert_ne!(dragging(&[1, 2]).gesture_key(), dragging(&[1, 3]).gesture_key());
     }
 
     fn keyframe_removed_at(frame: u64) -> Command {
@@ -758,7 +813,7 @@ mod tests {
     #[test]
     fn dragging_clips_is_one_gesture_for_those_clips_wherever_they_have_got_to() {
         let moved = |clips: &[(u32, u64)]| {
-            Command::MoveClips(
+            Command::move_clips(
                 clips
                     .iter()
                     .map(|&(number, start)| ClipMove {
@@ -777,7 +832,7 @@ mod tests {
             moved(&[(1, 70), (0, 30)]).gesture_key(),
             "the same clips in any order"
         );
-        let to_another_track = Command::MoveClips(vec![ClipMove {
+        let to_another_track = Command::move_clips(vec![ClipMove {
             clip: clip(0),
             to_track: TrackId::new(5),
             start: TimelineFrameIndex::new(10),

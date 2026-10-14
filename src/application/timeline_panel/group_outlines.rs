@@ -13,7 +13,8 @@
 //! The outline of a group is always **outside** those of the groups in it: each level of groups in groups is 4 points further out than the
 //! level below. A tag goes round the outlines of the groups that are in it, as it does round its clips.
 //!
-//! No group can be clicked or dragged on the timeline, and none has its name there: what a group is, is told in the properties panel.
+//! What can be done to a group on the timeline is in [`super::group_title_bars`] (its name, which is where it is clicked and dragged, when the
+//! pointer is over it) and [`super::group_edges`] (the edges of a clip group, which are moved to take in or let go of clips).
 
 use std::collections::HashMap;
 
@@ -24,7 +25,7 @@ use super::clips::rectangles_of;
 use super::strip_view::StripView;
 use crate::application::selection::Selection;
 use crate::application::theme;
-use crate::project::{Group, GroupId, GroupKind, Member, Project, Track};
+use crate::project::{ClipGroupEdge, Group, GroupId, GroupKind, Member, Project, Track};
 
 mod shape;
 
@@ -55,6 +56,17 @@ pub(super) struct WhereTheRowsAre<'a> {
     pub views: &'a [(&'a Track, StripView)],
     /// How far left the boxes of the titles of the tracks begin: where the outline of a track group reaches to.
     pub left_of_the_title_boxes: f32,
+    /// The edge of a clip group that is shown somewhere else than where the group has it, while the edge is being moved.
+    pub an_edge_shown_elsewhere: Option<EdgeShownElsewhere>,
+}
+
+/// An edge of the rectangle of a clip group that is drawn somewhere else than where the group has it: at a place that is a number of frames
+/// along (not a whole number while it moves).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct EdgeShownElsewhere {
+    pub group: GroupId,
+    pub edge: ClipGroupEdge,
+    pub frame: f64,
 }
 
 /// The outline of one group, as the loops that go round it.
@@ -218,12 +230,18 @@ impl Working<'_> {
         let rectangle = self.project.rectangle_of_the_group(group)?;
         let (_, first) = self.rows.views.get(rectangle.first_track)?;
         let (_, last) = self.rows.views.get(rectangle.last_track)?;
+        let shown_at = |edge: ClipGroupEdge, frame: u64| match self.rows.an_edge_shown_elsewhere {
+            Some(elsewhere) if elsewhere.group == group && elsewhere.edge == edge => {
+                first.screen_x_of_fractional_frame(elsewhere.frame)
+            }
+            _ => first.screen_x_of_frame(frame),
+        };
         let left = if over_the_title_boxes {
             self.rows.left_of_the_title_boxes
         } else {
-            first.screen_x_of_frame(rectangle.first_frame)
+            shown_at(ClipGroupEdge::Left, rectangle.first_frame)
         };
-        let right = first.screen_x_of_frame(rectangle.end_frame).max(left);
+        let right = shown_at(ClipGroupEdge::Right, rectangle.end_frame).max(left);
         Some(Rect::from_min_max(
             pos2(left, first.rectangle.top()),
             pos2(right, last.rectangle.bottom()),
@@ -231,17 +249,16 @@ impl Working<'_> {
     }
 }
 
-/// Draws the outlines of the groups of `project` (in the places that `rows` say the rows are), over what is drawn in `painter` so far: in the
-/// colour of each group, thicker for those that are selected. A clip group or a tag is only drawn where the strips are (`strips_area`), and a
-/// track group where the title boxes are as well (`rows_area`).
+/// Draws `outlines` (see [`outlines_of_the_groups`]) over what is drawn in `painter` so far: in the colour of each group, thicker for those
+/// that are selected. A clip group or a tag is only drawn where the strips are (`strips_area`), and a track group where the title boxes are
+/// as well (`rows_area`).
 pub(super) fn draw(
     painter: &Painter,
-    project: &Project,
+    outlines: &[OutlineOfAGroup],
     selection: &Selection,
-    rows: WhereTheRowsAre<'_>,
     (strips_area, rows_area): (Rect, Rect),
 ) {
-    for outline in outlines_of_the_groups(project, rows) {
+    for outline in outlines {
         let thickness = if selection.contains_group(outline.group) {
             THICKNESS_WHEN_SELECTED
         } else {
@@ -253,8 +270,11 @@ pub(super) fn draw(
             strips_area
         };
         let painter = painter.with_clip_rect(area.intersect(painter.clip_rect()));
-        for points in outline.loops {
-            painter.add(Shape::closed_line(points, Stroke::new(thickness, outline.colour)));
+        for points in &outline.loops {
+            painter.add(Shape::closed_line(
+                points.clone(),
+                Stroke::new(thickness, outline.colour),
+            ));
         }
     }
 }

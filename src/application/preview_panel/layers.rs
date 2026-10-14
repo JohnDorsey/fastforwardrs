@@ -11,7 +11,8 @@
 //!
 //! The layers are cut off at the edge of the picture, as the export cuts them off. What shows where they are
 //! and what can be taken hold of (their outlines, the handles, the ring to turn by) is not: it is drawn wherever
-//! it is in the window, over the other panels too.
+//! it is over the preview, outside the picture too (when the picture is zoomed out, or does not fill the panel), but it stops at
+//! the edge of the preview panel and is never drawn over the other panels.
 
 use egui::epaint::Vertex;
 use egui::{
@@ -33,7 +34,7 @@ use crate::text_rendering::{LazyTextRenderer, TextAppearance};
 /// Draws the layers (and the symbol over the front-most video) and adds a command for each thing
 /// the user does to them. `panel_rectangle` is all of the room the preview has, of which the
 /// picture is a part (all of the panel, or more, if the picture is zoomed in): the box of the selected layer, and the places
-/// to turn it from, can be outside the picture, and outside the panel.
+/// to turn it from, can be outside the picture, and are drawn and taken hold of as far as the panel goes.
 pub(super) fn show(
     ui: &mut Ui,
     content: &PreviewContent<'_>,
@@ -44,9 +45,10 @@ pub(super) fn show(
     commands: &mut Vec<Command>,
 ) {
     // What is drawn is cut off at the edge of the picture, as the export cuts it off (and at the edge of the panel, if the picture
-    // reaches past it), but what is drawn to show where things are, and what can be taken hold of, is not cut off at all.
+    // reaches past it), but what is drawn to show where things are, and what can be taken hold of, is only cut off at the edge of
+    // the panel: it is not drawn over the other panels.
     let painter = ui.painter().with_clip_rect(picture.rectangle);
-    let over_everything = ui.ctx().layer_painter(ui.layer_id());
+    let painter_of_what_shows_where_things_are = ui.painter().with_clip_rect(panel_rectangle);
     let catchers = Catchers::register(
         ui,
         panel_rectangle,
@@ -58,7 +60,7 @@ pub(super) fn show(
         draw_layer(ui, &painter, layer, picture, textures, text_renderer);
         name_the_layer(ui, layer, &picture);
         if pointing.outlines(content, layer) {
-            over_everything.add(Shape::closed_line(
+            painter_of_what_shows_where_things_are.add(Shape::closed_line(
                 picture.outline_of(&layer.placement).to_vec(),
                 Stroke::new(1.0, theme::INDICATOR_OUTLINE),
             ));
@@ -71,11 +73,11 @@ pub(super) fn show(
         }
     }
 
-    // The selected layer has its outline and handles over everything else.
+    // The selected layer has its outline and handles over everything else on the preview.
     if let Some(layer) = content.selected_layer() {
-        show_the_box(&over_everything, layer, picture);
+        show_the_box(&painter_of_what_shows_where_things_are, layer, picture);
     }
-    pointing.show(ui, &over_everything, content, &picture);
+    pointing.show(ui, &painter_of_what_shows_where_things_are, content, &picture);
 }
 
 /// Gives the layer its name for screen readers (and the tests), over where it is. It senses nothing.

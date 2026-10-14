@@ -339,15 +339,28 @@ impl Drawers {
 
     /// How far the drawers of the clips of `track` reach under the bottom of its row, as far as the one that reaches
     /// furthest does, however they opened. (A keyframe crate has no drawer to open, but it reaches below the strip when it has
-    /// more racks than fit in it: see [`crate_layout`].)
-    pub(super) fn reach_of_the_drawers_of_the_clips_of(&self, track: &Track, project: &Project) -> f32 {
-        self.furthest_reach_of_the_clips_of(track, project, |_| true)
+    /// more racks than fit in it: see [`crate_layout`], and `strip_height`, which is how tall the strip of the track is drawn:
+    /// it is the only thing that the height of the strip has to do with how far a drawer reaches.)
+    pub(super) fn reach_of_the_drawers_of_the_clips_of(
+        &self,
+        track: &Track,
+        strip_height: f32,
+        project: &Project,
+    ) -> f32 {
+        self.furthest_reach_of_the_clips_of(track, strip_height, project, |_| true)
     }
 
     /// How far the drawers of the clips of `track` that pushed the rows under them to open reach under the bottom of its row, as
     /// far as the one that reaches furthest does. (A keyframe crate does not push: it lies over what is under it.)
-    fn reach_of_the_drawers_of_the_clips_of_that_push(&self, track: &Track, project: &Project) -> f32 {
-        self.furthest_reach_of_the_clips_of(track, project, |mode| mode == Some(OpenMode::PushingTheRowsUnder))
+    fn reach_of_the_drawers_of_the_clips_of_that_push(
+        &self,
+        track: &Track,
+        strip_height: f32,
+        project: &Project,
+    ) -> f32 {
+        self.furthest_reach_of_the_clips_of(track, strip_height, project, |mode| {
+            mode == Some(OpenMode::PushingTheRowsUnder)
+        })
     }
 
     /// How far under the bottom of its row the drawers of the clips of `track` reach, as far as the one that reaches furthest
@@ -355,6 +368,7 @@ impl Drawers {
     fn furthest_reach_of_the_clips_of(
         &self,
         track: &Track,
+        strip_height: f32,
         project: &Project,
         counts: impl Fn(Option<OpenMode>) -> bool,
     ) -> f32 {
@@ -362,7 +376,7 @@ impl Drawers {
             .placements()
             .map(|placement| match placement.clip {
                 Clip::Crate(_) if counts(None) => {
-                    crate_layout(track.height().points(), placement.drawer.len()).reach_below_the_strip
+                    crate_layout(strip_height, placement.drawer.len()).reach_below_the_strip
                 }
                 other if has_an_accessible_drawer(other) => {
                     let owner = AnimationTarget::Clip(placement.id);
@@ -379,8 +393,8 @@ impl Drawers {
 
     /// How far the drawers hanging from the row of `track` (its own and its clips') reach under the bottom of the row,
     /// altogether: the drawer of the track hangs from the end of the drawers of its clips.
-    pub(super) fn reach_under_the_row_of(&self, track: &Track, project: &Project) -> f32 {
-        self.reach_of_the_drawers_of_the_clips_of(track, project)
+    pub(super) fn reach_under_the_row_of(&self, track: &Track, strip_height: f32, project: &Project) -> f32 {
+        self.reach_of_the_drawers_of_the_clips_of(track, strip_height, project)
             + self.hanging_height_of(AnimationTarget::Track(track.id()), project)
     }
 
@@ -388,19 +402,25 @@ impl Drawers {
     /// by that much. The drawers of its clips that pushed to open are in it, as far as the lowest of them reaches; and so is
     /// everything above the drawer of the track if that pushed to open, because it hangs from the end of them. What lies over
     /// the rows under it, whichever it is, is not.
-    pub(super) fn extra_height_of(&self, track: &Track, project: &Project) -> f32 {
+    pub(super) fn extra_height_of(&self, track: &Track, strip_height: f32, project: &Project) -> f32 {
         let of_the_track = AnimationTarget::Track(track.id());
         let hanging = self.hanging_height_of(of_the_track, project);
         if hanging > 0.0 && self.mode_of(of_the_track) == OpenMode::PushingTheRowsUnder {
-            return self.reach_of_the_drawers_of_the_clips_of(track, project) + hanging;
+            return self.reach_of_the_drawers_of_the_clips_of(track, strip_height, project) + hanging;
         }
-        self.reach_of_the_drawers_of_the_clips_of_that_push(track, project)
+        self.reach_of_the_drawers_of_the_clips_of_that_push(track, strip_height, project)
     }
 
     /// How far the drawers that hang from the row of `track` reach under the row as the rows are laid out (which is the track and
     /// [`Self::extra_height_of`] it): what lies over the rows under it.
-    pub(super) fn reach_over_the_rows_under_the_row_of(&self, track: &Track, project: &Project) -> f32 {
-        (self.reach_under_the_row_of(track, project) - self.extra_height_of(track, project)).max(0.0)
+    pub(super) fn reach_over_the_rows_under_the_row_of(
+        &self,
+        track: &Track,
+        strip_height: f32,
+        project: &Project,
+    ) -> f32 {
+        (self.reach_under_the_row_of(track, strip_height, project) - self.extra_height_of(track, strip_height, project))
+            .max(0.0)
     }
 
     /// Forgets the drawers of clips and tracks that are not in `project` any more.
@@ -512,6 +532,12 @@ fn draw_arrow(painter: &Painter, centre: Pos2, points_up: bool, colour: Color32)
 mod tests {
     use super::*;
     use crate::project::{TrackHeight, TrackId};
+    use crate::test_support::{RACKS_IN_THE_CRATE, project_with_a_crate_that_has_a_lot_of_racks};
+
+    /// How tall the strip of `track` is drawn when the rows are not zoomed up or down: as tall as the track says.
+    fn strip_height_of(track: &Track) -> f32 {
+        track.height().points()
+    }
 
     fn clip(number: u32) -> AnimationTarget {
         AnimationTarget::Clip(ClipId::new(TrackId::new(0), number))
@@ -993,7 +1019,7 @@ mod tests {
         advance_for(&mut drawers, 0.5);
         assert_eq!(drawers.hanging_height_of(owner, &project), drawer_height(0));
         assert_eq!(
-            drawers.reach_under_the_row_of(&project.tracks()[0], &project),
+            drawers.reach_under_the_row_of(&project.tracks()[0], strip_height_of(&project.tracks()[0]), &project),
             drawer_height(0)
         );
     }
@@ -1013,16 +1039,24 @@ mod tests {
         let mut drawers = Drawers::default();
         drawers.toggle(AnimationTarget::Clip(text), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
-        let by_the_clips = drawers.reach_of_the_drawers_of_the_clips_of(&project.tracks()[0], &project);
+        let by_the_clips = drawers.reach_of_the_drawers_of_the_clips_of(
+            &project.tracks()[0],
+            strip_height_of(&project.tracks()[0]),
+            &project,
+        );
         assert_eq!(by_the_clips, drawer_height(0));
         drawers.toggle(AnimationTarget::Track(track_id), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
         assert_eq!(
-            drawers.reach_under_the_row_of(&project.tracks()[0], &project),
+            drawers.reach_under_the_row_of(&project.tracks()[0], strip_height_of(&project.tracks()[0]), &project),
             2.0 * drawer_height(0)
         );
         assert_eq!(
-            drawers.reach_of_the_drawers_of_the_clips_of(&project.tracks()[0], &project),
+            drawers.reach_of_the_drawers_of_the_clips_of(
+                &project.tracks()[0],
+                strip_height_of(&project.tracks()[0]),
+                &project
+            ),
             by_the_clips,
             "the track's own drawer is not one of its clips'"
         );
@@ -1165,17 +1199,20 @@ mod tests {
         let track = &project.tracks()[0];
 
         assert_eq!(
-            drawers.extra_height_of(track, &project),
+            drawers.extra_height_of(track, strip_height_of(track), &project),
             drawer_height(1),
             "the second has a rack in its drawer, and the first none: the lowest is the second's"
         );
         assert_eq!(
-            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawers.reach_over_the_rows_under_the_row_of(track, strip_height_of(track), &project),
             0.0,
             "all of what hangs from the row is in the row"
         );
         let (project, nothing_open) = a_track_with_drawers_opened_like(None, None, None);
-        assert_eq!(nothing_open.extra_height_of(&project.tracks()[0], &project), 0.0);
+        assert_eq!(
+            nothing_open.extra_height_of(&project.tracks()[0], strip_height_of(&project.tracks()[0]), &project),
+            0.0
+        );
     }
 
     #[test]
@@ -1186,17 +1223,17 @@ mod tests {
         let lying_over = drawer_height(1);
 
         assert_eq!(
-            drawers.extra_height_of(track, &project),
+            drawers.extra_height_of(track, strip_height_of(track), &project),
             pushing,
             "only the first pushes"
         );
         assert_eq!(
-            drawers.reach_under_the_row_of(track, &project),
+            drawers.reach_under_the_row_of(track, strip_height_of(track), &project),
             lying_over,
             "the second reaches further"
         );
         assert_eq!(
-            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawers.reach_over_the_rows_under_the_row_of(track, strip_height_of(track), &project),
             lying_over - pushing,
             "the rest of it is over the rows under"
         );
@@ -1207,9 +1244,9 @@ mod tests {
         let (project, drawers) = a_track_with_drawers_opened_like(None, Some(LYING_OVER), None);
         let track = &project.tracks()[0];
 
-        assert_eq!(drawers.extra_height_of(track, &project), 0.0);
+        assert_eq!(drawers.extra_height_of(track, strip_height_of(track), &project), 0.0);
         assert_eq!(
-            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawers.reach_over_the_rows_under_the_row_of(track, strip_height_of(track), &project),
             drawer_height(1)
         );
     }
@@ -1222,10 +1259,13 @@ mod tests {
         let track = &project.tracks()[0];
 
         assert_eq!(
-            drawers.extra_height_of(track, &project),
+            drawers.extra_height_of(track, strip_height_of(track), &project),
             drawer_height(1) + drawer_height(0)
         );
-        assert_eq!(drawers.reach_over_the_rows_under_the_row_of(track, &project), 0.0);
+        assert_eq!(
+            drawers.reach_over_the_rows_under_the_row_of(track, strip_height_of(track), &project),
+            0.0
+        );
     }
 
     #[test]
@@ -1235,12 +1275,12 @@ mod tests {
         let track = &project.tracks()[0];
 
         assert_eq!(
-            drawers.extra_height_of(track, &project),
+            drawers.extra_height_of(track, strip_height_of(track), &project),
             drawer_height(0),
             "the clip's drawer pushes"
         );
         assert_eq!(
-            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawers.reach_over_the_rows_under_the_row_of(track, strip_height_of(track), &project),
             drawer_height(0),
             "and the drawer of the track, which hangs under it, is over the rows under"
         );
@@ -1263,8 +1303,11 @@ mod tests {
         for _ in 0..12 {
             pushing.advance(1.0 / 60.0);
             lying_over.advance(1.0 / 60.0);
-            extras.push(pushing.extra_height_of(&project.tracks()[0], &project));
-            assert_eq!(lying_over.extra_height_of(&project.tracks()[0], &project), 0.0);
+            extras.push(pushing.extra_height_of(&project.tracks()[0], strip_height_of(&project.tracks()[0]), &project));
+            assert_eq!(
+                lying_over.extra_height_of(&project.tracks()[0], strip_height_of(&project.tracks()[0]), &project),
+                0.0
+            );
         }
         assert!(
             extras.windows(2).all(|pair| pair[1] >= pair[0]) && extras[0] < extras[11],
@@ -1272,7 +1315,7 @@ mod tests {
         );
         assert_eq!(
             *extras.last().unwrap(),
-            pushing.reach_under_the_row_of(&project.tracks()[0], &project)
+            pushing.reach_under_the_row_of(&project.tracks()[0], strip_height_of(&project.tracks()[0]), &project)
         );
     }
 
@@ -1312,58 +1355,123 @@ mod tests {
     }
 
     #[test]
-    fn a_keyframe_crate_with_more_racks_than_fit_in_it_lies_over_the_rows_under_it_and_does_not_push_them() {
-        use crate::project::{PropertyId, RackDestination, TextObject, TimelineFrameIndex};
+    fn the_room_that_the_drawers_of_a_row_need_is_worked_out_for_the_strip_as_it_is_drawn_when_the_rows_are_zoomed() {
+        let (project, crate_track) = project_with_a_crate_that_has_a_lot_of_racks();
+        let mut drawers = Drawers::default();
+        drawers.toggle(AnimationTarget::Track(crate_track), OpenMode::PushingTheRowsUnder);
+        advance_for(&mut drawers, 0.5);
+        let position = project
+            .tracks()
+            .iter()
+            .position(|track| track.id() == crate_track)
+            .unwrap();
+        let track = &project.tracks()[position];
 
-        let mut project = Project::empty();
-        let text_track = project.tracks()[0].id();
-        let (text, _) = project
-            .insert_text(text_track, TimelineFrameIndex::new(0), TextObject::default(), 90)
-            .unwrap();
-        let crate_track = project.add_track_in_front();
-        let crate_clip = project
-            .insert_crate(crate_track, TimelineFrameIndex::new(0), 90)
-            .unwrap();
-        let properties_of_a_text = [
-            PropertyId::Position,
-            PropertyId::Size,
-            PropertyId::Rotation,
-            PropertyId::Text,
-            PropertyId::FontFamily,
-            PropertyId::FontSize,
-            PropertyId::Colour,
-        ];
-        for property in properties_of_a_text {
-            let made = project
-                .add_keyframe(AnimationTarget::Clip(text), property, TimelineFrameIndex::new(10))
-                .unwrap()
-                .unwrap();
-            project
-                .move_rack(
-                    made.rack,
-                    RackDestination::Drawer(AnimationTarget::Clip(crate_clip)),
-                    0,
-                    None,
-                )
-                .unwrap();
-        }
+        // The rows are zoomed down to a half: the strip is drawn as tall as half of what the track says.
+        let layout = crate::application::timeline_panel::rows::RowsLayout::of(
+            &project,
+            &drawers,
+            crate::application::timeline_panel::vertical_zoom::VerticalZoom::of(0.5),
+        );
+
+        let strip = layout.strip_heights[position];
+        assert!(
+            strip < track.height().points() - 20.0,
+            "the setup: the strip is drawn shorter: {strip}"
+        );
+        let wanted = drawers.extra_height_of(track, strip, &project);
+        let if_it_were_not_zoomed = drawers.extra_height_of(track, track.height().points(), &project);
+        assert!(
+            (wanted - if_it_were_not_zoomed).abs() > 20.0,
+            "the setup: the room the crate and the drawer need is not the same for the strip as it is: {wanted} and {if_it_were_not_zoomed}"
+        );
+        assert_eq!(layout.heights[position], strip + wanted);
+
+        // With nothing open the crate of the first row lies over the row under it, and past it: how far past is what the room under the last
+        // row is.
+        assert_eq!(
+            (position, layout.heights.len()),
+            (0, 2),
+            "the setup: the crate is on the first of two rows"
+        );
+        let nothing_open = Drawers::default();
+        let layout = crate::application::timeline_panel::rows::RowsLayout::of(
+            &project,
+            &nothing_open,
+            crate::application::timeline_panel::vertical_zoom::VerticalZoom::of(0.5),
+        );
+        let reach_over_the_row_under = nothing_open.reach_over_the_rows_under_the_row_of(track, strip, &project);
+        let if_it_were_not_zoomed =
+            nothing_open.reach_over_the_rows_under_the_row_of(track, track.height().points(), &project);
+        assert!(
+            (reach_over_the_row_under - if_it_were_not_zoomed).abs() > 20.0,
+            "the setup: how far the crate reaches depends on the strip: {reach_over_the_row_under} and {if_it_were_not_zoomed}"
+        );
+        assert_eq!(
+            layout.room_after_the_last_row,
+            (reach_over_the_row_under - crate::application::theme::SPACE_BETWEEN_TRACKS - layout.heights[1]).max(0.0)
+        );
+        assert!(
+            layout.room_after_the_last_row > 10.0,
+            "the setup: it does reach past the row under it"
+        );
+    }
+
+    #[test]
+    fn how_far_a_keyframe_crate_reaches_below_its_strip_is_told_by_how_tall_the_strip_is_drawn_and_not_by_the_height_of_its_track()
+     {
+        let (project, crate_track) = project_with_a_crate_that_has_a_lot_of_racks();
         let drawers = Drawers::default();
         let track = project.track(crate_track).unwrap();
-        let overhang = crate_layout(track.height().points(), properties_of_a_text.len()).reach_below_the_strip;
+
+        let reach_at = |strip_height: f32| drawers.reach_under_the_row_of(track, strip_height, &project);
+
+        assert_eq!(
+            reach_at(104.0),
+            crate_layout(104.0, RACKS_IN_THE_CRATE).reach_below_the_strip
+        );
+        assert_eq!(
+            reach_at(44.0),
+            crate_layout(44.0, RACKS_IN_THE_CRATE).reach_below_the_strip
+        );
+        assert!(
+            reach_at(44.0) > reach_at(104.0) + 50.0,
+            "a row that is drawn shorter has the crate reach further below it: {} and {}",
+            reach_at(44.0),
+            reach_at(104.0)
+        );
+        assert_eq!(
+            reach_at(312.0),
+            0.0,
+            "and a row that is drawn three times as tall has room for all the racks in it"
+        );
+        assert_eq!(
+            drawers.extra_height_of(track, 44.0, &project),
+            0.0,
+            "whichever it is, the crate lies over the rows under it and does not push them"
+        );
+    }
+
+    #[test]
+    fn a_keyframe_crate_with_more_racks_than_fit_in_it_lies_over_the_rows_under_it_and_does_not_push_them() {
+        let (project, crate_track) = project_with_a_crate_that_has_a_lot_of_racks();
+        let drawers = Drawers::default();
+        let track = project.track(crate_track).unwrap();
+        let overhang = crate_layout(track.height().points(), RACKS_IN_THE_CRATE).reach_below_the_strip;
         assert!(overhang > 0.0, "the racks do not fit in the crate");
 
         assert_eq!(
-            drawers.reach_under_the_row_of(track, &project),
+            drawers.reach_under_the_row_of(track, strip_height_of(track), &project),
             overhang,
             "the crate hangs below its row"
         );
         assert_eq!(
-            drawers.extra_height_of(track, &project),
+            drawers.extra_height_of(track, strip_height_of(track), &project),
             0.0,
             "and does not make the row taller: what is under it is not pushed down"
         );
         assert_eq!(
-            drawers.reach_over_the_rows_under_the_row_of(track, &project),
+            drawers.reach_over_the_rows_under_the_row_of(track, strip_height_of(track), &project),
             overhang,
             "all of it is over the rows under"
         );
@@ -1371,7 +1479,7 @@ mod tests {
 
     #[test]
     fn a_keyframe_crate_has_no_drawer_to_reach_with_even_if_it_has_racks_that_would_make_it_reach_further() {
-        use crate::project::{PropertyId, RackDestination, TextObject, TimelineFrameIndex};
+        use crate::project::{PropertyId, TextObject, TimelineFrameIndex};
 
         let mut project = Project::empty();
         let front = project.tracks()[0].id();
@@ -1381,29 +1489,24 @@ mod tests {
             .unwrap();
         // A crate on the track that is in front, over the same frames, with a rack in it (which makes it taller than a
         // drawer that has none).
-        let crate_clip = project.insert_crate(behind, TimelineFrameIndex::new(20), 10).unwrap();
-        let made = project
-            .add_keyframe(
-                AnimationTarget::Clip(text),
-                PropertyId::Rotation,
-                TimelineFrameIndex::new(22),
-            )
-            .unwrap()
-            .unwrap();
-        project
-            .move_rack(
-                made.rack,
-                RackDestination::Drawer(AnimationTarget::Clip(crate_clip)),
-                0,
-                None,
-            )
-            .unwrap();
+        let crate_clip = crate::test_support::make_a_crate(
+            &mut project,
+            behind,
+            20,
+            29,
+            AnimationTarget::Clip(text),
+            PropertyId::Rotation,
+        );
         let mut drawers = Drawers::default();
         drawers.toggle(AnimationTarget::Clip(crate_clip), OpenMode::PushingTheRowsUnder);
         advance_for(&mut drawers, 0.5);
 
         assert_eq!(
-            drawers.reach_of_the_drawers_of_the_clips_of(project.track(behind).unwrap(), &project),
+            drawers.reach_of_the_drawers_of_the_clips_of(
+                project.track(behind).unwrap(),
+                strip_height_of(project.track(behind).unwrap()),
+                &project
+            ),
             0.0,
             "a crate is nothing but a drawer that is always open: it has no other to open, and one rack fits in it"
         );

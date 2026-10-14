@@ -1174,16 +1174,6 @@ fn window_with_many_tracks_scrolled_to_the_bottom() -> Window {
     window
 }
 
-/// How far down the rows can be seen: where the view of them ends at the bottom.
-fn the_bottom_of_what_can_be_seen_of_the_rows(window: &Window) -> f32 {
-    window
-        .application()
-        .timeline_view
-        .timeline_area_in_the_last_frame
-        .expect("the timeline was drawn")
-        .bottom()
-}
-
 /// Where the first drawer that was drawn is, and where what it is drawn in is cut off.
 fn the_drawer_and_where_it_is_cut_off(window: &Window) -> (Rect, Rect) {
     window
@@ -1234,7 +1224,7 @@ fn a_drawer_that_is_brought_into_view_with_rows_under_it_is_scrolled_to_with_som
     // Scrolled up until the bottom of the strip of the track that is over the last is a little way above the bottom of what is
     // in view, and the drawer of that track, which hangs under the strip, goes beyond it: with the last track under it, the rows
     // can be scrolled as far as that takes.
-    let bottom_of_the_view = the_bottom_of_what_can_be_seen_of_the_rows(&window);
+    let bottom_of_the_view = window.the_bottom_of_what_can_be_seen_of_the_rows();
     let bottom_of_the_strip = window.strip_of_track(the_one_over_the_last).bottom();
     window.application_mut().timeline_view.rows_scroll_offset -= bottom_of_the_view - 10.0 - bottom_of_the_strip;
     window.harness.run_steps(5);
@@ -1252,7 +1242,7 @@ fn a_drawer_that_is_brought_into_view_with_rows_under_it_is_scrolled_to_with_som
     );
     let (drawer, _) = the_drawer_and_where_it_is_cut_off(&window);
     assert_close(
-        the_bottom_of_what_can_be_seen_of_the_rows(&window) - drawer.bottom(),
+        window.the_bottom_of_what_can_be_seen_of_the_rows() - drawer.bottom(),
         theme::MARGIN_UNDER_A_DRAWER_BROUGHT_INTO_VIEW,
         "the room under the drawer, which is not at the very edge of what is in view",
     );

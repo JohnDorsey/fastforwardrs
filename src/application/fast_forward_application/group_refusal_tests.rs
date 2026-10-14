@@ -10,7 +10,10 @@ use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::dialogs::Dialog;
 use crate::project::groups::test_projects::lay_out;
-use crate::project::{FrameRate, GroupKind, Member, SpeedFactor, TimelineFrameIndex};
+use crate::project::{
+    AnimationTarget, ClipMove, FrameRate, GroupKind, Member, PropertyId, RackDestination, SpeedFactor,
+    TimelineFrameIndex,
+};
 
 /// What the message that is up says, as its title and its words.
 fn the_message_that_is_up(window: &Window) -> (String, String) {
@@ -231,6 +234,144 @@ fn a_frame_rate_that_would_put_a_clip_a_frame_inside_the_rectangle_of_a_clip_gro
         window.current_frame(),
         3,
         "the playhead stays where it was: nothing was counted again, so it is not taken to the same moment at another rate"
+    );
+}
+
+#[test]
+fn an_edge_that_is_asked_to_go_where_it_would_cut_across_a_clip_is_refused_and_the_clip_is_named() {
+    // The clip group has the clips at 20 to 50 and 65 to 95; the third, at 110 to 140, is cut across by an edge at 120.
+    let laid = lay_out(&[&[(20, 30), (65, 30), (110, 30)]]);
+    let (a, b) = (laid.clip(0, 0), laid.clip(0, 1));
+    let mut project = laid.project;
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(a), Member::Clip(b)])
+        .unwrap();
+    let before = project.clone();
+    let mut window = window_showing_what_is_saved(project);
+
+    window.do_this(Command::SetTheFramesOfAClipGroup {
+        group,
+        first_frame: 20,
+        end_frame: 120,
+    });
+
+    assert_refused(
+        &window,
+        &before,
+        "The group cannot be changed that way",
+        &["The edge cannot go there: it would cut across \"Text object: Text (at 00:00:03.20)\"."],
+    );
+}
+
+#[test]
+fn edges_of_a_group_that_is_not_a_clip_group_and_edges_that_would_leave_nothing_in_it_are_refused_and_the_user_is_told()
+{
+    let laid = lay_out(&[&[(20, 30), (65, 30)]]);
+    let (a, b) = (laid.clip(0, 0), laid.clip(0, 1));
+    let mut project = laid.project;
+    let tag = project
+        .create_group(GroupKind::Tag, &[Member::Clip(a), Member::Clip(b)])
+        .unwrap();
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(a), Member::Clip(b)])
+        .unwrap();
+    let before = project.clone();
+    let mut window = window_showing_what_is_saved(project);
+
+    window.do_this(Command::SetTheFramesOfAClipGroup {
+        group: tag,
+        first_frame: 20,
+        end_frame: 95,
+    });
+    assert_refused(
+        &window,
+        &before,
+        "The group cannot be changed that way",
+        &["the tag \"Tag 1\" has no edges to move: it is not a clip group."],
+    );
+
+    window.application_mut().dialog = None;
+    window.do_this(Command::SetTheFramesOfAClipGroup {
+        group,
+        first_frame: 200,
+        end_frame: 300,
+    });
+    assert_refused(
+        &window,
+        &before,
+        "The group cannot be changed that way",
+        &["Nothing would be left in the clip group \"Clip group 1\"."],
+    );
+}
+
+#[test]
+fn clips_that_are_asked_to_go_where_their_group_would_take_in_another_clip_are_refused_and_the_user_is_told() {
+    // A and B are in a clip group on the first track (20 to 50 and 65 to 95); D is on the second track at 60 to 70, outside its rectangle. A
+    // moved to the second track at frames 20 to 50 would make the rectangle reach across both tracks, and D is inside it.
+    let laid = lay_out(&[&[(20, 30), (65, 30)], &[(60, 10)]]);
+    let (a, b, d) = (laid.clip(0, 0), laid.clip(0, 1), laid.clip(1, 0));
+    let tracks = laid.tracks.clone();
+    let mut project = laid.project;
+    project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(a), Member::Clip(b)])
+        .unwrap();
+    let before = project.clone();
+    let mut window = window_showing_what_is_saved(project);
+    let _ = d;
+
+    window.do_this(Command::move_clips(vec![ClipMove {
+        clip: a,
+        to_track: tracks[1],
+        start: TimelineFrameIndex::new(20),
+    }]));
+
+    assert_refused(
+        &window,
+        &before,
+        "The clips cannot be moved there",
+        &["would be inside the rectangle of the clip group \"Clip group 1\""],
+    );
+}
+
+#[test]
+fn racks_that_are_asked_to_go_to_a_new_crate_inside_the_rectangle_of_a_clip_group_are_refused_and_the_user_is_told() {
+    // The clip group has A on the first track at 20 to 50 and B on the second at 80 to 95, so its rectangle is 20 to 95 across both tracks. The
+    // clip T on the third track has a keyframe. A new crate on the second track at frames 30 to 60 would be inside the rectangle.
+    let laid = lay_out(&[&[(20, 30)], &[(80, 15)], &[(20, 30)]]);
+    let (a, b, t) = (laid.clip(0, 0), laid.clip(1, 0), laid.clip(2, 0));
+    let tracks = laid.tracks.clone();
+    let mut project = laid.project;
+    project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(a), Member::Clip(b)])
+        .unwrap();
+    let rack = project
+        .add_keyframe(
+            AnimationTarget::Clip(t),
+            PropertyId::Rotation,
+            TimelineFrameIndex::new(30),
+        )
+        .unwrap()
+        .unwrap()
+        .rack;
+    let before = project.clone();
+    let mut window = window_showing_what_is_saved(project);
+
+    window.do_this(Command::MoveRacks {
+        racks: vec![rack],
+        to: RackDestination::NewCrate {
+            track: tracks[1],
+            from_frame: 30,
+            until_frame: 60,
+        },
+        shift_in_frames: 0,
+        slot: None,
+    });
+
+    assert_refused(
+        &window,
+        &before,
+        "The rack cannot go there",
+        &["would be inside the rectangle of the clip group \"Clip group 1\""],
     );
 }
 

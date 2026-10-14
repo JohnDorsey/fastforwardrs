@@ -34,8 +34,11 @@ impl Project {
         towards: TimeDirection,
         gap_in_frames: u64,
     ) -> Result<(), EditError> {
-        self.plan_the_duplicating_of_keyframes(keyframes, towards, gap_in_frames)
-            .map(|_| ())
+        self.would_be_allowed(|project| {
+            project
+                .duplicate_keyframes_unchecked(keyframes, towards, gap_in_frames)
+                .map(|_| ())
+        })
     }
 
     /// Makes a copy of each of the keyframes in the rack it is in: the copy has the same value, and is as far from where the
@@ -44,24 +47,49 @@ impl Project {
     /// new keyframe, with a name of its own: the names are given, in the order of the keyframes that are copied.
     ///
     /// Either all the copies are made or, if one cannot be (a keyframe is not there, or the copy would be at a frame that the
-    /// drawer of its rack does not have, or at the frame of a keyframe the rack has), none is, and the error says why.
+    /// drawer of its rack has no room for, or at the frame of a keyframe the rack has), none is, and the error says why. (A keyframe
+    /// crate has room for the empty frames round it, and is made longer if a copy is put beyond it.)
     pub fn duplicate_keyframes(
         &mut self,
         keyframes: &[KeyframeId],
         towards: TimeDirection,
         gap_in_frames: u64,
     ) -> Result<Vec<KeyframeId>, EditError> {
-        let Copying { racks, copies } = self.plan_the_duplicating_of_keyframes(keyframes, towards, gap_in_frames)?;
-        self.put_back_the_racks(racks);
-        Ok(copies)
+        self.keeping_the_groups_valid(|project| {
+            project.duplicate_keyframes_unchecked(keyframes, towards, gap_in_frames)
+        })
     }
 
-    fn plan_the_duplicating_of_keyframes(
+    fn duplicate_keyframes_unchecked(
+        &mut self,
+        keyframes: &[KeyframeId],
+        towards: TimeDirection,
+        gap_in_frames: u64,
+    ) -> Result<Vec<KeyframeId>, EditError> {
+        self.atomically(|project| {
+            let places = project.frames_of_the_timeline_that_copies_go_to(keyframes, towards, gap_in_frames)?;
+            project.make_the_crates_begin_in_time_for(
+                &places
+                    .iter()
+                    .map(|(_, rack, frame)| (*rack, *frame))
+                    .collect::<Vec<_>>(),
+            )?;
+            // (The drawers of the crates that were made to begin earlier are counted from a frame that is earlier now.)
+            let Copying { racks, copies } = project.plan_the_copies(&places)?;
+            project.put_back_the_racks(racks)?;
+            Ok(copies)
+        })
+    }
+
+    /// Each keyframe that is to be copied, with the rack it is in and the frame of the timeline its copy goes to; or why they
+    /// cannot all be copied. (Whether the room is there is looked at as the racks are: a copy beyond a keyframe crate is where it is
+    /// to be if the crate has room to be made long enough.)
+    fn frames_of_the_timeline_that_copies_go_to(
         &self,
         keyframes: &[KeyframeId],
         towards: TimeDirection,
         gap_in_frames: u64,
-    ) -> Result<Copying, EditError> {
+    ) -> Result<Vec<(KeyframeId, RackId, u64)>, EditError> {
         let mut wanted: Vec<KeyframeId> = Vec::with_capacity(keyframes.len());
         for keyframe in keyframes {
             if !wanted.contains(keyframe) {
@@ -79,28 +107,40 @@ impl Project {
             located.iter().map(|located| located.timeline_frame()).min(),
             located.iter().map(|located| located.timeline_frame()).max(),
         ) else {
-            return Ok(Copying {
-                racks: Vec::new(),
-                copies: Vec::new(),
-            });
+            return Ok(Vec::new());
         };
         let distance = last - first + gap_in_frames.max(1);
+        located
+            .iter()
+            .map(|original| {
+                let copy_is_at = match towards {
+                    TimeDirection::Later => original.timeline_frame().checked_add(distance),
+                    TimeDirection::Earlier => original.timeline_frame().checked_sub(distance),
+                };
+                let frame = copy_is_at
+                    .filter(|frame| original.rack.room.contains(*frame))
+                    .ok_or(EditError::NoRoomForTheKeyframes)?;
+                Ok((original.keyframe.id(), original.rack.rack.id(), frame))
+            })
+            .collect()
+    }
 
+    /// The copies of the keyframes in `places` (as it says: the keyframe, the rack it is in, and the frame of the timeline its copy
+    /// goes to), as the racks are once they have them.
+    fn plan_the_copies(&self, places: &[(KeyframeId, RackId, u64)]) -> Result<Copying, EditError> {
         let mut racks: BTreeMap<RackId, (AnimationTarget, Rack)> = BTreeMap::new();
-        let mut copies = Vec::with_capacity(located.len());
-        for original in &located {
-            let copy_is_at = match towards {
-                TimeDirection::Later => original.timeline_frame().checked_add(distance),
-                TimeDirection::Earlier => original.timeline_frame().checked_sub(distance),
-            };
-            let frame_in_the_rack = copy_is_at
-                .and_then(|frame| frame.checked_sub(original.rack.start))
-                .filter(|frame| original.rack.length.is_none_or(|length| *frame < length))
+        let mut copies = Vec::with_capacity(places.len());
+        for (keyframe, rack_id, frame) in places {
+            let located = self
+                .located_rack(*rack_id)
+                .ok_or(EditError::UnknownRack { rack: *rack_id })?;
+            let frame_in_the_rack = frame
+                .checked_sub(located.start)
                 .ok_or(EditError::NoRoomForTheKeyframes)?;
             let (_, rack) = racks
-                .entry(original.rack.rack.id())
-                .or_insert_with(|| (original.rack.owner, original.rack.rack.clone()));
-            copies.push(rack.add_a_copy_of(original.keyframe.id(), frame_in_the_rack)?);
+                .entry(*rack_id)
+                .or_insert_with(|| (located.owner, located.rack.clone()));
+            copies.push(rack.add_a_copy_of(*keyframe, frame_in_the_rack)?);
         }
         Ok(Copying {
             racks: racks.into_values().collect(),

@@ -24,8 +24,10 @@
 //! always agree, and the rules say so.
 
 mod colour;
+mod edges;
 mod editing;
 mod effects_of_groups;
+mod joining;
 mod queries;
 mod rectangles;
 mod rules;
@@ -34,7 +36,9 @@ mod upkeep;
 use std::fmt;
 
 pub use colour::GroupColour;
+pub use edges::ClipGroupEdge;
 pub use effects_of_groups::{AppliedEffect, ChainRow, EffectOwner};
+pub use joining::ClipGroupBeforeTheDrag;
 pub use rectangles::Rectangle;
 pub use rules::GroupProblem;
 

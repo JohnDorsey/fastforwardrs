@@ -526,9 +526,9 @@ fn putting_a_clip_on_a_track_that_plays_so_fast_that_it_has_fewer_frames_than_ke
         start: frame(0),
     }];
 
-    window.do_this(Command::MoveClips(moves.clone()));
+    window.do_this(Command::move_clips(moves.clone()));
 
-    assert_eq!(the_question_open(&window), Some((Command::MoveClips(moves), 2)));
+    assert_eq!(the_question_open(&window), Some((Command::move_clips(moves), 2)));
     assert_eq!(window.application().project(), &before, "the clip stays where it is");
     agree(&mut window);
     assert_eq!(duration_of(&window, video), 3);
@@ -545,7 +545,7 @@ fn moving_a_clip_to_a_track_that_plays_at_the_same_speed_is_not_asked_about_howe
     window.do_this(Command::AddTrack);
     let other = window.application().project().tracks()[0].id();
 
-    window.do_this(Command::MoveClips(vec![ClipMove {
+    window.do_this(Command::move_clips(vec![ClipMove {
         clip: video,
         to_track: other,
         start: frame(10),
@@ -573,7 +573,7 @@ fn the_commands_that_change_how_long_things_last_are_the_ones_that_may_lose_keyf
         },
         Command::SetClipDuration { clip, frames: 5 },
         Command::SetProjectFrameRate(FrameRate::new(24, 1).unwrap()),
-        Command::MoveClips(Vec::new()),
+        Command::move_clips(Vec::new()),
     ];
     let words: Vec<&str> = those
         .iter()

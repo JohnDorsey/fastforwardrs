@@ -18,7 +18,7 @@ fn hold(clip: ClipId, start: u64, within_frames: u64) -> Snap {
 }
 
 fn move_of(project: &Project, clips: &[ClipId], tracks_down: i64, frames: i64, snap: Snap) -> MoveBy {
-    allowed_move_holding(project, clips, MoveBy { tracks_down, frames }, Some(snap))
+    allowed_move_holding(project, clips, MoveBy { tracks_down, frames }, Some(snap), &[])
 }
 
 #[test]
@@ -288,7 +288,8 @@ fn a_hold_on_a_clip_that_is_not_there_holds_nothing() {
                 tracks_down: 1,
                 frames: 3
             },
-            Some(missing)
+            Some(missing),
+            &[]
         ),
         allowed_move(
             &project,
@@ -343,7 +344,7 @@ fn whatever_is_allowed_with_a_hold_can_be_done_and_a_hold_that_cannot_reach_chan
             free_on: [None, Some(FIRST), Some(SECOND)][random.next_below(3) as usize],
         };
 
-        let allowed = allowed_move_holding(&project, &moving, wanted, Some(held_to_the_time));
+        let allowed = allowed_move_holding(&project, &moving, wanted, Some(held_to_the_time), &[]);
         let context = format!(
             "round {round}: {wanted:?} was wanted of {moving:?}, {allowed:?} was allowed, {held_to_the_time:?}"
         );
@@ -367,7 +368,7 @@ fn whatever_is_allowed_with_a_hold_can_be_done_and_a_hold_that_cannot_reach_chan
             ..held_to_the_time
         };
         assert_eq!(
-            allowed_move_holding(&project, &moving, wanted, Some(nowhere_near)),
+            allowed_move_holding(&project, &moving, wanted, Some(nowhere_near), &[]),
             allowed_move(&project, &moving, wanted),
             "{context}: a hold on a time a million frames away"
         );

@@ -5,14 +5,14 @@
 //! that is all the panel needs.
 //!
 //! The box of the selected layer (its outline, and the handles and the places to turn it from at its corners)
-//! is another matter: it can reach out of the picture, and out of the panel too, over the other panels of the
-//! window, and what is drawn on top of everything is what a person expects to take hold of. So each corner has
-//! a widget of its own, over the handle and the place that turns the layer from it, registered after the
-//! others, which makes it the one that is on top where it is, over the properties or the timeline as well. These
-//! widgets only take the press to the same place as the panel's: what it is about is worked out from where it
-//! began.
+//! is another matter: it can reach out of the picture, and what is drawn on top of the picture is what a person
+//! expects to take hold of. So each corner has a widget of its own, over the handle and the place that turns the
+//! layer from it, registered after the panel's, which makes it the one that is on top where it is. (It stops at
+//! the edge of the panel, as what is drawn of it does: over the other panels of the window, what is in them is
+//! what is taken hold of.) These widgets only take the press to the same place as the panel's: what it is about is
+//! worked out from where it began.
 
-use egui::{PointerButton, Pos2, Rect, Response, Sense, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType, vec2};
+use egui::{PointerButton, Pos2, Rect, Response, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
 
 use super::PreviewLayer;
 use super::geometry::{HANDLE_SIZE, PictureOnScreen, TURN_ZONE_RADIUS};
@@ -37,15 +37,6 @@ impl Catchers {
         let sense = Sense::CLICK | Sense::DRAG;
         let mut responses = vec![ui.interact(panel_rectangle, catcher_id(), sense)];
         if let Some((layer, picture)) = selected_layer {
-            // A widget can only be pressed where the Ui it is made in reaches, which for the Ui of the panel
-            // is the panel. These are made in one that reaches over all of the window.
-            let window = ui.ctx().viewport_rect();
-            let mut over_the_window = ui.new_child(
-                UiBuilder::new()
-                    .id_salt("the corners of the selected layer")
-                    .max_rect(window),
-            );
-            over_the_window.set_clip_rect(window);
             for corner in Corner::ALL {
                 // The handle that resizes the layer is in the place just outside the corner that turns it, so the
                 // one widget takes the press for both, and which of them it is about is worked out from where it began.
@@ -54,13 +45,12 @@ impl Catchers {
                     corner_on_the_screen,
                     vec2(2.0 * TURN_ZONE_RADIUS, 2.0 * TURN_ZONE_RADIUS),
                 );
-                let response = over_the_window.interact(place_to_turn_from, turn_place_id(layer.clip, corner), sense);
+                let response = ui.interact(place_to_turn_from, turn_place_id(layer.clip, corner), sense);
                 response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, turn_handle_label(corner)));
                 responses.push(response);
                 // The handle is only named, for screen readers and the tests: the place it is in takes the press.
                 let handle = Rect::from_center_size(corner_on_the_screen, vec2(HANDLE_SIZE, HANDLE_SIZE));
-                over_the_window
-                    .interact(handle, corner_handle_id(layer.clip, corner), Sense::hover())
+                ui.interact(handle, corner_handle_id(layer.clip, corner), Sense::hover())
                     .widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, corner_handle_label(corner)));
             }
         }

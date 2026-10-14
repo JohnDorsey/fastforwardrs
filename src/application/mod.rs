@@ -20,6 +20,7 @@ mod history;
 mod keyboard;
 mod keyframe_moving;
 mod menu_bar;
+mod mouse_buttons;
 mod naming;
 mod opening;
 mod plus_button;

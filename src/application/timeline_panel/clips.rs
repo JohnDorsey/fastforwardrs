@@ -10,14 +10,14 @@
 //!
 //! The selected clip has a bright outline.
 
-use egui::epaint::RectShape;
 use egui::epaint::tessellator::Path;
+use egui::epaint::{PathShape, PathStroke, RectShape};
 use egui::{
     Align2, Color32, CornerRadius, FontId, Mesh, Painter, Rect, Shape, Stroke, StrokeKind, TextureId, Ui, pos2, remap,
     vec2,
 };
 
-use super::bevel::{self, bevel_lines};
+use super::bevel::{self, bevel_layers};
 use super::clip_shape::ClipShape;
 use super::grip_dots::{self, Arrangement};
 use super::strip_view::StripView;
@@ -276,17 +276,22 @@ fn draw_grip_dots(painter: &Painter, rectangles: ClipRectangles) {
 }
 
 /// Gives a clip its raised look: light along its top and left edges, shade along its bottom and
-/// right edges (see [`bevel`]), so that its edges show whatever the colour of what it is made of.
+/// right edges, going smoothly from one to the other round the corners (see [`bevel`]), so that its edges show whatever the
+/// colour of what it is made of.
 fn draw_bevel(painter: &Painter, rectangles: ClipRectangles, view: &StripView) {
-    let lines = bevel_lines(
+    let layers = bevel_layers(
         rectangles.whole,
         f32::from(theme::CLIP_CORNER_RADIUS),
         view.rectangle.left(),
         view.rectangle.right(),
     );
-    for line in lines {
-        for run in line.runs {
-            painter.add(Shape::line(run, Stroke::new(bevel::LAYER_WIDTH, line.colour)));
+    for layer in layers {
+        let lighting = layer.lighting;
+        for run in layer.runs {
+            painter.add(PathShape::line(
+                run,
+                PathStroke::new_uv(bevel::LAYER_WIDTH, move |_, point| lighting.colour_at(point)),
+            ));
         }
     }
 }

@@ -10,7 +10,7 @@ use super::*;
 use crate::test_support::DeterministicRandomNumbers;
 
 /// The move of `keyframe`, which is in the rack `rack`, to frame `to_frame` of the drawer that rack is in: it stays in the rack.
-fn within_its_rack(rack: RackId, keyframe: KeyframeId, to_frame: u64) -> KeyframeMove {
+fn within_its_rack(rack: RackId, keyframe: KeyframeId, to_frame: i64) -> KeyframeMove {
     KeyframeMove {
         keyframe,
         to_rack: rack,
@@ -522,7 +522,7 @@ fn a_rack_moved_to_another_drawer_keeps_its_keyframes_at_the_frames_of_the_timel
     let before: Vec<f32> = (0..300).map(|at| gain_at(&project, big, at)).collect();
 
     project
-        .move_rack(rack, RackDestination::Drawer(AnimationTarget::Clip(text)), 0, None)
+        .move_racks(&[rack], RackDestination::Drawer(AnimationTarget::Clip(text)), 0, None)
         .unwrap();
 
     assert_eq!(
@@ -551,7 +551,12 @@ fn a_rack_can_be_shifted_in_time_as_it_is_moved_and_its_keyframes_keep_the_dista
 
     // The text is from 100 to 160: with the keyframes 200 frames earlier they are at 100 and 130, which is 0 and 30 into it.
     project
-        .move_rack(rack, RackDestination::Drawer(AnimationTarget::Clip(text)), -200, None)
+        .move_racks(
+            &[rack],
+            RackDestination::Drawer(AnimationTarget::Clip(text)),
+            -200,
+            None,
+        )
         .unwrap();
 
     assert_eq!(frames_in_the_rack(&project, rack), vec![0, 30]);
@@ -562,7 +567,7 @@ fn a_rack_can_be_shifted_in_time_as_it_is_moved_and_its_keyframes_keep_the_dista
 
     // And back to the video, where the keyframes are counted from the start of the timeline, 250 frames later.
     project
-        .move_rack(rack, RackDestination::Drawer(big), 250, None)
+        .move_racks(&[rack], RackDestination::Drawer(big), 250, None)
         .unwrap();
     assert_eq!(frames_in_the_rack(&project, rack), vec![350, 380]);
 }
@@ -583,22 +588,22 @@ fn a_rack_cannot_be_moved_where_its_keyframes_do_not_all_fit_and_nothing_changes
 
     // The first is at 110, which is in the text (100 to 160), and the second at 240, which is not.
     assert_eq!(
-        project.move_rack(rack, RackDestination::Drawer(owner), 0, None),
+        project.move_racks(&[rack], RackDestination::Drawer(owner), 0, None),
         Err(EditError::NoRoomForTheKeyframes)
     );
     // Shifted so that the first is at the text's first frame, they are 130 frames apart, and the text has only 60.
     assert_eq!(
-        project.move_rack(rack, RackDestination::Drawer(owner), -10, None),
+        project.move_racks(&[rack], RackDestination::Drawer(owner), -10, None),
         Err(EditError::NoRoomForTheKeyframes)
     );
     // Shifted to before the start of the timeline.
     assert_eq!(
-        project.move_rack(rack, RackDestination::Drawer(big), -111, None),
+        project.move_racks(&[rack], RackDestination::Drawer(big), -111, None),
         Err(EditError::NoRoomForTheKeyframes)
     );
     assert_eq!(project, before);
     assert_eq!(
-        project.check_the_move_of_a_rack(rack, RackDestination::Drawer(owner), 0),
+        project.check_the_move_of_racks(&[rack], RackDestination::Drawer(owner), 0),
         Err(EditError::NoRoomForTheKeyframes),
         "asking whether it can says no too"
     );
@@ -619,17 +624,17 @@ fn a_rack_just_fits_in_a_drawer_when_its_first_and_last_keyframes_are_at_its_fir
     );
 
     assert_eq!(
-        project.check_the_move_of_a_rack(rack, RackDestination::Drawer(owner), 1),
+        project.check_the_move_of_racks(&[rack], RackDestination::Drawer(owner), 1),
         Err(EditError::NoRoomForTheKeyframes),
         "the last would be one frame too late"
     );
     assert_eq!(
-        project.check_the_move_of_a_rack(rack, RackDestination::Drawer(owner), -1),
+        project.check_the_move_of_racks(&[rack], RackDestination::Drawer(owner), -1),
         Err(EditError::NoRoomForTheKeyframes),
         "the first would be one frame too early"
     );
     project
-        .move_rack(rack, RackDestination::Drawer(owner), 0, None)
+        .move_racks(&[rack], RackDestination::Drawer(owner), 0, None)
         .unwrap();
     assert_eq!(frames_in_the_rack(&project, rack), vec![0, 59]);
 }
@@ -644,7 +649,7 @@ fn a_rack_moved_to_a_drawer_that_has_a_rack_for_the_same_property_of_the_same_th
     let arriving = put_a_rack_in(&mut project, big, big, PropertyId::Gain, &[(120, db(0.0))]);
 
     project
-        .move_rack(arriving, RackDestination::Drawer(owner), 0, None)
+        .move_racks(&[arriving], RackDestination::Drawer(owner), 0, None)
         .unwrap();
 
     assert_eq!(
@@ -681,7 +686,7 @@ fn a_rack_moved_to_a_drawer_that_has_a_rack_for_another_property_or_another_thin
     );
 
     project
-        .move_rack(switch, RackDestination::Drawer(owner), 0, None)
+        .move_racks(&[switch], RackDestination::Drawer(owner), 0, None)
         .unwrap();
 
     assert_eq!(names_of_the_racks_in(&project, owner).len(), 2);
@@ -703,11 +708,73 @@ fn a_rack_moved_within_its_drawer_is_only_shifted_and_keeps_its_place_among_the_
     );
 
     project
-        .move_rack(first, RackDestination::Drawer(owner), 7, None)
+        .move_racks(&[first], RackDestination::Drawer(owner), 7, None)
         .unwrap();
 
     assert_eq!(names_of_the_racks_in(&project, owner), vec![first, second]);
     assert_eq!(frames_in_the_rack(&project, first), vec![17]);
+}
+
+#[test]
+fn racks_moved_in_their_drawer_with_no_place_asked_for_go_back_to_their_places_whatever_order_they_are_asked_for_in() {
+    let (mut project, video, text) = a_big_video_and_a_small_text();
+    let big = AnimationTarget::Clip(video);
+    let owner = AnimationTarget::Clip(text);
+    let first = put_a_rack_in(&mut project, owner, big, PropertyId::Gain, &[(10, db(-20.0))]);
+    let second = put_a_rack_in(
+        &mut project,
+        owner,
+        big,
+        PropertyId::Muted,
+        &[(5, PropertyValue::Flag(true))],
+    );
+    let third = put_a_rack_in(
+        &mut project,
+        owner,
+        big,
+        PropertyId::Rotation,
+        &[(8, PropertyValue::Number(30.0))],
+    );
+
+    // The second and then the first: the other way round from the places they are in, with the third staying where it is.
+    project
+        .move_racks(&[second, first], RackDestination::Drawer(owner), 7, None)
+        .unwrap();
+
+    assert_eq!(
+        names_of_the_racks_in(&project, owner),
+        vec![first, second, third],
+        "each is where it was among the racks"
+    );
+    assert_eq!(frames_in_the_rack(&project, first), vec![17]);
+    assert_eq!(frames_in_the_rack(&project, second), vec![12]);
+    assert_eq!(
+        frames_in_the_rack(&project, third),
+        vec![8],
+        "and the one that was not moved is not"
+    );
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn a_rack_that_is_asked_for_twice_is_moved_once() {
+    let (mut project, video, text) = a_big_video_and_a_small_text();
+    let big = AnimationTarget::Clip(video);
+    let to = RackDestination::Drawer(AnimationTarget::Clip(text));
+    let rack = put_a_rack_in(
+        &mut project,
+        big,
+        big,
+        PropertyId::Gain,
+        &[(110, db(-20.0)), (120, db(-10.0))],
+    );
+    let mut asked_for_once = project.clone();
+    asked_for_once.move_racks(&[rack], to, 3, None).unwrap();
+
+    project.move_racks(&[rack, rack], to, 3, None).unwrap();
+
+    assert_eq!(project, asked_for_once);
+    assert_the_racks_are_sound(&project);
 }
 
 #[test]
@@ -725,7 +792,7 @@ fn a_rack_moved_to_another_drawer_goes_under_the_racks_that_are_in_it() {
     );
 
     project
-        .move_rack(arriving, RackDestination::Drawer(owner), 0, None)
+        .move_racks(&[arriving], RackDestination::Drawer(owner), 0, None)
         .unwrap();
 
     assert_eq!(names_of_the_racks_in(&project, owner), vec![already_there, arriving]);
@@ -745,7 +812,7 @@ fn a_rack_moved_to_a_track_goes_in_the_drawer_of_the_track_and_counts_from_the_s
     let track = AnimationTarget::Track(project.tracks()[0].id());
 
     project
-        .move_rack(rack, RackDestination::Drawer(track), 0, None)
+        .move_racks(&[rack], RackDestination::Drawer(track), 0, None)
         .unwrap();
 
     assert_eq!(frames_in_the_rack(&project, rack), vec![110]);
@@ -769,20 +836,30 @@ fn a_rack_cannot_be_moved_to_a_clip_or_a_track_that_is_not_there_and_a_rack_that
     let no_rack = RackId::new(TrackId::new(50), 0);
 
     assert_eq!(
-        project.move_rack(rack, RackDestination::Drawer(AnimationTarget::Clip(no_clip)), 0, None),
+        project.move_racks(
+            &[rack],
+            RackDestination::Drawer(AnimationTarget::Clip(no_clip)),
+            0,
+            None
+        ),
         Err(EditError::Clip(ClipEditError::UnknownClip { clip: no_clip }))
     );
     assert_eq!(
-        project.move_rack(rack, RackDestination::Drawer(AnimationTarget::Track(no_track)), 0, None),
+        project.move_racks(
+            &[rack],
+            RackDestination::Drawer(AnimationTarget::Track(no_track)),
+            0,
+            None
+        ),
         Err(EditError::UnknownTrack { track: no_track })
     );
     assert_eq!(
-        project.move_rack(
-            rack,
+        project.move_racks(
+            &[rack],
             RackDestination::NewCrate {
                 track: no_track,
-                start: 0,
-                length: 100
+                from_frame: 0,
+                until_frame: 100,
             },
             0,
             None
@@ -790,7 +867,12 @@ fn a_rack_cannot_be_moved_to_a_clip_or_a_track_that_is_not_there_and_a_rack_that
         Err(EditError::UnknownTrack { track: no_track })
     );
     assert_eq!(
-        project.move_rack(no_rack, RackDestination::Drawer(AnimationTarget::Clip(video)), 0, None),
+        project.move_racks(
+            &[no_rack],
+            RackDestination::Drawer(AnimationTarget::Clip(video)),
+            0,
+            None
+        ),
         Err(EditError::UnknownRack { rack: no_rack })
     );
     assert_eq!(project, before);
@@ -809,14 +891,15 @@ fn a_rack_moved_onto_an_empty_stretch_of_a_track_makes_a_crate_that_has_it_and_a
         &[(10, db(-20.0)), (40, db(0.0))],
     );
 
-    // A crate from frame 200 for 100 frames, with the keyframes 100 frames later than they were: at 210 and 240.
+    // A crate somewhere in the empty stretch from frame 200 to frame 300, with the keyframes 100 frames later than they were: at 210
+    // and 240. It lasts from the first of them to the last, and not through the stretch it was made in.
     project
-        .move_rack(
-            rack,
+        .move_racks(
+            &[rack],
             RackDestination::NewCrate {
                 track: front,
-                start: 200,
-                length: 100,
+                from_frame: 200,
+                until_frame: 300,
             },
             100,
             None,
@@ -826,12 +909,12 @@ fn a_rack_moved_onto_an_empty_stretch_of_a_track_makes_a_crate_that_has_it_and_a
     let crate_id = project.tracks()[0].entries()[1].id();
     let placement = project.placement_of(crate_id).unwrap();
     assert!(matches!(placement.clip, Clip::Crate(_)));
-    assert_eq!(placement.first_timeline_frame, frame(200));
-    assert_eq!(placement.timeline_frame_count(), 100);
+    assert_eq!(placement.first_timeline_frame, frame(210));
+    assert_eq!(placement.timeline_frame_count(), 31);
     assert_eq!(
         frames_in_the_rack(&project, rack),
-        vec![10, 40],
-        "counted from the start of the crate"
+        vec![0, 30],
+        "counted from the start of the crate, which is where its first keyframe is"
     );
     assert_eq!(
         where_the_video_has_keyframes(&project, video, PropertyId::Gain),
@@ -842,7 +925,12 @@ fn a_rack_moved_onto_an_empty_stretch_of_a_track_makes_a_crate_that_has_it_and_a
 
     // Taken out of the crate and put in the drawer of the text (from 100 to 160), the crate has no rack left, and goes.
     project
-        .move_rack(rack, RackDestination::Drawer(AnimationTarget::Clip(text)), -100, None)
+        .move_racks(
+            &[rack],
+            RackDestination::Drawer(AnimationTarget::Clip(text)),
+            -100,
+            None,
+        )
         .unwrap();
     assert!(project.placement_of(crate_id).is_none(), "the crate has gone");
     assert_eq!(project.tracks()[0].entries().len(), 1);
@@ -868,8 +956,8 @@ fn a_crate_that_still_has_a_rack_stays_when_another_rack_goes_out_of_it() {
 
     // (Its keyframe is at 210: 100 frames earlier it is at 110, which is 10 frames into the text.)
     project
-        .move_rack(
-            leaving,
+        .move_racks(
+            &[leaving],
             RackDestination::Drawer(AnimationTarget::Clip(text)),
             -100,
             None,
@@ -896,12 +984,12 @@ fn the_last_rack_of_a_crate_moved_to_a_new_crate_leaves_the_old_one_to_go() {
 
     // The new crate is made where nothing is: from frame 400.
     project
-        .move_rack(
-            rack,
+        .move_racks(
+            &[rack],
             RackDestination::NewCrate {
                 track: front,
-                start: 400,
-                length: 60,
+                from_frame: 400,
+                until_frame: 460,
             },
             200,
             None,
@@ -930,36 +1018,111 @@ fn a_crate_cannot_be_made_where_a_clip_is_or_would_run_into_one_and_the_rack_sta
     );
     let before = project.clone();
 
-    // The text is from 100 to 160.
-    for (start, length, shift) in [(150, 100, 40), (50, 100, -60), (0, 600, 0)] {
-        let result = project.move_rack(
-            rack,
+    // The text is from 100 to 160, and the keyframe is at 110: the crate is where the keyframe is, so it is where the text is if the
+    // keyframe goes to a frame of the text, whatever stretch the crate is asked to be made in.
+    for (from, until, shift) in [(150, 250, 40), (0, 600, 0), (100, 200, 49)] {
+        let result = project.move_racks(
+            &[rack],
             RackDestination::NewCrate {
                 track: front,
-                start,
-                length,
+                from_frame: from,
+                until_frame: until,
             },
             shift,
             None,
         );
         assert!(
             matches!(result, Err(EditError::Insert(_))),
-            "from {start} for {length}: {result:?}"
+            "from {from} until {until}: {result:?}"
         );
         assert_eq!(project, before);
     }
-    let for_no_time = project.move_rack(
-        rack,
-        RackDestination::NewCrate {
-            track: front,
-            start: 300,
-            length: 0,
-        },
-        190,
-        None,
+    // Where it is not asked to be made: the keyframe is not in the stretch, or the stretch has no frame in it.
+    for (from, until, shift) in [(200, 300, 0), (0, 100, 0), (300, 300, 190), (300, 301, 189)] {
+        let result = project.move_racks(
+            &[rack],
+            RackDestination::NewCrate {
+                track: front,
+                from_frame: from,
+                until_frame: until,
+            },
+            shift,
+            None,
+        );
+        assert_eq!(
+            result,
+            Err(EditError::NoRoomForTheKeyframes),
+            "from {from} until {until}"
+        );
+        assert_eq!(project, before);
+    }
+    // And a stretch that a clip is in a part of, with the keyframe where the clip is not, is a place for it.
+    project
+        .move_racks(
+            &[rack],
+            RackDestination::NewCrate {
+                track: front,
+                from_frame: 50,
+                until_frame: 150,
+            },
+            -60,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        project.tracks()[0].entries().len(),
+        2,
+        "the crate is at frame 50, before the text"
     );
-    assert_eq!(for_no_time, Err(EditError::EmptyCrate(EmptyCrate)));
-    assert_eq!(project, before);
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn a_crate_that_would_run_into_a_clip_is_not_made_and_the_error_says_how_many_frames_it_needs() {
+    let (mut project, video, text) = a_big_video_and_a_small_text();
+    let front = project.tracks()[0].id();
+    // The keyframes are at 110 and 150 on the timeline: shifted by 200 they are at 310 and 350, so the crate has to last 41 frames from 310.
+    let rack = put_a_rack_in(
+        &mut project,
+        AnimationTarget::Clip(text),
+        AnimationTarget::Clip(video),
+        PropertyId::Gain,
+        &[(10, db(-20.0)), (50, db(0.0))],
+    );
+    let new_crate = RackDestination::NewCrate {
+        track: front,
+        from_frame: 300,
+        until_frame: 400,
+    };
+    let no_room =
+        |frames_of_room, needed| Err(EditError::Insert(InsertError::NotEnoughRoom { frames_of_room, needed }));
+
+    // Where another text object begins: well inside the frames the crate would have, on the frame of its last keyframe, and just after that.
+    for (next_clip_begins, expected) in [(330, no_room(20, 41)), (350, no_room(40, 41)), (351, Ok(()))] {
+        let mut project = project.clone();
+        project
+            .insert_text(front, frame(next_clip_begins), TextObject::default(), 100)
+            .unwrap();
+        let before = project.clone();
+
+        let asked = project.check_the_move_of_racks(&[rack], new_crate, 200);
+        let done = project.move_racks(&[rack], new_crate, 200, None);
+
+        assert_eq!(done, expected, "the next clip begins at {next_clip_begins}");
+        assert_eq!(
+            asked, done,
+            "the check says what making the move says (next clip at {next_clip_begins})"
+        );
+        if done.is_err() {
+            assert_eq!(project, before, "nothing is changed (next clip at {next_clip_begins})");
+        } else {
+            assert_eq!(
+                project.tracks()[0].entries().len(),
+                3,
+                "the text, the crate, and the next clip"
+            );
+        }
+    }
 }
 
 #[test]
@@ -976,12 +1139,12 @@ fn the_keyframes_of_a_rack_that_would_not_all_be_inside_the_new_crate_stop_it_be
     let before = project.clone();
 
     // Shifted by 200 they are at 310 and 350, and a crate from 300 for 30 frames has frames 300 to 329.
-    let result = project.move_rack(
-        rack,
+    let result = project.move_racks(
+        &[rack],
         RackDestination::NewCrate {
             track: front,
-            start: 300,
-            length: 30,
+            from_frame: 300,
+            until_frame: 330,
         },
         200,
         None,
@@ -1011,12 +1174,12 @@ fn a_crate_is_not_made_inside_the_rectangle_of_a_clip_group_where_only_its_membe
     // (The keyframes are at 110 and 140 on the timeline: shifted by 100 they are at 210 and 240, inside a crate that is from 200.)
     let inside_the_group = RackDestination::NewCrate {
         track: front,
-        start: 200,
-        length: 100,
+        from_frame: 200,
+        until_frame: 300,
     };
 
-    let asked = project.check_the_move_of_a_rack(rack, inside_the_group, 100);
-    let done = project.move_rack(rack, inside_the_group, 100, None);
+    let asked = project.check_the_move_of_racks(&[rack], inside_the_group, 100);
+    let done = project.move_racks(&[rack], inside_the_group, 100, None);
 
     assert!(
         matches!(
@@ -1031,11 +1194,11 @@ fn a_crate_is_not_made_inside_the_rectangle_of_a_clip_group_where_only_its_membe
     // After the end of the rectangle there is nothing to keep out: the same rack goes into a crate there.
     let after_the_group = RackDestination::NewCrate {
         track: front,
-        start: 650,
-        length: 100,
+        from_frame: 650,
+        until_frame: 750,
     };
-    assert_eq!(project.check_the_move_of_a_rack(rack, after_the_group, 550), Ok(()));
-    project.move_rack(rack, after_the_group, 550, None).unwrap();
+    assert_eq!(project.check_the_move_of_racks(&[rack], after_the_group, 550), Ok(()));
+    project.move_racks(&[rack], after_the_group, 550, None).unwrap();
     assert_eq!(project.problems_with_the_groups(), vec![]);
     assert_eq!(
         project.tracks()[0].entries().len(),
@@ -1063,33 +1226,33 @@ fn asking_whether_a_rack_can_be_moved_says_what_moving_it_does_and_changes_nothi
         (
             RackDestination::NewCrate {
                 track: front,
-                start: 300,
-                length: 100,
+                from_frame: 300,
+                until_frame: 400,
             },
             200,
         ),
         (
             RackDestination::NewCrate {
                 track: front,
-                start: 100,
-                length: 100,
+                from_frame: 100,
+                until_frame: 200,
             },
             0,
         ),
         (
             RackDestination::NewCrate {
                 track: front,
-                start: 300,
-                length: 0,
+                from_frame: 300,
+                until_frame: 300,
             },
             190,
         ),
     ];
 
     for (destination, shift) in destinations {
-        let asked = project.check_the_move_of_a_rack(rack, destination, shift);
+        let asked = project.check_the_move_of_racks(&[rack], destination, shift);
         assert_eq!(project, before, "asking changes nothing");
-        let done = project.move_rack(rack, destination, shift, None);
+        let done = project.move_racks(&[rack], destination, shift, None);
         assert_eq!(asked, done, "{destination:?} shifted by {shift}");
         project = before.clone();
     }
@@ -1127,12 +1290,15 @@ fn whatever_racks_are_moved_where_the_project_stays_sound_and_a_move_that_cannot
             (AnimationTarget::Track(front), PropertyId::Gain, db(-3.0)),
         ] {
             let owner = owners[random.next_below(owners.len() as u64) as usize];
-            let length = project.extent_of_the_drawer_of(owner).unwrap().length.unwrap_or(600);
+            let extent = project.extent_of_the_drawer_of(owner).unwrap();
+            let length = extent.room.end_frame.map_or(600, |end| end - extent.start);
             let frames: Vec<(u64, PropertyValue)> = (0..1 + random.next_below(3))
                 .map(|_| (random.next_below(length), value.clone()))
                 .collect();
             put_a_rack_in(&mut project, owner, target, property, &frames);
         }
+        // (A crate that none of the racks was put in is not one that stays: and then the racks that are moved to it are not moved.)
+        project.fit_the_crate(AnimationTarget::Clip(crate_id)).unwrap();
         assert_the_racks_are_sound(&project);
 
         for step in 0..30 {
@@ -1142,10 +1308,11 @@ fn whatever_racks_are_moved_where_the_project_stays_sound_and_a_move_that_cannot
             }
             let rack = racks[random.next_below(racks.len() as u64) as usize];
             let destination = if random.next_below(4) == 0 {
+                let from_frame = random.next_below(700);
                 RackDestination::NewCrate {
                     track: front,
-                    start: random.next_below(700),
-                    length: 1 + random.next_below(150),
+                    from_frame,
+                    until_frame: from_frame + 1 + random.next_below(150),
                 }
             } else {
                 RackDestination::Drawer(owners[random.next_below(owners.len() as u64) as usize])
@@ -1166,8 +1333,8 @@ fn whatever_racks_are_moved_where_the_project_stays_sound_and_a_move_that_cannot
                 .map(|keyframe| keyframe.value.clone())
                 .collect();
 
-            let asked = project.check_the_move_of_a_rack(rack, destination, shift);
-            let result = project.move_rack(rack, destination, shift, None);
+            let asked = project.check_the_move_of_racks(&[rack], destination, shift);
+            let result = project.move_racks(&[rack], destination, shift, None);
 
             let context = format!("seed {seed}, step {step}: {rack} to {destination:?} shifted by {shift}");
             assert_eq!(asked, result, "{context}");
@@ -1219,25 +1386,62 @@ fn a_rack_that_is_wanted_further_along_than_the_drawer_goes_is_put_as_far_as_the
         &[(110, db(-20.0)), (130, db(0.0))],
     );
 
-    assert_eq!(project.shift_that_fits(rack, to, 0), Ok(0), "it fits where it is");
-    assert_eq!(project.shift_that_fits(rack, to, 7), Ok(7));
+    assert_eq!(project.shift_that_fits(&[rack], to, 0), Ok(0), "it fits where it is");
+    assert_eq!(project.shift_that_fits(&[rack], to, 7), Ok(7));
     assert_eq!(
-        project.shift_that_fits(rack, to, 1_000),
+        project.shift_that_fits(&[rack], to, 1_000),
         Ok(29),
         "the last keyframe goes to the last frame, 159"
     );
     assert_eq!(
-        project.shift_that_fits(rack, to, -1_000),
+        project.shift_that_fits(&[rack], to, -1_000),
         Ok(-10),
         "the first keyframe goes to the first frame, 100"
     );
     // And what was said fits is accepted.
     for wanted in [-1_000, -3, 0, 40, 1_000] {
-        let shift = project.shift_that_fits(rack, to, wanted).unwrap();
+        let shift = project.shift_that_fits(&[rack], to, wanted).unwrap();
         assert!(
-            project.check_the_move_of_a_rack(rack, to, shift).is_ok(),
+            project.check_the_move_of_racks(&[rack], to, shift).is_ok(),
             "{wanted} became {shift}"
         );
+    }
+}
+
+#[test]
+fn several_racks_are_shifted_as_far_as_the_first_of_all_their_keyframes_and_the_last_of_all_allow_whatever_order_they_are_asked_for_in()
+ {
+    let (mut project, video, text) = a_big_video_and_a_small_text();
+    let big = AnimationTarget::Clip(video);
+    let to = RackDestination::Drawer(AnimationTarget::Clip(text));
+    // Keyframes at 110 and 120 of the timeline, and at 130 and 150: from 110 to 150 together, and the text has the frames 100 to 159.
+    let first = put_a_rack_in(
+        &mut project,
+        big,
+        big,
+        PropertyId::Gain,
+        &[(110, db(-20.0)), (120, db(-10.0))],
+    );
+    let second = put_a_rack_in(
+        &mut project,
+        big,
+        big,
+        PropertyId::Muted,
+        &[(130, PropertyValue::Flag(true)), (150, PropertyValue::Flag(false))],
+    );
+
+    for racks in [[first, second], [second, first]] {
+        assert_eq!(
+            project.shift_that_fits(&racks, to, -1_000),
+            Ok(-10),
+            "the first keyframe of all goes to the first frame, 100: {racks:?}"
+        );
+        assert_eq!(
+            project.shift_that_fits(&racks, to, 1_000),
+            Ok(9),
+            "and the last of all to the last frame, 159: {racks:?}"
+        );
+        assert_eq!(project.shift_that_fits(&racks, to, 4), Ok(4), "{racks:?}");
     }
 }
 
@@ -1262,11 +1466,11 @@ fn a_rack_whose_first_and_last_keyframes_are_further_apart_than_the_drawer_is_lo
     );
 
     assert_eq!(
-        project.shift_that_fits(rack, to, 0),
+        project.shift_that_fits(&[rack], to, 0),
         Err(EditError::NoRoomForTheKeyframes),
         "60 frames apart, in a drawer of 60"
     );
-    assert_eq!(project.shift_that_fits(almost, to, 500), Ok(0), "59 apart just fits");
+    assert_eq!(project.shift_that_fits(&[almost], to, 500), Ok(0), "59 apart just fits");
 }
 
 #[test]
@@ -1282,25 +1486,25 @@ fn a_rack_put_on_a_new_crate_is_put_as_far_as_the_crate_goes_and_the_track_drawe
     );
     let crate_at_300 = RackDestination::NewCrate {
         track: front,
-        start: 300,
-        length: 50,
+        from_frame: 300,
+        until_frame: 350,
     };
 
     // The keyframes are at 110 and 130 of the timeline, and the crate has the frames 300 to 349.
     assert_eq!(
-        project.shift_that_fits(rack, crate_at_300, 0),
+        project.shift_that_fits(&[rack], crate_at_300, 0),
         Ok(190),
         "the first keyframe goes to the first frame of the crate"
     );
     assert_eq!(
-        project.shift_that_fits(rack, crate_at_300, 10_000),
+        project.shift_that_fits(&[rack], crate_at_300, 10_000),
         Ok(219),
         "and the last to its last frame, 349"
     );
     let on_the_track = RackDestination::Drawer(AnimationTarget::Track(front));
-    assert_eq!(project.shift_that_fits(rack, on_the_track, 100_000), Ok(100_000));
+    assert_eq!(project.shift_that_fits(&[rack], on_the_track, 100_000), Ok(100_000));
     assert_eq!(
-        project.shift_that_fits(rack, on_the_track, -100_000),
+        project.shift_that_fits(&[rack], on_the_track, -100_000),
         Ok(-110),
         "not before the start of the timeline"
     );
@@ -1316,16 +1520,16 @@ fn a_shift_that_fits_is_not_found_for_a_place_that_is_not_there_or_a_rack_that_i
     let nowhere = ClipId::new(TrackId::new(50), 0);
 
     assert_eq!(
-        project.shift_that_fits(rack, RackDestination::Drawer(owner), 0),
+        project.shift_that_fits(&[rack], RackDestination::Drawer(owner), 0),
         Ok(0),
         "a drawer that has a rack of the same property of the same thing is a place it can go"
     );
     assert_eq!(
-        project.shift_that_fits(rack, RackDestination::Drawer(AnimationTarget::Clip(nowhere)), 0),
+        project.shift_that_fits(&[rack], RackDestination::Drawer(AnimationTarget::Clip(nowhere)), 0),
         Err(EditError::Clip(ClipEditError::UnknownClip { clip: nowhere }))
     );
     assert_eq!(
-        project.shift_that_fits(RackId::new(TrackId::new(50), 0), RackDestination::Drawer(owner), 0),
+        project.shift_that_fits(&[RackId::new(TrackId::new(50), 0)], RackDestination::Drawer(owner), 0),
         Err(EditError::UnknownRack {
             rack: RackId::new(TrackId::new(50), 0)
         })
@@ -1345,24 +1549,28 @@ fn a_crate_is_cut_moved_and_deleted_like_a_clip_with_what_it_holds() {
         AnimationTarget::Clip(crate_id),
         big,
         PropertyId::Gain,
-        &[(10, db(-20.0)), (100, db(0.0))],
+        &[(10, db(-20.0)), (40, db(-10.0)), (100, db(0.0))],
     );
+    // (It lasts from the first of the keyframes, at 310, to the last, at 400.)
+    assert_eq!(project.placement_of(crate_id).unwrap().first_timeline_frame, frame(310));
+    assert_eq!(project.placement_of(crate_id).unwrap().timeline_frame_count(), 91);
 
-    // Cut at frame 350: two crates, each with its part of the rack.
+    // Cut at frame 350: two crates, each with its part of the rack, and each as long as the keyframes in it need.
     let cut = project.split_at(frame(350), Some(&[crate_id]));
     assert_eq!(cut.len(), 1);
     let second = cut[0].1.second_half;
-    assert_eq!(project.placement_of(crate_id).unwrap().timeline_frame_count(), 50);
-    assert_eq!(project.placement_of(second).unwrap().timeline_frame_count(), 70);
-    assert_eq!(frames_in_the_rack(&project, rack), vec![10]);
+    assert_eq!(project.placement_of(crate_id).unwrap().timeline_frame_count(), 31);
+    assert_eq!(project.placement_of(second).unwrap().first_timeline_frame, frame(400));
+    assert_eq!(project.placement_of(second).unwrap().timeline_frame_count(), 1);
+    assert_eq!(frames_in_the_rack(&project, rack), vec![0, 30]);
     assert_eq!(
         where_the_video_has_keyframes(&project, video, PropertyId::Gain),
-        vec![310, 400],
+        vec![310, 340, 400],
         "the video has the keyframes it had"
     );
     assert_the_racks_are_sound(&project);
 
-    // Moved, the second crate takes its keyframes with it: it is from 350 to 420, and goes to 500.
+    // Moved, the second crate takes its keyframe with it: it is at 400, and goes to 500.
     project
         .move_clips(&[ClipMove {
             clip: second,
@@ -1372,14 +1580,14 @@ fn a_crate_is_cut_moved_and_deleted_like_a_clip_with_what_it_holds() {
         .unwrap();
     assert_eq!(
         where_the_video_has_keyframes(&project, video, PropertyId::Gain),
-        vec![310, 550]
+        vec![310, 340, 500]
     );
 
     // Deleted, it takes what is in it, and what is left is the first crate's.
     project.delete_clip(second).unwrap();
     assert_eq!(
         where_the_video_has_keyframes(&project, video, PropertyId::Gain),
-        vec![310]
+        vec![310, 340]
     );
     assert_the_racks_are_sound(&project);
 }

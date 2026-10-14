@@ -14,7 +14,8 @@ use crate::application::dialogs::Dialog;
 use crate::application::theme;
 use crate::application::timeline_panel::{NOT_ENOUGH_SPACE_MESSAGE, drawer_button_label};
 use crate::project::{
-    AnimationTarget, Clip, ClipId, PropertyId, RackDestination, RackId, TextObject, TimelineFrameIndex,
+    AnimationTarget, Clip, ClipId, GroupKind, Member, PropertyId, RackDestination, RackId, TextObject,
+    TimelineFrameIndex,
 };
 
 fn assert_close(actual: f32, expected: f32, what: &str) {
@@ -206,15 +207,17 @@ fn a_rack_dragged_sideways_in_its_drawer_moves_its_keyframes_together_and_not_ou
 // --- onto a track ---
 
 #[test]
-fn a_rack_dragged_onto_an_empty_part_of_a_track_is_in_a_crate_that_fills_the_empty_stretch() {
+fn a_rack_dragged_onto_an_empty_part_of_a_track_is_in_a_new_crate_that_lasts_as_long_as_its_keyframes_and_is_where_they_were_dropped()
+ {
     let (mut window, video, _) = window_with_a_video_and_a_text();
     rack_of_the_loudness_of(&mut window, video, &[60, 80]);
     let on_the_rack = racks_drawn(&window)[0];
     let in_front = window.strip_of_track(0);
     // The text is from frame 40 to frame 100 on the track in front, and the video lasts 300 frames: the empty stretch of the
-    // track in front is from 100 to the end of the video.
-    let from = at_frame(&window, 150, on_the_rack.center().y);
-    let to = at_frame(&window, 150, in_front.center().y);
+    // track in front is from 100 to the end of the video. The rack is taken at frame 100 (it is as long as its drawer, and can be
+    // taken anywhere along it) and put down 60 frames later.
+    let from = at_frame(&window, 100, on_the_rack.center().y);
+    let to = at_frame(&window, 160, in_front.center().y);
 
     window.drag(from, to, PointerButton::Primary);
 
@@ -222,22 +225,50 @@ fn a_rack_dragged_onto_an_empty_part_of_a_track_is_in_a_crate_that_fills_the_emp
     assert_eq!(track.entries().len(), 2, "the text and one crate");
     let crate_placement = track.placement_at_index(1).unwrap();
     assert!(matches!(crate_placement.clip, Clip::Crate(_)));
+    assert!(
+        (118..=120).contains(&crate_placement.first_timeline_frame.value()),
+        "60 frames later than the first keyframe was, less the first move of the pointer: {}",
+        crate_placement.first_timeline_frame.value()
+    );
+    assert_eq!(
+        crate_placement.timeline_frame_count(),
+        21,
+        "from the first keyframe to the last, and not through the empty stretch"
+    );
+    assert_eq!(crate_placement.drawer.len(), 1, "with the rack in it");
+    assert_eq!(racks_in(&window, AnimationTarget::Clip(video)), 0);
+    let frames = frames_of_the_keyframes_of_the_loudness_of(&window, video);
+    assert_eq!(
+        (frames[0], frames[1] - frames[0]),
+        (crate_placement.first_timeline_frame.value(), 20),
+        "the keyframes are the first and the last frames of the crate, as far apart as they were"
+    );
+}
+
+#[test]
+fn a_rack_dragged_onto_a_track_at_the_frames_of_a_clip_is_put_where_the_empty_stretch_begins_and_not_refused() {
+    let (mut window, video, _) = window_with_a_video_and_a_text();
+    rack_of_the_loudness_of(&mut window, video, &[60, 80]);
+    let on_the_rack = racks_drawn(&window)[0];
+    let in_front = window.strip_of_track(0);
+    // The text is from frame 40 to frame 100 on the track in front: the keyframes, at 60 and 80, are where it is, so they go as far as
+    // the empty stretch after it, and the first is at its first frame.
+    let from = at_frame(&window, 150, on_the_rack.center().y);
+    let to = at_frame(&window, 150, in_front.center().y);
+
+    window.drag(from, to, PointerButton::Primary);
+
+    let track = &window.application().project().tracks()[0];
+    let crate_placement = track.placement_at_index(1).unwrap();
     assert_eq!(
         crate_placement.first_timeline_frame.value(),
         100,
         "from where the text ends"
     );
-    assert_eq!(
-        crate_placement.end_timeline_frame.value(),
-        300,
-        "to the end of the finished video"
-    );
-    assert_eq!(crate_placement.drawer.len(), 1, "with the rack in it");
-    assert_eq!(racks_in(&window, AnimationTarget::Clip(video)), 0);
+    assert_eq!(crate_placement.end_timeline_frame.value(), 121);
     assert_eq!(
         frames_of_the_keyframes_of_the_loudness_of(&window, video),
-        vec![100, 120],
-        "the keyframes were before where the crate begins: they are the first and last frames of the crate that they can be"
+        vec![100, 120]
     );
 }
 
@@ -292,13 +323,14 @@ fn a_rack_dragged_out_of_a_crate_into_a_drawer_leaves_the_crate_with_nothing_and
         2,
         "the crate is there"
     );
+    // (It is from frame 100 to frame 120, as long as the keyframes need, and the rack in it is as long as it is.)
     let in_the_crate = racks_drawn(&window)[0];
     let video_strip = window.strip_of_track(1);
 
     // Down into the drawer of the video, which is still open and has nothing in it.
     window.drag(
-        at_frame(&window, 150, in_the_crate.center().y),
-        at_frame(&window, 150, video_strip.bottom() + 12.0),
+        at_frame(&window, 110, in_the_crate.center().y),
+        at_frame(&window, 110, video_strip.bottom() + 12.0),
         PointerButton::Primary,
     );
 
@@ -352,6 +384,38 @@ fn a_rack_whose_keyframes_are_further_apart_than_a_drawer_is_long_says_so_by_the
 }
 
 #[test]
+fn a_rack_that_cannot_go_where_the_pointer_is_for_a_reason_that_is_not_space_does_not_say_there_is_not_enough() {
+    let (mut window, video, text) = window_with_a_video_and_a_text();
+    rack_of_the_loudness_of(&mut window, video, &[60, 80]);
+    // The clip group has the text, from 40 to 100 on the track in front, and the video, so its rectangle goes from frame 0 to 300 across both
+    // tracks: the empty stretch of the track in front after the text is inside it, and a crate there would be a clip that is not in the group.
+    window.do_this(Command::CreateGroup {
+        kind: GroupKind::ClipGroup,
+        members: vec![Member::Clip(text), Member::Clip(video)],
+    });
+    let before = window.application().project().clone();
+    let on_the_rack = racks_drawn(&window)[0];
+    let in_front = window.strip_of_track(0);
+    let from = at_frame(&window, 150, on_the_rack.center().y);
+    let to = at_frame(&window, 150, in_front.center().y);
+
+    window.drag_and_hold(from, to, PointerButton::Primary);
+
+    assert_eq!(
+        cursor_shown(&window),
+        CursorIcon::NotAllowed,
+        "the rack cannot go there"
+    );
+    assert!(
+        the_words_drawn_by_the_pointer(&window).is_none(),
+        "and the words about space are not there: it is not for want of space"
+    );
+    window.release(to, PointerButton::Primary);
+    window.settle();
+    assert_eq!(window.application().project(), &before, "nothing was moved");
+}
+
+#[test]
 fn the_words_go_when_the_pointer_comes_to_a_place_where_the_rack_fits() {
     let (mut window, video, text) = window_with_a_video_and_a_text();
     rack_of_the_loudness_of(&mut window, video, &[10, 100]);
@@ -385,8 +449,8 @@ fn a_rack_can_be_dragged_into_a_drawer_that_has_a_rack_for_the_same_thing_alread
     make_a_keyframe(&mut window, AnimationTarget::Clip(text), PropertyId::Rotation, 50);
     // A rack of the loudness of the video goes in the drawer of the text, and a new keyframe makes another in the drawer of the
     // video: that is dragged into the drawer of the text, which has a rack of the loudness of the video already.
-    window.do_this(Command::MoveRack {
-        rack: first,
+    window.do_this(Command::MoveRacks {
+        racks: vec![first],
         to: RackDestination::Drawer(AnimationTarget::Clip(text)),
         shift_in_frames: 0,
         slot: None,
@@ -663,12 +727,12 @@ fn a_crate_with_more_racks_than_fit_in_the_height_of_the_track_reaches_below_it_
             .id(),
     );
     let front = window.application().project().tracks()[0].id();
-    window.do_this(Command::MoveRack {
-        rack: racks[0],
+    window.do_this(Command::MoveRacks {
+        racks: vec![racks[0]],
         to: RackDestination::NewCrate {
             track: front,
-            start: 100,
-            length: 200,
+            from_frame: 100,
+            until_frame: 300,
         },
         shift_in_frames: 0,
         slot: None,
@@ -678,8 +742,8 @@ fn a_crate_with_more_racks_than_fit_in_the_height_of_the_track_reaches_below_it_
         .unwrap()
         .id;
     for (index, rack) in racks.iter().enumerate().skip(1) {
-        window.do_this(Command::MoveRack {
-            rack: *rack,
+        window.do_this(Command::MoveRacks {
+            racks: vec![*rack],
             to: RackDestination::Drawer(AnimationTarget::Clip(crate_clip)),
             shift_in_frames: if index == 5 { 100 } else { 0 },
             slot: None,

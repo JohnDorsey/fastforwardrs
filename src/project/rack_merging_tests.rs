@@ -8,14 +8,13 @@ use super::tests::frame;
 use super::*;
 use crate::test_support::DeterministicRandomNumbers;
 
-/// A video of 600 frames on the back track, and on the front track a text object from frame 100 to 160, another from 300 to 400 and
-/// a keyframe crate from 450 to 530, where racks of the loudness of the video are put.
+/// A video of 600 frames on the back track, and on the front track a text object from frame 100 to 160 and another from 300 to 400,
+/// where racks of the loudness of the video are put (and see [`a_crate_after_the_texts`]).
 struct Places {
     project: Project,
     video: AnimationTarget,
     text: AnimationTarget,
     other_text: AnimationTarget,
-    keyframe_crate: AnimationTarget,
     front_track: AnimationTarget,
 }
 
@@ -26,25 +25,39 @@ fn places() -> Places {
         .insert_text(front, frame(300), TextObject::default(), 100)
         .map(|(clip, _)| clip)
         .unwrap();
-    let crate_id = project.insert_crate(front, frame(450), 80).unwrap();
     Places {
         project,
         video: AnimationTarget::Clip(video),
         text: AnimationTarget::Clip(text),
         other_text: AnimationTarget::Clip(other_text),
-        keyframe_crate: AnimationTarget::Clip(crate_id),
         front_track: AnimationTarget::Track(front),
     }
 }
 
+/// A keyframe crate on the front track of `places`, from frame 450 to 530, with no rack in it. (A crate with no rack is taken away as soon as
+/// it is looked at, by `Project::fit_the_crate`: the test that makes one puts racks in it, or fits it.)
+fn a_crate_after_the_texts(places: &mut Places) -> AnimationTarget {
+    let front = places.project.tracks()[0].id();
+    AnimationTarget::Clip(places.project.insert_crate(front, frame(450), 80).unwrap())
+}
+
 /// Puts a rack of the loudness of the video in the drawer of `owner`, with these keyframes at frames of the timeline (and values
-/// in decibels).
+/// in decibels). A keyframe crate is made to begin earlier first, as it is when keyframes are put in it by an edit, if the keyframes are before it (and
+/// is made as long as the keyframes need once they are in it).
 fn a_rack_of_the_loudness_in(
     project: &mut Project,
     video: AnimationTarget,
     owner: AnimationTarget,
     keyframes: &[(u64, f32)],
 ) -> RackId {
+    let first = keyframes
+        .iter()
+        .map(|(timeline_frame, _)| *timeline_frame)
+        .min()
+        .unwrap();
+    project
+        .make_the_crate_begin_by(owner, first)
+        .expect("a crate has room for them");
     let start = project.extent_of_the_drawer_of(owner).unwrap().start;
     let in_the_drawer: Vec<(u64, PropertyValue)> = keyframes
         .iter()
@@ -263,18 +276,10 @@ fn the_keyframe_of_the_rack_that_is_kept_gives_way_to_that_of_a_rack_that_comes_
 #[test]
 fn a_crate_that_is_left_with_no_rack_by_a_merging_goes_and_one_that_has_another_rack_stays() {
     let mut places = places();
-    let in_the_crate = a_rack_of_the_loudness_in(
-        &mut places.project,
-        places.video,
-        places.keyframe_crate,
-        &[(460, -20.0)],
-    );
+    let keyframe_crate = a_crate_after_the_texts(&mut places);
+    let in_the_crate = a_rack_of_the_loudness_in(&mut places.project, places.video, keyframe_crate, &[(460, -20.0)]);
     let in_the_video = a_rack_of_the_loudness_in(&mut places.project, places.video, places.video, &[(50, -6.0)]);
-    let Places {
-        mut project,
-        keyframe_crate,
-        ..
-    } = places;
+    let Places { mut project, .. } = places;
     let AnimationTarget::Clip(crate_id) = keyframe_crate else {
         unreachable!("the crate is a clip");
     };
@@ -287,27 +292,73 @@ fn a_crate_that_is_left_with_no_rack_by_a_merging_goes_and_one_that_has_another_
 }
 
 #[test]
-fn a_crate_that_has_another_rack_stays_when_one_of_its_racks_is_merged_into_another_drawer() {
+fn a_crate_whose_rack_the_others_are_merged_into_begins_earlier_when_a_keyframe_of_them_is_before_it() {
     let mut places = places();
+    let keyframe_crate = a_crate_after_the_texts(&mut places);
     let in_the_crate = a_rack_of_the_loudness_in(
         &mut places.project,
         places.video,
-        places.keyframe_crate,
-        &[(460, -20.0)],
+        keyframe_crate,
+        &[(460, -20.0), (490, -10.0)],
     );
+    // A rack in the drawer of the video, with a keyframe at frame 420, before the crate in the empty frames round it (there is a text object until
+    // frame 400), and one at 470, inside it. The drawer of the crate comes before that of the video (the front track is before the back track).
+    let in_the_video = a_rack_of_the_loudness_in(
+        &mut places.project,
+        places.video,
+        places.video,
+        &[(420, -6.0), (470, -3.0)],
+    );
+    let Places { mut project, video, .. } = places;
+    let curve_before = the_loudness_of_the_video_at_every_frame(&project, video);
+    let AnimationTarget::Clip(crate_id) = keyframe_crate else {
+        unreachable!("the crate is a clip");
+    };
+
+    let kept = project.merge_racks(&[in_the_crate, in_the_video]).unwrap();
+
+    assert_eq!(
+        kept, in_the_crate,
+        "the crate has room for all of them, and comes first"
+    );
+    let placement = project.placement_of(crate_id).unwrap();
+    assert_eq!(
+        (placement.first_timeline_frame.value(), placement.timeline_frame_count()),
+        (420, 71),
+        "the crate begins at the first of the keyframes and ends at the last"
+    );
+    let located = project.located_rack(kept).unwrap();
+    let frames_of_the_timeline: Vec<u64> = located
+        .rack
+        .keyframes()
+        .iter()
+        .map(|keyframe| located.timeline_frame_of(keyframe.frame))
+        .collect();
+    assert_eq!(frames_of_the_timeline, vec![420, 460, 470, 490]);
+    assert!(project.located_rack(in_the_video).is_none(), "the other rack has gone");
+    assert_eq!(
+        the_loudness_of_the_video_at_every_frame(&project, video),
+        curve_before,
+        "the video is as loud as it was at every frame"
+    );
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn a_crate_that_has_another_rack_stays_when_one_of_its_racks_is_merged_into_another_drawer() {
+    let mut places = places();
+    let keyframe_crate = a_crate_after_the_texts(&mut places);
+    let in_the_crate = a_rack_of_the_loudness_in(&mut places.project, places.video, keyframe_crate, &[(460, -20.0)]);
+    // (The crate begins at 460 now, where its first keyframe is, so this one is at frame 465.)
     let other_in_the_crate = put_a_rack_in(
         &mut places.project,
-        places.keyframe_crate,
+        keyframe_crate,
         places.video,
         PropertyId::Muted,
         &[(5, PropertyValue::Flag(true))],
     );
     let in_the_video = a_rack_of_the_loudness_in(&mut places.project, places.video, places.video, &[(50, -6.0)]);
-    let Places {
-        mut project,
-        keyframe_crate,
-        ..
-    } = places;
+    let Places { mut project, .. } = places;
 
     project.merge_racks(&[in_the_crate, in_the_video]).unwrap();
 
@@ -424,19 +475,21 @@ fn whatever_racks_are_merged_the_property_is_what_it_was_at_every_frame_and_what
     for seed in 1..=200u64 {
         let mut random = DeterministicRandomNumbers::with_seed(seed);
         let mut places = places();
+        let keyframe_crate = a_crate_after_the_texts(&mut places);
         let owners = [
             places.video,
             places.text,
             places.other_text,
-            places.keyframe_crate,
+            keyframe_crate,
             places.front_track,
         ];
         for _ in 0..3 + random.next_below(5) {
             let owner = owners[random.next_below(owners.len() as u64) as usize];
-            let extent = places.project.extent_of_the_drawer_of(owner).unwrap();
-            let length = extent.length.unwrap_or(600);
+            // (Where a keyframe crate can have keyframes is the empty stretch round it, and not only where it is.)
+            let room = places.project.extent_of_the_drawer_of(owner).unwrap().room;
+            let length = room.end_frame.unwrap_or(600) - room.first_frame;
             let mut frames: Vec<u64> = (0..1 + random.next_below(3))
-                .map(|_| extent.start + random.next_below(length))
+                .map(|_| room.first_frame + random.next_below(length))
                 .collect();
             frames.sort_unstable();
             frames.dedup();
@@ -446,6 +499,8 @@ fn whatever_racks_are_merged_the_property_is_what_it_was_at_every_frame_and_what
                 .collect();
             a_rack_of_the_loudness_in(&mut places.project, places.video, owner, &keyframes);
         }
+        // (If no rack was put in the crate it is not a crate that stays.)
+        places.project.fit_the_crate(keyframe_crate).unwrap();
         let Places { mut project, video, .. } = places;
         assert_the_racks_are_sound(&project);
 
@@ -521,9 +576,7 @@ fn whatever_racks_are_merged_the_property_is_what_it_was_at_every_frame_and_what
                 let expected = before
                     .located_racks()
                     .filter(|located| chosen.contains(&located.rack.id()))
-                    .find(|located| {
-                        located.start <= first && located.length.is_none_or(|length| last < located.start + length)
-                    })
+                    .find(|located| located.room.contains(first) && located.room.contains(last))
                     .map(|located| located.rack.id());
                 assert_eq!(Some(kept), expected, "{context}");
             }

@@ -23,7 +23,7 @@ struct Merging {
 impl Project {
     /// Whether [`Self::merge_racks`] would merge the racks, and if not, why not.
     pub fn check_the_merging_of_racks(&self, racks: &[RackId]) -> Result<(), EditError> {
-        self.plan_the_merging_of_racks(racks).map(|_| ())
+        self.would_be_allowed(|project| project.merge_racks_unchecked(racks).map(|_| ()))
     }
 
     /// Makes one rack of the racks `racks`, which have the keyframes of all of them. It is the rack of them that is in the drawer
@@ -34,14 +34,27 @@ impl Project {
     /// what the property is does not change. Gives the name of the rack that was kept.
     ///
     /// Nothing is changed, and the error says why, if there are fewer than two racks, or any is not there, or they are not all of
-    /// the same property of the same thing, or no drawer one of them is in has room for all the keyframes.
+    /// the same property of the same thing, or no drawer one of them is in has room for all the keyframes. (A keyframe crate has room
+    /// for the empty frames round it, and is made longer if the keyframes need it; a crate that is left with no rack is taken away.)
     pub fn merge_racks(&mut self, racks: &[RackId]) -> Result<RackId, EditError> {
-        let Merging { survivor, racks } = self.plan_the_merging_of_racks(racks)?;
-        self.put_back_the_racks(racks);
-        Ok(survivor)
+        self.keeping_the_groups_valid(|project| project.merge_racks_unchecked(racks))
     }
 
-    fn plan_the_merging_of_racks(&self, racks: &[RackId]) -> Result<Merging, EditError> {
+    fn merge_racks_unchecked(&mut self, racks: &[RackId]) -> Result<RackId, EditError> {
+        self.atomically(|project| {
+            let (_, owner, first_frame) = project.survivor_of_the_merging_of(racks)?;
+            // (The keyframes are counted from where the drawer of the survivor begins, which is earlier now if it is a crate that
+            // had to begin earlier.)
+            project.make_the_crate_begin_by(owner, first_frame)?;
+            let Merging { survivor, racks } = project.plan_the_merging_of_racks(racks)?;
+            project.put_back_the_racks(racks)?;
+            Ok(survivor)
+        })
+    }
+
+    /// The rack that survives the merging of `racks`, with the clip or track whose drawer it is in, and the first frame of the timeline
+    /// of all the keyframes of the racks; or why they cannot be merged.
+    fn survivor_of_the_merging_of(&self, racks: &[RackId]) -> Result<(RackId, AnimationTarget, u64), EditError> {
         let mut wanted: Vec<RackId> = Vec::with_capacity(racks.len());
         for rack in racks {
             self.located_rack(*rack).ok_or(EditError::UnknownRack { rack: *rack })?;
@@ -76,12 +89,21 @@ impl Project {
         };
         let survivor = located
             .iter()
-            .find(|candidate| {
-                candidate.start <= first_frame
-                    && candidate
-                        .length
-                        .is_none_or(|length| last_frame < candidate.start + length)
-            })
+            .find(|candidate| candidate.room.contains(first_frame) && candidate.room.contains(last_frame))
+            .ok_or(EditError::NoRoomForTheKeyframes)?;
+        Ok((survivor.rack.id(), survivor.owner, first_frame))
+    }
+
+    fn plan_the_merging_of_racks(&self, racks: &[RackId]) -> Result<Merging, EditError> {
+        let (survivor, _, _) = self.survivor_of_the_merging_of(racks)?;
+        // (In the order that says which of two keyframes at one frame counts: the later is the one that does.)
+        let located: Vec<LocatedRack<'_>> = self
+            .located_racks()
+            .filter(|located| racks.contains(&located.rack.id()))
+            .collect();
+        let survivor = located
+            .iter()
+            .find(|candidate| candidate.rack.id() == survivor)
             .ok_or(EditError::NoRoomForTheKeyframes)?;
 
         let mut by_frame: BTreeMap<u64, RackKeyframe> = BTreeMap::new();

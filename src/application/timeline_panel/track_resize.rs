@@ -10,7 +10,7 @@ use egui::{CornerRadius, CursorIcon, PointerButton, Rect, Sense, Ui, pos2, vec2}
 use super::view_state::{TimelineViewState, TrackResize};
 use crate::application::commands::Command;
 use crate::application::theme;
-use crate::project::{Track, TrackHeight};
+use crate::project::Track;
 
 /// How far the zone that takes hold of the mouse reaches into the title boxes on both sides of the
 /// gap, in points.
@@ -62,7 +62,7 @@ pub(super) fn show(
     {
         state.track_resize = Some(TrackResize {
             track: track.id(),
-            height_at_the_start: track.height().points(),
+            height_at_the_start: header_rectangle.height(),
             pointer_y_at_the_start: pointer.y,
             rows_area_height,
         });
@@ -83,7 +83,10 @@ pub(super) fn show(
         && let Some(resize) = state.track_resize.filter(|resize| resize.track == track.id())
         && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
     {
-        let height = TrackHeight::from_points(resize.height_at_the_start + (pointer.y - resize.pointer_y_at_the_start));
+        // (The track is given the height that is drawn as tall as the pointer has made it, with the rows zoomed as they are.)
+        let height = state
+            .vertical_zoom
+            .height_that_is_drawn_as(resize.height_at_the_start + (pointer.y - resize.pointer_y_at_the_start));
         if height != track.height() {
             commands.push(Command::SetTrackHeight {
                 track: track.id(),

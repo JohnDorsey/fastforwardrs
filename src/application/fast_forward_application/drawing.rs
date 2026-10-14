@@ -1,6 +1,6 @@
 //! Laying out the window: the menu bar along the top, and under it the panels: the properties panel at the
-//! left, the preview at the right of it, and along the bottom the timeline with the play buttons over it and
-//! the slider under it.
+//! left, the preview at the right of it, and along the bottom the timeline with the play buttons, the time and the
+//! slider on one line over it.
 
 use std::collections::HashMap;
 
@@ -13,10 +13,10 @@ use crate::application::preview_panel::{
     self, PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
 };
 use crate::application::properties_panel::{self, PropertiesContent};
+use crate::application::theme;
 use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
-use crate::application::{scrub_bar, theme};
 use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
 use crate::media::thumbnail_second_for_source_frame;
 use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
@@ -64,8 +64,8 @@ impl FastForwardApplication {
                     ui,
                     &TransportBarState {
                         is_playing: frame_state.is_playing,
-                        has_something_to_play: frame_state.total_frames > 0,
                         current_frame: frame_state.current_frame,
+                        total_frames: frame_state.total_frames,
                         frame_rate: frame_state.frame_rate,
                     },
                     commands,
@@ -78,8 +78,6 @@ impl FastForwardApplication {
                     &mut self.textures,
                     commands,
                 );
-                ui.add_space(2.0);
-                scrub_bar::show(ui, frame_state.current_frame, frame_state.total_frames, commands);
             });
 
         egui::Panel::left("properties panel")

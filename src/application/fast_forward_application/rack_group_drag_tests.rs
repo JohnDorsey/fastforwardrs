@@ -10,6 +10,7 @@ use egui::{PointerButton, Pos2, vec2};
 
 use super::keyframe_drag_tests::{
     frame_of, keyframe_at, make_a_keyframe, points_per_frame, selected_keyframes, where_it_is,
+    window_with_a_video_and_a_text,
 };
 use super::rack_mouse_tests::{
     Racks, on_the_rack, select_racks, selected_racks, the_rack_of, window_with_racks_of_the_video,
@@ -18,7 +19,7 @@ use super::rack_tests::racks_drawn;
 use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::selection::{SelectionChange, SelectionItem};
-use crate::project::{AnimationTarget, ClipId, KeyframeMove, PropertyId, RackDestination, RackId};
+use crate::project::{AnimationTarget, Clip, ClipId, KeyframeMove, PropertyId, RackDestination, RackId};
 
 /// The frames of the timeline that the keyframes of `rack` are at.
 fn frames_of(window: &Window, rack: RackId) -> Vec<u64> {
@@ -108,7 +109,7 @@ fn put_the_keyframe_of_the_rack_at(window: &mut Window, rack: RackId, frame: u64
     window.do_this(Command::MoveKeyframes(vec![KeyframeMove {
         keyframe,
         to_rack: rack,
-        to_frame: frame,
+        to_frame: i64::try_from(frame).unwrap(),
     }]));
     window.harness.run_steps(5);
 }
@@ -213,7 +214,7 @@ fn racks_dragged_together_stop_together_when_the_first_to_come_to_the_end_of_its
 }
 
 #[test]
-fn racks_dragged_together_are_not_taken_to_another_place_by_the_pointer_going_up_or_down() {
+fn racks_dragged_together_over_the_racks_of_their_drawer_do_not_change_places_in_it() {
     let Racks {
         mut window,
         video,
@@ -223,10 +224,10 @@ fn racks_dragged_together_are_not_taken_to_another_place_by_the_pointer_going_up
     } = window_with_racks_of_the_video();
     select_racks(&mut window, &[upper, turn]);
     let from = on_the_rack(&window, 0, 160);
+    // Down, over the rack that was not selected and then the one that was, past the middle of the last.
+    let to = on_the_rack(&window, 2, 160) + vec2(0.0, 6.0);
 
-    // Up, over the text track in front and the strip of the video, and then down, below the racks.
-    window.drag(from, from + vec2(0.0, -150.0), PointerButton::Primary);
-    window.drag(from, from + vec2(0.0, 120.0), PointerButton::Primary);
+    window.drag(from, to, PointerButton::Primary);
 
     assert_eq!(
         racks_of_the_drawer_of(&window, video),
@@ -234,6 +235,389 @@ fn racks_dragged_together_are_not_taken_to_another_place_by_the_pointer_going_up
         "the same racks in the same order in the same drawer"
     );
     assert_eq!(selected_racks(&window), vec![upper, turn]);
+}
+
+#[test]
+fn racks_dragged_together_over_a_clip_are_not_moved_anywhere() {
+    let Racks {
+        mut window,
+        video,
+        upper,
+        lower,
+        turn,
+    } = window_with_racks_of_the_video();
+    select_racks(&mut window, &[upper, turn]);
+    let before = window.application().project().clone();
+    let from = on_the_rack(&window, 0, 160);
+    // Up, onto the strip of the video: nothing but a clip is there.
+    let to = Pos2::new(from.x, window.strip_of_track(1).center().y);
+
+    window.drag(from, to, PointerButton::Primary);
+
+    assert_eq!(window.application().project(), &before);
+    assert_eq!(racks_of_the_drawer_of(&window, video), vec![upper, lower, turn]);
+}
+
+#[test]
+fn racks_dragged_together_onto_an_empty_part_of_a_track_are_in_one_new_crate_that_lasts_as_long_as_their_keyframes_need()
+ {
+    let Racks {
+        mut window,
+        video,
+        upper,
+        lower,
+        turn,
+    } = window_with_racks_of_the_video();
+    select_racks(&mut window, &[upper, turn]);
+    let (upper_before, turn_before) = (frames_of(&window, upper), frames_of(&window, turn));
+    let from = on_the_rack(&window, 0, 160);
+    // Up, to the track in front, where the text is from frame 40 to frame 100 and nothing is after it.
+    let to = Pos2::new(from.x, window.strip_of_track(0).center().y);
+
+    window.drag(from, to, PointerButton::Primary);
+
+    let project = window.application().project();
+    let track = &project.tracks()[0];
+    assert_eq!(track.entries().len(), 2, "the text and one crate");
+    let crate_placement = track.placement_at_index(1).unwrap();
+    assert!(matches!(crate_placement.clip, Clip::Crate(_)));
+    assert_eq!(
+        (
+            crate_placement.first_timeline_frame.value(),
+            crate_placement.timeline_frame_count()
+        ),
+        (100, 51),
+        "from the first keyframe of the racks, at 100, to the last, at 150"
+    );
+    assert_eq!(
+        crate_placement
+            .drawer
+            .racks()
+            .iter()
+            .map(|rack| rack.id())
+            .collect::<Vec<_>>(),
+        vec![upper, turn],
+        "both racks are in the one crate"
+    );
+    assert_eq!(
+        racks_of_the_drawer_of(&window, video),
+        vec![lower],
+        "the one that was not selected stays"
+    );
+    assert_eq!(frames_of(&window, upper), upper_before);
+    assert_eq!(frames_of(&window, turn), turn_before);
+    assert_eq!(selected_racks(&window), vec![upper, turn]);
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
+}
+
+/// A window with a video that has two racks in its drawer (its loudness and its turn) and a text that has one (its turn). Gives the window, the
+/// video, the text, and the racks of the video.
+fn window_with_two_racks_in_the_drawer_of_a_video_and_one_in_that_of_a_text() -> (Window, ClipId, ClipId, Vec<RackId>) {
+    let (mut window, video, text) = window_with_a_video_and_a_text();
+    for at in [60, 80] {
+        make_a_keyframe(&mut window, AnimationTarget::Clip(video), PropertyId::Gain, at);
+    }
+    make_a_keyframe(&mut window, AnimationTarget::Clip(video), PropertyId::Rotation, 70);
+    make_a_keyframe(&mut window, AnimationTarget::Clip(text), PropertyId::Rotation, 50);
+    let from_the_video = racks_of_the_drawer_of(&window, video);
+    assert_eq!(from_the_video.len(), 2, "the loudness and the turn");
+    (window, video, text, from_the_video)
+}
+
+#[test]
+fn racks_dragged_together_into_the_drawer_of_another_clip_go_in_it_together_in_the_order_they_were_in_in_their_own_drawer()
+ {
+    // (Once with the racks in the order they were made in, and once with the second put above the first: the order of a drawer is the user's.)
+    for the_second_is_put_above_the_first in [false, true] {
+        let (mut window, video, text, from_the_video) =
+            window_with_two_racks_in_the_drawer_of_a_video_and_one_in_that_of_a_text();
+        if the_second_is_put_above_the_first {
+            window.do_this(Command::MoveRacks {
+                racks: vec![from_the_video[1]],
+                to: RackDestination::Drawer(AnimationTarget::Clip(video)),
+                shift_in_frames: 0,
+                slot: Some(0),
+            });
+            window.settle();
+        }
+        let in_their_drawer = racks_of_the_drawer_of(&window, video);
+        assert_eq!(
+            in_their_drawer == from_the_video,
+            !the_second_is_put_above_the_first,
+            "the setup: {in_their_drawer:?}"
+        );
+        select_racks(&mut window, &from_the_video);
+        let before = (
+            frames_of(&window, in_their_drawer[0]),
+            frames_of(&window, in_their_drawer[1]),
+        );
+        // The drawer of the text is the one that is higher on the screen: the pointer goes up from the first of the racks of the video to
+        // the room under the rack that is in the drawer of the text.
+        let on_the_screen = racks_drawn(&window);
+        assert_eq!(on_the_screen.len(), 3);
+        // (Taken hold of at frame 100: none of the keyframes of the video, which are at 60, 70 and 80, is there, wherever the racks are.)
+        let from = on_the_rack(&window, 1, 100);
+        let to = Pos2::new(from.x, on_the_screen[0].bottom() + 10.0);
+
+        window.drag(from, to, PointerButton::Primary);
+
+        assert_eq!(
+            racks_of_the_drawer_of(&window, video),
+            vec![],
+            "they have both left the drawer of the video"
+        );
+        let in_the_text = racks_of_the_drawer_of(&window, text);
+        assert_eq!(in_the_text.len(), 3, "the rack that was there, and the two that came");
+        assert_eq!(
+            in_the_text[1..],
+            in_their_drawer[..],
+            "under it, together, in the order they were in (the second above the first: {the_second_is_put_above_the_first})"
+        );
+        assert_eq!(
+            (
+                frames_of(&window, in_their_drawer[0]),
+                frames_of(&window, in_their_drawer[1])
+            ),
+            before,
+            "the keyframes are at the frames of the timeline they were at"
+        );
+        assert_eq!(
+            window.application().project().problems_with_the_racks(),
+            Vec::<String>::new()
+        );
+    }
+}
+
+#[test]
+fn racks_of_two_drawers_that_are_selected_together_are_dragged_along_the_timeline_and_none_goes_to_another_drawer() {
+    let (mut window, video, text, from_the_video) =
+        window_with_two_racks_in_the_drawer_of_a_video_and_one_in_that_of_a_text();
+    let in_the_text = racks_of_the_drawer_of(&window, text);
+    select_racks(&mut window, &[from_the_video[0], in_the_text[0]]);
+    let before = window.application().project().clone();
+    // The drawer of the text is the one that is higher on the screen: the pointer goes up from the first rack of the video to the room under
+    // the rack of the text (taken hold of at frame 100, where no keyframe is), which would be a drawer to go to for racks that are in one.
+    let on_the_screen = racks_drawn(&window);
+    assert_eq!(on_the_screen.len(), 3);
+    let from = on_the_rack(&window, 1, 100);
+    let to = Pos2::new(from.x, on_the_screen[0].bottom() + 10.0);
+
+    window.drag(from, to, PointerButton::Primary);
+
+    assert_eq!(
+        racks_of_the_drawer_of(&window, video),
+        from_the_video,
+        "none has left the drawer of the video"
+    );
+    assert_eq!(
+        racks_of_the_drawer_of(&window, text),
+        in_the_text,
+        "and none has gone to the drawer of the text"
+    );
+    assert_eq!(
+        window.application().project(),
+        &before,
+        "going up and down moves nothing"
+    );
+}
+
+#[test]
+fn racks_dragged_together_into_the_drawer_of_another_clip_go_in_it_at_the_place_the_pointer_is_at_among_its_racks() {
+    let (mut window, _, text, from_the_video) =
+        window_with_two_racks_in_the_drawer_of_a_video_and_one_in_that_of_a_text();
+    let in_the_text_before = racks_of_the_drawer_of(&window, text);
+    assert_eq!(in_the_text_before.len(), 1, "the setup");
+    select_racks(&mut window, &from_the_video);
+    // The drawer of the text is the one that is higher on the screen: the pointer goes up from the first of the racks of the video to the top
+    // half of the rack that is in the drawer of the text, which is above the middle of it.
+    let on_the_screen = racks_drawn(&window);
+    let from = on_the_rack(&window, 1, 70);
+    let to = Pos2::new(from.x, on_the_screen[0].center().y - 3.0);
+
+    // (The pointer goes there in one move, so that where it is when the racks come into the drawer is where it is let go: once they are in it
+    // they do not change places in it.)
+    window.move_pointer_to(from);
+    window.press(from, PointerButton::Primary);
+    window.move_pointer_to(to);
+    window.release(to, PointerButton::Primary);
+    window.settle();
+
+    let in_the_text = racks_of_the_drawer_of(&window, text);
+    assert_eq!(in_the_text.len(), 3, "the rack that was there, and the two that came");
+    assert_eq!(
+        in_the_text[..2],
+        from_the_video[..],
+        "above it, together, in the order they were in"
+    );
+    assert_eq!(in_the_text[2..], in_the_text_before[..], "and it is under them");
+}
+
+/// The first frame of the timeline that the keyframe crate `crate_clip` is at, and the one after its last.
+fn extent_of_the_crate(window: &Window, crate_clip: ClipId) -> (u64, u64) {
+    let placement = window
+        .application()
+        .project()
+        .placement_of(crate_clip)
+        .expect("the crate is there");
+    (
+        placement.first_timeline_frame.value(),
+        placement.end_timeline_frame.value(),
+    )
+}
+
+#[test]
+fn a_rack_dragged_sideways_in_a_crate_makes_the_crate_longer_where_its_keyframes_go_beyond_it_and_shorter_when_they_come_back()
+ {
+    let Racks {
+        mut window,
+        upper,
+        turn,
+        ..
+    } = window_with_racks_of_the_video();
+    // Both racks in a crate: it is from frame 100, where the first keyframe of the upper is, to frame 150, where the turn has its one.
+    select_racks(&mut window, &[upper, turn]);
+    let from = on_the_rack(&window, 0, 160);
+    window.drag(
+        from,
+        Pos2::new(from.x, window.strip_of_track(0).center().y),
+        PointerButton::Primary,
+    );
+    let crate_clip = window.clip(0, 1);
+    assert_eq!(extent_of_the_crate(&window, crate_clip), (100, 151));
+
+    // The rack of the turn on its own, taken at frame 125 (along its bar, which is as long as the crate) and taken 12 frames later.
+    select_racks(&mut window, &[turn]);
+    let on_the_turn = Pos2::new(
+        window.x_of_frame_on_the_strip(0, 125),
+        racks_drawn(&window)[1].center().y,
+    );
+    drag_sideways_by(&mut window, on_the_turn, 12.0);
+
+    let went = how_far_they_went(&window, turn, &[150]);
+    assert!((11..=13).contains(&went), "about as far as the pointer went: {went}");
+    assert_eq!(
+        extent_of_the_crate(&window, crate_clip),
+        (100, 151 + went as u64),
+        "longer at the end, as far as the keyframe went"
+    );
+    assert_eq!(
+        frames_of(&window, upper),
+        vec![100, 120],
+        "the other rack is where it was"
+    );
+
+    // And back: the crate is as short as it was.
+    let on_the_turn = Pos2::new(
+        window.x_of_frame_on_the_strip(0, 125),
+        racks_drawn(&window)[1].center().y,
+    );
+    drag_sideways_by(&mut window, on_the_turn, -12.0);
+
+    let turn_now = frames_of(&window, turn)[0];
+    assert!((149..=151).contains(&turn_now), "back where it was, about: {turn_now}");
+    assert_eq!(
+        extent_of_the_crate(&window, crate_clip),
+        (100, turn_now + 1),
+        "and the crate ends where its last keyframe is"
+    );
+    assert_eq!(
+        window.application().project().problems_with_the_racks(),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_rack_put_in_a_crate_whose_keyframes_are_beyond_it_makes_the_crate_longer() {
+    let Racks {
+        mut window,
+        upper,
+        turn,
+        ..
+    } = window_with_racks_of_the_video();
+    // The upper rack on its own in a crate: from frame 100 to frame 120.
+    let from = on_the_rack(&window, 0, 160);
+    window.drag(
+        from,
+        Pos2::new(from.x, window.strip_of_track(0).center().y),
+        PointerButton::Primary,
+    );
+    let crate_clip = window.clip(0, 1);
+    assert_eq!(extent_of_the_crate(&window, crate_clip), (100, 121));
+
+    // The rack of the turn (the last of the racks on the screen: the crate has the first, then the lower one of the video's drawer) is
+    // taken at frame 140 of its bar, where its keyframe, at 150, is not, and put in the crate at frame 118: 22 frames earlier, which is
+    // frame 128 for the keyframe, 7 frames after the end of the crate.
+    let on_the_turn = Pos2::new(
+        window.x_of_frame_on_the_strip(0, 140),
+        racks_drawn(&window)[2].center().y,
+    );
+    let in_the_crate = Pos2::new(
+        window.x_of_frame_on_the_strip(0, 118),
+        window.strip_of_track(0).center().y,
+    );
+    window.drag(on_the_turn, in_the_crate, PointerButton::Primary);
+
+    let project = window.application().project();
+    let mut racks_in_the_crate: Vec<RackId> = project
+        .drawer_of(AnimationTarget::Clip(crate_clip))
+        .unwrap()
+        .racks()
+        .iter()
+        .map(|rack| rack.id())
+        .collect();
+    racks_in_the_crate.sort();
+    assert_eq!(
+        racks_in_the_crate,
+        vec![upper, turn],
+        "both racks are in the crate (in the order the pointer put them)"
+    );
+    let landed = frames_of(&window, turn)[0];
+    assert!((127..=128).contains(&landed), "22 frames earlier, about: {landed}");
+    assert_eq!(
+        extent_of_the_crate(&window, crate_clip),
+        (100, landed + 1),
+        "the crate was made longer to have the keyframe in it, and no longer"
+    );
+    assert_eq!(
+        frames_of(&window, upper),
+        vec![100, 120],
+        "what was in it is where it was"
+    );
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
+}
+
+#[test]
+fn racks_dragged_together_along_to_a_track_go_as_far_along_as_the_pointer_and_the_empty_stretch_let_them() {
+    let Racks {
+        mut window,
+        upper,
+        turn,
+        ..
+    } = window_with_racks_of_the_video();
+    select_racks(&mut window, &[upper, turn]);
+    let (upper_before, turn_before) = (frames_of(&window, upper), frames_of(&window, turn));
+    let from = on_the_rack(&window, 0, 110);
+    // Up and 20 frames along.
+    let to = Pos2::new(
+        from.x + 20.0 * points_per_frame(&window),
+        window.strip_of_track(0).center().y,
+    );
+
+    window.drag(from, to, PointerButton::Primary);
+
+    let (upper_went, turn_went) = (
+        how_far_they_went(&window, upper, &upper_before),
+        how_far_they_went(&window, turn, &turn_before),
+    );
+    assert_eq!(upper_went, turn_went, "they went as far as each other");
+    assert!(
+        (19..=21).contains(&upper_went),
+        "about as far as the pointer went (a frame more or less, as it is on the edge of one): {upper_went}"
+    );
+    let project = window.application().project();
+    let crate_placement = project.tracks()[0].placement_at_index(1).unwrap();
+    assert_eq!(crate_placement.first_timeline_frame.value(), 100 + upper_went as u64);
+    assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
 }
 
 #[test]
@@ -665,8 +1049,8 @@ fn window_with_three_racks_of_the_loudness_of_the_video() -> ThreeRacksOfTheLoud
     // The two racks wait in the drawer of the track in front while the third is made, so that it is a rack of its own.
     let in_front = AnimationTarget::Track(window.application().project().tracks()[0].id());
     for rack in [first, second] {
-        window.do_this(Command::MoveRack {
-            rack,
+        window.do_this(Command::MoveRacks {
+            racks: vec![rack],
             to: RackDestination::Drawer(in_front),
             shift_in_frames: 0,
             slot: None,
@@ -675,8 +1059,8 @@ fn window_with_three_racks_of_the_loudness_of_the_video() -> ThreeRacksOfTheLoud
     make_a_keyframe(&mut window, target, PropertyId::Gain, 60);
     let third = the_rack_of(&window, video, PropertyId::Gain);
     for (slot, rack) in [(0, first), (1, second)] {
-        window.do_this(Command::MoveRack {
-            rack,
+        window.do_this(Command::MoveRacks {
+            racks: vec![rack],
             to: RackDestination::Drawer(target),
             shift_in_frames: 0,
             slot: Some(slot),

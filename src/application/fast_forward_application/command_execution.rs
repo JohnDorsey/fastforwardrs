@@ -120,6 +120,9 @@ impl FastForwardApplication {
                 }
             }
 
+            Command::GoBackInTheTimelineViewHistory => self.timeline_view.go_back_in_the_view_history(),
+            Command::GoForwardInTheTimelineViewHistory => self.timeline_view.go_forward_in_the_view_history(),
+
             Command::SelectItems { items, change } => {
                 let asked_for_something = !items.is_empty();
                 let items_that_exist = items
@@ -135,11 +138,11 @@ impl FastForwardApplication {
             Command::SplitAt { frame, only } => self.split_at(frame, only, now),
             Command::DeleteClips(clips) => self.delete_clips(clips, now),
             Command::DuplicateClips { clips, side } => self.duplicate_clips(clips, side),
-            Command::MoveClips(starts) => {
+            Command::MoveClips { moves, before_the_drag } => {
                 // A move that cannot be made (clips would be on top of one another) is not made, and the user is told if the rules of groups
                 // are why. (A drag stops against what is in its way, so this is not what a drag comes to: it is for a move that is asked
                 // for by other means.)
-                if let Err(error) = self.project.move_clips(&starts) {
+                if let Err(error) = self.project.move_clips_remembering(&moves, &before_the_drag) {
                     self.say_why_a_group_edit_was_refused("The clips cannot be moved there", &error);
                 }
             }
@@ -202,6 +205,18 @@ impl FastForwardApplication {
             Command::CreateGroup { kind, members } => self.create_a_group(kind, &members),
             Command::AddToGroup { group, members } => self.add_to_a_group(group, &members),
             Command::RemoveFromGroup { group, member } => self.remove_from_a_group(group, member),
+            Command::SetTheFramesOfAClipGroup {
+                group,
+                first_frame,
+                end_frame,
+            } => {
+                if let Err(error) = self
+                    .project
+                    .set_the_frames_of_the_clip_group(group, first_frame, end_frame)
+                {
+                    self.say_why_a_group_edit_was_refused("The group cannot be changed that way", &error);
+                }
+            }
             Command::DisbandGroup(group) => self.disband_a_group(group),
             Command::DeleteGroupAndEverythingInIt(group) => self.delete_a_group_and_everything_in_it(group, now),
             Command::RenameGroup { group, name } => {
@@ -275,15 +290,15 @@ impl FastForwardApplication {
                 let _ = self.project.merge_racks(&racks);
                 self.selection.forget_what_is_gone(&self.project);
             }
-            Command::MoveRack {
-                rack,
+            Command::MoveRacks {
+                racks,
                 to,
                 shift_in_frames,
                 slot,
             } => {
-                // A rack that cannot go where it is asked to is not moved (the user is told if the rules of groups are why: a new crate
-                // cannot be made inside the rectangle of a clip group).
-                if let Err(error) = self.project.move_rack(rack, to, shift_in_frames, slot) {
+                // Racks that cannot go where they are asked to are not moved (the user is told if the rules of groups are why: a new
+                // crate cannot be made inside the rectangle of a clip group).
+                if let Err(error) = self.project.move_racks(&racks, to, shift_in_frames, slot) {
                     self.say_why_a_group_edit_was_refused("The rack cannot go there", &error);
                 }
                 self.selection.forget_what_is_gone(&self.project);

@@ -1,10 +1,10 @@
 //! Tests of what moves on the screen, frame by frame, while a drawer slides open or shut.
 //!
 //! The timeline panel is as tall as what is in it, and grows upward from the bottom of the window, so a drawer that pushes the
-//! rows under it down makes it taller as it opens. (There was a bug: the panel was as tall as the rows were in the frame before,
-//! so in each frame of the sliding everything in it was drawn lower than it was going to be, by as much as the drawer had grown in
-//! that frame, and went back up in the next: the track under the drawer jumped down and crept back, and the slider along the
-//! bottom of the window went with it. The tests here are what it was.)
+//! rows under it down makes it taller as it opens, and the row of the buttons and the slider, which is the top of the panel, goes
+//! up with it. (There was a bug: the panel was as tall as the rows were in the frame before, so in each frame of the sliding
+//! everything in it was drawn lower than it was going to be, by as much as the drawer had grown in that frame, and went back up
+//! in the next: the track under the drawer jumped down and crept back. The tests here are what it was.)
 
 use egui_kittest::kittest::Queryable;
 
@@ -22,12 +22,20 @@ struct Places {
     first_strip_top: f32,
     /// The top of the strip of the track under it.
     second_strip_top: f32,
-    /// The top of the slider along the bottom of the timeline.
+    /// The top of the slider, which is on the row at the top of the timeline panel.
     slider_top: f32,
     /// The bottom of the timeline panel.
     panel_bottom: f32,
     /// The top of the timeline panel, which is also the bottom of the panel above it.
     panel_top: f32,
+}
+
+impl Places {
+    /// How far under the top of the panel the top of the slider is: the row it is on is the first thing in the panel, so this
+    /// does not change as the panel grows.
+    fn slider_below_the_top_of_the_panel(&self) -> f32 {
+        self.slider_top - self.panel_top
+    }
 }
 
 fn places(window: &Window) -> Places {
@@ -106,14 +114,25 @@ fn the_track_under_a_drawer_that_opens_stays_where_it_is_on_the_screen_in_every_
 }
 
 #[test]
-fn the_slider_and_the_bottom_of_the_panel_stay_where_they_are_while_a_drawer_opens() {
+fn the_slider_stays_the_same_distance_under_the_top_of_the_panel_and_the_bottom_of_the_panel_stays_where_it_is_while_a_drawer_opens()
+ {
     let mut window = window_with_two_tracks();
     let before = places(&window);
     press_the_button_of_the_drawer_of_the_first_track(&mut window);
 
     let during = the_places_in_the_frames_that_follow(&mut window, 24);
 
-    assert_stays_within(&during, "the slider", |places| places.slider_top, before.slider_top);
+    let after = *during.last().unwrap();
+    assert!(
+        after.slider_top < before.slider_top - 10.0,
+        "the setup: the slider went up with the top of the panel: {before:?} then {after:?}"
+    );
+    assert_stays_within(
+        &during,
+        "the slider under the top of the panel",
+        Places::slider_below_the_top_of_the_panel,
+        before.slider_below_the_top_of_the_panel(),
+    );
     assert_stays_within(
         &during,
         "the bottom of the panel",
@@ -171,11 +190,16 @@ fn the_track_under_a_drawer_that_shuts_stays_where_it_is_on_the_screen_in_every_
         |places| places.second_strip_top,
         open.second_strip_top,
     );
-    assert_stays_within(&during, "the slider", |places| places.slider_top, open.slider_top);
+    assert_stays_within(
+        &during,
+        "the slider under the top of the panel",
+        Places::slider_below_the_top_of_the_panel,
+        open.slider_below_the_top_of_the_panel(),
+    );
 }
 
 #[test]
-fn a_track_that_is_added_is_there_at_once_and_the_slider_does_not_move() {
+fn a_track_that_is_added_is_there_at_once_and_so_is_the_top_of_the_panel_with_the_slider_on_it() {
     let mut window = window_with_two_tracks();
     let before = places(&window);
 
@@ -184,7 +208,12 @@ fn a_track_that_is_added_is_there_at_once_and_the_slider_does_not_move() {
     let during = the_places_in_the_frames_that_follow(&mut window, 12);
 
     // (The panel is at its tallest with three tracks, so the new track makes it taller by as much as it can be, up to there.)
-    assert_stays_within(&during, "the slider", |places| places.slider_top, before.slider_top);
+    let after = *during.last().unwrap();
+    assert!(
+        after.slider_top < before.slider_top - 50.0,
+        "the setup: the panel grew, and the slider on its top went up: {before:?} then {after:?}"
+    );
+    assert_stays_within(&during, "the slider", |places| places.slider_top, after.slider_top);
     assert_stays_within(
         &during,
         "the bottom of the panel",
@@ -228,7 +257,7 @@ fn the_height_the_rows_are_laid_out_to_be_changes_exactly_as_the_height_of_what_
 }
 
 #[test]
-fn a_track_that_is_taken_away_is_gone_at_once_and_the_slider_does_not_move() {
+fn a_track_that_is_taken_away_is_gone_at_once_and_so_is_the_top_of_the_panel_with_the_slider_on_it() {
     let mut window = window_with_two_tracks();
     window.do_this(crate::application::commands::Command::AddTrack);
     let before = places(&window);
@@ -248,7 +277,12 @@ fn a_track_that_is_taken_away_is_gone_at_once_and_the_slider_does_not_move() {
         "the setup: the timeline shrank: {before:?} then {:?}",
         during.last().unwrap()
     );
-    assert_stays_within(&during, "the slider", |places| places.slider_top, before.slider_top);
+    let after = *during.last().unwrap();
+    assert!(
+        after.slider_top > before.slider_top + 50.0,
+        "the setup: the slider on the top of the panel went down: {before:?} then {after:?}"
+    );
+    assert_stays_within(&during, "the slider", |places| places.slider_top, after.slider_top);
     assert_stays_within(
         &during,
         "the bottom of the panel",

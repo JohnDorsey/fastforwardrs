@@ -9,6 +9,10 @@
 **/*.rs.bk
 *.pdb
 
+# Python tooling (tools/)
+__pycache__/
+*.pyc
+
 # Editors and IDEs
 .idea/
 .vscode/

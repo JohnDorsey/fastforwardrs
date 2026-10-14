@@ -41,8 +41,8 @@ pub(super) fn window_with_racks_of_the_video() -> Racks {
     let upper = the_rack_of(&window, video, PropertyId::Gain);
     // The first rack waits in the drawer of the track in front while the others are made, so that they are racks of their own.
     let in_front = window.application().project().tracks()[0].id();
-    window.do_this(Command::MoveRack {
-        rack: upper,
+    window.do_this(Command::MoveRacks {
+        racks: vec![upper],
         to: RackDestination::Drawer(AnimationTarget::Track(in_front)),
         shift_in_frames: 0,
         slot: None,
@@ -51,8 +51,8 @@ pub(super) fn window_with_racks_of_the_video() -> Racks {
     let lower = the_rack_of(&window, video, PropertyId::Gain);
     make_a_keyframe(&mut window, target, PropertyId::Rotation, 150);
     let turn = the_rack_of(&window, video, PropertyId::Rotation);
-    window.do_this(Command::MoveRack {
-        rack: upper,
+    window.do_this(Command::MoveRacks {
+        racks: vec![upper],
         to: RackDestination::Drawer(target),
         shift_in_frames: 0,
         slot: Some(0),

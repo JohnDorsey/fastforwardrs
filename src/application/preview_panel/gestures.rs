@@ -318,7 +318,8 @@ impl Pointing {
         }
     }
 
-    /// Shows what the pointer is on, with `painter` for what is drawn (which is not cut off anywhere): the
+    /// Shows what the pointer is on, with `painter` for what is drawn (which is cut off at the edge of the preview panel, and
+    /// not at the edge of the picture): the
     /// mouse pointer, a ring round the corner that a layer is turned from, and how far round a layer being
     /// turned is turned.
     pub fn show(&self, ui: &Ui, painter: &Painter, content: &PreviewContent<'_>, picture: &PictureOnScreen) {

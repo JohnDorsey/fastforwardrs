@@ -58,6 +58,17 @@ impl StripView {
         self.screen_x_of(self.geometry.x_of_frame(frame_number))
     }
 
+    /// Where on the screen a place that is `frame_number` frames along is, which can be between two frames (a frame is as wide as the
+    /// others all along, so it is as far along as it is many frames, however many).
+    pub fn screen_x_of_fractional_frame(&self, frame_number: f64) -> f32 {
+        self.screen_x_of(frame_number * self.points_per_frame())
+    }
+
+    /// How many frames along the strips the place on the screen at `screen_x` is, which can be between two frames.
+    pub fn fractional_frame_at(&self, screen_x: f32) -> f64 {
+        self.x_at(screen_x) / self.points_per_frame()
+    }
+
     /// The position along the strips of the place on the screen at `screen_x`.
     pub fn x_at(&self, screen_x: f32) -> f64 {
         f64::from(screen_x - self.rectangle.left()) + self.scroll_offset
@@ -178,6 +189,17 @@ mod tests {
     #[test]
     fn a_view_on_the_strips_is_as_wide_as_its_rectangle() {
         assert_eq!(view().width(), 600.0);
+    }
+
+    #[test]
+    fn a_place_between_two_frames_is_as_far_between_them_on_the_screen() {
+        let view = view();
+        assert_eq!(view.screen_x_of_fractional_frame(90.0), view.screen_x_of_frame(90));
+        assert_eq!(
+            view.screen_x_of_fractional_frame(90.5),
+            view.screen_x_of_frame(90) + 2.0
+        );
+        assert_eq!(view.fractional_frame_at(view.screen_x_of_frame(90) + 1.0), 90.25);
     }
 
     #[test]

@@ -293,8 +293,8 @@ fn moving_a_rack_with_the_command_moves_it_to_the_drawer_it_is_told_to() {
     let (rack, _) = keyframes_of_the_rack_of(&window, clip, PropertyId::Gain);
     let track = window.application().project().tracks()[0].id();
 
-    window.do_this(Command::MoveRack {
-        rack,
+    window.do_this(Command::MoveRacks {
+        racks: vec![rack],
         to: RackDestination::Drawer(AnimationTarget::Track(track)),
         shift_in_frames: 0,
         slot: None,
@@ -322,8 +322,8 @@ fn a_rack_that_cannot_go_where_it_is_told_to_is_not_moved() {
     let before = window.application().project().clone();
     let nowhere = AnimationTarget::Track(crate::project::TrackId::new(99));
 
-    window.do_this(Command::MoveRack {
-        rack,
+    window.do_this(Command::MoveRacks {
+        racks: vec![rack],
         to: RackDestination::Drawer(nowhere),
         shift_in_frames: 0,
         slot: None,
@@ -352,8 +352,8 @@ fn two_racks_of_the_loudness(window: &mut Window, clip: ClipId) -> (RackId, Rack
     add_a_keyframe(window, AnimationTarget::Clip(clip), PropertyId::Gain, 20);
     let (first, _) = keyframes_of_the_rack_of(window, clip, PropertyId::Gain);
     let track = window.application().project().tracks()[0].id();
-    window.do_this(Command::MoveRack {
-        rack: first,
+    window.do_this(Command::MoveRacks {
+        racks: vec![first],
         to: RackDestination::Drawer(AnimationTarget::Track(track)),
         shift_in_frames: 0,
         slot: None,

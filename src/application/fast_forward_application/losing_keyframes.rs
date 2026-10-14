@@ -76,8 +76,8 @@ impl FastForwardApplication {
                 let _ = copy.set_clip_duration(*clip, *frames);
             }
             Command::SetProjectFrameRate(frame_rate) => copy.set_frame_rate(*frame_rate),
-            Command::MoveClips(moves) => {
-                let _ = copy.move_clips(moves);
+            Command::MoveClips { moves, before_the_drag } => {
+                let _ = copy.move_clips_remembering(moves, before_the_drag);
             }
             other => {
                 debug_assert!(

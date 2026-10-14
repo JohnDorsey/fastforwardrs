@@ -181,16 +181,28 @@ fn a_crate_is_copied_with_its_racks() {
         AnimationTarget::Clip(crate_id),
         AnimationTarget::Clip(video),
         PropertyId::Gain,
-        &[(10, db(-20.0))],
+        &[(10, db(-20.0)), (30, db(-6.0))],
     );
+    // (The crate lasts from its first keyframe to its last, so it is from frame 310 to frame 330 and not as long as it was made.)
+    let lasting = |project: &Project, clip| {
+        let placement = project.placement_of(clip).unwrap();
+        (placement.first_timeline_frame, placement.timeline_frame_count())
+    };
+    assert_eq!(lasting(&project, crate_id), (frame(310), 21));
 
     let copy = project.duplicate_clip(crate_id, ClipSide::Right).unwrap();
 
     assert!(matches!(project.placement_of(copy).unwrap().clip, Clip::Crate(_)));
     assert_eq!(
-        where_the_video_has_keyframes(&project, video, PropertyId::Gain),
-        vec![310, 410]
+        lasting(&project, copy),
+        (frame(331), 21),
+        "right after the crate, as long"
     );
+    assert_eq!(
+        where_the_video_has_keyframes(&project, video, PropertyId::Gain),
+        vec![310, 330, 331, 351]
+    );
+    assert_the_racks_are_sound(&project);
 }
 
 // --- copying tracks ---

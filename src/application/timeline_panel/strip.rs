@@ -185,14 +185,16 @@ fn draw_the_drawers(ui: &Ui, view: &StripView, track: &Track, project: &Project,
         strip.left_top(),
         pos2(
             strip.right(),
-            strip.bottom() + state.drawers.reach_under_the_row_of(track, project),
+            strip.bottom() + state.drawers.reach_under_the_row_of(track, strip.height(), project),
         ),
     );
     let painter = ui.painter_at(room_for_drawers);
     let of_the_track = AnimationTarget::Track(track.id());
     if let Some(shape) = drawers::track_drawer_shape(
         strip,
-        state.drawers.reach_of_the_drawers_of_the_clips_of(track, project),
+        state
+            .drawers
+            .reach_of_the_drawers_of_the_clips_of(track, strip.height(), project),
         state.drawers.openness(of_the_track),
         drawers::height_when_open(of_the_track, project),
     ) {
@@ -250,7 +252,7 @@ fn operate_the_drawer_of_the_track(
     let top = strip.bottom()
         + state
             .drawers
-            .reach_of_the_drawers_of_the_clips_of(track, content.project);
+            .reach_of_the_drawers_of_the_clips_of(track, strip.height(), content.project);
     let hanging = Rect::from_min_max(
         pos2(strip.left(), top),
         pos2(

@@ -278,7 +278,7 @@ Each item has a number for the answer log. **Blocking** means the model or the f
 | Commands, menus (clip menu: *Create tag*, *Create clip group*, *Add to tag*; track menu: *Create track group*), refusals as messages naming what is in the way | `src/application/commands.rs`, `fast_forward_application/group_flow.rs`, `application/group_messages.rs`, `timeline_panel/{clip_menu,header}.rs` |
 | The properties panel: the box of a group (thick outline, bar with kind + name + colour, list of members, menus), the chain of effects with badges that are dragged and double-clicked | `src/application/properties_panel/{group_properties,chain,badge,kind_box}.rs` |
 | The outlines on the timeline | `src/application/timeline_panel/group_outlines.rs` and `group_outlines/shape.rs` |
-| Dragging clips stops against the rectangle of a clip group (the first place that is not allowed is worked out by arithmetic, so it takes the same time however far the clips are dragged; trying each place is what it falls back to, and what the tests of the arithmetic compare it with) | `src/application/clip_moving.rs` (`stopped_by_the_groups`, `stop_worked_out_by_arithmetic`, `stopped_by_trying_each_place`) |
+| Dragging clips (a clip joins the clip group whose rectangle it is dragged into; it stops where that would break a rule; the first place that is not allowed is worked out by looking at the places where the answer can change, so it takes the same time however far the clips are dragged; trying each place is what it falls back to, and what the tests compare it with) | `src/application/clip_moving.rs` (`stopped_by_the_groups`, `stop_found_where_the_rules_of_clip_groups_can_change`, `stopped_by_trying_each_place`), `src/project/groups/joining.rs` |
 
 **Where what was built differs from the plan above (flag any you dislike).**
 
@@ -313,5 +313,66 @@ Each item has a number for the answer log. **Blocking** means the model or the f
 * The placeholder (section 2, the correction): wrong at the see-through edges of layers that are over others, by up to about 100 levels for vivid colours.
 * The outlines of tags are an approximation of "yarn": the spokes are straight or bend once between the middles of two members and cross whatever is between them (the
   clips of other groups, and clips that are in no group), which the rules allow; they are not routed round clips.
-* A group is not selected by clicking its outline, not dragged, and its name is not shown on the timeline (as asked: later).
+* ~~A group is not selected by clicking its outline, not dragged, and its name is not shown on the timeline (as asked: later).~~ Done in round 12: see section 8.
 * Nothing is animated for a group (as asked), and groups have no effect on sound (as asked: not now).
+
+
+---
+
+## 8. Round 12 (2026-10-14): dragging clips into clip groups, moving the edges of a clip group, and names on the timeline
+
+The maintainer asked for these; **this section says what was built and the decisions taken where the request left room** (flag any you dislike). It changes two things
+this document said before: *"Changing membership by dragging: in the future, not now"* (section 1) and *"a drag stops against the obstacle (a rectangle is an obstacle for
+non-members)"* (G-10). The rule that **no clip that is not in a clip group is inside its rectangle**, and that **the rectangle is the smallest that holds the members**
+(section 3), are as they were: what changed is how clips come to be members.
+
+**8.1 A clip that is dragged into a clip group joins it.** A clip that is in no clip group, and is moved to where the rectangle of one is (it has some of its frames, on a track the
+rectangle reaches across), is put in the group (the innermost one, where it is in the rectangles of several that are one in another; where it is in the rectangles of two that
+are not, it is not put in either, and the move is refused for the rule). The rectangle is then the smallest that has it as well: a clip that is partly inside makes the rectangle
+longer, which is refused if it would take in a clip that is not in the group. A clip that is in a clip group already stays in it, and cannot be moved into another.
+(`Project::move_clips_remembering`, `src/project/groups/joining.rs`.)
+
+*Decision: while it is being dragged, a clip is in the group when it is in the rectangle, and out of it again when it is dragged out.* Each move of a drag says which clip group each
+of the clips was in **when the drag began** (`ClipGroupBeforeTheDrag`, kept in the drag state of the timeline and sent in the command): a clip that was in none is taken out of the
+group it joined as it was dragged, before it is moved on, and is put in the one it is moved to. So a clip can be dragged **through** a group where nothing is in its way, and is in
+it only while it is in its rectangle (and where it is let go, if that is in it). A clip that was a member of a group when the drag began is dragged as it always was: the
+rectangle follows it. *(Not done: leaving a group by being dragged out of it. A member is taken out with the menu of the list in its box, as before.)*
+
+*How far a drag can go* is still found without trying each frame: the places where whether the rules are kept can change are the shifts where an edge of a clip that moves is
+at an edge of a clip that does not (and one frame either side), so only those are looked at, in order from where the clips are, each with the same few sums as a move that is made
+(`RulesOfClipGroupsAfterTheMove`). The tests compare the answer with trying each frame, in random projects with groups in groups, with drags that have already put clips in groups.
+
+**8.2 The edges of a clip group.** The left and the right edge of a clip group's outline can be taken hold of (the pointer is a double arrow over a stripe 6 points wide on the edge,
+not over its rounded corners). The group is then **the clips and clip groups that are inside the frames the edge is put at**, on the tracks it reaches across:
+`Project::set_the_frames_of_the_clip_group(group, first_frame, end_frame)` takes in what is inside and was not in it (a clip that is directly in a clip group that is round this one
+leaves that group, as it is in this one, which is in it), and lets go of what was in it and is not inside (it stays in the group round this one if it is still inside its
+rectangle). It is refused if the frames would **cut across** a clip, or a clip group, that is on those tracks (part of it inside, part outside), if nothing would be left in the group, or
+for a rule of groups.
+
+*Decision: the rectangle is still never kept; moving an edge only changes what is in the group.* So "if the edge is let go where nothing is propping it open, the rectangle shrinks to
+fit the clips it contains" is not a rule that has to be carried out: it is what the rectangle is (the smallest that has the members). What the user sees is **drawn**: while the
+edge is held, the outline is drawn with that edge where the pointer puts it (the model is not changed until the button is let go: one edit, one step of the history); when the
+button is let go, the edge goes, quickly, from where it was to where the group has it then.
+
+*Places an edge can be put* (`Project::places_for_an_edge_of_the_clip_group`): the frames where it cuts across nothing and the group would have no rule broken, in ranges, found by
+looking at one frame of each stretch where the same clips are on either side (the tests compare them with trying every frame). The edge goes along with the pointer where it is in
+one of them, and where the pointer is not it is held at the **nearest** place (of the two on either side, the nearer; the one before if they are as near), shown moving there in
+about a twentieth of a second. *Not done:* the outlines of the groups round the one whose edge is moved are not drawn longer along with it while it is held (they are when it is
+let go).
+
+**8.3 Names on the timeline.** The name of a clip group or a tag is shown, while the pointer is over the group, in a **tab** in the colour of the group (white or black writing,
+whichever can be read better) on the **top edge of its outline**: flat on the edge, round at the ends, as wide as the dots at its left and the name need (a name wider than 260
+points is cut off with an ellipsis), in the middle of the part of the edge that is in view, and going out beyond both sides of a group that is narrower. A tab over the
+first row goes over the bottom of the ruler; it hangs under the edge, inside the group, only where there is no room over the edge in the part of the window that the timeline has. A tag has its tab on the **top edge of
+its outline that has the most in view** (the highest, and then the left-most, of those that are as long). Of the groups that the pointer is over, the tab shown is the
+**innermost** one's. A track group has none.
+
+**Clicking the tab selects the group** (Ctrl+click toggles it in the selection); **dragging it moves the group**: all of its clips (those of the groups in it too, and the
+clips of a tag wherever they are) go along the timeline as far as the pointer, and down or up as many tracks as the pointer goes from the row it was in when the tab was taken
+hold of, as far as the clips in the way and the rules allow (it is the drag of clips, with all of them dragged together; there is no holding to the time it began at, which a single clip
+has when it goes to another track). If the group was selected with other things, they go along too. (`src/application/timeline_panel/group_title_bars.rs`.)
+*Not done:* a menu on the tab (the menu of the box of the group in the properties panel is where *Disband* and *Delete all* are, as they were).
+
+**Where things are (round 12).** `src/project/groups/{joining,edges}.rs` (the model), `src/application/clip_moving.rs` (how far a drag goes), `src/application/timeline_panel/{group_title_bars,group_edges,item_dragging}.rs`
+(the tabs, the edges, the drag of a group), the command `SetTheFramesOfAClipGroup` and the move command that carries what each clip was in (`MoveClips { moves, before_the_drag }`), and
+the tests: `groups/joining/tests.rs`, `groups/edges/tests.rs`, `clip_moving/group_tests.rs`, and in the window `group_title_bar_tests.rs`, `group_edge_tests.rs`, `group_drag_tests.rs`.

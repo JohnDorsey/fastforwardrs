@@ -114,6 +114,23 @@ pub(super) fn frames_that_a_keyframe_is_wide(points_per_frame: f64) -> u64 {
     ((f64::from(KEYFRAME_HEIGHT) / points_per_frame).ceil() as u64).max(1)
 }
 
+/// The racks of the drawer `drawer` that are dragged together to other drawers when `items` are dragged, in the order they are in
+/// the drawer (which is the order they go in wherever they go): all of `items` that are racks, if they are all in this drawer and
+/// nothing else is among them but tracks (nothing of which is dragged). `None` if there is something else, or a rack that is in
+/// another drawer, which is dragged along the timeline with the rest instead. (`items` lists each thing once, as a selection does.)
+fn racks_dragged_together<'a>(items: &[SelectionItem], drawer: &'a crate::project::Drawer) -> Option<Vec<&'a Rack>> {
+    let mut racks = Vec::new();
+    for item in items {
+        match item {
+            SelectionItem::Rack(id) => racks.push(drawer.rack(*id)?),
+            SelectionItem::Track(_) => {}
+            _ => return None,
+        }
+    }
+    racks.sort_by_key(|rack| drawer.position_of(rack.id()));
+    (!racks.is_empty()).then_some(racks)
+}
+
 /// The command that selects (or, with `adding_to_the_selection`, adds to or lets go of) just `item`.
 fn select(item: SelectionItem, adding_to_the_selection: bool) -> Command {
     Command::SelectItems {
@@ -230,17 +247,20 @@ pub(super) fn show(
             );
             let pointer_frame_at_the_start = view.frame_at(press.x).map_or(0, |frame| frame.value());
             let first_keyframe_frame_at_the_start = place.first_frame + first_frame;
-            // A rack that is selected on its own is taken to other drawers; with other things that are selected (a track does not
-            // count: nothing of it is dragged) it is dragged along the timeline with them.
-            let is_alone = items.iter().all(|item| {
-                matches!(item, SelectionItem::Rack(other) if *other == rack.id())
-                    || matches!(item, SelectionItem::Track(_))
-            });
-            if is_alone {
+            // A rack that is selected on its own is taken to other drawers, and so are several that are selected with nothing else
+            // when they are all in this drawer (together, in one new crate if they are put on an empty place of a track); with other
+            // things that are selected (a track does not count: nothing of it is dragged), or racks that are in other drawers, they
+            // are dragged along the timeline with them.
+            if let Some(racks) = racks_dragged_together(&items, drawer) {
+                let first_frame_of_them_all = racks
+                    .iter()
+                    .filter_map(|rack| rack.first_frame())
+                    .min()
+                    .unwrap_or(first_frame);
                 state.rack_drag = Some(RackDrag {
-                    rack: rack.id(),
+                    racks: racks.iter().map(|rack| rack.id()).collect(),
                     pointer_frame_at_the_start,
-                    first_keyframe_frame_at_the_start,
+                    first_keyframe_frame_at_the_start: place.first_frame + first_frame_of_them_all,
                 });
             } else {
                 state.item_drag = Some(drag_of(

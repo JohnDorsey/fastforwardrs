@@ -2,18 +2,22 @@
 //!
 //! Dragging a clip moves it as far as the pointer goes along its track (and up or down to the other tracks),
 //! until it comes to another clip that is not moving along with it (no two clips can be at the same time on
-//! one track), or to the start of the timeline, or to what the rules of clip groups do not allow (a clip that is not in a clip group cannot
-//! be inside its rectangle: see [`stopped_by_the_groups`]). The clips in the way stop it, they are not pushed. A clip
+//! one track), or to the start of the timeline, or to what the rules of clip groups do not allow: a clip that is in no clip group and goes into
+//! the rectangle of one **joins** it (see [`crate::project::Project::move_clips_remembering`]), unless that would make the rectangle take in a
+//! clip that is not in the group, and one that is in a group cannot be moved so that the rectangle takes in a clip that is not in it, or into
+//! another's (see [`stopped_by_the_groups`]). The clips in the way stop it, they are not pushed. A clip
 //! goes to the track the pointer is over if there is room for it there, where it is along the timeline, and
 //! otherwise stays on the track it is on: tracks that it does not fit on are not entered. A clip that goes to
 //! another track can be held to the time it started at, as a magnet holds iron (see [`Snap`], and
 //! [`StartTimeMemory`] for when it is). Everything here is arithmetic on frames and on the places of tracks in the
 //! list of them, so that how far is allowed can be tested without a window.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::start_time_hold::{HeldTime, StartTimeMemory};
-use crate::project::{ClipId, ClipMove, GroupKind, Project, TimelineFrameIndex, TrackId};
+use crate::project::{
+    ClipGroupBeforeTheDrag, ClipId, ClipMove, GroupId, GroupKind, Member, Project, TimelineFrameIndex, TrackId,
+};
 
 /// How far to move clips: down that many tracks in the list of them (up, if negative), and later by that
 /// many frames of the timeline (earlier, if negative).
@@ -27,7 +31,7 @@ pub struct MoveBy {
 /// without a [`Snap`], which is what the tests of how far clips go use.
 #[cfg(test)]
 pub fn allowed_move(project: &Project, moving: &[ClipId], wanted: MoveBy) -> MoveBy {
-    allowed_move_holding(project, moving, wanted, None)
+    allowed_move_holding(project, moving, wanted, None, &[])
 }
 
 /// A time that a dragged clip is held to when it is near, as a magnet holds iron.
@@ -78,7 +82,17 @@ impl Snap {
 /// With the clip that was taken hold of held to the time of the [`Snap`] when it is near that, where it is held
 /// it is wanted at that time and not where the pointer would put it, and so it fits on a track if it fits there
 /// at that time, though it would not at the frame it is at now.
-pub fn allowed_move_holding(project: &Project, moving: &[ClipId], wanted: MoveBy, snap: Option<Snap>) -> MoveBy {
+///
+/// `before_the_drag` says which clip group each of the clips was in when the drag began (see
+/// [`crate::project::Project::clip_groups_before_a_drag_of`]; empty for a move that is not a drag): the clips that joined a clip group as
+/// they were dragged are out of it again where the moves are tried, as the move itself makes them.
+pub fn allowed_move_holding(
+    project: &Project,
+    moving: &[ClipId],
+    wanted: MoveBy,
+    snap: Option<Snap>,
+    before_the_drag: &[ClipGroupBeforeTheDrag],
+) -> MoveBy {
     let positions: Vec<usize> = moving
         .iter()
         .filter_map(|clip| project.track_position_holding(*clip))
@@ -99,33 +113,41 @@ pub fn allowed_move_holding(project: &Project, moving: &[ClipId], wanted: MoveBy
     })
     .find(|&tracks| {
         tracks == 0
-            || the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks, 0)
-            || frames_to_the_time_held_to(project, wanted, snap, tracks)
-                .is_some_and(|held| the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks, held))
+            || the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks, 0, before_the_drag)
+            || frames_to_the_time_held_to(project, wanted, snap, tracks).is_some_and(|held| {
+                the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks, held, before_the_drag)
+            })
     })
     .unwrap_or(0);
     let frames = frames_to_the_time_held_to(project, wanted, snap, tracks_down).unwrap_or(wanted.frames);
     let frames = allowed_frames(project, moving, tracks_down, frames);
     MoveBy {
         tracks_down,
-        frames: stopped_by_the_groups(project, moving, tracks_down, frames),
+        frames: stopped_by_the_groups(project, moving, tracks_down, frames, before_the_drag),
     }
 }
 
 /// How many of the `frames` that the clips `moving` can be moved along, when they are on the tracks `tracks_down` below the ones they are on,
-/// the rules of clip groups let them be moved: a clip that is not in a clip group stops against the rectangle of the group, which it cannot
-/// be inside, and a clip that is in one stops when its group would take in a clip that is not in it. (Clips that are all of a group move
-/// along with its rectangle.) They are stopped as clips are by other clips: the first place along the way where the move would not be
-/// allowed is where they stop, and they do not go on past it to a place where it would be allowed again, which is what a drag that jumped
-/// over a rectangle would be.
+/// the rules of clip groups let them be moved: a clip that is in a clip group stops where its group would take in a clip that is not in it,
+/// and a clip that is in none and goes into the rectangle of one joins it, and stops where that would make the rectangle take in a clip that is
+/// not in the group (or where it would be in the rectangle of two groups that are not one in the other, or is in a group already, and so cannot
+/// join). (Clips that are all of a group move along with its rectangle.) They are stopped as clips are by other clips: the first place along the
+/// way where the move would not be allowed is where they stop, and they do not go on past it to a place where it would be allowed again, which
+/// is what a drag that jumped over a rectangle would be.
 ///
 /// Where there are no clip groups nothing is looked at, and the answer is `frames`. Otherwise, when the clips are allowed where they are
-/// now, the first place that is not allowed is worked out by arithmetic (see [`stop_worked_out_by_arithmetic`]), which takes the same time
-/// however far the clips are taken, and the answer is checked: it must be a place that the move itself (see [`Project::move_clips`]) allows.
-/// If the clips are not allowed where they are now (which is so when the tracks they go to were chosen for the time they are held to), or the
-/// arithmetic cannot say, or what it says is not allowed, each place along the way is tried as the move itself is, on a copy of the project,
-/// until one is not allowed.
-fn stopped_by_the_groups(project: &Project, moving: &[ClipId], tracks_down: i64, frames: i64) -> i64 {
+/// now, the first place that is not allowed is found without trying each of the places along the way (see
+/// [`stop_found_where_the_rules_of_clip_groups_can_change`]), which takes the same time however far the clips are taken, and the answer is
+/// checked: it must be a place that the move itself (see [`Project::move_clips_remembering`]) allows. If the clips are not allowed where they
+/// are now (which is so when the tracks they go to were chosen for the time they are held to), or that cannot say, or what it says is not
+/// allowed, each place along the way is tried as the move itself is, on a copy of the project, until one is not allowed.
+fn stopped_by_the_groups(
+    project: &Project,
+    moving: &[ClipId],
+    tracks_down: i64,
+    frames: i64,
+    before_the_drag: &[ClipGroupBeforeTheDrag],
+) -> i64 {
     let has_clip_groups = project
         .groups()
         .iter()
@@ -133,20 +155,29 @@ fn stopped_by_the_groups(project: &Project, moving: &[ClipId], tracks_down: i64,
     if !has_clip_groups || frames == 0 {
         return frames;
     }
-    let is_allowed = |shift: i64| the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks_down, shift);
+    let is_allowed =
+        |shift: i64| the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks_down, shift, before_the_drag);
     if is_allowed(0)
-        && let Some(stop) = stop_worked_out_by_arithmetic(project, moving, tracks_down, frames)
+        && let Some(stop) =
+            stop_found_where_the_rules_of_clip_groups_can_change(project, moving, tracks_down, frames, before_the_drag)
         && is_allowed(stop)
     {
         return stop;
     }
-    stopped_by_trying_each_place(project, moving, tracks_down, frames)
+    stopped_by_trying_each_place(project, moving, tracks_down, frames, before_the_drag)
 }
 
 /// [`stopped_by_the_groups`], found by trying each place along the way (and so taking longer the further the clips are taken, which is why it
-/// is not what is done when there is another way): the answer for the tests of the arithmetic to be the same as.
-fn stopped_by_trying_each_place(project: &Project, moving: &[ClipId], tracks_down: i64, frames: i64) -> i64 {
-    let is_allowed = |shift: i64| the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks_down, shift);
+/// is not what is done when there is another way): the answer for the tests of the other to be the same as.
+fn stopped_by_trying_each_place(
+    project: &Project,
+    moving: &[ClipId],
+    tracks_down: i64,
+    frames: i64,
+    before_the_drag: &[ClipGroupBeforeTheDrag],
+) -> i64 {
+    let is_allowed =
+        |shift: i64| the_clips_fit_on_the_tracks_they_would_be_on(project, moving, tracks_down, shift, before_the_drag);
     if is_allowed(0) {
         let direction = frames.signum();
         let mut reached = 0;
@@ -183,6 +214,17 @@ struct ClipAfterTheMove {
     is_shifted: bool,
 }
 
+impl ClipAfterTheMove {
+    /// The frames the clip lasts from and until when the clips that are shifted have been shifted `shift` frames along.
+    fn frames_after(&self, shift: i64) -> (i64, i64) {
+        if self.is_shifted {
+            (self.first.saturating_add(shift), self.end.saturating_add(shift))
+        } else {
+            (self.first, self.end)
+        }
+    }
+}
+
 /// Every clip of the project as [`ClipAfterTheMove`] says, or `None` if one of the clips that are moved would go to a track that is not there.
 fn clips_after_the_move(project: &Project, moving: &[ClipId], tracks_down: i64) -> Option<Vec<ClipAfterTheMove>> {
     let moving: HashSet<ClipId> = moving.iter().copied().collect();
@@ -214,164 +256,235 @@ fn clips_after_the_move(project: &Project, moving: &[ClipId], tracks_down: i64) 
     Some(clips)
 }
 
-/// A stretch of shifts (how many frames later the clips that are moved are put, earlier if it is negative), from the first of them to the
-/// last, both counted.
-type Shifts = (i64, i64);
-
-/// What decides whether something is so for a shift: for each shift, or for none, or for those that are below some shift or above some shift.
-#[derive(Clone, Copy)]
-enum When {
-    Always,
-    Never,
-    ShiftIsBelow(i64),
-    ShiftIsAbove(i64),
+/// A clip group as the rules look at it when clips are moved.
+struct ClipGroupAfterTheMove {
+    /// The places in the list of clips of the clips that are in it, directly or in the clip groups that are in it: the clips that are moved
+    /// and are in no clip group (which is the clips that can join one) are not among them, as they are in it by where they are.
+    members: Vec<usize>,
+    /// Whether the clip at each place in the list of clips is one of those.
+    has: Vec<bool>,
+    /// The places in the list of clip groups of the clip groups that it is in, one in another: the nearest first.
+    round: Vec<usize>,
 }
 
-impl When {
-    /// The shifts it is so for, if there are any.
-    fn shifts(self) -> Option<Shifts> {
-        match self {
-            Self::Always => Some((i64::MIN, i64::MAX)),
-            Self::Never => None,
-            Self::ShiftIsBelow(limit) => Some((i64::MIN, limit.saturating_sub(1))),
-            Self::ShiftIsAbove(limit) => Some((limit.saturating_add(1), i64::MAX)),
+/// What the rules of clip groups look at, for a move of clips down some tracks, worked out once so that whether the rules are kept can be
+/// said for any number of frames along without looking at the project again.
+struct RulesOfClipGroupsAfterTheMove {
+    clips: Vec<ClipAfterTheMove>,
+    groups: Vec<ClipGroupAfterTheMove>,
+    /// The places in the list of clips of the clips that are moved and are in no clip group (when the drag began, if it is a drag): each is
+    /// put in the clip group whose rectangle it is in, if it is in one.
+    joiners: Vec<usize>,
+}
+
+impl RulesOfClipGroupsAfterTheMove {
+    /// The rules for moving the clips `moving` down `tracks_down` tracks, where `before_the_drag` says which clip group each was in when the
+    /// drag began (the clip groups they are in now otherwise). `None` if one of them would go to a track that is not there.
+    fn of(
+        project: &Project,
+        moving: &[ClipId],
+        tracks_down: i64,
+        before_the_drag: &[ClipGroupBeforeTheDrag],
+    ) -> Option<Self> {
+        let clips = clips_after_the_move(project, moving, tracks_down)?;
+        let place_of: HashMap<ClipId, usize> = clips.iter().enumerate().map(|(place, clip)| (clip.id, place)).collect();
+        let was_in_no_clip_group = |clip: ClipId| match before_the_drag.iter().find(|before| before.clip == clip) {
+            Some(before) => before.group.is_none(),
+            None => project.shape_group_of(Member::Clip(clip)).is_none(),
+        };
+        let joiners: Vec<usize> = clips
+            .iter()
+            .enumerate()
+            .filter(|(_, clip)| clip.is_shifted && was_in_no_clip_group(clip.id))
+            .map(|(place, _)| place)
+            .collect();
+        let clip_groups: Vec<GroupId> = project
+            .groups()
+            .iter()
+            .filter(|group| group.kind() == GroupKind::ClipGroup)
+            .map(|group| group.id())
+            .collect();
+        let groups = clip_groups
+            .iter()
+            .map(|group| {
+                let mut has = vec![false; clips.len()];
+                for clip in project.clips_in(*group) {
+                    if let Some(&place) = place_of.get(&clip)
+                        && !joiners.contains(&place)
+                    {
+                        has[place] = true;
+                    }
+                }
+                let members = (0..clips.len()).filter(|place| has[*place]).collect();
+                let mut round = Vec::new();
+                let mut at = *group;
+                while let Some(parent) = project.shape_group_of(Member::Group(at)) {
+                    if round.len() > clip_groups.len() {
+                        break;
+                    }
+                    round.extend(clip_groups.iter().position(|candidate| *candidate == parent.id()));
+                    at = parent.id();
+                }
+                ClipGroupAfterTheMove { members, has, round }
+            })
+            .collect();
+        Some(Self { clips, groups, joiners })
+    }
+
+    /// The rectangle of each clip group (the smallest that holds its members) when the clips that are moved are `shift` frames along: from
+    /// the first frame to the end, and from the first track to the last. `None` for a group that has no members left (they are all joiners).
+    fn rectangles(&self, shift: i64) -> Vec<Option<(i64, i64, usize, usize)>> {
+        self.groups
+            .iter()
+            .map(|group| {
+                group
+                    .members
+                    .iter()
+                    .fold(None::<(i64, i64, usize, usize)>, |found, &member| {
+                        let clip = &self.clips[member];
+                        let (first, end) = clip.frames_after(shift);
+                        Some(match found {
+                            None => (first, end, clip.track_position, clip.track_position),
+                            Some((found_first, found_end, first_track, last_track)) => (
+                                found_first.min(first),
+                                found_end.max(end),
+                                first_track.min(clip.track_position),
+                                last_track.max(clip.track_position),
+                            ),
+                        })
+                    })
+            })
+            .collect()
+    }
+
+    /// Whether the rules of clip groups are kept when the clips that are moved are `shift` frames along: each of the clips that can join a
+    /// group joins the innermost one whose rectangle it is in (which has to be one that all the others it is in the rectangle of are round),
+    /// and then no clip is inside the rectangle of a group, the smallest that holds its members and the clips that joined it, without being
+    /// in it.
+    fn hold_for(&self, shift: i64) -> bool {
+        let rectangles = self.rectangles(shift);
+        let mut joined: Vec<Vec<usize>> = vec![Vec::new(); self.groups.len()];
+        for &joiner in &self.joiners {
+            let clip = &self.clips[joiner];
+            let (first, end) = clip.frames_after(shift);
+            let candidates: Vec<usize> = (0..self.groups.len())
+                .filter(|group| {
+                    rectangles[*group].is_some_and(|(group_first, group_end, first_track, last_track)| {
+                        first < group_end
+                            && group_first < end
+                            && (first_track..=last_track).contains(&clip.track_position)
+                    })
+                })
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            let has_an_innermost = candidates.iter().any(|candidate| {
+                candidates
+                    .iter()
+                    .all(|other| other == candidate || self.groups[*candidate].round.contains(other))
+            });
+            if !has_an_innermost {
+                return false;
+            }
+            for candidate in candidates {
+                joined[candidate].push(joiner);
+            }
         }
+        for (index, group) in self.groups.iter().enumerate() {
+            let Some((first, end, first_track, last_track)) = rectangles[index] else {
+                continue;
+            };
+            let (first, end) = joined[index].iter().fold((first, end), |(first, end), joiner| {
+                let (joiner_first, joiner_end) = self.clips[*joiner].frames_after(shift);
+                (first.min(joiner_first), end.max(joiner_end))
+            });
+            for (place, clip) in self.clips.iter().enumerate() {
+                if group.has[place]
+                    || joined[index].contains(&place)
+                    || !(first_track..=last_track).contains(&clip.track_position)
+                {
+                    continue;
+                }
+                let (clip_first, clip_end) = clip.frames_after(shift);
+                if clip_first < end && first < clip_end {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// The shifts, from the one nearest to none towards `frames` and as far as it, that the answer to [`Self::hold_for`] can change at: each
+    /// comparison it makes is of an edge of a clip that is shifted with an edge of one that is not (two that are shifted are as far from one
+    /// another for every shift), and is different on the two sides of the shift where the edges are the same, which is where they are one
+    /// frame apart as well. `frames` itself is the last.
+    fn shifts_where_the_answer_can_change(&self, frames: i64) -> Vec<i64> {
+        let direction = frames.signum();
+        let tracks_in_a_rectangle: HashSet<usize> = self
+            .rectangles(0)
+            .into_iter()
+            .flatten()
+            .flat_map(|(_, _, first_track, last_track)| first_track..=last_track)
+            .collect();
+        let moved_edges: Vec<i64> = self
+            .clips
+            .iter()
+            .filter(|clip| clip.is_shifted)
+            .flat_map(|clip| [clip.first, clip.end])
+            .collect();
+        let staying_edges: Vec<i64> = self
+            .clips
+            .iter()
+            .filter(|clip| !clip.is_shifted && tracks_in_a_rectangle.contains(&clip.track_position))
+            .flat_map(|clip| [clip.first, clip.end])
+            .collect();
+        let is_on_the_way = |shift: i64| shift.signum() == direction && shift.abs() <= frames.abs();
+        let mut shifts: Vec<i64> = Vec::new();
+        for moved in &moved_edges {
+            for staying in &staying_edges {
+                let together = staying.saturating_sub(*moved);
+                shifts.extend(
+                    [together.saturating_sub(1), together.saturating_add(1)]
+                        .into_iter()
+                        .filter(|shift| is_on_the_way(*shift)),
+                );
+            }
+        }
+        shifts.sort_unstable_by_key(|shift| shift.abs());
+        shifts.dedup();
+        shifts
     }
 }
 
-/// The shifts that are in both stretches, if there are any.
-fn shifts_in_both(first: Option<Shifts>, second: Option<Shifts>) -> Option<Shifts> {
-    let (first, second) = (first?, second?);
-    let (from, to) = (first.0.max(second.0), first.1.min(second.1));
-    (from <= to).then_some((from, to))
-}
-
-/// The first and the end of the frames of the clips of a clip group that stay where they are, and of those that are shifted (none, if there is
-/// no clip of that kind in it).
-struct MembersAfterTheMove {
-    staying: Option<(i64, i64)>,
-    shifted: Option<(i64, i64)>,
-}
-
-/// The shifts that take the clip `clip`, which is not in the clip group that has the clips `members` in it, inside the rectangle of the group:
-/// the rectangle holds all of the members (so it begins where the first of them does, and ends where the last of them does, wherever they are
-/// when the clips that are shifted have been), and the clip is inside when it has any frames of the rectangle (and is on one of its tracks, which
-/// the caller has looked at: the shift does not change that). They are the shifts where the rectangle begins before the clip ends and the clip
-/// begins before the rectangle ends, and each of those is so when it is for the members that stay or for those that are shifted: so there are at most
-/// four stretches of them, found without trying any shift.
-fn shifts_that_take_a_clip_inside(members: &MembersAfterTheMove, clip: &ClipAfterTheMove) -> Vec<Shifts> {
-    let goes_along = clip.is_shifted;
-    // (The rectangle begins before the clip ends. For the members that stay: where they begin is before where the clip ends then, and where it ends
-    // is further on by the shift, if it goes along. For those that are shifted: where they begin is further on by the shift, and so is the end of the
-    // clip if it goes along.)
-    let rectangle_begins_before_the_clip_ends = [
-        members.staying.map(|(first, _)| {
-            if goes_along {
-                When::ShiftIsAbove(first - clip.end)
-            } else if first < clip.end {
-                When::Always
-            } else {
-                When::Never
-            }
-        }),
-        members.shifted.map(|(first, _)| {
-            if !goes_along {
-                When::ShiftIsBelow(clip.end - first)
-            } else if first < clip.end {
-                When::Always
-            } else {
-                When::Never
-            }
-        }),
-    ];
-    // (The clip begins before the rectangle ends.)
-    let clip_begins_before_the_rectangle_ends = [
-        members.staying.map(|(_, end)| {
-            if goes_along {
-                When::ShiftIsBelow(end - clip.first)
-            } else if clip.first < end {
-                When::Always
-            } else {
-                When::Never
-            }
-        }),
-        members.shifted.map(|(_, end)| {
-            if !goes_along {
-                When::ShiftIsAbove(clip.first - end)
-            } else if clip.first < end {
-                When::Always
-            } else {
-                When::Never
-            }
-        }),
-    ];
-    let mut shifts = Vec::new();
-    for begins_before in rectangle_begins_before_the_clip_ends.into_iter().flatten() {
-        for begins_before_the_end in clip_begins_before_the_rectangle_ends.into_iter().flatten() {
-            if let Some(found) = shifts_in_both(begins_before.shifts(), begins_before_the_end.shifts()) {
-                shifts.push(found);
-            }
-        }
-    }
-    shifts
-}
-
-/// How far the clips can be shifted of the `frames`, as far as the rectangles of clip groups go, worked out without trying any shift: the
-/// first shift (counting away from none) that takes a clip into a rectangle it is not in, or takes a rectangle round a clip that is not in it,
-/// is where they stop short of. `None` if that cannot be said: the clips would go to a track that is not there, or the shift of none is itself
-/// one that the rules of clip groups do not allow.
+/// How far the clips can be shifted of the `frames`, as far as the rules of clip groups go, found by looking at the places where whether they
+/// are kept can change and not at each place along the way: the first of them (counting away from none) where they are not kept is where the
+/// clips stop short of. `None` if that cannot be said: the clips would go to a track that is not there, or the shift of none is itself one
+/// that the rules do not allow.
 ///
 /// It is the rule of [`crate::project::Project::problems_with_the_groups`] that no clip is inside a clip group that it is not in, and only that
 /// one: the others do not depend on the shift (and the clips that would be on one another are not what this is about: where the clips can go
 /// without that is what [`allowed_frames`] has found).
-fn stop_worked_out_by_arithmetic(project: &Project, moving: &[ClipId], tracks_down: i64, frames: i64) -> Option<i64> {
-    let after = clips_after_the_move(project, moving, tracks_down)?;
-    let mut not_allowed: Vec<Shifts> = Vec::new();
-    for group in project
-        .groups()
-        .iter()
-        .filter(|group| group.kind() == GroupKind::ClipGroup)
-    {
-        let members: HashSet<ClipId> = project.clips_in(group.id()).into_iter().collect();
-        let mut staying: Option<(i64, i64)> = None;
-        let mut shifted: Option<(i64, i64)> = None;
-        let mut tracks: Option<(usize, usize)> = None;
-        for clip in after.iter().filter(|clip| members.contains(&clip.id)) {
-            let extent = if clip.is_shifted { &mut shifted } else { &mut staying };
-            *extent = Some(match *extent {
-                Some((first, end)) => (first.min(clip.first), end.max(clip.end)),
-                None => (clip.first, clip.end),
-            });
-            tracks = Some(match tracks {
-                Some((first, last)) => (first.min(clip.track_position), last.max(clip.track_position)),
-                None => (clip.track_position, clip.track_position),
-            });
-        }
-        let Some((first_track, last_track)) = tracks else {
-            continue;
-        };
-        let members_after_the_move = MembersAfterTheMove { staying, shifted };
-        for clip in after
-            .iter()
-            .filter(|clip| !members.contains(&clip.id) && (first_track..=last_track).contains(&clip.track_position))
-        {
-            not_allowed.extend(shifts_that_take_a_clip_inside(&members_after_the_move, clip));
-        }
-    }
-    if not_allowed.iter().any(|(from, to)| *from <= 0 && 0 <= *to) {
+fn stop_found_where_the_rules_of_clip_groups_can_change(
+    project: &Project,
+    moving: &[ClipId],
+    tracks_down: i64,
+    frames: i64,
+    before_the_drag: &[ClipGroupBeforeTheDrag],
+) -> Option<i64> {
+    let rules = RulesOfClipGroupsAfterTheMove::of(project, moving, tracks_down, before_the_drag)?;
+    if !rules.hold_for(0) {
         return None;
     }
-    Some(if frames > 0 {
-        let first_not_allowed = not_allowed
-            .iter()
-            .map(|(from, _)| *from)
-            .filter(|from| *from >= 1)
-            .min();
-        first_not_allowed.map_or(frames, |first| frames.min(first - 1))
-    } else {
-        let last_not_allowed = not_allowed.iter().map(|(_, to)| *to).filter(|to| *to <= -1).max();
-        last_not_allowed.map_or(frames, |last| frames.max(last + 1))
-    })
+    let direction = frames.signum();
+    for shift in rules.shifts_where_the_answer_can_change(frames) {
+        if !rules.hold_for(shift) {
+            // (What is between this shift and the one before it, if that is not the one next to it, is as that is: the answer does not change
+            // where it is not at one of the shifts.)
+            return Some(shift - direction);
+        }
+    }
+    Some(frames)
 }
 
 /// How many frames later (earlier, if negative) than where it is now the clip that `snap` holds is at the time it
@@ -389,15 +502,17 @@ fn frames_to_the_time_held_to(project: &Project, wanted: MoveBy, snap: Option<Sn
         .shift_to_it(destination.id(), placement.first_timeline_frame.value(), wanted.frames)
 }
 
-/// Whether the clips `moving` can be moved down `tracks_down` tracks and `frames` frames along.
+/// Whether the clips `moving` can be moved down `tracks_down` tracks and `frames` frames along (as the clips that were in the groups
+/// `before_the_drag` says when the drag began, if it is a drag).
 fn the_clips_fit_on_the_tracks_they_would_be_on(
     project: &Project,
     moving: &[ClipId],
     tracks_down: i64,
     frames: i64,
+    before_the_drag: &[ClipGroupBeforeTheDrag],
 ) -> bool {
     let moves = moves_by(project, moving, MoveBy { tracks_down, frames });
-    project.clone().move_clips(&moves).is_ok()
+    project.clone().move_clips_remembering(&moves, before_the_drag).is_ok()
 }
 
 /// How many frames earlier (negative) or later the clips `moving` can be moved, when they are on the tracks

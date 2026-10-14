@@ -405,7 +405,8 @@ fn write_screenshots_of_things_that_reach_out_past_the_edges_of_the_picture() {
     };
 
     // The video, made smaller and then taken to the left until half of it is past the edge: its box
-    // reaches over the properties panel, where its corners can be taken hold of as well.
+    // reaches to the edge of the preview panel and stops there (it is not drawn over the properties panel, and the corners that
+    // would be over that panel cannot be taken hold of).
     let on_the_video = journey.rectangle_of("Video, clip 0 of track 0").center();
     journey.click(on_the_video);
     let (top_left, bottom_right) = (handle(&journey, "top left"), handle(&journey, "bottom right"));
@@ -421,15 +422,15 @@ fn write_screenshots_of_things_that_reach_out_past_the_edges_of_the_picture() {
     journey.wait_until_idle();
     save(&mut journey, &folder, "36_a_video_taken_past_the_left_edge");
 
-    // And a corner of it, over the properties panel, dragged on.
-    let top_left = handle(&journey, "top left");
+    // And a corner of it that is still over the preview, dragged on.
+    let top_right = handle(&journey, "top right");
     journey.drag(
         egui::PointerButton::Primary,
-        top_left,
-        top_left + egui::vec2(60.0, 40.0),
+        top_right,
+        top_right + egui::vec2(-60.0, 40.0),
     );
     journey.wait_until_idle();
-    save(&mut journey, &folder, "37_its_corner_over_the_properties_dragged");
+    save(&mut journey, &folder, "37_its_corner_that_is_over_the_preview_dragged");
 
     // Text past the bottom right corner of the picture.
     journey.add_a_track();
@@ -740,7 +741,8 @@ fn write_screenshots_of_racks_being_dragged_and_keyframe_crates() {
     journey.move_pointer_to(egui::pos2(5.0, 5.0));
     save_what_is_drawn(&mut journey, &folder, "95_two_racks_in_the_drawer_of_the_video");
 
-    // Taking hold of the position rack and going up with it, over the empty stretch of the front track: a crate fills it.
+    // Taking hold of the position rack and going up with it, over the empty stretch of the front track: a crate is made there, which
+    // lasts from the first keyframe of the rack to the last.
     let racks_strip = journey.strip_of_track(1);
     let second_rack = egui::pos2(
         racks_strip.left() + 300.0,
@@ -758,8 +760,7 @@ fn write_screenshots_of_racks_being_dragged_and_keyframe_crates() {
     journey.harness.run_steps(20);
     save_what_is_drawn(&mut journey, &folder, "97_the_crate_with_the_rack_in_it");
 
-    // Over the room of the text object, which has no drawer open: the rack goes nowhere. And then the gain rack, which has
-    // keyframes two and a half seconds apart, over a crate that is shorter than that.
+    // The pointer over the rack in the crate: its label.
     let crate_rack = egui::pos2(racks_strip.left() + 700.0, journey.strip_of_track(0).center().y);
     journey.move_pointer_to(crate_rack);
     save_what_is_drawn(&mut journey, &folder, "98_the_label_of_the_rack_in_the_crate");
@@ -1240,4 +1241,83 @@ fn write_screenshots_of_groups() {
     journey
         .application_mut()
         .save_project_to(folder.join("demo_groups.fastforwardrs.json"));
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_names_of_groups_and_moving_the_edge_of_a_clip_group() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let mut journey = Journey::start_with_frames_lasting(&toolchain, 1.0 / 60.0);
+    journey.import(&video);
+    // Four clips on the back track, and a track in front with a text object.
+    journey.cut_at_frame(120);
+    journey.cut_at_frame(240);
+    journey.cut_at_frame(360);
+    journey.move_playhead_to_frame(0);
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 30);
+    journey.harness.run_steps(40);
+    // Zoomed out, so that the whole video is in view.
+    let over_the_strip = journey.point_on_the_strip_at_frame(1, 60);
+    journey.scroll_the_wheel(over_the_strip, egui::vec2(0.0, -200.0), egui::Modifiers::COMMAND);
+    // The first two clips of the back track in a clip group, and the text object with the last clip in a tag.
+    let first = journey.point_on_the_strip_at_frame(1, 60);
+    let second = journey.point_on_the_strip_at_frame(1, 180);
+    journey.click(first);
+    journey.click_with_control(second);
+    journey.right_click(second);
+    journey.harness.run_steps(10);
+    journey.harness.get_by_label("Create clip group").click();
+    journey.settle();
+    let text = journey.point_on_the_strip_at_frame(0, 60);
+    let last = journey.point_on_the_strip_at_frame(1, 420);
+    journey.click(text);
+    journey.click_with_control(last);
+    journey.right_click(last);
+    journey.harness.run_steps(10);
+    journey.harness.get_by_label("Create tag").click();
+    journey.settle();
+
+    // The pointer over a clip of the clip group: its name is over the top edge of the group, in its colour, with its dots.
+    journey.move_pointer_to(first);
+    journey.harness.run_steps(5);
+    save_what_is_drawn(&mut journey, &folder, "210_the_name_of_a_clip_group_over_its_top_edge");
+    // Over the text object, which is in the tag.
+    journey.move_pointer_to(text);
+    journey.harness.run_steps(5);
+    save_what_is_drawn(&mut journey, &folder, "211_the_name_of_a_tag");
+
+    // The right edge of the clip group, taken hold of and dragged to the end of the third clip (frames 240 to 360): in the middle of it the edge
+    // cannot be, and is held at the nearest end; and where it is let go the group takes the clip in.
+    let strip = journey.strip_of_track(1);
+    let (x_240, x_280, x_360) = (
+        journey.point_on_the_strip_at_frame(1, 240).x,
+        journey.point_on_the_strip_at_frame(1, 280).x,
+        journey.point_on_the_strip_at_frame(1, 360).x,
+    );
+    let edge = egui::pos2(x_240 + 3.0, strip.center().y);
+    let in_the_third = egui::pos2(x_280, strip.center().y);
+    journey.drag_and_hold(egui::PointerButton::Primary, edge, in_the_third);
+    journey.harness.run_steps(40);
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "212_the_edge_of_a_clip_group_held_where_it_does_not_cut_a_clip",
+    );
+    let end_of_the_third = egui::pos2(x_360, strip.center().y);
+    journey.move_pointer_to(end_of_the_third);
+    journey.harness.run_steps(40);
+    save_what_is_drawn(&mut journey, &folder, "213_the_edge_at_the_end_of_the_clip");
+    journey.release(egui::PointerButton::Primary, end_of_the_third);
+    journey.harness.run_steps(40);
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save_what_is_drawn(&mut journey, &folder, "214_the_clip_group_has_taken_the_clip_in");
+
+    // The project, for opening in the real program.
+    journey
+        .application_mut()
+        .save_project_to(folder.join("demo_group_names_and_edges.fastforwardrs.json"));
 }

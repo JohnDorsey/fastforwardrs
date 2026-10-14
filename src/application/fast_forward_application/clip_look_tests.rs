@@ -1,7 +1,8 @@
 //! Tests of what the strips and the clips on them look like, checked from the shapes the window
 //! draws (so they need no graphics card).
 
-use egui::{CornerRadius, Shape};
+use egui::epaint::{ColorMode, PathShape};
+use egui::{Color32, CornerRadius, Pos2, Rect, Shape, pos2, vec2};
 
 use super::test_window::{Window, project_of};
 use crate::application::theme;
@@ -200,27 +201,46 @@ fn a_last_picture_that_is_only_a_sliver_does_not_stick_out_of_the_rounded_end_of
     assert_the_end_of_the_clip_is_filled_up_to_its_curve(&window, end, -1.0);
 }
 
+/// The lines of the bevel of the clips that were drawn: the thin lines that have no fill.
+fn bevel_lines_drawn(window: &Window) -> Vec<&PathShape> {
+    window
+        .shapes_drawn()
+        .into_iter()
+        .filter_map(|shape| match shape {
+            Shape::Path(path) if path.stroke.width == 1.0 && path.fill == Color32::TRANSPARENT => Some(path),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The colour that the line `path` has at `point`: its one colour, or, for a line that is lit more at some places than at others,
+/// the colour it has there.
+fn colour_of_the_line_at(path: &PathShape, point: Pos2) -> Color32 {
+    match &path.stroke.color {
+        ColorMode::Solid(colour) => *colour,
+        ColorMode::UV(colour_at) => colour_at(Rect::NAN, point),
+    }
+}
+
+/// How strongly lit a colour that is white (light) or black (dark) is, with a sign: positive for light, negative for dark.
+fn signed_strength(colour: Color32) -> f32 {
+    if colour.r() > 0 {
+        f32::from(colour.a())
+    } else {
+        -f32::from(colour.a())
+    }
+}
+
 #[test]
 fn every_clip_has_a_raised_edge_drawn_over_it_light_above_and_dark_below() {
     let window = window_in_the_middle_of_a_long_clip();
     let strip = window.strip_of_track(0);
-    let lines: Vec<&Shape> = window
-        .shapes_drawn()
-        .into_iter()
-        .filter(|shape| matches!(shape, Shape::Path(path) if path.stroke.width == 1.0 && path.fill == egui::Color32::TRANSPARENT))
-        .collect();
-    let colours_at = |near_y: f32| -> Vec<egui::Color32> {
+    let lines = bevel_lines_drawn(&window);
+    let colours_at = |near_y: f32| -> Vec<Color32> {
         lines
             .iter()
-            .filter_map(|shape| match shape {
-                Shape::Path(path) if path.points.iter().all(|point| (point.y - near_y).abs() < 4.0) => {
-                    match &path.stroke.color {
-                        egui::epaint::ColorMode::Solid(colour) => Some(*colour),
-                        egui::epaint::ColorMode::UV(_) => None,
-                    }
-                }
-                _ => None,
-            })
+            .filter(|path| path.points.iter().all(|point| (point.y - near_y).abs() < 4.0))
+            .flat_map(|path| path.points.iter().map(|point| colour_of_the_line_at(path, *point)))
             .collect()
     };
     let at_the_top = colours_at(strip.top() + 1.0);
@@ -230,7 +250,106 @@ fn every_clip_has_a_raised_edge_drawn_over_it_light_above_and_dark_below() {
         "a light line along the top: {at_the_top:?}"
     );
     assert!(
+        at_the_top.iter().all(|colour| colour.r() > 0 || colour.a() == 0),
+        "and nothing dark there: {at_the_top:?}"
+    );
+    assert!(
         at_the_bottom.iter().any(|colour| colour.r() == 0 && colour.a() > 100),
         "a dark line along the bottom: {at_the_bottom:?}"
     );
+    assert!(
+        at_the_bottom.iter().all(|colour| colour.r() == 0),
+        "and nothing light there: {at_the_bottom:?}"
+    );
+}
+
+/// The outermost layer of the bevel of the one clip of a window, which is all in view: its two lines (the clip is the first
+/// thing drawn, and its layers are drawn from the outermost inwards), and the rectangle they go round, which is half a point
+/// inside the clip.
+fn outermost_layer_of_the_bevel_of_the_one_clip(window: &Window) -> (Vec<&PathShape>, Rect) {
+    let outer: Vec<&PathShape> = bevel_lines_drawn(window).into_iter().take(2).collect();
+    let points: Vec<Pos2> = outer.iter().flat_map(|path| path.points.iter().copied()).collect();
+    (outer, Rect::from_points(&points))
+}
+
+#[test]
+fn the_edge_of_a_clip_that_is_all_in_view_is_lit_smoothly_all_the_way_round_and_brightest_at_its_top_left_corner() {
+    let window = Window::showing(project_of(60)); // two seconds: all of it is in view
+    let (lines, outline) = outermost_layer_of_the_bevel_of_the_one_clip(&window);
+    let radius = f32::from(theme::CLIP_CORNER_RADIUS) - 0.5;
+    assert_eq!(
+        lines.len(),
+        2,
+        "the outline is in two pieces, which meet where the light is nothing"
+    );
+    assert!(
+        (outline.top() - (window.strip_of_track(0).top() + 0.5)).abs() < 0.01,
+        "the setup: these are the lines that go half a point inside the clip: {outline:?}"
+    );
+
+    let mut brightest = (Pos2::ZERO, f32::MIN);
+    for line in &lines {
+        for pair in line.points.windows(2) {
+            let (from, to) = (
+                signed_strength(colour_of_the_line_at(line, pair[0])),
+                signed_strength(colour_of_the_line_at(line, pair[1])),
+            );
+            let distance = pair[0].distance(pair[1]).max(1e-3);
+            assert!(
+                (to - from).abs() / distance < 20.0,
+                "the light does not jump: from {:?} to {:?} it goes from {from} to {to}",
+                pair[0],
+                pair[1]
+            );
+        }
+        for point in &line.points {
+            let strength = signed_strength(colour_of_the_line_at(line, *point));
+            if strength > brightest.1 {
+                brightest = (*point, strength);
+            }
+        }
+    }
+    let top_left_corner = Rect::from_min_size(outline.left_top(), vec2(radius, radius));
+    assert!(
+        top_left_corner.expand(1.0).contains(brightest.0),
+        "the brightest light, {}, is in the top left corner: {:?}, the corner is {top_left_corner:?}",
+        brightest.1,
+        brightest.0
+    );
+    assert!(
+        brightest.1 > 200.0,
+        "and it is brighter than the 150 of the edges: {}",
+        brightest.1
+    );
+
+    // At the top right corner and the bottom left corner the light passes through nothing.
+    for (name, corner) in [
+        (
+            "top right",
+            Rect::from_min_size(pos2(outline.right() - radius, outline.top()), vec2(radius, radius)),
+        ),
+        (
+            "bottom left",
+            Rect::from_min_size(pos2(outline.left(), outline.bottom() - radius), vec2(radius, radius)),
+        ),
+    ] {
+        let strengths: Vec<f32> = lines
+            .iter()
+            .flat_map(|line| {
+                line.points
+                    .iter()
+                    .filter(|point| corner.expand(0.01).contains(**point))
+                    .map(|point| signed_strength(colour_of_the_line_at(line, *point)))
+            })
+            .collect();
+        assert!(!strengths.is_empty(), "{name}: the corner is drawn");
+        assert!(
+            strengths.iter().any(|strength| *strength > 40.0) && strengths.iter().any(|strength| *strength < -40.0),
+            "{name}: it goes from light to dark in the corner: {strengths:?}"
+        );
+        assert!(
+            strengths.iter().any(|strength| strength.abs() < 30.0),
+            "{name}: and passes close to nothing between them: {strengths:?}"
+        );
+    }
 }

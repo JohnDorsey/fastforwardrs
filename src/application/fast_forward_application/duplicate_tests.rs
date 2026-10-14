@@ -342,8 +342,8 @@ fn a_copy_of_a_clip_that_has_the_keyframes_of_another_clip_in_its_drawer_does_to
         .first_rack_for(AnimationTarget::Clip(video), PropertyId::Gain)
         .unwrap()
         .id();
-    window.do_this(Command::MoveRack {
-        rack,
+    window.do_this(Command::MoveRacks {
+        racks: vec![rack],
         to: RackDestination::Drawer(AnimationTarget::Clip(text)),
         shift_in_frames: 0,
         slot: None,
@@ -387,6 +387,7 @@ fn a_copy_of_a_clip_that_has_the_keyframes_of_another_clip_in_its_drawer_does_to
 #[test]
 fn the_menu_of_a_keyframe_crate_copies_it_with_the_racks_in_it() {
     let (mut window, video, _) = window_with_a_video_and_a_text();
+    make_a_keyframe(&mut window, AnimationTarget::Clip(video), PropertyId::Gain, 110);
     make_a_keyframe(&mut window, AnimationTarget::Clip(video), PropertyId::Gain, 150);
     let rack = window
         .application()
@@ -396,17 +397,18 @@ fn the_menu_of_a_keyframe_crate_copies_it_with_the_racks_in_it() {
         .racks()[0]
         .id();
     let front = window.application().project().tracks()[0].id();
-    window.do_this(Command::MoveRack {
-        rack,
+    window.do_this(Command::MoveRacks {
+        racks: vec![rack],
         to: RackDestination::NewCrate {
             track: front,
-            start: 100,
-            length: 200,
+            from_frame: 100,
+            until_frame: 300,
         },
         shift_in_frames: 0,
         slot: None,
     });
-    assert_eq!(spans_of_the_clips_on(&window, 0), vec![(40, 100), (100, 300)]);
+    // (It lasts from the first keyframe to the last, and not through the empty stretch it was made in.)
+    assert_eq!(spans_of_the_clips_on(&window, 0), vec![(40, 100), (110, 151)]);
 
     // Near the top of the crate, where there is nothing but the crate: its racks are in the middle of it.
     let strip = window.strip_of_track(0);
@@ -416,7 +418,7 @@ fn the_menu_of_a_keyframe_crate_copies_it_with_the_racks_in_it() {
 
     assert_eq!(
         spans_of_the_clips_on(&window, 0),
-        vec![(40, 100), (100, 300), (300, 500)]
+        vec![(40, 100), (110, 151), (151, 192)]
     );
     let (original, copy) = (window.clip(0, 1), window.clip(0, 2));
     assert_eq!(
@@ -432,7 +434,7 @@ fn the_menu_of_a_keyframe_crate_copies_it_with_the_racks_in_it() {
             .iter()
             .map(|keyframe| keyframe.frame)
             .collect::<Vec<_>>(),
-        vec![150, 350],
+        vec![110, 150, 151, 191],
         "and what it does to the video, it does where the copy is"
     );
     assert_eq!(window.application().selected_items(), vec![SelectionItem::Clip(copy)]);

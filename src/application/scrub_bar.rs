@@ -1,5 +1,5 @@
-//! The slider along the bottom that spans the whole timeline. Dragging it moves quickly through
-//! the video, and the current frame follows.
+//! The slider that spans the whole timeline, on the row of the play buttons (see [`super::transport_bar`]). Dragging it
+//! moves quickly through the video, and the current frame follows.
 
 use egui::{PointerButton, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
@@ -14,7 +14,7 @@ const KNOB_RADIUS: f32 = 9.0;
 /// How thick the groove is, in points.
 const GROOVE_THICKNESS: f32 = 6.0;
 
-/// Draws the slider across the full width of `ui`, and adds a command when it is dragged.
+/// Draws the slider across the rest of the width of `ui`, and adds a command when it is dragged.
 pub fn show(ui: &mut Ui, current_frame: TimelineFrameIndex, total_frame_count: u64, commands: &mut Vec<Command>) {
     // Not focusable, so that the space bar always means "cut here".
     let sense = if total_frame_count > 0 {

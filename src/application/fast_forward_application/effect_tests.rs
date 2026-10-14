@@ -115,11 +115,14 @@ fn a_track_has_a_plus_button_and_so_does_nothing_that_is_not_selected_or_a_keyfr
 
     let track = window.application().project().tracks()[0].id();
     let front = window.application_mut().project.add_track_in_front();
-    let a_crate = window
-        .application_mut()
-        .project
-        .insert_crate(front, frame(0), 50)
-        .unwrap();
+    let a_crate = crate::test_support::make_a_crate(
+        &mut window.application_mut().project,
+        front,
+        0,
+        49,
+        AnimationTarget::Track(front),
+        PropertyId::Gain,
+    );
     assert_ne!(front, track);
     window.settle();
     select(&mut window, a_crate);

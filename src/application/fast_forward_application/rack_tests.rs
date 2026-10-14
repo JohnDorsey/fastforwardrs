@@ -607,8 +607,8 @@ fn a_rack_that_is_in_a_drawer_of_something_else_has_a_label_that_says_what_it_an
         .racks()[0]
         .id();
     let track = window.application().project().tracks()[0].id();
-    window.do_this(Command::MoveRack {
-        rack,
+    window.do_this(Command::MoveRacks {
+        racks: vec![rack],
         to: RackDestination::Drawer(AnimationTarget::Track(track)),
         shift_in_frames: 0,
         slot: None,

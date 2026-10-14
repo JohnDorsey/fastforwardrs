@@ -107,6 +107,17 @@ pub fn the_reason(project: &Project, source_looks: &SourceLooks<'_>, error: &Edi
             the_group(project, *group)
         )),
         EditError::UnknownGroup { .. } => Some("That group is not in the project any more.".to_owned()),
+        EditError::NotAClipGroup { group } => Some(format!(
+            "{} has no edges to move: it is not a clip group.",
+            the_group(project, *group)
+        )),
+        EditError::TheEdgeWouldCutAcross { member } => Some(format!(
+            "The edge cannot go there: it would cut across {}.",
+            the_member(project, source_looks, *member)
+        )),
+        EditError::NothingWouldBeLeftInTheGroup { group } => {
+            Some(format!("Nothing would be left in {}.", the_group(project, *group)))
+        }
         _ => None,
     }
 }

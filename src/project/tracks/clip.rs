@@ -102,13 +102,13 @@ impl Clip {
     }
 
     /// How many frames the clip is shown for, if that is something it says itself (a text object
-    /// and a picture). A video or a sound lasts as long as the part of its file it is made from.
+    /// and a picture). A video or a sound lasts as long as the part of its file it is made from, and a keyframe crate from its
+    /// first keyframe to its last.
     pub fn duration_in_frames_it_says(&self) -> Option<u64> {
         match self {
             Self::Text(text) => Some(text.duration_in_frames()),
             Self::Image(image) => Some(image.duration_in_frames()),
-            Self::Crate(crate_clip) => Some(crate_clip.duration_in_frames()),
-            Self::Video(_) | Self::Audio(_) => None,
+            Self::Video(_) | Self::Audio(_) | Self::Crate(_) => None,
         }
     }
 
@@ -119,8 +119,7 @@ impl Clip {
         match self {
             Self::Text(text) => text.with_duration_in_frames(duration_in_frames).map(Self::Text),
             Self::Image(image) => image.with_duration_in_frames(duration_in_frames).map(Self::Image),
-            Self::Crate(crate_clip) => crate_clip.with_duration_in_frames(duration_in_frames).map(Self::Crate),
-            Self::Video(_) | Self::Audio(_) => None,
+            Self::Video(_) | Self::Audio(_) | Self::Crate(_) => None,
         }
     }
 
@@ -131,12 +130,15 @@ impl Clip {
         match self {
             Self::Video(media) => Self::Video(media.retimed(from, to)),
             Self::Audio(media) => Self::Audio(media.retimed(from, to)),
-            Self::Image(_) | Self::Text(_) | Self::Crate(_) => {
+            Self::Image(_) | Self::Text(_) => {
                 let duration = self.duration_in_frames_it_says().unwrap_or(1);
                 let retimed = from.convert_frame_count_to(duration, to).max(1);
                 self.with_duration_in_frames_it_says(retimed)
                     .unwrap_or_else(|| self.clone())
             }
+            // (A crate lasts as long as its keyframes need, which is worked out again from them, once they are counted again: see
+            // `Project::fit_every_crate`.)
+            Self::Crate(crate_clip) => Self::Crate(crate_clip.retimed(from, to)),
         }
     }
 
@@ -418,9 +420,34 @@ mod tests {
             assert_eq!(longer.kind(), clip.kind());
             assert_eq!(clip.with_duration_in_frames_it_says(0), None, "not for no time");
         }
-        for clip in [Clip::Video(media(0, 10, 1)), Clip::Audio(media(0, 10, 1))] {
+        for clip in [
+            Clip::Video(media(0, 10, 1)),
+            Clip::Audio(media(0, 10, 1)),
+            Clip::Crate(super::super::CrateClip::new(10).unwrap()),
+        ] {
             assert_eq!(clip.duration_in_frames_it_says(), None);
             assert_eq!(clip.with_duration_in_frames_it_says(5), None);
+        }
+    }
+
+    #[test]
+    fn a_clip_that_says_how_long_it_lasts_is_counted_again_at_another_frame_rate_for_as_long_in_time_and_a_frame_at_the_least()
+     {
+        let rate = |frames_per_second| FrameRate::from_whole_frames_per_second(frames_per_second).unwrap();
+        let crate_lasting = |frames| Clip::Crate(super::super::CrateClip::new(frames).unwrap());
+        let of_each_kind = |frames: u64| [text(frames), picture(frames), crate_lasting(frames)];
+
+        for ((before, at_60), at_15) in of_each_kind(31).into_iter().zip(of_each_kind(62)).zip(of_each_kind(16)) {
+            assert_eq!(before.retimed(rate(30), rate(60)), at_60, "{:?}", before.kind());
+            assert_eq!(before.retimed(rate(30), rate(15)), at_15, "{:?}", before.kind());
+        }
+        for before in of_each_kind(1) {
+            assert_eq!(
+                before.retimed(rate(30), rate(12)).timeline_frame_count(speed(1)),
+                1,
+                "{:?} lasts a frame, though that would be no time at the new rate",
+                before.kind()
+            );
         }
     }
 

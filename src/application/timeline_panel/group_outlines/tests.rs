@@ -15,6 +15,11 @@ struct Screen {
 }
 
 fn screen_of(project: &Project) -> Screen {
+    screen_scrolled_by(project, 0.0)
+}
+
+/// The rows of `project` as they are on the screen when the strips are scrolled `scroll_offset` points along.
+fn screen_scrolled_by(project: &Project, scroll_offset: f64) -> Screen {
     // 120 points a second at 30 frames a second: 4 points a frame.
     let geometry = TimelineGeometry::for_picture(FrameRate::new(30, 1).unwrap(), 100, 100, 120.0);
     let height = crate::project::TrackHeight::DEFAULT_IN_POINTS;
@@ -23,7 +28,7 @@ fn screen_of(project: &Project) -> Screen {
             let top = 50.0 + position as f32 * (height + theme::SPACE_BETWEEN_TRACKS);
             StripView::new(
                 geometry,
-                0.0,
+                scroll_offset,
                 Rect::from_min_size(pos2(200.0, top), vec2(1000.0, height)),
             )
         })
@@ -32,12 +37,21 @@ fn screen_of(project: &Project) -> Screen {
 }
 
 fn outlines_of_the_groups_of(project: &Project, screen: &Screen) -> Vec<OutlineOfAGroup> {
+    outlines_with_an_edge_shown_elsewhere(project, screen, None)
+}
+
+fn outlines_with_an_edge_shown_elsewhere(
+    project: &Project,
+    screen: &Screen,
+    an_edge_shown_elsewhere: Option<EdgeShownElsewhere>,
+) -> Vec<OutlineOfAGroup> {
     let views: Vec<(&Track, StripView)> = project.tracks().iter().zip(screen.views.iter().copied()).collect();
     outlines_of_the_groups(
         project,
         WhereTheRowsAre {
             views: &views,
             left_of_the_title_boxes: 40.0,
+            an_edge_shown_elsewhere,
         },
     )
 }
@@ -250,6 +264,89 @@ fn a_tag_that_has_a_clip_group_in_it_goes_round_the_outline_of_the_group_and_not
 }
 
 #[test]
+fn an_edge_that_is_shown_elsewhere_is_drawn_there_and_only_that_edge_of_that_group_is() {
+    // Two clip groups on tracks of their own: the first has the clips from 10 to 30 and from 40 to 50 on the first track, the second those from
+    // 15 to 45 and from 50 to 60 on the second.
+    let mut laid = lay_out(&[&[(10, 20), (40, 10)], &[(15, 30), (50, 10)]]);
+    let first = laid
+        .project
+        .create_group(GroupKind::ClipGroup, &[laid.clip_member(0, 0), laid.clip_member(0, 1)])
+        .unwrap();
+    let second = laid
+        .project
+        .create_group(GroupKind::ClipGroup, &[laid.clip_member(1, 0), laid.clip_member(1, 1)])
+        .unwrap();
+    let screen = screen_of(&laid.project);
+    let bounds_of_the = |outlines: &[OutlineOfAGroup], group: GroupId| {
+        let outline = outlines.iter().find(|outline| outline.group == group).unwrap();
+        bounds_of(&outline.loops[0])
+    };
+    let normally = outlines_of_the_groups_of(&laid.project, &screen);
+
+    // The right edge of the first is shown at 33 and a half frames, a place that is not a frame.
+    let right_edge = outlines_with_an_edge_shown_elsewhere(
+        &laid.project,
+        &screen,
+        Some(EdgeShownElsewhere {
+            group: first,
+            edge: ClipGroupEdge::Right,
+            frame: 33.5,
+        }),
+    );
+    let (before, after) = (bounds_of_the(&normally, first), bounds_of_the(&right_edge, first));
+    assert_eq!(after.min.x, before.min.x, "the left edge of it is where it was");
+    assert_eq!(
+        after.max.x,
+        frame_x(33) + 2.0 + 3.0,
+        "and the right is at 33 and a half"
+    );
+    assert_eq!(
+        (after.min.y, after.max.y),
+        (before.min.y, before.max.y),
+        "up and down it is the same"
+    );
+    assert_eq!(
+        bounds_of_the(&right_edge, second),
+        bounds_of_the(&normally, second),
+        "the other group is where it was"
+    );
+
+    // And the left edge the other way round.
+    let left_edge = outlines_with_an_edge_shown_elsewhere(
+        &laid.project,
+        &screen,
+        Some(EdgeShownElsewhere {
+            group: second,
+            edge: ClipGroupEdge::Left,
+            frame: 5.25,
+        }),
+    );
+    let (before, after) = (bounds_of_the(&normally, second), bounds_of_the(&left_edge, second));
+    assert_eq!(after.min.x, frame_x(5) + 1.0 - 3.0);
+    assert_eq!(after.max.x, before.max.x);
+    assert_eq!(bounds_of_the(&left_edge, first), bounds_of_the(&normally, first));
+}
+
+#[test]
+fn the_right_edge_of_an_outline_is_never_before_the_left_one_which_is_where_the_title_boxes_begin_for_a_track_group() {
+    // A track group whose clips are all scrolled out of view to the left: the end of the last of them is far before the title boxes.
+    let mut laid = lay_out(&[&[(10, 20)], &[(15, 30)]]);
+    laid.project
+        .create_group(GroupKind::TrackGroup, &[laid.track_member(0), laid.track_member(1)])
+        .unwrap();
+    let screen = screen_scrolled_by(&laid.project, 5000.0);
+
+    let outlines = outlines_of_the_groups_of(&laid.project, &screen);
+
+    let points: Vec<Pos2> = outlines[0].loops.iter().flatten().copied().collect();
+    assert!(!points.is_empty());
+    assert!(
+        points.iter().all(|point| point.x >= 40.0 - 3.0),
+        "none of it is further left than where the title boxes begin (and the padding): {points:?}"
+    );
+}
+
+#[test]
 fn a_group_whose_tracks_are_not_in_the_rows_has_no_outline_and_no_mistake_is_made() {
     let mut laid = lay_out(&[&[(0, 10)], &[(0, 10)]]);
     laid.project
@@ -269,6 +366,7 @@ fn a_group_whose_tracks_are_not_in_the_rows_has_no_outline_and_no_mistake_is_mad
         WhereTheRowsAre {
             views: &views,
             left_of_the_title_boxes: 40.0,
+            an_edge_shown_elsewhere: None,
         },
     );
 

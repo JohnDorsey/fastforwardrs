@@ -35,7 +35,9 @@ use crate::application::keyframe_moving::{self, Hold};
 use crate::application::selection::SelectionChange;
 use crate::application::selection::SelectionItem;
 use crate::application::theme;
-use crate::project::{AnimationTarget, ClipId, KeyframeId, KeyframeMove, Project, RackId, Track};
+use crate::project::{
+    AnimationTarget, ClipGroupBeforeTheDrag, ClipId, GroupKind, KeyframeId, KeyframeMove, Project, RackId, Track,
+};
 
 /// What is dragged when `taken_hold_of` is taken hold of: what is selected, if it is one of that, and otherwise just it, which
 /// is selected (with Ctrl held it is added to what is selected, or let go of if it was: as it is not selected, it is added), and
@@ -88,14 +90,28 @@ pub(super) fn drag_of(
                     keyframes.extend(located.rack.keyframes().iter().map(|keyframe| keyframe.id()));
                 }
             }
-            // (A track, or a group, is not dragged along the timeline: what is in a group is dragged, clip by clip.)
-            SelectionItem::Track(_) | SelectionItem::Group(_) => {}
+            // (A clip group or a tag goes along with all the clips that are in it. A track is not dragged along the timeline, and
+            // neither are the clips of a track group, which is a group of the tracks that they are on.)
+            SelectionItem::Group(group) => {
+                if project
+                    .group(*group)
+                    .is_some_and(|found| found.kind() != GroupKind::TrackGroup)
+                {
+                    for clip in project.clips_in(*group) {
+                        if !clips.contains(&clip) {
+                            clips.push(clip);
+                        }
+                    }
+                }
+            }
+            SelectionItem::Track(_) => {}
         }
     }
     keyframes.sort();
     keyframes.dedup();
     ItemDrag {
         keyframes: keyframes_dragged_on_their_own(project, &clips, &keyframes),
+        clip_groups_before_the_drag: project.clip_groups_before_a_drag_of(&clips),
         clips,
         racks,
         grabbed,
@@ -160,6 +176,9 @@ pub(super) fn keep_dragging(
         Grabbed::Rack { rack, .. } => project
             .located_rack(rack)
             .and_then(|located| located.rack.first_frame().map(|frame| located.timeline_frame_of(frame))),
+        Grabbed::Group { group, .. } => project
+            .rectangle_of_the_group(group)
+            .map(|rectangle| rectangle.first_frame),
     };
     let Some(grabbed_frame_now) = grabbed_frame_now else {
         return;
@@ -196,29 +215,33 @@ pub(super) fn keep_dragging(
                 );
                 snap = Snap::held_by(*clip, start_time, points_per_frame);
             }
-            by = allowed_move_holding(
+            let (clips_by, moves) = clips_lead(
                 project,
-                &drag.clips,
+                (&drag.clips, &drag.keyframes, &drag.clip_groups_before_the_drag),
                 MoveBy {
                     tracks_down: tracks_the_pointer_is_down,
                     frames: wanted_frames,
                 },
                 snap,
             );
-            // The keyframes that are dragged with the clips go along the timeline only, in the racks they are in; and if they are
-            // stopped sooner than the clips are, so are the clips.
-            let along = keyframe_moving::allowed_move_holding(
+            by = clips_by;
+            moves
+        }
+        Grabbed::Group { row, .. } => {
+            // The group goes down as many rows as the pointer has gone from the row it was taken hold of in, and is not held to a time.
+            let tracks_the_pointer_is_down =
+                row_nearest_to(rows, visible_rows, pointer.y).map_or(0, |now| now as i64 - *row as i64);
+            let (clips_by, moves) = clips_lead(
                 project,
-                &drag.keyframes,
-                &|rack| vec![rack],
-                keyframe_moving::MoveBy {
-                    racks_down: 0,
-                    frames: by.frames,
+                (&drag.clips, &drag.keyframes, &drag.clip_groups_before_the_drag),
+                MoveBy {
+                    tracks_down: tracks_the_pointer_is_down,
+                    frames: wanted_frames,
                 },
                 None,
             );
-            by.frames = along.by.frames;
-            along.moves
+            by = clips_by;
+            moves
         }
         Grabbed::Keyframe { keyframe, start_time } => {
             let mut racks_the_pointer_is_down = 0;
@@ -239,6 +262,7 @@ pub(super) fn keep_dragging(
             let (frames, moves) = keyframes_lead(
                 project,
                 (&drag.clips, &drag.keyframes),
+                &drag.clip_groups_before_the_drag,
                 &racks_each_can_go_to,
                 racks_the_pointer_is_down,
                 hold,
@@ -252,6 +276,7 @@ pub(super) fn keep_dragging(
             let (frames, moves) = keyframes_lead(
                 project,
                 (&drag.clips, &drag.keyframes),
+                &drag.clip_groups_before_the_drag,
                 &|rack| vec![rack],
                 0,
                 None,
@@ -261,7 +286,37 @@ pub(super) fn keep_dragging(
             moves
         }
     };
-    push_the_commands(project, (&drag.clips, by), (&drag.keyframes, keyframe_moves), commands);
+    push_the_commands(
+        project,
+        (&drag.clips, &drag.clip_groups_before_the_drag, by),
+        (&drag.keyframes, keyframe_moves),
+        commands,
+    );
+}
+
+/// How far the clips that are dragged can go towards `wanted` (held to the time `snap` says, if there is one), where `clips` are what is
+/// dragged, the keyframes that go with them along the timeline only, in the racks they are in, and `before_the_drag` says which clip group
+/// each clip was in when the drag began. If the keyframes are stopped sooner than the clips are, so are the clips. Gives how far they go and
+/// the moves of the keyframes.
+fn clips_lead(
+    project: &Project,
+    (clips, keyframes, before_the_drag): (&[ClipId], &[KeyframeId], &[ClipGroupBeforeTheDrag]),
+    wanted: MoveBy,
+    snap: Option<Snap>,
+) -> (MoveBy, Vec<KeyframeMove>) {
+    let mut by = allowed_move_holding(project, clips, wanted, snap, before_the_drag);
+    let along = keyframe_moving::allowed_move_holding(
+        project,
+        keyframes,
+        &|rack| vec![rack],
+        keyframe_moving::MoveBy {
+            racks_down: 0,
+            frames: by.frames,
+        },
+        None,
+    );
+    by.frames = along.by.frames;
+    (by, along.moves)
 }
 
 /// How many frames `keyframes` are moved when they lead `clips`, and the moves of the keyframes. The keyframes go as far as `wanted_frames`
@@ -271,6 +326,7 @@ pub(super) fn keep_dragging(
 fn keyframes_lead(
     project: &Project,
     (clips, keyframes): (&[ClipId], &[KeyframeId]),
+    before_the_drag: &[ClipGroupBeforeTheDrag],
     racks_each_can_go_to: &dyn Fn(RackId) -> Vec<RackId>,
     racks_down: i64,
     hold: Option<Hold>,
@@ -294,6 +350,7 @@ fn keyframes_lead(
             frames: moved.by.frames,
         },
         None,
+        before_the_drag,
     );
     if clips_by.frames == moved.by.frames {
         return (moved.by.frames, moved.moves);
@@ -317,18 +374,22 @@ fn keyframes_lead(
 /// frames of the drag are all alike and are one edit of the history.
 fn push_the_commands(
     project: &Project,
-    (clips, by): (&[ClipId], MoveBy),
+    (clips, before_the_drag, by): (&[ClipId], &[ClipGroupBeforeTheDrag], MoveBy),
     (keyframes, moves): (&[KeyframeId], Vec<KeyframeMove>),
     commands: &mut Vec<Command>,
 ) {
     let both = !clips.is_empty() && !keyframes.is_empty();
     if !clips.is_empty() && (by != MoveBy::default() || both) {
-        commands.push(Command::MoveClips(moves_by(project, clips, by)));
+        commands.push(Command::MoveClips {
+            moves: moves_by(project, clips, by),
+            before_the_drag: before_the_drag.to_vec(),
+        });
     }
     let any_is_moved = moves.iter().any(|moved| {
-        project
-            .locate_keyframe(moved.keyframe)
-            .is_some_and(|located| located.rack.rack.id() != moved.to_rack || located.keyframe.frame != moved.to_frame)
+        project.locate_keyframe(moved.keyframe).is_some_and(|located| {
+            located.rack.rack.id() != moved.to_rack
+                || i64::try_from(located.keyframe.frame).ok() != Some(moved.to_frame)
+        })
     });
     if !keyframes.is_empty() && (any_is_moved || both) {
         commands.push(Command::MoveKeyframes(moves));
@@ -378,7 +439,7 @@ fn rack_under(pointer: Pos2, racks: &[RackId], on_the_screen: &[(RackId, Rect)])
 /// The row (its place in the list of tracks) that is nearest to `y` up and down the screen, of those that
 /// can be seen in `visible_rows`: the one the pointer is over, or if it is between two, or above them all,
 /// or below them all, the one it is nearest to.
-fn row_nearest_to(rows: &[(&Track, StripView)], visible_rows: Rect, y: f32) -> Option<usize> {
+pub(super) fn row_nearest_to(rows: &[(&Track, StripView)], visible_rows: Rect, y: f32) -> Option<usize> {
     let how_far = |rectangle: Rect| (rectangle.top() - y).max(y - rectangle.bottom()).max(0.0);
     rows.iter()
         .enumerate()
@@ -394,7 +455,7 @@ mod tests {
     use super::*;
     use crate::application::timeline_geometry::TimelineGeometry;
     use crate::project::{
-        FrameRate, PropertyId, PropertyValue, RackDestination, TextObject, TimelineFrameIndex, TrackId,
+        FrameRate, Member, PropertyId, PropertyValue, RackDestination, TextObject, TimelineFrameIndex, TrackId,
     };
     use crate::test_support::make_a_keyframe;
 
@@ -443,6 +504,49 @@ mod tests {
         );
         assert_eq!(row_nearest_to(&rows, seen, 80.0), Some(2));
         assert_eq!(row_nearest_to(&rows, Rect::NOTHING, 80.0), None, "nothing can be seen");
+    }
+
+    #[test]
+    fn a_clip_that_is_dragged_with_the_group_it_is_in_is_dragged_once_and_a_clip_of_a_tag_that_is_not_selected_is_too()
+    {
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let mut clip_at = |frame: u64| {
+            project
+                .insert_text(track, TimelineFrameIndex::new(frame), TextObject::default(), 30)
+                .unwrap()
+                .0
+        };
+        let (first, second, third) = (clip_at(0), clip_at(40), clip_at(80));
+        let group = project
+            .create_group(GroupKind::ClipGroup, &[Member::Clip(first), Member::Clip(second)])
+            .unwrap();
+        let tag = project
+            .create_group(GroupKind::Tag, &[Member::Clip(second), Member::Clip(third)])
+            .unwrap();
+        let by_the_group = Grabbed::Group {
+            group,
+            first_frame: 0,
+            row: 0,
+        };
+
+        let drag_of_items = |items: &[SelectionItem]| drag_of(&project, items, by_the_group, 5).clips;
+
+        assert_eq!(
+            drag_of_items(&[SelectionItem::Clip(first), SelectionItem::Group(group)]),
+            vec![first, second],
+            "the clip that is selected with its group, and the group"
+        );
+        assert_eq!(
+            drag_of_items(&[SelectionItem::Group(group), SelectionItem::Group(tag)]),
+            vec![first, second, third],
+            "two groups that have a clip in common"
+        );
+        assert_eq!(
+            drag_of_items(&[SelectionItem::Clip(third), SelectionItem::Group(group)]),
+            vec![third, first, second],
+            "in the order that the items are in"
+        );
     }
 
     #[test]
@@ -526,8 +630,8 @@ mod tests {
         );
         let turn_of_the_first_in_the_track = the_rack_in_the_drawer_of(&project, first, first);
         project
-            .move_rack(
-                turn_of_the_first_in_the_track,
+            .move_racks(
+                &[turn_of_the_first_in_the_track],
                 RackDestination::Drawer(AnimationTarget::Track(track)),
                 0,
                 None,
@@ -687,7 +791,7 @@ mod tests {
             let mut commands = Vec::new();
             push_the_commands(
                 &racks.project,
-                (clips, MoveBy::default()),
+                (clips, &[], MoveBy::default()),
                 (&[keyframe], moves),
                 &mut commands,
             );
@@ -702,7 +806,7 @@ mod tests {
             2,
             "clips and keyframes dragged together: each is sent in every frame: {both:?}"
         );
-        assert!(matches!(both[0], Command::MoveClips(_)), "{both:?}");
+        assert!(matches!(both[0], Command::MoveClips { .. }), "{both:?}");
         assert!(matches!(both[1], Command::MoveKeyframes(_)), "{both:?}");
     }
 

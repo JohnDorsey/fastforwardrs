@@ -343,7 +343,15 @@ fn a_keyframe_crate_makes_no_sound_and_has_no_strip_of_its_own() {
     let without = project_of(vec![vec![], vec![(0, long_video(0, 100, 1))]]);
     let mut with = without.clone();
     let in_front = with.tracks()[0].id();
-    with.insert_crate(in_front, frame(30), 40).unwrap();
+    // (A crate has a rack in it, which animates the loudness of its own track here, so that nothing in the picture or the sound is changed.)
+    crate::test_support::make_a_crate(
+        &mut with,
+        in_front,
+        30,
+        69,
+        AnimationTarget::Track(in_front),
+        PropertyId::Gain,
+    );
 
     assert_eq!(
         plan_sound(&with, frame(0), |_| true),

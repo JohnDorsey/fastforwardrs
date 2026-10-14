@@ -22,7 +22,8 @@ pub(super) fn a_big_video_and_a_small_text() -> (Project, ClipId, ClipId) {
 }
 
 /// Puts a rack in the drawer of `owner`, of the keyframes of `property` of `target` at these frames (counted from the start of the
-/// drawer), without anything else being done.
+/// drawer), without anything else being done but making a keyframe crate as long as its keyframes need (and so counting the frames
+/// of the racks in it from where it begins then).
 pub(super) fn put_a_rack_in(
     project: &mut Project,
     owner: AnimationTarget,
@@ -40,6 +41,10 @@ pub(super) fn put_a_rack_in(
         rack.set(*frame, value.clone()).unwrap();
     }
     project.drawer_mut(owner).unwrap().push(rack);
+    // (A keyframe crate lasts exactly as long as its keyframes need, from the first to the last.)
+    project
+        .fit_the_crate(owner)
+        .expect("a crate has room for the keyframes that are put in it");
     id
 }
 
@@ -904,7 +909,7 @@ fn a_project_whose_racks_are_in_order_has_no_problems_and_what_is_wrong_is_said(
     assert!(
         problems
             .iter()
-            .any(|problem| problem.contains("drawer it is in lasts 60 frames"))
+            .any(|problem| problem.contains("a keyframe at frame 61 of the drawer it is in, which has no room for it"))
     );
     assert!(problems.iter().any(|problem| problem.contains("is not there")));
     assert!(problems.iter().any(|problem| problem.contains("does not have it")));

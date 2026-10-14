@@ -362,29 +362,108 @@ fn racks_kept_in_the_drawer_of_another_clip_or_of_a_track_say_what_they_are_of_b
     assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
 }
 
+/// The file of the project that has everything, with one more thing at the end of the clips of the track in front: `crate_clip`.
+fn file_with_this_crate_after_the_text_object(crate_clip: serde_json::Value) -> serde_json::Value {
+    let mut file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
+    file["tracks"][0]["clips"].as_array_mut().unwrap().push(crate_clip);
+    file
+}
+
+/// How long the keyframe crate that is the last clip of the track in front lasts, and where.
+fn the_crate_at_the_end_of_the_front_track(project: &Project) -> (u64, u64, usize) {
+    let entry = project.tracks()[0].entries().last().unwrap();
+    let crate::project::Clip::Crate(crate_clip) = entry.clip() else {
+        panic!("the last clip of the track in front is not a crate: {:?}", entry.clip());
+    };
+    (
+        entry.gap_before_frames(),
+        crate_clip.duration_in_frames(),
+        entry.drawer().len(),
+    )
+}
+
 #[test]
 fn a_keyframe_crate_is_written_with_how_long_it_lasts_and_its_drawer_and_comes_back() {
-    let mut file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
-    file["tracks"][0]["clips"].as_array_mut().unwrap().push(serde_json::json!({
+    // (A crate lasts from its first keyframe to its last, so this one, with keyframes at its first frame and at its 51st, lasts 51.)
+    let file = file_with_this_crate_after_the_text_object(serde_json::json!({
         "kind": "crate",
         "gap_before_frames": 40,
-        "duration_in_frames": 200,
-        "drawer": [{"property": "rotation", "target": {"track": 2, "clip": 0}, "keyframes": [{"frame": 10, "value": 90.0}]}]
+        "duration_in_frames": 51,
+        "drawer": [{"property": "rotation", "target": {"track": 2, "clip": 0}, "keyframes": [
+            {"frame": 0, "value": 90.0},
+            {"frame": 50, "value": 180.0}
+        ]}]
     }));
     let text = serde_json::to_string_pretty(&file).unwrap();
 
     let loaded = project_from_json_text(&text).unwrap();
 
-    let crate_entry = loaded.tracks()[0].entries().last().unwrap();
-    assert!(matches!(crate_entry.clip(), crate::project::Clip::Crate(_)));
-    assert_eq!(crate_entry.clip().duration_in_frames_it_says(), Some(200));
-    assert_eq!(crate_entry.gap_before_frames(), 40);
-    assert_eq!(crate_entry.drawer().len(), 1);
+    assert_eq!(the_crate_at_the_end_of_the_front_track(&loaded), (40, 51, 1));
     let written: serde_json::Value = serde_json::from_str(&saved(&loaded)).unwrap();
     assert_eq!(
         written["tracks"][0]["clips"].as_array().unwrap().last(),
         file["tracks"][0]["clips"].as_array().unwrap().last()
     );
+}
+
+#[test]
+fn a_keyframe_crate_saved_by_a_version_that_let_it_last_longer_than_its_keyframes_is_loaded_as_long_as_they_need() {
+    let file = file_with_this_crate_after_the_text_object(serde_json::json!({
+        "kind": "crate",
+        "gap_before_frames": 40,
+        "duration_in_frames": 200,
+        "drawer": [{"property": "rotation", "target": {"track": 2, "clip": 0}, "keyframes": [
+            {"frame": 10, "value": 90.0},
+            {"frame": 30, "value": 180.0}
+        ]}]
+    }));
+    let text = serde_json::to_string_pretty(&file).unwrap();
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    // It begins where its first keyframe was (10 frames after where it began) and ends after its last (21 frames later): it is what the
+    // file of a crate that is made so says.
+    assert_eq!(the_crate_at_the_end_of_the_front_track(&loaded), (50, 21, 1));
+    let the_same_made_so = file_with_this_crate_after_the_text_object(serde_json::json!({
+        "kind": "crate",
+        "gap_before_frames": 50,
+        "duration_in_frames": 21,
+        "drawer": [{"property": "rotation", "target": {"track": 2, "clip": 0}, "keyframes": [
+            {"frame": 0, "value": 90.0},
+            {"frame": 20, "value": 180.0}
+        ]}]
+    }));
+    let the_same_loaded = project_from_json_text(&serde_json::to_string_pretty(&the_same_made_so).unwrap()).unwrap();
+    assert_same_content(&loaded, &the_same_loaded);
+    // The keyframes did not move: they are at the frames of the timeline that the file said.
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let where_the_crate_began = project_with_everything().tracks()[0].total_frame_count() + 40;
+    let frame = crate::project::TimelineFrameIndex::new;
+    assert_eq!(
+        loaded.property_value_at(video, PropertyId::Rotation, frame(where_the_crate_began + 10)),
+        Some(PropertyValue::Number(90.0))
+    );
+    assert_eq!(
+        loaded.property_value_at(video, PropertyId::Rotation, frame(where_the_crate_began + 30)),
+        Some(PropertyValue::Number(180.0))
+    );
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+}
+
+#[test]
+fn a_keyframe_crate_saved_with_nothing_in_it_is_not_in_the_project_that_is_loaded() {
+    let original = project_with_everything();
+    let file = file_with_this_crate_after_the_text_object(serde_json::json!({
+        "kind": "crate",
+        "gap_before_frames": 40,
+        "duration_in_frames": 200,
+        "drawer": []
+    }));
+    let text = serde_json::to_string_pretty(&file).unwrap();
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    assert_same_content(&loaded, &original);
 }
 
 #[test]

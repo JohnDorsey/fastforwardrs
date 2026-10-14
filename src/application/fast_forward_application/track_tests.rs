@@ -127,9 +127,9 @@ fn with_more_tracks_than_fit_the_rows_scroll_and_the_button_can_still_be_pressed
     let first = window.strip_of_track(0);
     let ruler = window.rectangle_of("Ruler");
     assert_eq!(first.top(), ruler.bottom());
-    let slider_along_the_bottom = window.rectangle_of("Position in the video");
     assert!(
-        slider_along_the_bottom.top() - first.top() < 4.0 * crate::project::TrackHeight::DEFAULT_IN_POINTS,
+        window.the_bottom_of_what_can_be_seen_of_the_rows() - first.top()
+            < 4.0 * crate::project::TrackHeight::DEFAULT_IN_POINTS,
         "at most a few tracks are shown at once"
     );
     add_a_track(&mut window);
@@ -193,10 +193,14 @@ fn rows_that_are_scrolled_down_with_alt_and_the_wheel_stop_at_the_last_one() {
     let over_the_strips = window.strip_of_track(0).center();
     window.scroll_the_wheel(over_the_strips, egui::vec2(0.0, -100_000.0), Modifiers::ALT);
     let last_strip = window.strip_of_track(6);
-    let slider_along_the_bottom = window.rectangle_of("Position in the video");
+    let bottom_of_the_view = window.the_bottom_of_what_can_be_seen_of_the_rows();
     assert!(
-        last_strip.bottom() <= slider_along_the_bottom.top() + 1.0,
-        "the last row is fully shown: {last_strip:?}"
+        last_strip.bottom() <= bottom_of_the_view + 1.0,
+        "the last row is fully shown: {last_strip:?} in a view that ends at {bottom_of_the_view}"
+    );
+    assert!(
+        bottom_of_the_view - last_strip.bottom() < 20.0,
+        "and the rows did not scroll on past it into empty room: {last_strip:?} in a view that ends at {bottom_of_the_view}"
     );
 }
 

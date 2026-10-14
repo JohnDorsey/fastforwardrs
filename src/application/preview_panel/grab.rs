@@ -29,8 +29,8 @@ pub(super) enum Grab {
 
 /// What there is to take hold of at `point` on the screen, if anything.
 ///
-/// The handles and the places to turn the selected layer from are drawn over everything else, wherever
-/// they are, so they come first. Then, from the front to the back, each layer is as far as it is on the
+/// The handles and the places to turn the selected layer from are drawn over everything else on the preview, wherever
+/// they are on it, so they come first. Then, from the front to the back, each layer is as far as it is on the
 /// screen (turned as it is, and not as far as the rectangle round it), with the fast-forward symbol, which
 /// is over the front-most video, between that video and the layers in front of it. What is past the edge
 /// of the picture is not seen, so a layer is only taken hold of where it is over the picture, but for the

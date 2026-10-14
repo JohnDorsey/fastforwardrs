@@ -17,6 +17,7 @@ use egui::{Color32, CornerRadius, Rect, Sense, Shadow, Ui, pos2, vec2};
 use super::drawers::Drawers;
 use super::strip_view::StripView;
 use super::track_reordering::{follow_the_handles, plan_rows};
+use super::vertical_zoom::VerticalZoom;
 use super::{TimelineContent, TimelineViewState, drawers, header, strip, track_resize};
 use crate::application::commands::Command;
 use crate::application::textures::Textures;
@@ -36,7 +37,10 @@ const SHADOW_UNDER_THE_DRAGGED_ROW: Shadow = Shadow {
 /// [`super::prepare`]), and `show` lays them out by it, so that it is what they are.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct RowsLayout {
-    /// How tall each row is, in the order of the tracks: as tall as its track, and as the drawers that pushed to open on it need.
+    /// How tall the strip of each track is drawn, in the order of the tracks: as tall as its track says times the vertical zoom
+    /// (see [`VerticalZoom`]).
+    pub(super) strip_heights: Vec<f32>,
+    /// How tall each row is, in the order of the tracks: as tall as its strip, and as the drawers that pushed to open on it need.
     /// (The drawers that lie over the rows under it are not in it.)
     pub(super) heights: Vec<f32>,
     /// Room after the last row for what lies over the rows under its row and hangs below it, so that it can be scrolled to: as much
@@ -45,24 +49,64 @@ pub(super) struct RowsLayout {
 }
 
 impl RowsLayout {
-    pub(super) fn of(project: &Project, drawers: &Drawers) -> Self {
+    pub(super) fn of(project: &Project, drawers: &Drawers, zoom: VerticalZoom) -> Self {
         let tracks = project.tracks();
+        let strip_heights: Vec<f32> = tracks
+            .iter()
+            .map(|track| zoom.height_of_a_row(track.height()))
+            .collect();
         let heights: Vec<f32> = tracks
             .iter()
-            .map(|track| track.height().points() + drawers.extra_height_of(track, project))
+            .zip(&strip_heights)
+            .map(|(track, strip_height)| strip_height + drawers.extra_height_of(track, *strip_height, project))
             .collect();
         let mut top = 0.0;
         let mut bottom_of_the_last = 0.0;
         let mut furthest_down = 0.0_f32;
-        for (track, height) in tracks.iter().zip(&heights) {
+        for ((track, height), strip_height) in tracks.iter().zip(&heights).zip(&strip_heights) {
             let bottom = top + height;
-            furthest_down = furthest_down.max(bottom + drawers.reach_over_the_rows_under_the_row_of(track, project));
+            furthest_down =
+                furthest_down.max(bottom + drawers.reach_over_the_rows_under_the_row_of(track, *strip_height, project));
             bottom_of_the_last = bottom;
             top = bottom + theme::SPACE_BETWEEN_TRACKS;
         }
         Self {
+            strip_heights,
             heights,
             room_after_the_last_row: (furthest_down - bottom_of_the_last).max(0.0),
+        }
+    }
+
+    /// Where the top of each row is, counted down from the top of the rows.
+    fn tops(&self) -> Vec<f32> {
+        let mut top = 0.0;
+        self.heights
+            .iter()
+            .map(|height| {
+                let this = top;
+                top += height + theme::SPACE_BETWEEN_TRACKS;
+                this
+            })
+            .collect()
+    }
+
+    /// Where the point of the rows that is `y` points below the top of them in this layout is in `after`, the layout of the same
+    /// rows when they are zoomed some other way: in the same row, as far down its strip as it was (in the same part of it, a
+    /// half of the way down if it was), or as far under the strip as it was if it is in what hangs under it. A point that is
+    /// above the first row or below the last stays as far from it.
+    pub(super) fn where_the_point_goes_in(&self, after: &RowsLayout, y: f32) -> f32 {
+        let (before_tops, after_tops) = (self.tops(), after.tops());
+        let Some(row) = before_tops.iter().rposition(|top| *top <= y) else {
+            // Above the first row, which is at the top of the rows in every layout: the point is as far above it as it was.
+            return y;
+        };
+        let below_its_top = y - before_tops[row];
+        let (strip_before, strip_after) = (self.strip_heights[row], after.strip_heights[row]);
+        if below_its_top <= strip_before {
+            after_tops[row] + below_its_top / strip_before.max(1.0) * strip_after
+        } else {
+            // Under the strip: in the drawers that hang there, or in the gap, or after the last row.
+            after_tops[row] + strip_after + (below_its_top - strip_before)
         }
     }
 
@@ -71,6 +115,14 @@ impl RowsLayout {
     pub(super) fn total_height(&self) -> f32 {
         let room_between_rows = self.heights.len().saturating_sub(1) as f32 * theme::SPACE_BETWEEN_TRACKS;
         self.heights.iter().sum::<f32>() + room_between_rows + self.room_after_the_last_row
+    }
+
+    /// How tall everything is that the area the rows scroll in has in it: the rows ([`Self::total_height`]), and after them the room for
+    /// the boundary under the last track to be taken hold of, which comes after the room there is between rows too (see
+    /// [`track_resize::REACH_INTO_THE_BOXES`], and `show` in the parent module, where it is made). So the rows scroll as far as this is more
+    /// than the area is tall.
+    pub(super) fn height_of_everything_in_the_area(&self) -> f32 {
+        self.total_height() + theme::SPACE_BETWEEN_TRACKS + track_resize::REACH_INTO_THE_BOXES
     }
 }
 
@@ -91,7 +143,7 @@ pub(super) fn show<'a>(
     let tracks = content.project.tracks();
     let can_delete = tracks.len() > 1;
     // A row is as tall as its track, and as the drawers that pushed to open on it need under that.
-    let layout = RowsLayout::of(content.project, &state.drawers);
+    let layout = RowsLayout::of(content.project, &state.drawers, state.vertical_zoom);
     let heights = &layout.heights;
     let laid_out: Vec<Rect> = heights
         .iter()
@@ -133,8 +185,9 @@ pub(super) fn show<'a>(
     let mut views: Vec<Option<StripView>> = vec![None; tracks.len()];
     for position in drawing_order {
         let track = &tracks[position];
-        // The box and the strip are as tall as the track is: what is under them is the room for the drawers that pushed to open.
-        let height = track.height().points();
+        // The box and the strip are as tall as the track is (and the rows are zoomed): what is under them is the room for the
+        // drawers that pushed to open.
+        let height = layout.strip_heights[position];
         let top = rows_top + planned.tops[position];
         let row = Rect::from_min_size(
             pos2(laid_out[position].left(), top),
@@ -239,7 +292,7 @@ mod tests {
     fn rows_with_every_drawer_shut_are_as_tall_as_their_tracks_with_room_between_them_and_nothing_after_the_last() {
         let tracks = two_tracks();
 
-        let layout = RowsLayout::of(&tracks.project, &Drawers::default());
+        let layout = RowsLayout::of(&tracks.project, &Drawers::default(), VerticalZoom::NORMAL);
 
         assert_eq!(layout.heights, vec![track_height(), track_height()]);
         assert_eq!(layout.room_after_the_last_row, 0.0);
@@ -257,11 +310,11 @@ mod tests {
 
         let mut drawers = Drawers::default();
         open(&mut drawers, tracks.in_front, OpenMode::PushingTheRowsUnder);
-        let layout = RowsLayout::of(&tracks.project, &drawers);
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::NORMAL);
 
         assert_eq!(layout.heights, vec![track_height() + hanging, track_height()]);
         assert_eq!(layout.room_after_the_last_row, 0.0);
-        let shut = RowsLayout::of(&tracks.project, &Drawers::default());
+        let shut = RowsLayout::of(&tracks.project, &Drawers::default(), VerticalZoom::NORMAL);
         assert_eq!(layout.total_height(), shut.total_height() + hanging);
     }
 
@@ -272,7 +325,7 @@ mod tests {
 
         let mut drawers = Drawers::default();
         open(&mut drawers, tracks.behind, OpenMode::PushingTheRowsUnder);
-        let layout = RowsLayout::of(&tracks.project, &drawers);
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::NORMAL);
 
         assert_eq!(layout.heights, vec![track_height(), track_height() + hanging]);
         assert_eq!(layout.room_after_the_last_row, 0.0);
@@ -285,11 +338,11 @@ mod tests {
 
         let mut drawers = Drawers::default();
         open(&mut drawers, tracks.behind, OpenMode::LyingOverTheRowsUnder);
-        let layout = RowsLayout::of(&tracks.project, &drawers);
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::NORMAL);
 
         assert_eq!(layout.heights, vec![track_height(), track_height()]);
         assert_eq!(layout.room_after_the_last_row, hanging, "so that it can be scrolled to");
-        let shut = RowsLayout::of(&tracks.project, &Drawers::default());
+        let shut = RowsLayout::of(&tracks.project, &Drawers::default(), VerticalZoom::NORMAL);
         assert_eq!(layout.total_height(), shut.total_height() + hanging);
     }
 
@@ -316,7 +369,7 @@ mod tests {
 
         let mut drawers = Drawers::default();
         open(&mut drawers, tracks.in_front, OpenMode::LyingOverTheRowsUnder);
-        let layout = RowsLayout::of(&tracks.project, &drawers);
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::NORMAL);
 
         assert_eq!(
             layout.heights,
@@ -332,9 +385,12 @@ mod tests {
 
         let mut drawers = Drawers::default();
         open(&mut drawers, tracks.in_front, OpenMode::LyingOverTheRowsUnder);
-        let layout = RowsLayout::of(&tracks.project, &drawers);
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::NORMAL);
 
-        assert_eq!(layout, RowsLayout::of(&tracks.project, &Drawers::default()));
+        assert_eq!(
+            layout,
+            RowsLayout::of(&tracks.project, &Drawers::default(), VerticalZoom::NORMAL)
+        );
     }
 
     #[test]
@@ -349,7 +405,7 @@ mod tests {
             "the setup: it is part of the way"
         );
 
-        let layout = RowsLayout::of(&tracks.project, &drawers);
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::NORMAL);
 
         assert_eq!(layout.heights[0], track_height() + part_way);
     }
@@ -357,10 +413,134 @@ mod tests {
     #[test]
     fn a_layout_of_no_rows_has_no_height() {
         let layout = RowsLayout {
+            strip_heights: Vec::new(),
             heights: Vec::new(),
             room_after_the_last_row: 0.0,
         };
 
         assert_eq!(layout.total_height(), 0.0);
+    }
+
+    // --- the rows zoomed up and down ---
+
+    #[test]
+    fn zoomed_rows_have_strips_as_many_times_as_tall_and_the_room_the_drawers_need_is_what_it_was() {
+        let tracks = two_tracks();
+        let mut drawers = Drawers::default();
+        open(&mut drawers, tracks.in_front, OpenMode::PushingTheRowsUnder);
+        let hanging = height_when_open(tracks.in_front, &tracks.project);
+
+        let shut = RowsLayout::of(&tracks.project, &Drawers::default(), VerticalZoom::of(2.0));
+        let layout = RowsLayout::of(&tracks.project, &drawers, VerticalZoom::of(2.0));
+
+        assert_eq!(shut.strip_heights, vec![2.0 * track_height(), 2.0 * track_height()]);
+        assert_eq!(
+            shut.heights, shut.strip_heights,
+            "with every drawer shut the rows are their strips"
+        );
+        assert_eq!(
+            layout.strip_heights, shut.strip_heights,
+            "an open drawer does not change the strips"
+        );
+        assert_eq!(
+            layout.heights,
+            vec![2.0 * track_height() + hanging, 2.0 * track_height()]
+        );
+    }
+
+    #[test]
+    fn the_rows_of_tracks_that_are_as_short_as_they_can_be_are_that_whatever_the_zoom() {
+        let mut tracks = two_tracks();
+        let behind = tracks.project.tracks()[1].id();
+        tracks
+            .project
+            .set_track_height(behind, TrackHeight::from_points(TrackHeight::SMALLEST_IN_POINTS))
+            .unwrap();
+
+        let layout = RowsLayout::of(&tracks.project, &Drawers::default(), VerticalZoom::of(0.5));
+
+        assert_eq!(
+            layout.strip_heights,
+            vec![0.5 * track_height(), TrackHeight::SMALLEST_IN_POINTS]
+        );
+    }
+
+    /// A layout of rows with these strips and nothing hanging under them, which are at tops of `0`, `strip + gap`, and so on.
+    fn layout_of_strips(strips: &[f32]) -> RowsLayout {
+        RowsLayout {
+            strip_heights: strips.to_vec(),
+            heights: strips.to_vec(),
+            room_after_the_last_row: 0.0,
+        }
+    }
+
+    #[test]
+    fn where_each_row_begins_is_the_heights_of_the_rows_before_it_and_the_gaps() {
+        let layout = layout_of_strips(&[100.0, 50.0, 70.0]);
+        let gap = theme::SPACE_BETWEEN_TRACKS;
+        assert_eq!(layout.tops(), vec![0.0, 100.0 + gap, 150.0 + 2.0 * gap]);
+        assert!(layout_of_strips(&[]).tops().is_empty());
+    }
+
+    #[test]
+    fn a_point_of_a_row_goes_to_the_same_part_of_the_same_row_when_the_rows_are_zoomed() {
+        let gap = theme::SPACE_BETWEEN_TRACKS;
+        let before = layout_of_strips(&[100.0, 50.0]);
+        let after = layout_of_strips(&[200.0, 100.0]);
+        // A quarter of the way down the first row, and then a quarter of the way down the second.
+        assert_eq!(before.where_the_point_goes_in(&after, 25.0), 50.0);
+        assert_eq!(
+            before.where_the_point_goes_in(&after, 100.0 + gap + 12.5),
+            200.0 + gap + 25.0
+        );
+        // The top and the bottom of a row are the top and the bottom of it zoomed.
+        assert_eq!(before.where_the_point_goes_in(&after, 0.0), 0.0);
+        assert_eq!(before.where_the_point_goes_in(&after, 100.0), 200.0);
+    }
+
+    #[test]
+    fn a_point_of_a_strip_that_has_no_height_at_all_goes_to_the_top_of_it_and_not_to_nowhere() {
+        // (A row is never so short: this is for a layout that is made some other way, which must not give a point that is not a number.)
+        let before = layout_of_strips(&[0.0, 50.0]);
+        let after = layout_of_strips(&[0.0, 100.0]);
+
+        assert_eq!(before.where_the_point_goes_in(&after, 0.0), 0.0);
+    }
+
+    #[test]
+    fn a_point_under_a_row_stays_the_same_distance_under_its_strip_whatever_is_there() {
+        // The first row has a drawer hanging from it that is 60 points tall: the strip is 100, and the row is 160.
+        let before = RowsLayout {
+            strip_heights: vec![100.0, 50.0],
+            heights: vec![160.0, 50.0],
+            room_after_the_last_row: 0.0,
+        };
+        let after = RowsLayout {
+            strip_heights: vec![200.0, 100.0],
+            heights: vec![260.0, 100.0],
+            room_after_the_last_row: 0.0,
+        };
+        assert_eq!(
+            before.where_the_point_goes_in(&after, 130.0),
+            230.0,
+            "30 points into the drawer, which is as far into it as it was"
+        );
+    }
+
+    #[test]
+    fn a_point_above_the_first_row_or_below_the_last_stays_as_far_from_it() {
+        let before = layout_of_strips(&[100.0]);
+        let after = layout_of_strips(&[300.0]);
+        assert_eq!(before.where_the_point_goes_in(&after, -10.0), -10.0, "above");
+        assert_eq!(
+            before.where_the_point_goes_in(&after, 120.0),
+            320.0,
+            "20 points below the bottom of the last"
+        );
+        assert_eq!(
+            layout_of_strips(&[]).where_the_point_goes_in(&layout_of_strips(&[]), 5.0),
+            5.0,
+            "and with no rows nothing moves"
+        );
     }
 }

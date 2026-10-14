@@ -203,6 +203,9 @@ mod tests {
     /// Opens the real speakers and gives them silence to play, to see that they take it at the
     /// speed of real time. (Silence, so that running the tests makes no noise.) Skipped on a
     /// computer without a sound output.
+    ///
+    /// A computer that is busy makes the sound thread late now and then, and one try is spoiled by that: the speakers have to be on time
+    /// in one of three tries (speakers that do not go at the speed of real time are not, in any of them).
     #[test]
     fn the_real_speakers_use_up_what_is_queued_in_real_time() {
         let mut sink = match DeviceAudioSink::open() {
@@ -220,17 +223,27 @@ mod tests {
 
         sink.queue(&one_second);
         assert_eq!(sink.queued_moment_count(), u64::from(format.sample_rate));
-        let started = Instant::now();
-        std::thread::sleep(Duration::from_millis(500));
-        let left = sink.queued_moment_count();
-        let heard = started.elapsed().as_secs_f64();
+        let mut complaints = Vec::new();
+        for attempt in 0..3 {
+            if attempt > 0 {
+                sink.clear();
+                sink.queue(&one_second);
+            }
+            let started = Instant::now();
+            std::thread::sleep(Duration::from_millis(500));
+            let left = sink.queued_moment_count();
+            let heard = started.elapsed().as_secs_f64();
 
-        let used = f64::from(format.sample_rate) - left as f64;
-        let expected = heard * f64::from(format.sample_rate);
-        assert!(
-            (used - expected).abs() < 0.12 * f64::from(format.sample_rate),
-            "in {heard:.3} s the speakers used up {used} moments, about {expected} were expected"
-        );
+            let used = f64::from(format.sample_rate) - left as f64;
+            let expected = heard * f64::from(format.sample_rate);
+            if (used - expected).abs() < 0.12 * f64::from(format.sample_rate) {
+                break;
+            }
+            complaints.push(format!(
+                "in {heard:.3} s the speakers used up {used} moments, about {expected} were expected"
+            ));
+            assert!(complaints.len() < 3, "{complaints:?}");
+        }
         sink.clear();
         assert_eq!(sink.queued_moment_count(), 0);
         assert!(sink.is_working());

@@ -55,6 +55,8 @@ mod group_box_tests;
 mod group_command_fuzz_tests;
 #[cfg(test)]
 mod group_drag_tests;
+#[cfg(test)]
+mod group_edge_tests;
 mod group_flow;
 #[cfg(test)]
 mod group_menu_tests;
@@ -64,6 +66,8 @@ mod group_outline_tests;
 mod group_refusal_tests;
 #[cfg(test)]
 mod group_render_tests;
+#[cfg(test)]
+mod group_title_bar_tests;
 mod included_files_flow;
 #[cfg(test)]
 mod included_files_tests;
@@ -130,7 +134,13 @@ mod track_selection_tests;
 #[cfg(test)]
 mod track_tests;
 #[cfg(test)]
+mod transport_row_tests;
+#[cfg(test)]
 mod undo_tests;
+#[cfg(test)]
+mod vertical_zoom_tests;
+#[cfg(test)]
+mod view_history_tests;
 #[cfg(test)]
 mod zoom_tests;
 
@@ -149,6 +159,7 @@ use super::file_chooser::{FileChooser, NativeFileChooser, RefusingFileChooser};
 use super::gesture_frame::GestureFrame;
 use super::history::History;
 use super::keyboard::{self, KeyboardState};
+use super::mouse_buttons;
 use super::opening::OpeningOutcome;
 use super::preview_panel::PreviewView;
 use super::selection::Selection;
@@ -596,8 +607,9 @@ impl FastForwardApplication {
         self.audio_supplier.update(content, clock, now);
     }
 
-    /// Turns the keyboard into commands (see [`keyboard`]), unless something is in the way.
-    fn collect_keyboard_commands(&self, context: &Context, frame_state: &FrameState, commands: &mut Vec<Command>) {
+    /// Turns the keyboard (see [`keyboard`]) and the extra buttons of the mouse (see [`mouse_buttons`]) into commands, unless
+    /// something is in the way.
+    fn collect_shortcut_commands(&self, context: &Context, frame_state: &FrameState, commands: &mut Vec<Command>) {
         if self.is_blocked() {
             return;
         }
@@ -631,6 +643,7 @@ impl FastForwardApplication {
                 can_redo: self.history.can_redo(),
             },
         ));
+        commands.extend(mouse_buttons::commands_for_the_buttons_pressed(context));
     }
 
     /// The frames where the clips begin and end that the keys that go to the end of a clip go between: those of the selected
@@ -667,7 +680,7 @@ impl FastForwardApplication {
         let frame_state = self.prepare_frame(&context, now);
 
         let mut commands = Vec::new();
-        self.collect_keyboard_commands(&context, &frame_state, &mut commands);
+        self.collect_shortcut_commands(&context, &frame_state, &mut commands);
         self.draw(ui, &frame_state, &mut commands);
         self.ask_for_finer_thumbnails();
         settings_windows::show(

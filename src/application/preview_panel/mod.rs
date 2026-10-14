@@ -14,9 +14,9 @@
 //!
 //! They can be put partly past the edge of the picture. What is past it is not seen (it is cut off,
 //! as in the export), so only the selected one is taken hold of there; and the box of the selected one
-//! (its outline, its corners, the places to turn it from) is drawn over all of the window and taken hold
-//! of wherever it is, over the other panels too. The widgets that take the mouse are made in
-//! `catchers`, and the names the parts of the preview are known by are in `names`.
+//! (its outline, its corners, the places to turn it from) is drawn and taken hold of wherever it is over the preview panel,
+//! outside the picture too, and nowhere else: it is not drawn over the other panels. The widgets that take the mouse are
+//! made in `catchers`, and the names the parts of the preview are known by are in `names`.
 //!
 //! The picture can be zoomed out, to half the size it fits the panel at, and in, until its pixels can be seen, with the wheel
 //! (see `zooming`), and moved about when it is bigger than the panel. Where it is drawn is worked out in `view`, from how it is

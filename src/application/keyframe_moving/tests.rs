@@ -43,12 +43,12 @@ fn three_racks() -> ThreeRacks {
         make_a_keyframe(&mut project, text, PropertyId::Rotation, at, turn(at as f32));
     }
     let middle = the_rack_of_the_text(&project);
-    project.move_rack(middle, to_the_track, 0, None).unwrap();
+    project.move_racks(&[middle], to_the_track, 0, None).unwrap();
     for at in [30, 40] {
         make_a_keyframe(&mut project, text, PropertyId::Rotation, at, turn(at as f32));
     }
     let bottom = the_rack_of_the_text(&project);
-    project.move_rack(bottom, to_the_track, 0, None).unwrap();
+    project.move_racks(&[bottom], to_the_track, 0, None).unwrap();
     for at in [50, 60] {
         make_a_keyframe(&mut project, text, PropertyId::Rotation, at, turn(at as f32));
     }
@@ -88,7 +88,7 @@ impl ThreeRacks {
             .move_keyframes(&[KeyframeMove {
                 keyframe: made,
                 to_rack: rack,
-                to_frame: at,
+                to_frame: i64::try_from(at).unwrap(),
             }])
             .unwrap();
         made
@@ -102,7 +102,10 @@ fn every_one_of(racks: Vec<RackId>) -> impl Fn(RackId) -> Vec<RackId> {
 
 /// Where the moves say the keyframes go: the rack and the frame of its drawer, for each in order.
 fn as_places(moves: &[KeyframeMove]) -> Vec<(RackId, u64)> {
-    moves.iter().map(|moved| (moved.to_rack, moved.to_frame)).collect()
+    moves
+        .iter()
+        .map(|moved| (moved.to_rack, u64::try_from(moved.to_frame).unwrap()))
+        .collect()
 }
 
 fn wanting(racks_down: i64, frames: i64) -> MoveBy {

@@ -246,6 +246,26 @@ fn a_press_just_inside_a_corner_moves_the_text_and_does_not_turn_it() {
 }
 
 #[test]
+fn the_place_to_turn_from_that_is_named_at_each_corner_is_the_place_a_press_turns_from_and_is_round_the_corner() {
+    let (window, _) = window_with_a_text_object_in_the_middle_selected();
+    for corner in Corner::ALL {
+        let place = window.rectangle_of(&turn_handle_label(corner));
+        let at = corner_position(&window, corner);
+
+        // (A press turns the layer from where it is as near the corner as 34 points: the place that is named for screen readers, and
+        // that the widget is made as, is the square round that.)
+        assert!(
+            (place.center() - at).length() < 0.6,
+            "{corner:?}: the place is round the corner: {place:?} and {at:?}"
+        );
+        assert!(
+            (place.width() - 68.0).abs() < 0.6 && (place.height() - 68.0).abs() < 0.6,
+            "{corner:?}: it is twice 34 points wide and tall: {place:?}"
+        );
+    }
+}
+
+#[test]
 fn a_press_far_from_the_text_turns_nothing() {
     let (mut window, text) = window_with_a_text_object_selected();
     let before = placement_of(&window, text);
@@ -613,7 +633,11 @@ fn a_layer_grabbed_by_its_edge_is_dragged_even_when_the_pointer_goes_into_the_la
     assert_eq!(window.application().selected_clip(), Some(behind));
 }
 
-// --- reaching out of the picture and out of the preview ---
+// --- reaching out of the picture, and over the other panels ---
+//
+// The box of the selected video (its outline, its corners, the places to turn it from) reaches out of the picture, and is drawn and
+// taken hold of wherever it is over the preview, but it stops at the edges of the preview: it is not drawn over the other panels,
+// and what is in them works as it does without it.
 
 /// A window with the video selected and put where `area` is, not turned.
 fn window_with_the_video_put_at(area: CanvasArea) -> (Window, ClipId) {
@@ -631,38 +655,79 @@ fn far_before_the_picture() -> CanvasArea {
     CanvasArea::new(-0.2, 0.3, 0.6, 0.4)
 }
 
-#[test]
-fn a_corner_of_the_selected_video_that_is_over_the_properties_panel_can_be_taken_hold_of_there_and_resizes_it() {
-    let (mut window, video) = window_with_the_video_put_at(far_before_the_picture());
-    let handle = corner_position(&window, Corner::TopLeft);
+/// A window with the video selected and put so that its bottom left corner is over an empty place of the properties panel, which is
+/// not over the picture, and is not over anything that the properties panel has to be used with: the video, and the place.
+/// (That the place is empty is checked by dragging from it with nothing selected, which changes nothing.)
+fn window_with_a_corner_over_an_empty_place_of_the_properties_panel() -> (Window, ClipId, Pos2) {
+    let (mut window, video) = window_with_the_video_selected();
+    let properties = window.the_properties_panel();
+    let place = pos2(properties.center().x, properties.bottom() - 40.0);
+    let picture = picture_rectangle_on_the_screen(&window);
+    window.do_this(Command::SetClipPlacement {
+        clip: video,
+        placement: Placement::upright(CanvasArea::new(
+            (place.x - picture.left()) / picture.width(),
+            (place.y - picture.top()) / picture.height() - 0.4,
+            0.8,
+            0.4,
+        )),
+    });
     assert!(
-        window.the_properties_panel().contains(handle),
-        "the setup: the corner is over the properties panel, and not the preview: {handle:?}"
+        properties.contains(place) && corner_position(&window, Corner::BottomLeft).distance(place) < 2.0,
+        "the setup: the corner is at the place, over the properties panel: {place:?}"
     );
-    let before = placement_of(&window, video);
 
-    // Towards the middle of the video: makes it smaller.
-    window.drag(handle, handle + vec2(60.0, 30.0), PointerButton::Primary);
+    window.do_this(Command::Deselect);
+    let project_before = window.application().project().clone();
+    window.drag(place, place + vec2(60.0, -30.0), PointerButton::Primary);
+    assert!(
+        *window.application().project() == project_before,
+        "the setup: nothing of the properties panel is at the place, which a drag from it would have changed"
+    );
+    select(&mut window, video);
+    (window, video, place)
+}
 
-    let after = placement_of(&window, video);
-    assert!(
-        after.area.width() < before.area.width() - 0.02,
-        "{before:?} then {after:?}"
-    );
-    assert!(
-        after.area.height() < before.area.height() - 0.02,
-        "{before:?} then {after:?}: it keeps its shape"
-    );
-    let (fixed_x, fixed_y) = before.area.corner_position(Corner::BottomRight);
-    let (still_x, still_y) = after.area.corner_position(Corner::BottomRight);
-    assert!(
-        (fixed_x - still_x).abs() < 1e-3 && (fixed_y - still_y).abs() < 1e-3,
-        "the corner across stays where it was: {before:?} then {after:?}"
-    );
+/// What the speed of the clip is.
+fn speed_of(window: &Window, clip: ClipId) -> crate::project::SpeedFactor {
+    window
+        .application()
+        .project()
+        .placement_of(clip)
+        .unwrap()
+        .clip
+        .as_media()
+        .unwrap()
+        .speed()
+}
+
+/// Whether the sound of the clip is switched off.
+fn is_muted(window: &Window, clip: ClipId) -> bool {
+    window
+        .application()
+        .project()
+        .placement_of(clip)
+        .unwrap()
+        .clip
+        .as_media()
+        .unwrap()
+        .is_muted()
 }
 
 #[test]
-fn a_handle_that_is_over_a_control_of_the_properties_panel_takes_the_press_and_the_control_does_not() {
+fn a_corner_of_the_selected_video_that_is_over_the_properties_panel_is_not_there_to_be_taken_hold_of() {
+    let (mut window, video, handle) = window_with_a_corner_over_an_empty_place_of_the_properties_panel();
+    let before = placement_of(&window, video);
+
+    // Towards the middle of the video: would make it smaller, if the corner were taken hold of.
+    window.drag(handle, handle + vec2(60.0, -30.0), PointerButton::Primary);
+
+    assert_eq!(placement_of(&window, video), before, "the video is as it was");
+}
+
+#[test]
+fn a_control_of_the_properties_panel_that_a_corner_of_the_selected_video_is_over_takes_the_press_and_the_video_is_not_resized()
+ {
     let (mut window, video) = window_with_the_video_selected();
     let speed_slider = window.rectangle_of("Speed").center();
     let picture = picture_rectangle_on_the_screen(&window);
@@ -683,154 +748,100 @@ fn a_handle_that_is_over_a_control_of_the_properties_panel_takes_the_press_and_t
         "the setup: the corner is on the slider: {handle:?}, {speed_slider:?}"
     );
     let before = placement_of(&window, video);
-    let speed_before = window
-        .application()
-        .project()
-        .placement_of(video)
-        .unwrap()
-        .clip
-        .as_media()
-        .unwrap()
-        .speed();
+    let speed_before = speed_of(&window, video);
 
     window.drag(handle, handle + vec2(20.0, 20.0), PointerButton::Primary);
 
-    let after = placement_of(&window, video);
-    assert!(
-        after.area.width() < before.area.width() - 0.01,
-        "the corner took the press: {before:?} then {after:?}"
-    );
-    let speed_after = window
-        .application()
-        .project()
-        .placement_of(video)
-        .unwrap()
-        .clip
-        .as_media()
-        .unwrap()
-        .speed();
-    assert_eq!(speed_after, speed_before, "and the slider under it did not");
+    assert_ne!(speed_of(&window, video), speed_before, "the slider took the press");
+    assert_eq!(placement_of(&window, video), before, "and the corner over it did not");
 }
 
 #[test]
-fn a_corner_over_the_properties_panel_pressed_in_the_frame_of_the_move_that_brought_the_pointer_to_it_is_taken_hold_of()
-{
-    let (mut window, video) = window_with_the_video_put_at(far_before_the_picture());
-    let handle = corner_position(&window, Corner::TopLeft);
-    let before = placement_of(&window, video);
-    point_at(&mut window, handle + vec2(150.0, 100.0));
-
-    window.all_in_one_frame([
-        Event::PointerMoved(handle),
-        button_pressed_at(handle, PointerButton::Primary),
-    ]);
-    for step in 1..=6 {
-        window.move_pointer_to(handle + vec2(10.0 * step as f32, 5.0 * step as f32));
-    }
-    window.release(handle + vec2(60.0, 30.0), PointerButton::Primary);
-    window.settle();
-
-    let after = placement_of(&window, video);
-    assert!(
-        after.area.width() < before.area.width() - 0.02,
-        "the corner was taken hold of: {before:?} then {after:?}"
-    );
-}
-
-#[test]
-fn a_place_to_turn_from_that_is_over_the_properties_panel_turns_the_selected_video() {
-    let (mut window, video) = window_with_the_video_put_at(far_before_the_picture());
+fn a_place_to_turn_from_that_is_over_the_properties_panel_is_not_there_to_turn_the_selected_video_from() {
+    let (mut window, video, _handle) = window_with_a_corner_over_an_empty_place_of_the_properties_panel();
     let middle = middle_of_the_layer(&window);
-    let start = just_outside(&window, Corner::TopLeft, 18.0);
+    let start = just_outside(&window, Corner::BottomLeft, 18.0);
     assert!(
         window.the_properties_panel().contains(start),
         "the setup: it is over the properties panel: {start:?}"
     );
+    let before = placement_of(&window, video);
 
     window.drag(start, turned_about(start, middle, 20.0), PointerButton::Primary);
 
-    assert_degrees(
-        placement_of(&window, video).rotation,
-        20.0,
-        "turned from a place over the properties panel",
-    );
+    assert_eq!(placement_of(&window, video), before, "the video is as it was");
 }
 
 #[test]
-fn the_box_of_the_selected_video_is_drawn_over_the_properties_panel_and_not_cut_off_where_the_preview_ends() {
+fn the_box_of_the_selected_video_is_cut_off_where_the_preview_ends_and_none_of_it_is_drawn_over_the_other_panels() {
     let (window, _video) = window_with_the_video_put_at(far_before_the_picture());
     let handle = corner_position(&window, Corner::TopLeft);
+    let (properties, preview, timeline) = (
+        window.the_properties_panel(),
+        window.the_preview_panel(),
+        window.the_timeline_panel(),
+    );
+    assert!(
+        properties.contains(handle),
+        "the setup: the corner is over the properties panel: {handle:?}"
+    );
     let drawn = window.clipped_shapes_drawn();
 
-    let properties_panel = drawn
+    // What is drawn of the box is what is of the colour of its outline, and what is seen of it is where it is not cut off.
+    let parts_of_the_box: Vec<(egui::Rect, egui::Rect)> = drawn
         .iter()
-        .position(|(_, shape)| matches!(shape, Shape::Rect(panel) if panel.fill == theme::PANEL_BACKGROUND && panel.rect == window.the_properties_panel()))
-        .expect("the properties panel is drawn");
-    let outline = drawn
-        .iter()
-        .position(|(_, shape)| {
-            matches!(shape, Shape::Path(path) if path.closed && path.stroke.color == ColorMode::Solid(theme::SELECTION_OUTLINE))
+        .filter(|(_, shape)| match shape {
+            Shape::Path(path) => path.closed && path.stroke.color == ColorMode::Solid(theme::SELECTION_OUTLINE),
+            Shape::Rect(square) => square.fill == theme::SELECTION_OUTLINE,
+            _ => false,
         })
-        .expect("the outline of the selected video is drawn");
-    assert!(
-        drawn[outline].0.contains(handle),
-        "the outline is not cut off before the corner that is over the properties panel: {:?}",
-        drawn[outline].0
+        .map(|(cut_off_at, shape)| (*cut_off_at, cut_off_at.intersect(shape.visual_bounding_rect())))
+        .collect();
+    assert_eq!(
+        parts_of_the_box.len(),
+        5,
+        "the outline and the four squares at the corners"
     );
-    assert!(
-        outline > properties_panel,
-        "and it is drawn over the panel, not under it"
-    );
-
-    let square = drawn
-        .iter()
-        .find(|(_, shape)| {
-            matches!(shape, Shape::Rect(square) if square.fill == theme::SELECTION_OUTLINE && square.rect.center().distance(handle) < 1.0)
-        })
-        .expect("the square at the corner is drawn");
-    assert!(
-        square.0.contains_rect(square.1.visual_bounding_rect()),
-        "and so is the square at the corner, whole"
-    );
+    for (cut_off_at, seen) in parts_of_the_box {
+        assert!(
+            preview.expand(0.5).contains_rect(cut_off_at),
+            "it is cut off at the edge of the preview: {cut_off_at:?}, the preview is {preview:?}"
+        );
+        for other in [properties, timeline] {
+            assert!(
+                !seen.intersects(other),
+                "none of it is seen over another panel: {seen:?} is over {other:?}"
+            );
+        }
+    }
 }
 
 #[test]
-fn what_is_in_the_properties_panel_under_the_box_of_the_selected_video_and_not_under_one_of_its_corners_still_works() {
+fn what_is_in_the_properties_panel_still_works_under_the_box_of_the_selected_video_and_under_a_corner_of_it() {
     let (mut window, video) = window_with_the_video_put_at(far_before_the_picture());
     let mute = window.rectangle_of("Mute").center();
-    for corner in Corner::ALL {
-        let place_of_the_corner = corner_position(&window, corner);
-        assert!(
-            place_of_the_corner.distance(mute) > 60.0,
-            "the setup: the box to tick is not under the {corner:?} corner: {place_of_the_corner:?}, {mute:?}"
-        );
-    }
+    // (A corner is put right over the box that is ticked: a box that is wide enough to be put so far before the picture, which
+    // keeps the middle of a box on it.)
+    let picture = picture_rectangle_on_the_screen(&window);
+    window.do_this(Command::SetClipPlacement {
+        clip: video,
+        placement: Placement::upright(CanvasArea::new(
+            (mute.x - picture.left()) / picture.width(),
+            (mute.y - picture.top()) / picture.height(),
+            0.8,
+            0.4,
+        )),
+    });
     assert!(
-        !window
-            .application()
-            .project()
-            .placement_of(video)
-            .unwrap()
-            .clip
-            .as_media()
-            .unwrap()
-            .is_muted()
+        corner_position(&window, Corner::TopLeft).distance(mute) < 2.0,
+        "the setup: a corner is over the box that is ticked: {:?}, {mute:?}",
+        corner_position(&window, Corner::TopLeft),
     );
+    assert!(!is_muted(&window, video));
 
     window.click(mute);
 
-    assert!(
-        window
-            .application()
-            .project()
-            .placement_of(video)
-            .unwrap()
-            .clip
-            .as_media()
-            .unwrap()
-            .is_muted(),
-        "the box was ticked"
-    );
+    assert!(is_muted(&window, video), "the box was ticked");
 }
 
 #[test]
@@ -965,6 +976,88 @@ fn a_corner_of_the_selected_video_that_is_over_the_preview_but_not_over_the_pict
     assert!(
         after.area.width() < before.area.width() - 0.02,
         "{before:?} then {after:?}"
+    );
+}
+
+#[test]
+fn a_corner_over_the_preview_but_not_the_picture_pressed_in_the_frame_of_the_move_that_brought_the_pointer_to_it_is_taken_hold_of()
+ {
+    let (mut window, video) = window_with_a_standing_video_put_at(CanvasArea::new(-0.5, 0.3, 0.8, 0.4));
+    let handle = corner_position(&window, Corner::TopLeft);
+    assert!(
+        handle.x < picture_rectangle_on_the_screen(&window).left() && window.the_preview_panel().contains(handle),
+        "the setup: {handle:?}"
+    );
+    let before = placement_of(&window, video);
+    point_at(&mut window, handle + vec2(100.0, 100.0));
+
+    window.all_in_one_frame([
+        Event::PointerMoved(handle),
+        button_pressed_at(handle, PointerButton::Primary),
+    ]);
+    for step in 1..=6 {
+        window.move_pointer_to(handle + vec2(10.0 * step as f32, 5.0 * step as f32));
+    }
+    window.release(handle + vec2(60.0, 30.0), PointerButton::Primary);
+    window.settle();
+
+    let after = placement_of(&window, video);
+    assert!(
+        after.area.width() < before.area.width() - 0.02,
+        "the corner was taken hold of: {before:?} then {after:?}"
+    );
+}
+
+#[test]
+fn a_place_to_turn_from_that_is_over_the_preview_but_not_the_picture_turns_the_selected_video() {
+    let (mut window, video) = window_with_a_standing_video_put_at(CanvasArea::new(-0.5, 0.3, 0.8, 0.4));
+    let middle = middle_of_the_layer(&window);
+    let start = just_outside(&window, Corner::TopLeft, 18.0);
+    assert!(
+        start.x < picture_rectangle_on_the_screen(&window).left() && window.the_preview_panel().contains(start),
+        "the setup: it is before the picture, over the preview: {start:?}"
+    );
+
+    window.drag(start, turned_about(start, middle, 20.0), PointerButton::Primary);
+
+    assert_degrees(
+        placement_of(&window, video).rotation,
+        20.0,
+        "turned from a place that is over the preview and not over the picture",
+    );
+}
+
+#[test]
+fn the_box_of_the_selected_video_is_drawn_whole_where_it_reaches_out_of_the_picture_over_the_preview() {
+    let (window, _video) = window_with_a_standing_video_put_at(CanvasArea::new(-0.5, 0.3, 0.8, 0.4));
+    let handle = corner_position(&window, Corner::TopLeft);
+    let preview = window.the_preview_panel();
+    assert!(
+        handle.x < picture_rectangle_on_the_screen(&window).left() && preview.contains(handle),
+        "the setup: the corner is before the picture, over the preview: {handle:?}"
+    );
+
+    let drawn = window.clipped_shapes_drawn();
+    let (cut_off_at, square) = drawn
+        .iter()
+        .find(|(_, shape)| {
+            matches!(shape, Shape::Rect(square) if square.fill == theme::SELECTION_OUTLINE && square.rect.center().distance(handle) < 1.0)
+        })
+        .expect("the square at the corner is drawn");
+    assert!(
+        cut_off_at.contains_rect(square.visual_bounding_rect()),
+        "the square at the corner that is before the picture is drawn whole: {cut_off_at:?}"
+    );
+    let outline = drawn
+        .iter()
+        .find(|(_, shape)| {
+            matches!(shape, Shape::Path(path) if path.closed && path.stroke.color == ColorMode::Solid(theme::SELECTION_OUTLINE))
+        })
+        .expect("the outline of the selected video is drawn");
+    assert!(
+        outline.0.contains(handle),
+        "and so is the outline: it is not cut off at the edge of the picture: {:?}",
+        outline.0
     );
 }
 

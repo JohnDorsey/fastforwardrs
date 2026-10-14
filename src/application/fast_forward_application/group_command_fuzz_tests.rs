@@ -147,7 +147,7 @@ impl Fuzz {
     fn a_command(&mut self) -> Option<(&'static str, Command)> {
         let clips = self.clips();
         let tracks = self.tracks();
-        Some(match self.below(26) {
+        Some(match self.below(29) {
             0..=2 => {
                 let count = 1 + self.below(4);
                 let members: Vec<Member> = (0..count).filter_map(|_| self.some(&clips)).map(Member::Clip).collect();
@@ -291,7 +291,7 @@ impl Fuzz {
                 let start = TimelineFrameIndex::new(self.below(120) as u64);
                 (
                     "move a clip",
-                    Command::MoveClips(vec![ClipMove { clip, to_track, start }]),
+                    Command::move_clips(vec![ClipMove { clip, to_track, start }]),
                 )
             }
             24 => match self.below(4) {
@@ -316,6 +316,25 @@ impl Fuzz {
                     },
                 ),
             },
+            26..=27 => {
+                let groups = self.groups(Some(GroupKind::ClipGroup));
+                let group = self.some(&groups)?;
+                let frame = self.below(200) as u64;
+                let rectangle = self.project().rectangle_of_the_group(group)?;
+                let (first_frame, end_frame) = if self.below(2) == 0 {
+                    (frame, rectangle.end_frame)
+                } else {
+                    (rectangle.first_frame, frame)
+                };
+                (
+                    "move an edge of a clip group",
+                    Command::SetTheFramesOfAClipGroup {
+                        group,
+                        first_frame,
+                        end_frame,
+                    },
+                )
+            }
             _ => {
                 let groups = self.groups(None);
                 let group = self.some(&groups)?;

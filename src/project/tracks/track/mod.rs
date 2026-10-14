@@ -17,6 +17,7 @@
 #[cfg(test)]
 mod animation_tests;
 mod copying;
+mod crates;
 mod editing;
 mod effects;
 #[cfg(test)]
@@ -339,12 +340,14 @@ impl Track {
         self.take_next_rack_id()
     }
 
-    /// Takes away the racks in the drawers of the track and of its clips that animate `target`.
-    pub(in crate::project) fn remove_the_racks_that_animate(&mut self, target: AnimationTarget) {
+    /// Takes away the racks in the drawers of the track and of its clips that animate `target`, and says which clips had racks taken from
+    /// their drawers.
+    pub(in crate::project) fn remove_the_racks_that_animate(&mut self, target: AnimationTarget) -> Vec<ClipId> {
         self.drawer.remove_the_racks_of(target);
-        for entry in &mut self.entries {
-            entry.drawer.remove_the_racks_of(target);
-        }
+        self.entries
+            .iter_mut()
+            .filter_map(|entry| (entry.drawer.remove_the_racks_of(target) > 0).then_some(entry.id))
+            .collect()
     }
 
     pub fn entries(&self) -> &[TrackEntry] {

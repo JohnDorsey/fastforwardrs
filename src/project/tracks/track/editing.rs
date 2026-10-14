@@ -62,6 +62,12 @@ pub enum ClipEditError {
     NotOnThePicture { clip: ClipId },
     #[error("{clip} lasts as long as the part of its video or sound it is made from, so this does not apply to it")]
     LastsAsLongAsItsFile { clip: ClipId },
+    #[error(
+        "{clip} is a keyframe crate, which lasts from its first keyframe to its last, so this does not apply to it"
+    )]
+    LastsAsLongAsItsKeyframes { clip: ClipId },
+    #[error("{clip} is not a keyframe crate, so this does not apply to it")]
+    NotAKeyframeCrate { clip: ClipId },
     #[error("{clip} would be on top of another clip there")]
     WouldOverlap { clip: ClipId },
     #[error("{property:?} is not a property of {clip}, or the value is not the kind it has")]
@@ -319,6 +325,9 @@ impl Track {
     /// frame).
     pub fn duration_a_clip_would_be_given(&self, clip: ClipId, duration_in_frames: u64) -> Result<u64, ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
+        if matches!(self.entries[index].clip, Clip::Crate(_)) {
+            return Err(ClipEditError::LastsAsLongAsItsKeyframes { clip });
+        }
         let start = self.first_timeline_frames[index];
         let longest = self
             .first_timeline_frames

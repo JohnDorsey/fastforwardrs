@@ -3,6 +3,7 @@ use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::*;
+use crate::test_support::check_every_case_at_once;
 
 /// Thresholds so low that the zip64 forms are made for small things: a file of 10 bytes is long, an entry that begins 100 bytes in is
 /// far, and three entries are many.
@@ -554,9 +555,12 @@ fn whatever_part_of_a_save_was_written_the_archive_is_as_it_was_before_it() {
         "what was there is not changed"
     );
 
-    // Every length that the file could have been left at.
-    for length in before_bytes.len() + 1..after_bytes.len() {
-        let cut = archive_in(&folder, "cut.ffrs");
+    // Every length that the file could have been left at (several at once: each takes a file to be written and read again, and there are
+    // thousands, which took half a minute one after another; each thread has a file of its own).
+    let lengths: Vec<usize> = (before_bytes.len() + 1..after_bytes.len()).collect();
+    check_every_case_at_once(&lengths, |&length| {
+        let thread = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
+        let cut = archive_in(&folder, &format!("cut-{thread}.ffrs"));
         fs::write(&cut, &after_bytes[..length]).unwrap();
 
         let directory = directory_of(&cut);
@@ -586,7 +590,7 @@ fn whatever_part_of_a_save_was_written_the_archive_is_as_it_was_before_it() {
         } else {
             assert_eq!(cut_off, 0, "a few bytes may be anything: left at {length}");
         }
-    }
+    });
 }
 
 #[test]

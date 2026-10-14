@@ -1,13 +1,20 @@
 //! A keyframe crate: a clip that has no picture and no sound, and holds racks of keyframes in its drawer.
 //!
 //! A crate is how racks of keyframes are put on a track on their own, where they are not in the drawer of a clip: it is a
-//! stretch of the track, which lasts as long as it says (whatever the speed of its track, like a picture), and is nothing
-//! but a drawer that is always open. It cannot have a drawer, because that is what it is.
+//! stretch of the track (whatever the speed of its track, like a picture), and is nothing but a drawer that is always open.
+//! It cannot have a drawer, because that is what it is.
 //!
-//! What is in a crate is in the drawer of its place on the track (see [`super::TrackEntry`]), as for any clip: it moves,
-//! is cut, stretched and deleted with it.
+//! **A crate lasts exactly as long as the keyframes in it need**: from the frame of the first of them, in whichever of its racks,
+//! to the frame of the last (and so at least one frame, for a crate with one keyframe). Nobody sets how long it lasts: it shrinks
+//! when keyframes are taken out or moved in, and grows when keyframes come that need more room (where there is room for it:
+//! see `Project::fit_the_crate` and `Project::make_the_crate_begin_by`, which keep it so).
+//!
+//! What is in a crate is in the drawer of its place on the track (see [`super::TrackEntry`]), as for any clip, counted in frames
+//! from the first frame of the crate: it moves, is cut and deleted with it.
 
 use thiserror::Error;
+
+use crate::project::FrameRate;
 
 /// Returned when a crate would last no time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -33,10 +40,14 @@ impl CrateClip {
         self.duration_in_frames
     }
 
-    /// The same crate lasting a different number of frames, or `None` if that is none at all.
+    /// The crate as it is when its project runs at the frame rate `to` and not `from`: it lasts as long as it did, counted again at the
+    /// new rate (for at least one frame). Its keyframes are counted again with it, and it is made as long as they need afterwards (see
+    /// `Project::fit_every_crate`).
     #[must_use]
-    pub fn with_duration_in_frames(&self, duration_in_frames: u64) -> Option<Self> {
-        Self::new(duration_in_frames).ok()
+    pub fn retimed(&self, from: FrameRate, to: FrameRate) -> Self {
+        Self {
+            duration_in_frames: from.convert_frame_count_to(self.duration_in_frames, to).max(1),
+        }
     }
 
     /// Cuts the crate in two after its first `frames_in` frames, or `None` if that is not strictly inside it.
@@ -63,14 +74,28 @@ mod tests {
     fn a_crate_lasts_at_least_a_frame() {
         assert_eq!(CrateClip::new(0), Err(EmptyCrate));
         assert_eq!(CrateClip::new(1).unwrap().duration_in_frames(), 1);
-        assert!(CrateClip::new(5).unwrap().with_duration_in_frames(0).is_none());
+        assert_eq!(CrateClip::new(9).unwrap().duration_in_frames(), 9);
+    }
+
+    #[test]
+    fn a_crate_counted_again_at_another_frame_rate_lasts_as_long_in_time_and_a_frame_at_the_least() {
+        let rate = |frames_per_second| FrameRate::from_whole_frames_per_second(frames_per_second).unwrap();
+        let crate_clip = CrateClip::new(31).unwrap();
+
+        assert_eq!(crate_clip.retimed(rate(30), rate(60)).duration_in_frames(), 62);
         assert_eq!(
-            CrateClip::new(5)
+            crate_clip.retimed(rate(30), rate(15)).duration_in_frames(),
+            16,
+            "half a frame is rounded up"
+        );
+        assert_eq!(crate_clip.retimed(rate(30), rate(30)), crate_clip);
+        assert_eq!(
+            CrateClip::new(1)
                 .unwrap()
-                .with_duration_in_frames(9)
-                .unwrap()
+                .retimed(rate(30), rate(12))
                 .duration_in_frames(),
-            9
+            1,
+            "a frame at 30 per second would last no time at 12 per second, and a crate has to last"
         );
     }
 

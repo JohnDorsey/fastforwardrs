@@ -5,7 +5,7 @@ use super::tests::{
     assert_same_content, edited_project, link_to_missing_video, project_with_everything, saved, version_line,
 };
 use super::*;
-use crate::project::{Badge, ChainItemKey, GroupColour, GroupKind, Member, TimelineFrameIndex};
+use crate::project::{Badge, ChainItemKey, GroupColour, GroupKind, Member, RackDestination, TimelineFrameIndex};
 
 fn turn(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
@@ -35,7 +35,24 @@ pub(super) fn a_project_with_groups_of_every_kind() -> Project {
         project.tracks()[2].entries()[0].id(),
         project.tracks()[2].entries()[1].id(),
     );
-    let a_crate = project.insert_crate(captions, TimelineFrameIndex::new(0), 50).unwrap();
+    // (A keyframe crate that has no keyframes in it does not stay, so this one is made as it is when it is made by the person using the
+    // editor: by taking a rack out of the drawer of the first video, and it lasts a frame, where its keyframe is, before the text object.)
+    let rack = project
+        .add_keyframe(
+            AnimationTarget::Clip(first_video),
+            PropertyId::Rotation,
+            TimelineFrameIndex::new(10),
+        )
+        .unwrap()
+        .unwrap()
+        .rack;
+    let before_the_text = RackDestination::NewCrate {
+        track: captions,
+        from_frame: 0,
+        until_frame: 100,
+    };
+    project.move_racks(&[rack], before_the_text, 0, None).unwrap();
+    let a_crate = project.tracks()[0].entries()[0].id();
 
     let tag = project
         .create_group(

@@ -248,11 +248,11 @@ fn rows_never_take_up_more_of_the_window_than_three_rows_of_the_normal_height() 
         set_height(&mut window, position, 10_000.0);
     }
     let first = window.strip_of_track(0);
-    let slider = window.rectangle_of("Position in the video");
+    let bottom_of_the_rows = window.the_bottom_of_what_can_be_seen_of_the_rows();
     let three_normal_rows = 3.0 * TrackHeight::DEFAULT_IN_POINTS + 2.0 * theme::SPACE_BETWEEN_TRACKS;
     assert!(
-        slider.top() - first.top() < three_normal_rows + 80.0,
-        "{} points from the top of the rows to the slider along the bottom",
-        slider.top() - first.top()
+        bottom_of_the_rows - first.top() < three_normal_rows + 80.0,
+        "{} points from the top of the rows to where they end at the bottom",
+        bottom_of_the_rows - first.top()
     );
 }

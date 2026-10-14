@@ -11,8 +11,10 @@
 //!   properties panel). Right-clicking an empty part of a strip opens a menu to put something new there.
 //! * Clicking the box of a track selects the track.
 //! * The mouse wheel (or a trackpad) scrolls the strips without moving the current frame.
-//! * Groups are drawn as outlines in their colours over the clips and under the playhead (see `group_outlines`); they are not clicked or
-//!   dragged there. Dragging clips stops against the rectangle of a clip group (see [`super::clip_moving`]).
+//! * Groups are drawn as outlines in their colours over the clips and under the playhead (see `group_outlines`). The pointer over a clip group
+//!   or a tag shows its name in a bar on its top edge, which selects the group when it is clicked and moves it, with everything in it, when it
+//!   is dragged (see `group_title_bars`); the left and right edges of a clip group are taken hold of to make it take in clips or let go of them
+//!   (see `group_edges`). A clip that is dragged into the rectangle of a clip group joins it (see [`super::clip_moving`]).
 //!
 //! Cutting is done with a key (see the `keyboard` module), not with the mouse.
 
@@ -23,7 +25,9 @@ mod clips;
 mod drawers;
 mod flash;
 mod grip_dots;
+mod group_edges;
 mod group_outlines;
+mod group_title_bars;
 mod header;
 mod item_dragging;
 mod playhead;
@@ -39,13 +43,15 @@ mod strip_view;
 mod top_row;
 mod track_reordering;
 mod track_resize;
+mod vertical_zoom;
+mod view_history;
 mod view_state;
 
 use std::collections::HashMap;
 
 use egui::containers::panel::PanelState;
 use egui::scroll_area::{DragScroll, ScrollSource};
-use egui::{Context, Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2};
+use egui::{Context, Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 // The names the parts of the timeline are known by to screen readers, which the tests look them up by.
 pub use drawers::DrawerSound;
@@ -54,6 +60,8 @@ pub use drawers::{drawer_button_label, track_drawer_button_label};
 #[cfg(test)]
 pub use grip_dots::VERTICES_PER_DOT as VERTICES_IN_A_GRIP_DOT;
 pub use grip_dots::{Arrangement as GripDotArrangement, draw as draw_grip_dots};
+#[cfg(test)]
+pub use group_title_bars::HEIGHT as HEIGHT_OF_A_GROUP_TITLE_BAR;
 #[cfg(test)]
 pub use header::{HEIGHT_THE_BOX_NEEDS, TITLE_HEIGHT as HEIGHT_OF_THE_ROOM_FOR_A_TITLE};
 #[cfg(test)]
@@ -148,6 +156,8 @@ pub fn prepare(context: &Context, content: &TimelineContent<'_>, state: &mut Tim
     if state.drawers.advance(context.input(|input| input.stable_dt)) {
         context.request_repaint();
     }
+    state.begin_a_frame_of_the_view();
+    scrolling::zoom_the_rows(context, content.project, state);
     let growth = growth_of_the_rows_area(content.project, state);
     if growth != 0.0
         && let Some(panel) = PanelState::load(context, Id::new(PANEL_ID))
@@ -173,7 +183,7 @@ fn growth_of_the_rows_area(project: &Project, state: &TimelineViewState) -> f32 
     if state.track_resize.is_some() {
         return 0.0;
     }
-    let height_laid_out_now = RowsLayout::of(project, &state.drawers).total_height();
+    let height_laid_out_now = RowsLayout::of(project, &state.drawers, state.vertical_zoom).total_height();
     let content_height_now = (last.content_height + height_laid_out_now - last.height_laid_out).max(0.0);
     let tallest = tallest_rows_area();
     content_height_now.min(tallest) - last.content_height.min(tallest)
@@ -237,6 +247,10 @@ pub fn show(
     // the rows the boundary being dragged would stay where it is on the screen while the pointer
     // went on without it. (When the button is let go the rows are as tall as they are.)
     let height_while_resizing = state.track_resize.map(|resize| resize.rows_area_height);
+    // The rows are as tall as they are, up to this much, whatever room the panel had in the frame before (a panel is as tall
+    // as what was in it, so the room it has is what the rows took then: a rows area that could be no taller than that would
+    // stay as short as the first frame made it, and the rows would never be seen whole).
+    let tallest_height_of_the_area = height_while_resizing.unwrap_or_else(tallest_rows_area);
     // The scroll bar of the rows is a thin one that stays in sight (in the room left for it at the
     // right) while there are more rows than fit, so that it is clear that there are more.
     let rows_scope = ui.scope(|ui| {
@@ -246,7 +260,8 @@ pub fn show(
         scroll_bar.foreground_color = true;
         ScrollArea::vertical()
             .id_salt("timeline tracks")
-            .max_height(height_while_resizing.unwrap_or_else(tallest_rows_area))
+            .max_height(tallest_height_of_the_area)
+            .min_scrolled_height(tallest_height_of_the_area)
             .auto_shrink([false, height_while_resizing.is_none()])
             .vertical_scroll_offset(state.rows_scroll_offset)
             .scroll_source(ScrollSource {
@@ -277,34 +292,63 @@ pub fn show(
     });
     let rows = rows_scope.inner;
     let strip_views = rows.inner;
+    // What can be seen of the rows: the area they scroll in, as tall as it came out when it shrank to fit them (and not as tall
+    // as the room it had, which is what the rectangle it reports is).
+    let rows_view = Rect::from_min_size(
+        rows.inner_rect.min,
+        vec2(rows.inner_rect.width(), rows_scope.response.rect.height()),
+    );
     ui.spacing_mut().item_spacing.y = previous_item_spacing;
-    item_dragging::keep_dragging(ui, content, state, &strip_views, rows.inner_rect, commands);
+    item_dragging::keep_dragging(ui, content, state, &strip_views, rows_view, commands);
     rack_dragging::keep_dragging(ui, content, state, &strip_views, commands);
+    group_edges::keep_moving(ui, content, state, strip_views.first().map(|(_, view)| view), commands);
     // The outlines of the groups go over the clips and under the playhead. (Not while a track is being moved: the rows are somewhere else for
     // that while, and the groups are round the tracks as they are in the list.)
     if state.track_reorder.is_none() {
         // (The outline of a group is a little way out from the rows it goes round: the top of it, over the first row, goes over the bottom of
         // the ruler, which is right above, and the left of that of a track group, a little way out from the title boxes that are at the left
         // edge of the rows, goes as far left as the panel does.)
-        let top = (rows.inner_rect.top() - group_outlines::MOST_ROOM_ABOVE_THE_ROWS).max(ruler_rectangle.top());
-        group_outlines::draw(
-            ui.painter(),
+        let top = (rows_view.top() - group_outlines::MOST_ROOM_ABOVE_THE_ROWS).max(ruler_rectangle.top());
+        let outlines = group_outlines::outlines_of_the_groups(
             content.project,
-            content.selection,
             group_outlines::WhereTheRowsAre {
                 views: &strip_views,
                 left_of_the_title_boxes: ruler_rectangle.left() - strips_offset,
+                an_edge_shown_elsewhere: state.group_edge_move.as_ref().map(|moving| {
+                    group_outlines::EdgeShownElsewhere {
+                        group: moving.group,
+                        edge: moving.edge,
+                        frame: moving.shown,
+                    }
+                }),
             },
+        );
+        let strips_area = Rect::from_min_max(
+            pos2(ruler_rectangle.left(), top),
+            pos2(ruler_rectangle.right(), rows_view.bottom()),
+        );
+        group_outlines::draw(
+            ui.painter(),
+            &outlines,
+            content.selection,
             (
-                Rect::from_min_max(
-                    pos2(ruler_rectangle.left(), top),
-                    pos2(ruler_rectangle.right(), rows.inner_rect.bottom()),
-                ),
-                Rect::from_min_max(
-                    pos2(ui.clip_rect().left().min(rows.inner_rect.left()), top),
-                    rows.inner_rect.max,
-                ),
+                strips_area,
+                Rect::from_min_max(pos2(ui.clip_rect().left().min(rows_view.left()), top), rows_view.max),
             ),
+        );
+        group_edges::show_the_handles(ui, content, state, &outlines, strips_area);
+        // (A name can be over the ruler, which is right above the first row.)
+        group_title_bars::show(
+            ui,
+            content,
+            state,
+            &outlines,
+            Rect::from_min_max(
+                pos2(ruler_rectangle.left(), ruler_rectangle.top()),
+                pos2(ruler_rectangle.right(), rows_view.bottom()),
+            ),
+            (&strip_views, rows_view),
+            commands,
         );
     }
     if content.can_edit {
@@ -313,24 +357,25 @@ pub fn show(
 
     let strips_rectangle = Rect::from_min_max(
         pos2(ruler_rectangle.left(), ruler_rectangle.bottom()),
-        pos2(ruler_rectangle.right(), rows.inner_rect.bottom()),
+        pos2(ruler_rectangle.right(), rows_view.bottom()),
     );
     state.strips_area_in_the_last_frame = Some(ruler_rectangle.union(strips_rectangle));
-    state.timeline_area_in_the_last_frame = Some(top_row.rectangle.union(rows.inner_rect));
+    state.timeline_area_in_the_last_frame = Some(top_row.rectangle.union(rows_view));
+    state.rows_view_in_the_last_frame = Some(rows_view);
     state.rows_scroll_offset = rows.state.offset.y;
     state.rows_area_height = rows_scope.response.rect.height();
     state.rows_in_the_last_frame = Some(RowsInTheLastFrame {
         content_height: rows.content_size.y,
-        height_laid_out: RowsLayout::of(content.project, &state.drawers).total_height(),
+        height_laid_out: RowsLayout::of(content.project, &state.drawers, state.vertical_zoom).total_height(),
     });
-    bring_the_drawer_that_is_opening_into_view(state, rows.inner_rect, &context);
+    bring_the_drawer_that_is_opening_into_view(state, rows_view, &context);
     // A track dragged to the top or the bottom of the rows brings the rows beyond it into view.
     if state.track_reorder.is_some() {
         state.rows_scroll_offset += track_reordering::scroll_while_dragging_a_track(
             context
                 .input(|input| input.pointer.interact_pos())
                 .map(|pointer| pointer.y),
-            (rows.inner_rect.top(), rows.inner_rect.bottom()),
+            (rows_view.top(), rows_view.bottom()),
             context.input(|input| input.stable_dt),
         );
     }
@@ -343,7 +388,7 @@ pub fn show(
     racks::draw_the_labels(&context, &state.rack_labels);
     racks::draw_the_message_by_the_pointer(&context, state.pointer_message.as_deref());
     flash::draw_over(
-        &ui.painter().with_clip_rect(rows.inner_rect),
+        &ui.painter().with_clip_rect(rows_view),
         strip_views.iter().map(|(track, view)| (track.id(), view)),
         &state.cut_flashes,
         context.input(|input| input.time),
@@ -353,6 +398,7 @@ pub fn show(
         state.track_resize = None;
         state.track_reorder = None;
     }
+    state.end_a_frame_of_the_view(context.input(|input| input.time));
 }
 
 /// While a drawer that was just opened slides open, scrolls the rows down, as far as it takes for the bottom of the drawer to be
@@ -473,7 +519,7 @@ mod tests {
     ) -> TimelineViewState {
         state.rows_in_the_last_frame = Some(RowsInTheLastFrame {
             content_height,
-            height_laid_out: RowsLayout::of(project, &state.drawers).total_height(),
+            height_laid_out: RowsLayout::of(project, &state.drawers, state.vertical_zoom).total_height(),
         });
         state
     }

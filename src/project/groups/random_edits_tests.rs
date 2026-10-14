@@ -3,13 +3,19 @@
 //!
 //! This is the test that the rest stands on. The editing is written so that every edit that can break a rule is taken back if it does; here a
 //! great many edits of every kind are made at random, on projects of clips and groups, and the one check that finds every broken rule
-//! (`Project::problems_with_the_groups`) is made after each.
+//! (`Project::problems_with_the_groups`) is made after each. (So is the one that finds what is wrong with the racks of keyframes and the
+//! keyframe crates that hold them, `Project::problems_with_the_racks`: some of the edits make keyframes and crates, and the others have to
+//! leave them as they should be, as a crate lasts as long as its keyframes need and goes if it has none.)
 
 use std::collections::BTreeMap;
 
 use super::*;
 use crate::project::groups::test_projects::{Laid, lay_out};
-use crate::project::{ClipMove, ClipSide, EffectKind, FrameRate, Project, TextObject, TimelineFrameIndex, TrackSide};
+use crate::project::racks_tests::{db, put_a_rack_in};
+use crate::project::{
+    AnimationTarget, ClipMove, ClipSide, EffectKind, FrameRate, Project, PropertyId, RackDestination, RackId,
+    TextObject, TimelineFrameIndex, TrackSide,
+};
 use crate::test_support::DeterministicRandomNumbers;
 
 /// What was done and whether it was refused, by kind of edit, and which of the arrangements that are worth trying the project was in at some
@@ -257,6 +263,8 @@ impl Randomly {
         }
         let problems = self.laid.project.problems_with_the_groups();
         assert!(problems.is_empty(), "{problems:?} after:\n{}", self.recent_log());
+        let problems = self.laid.project.problems_with_the_racks();
+        assert!(problems.is_empty(), "{problems:?} after:\n{}", self.recent_log());
         assert!(!self.laid.project.tracks().is_empty());
         for arrangement in arrangements_in(&self.laid.project) {
             *self.tally.reached.entry(arrangement).or_default() += 1;
@@ -276,7 +284,7 @@ impl Randomly {
     }
 
     fn make_a_random_edit(&mut self) -> (&'static str, bool, String) {
-        let choice = self.below(103);
+        let choice = self.below(114);
         match choice {
             0..=11 => {
                 let kind = GroupKind::Tag;
@@ -533,10 +541,92 @@ impl Randomly {
                 let track = self.some_track();
                 let frame = TimelineFrameIndex::new(self.random.next_below(150));
                 let frames = 1 + self.random.next_below(30);
+                let made = self.laid.project.insert_crate(track, frame, frames);
+                if let Ok(crate_clip) = made {
+                    // (A crate that has nothing in it does not stay: this one has a rack of the loudness of its track, with a keyframe at
+                    // each end, so that it lasts as long as it was made to.)
+                    put_a_rack_in(
+                        &mut self.laid.project,
+                        AnimationTarget::Clip(crate_clip),
+                        AnimationTarget::Track(track),
+                        PropertyId::Gain,
+                        &[(0, db(0.0)), (frames - 1, db(-6.0))],
+                    );
+                }
                 (
                     "put a keyframe crate on a track",
-                    self.laid.project.insert_crate(track, frame, frames).is_ok(),
+                    made.is_ok(),
                     format!("{track} at {frame} for {frames}"),
+                )
+            }
+            103..=105 => {
+                let target = match self.some_clip() {
+                    Some(clip) if self.below(4) > 0 => AnimationTarget::Clip(clip),
+                    _ => AnimationTarget::Track(self.some_track()),
+                };
+                let properties = match target {
+                    AnimationTarget::Clip(_) => [PropertyId::Rotation, PropertyId::Position, PropertyId::Size],
+                    AnimationTarget::Track(_) => [PropertyId::Gain, PropertyId::Muted, PropertyId::Gain],
+                };
+                let property = properties[self.below(properties.len())];
+                let frame = TimelineFrameIndex::new(self.random.next_below(150));
+                (
+                    "put a keyframe",
+                    self.laid.project.add_keyframe(target, property, frame).is_ok(),
+                    format!("{property:?} of {target:?} at {frame}"),
+                )
+            }
+            110..=113 => {
+                let Some(group) = self.some_group(Some(GroupKind::ClipGroup)) else {
+                    return ("move an edge of a clip group", false, "no clip group".to_owned());
+                };
+                let Some(rectangle) = self.laid.project.rectangle_of_the_group(group) else {
+                    return ("move an edge of a clip group", false, "nothing in it".to_owned());
+                };
+                let frame = self.random.next_below(200);
+                let (first_frame, end_frame) = if self.below(2) == 0 {
+                    (frame, rectangle.end_frame)
+                } else {
+                    (rectangle.first_frame, frame)
+                };
+                (
+                    "move an edge of a clip group",
+                    self.laid
+                        .project
+                        .set_the_frames_of_the_clip_group(group, first_frame, end_frame)
+                        .is_ok(),
+                    format!("{group} to {first_frame}..{end_frame}"),
+                )
+            }
+            106..=109 => {
+                let racks: Vec<RackId> = self
+                    .laid
+                    .project
+                    .located_racks()
+                    .map(|located| located.rack.id())
+                    .collect();
+                if racks.is_empty() {
+                    return ("move a rack", false, "no rack".to_owned());
+                }
+                let rack = racks[self.below(racks.len())];
+                let to = if self.below(2) == 0 {
+                    let from_frame = self.random.next_below(100);
+                    RackDestination::NewCrate {
+                        track: self.some_track(),
+                        from_frame,
+                        until_frame: from_frame + 1 + self.random.next_below(200),
+                    }
+                } else {
+                    RackDestination::Drawer(match self.some_clip() {
+                        Some(clip) if self.below(3) > 0 => AnimationTarget::Clip(clip),
+                        _ => AnimationTarget::Track(self.some_track()),
+                    })
+                };
+                let shift = i64::try_from(self.random.next_below(81)).unwrap() - 40;
+                (
+                    "move a rack",
+                    self.laid.project.move_racks(&[rack], to, shift, None).is_ok(),
+                    format!("{rack} to {to:?} by {shift}"),
                 )
             }
             _ => {
@@ -638,6 +728,9 @@ fn whatever_edits_are_made_in_whatever_order_no_rule_of_groups_is_left_broken_an
         "change how long a clip lasts",
         "put a text object on a track",
         "put a keyframe crate on a track",
+        "put a keyframe",
+        "move a rack",
+        "move an edge of a clip group",
         "an effect of a group",
         "move a thing in a chain",
     ] {
@@ -658,6 +751,7 @@ fn whatever_edits_are_made_in_whatever_order_no_rule_of_groups_is_left_broken_an
         "change how long a clip lasts",
         "put a text object on a track",
         "put a keyframe crate on a track",
+        "move an edge of a clip group",
     ] {
         // (Ten: a longer clip is refused only when the longer rectangle of its clip group would take in another clip, which is rarer than a
         // move that does not fit.)

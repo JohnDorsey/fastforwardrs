@@ -12,16 +12,16 @@ use crate::application::theme;
 use crate::project::{GroupId, GroupKind, Member};
 
 /// One outline as it was drawn: where it was cut off, its points and how thick it is.
-struct DrawnOutline {
-    cut_off_at: Rect,
-    points: Vec<Pos2>,
-    thickness: f32,
+pub(super) struct DrawnOutline {
+    pub(super) cut_off_at: Rect,
+    pub(super) points: Vec<Pos2>,
+    pub(super) thickness: f32,
     /// Where in the order of what was drawn it was.
-    place: usize,
+    pub(super) place: usize,
 }
 
 /// Every closed line of `colour` that was drawn in the last frame.
-fn outlines_drawn_in(window: &Window, colour: Color32) -> Vec<DrawnOutline> {
+pub(super) fn outlines_drawn_in(window: &Window, colour: Color32) -> Vec<DrawnOutline> {
     window
         .clipped_shapes_drawn()
         .into_iter()
@@ -38,17 +38,17 @@ fn outlines_drawn_in(window: &Window, colour: Color32) -> Vec<DrawnOutline> {
         .collect()
 }
 
-fn colour_of_group(window: &Window, group: GroupId) -> Color32 {
+pub(super) fn colour_of_group(window: &Window, group: GroupId) -> Color32 {
     let colour = colour_of(window, group);
     Color32::from_rgb(colour.red, colour.green, colour.blue)
 }
 
-fn bounds_of(outline: &DrawnOutline) -> Rect {
+pub(super) fn bounds_of(outline: &DrawnOutline) -> Rect {
     Rect::from_points(&outline.points)
 }
 
 /// The window of `window_with_three_clips` with the first two clips in a clip group.
-fn window_with_a_clip_group_of_the_first_two_clips() -> (Window, GroupId) {
+pub(super) fn window_with_a_clip_group_of_the_first_two_clips() -> (Window, GroupId) {
     let mut window = window_with_three_clips();
     let clips = the_three_clips(&window);
     let group = window
@@ -155,6 +155,13 @@ fn the_top_of_an_outline_round_the_first_row_is_not_cut_off_where_it_goes_a_litt
     assert!(
         outline.cut_off_at.top() >= window.rectangle_of("Ruler").top(),
         "but not over more of the timeline than the ruler"
+    );
+    // (As far above the first row as the outline of a group that has two levels of groups in it goes, 3 + 2 * 4 points, and the line, 3.)
+    assert!(
+        (outline.cut_off_at.top() - (window.strip_of_track(0).top() - 14.0)).abs() < 0.5,
+        "{:?} and the first row at {}",
+        outline.cut_off_at,
+        window.strip_of_track(0).top()
     );
 }
 

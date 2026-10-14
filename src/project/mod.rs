@@ -11,6 +11,7 @@
 
 mod animating;
 mod animation;
+mod crates;
 mod duplicating;
 mod effect_editing;
 mod effects;
@@ -43,11 +44,14 @@ pub use effects::{Badge, ChainEntry, ChainItem, ChainItemKey, Effect, EffectKind
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
 pub use groups::{
-    AppliedEffect, ChainRow, EffectOwner, Group, GroupColour, GroupId, GroupKind, GroupProblem, Member, Rectangle,
+    AppliedEffect, ChainRow, ClipGroupBeforeTheDrag, ClipGroupEdge, EffectOwner, Group, GroupColour, GroupId,
+    GroupKind, GroupProblem, Member, Rectangle,
 };
 pub use keyframe_copying::TimeDirection;
 pub use rack_editing::{KeyframeDestination, KeyframeMove, RackDestination};
-pub use racks::{DrawerExtent, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations};
+pub use racks::{
+    DrawerExtent, FrameRoom, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations,
+};
 pub use settings::{
     AnySetting, ProjectSettings, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
 };
@@ -208,6 +212,12 @@ pub enum EditError {
     AlreadyInTheGroup { group: GroupId, member: Member },
     #[error("{member} is not in {group}")]
     NotInTheGroup { group: GroupId, member: Member },
+    #[error("{group} is not a clip group, and has no edges to move")]
+    NotAClipGroup { group: GroupId },
+    #[error("the edge would cut across {member}: part of it would be inside the group and part outside")]
+    TheEdgeWouldCutAcross { member: Member },
+    #[error("nothing would be left in {group}")]
+    NothingWouldBeLeftInTheGroup { group: GroupId },
     /// An edit that would leave the groups breaking a rule (see [`GroupProblem`]) is not made.
     #[error("that would break a rule of groups: {0}")]
     BreaksTheRulesOfGroups(GroupProblem),
@@ -252,6 +262,19 @@ impl Project {
         tracks: Vec<Track>,
         speed_indicator_layout: SpeedIndicatorLayout,
     ) -> Result<Self, InconsistentProject> {
+        Self::from_parts_and_groups(sources, tracks, speed_indicator_layout, Vec::new())
+    }
+
+    /// [`Self::from_parts`] with `groups` in the project, which are used as they are, in that order (the tracks, the clips and the racks
+    /// are as they were made). It is an error if they break a rule (see [`GroupProblem`]): what is in them has to be in the project, and
+    /// has to be in order, as it is checked here whatever the groups came from. The groups are put in before the keyframe crates are made
+    /// as long as their keyframes need, because a crate that has no keyframes in it goes then, and is taken out of the groups it was in.
+    pub fn from_parts_and_groups(
+        sources: Vec<SourceMedia>,
+        tracks: Vec<Track>,
+        speed_indicator_layout: SpeedIndicatorLayout,
+        groups: Vec<Group>,
+    ) -> Result<Self, InconsistentProject> {
         let mut seen_sources = HashSet::new();
         for source in &sources {
             if !seen_sources.insert(source.identifier) {
@@ -295,7 +318,7 @@ impl Project {
             .max()
             .unwrap_or(0)
             .max(u32::try_from(tracks.len()).unwrap_or(u32::MAX));
-        let project = Self {
+        let mut project = Self {
             sources,
             tracks,
             next_track_number,
@@ -304,19 +327,31 @@ impl Project {
             speed_indicator_layout,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
             frame_rate: None,
-        };
+        }
+        .with_groups(groups)?;
+        // (A keyframe crate lasts exactly as long as its keyframes need: one that was saved lasting longer, or with nothing in it, is
+        // made so.)
+        project
+            .fit_every_crate()
+            .map_err(|error| InconsistentProject::RacksAreWrong {
+                problems: format!("a keyframe crate has keyframes that it has no room for: {error}"),
+            })?;
         let problems = project.problems_with_the_racks();
         if !problems.is_empty() {
             return Err(InconsistentProject::RacksAreWrong {
                 problems: problems.join("; "),
             });
         }
+        if let Some(problem) = project.first_problem_with_the_groups() {
+            return Err(InconsistentProject::GroupsAreWrong { problem });
+        }
         Ok(project)
     }
 
     /// The same project with `groups` in it, which are used as they are, in that order (the tracks, the clips and the racks are as they
     /// were made). It is an error if they break a rule (see [`GroupProblem`]): what is in them has to be in the project, and has to be in
-    /// order, as it is checked here whatever the groups came from. (For making a project from its parts, as when a project file is loaded.)
+    /// order, as it is checked here whatever the groups came from. (For a project that is finished, whose keyframe crates last as long as
+    /// their keyframes need: a project is made from its parts, as when a project file is loaded, with [`Self::from_parts_and_groups`].)
     pub fn with_groups(mut self, groups: Vec<Group>) -> Result<Self, InconsistentProject> {
         self.next_group_number = groups
             .iter()
@@ -443,6 +478,12 @@ impl Project {
             for track in &mut self.tracks {
                 *track = track.retimed(before, frame_rate);
             }
+            // (The keyframes of a crate are counted again with it, and it is made as long as they need: that only makes it shorter.)
+            let fitted = self.fit_every_crate();
+            debug_assert!(
+                fitted.is_ok(),
+                "counting a crate again does not make it need more room: {fitted:?}"
+            );
         }
     }
 
@@ -778,6 +819,16 @@ impl Project {
         // (Both halves are where the clip was, so the rectangles of its groups are what they were: nothing can be broken by this. The
         // second half has the badges of the first in its chain already, because it was cut from it.)
         self.put_the_copy_in_the_groups_of(Member::Clip(outcome.second_half), Member::Clip(outcome.first_half));
+        // (A crate that is cut is two crates, each as long as the keyframes in it need, which is shorter than the half it was cut to
+        // be where the keyframes do not go as far, and nothing at all for a half that has none.)
+        let fitted = self.fit_the_crates(&[
+            AnimationTarget::Clip(outcome.first_half),
+            AnimationTarget::Clip(outcome.second_half),
+        ]);
+        debug_assert!(
+            fitted.is_ok(),
+            "the halves of a crate that is cut only get shorter: {fitted:?}"
+        );
         Some(outcome)
     }
 
@@ -829,11 +880,12 @@ impl Project {
     /// last told to.
     ///
     /// Either all of them move or, if one of them cannot (a clip or a track is not there, or clips would be
-    /// on top of one another, or a rule of groups would be broken: a clip that is not in a clip group cannot be moved into its rectangle,
-    /// and one that is cannot be moved so that the rectangle takes in another), none does. The clips all leave before any arrives, so that
-    /// clips can swap places, or one take the place another leaves.
+    /// on top of one another, or a rule of groups would be broken: a clip that is in a clip group cannot be moved so that the rectangle
+    /// takes in a clip that is not in it, and one that is in none cannot be moved so that it is in the rectangle of one and is in it
+    /// without being a member of it: it is put in the clip group whose rectangle it is moved into, see [`Self::move_clips_remembering`]),
+    /// none does. The clips all leave before any arrives, so that clips can swap places, or one take the place another leaves.
     pub fn move_clips(&mut self, moves: &[ClipMove]) -> Result<(), EditError> {
-        self.keeping_the_groups_valid(|project| project.move_clips_without_looking_at_the_groups(moves))
+        self.move_clips_remembering(moves, &[])
     }
 
     /// [`Self::move_clips`], without checking the rules about groups afterwards.
@@ -1017,6 +1069,8 @@ impl Default for Project {
 
 #[cfg(test)]
 mod animating_tests;
+#[cfg(test)]
+mod crates_tests;
 #[cfg(test)]
 mod duplicating_tests;
 #[cfg(test)]

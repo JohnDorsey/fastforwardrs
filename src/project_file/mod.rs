@@ -957,8 +957,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
 
     let groups = groups::groups_from_documents(document.groups, &clips_in_each_track).map_err(invalid_project)?;
     let layout = speed_indicator_from_document(&document.speed_indicator);
-    Project::from_parts(sources, tracks, layout)
-        .and_then(|project| project.with_groups(groups))
+    Project::from_parts_and_groups(sources, tracks, layout, groups)
         .map(|project| {
             project
                 .with_settings(settings_from_document(document.settings))

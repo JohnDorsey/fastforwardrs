@@ -33,6 +33,14 @@ struct OneOfEach {
     picture_track: TrackId,
 }
 
+/// A keyframe crate on `track`, beginning at frame 300, that is not empty (which a crate cannot stay): it has a rack that lowers the loudness
+/// of `video`.
+fn a_crate_holding_a_rack(project: &mut Project, track: TrackId, video: ClipId) -> ClipId {
+    let a_crate = project.insert_crate(track, frame(300), 50).unwrap();
+    put_a_rack_in(project, clip(a_crate), clip(video), PropertyId::Gain, &[(5, db(-6.0))]);
+    a_crate
+}
+
 fn one_of_each() -> OneOfEach {
     let mut project = Project::empty();
     let video = project.import_source(video_source(1, 30, 600), frame(0)).unwrap();
@@ -148,11 +156,12 @@ fn an_effect_put_on_one_clip_is_not_on_any_other_clip_or_track() {
 fn a_sound_and_a_keyframe_crate_cannot_have_an_effect_and_the_error_says_which_clip_it_was() {
     let OneOfEach {
         mut project,
+        video,
         sound,
         picture_track,
         ..
     } = one_of_each();
-    let a_crate = project.insert_crate(picture_track, frame(300), 50).unwrap();
+    let a_crate = a_crate_holding_a_rack(&mut project, picture_track, video);
 
     for not_seen in [sound, a_crate] {
         assert_eq!(
@@ -233,7 +242,7 @@ fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_n
 fn every_effect_in_the_table_goes_on_what_it_says_can_have_it_and_its_values_are_the_properties_of_that_thing_from_then_on()
  {
     let mut base = one_of_each();
-    let a_crate = base.project.insert_crate(base.picture_track, frame(300), 50).unwrap();
+    let a_crate = a_crate_holding_a_rack(&mut base.project, base.picture_track, base.video);
     for kind in EffectKind::ALL {
         let cases = [
             (clip(base.video), kind.applies_to_a_clip_of_kind(ClipKind::Video)),
@@ -874,7 +883,9 @@ fn whatever_effects_are_put_on_and_taken_off_and_whatever_is_done_to_the_clips_a
                     } else {
                         let rack = racks[random.next_below(racks.len() as u64) as usize];
                         let owner = a_target(&mut random);
-                        project.move_rack(rack, RackDestination::Drawer(owner), 0, None).is_ok()
+                        project
+                            .move_racks(&[rack], RackDestination::Drawer(owner), 0, None)
+                            .is_ok()
                     }
                 }
                 _ => {

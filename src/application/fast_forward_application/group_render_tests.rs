@@ -9,6 +9,7 @@ use super::test_window::Window;
 use crate::application::selection::SelectionItem;
 use crate::project::groups::random_edits_tests::project_after_random_edits_with_more_clip_groups;
 use crate::project::{GroupKind, Project};
+use crate::test_support::check_every_case_at_once;
 
 /// Whether every point of every line that was drawn in the last frame is a number that is not infinite.
 fn every_point_drawn_is_finite(window: &Window) -> bool {
@@ -33,41 +34,61 @@ fn everything_that_can_be_selected(project: &Project) -> Vec<SelectionItem> {
     groups.chain(clips).chain(tracks).collect()
 }
 
+/// What was shown for the project that one seed makes.
+#[derive(Default)]
+struct WhatWasShown {
+    had_groups: bool,
+    tags: usize,
+    clip_groups: usize,
+    track_groups: usize,
+    selected: usize,
+}
+
+/// Shows the project that the seed `seed` makes in a window, with each thing in it selected in turn, and checks every frame.
+fn show_the_project_of_the_seed(seed: u64) -> WhatWasShown {
+    let project = project_after_random_edits_with_more_clip_groups(seed, 120);
+    if project.groups().is_empty() {
+        return WhatWasShown::default();
+    }
+    let mut shown = WhatWasShown {
+        had_groups: true,
+        ..WhatWasShown::default()
+    };
+    for group in project.groups() {
+        match group.kind() {
+            GroupKind::Tag => shown.tags += 1,
+            GroupKind::ClipGroup => shown.clip_groups += 1,
+            GroupKind::TrackGroup => shown.track_groups += 1,
+        }
+    }
+    let things = everything_that_can_be_selected(&project);
+    let mut window = Window::showing(project);
+    assert!(every_point_drawn_is_finite(&window), "seed {seed}: nothing selected");
+    for item in things {
+        select_only(&mut window, item);
+        shown.selected += 1;
+        assert!(every_point_drawn_is_finite(&window), "seed {seed}: {item:?} selected");
+        assert_eq!(
+            window.application().project().problems_with_the_groups(),
+            vec![],
+            "seed {seed}: showing a project changes nothing in it"
+        );
+    }
+    shown
+}
+
 #[test]
 fn whatever_groups_there_are_the_window_draws_them_with_each_thing_selected_in_turn_and_nothing_that_is_drawn_has_a_point_that_is_not_finite()
  {
-    let mut shown_with_groups = 0;
-    let mut tags = 0;
-    let mut clip_groups = 0;
-    let mut track_groups = 0;
-    let mut selected = 0;
-    for seed in 1..=10u64 {
-        let project = project_after_random_edits_with_more_clip_groups(seed, 120);
-        if project.groups().is_empty() {
-            continue;
-        }
-        shown_with_groups += 1;
-        for group in project.groups() {
-            match group.kind() {
-                GroupKind::Tag => tags += 1,
-                GroupKind::ClipGroup => clip_groups += 1,
-                GroupKind::TrackGroup => track_groups += 1,
-            }
-        }
-        let things = everything_that_can_be_selected(&project);
-        let mut window = Window::showing(project);
-        assert!(every_point_drawn_is_finite(&window), "seed {seed}: nothing selected");
-        for item in things {
-            select_only(&mut window, item);
-            selected += 1;
-            assert!(every_point_drawn_is_finite(&window), "seed {seed}: {item:?} selected");
-            assert_eq!(
-                window.application().project().problems_with_the_groups(),
-                vec![],
-                "seed {seed}: showing a project changes nothing in it"
-            );
-        }
-    }
+    // (Each project is shown in a window of its own, so they are shown several at once: it takes a window a good while to draw a frame.)
+    let seeds: Vec<u64> = (1..=10).collect();
+    let shown = check_every_case_at_once(&seeds, |seed| show_the_project_of_the_seed(*seed));
+
+    let shown_with_groups = shown.iter().filter(|shown| shown.had_groups).count();
+    let tags: usize = shown.iter().map(|shown| shown.tags).sum();
+    let clip_groups: usize = shown.iter().map(|shown| shown.clip_groups).sum();
+    let track_groups: usize = shown.iter().map(|shown| shown.track_groups).sum();
+    let selected: usize = shown.iter().map(|shown| shown.selected).sum();
     // (Measured: 10 projects, with 52 tags, 30 clip groups and 16 track groups in them, and 368 things selected.)
     assert!(
         shown_with_groups >= 9,

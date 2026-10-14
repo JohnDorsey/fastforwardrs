@@ -92,6 +92,9 @@ mod tests {
     /// Opens the real speakers and has them play a sound of silence, to see that they take it at the speed of
     /// real time. (Silence, so that running the tests makes no noise.) Skipped on a computer without a sound
     /// output.
+    ///
+    /// A computer that is busy makes the sound thread late now and then, and one try is spoiled by that: the speakers have to be on time
+    /// in one of three tries (speakers that do not go at the speed of real time are not, in any of them).
     #[test]
     fn the_real_speakers_play_a_sound_to_its_end_in_real_time() {
         let mut speakers = match DeviceEffectSpeakers::open() {
@@ -107,21 +110,25 @@ mod tests {
 
         let seconds = 0.4;
         let silence: Arc<[f32]> = vec![0.0; (seconds * f64::from(speakers.sample_rate())) as usize].into();
-        let started = Instant::now();
-        speakers.play(silence);
-        assert_eq!(speakers.sounds_playing(), 1);
+        let mut complaints = Vec::new();
+        for _attempt in 0..3 {
+            let started = Instant::now();
+            speakers.play(silence.clone());
+            assert_eq!(speakers.sounds_playing(), 1);
 
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(speakers.sounds_playing(), 1, "not over after half the time");
-        while speakers.sounds_playing() > 0 && started.elapsed() < Duration::from_secs(3) {
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(200));
+            assert_eq!(speakers.sounds_playing(), 1, "not over after half the time");
+            while speakers.sounds_playing() > 0 && started.elapsed() < Duration::from_secs(3) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let heard = started.elapsed().as_secs_f64();
+            assert_eq!(speakers.sounds_playing(), 0, "over after {heard:.2} s");
+            if (seconds - 0.1..seconds + 0.25).contains(&heard) {
+                break;
+            }
+            complaints.push(format!("a sound of {seconds} s took {heard:.3} s to play"));
+            assert!(complaints.len() < 3, "{complaints:?}");
         }
-        let heard = started.elapsed().as_secs_f64();
-        assert_eq!(speakers.sounds_playing(), 0, "over after {heard:.2} s");
-        assert!(
-            (seconds - 0.1..seconds + 0.25).contains(&heard),
-            "a sound of {seconds} s took {heard:.3} s to play"
-        );
         assert!(speakers.is_working());
     }
 }

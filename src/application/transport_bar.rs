@@ -1,9 +1,10 @@
-//! The pause, play and stop buttons, and the current time next to them.
+//! The row along the top of the timeline panel: the stop, play and pause buttons, the current time next to them, and the
+//! slider through the whole video that fills the rest of the row.
 
 use egui::{Rect, Response, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use super::commands::Command;
-use super::theme;
+use super::{scrub_bar, theme};
 use crate::project::{FrameRate, TimelineFrameIndex, format_timecode};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,16 +17,17 @@ enum TransportIcon {
 /// What the bar needs to know to draw itself.
 pub struct TransportBarState {
     pub is_playing: bool,
-    pub has_something_to_play: bool,
     pub current_frame: TimelineFrameIndex,
+    /// How many frames the timeline has, which is what the slider goes through (and there is nothing to play when it is 0).
+    pub total_frames: u64,
     pub frame_rate: FrameRate,
 }
 
-/// Draws the buttons and the time, and adds a command for each button pressed.
+/// Draws the buttons, the time and the slider, and adds a command for each button pressed and for the slider being used.
 pub fn show(ui: &mut Ui, state: &TransportBarState, commands: &mut Vec<Command>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        let enabled = state.has_something_to_play;
+        let enabled = state.total_frames > 0;
         if icon_button(ui, TransportIcon::Stop, "Stop", enabled, false).clicked() {
             commands.push(Command::Stop);
         }
@@ -42,6 +44,8 @@ pub fn show(ui: &mut Ui, state: &TransportBarState, commands: &mut Vec<Command>)
                 .size(20.0)
                 .color(theme::ICON),
         );
+        ui.add_space(theme::SPACING);
+        scrub_bar::show(ui, state.current_frame, state.total_frames, commands);
     });
 }
 

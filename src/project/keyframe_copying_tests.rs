@@ -315,8 +315,11 @@ fn asking_whether_keyframes_can_be_copied_gives_the_answer_that_copying_them_doe
 
 // --- crates and whatever is copied ---
 
-#[test]
-fn the_copies_of_the_keyframes_of_a_crate_are_in_the_crate_and_not_past_its_end() {
+/// A video of 600 frames, a text object from frame 100 to 160 and, in front of the video as the text is, a keyframe crate with a rack of
+/// the loudness of the video, which has keyframes at the frames 310 and 320 of the timeline (the crate lasts from one to the other, and
+/// one frame more: it begins at 310 and ends at 321). Another text object is at frame 340, which is where the crate can last until.
+/// The project, the video, the crate and its rack.
+fn a_crate_with_a_text_object_after_it_and_one_before() -> (Project, ClipId, ClipId, RackId) {
     let (mut project, video, _) = a_big_video_and_a_small_text();
     let front = project.tracks()[0].id();
     let crate_id = project.insert_crate(front, frame(300), 50).unwrap();
@@ -327,17 +330,87 @@ fn the_copies_of_the_keyframes_of_a_crate_are_in_the_crate_and_not_past_its_end(
         PropertyId::Gain,
         &[(10, db(-1.0)), (20, db(-2.0))],
     );
+    project
+        .insert_text(front, frame(340), TextObject::default(), 20)
+        .unwrap();
+    assert_eq!(first_and_end_of_the_crate_clip(&project, crate_id), (310, 321));
+    (project, video, crate_id, rack)
+}
+
+fn first_and_end_of_the_crate_clip(project: &Project, crate_id: ClipId) -> (u64, u64) {
+    let placement = project.placement_of(crate_id).unwrap();
+    (
+        placement.first_timeline_frame.value(),
+        placement.end_timeline_frame.value(),
+    )
+}
+
+#[test]
+fn the_copies_of_keyframes_after_those_of_a_crate_make_it_longer_where_it_has_room_and_are_not_made_where_it_has_not() {
+    let (mut project, _, crate_id, rack) = a_crate_with_a_text_object_after_it_and_one_before();
     let names = names_of_the_keyframes_in(&project, rack);
 
     project.duplicate_keyframes(&names, TimeDirection::Later, 5).unwrap();
-    assert_eq!(frames_in_the_rack(&project, rack), vec![10, 20, 25, 35]);
+    assert_eq!(frames_in_the_rack(&project, rack), vec![0, 10, 15, 25]);
+    assert_eq!(
+        first_and_end_of_the_crate_clip(&project, crate_id),
+        (310, 336),
+        "the copies, at the frames 325 and 335, are in the crate, which lasts until the last"
+    );
 
-    // Another copy of all four would be 30 frames later, at 40, 50, 55 and 65, and the frames of the crate are 0 to 49.
+    // Another copy of all four would be 30 frames later, at 340, 350, 355 and 365, and the text object is at 340.
     let names = names_of_the_keyframes_in(&project, rack);
+    let before = project.clone();
     assert_eq!(
         project.duplicate_keyframes(&names, TimeDirection::Later, 5),
         Err(EditError::NoRoomForTheKeyframes)
     );
+    assert_eq!(project, before, "nothing is changed");
+
+    // One more frame of room is enough for a copy of the first keyframe alone: 28 frames after it, at 338, in the last frame the crate has.
+    project
+        .duplicate_keyframes(&names[..1], TimeDirection::Later, 28)
+        .unwrap();
+    assert_eq!(frames_in_the_rack(&project, rack), vec![0, 10, 15, 25, 28]);
+    assert_eq!(first_and_end_of_the_crate_clip(&project, crate_id), (310, 339));
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn the_copies_of_keyframes_before_those_of_a_crate_make_it_begin_earlier_and_what_is_in_it_stays_at_the_frames_it_was_at()
+ {
+    let (mut project, video, crate_id, rack) = a_crate_with_a_text_object_after_it_and_one_before();
+    let video = AnimationTarget::Clip(video);
+    let names = names_of_the_keyframes_in(&project, rack);
+
+    project
+        .duplicate_keyframes(&names[..1], TimeDirection::Earlier, 4)
+        .unwrap();
+
+    assert_eq!(first_and_end_of_the_crate_clip(&project, crate_id), (306, 321));
+    assert_eq!(
+        frames_in_the_rack(&project, rack),
+        vec![0, 4, 14],
+        "counted from where the crate begins now"
+    );
+    assert_eq!(
+        project
+            .keyframes_of(video, PropertyId::Gain)
+            .iter()
+            .map(|keyframe| keyframe.frame)
+            .collect::<Vec<_>>(),
+        vec![306, 310, 320],
+        "the keyframes that were there are where they were, and the copy is 4 frames before them"
+    );
+
+    // A copy 150 frames before the first would be at frame 156, which is in the text object that is from 100 to 160.
+    let names = names_of_the_keyframes_in(&project, rack);
+    let before = project.clone();
+    assert_eq!(
+        project.duplicate_keyframes(&names[..1], TimeDirection::Earlier, 150),
+        Err(EditError::NoRoomForTheKeyframes)
+    );
+    assert_eq!(project, before, "nothing is changed");
     assert_the_racks_are_sound(&project);
 }
 
