@@ -19,7 +19,7 @@ fn renderer(graphics: &super::testing::SoftwareGraphics) -> FrameRenderer {
 }
 
 /// The events of `engine` until `count` of them have come (or the time is up, which fails the test).
-fn events_of(engine: &Engine, count: usize) -> Vec<EngineEvent> {
+pub(super) fn events_of(engine: &Engine, count: usize) -> Vec<EngineEvent> {
     let started = Instant::now();
     let mut events = Vec::new();
     while events.len() < count {
@@ -38,11 +38,11 @@ fn events_of(engine: &Engine, count: usize) -> Vec<EngineEvent> {
     events
 }
 
-fn software_engine() -> (Engine, Arc<AtomicUsize>) {
+pub(super) fn software_engine() -> (Engine, Arc<AtomicUsize>) {
     software_engine_with(EngineSettings::new(AdapterChoice::SoftwareOnly))
 }
 
-fn software_engine_with(settings: EngineSettings) -> (Engine, Arc<AtomicUsize>) {
+pub(super) fn software_engine_with(settings: EngineSettings) -> (Engine, Arc<AtomicUsize>) {
     let woken = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&woken);
     let engine = Engine::start(

@@ -18,6 +18,9 @@ pub const COLOUR_MATRIX: &str = include_str!("shaders/colour_matrix.wgsl");
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");
 
+/// The vertex stage of the effects that others wrote (their shaders only have a fragment stage): one triangle that covers all of the picture.
+pub const FULL_SCREEN_TRIANGLE: &str = include_str!("shaders/full_screen_triangle.wgsl");
+
 /// Every shader of the engine, with the name of its file.
 #[cfg(test)]
 pub const ALL: &[(&str, &str)] = &[
@@ -43,6 +46,26 @@ mod tests {
                 .validate(&module)
                 .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         }
+    }
+
+    #[test]
+    fn the_vertex_stage_of_the_effects_that_others_wrote_reads_and_passes_validation_and_is_a_vertex_stage_and_no_more()
+    {
+        let module = naga::front::wgsl::parse_str(FULL_SCREEN_TRIANGLE)
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(FULL_SCREEN_TRIANGLE)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+            .validate(&module)
+            .unwrap();
+        let entry_points: Vec<(&str, naga::ShaderStage)> = module
+            .entry_points
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.stage))
+            .collect();
+        assert_eq!(entry_points, vec![("vs_main", naga::ShaderStage::Vertex)]);
+        assert!(
+            module.global_variables.is_empty(),
+            "it uses nothing the effect's pass binds"
+        );
     }
 
     #[test]

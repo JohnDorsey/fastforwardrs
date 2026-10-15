@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::device::AdapterChoice;
+use super::guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader};
 use super::{FrameDescription, FrameStatistics, PictureData, PictureId, RenderedFrame};
 
 /// What the engine calls when it has something to tell: the window's way of being asked to draw again, so that the engine's thread does not
@@ -21,6 +22,8 @@ pub enum EngineRequest {
     Upload { id: PictureId, data: Arc<PictureData> },
     /// Let go of these pictures.
     Forget(Vec<PictureId>),
+    /// From now on the effect under `key` is run by this shader, which has been through the guard (an effect that was under that key is replaced).
+    InstallEffect { key: String, shader: Arc<GuardedShader> },
     /// Make the frame `description` describes. If more requests have come by the time the engine looks, only the newest of them is made, and
     /// the others are not answered: the window only wants the latest.
     Render { serial: u64, description: FrameDescription },
@@ -44,6 +47,17 @@ pub enum EngineEvent {
     PicturesMissing { serial: u64, ids: Vec<PictureId> },
     /// A picture that was sent could not be used, and is not kept.
     PictureRejected { id: PictureId, problem: String },
+    /// The shader that was given for the effect under `key` could not be used (the graphics library would not take it): the effect is not installed, and a
+    /// frame that asks for it is made without it.
+    EffectRejected { key: String, problem: String },
+    /// The graphics device was replaced by a new one: it was lost, or a frame did not finish in time (`why` says which). The new device has none of the
+    /// pictures the old one had: **send them again** (the engine would say so, a frame at a time, with `PicturesMissing`). Frames that were made are not kept.
+    /// `effects_switched_off` are the keys of the effects that were in the frame that did not finish: they are not run again as long as the engine runs, and
+    /// frames that ask for them are made without them.
+    DeviceReplaced {
+        why: String,
+        effects_switched_off: Vec<String>,
+    },
     /// The engine has stopped, and will make no more frames (it could not start, or could not go on, or was told to stop).
     Stopped { problem: String },
 }
@@ -58,9 +72,17 @@ pub struct EngineSettings {
     pub most_cached_frames: usize,
     /// How many bytes the kept frames take up at most.
     pub most_cached_frame_bytes: usize,
+    /// How many passes a loop of a shader that was given to the engine is let make (see `guard`).
+    pub most_passes_of_a_loop: u32,
+    /// When the graphics device has had to be replaced this many times within `how_long_replacements_are_counted`, the engine stops instead (see `replacement`).
+    pub replacements_that_stop_the_engine: usize,
+    pub how_long_replacements_are_counted: Duration,
     /// For the tests: the thread does nothing, once it has its device, until this is opened, so that a test can have requests pile up.
     #[cfg(test)]
     pub(crate) hold_the_first_batch_until: Option<Arc<super::testing::Gate>>,
+    /// For the tests: told about every device the engine makes, the first and each that replaces another, so that a test can do to it what a card does.
+    #[cfg(test)]
+    pub(crate) watch_the_devices: Option<super::testing::DeviceWatcher>,
 }
 
 impl EngineSettings {
@@ -71,8 +93,13 @@ impl EngineSettings {
             frame_timeout: Duration::from_secs(2),
             most_cached_frames: 32,
             most_cached_frame_bytes: 256 * 1024 * 1024,
+            most_passes_of_a_loop: DEFAULT_MOST_PASSES_OF_A_LOOP,
+            replacements_that_stop_the_engine: 3,
+            how_long_replacements_are_counted: Duration::from_secs(60),
             #[cfg(test)]
             hold_the_first_batch_until: None,
+            #[cfg(test)]
+            watch_the_devices: None,
         }
     }
 }

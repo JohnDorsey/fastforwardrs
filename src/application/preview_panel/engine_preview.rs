@@ -261,6 +261,15 @@ impl EnginePreview {
                     self.last_problem = Some(problem);
                     self.asked_for = None;
                 }
+                EngineEvent::EffectRejected { problem, .. } => self.last_problem = Some(problem),
+                EngineEvent::DeviceReplaced { why, .. } => {
+                    // (The new device has none of the pictures: they are all sent again, and the frame is asked for again, which the engine may now make
+                    // without an effect that it does not trust any more.)
+                    self.sent.clear();
+                    self.last_used_in.clear();
+                    self.asked_for = None;
+                    self.last_problem = Some(why);
+                }
                 EngineEvent::Stopped { problem } => self.stopped = Some(problem),
             }
         }

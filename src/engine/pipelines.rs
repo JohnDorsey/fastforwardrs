@@ -7,6 +7,7 @@
 
 use std::num::NonZeroU64;
 
+use super::effect_shaders::ForeignEffectPass;
 use super::shaders;
 
 /// The format of the picture that the layers are put together in, and of the pictures of the layers: premultiplied, in half floats.
@@ -69,6 +70,8 @@ pub struct Pipelines {
     pub yuv: YuvPass,
     pub colour_matrix: ColourMatrixPass,
     pub place: PlacePass,
+    /// What the effects that others wrote are made from (the pipeline of each is made when its shader is given to the engine).
+    pub foreign_effect: ForeignEffectPass,
 }
 
 impl Pipelines {
@@ -79,11 +82,12 @@ impl Pipelines {
             yuv: yuv_pass(device),
             colour_matrix: colour_matrix_pass(device),
             place: place_pass(device),
+            foreign_effect: ForeignEffectPass::create(device),
         }
     }
 }
 
-fn shader_module(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderModule {
+pub(super) fn shader_module(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderModule {
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -113,17 +117,30 @@ fn pipeline(
     format: wgpu::TextureFormat,
     blend: Option<wgpu::BlendState>,
 ) -> wgpu::RenderPipeline {
+    pipeline_of_two_modules(device, label, module, module, layout, format, blend)
+}
+
+/// A pipeline that draws with the `vs_main` of one shader and the `fs_main` of another (they may be the same) into `format`, with `blend`.
+pub(super) fn pipeline_of_two_modules(
+    device: &wgpu::Device,
+    label: &str,
+    vertex_module: &wgpu::ShaderModule,
+    fragment_module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
         vertex: wgpu::VertexState {
-            module,
+            module: vertex_module,
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
-            module,
+            module: fragment_module,
             entry_point: Some("fs_main"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {

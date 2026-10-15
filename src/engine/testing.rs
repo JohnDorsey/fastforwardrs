@@ -96,6 +96,57 @@ impl Gate {
     }
 }
 
+/// What a test is told about every device the engine makes: a handle to it (cloning a device gives another handle to the same one).
+#[derive(Clone)]
+pub struct DeviceWatcher(Arc<dyn Fn(&EngineDevice) + Send + Sync>);
+
+impl DeviceWatcher {
+    pub fn new(told: impl Fn(&EngineDevice) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(told))
+    }
+
+    pub fn tell(&self, device: &EngineDevice) {
+        (self.0)(device);
+    }
+}
+
+impl std::fmt::Debug for DeviceWatcher {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "a watcher of devices")
+    }
+}
+
+/// The devices that an engine made, in the order it made them, for a test to destroy as a card that is lost would be.
+#[derive(Clone, Default)]
+pub struct DevicesMade(Arc<Mutex<Vec<EngineDevice>>>);
+
+impl DevicesMade {
+    pub fn watcher(&self) -> DeviceWatcher {
+        let made = Arc::clone(&self.0);
+        DeviceWatcher::new(move |device| made.lock().unwrap().push(device.clone()))
+    }
+
+    /// The `number`th device (the first is 1) once the engine has made it, waiting for it for as long as `how_long`.
+    pub fn nth(&self, number: usize, how_long: std::time::Duration) -> EngineDevice {
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(device) = self.0.lock().unwrap().get(number - 1) {
+                return device.clone();
+            }
+            assert!(
+                started.elapsed() < how_long,
+                "the engine did not make a device number {number} in {how_long:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// How many devices have been made.
+    pub fn count(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+}
+
 /// Starts the test body only if there is a software adapter. `$graphics` is the [`SoftwareGraphics`].
 macro_rules! with_software_graphics {
     ($graphics:ident, $body:block) => {

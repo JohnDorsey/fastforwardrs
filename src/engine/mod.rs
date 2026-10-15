@@ -24,9 +24,11 @@
 
 mod byte_lru;
 mod device;
+mod effect_shaders;
 mod frame_cache;
 mod frame_renderer;
 mod frames;
+mod guard;
 mod handle;
 mod messages;
 mod picture_cache;
@@ -36,6 +38,7 @@ mod placement;
 mod plan;
 mod readback;
 mod recycler;
+mod replacement;
 mod scene;
 mod shaders;
 #[cfg(test)]
@@ -51,6 +54,12 @@ mod effect_tests;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
+mod foreign_effect_tests;
+#[cfg(test)]
+mod guard_tests;
+#[cfg(test)]
+mod hang_tests;
+#[cfg(test)]
 pub(crate) mod oracle_tests;
 #[cfg(test)]
 mod picture_tests;
@@ -58,13 +67,15 @@ mod picture_tests;
 mod yuv_tests;
 
 pub use device::{AdapterChoice, DeviceError, DeviceTrouble, EngineDevice};
+pub use effect_shaders::{FOREIGN_EFFECT_UNIFORM_BYTES, MOST_NUMBERS_OF_A_FOREIGN_EFFECT};
 pub use frame_cache::FrameCache;
 pub use frame_renderer::{FrameRenderer, RenderProblem};
 pub use frames::{FrameStatistics, RenderedFrame};
-pub use handle::Engine;
+pub use guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader, ShaderProblem, cap_loops, guard_wgsl};
+pub use handle::{EffectShaderReport, Engine};
 pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 pub use pictures::{PictureData, PicturePixels, PictureProblem};
-pub use plan::{FramePlan, PassPlan, plan_frame};
+pub use plan::{EffectsThatRun, FramePlan, KindOfEffect, PassPlan, plan_frame};
 pub use scene::{
     COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameDescription, LayerDescription, LayerSource,
     PictureId,

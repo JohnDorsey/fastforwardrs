@@ -158,7 +158,9 @@ maintainer's objection: a clip's effects run **before** placement, in the clip's
 **Progress, 2026-10-15 [V]:** pieces 1.1 (skeleton), 1.2 (place and composite, the egui-wgpu oracle), 1.3 (video pictures in planes: probe, `FrameDelivery::Yuv420p`, the planes event, the YUV pass) and 1.4 (the colour matrix effect,
 `describe_frame`, and the gate that runs the real old drawing against the engine on 400 random scenes: 2 levels at most except on the edges of layers) are built and verified on Windows (WARP) and Linux (lavapipe; the real-ffmpeg tests
 on CI). 1.3 is described in section 9 of the design, with the one decision that measuring it changed: **chroma is replicated like ffmpeg does, not blended** (within 3 levels of ffmpeg at 1 to 1 and 2 to 1; a blend was off by up to 82).
-The window does not use any of it yet (1.5).
+**Progress, 2026-10-16 [V]:** 1.5 (the window can make its preview with the engine: `FASTFORWARDRS_PREVIEW=engine`, off by default until the maintainer has looked at it on a real card, and the old drawing is the fallback if the engine stops) and 1.6 (the guard:
+loop caps in every shader that is given to the engine, `Engine::compile_effect_shader`, the watchdog that replaces the device when a frame does not finish or the device is lost, effects of strangers switched off for the run, three replacements within a minute stop the engine; the gate tests, one of
+them in a process of its own that is killed by its id) are built and verified on Windows (WARP) and Linux (lavapipe). **1.7** (the quality governor, frame-cache hits in the window, the benchmark, the mutation campaign, the list of visible differences) is what is left of the phase.
 *Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
 and each is listed and either fixed or accepted by the maintainer.
 

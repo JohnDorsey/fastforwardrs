@@ -21,12 +21,12 @@ use crate::colour_effects::ColourMatrix;
 
 const A_LONG_TIME: Duration = Duration::from_secs(60);
 
-fn matrix_effect(matrix: ColourMatrix) -> EffectCall {
+pub(super) fn matrix_effect(matrix: ColourMatrix) -> EffectCall {
     EffectCall::colour_matrix(matrix.rows())
 }
 
 /// A layer of `picture` over the whole frame, with `effects` done to it first.
-fn whole_frame(picture: u64, effects: Vec<EffectCall>) -> LayerDescription {
+pub(super) fn whole_frame(picture: u64, effects: Vec<EffectCall>) -> LayerDescription {
     LayerDescription {
         source: LayerSource::Picture(PictureId(picture)),
         corners: CORNERS_OF_THE_WHOLE_PICTURE,
@@ -35,7 +35,7 @@ fn whole_frame(picture: u64, effects: Vec<EffectCall>) -> LayerDescription {
 }
 
 /// The frame of `layers` over black, with the pictures `(id, picture)` sent first, and what making it came to.
-fn frame_of(
+pub(super) fn frame_of(
     renderer: &mut FrameRenderer,
     size: (u32, u32),
     pictures: &[(u64, &TestPicture)],
@@ -50,7 +50,7 @@ fn frame_of(
 }
 
 /// The frame of `layers` over black, from the pictures the renderer has.
-fn render(
+pub(super) fn render(
     renderer: &mut FrameRenderer,
     size: (u32, u32),
     layers: Vec<LayerDescription>,
@@ -102,7 +102,7 @@ fn noise(count: usize, seed: u64) -> Vec<u8> {
 }
 
 /// A picture of random colours and, if `see_through`, random opacities (some of them 0 and some 255).
-fn noisy(width: u32, height: u32, seed: u64, see_through: bool) -> TestPicture {
+pub(super) fn noisy(width: u32, height: u32, seed: u64, see_through: bool) -> TestPicture {
     let mut rgba = noise((width * height * 4) as usize, seed);
     for (number, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         pixel[3] = if see_through {
@@ -119,7 +119,7 @@ fn noisy(width: u32, height: u32, seed: u64, see_through: bool) -> TestPicture {
 }
 
 /// A picture all of one colour.
-fn flat(width: u32, height: u32, colour: [u8; 4]) -> TestPicture {
+pub(super) fn flat(width: u32, height: u32, colour: [u8; 4]) -> TestPicture {
     TestPicture {
         width,
         height,
@@ -129,7 +129,7 @@ fn flat(width: u32, height: u32, colour: [u8; 4]) -> TestPicture {
 
 /// Matrices of every kind: turns of the hues, a mixing of everything with everything, ones that make numbers too big or too small (which are cut off),
 /// ones that swap colours and ones that darken.
-fn matrices() -> Vec<(&'static str, ColourMatrix)> {
+pub(super) fn matrices() -> Vec<(&'static str, ColourMatrix)> {
     vec![
         ("hue 30", ColourMatrix::hue_rotation(30.0)),
         ("hue 120", ColourMatrix::hue_rotation(120.0)),

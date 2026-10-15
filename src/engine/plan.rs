@@ -7,10 +7,14 @@
 //! without one: that a layer with no effects is put in its place straight from its picture, that the effects of a layer are run before it is put
 //! in its place and in the order they were asked for, that the first thing drawn clears the picture, and so on.
 //!
-//! **Which effects run.** An effect that the engine does not have (its key is not one the engine knows), or that is given numbers it cannot use, is left
-//! out and counted (`FramePlan::effects_not_run`), as an effect that is not installed does nothing. So is an effect on a layer that is only a colour,
-//! which has no picture to do anything to. An effect that changes nothing is left out too, and not counted: it has done what it was asked to.
+//! **Which effects run.** An effect that the engine does not have (its key is not one the engine knows: [`EffectsThatRun`] says which it knows), or that is
+//! given numbers it cannot use, is left out and counted (`FramePlan::effects_not_run`), as an effect that is not installed does nothing. So is an effect on a
+//! layer that is only a colour, which has no picture to do anything to. An effect that changes nothing is left out too, and not counted: it has done what it was
+//! asked to.
 
+use std::collections::HashSet;
+
+use super::effect_shaders::MOST_NUMBERS_OF_A_FOREIGN_EFFECT;
 use super::{COLOUR_MATRIX_KEY, FrameDescription, LayerDescription, LayerSource};
 
 /// How far a number of a colour matrix may be from what it is in the matrix that changes nothing, for the matrix to be taken for that one: a change
@@ -56,6 +60,49 @@ impl FramePlan {
     }
 }
 
+/// What an effect is run by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KindOfEffect {
+    /// The engine's own effect that mixes colours with a matrix of nine numbers.
+    ColourMatrix,
+    /// A shader that was given to the engine (see `effect_shaders`), which is given as many numbers as the call has, up to a limit.
+    Shader,
+}
+
+/// The effects the engine can run: the ones it has of its own, and the ones that were given to it as shaders.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EffectsThatRun {
+    keys_of_shaders: HashSet<String>,
+}
+
+impl EffectsThatRun {
+    /// The effects the engine has of its own, and no others.
+    pub fn built_in_only() -> Self {
+        Self::default()
+    }
+
+    /// The effect under `key` is also run, by a shader. (A key that is the engine's own stays the engine's own.)
+    pub fn add_shader(&mut self, key: &str) {
+        self.keys_of_shaders.insert(key.to_owned());
+    }
+
+    /// The effect under `key` is not run any more.
+    pub fn remove_shader(&mut self, key: &str) {
+        self.keys_of_shaders.remove(key);
+    }
+
+    /// How the effect under `key` is run, if the engine can run it.
+    pub fn kind_of(&self, key: &str) -> Option<KindOfEffect> {
+        if key == COLOUR_MATRIX_KEY {
+            Some(KindOfEffect::ColourMatrix)
+        } else if self.keys_of_shaders.contains(key) {
+            Some(KindOfEffect::Shader)
+        } else {
+            None
+        }
+    }
+}
+
 /// Whether nine numbers (a matrix, row by row) are one that changes no colour, or none that can be told from what it was.
 pub fn colour_matrix_changes_nothing(values: &[f32]) -> bool {
     const NOTHING_CHANGES: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
@@ -66,30 +113,36 @@ pub fn colour_matrix_changes_nothing(values: &[f32]) -> bool {
 }
 
 /// Which effects of `layer` run, and how many cannot.
-fn effects_of(layer: &LayerDescription) -> (Vec<usize>, usize) {
+fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (Vec<usize>, usize) {
     if matches!(layer.source, LayerSource::Solid(_)) {
         return (Vec::new(), layer.effects.len());
     }
     let (mut calls, mut not_run) = (Vec::new(), 0);
     for (number, effect) in layer.effects.iter().enumerate() {
-        if effect.key != COLOUR_MATRIX_KEY
-            || effect.values.len() != 9
-            || effect.values.iter().any(|value| !value.is_finite())
-        {
-            not_run += 1;
-        } else if !colour_matrix_changes_nothing(&effect.values) {
-            calls.push(number);
+        let numbers_are_finite = effect.values.iter().all(|value| value.is_finite());
+        match effects_that_run.kind_of(&effect.key) {
+            Some(KindOfEffect::ColourMatrix) if effect.values.len() == 9 && numbers_are_finite => {
+                if !colour_matrix_changes_nothing(&effect.values) {
+                    calls.push(number);
+                }
+            }
+            Some(KindOfEffect::Shader)
+                if effect.values.len() <= MOST_NUMBERS_OF_A_FOREIGN_EFFECT && numbers_are_finite =>
+            {
+                calls.push(number);
+            }
+            _ => not_run += 1,
         }
     }
     (calls, not_run)
 }
 
-/// The steps that make the frame `description` describes.
-pub fn plan_frame(description: &FrameDescription) -> FramePlan {
+/// The steps that make the frame `description` describes, with the effects `effects_that_run` says the engine can run.
+pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThatRun) -> FramePlan {
     let mut passes = Vec::new();
     let mut effects_not_run = 0;
     for (number, layer) in description.layers.iter().enumerate() {
-        let (calls, not_run) = effects_of(layer);
+        let (calls, not_run) = effects_of(layer, effects_that_run);
         effects_not_run += not_run;
         if !calls.is_empty() {
             passes.push(PassPlan::Effects { layer: number, calls });
@@ -113,6 +166,11 @@ pub fn plan_frame(description: &FrameDescription) -> FramePlan {
 mod tests {
     use super::*;
     use crate::engine::{CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, LayerDescription, LayerSource, PictureId};
+
+    /// What was planned before effects could be given as shaders: the effects the engine has of its own, and no others.
+    fn plan_of_the_built_in_effects(description: &FrameDescription) -> FramePlan {
+        plan_frame(description, &EffectsThatRun::built_in_only())
+    }
 
     fn layer(picture: u64) -> LayerDescription {
         LayerDescription {
@@ -150,7 +208,7 @@ mod tests {
 
     #[test]
     fn a_frame_with_nothing_in_it_is_cleared_and_then_made_into_the_output() {
-        let plan = plan_frame(&FrameDescription::black((64, 36)));
+        let plan = plan_of_the_built_in_effects(&FrameDescription::black((64, 36)));
         assert_eq!(plan.passes, vec![PassPlan::ClearAccumulation, PassPlan::Output]);
         assert_eq!(plan.effects_not_run, 0);
         assert_eq!(plan.passes_recorded(), 2);
@@ -158,7 +216,7 @@ mod tests {
 
     #[test]
     fn layers_are_put_in_their_places_back_to_front_in_one_pass_that_also_clears_and_then_the_output_is_made() {
-        let plan = plan_frame(&description_of(vec![layer(1), layer(2), layer(3)]));
+        let plan = plan_of_the_built_in_effects(&description_of(vec![layer(1), layer(2), layer(3)]));
         assert_eq!(
             plan.passes,
             vec![PassPlan::PlaceLayers { layers: vec![0, 1, 2] }, PassPlan::Output]
@@ -168,7 +226,7 @@ mod tests {
 
     #[test]
     fn the_effects_of_a_layer_run_before_the_layers_are_put_in_their_places_and_in_the_order_they_were_asked_for() {
-        let plan = plan_frame(&description_of(vec![
+        let plan = plan_of_the_built_in_effects(&description_of(vec![
             layer(1),
             layer_with(2, vec![redder(), greyer()]),
             layer(3),
@@ -197,7 +255,7 @@ mod tests {
 
     #[test]
     fn an_effect_that_changes_nothing_is_left_out_and_is_not_counted_as_one_that_could_not_run() {
-        let plan = plan_frame(&description_of(vec![layer_with(
+        let plan = plan_of_the_built_in_effects(&description_of(vec![layer_with(
             1,
             vec![nothing_changes(), redder(), nothing_changes(), greyer()],
         )]));
@@ -211,7 +269,7 @@ mod tests {
         assert_eq!(plan.effects_not_run, 0);
 
         // A layer whose effects all change nothing is put in its place straight from its picture.
-        let plan = plan_frame(&description_of(vec![layer_with(1, vec![nothing_changes()])]));
+        let plan = plan_of_the_built_in_effects(&description_of(vec![layer_with(1, vec![nothing_changes()])]));
         assert_eq!(
             plan.passes,
             vec![PassPlan::PlaceLayers { layers: vec![0] }, PassPlan::Output]
@@ -263,7 +321,7 @@ mod tests {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::INFINITY, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         };
-        let plan = plan_frame(&description_of(vec![
+        let plan = plan_of_the_built_in_effects(&description_of(vec![
             layer_with(1, vec![unknown, redder(), too_few_numbers]),
             layer_with(2, vec![too_many_numbers, not_a_number, infinite]),
         ]));
@@ -288,7 +346,7 @@ mod tests {
             corners: CORNERS_OF_THE_WHOLE_PICTURE,
             effects: vec![redder(), greyer()],
         };
-        let plan = plan_frame(&description_of(vec![solid]));
+        let plan = plan_of_the_built_in_effects(&description_of(vec![solid]));
         assert_eq!(plan.effects_not_run, 2);
         assert_eq!(
             plan.passes,
@@ -298,12 +356,15 @@ mod tests {
 
     #[test]
     fn the_passes_a_frame_takes_are_one_for_each_effect_and_the_two_that_every_frame_has() {
-        let plan = plan_frame(&description_of(vec![
+        let plan = plan_of_the_built_in_effects(&description_of(vec![
             layer_with(1, vec![redder(), greyer(), redder()]),
             layer_with(2, vec![greyer()]),
         ]));
         assert_eq!(plan.passes_recorded(), 4 + 2);
-        assert_eq!(plan_frame(&FrameDescription::black((8, 8))).passes_recorded(), 2);
+        assert_eq!(
+            plan_of_the_built_in_effects(&FrameDescription::black((8, 8))).passes_recorded(),
+            2
+        );
     }
 
     /// The numbers that say a matrix changes nothing are the window's own (`ColourMatrix::changes_nothing`): a matrix the window would not apply is one the

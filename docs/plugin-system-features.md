@@ -220,6 +220,8 @@ can be supported. The design notes answer that at length; here is what the syste
   lost device, disables that instance and says which; the device is recreated. *(Spike S2, 2026-10-15: see plugin-system-spike-findings.md. Recommended guard: loop caps injected in the
   rewriting step, the engine's own device and thread, a watchdog with a timeout and recreation, a first-use probe at small size; on a software adapter the abandoned work cannot be
   cancelled and keeps using the CPU, so a render process stays an open option. Waiting for the maintainer's answer.)*
+  *(Phase 1.6, 2026-10-16 [V]: built as recommended except the first-use probe (phase 6): loop caps in every shader that is given to the engine, the engine's own device and thread, a watchdog with a timeout and recreation, the effects of the frame that did not finish switched off for the run, three recreations within a minute stop the engine. Verified on the software adapters, **not** on a real card (SF-01):
+  `engine-phase-1-design.md` section 6 says what was measured.)*
 * **EN-06 [P] M** An effect that depends on earlier frames (ISF persistent buffers, feedback) is marked so in its descriptor; a seek
   re-simulates from the clip's start or a checkpoint; the export is sequential. The interface says "this effect depends on earlier
   frames". **Decided 2026-10-15 (Q-21): see EN-14.**

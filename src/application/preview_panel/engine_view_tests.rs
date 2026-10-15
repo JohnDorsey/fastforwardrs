@@ -254,7 +254,7 @@ fn a_matrix_that_the_engine_would_not_run_is_not_described_and_one_that_it_would
         let mut shown = showing(0, &picture, whole_picture());
         shown.colour = ColourMatrix::hue_rotation(degrees);
         let (description, _) = describe(&content(vec![shown], None));
-        let plan = crate::engine::plan_frame(&description);
+        let plan = crate::engine::plan_frame(&description, &crate::engine::EffectsThatRun::built_in_only());
         assert_eq!(
             description.layers[0].effects.is_empty(),
             plan.effects_not_run == 0 && plan.passes_recorded() == 2,

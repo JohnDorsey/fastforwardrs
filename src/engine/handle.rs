@@ -9,13 +9,23 @@ use std::time::{Duration, Instant};
 
 use std::sync::Arc;
 
+use super::effect_shaders::check_that_it_is_an_effect;
+use super::guard::{ShaderProblem, guard_wgsl};
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::worker;
-use super::{FrameDescription, PictureData, PictureId};
+use super::{COLOUR_MATRIX_KEY, FrameDescription, PictureData, PictureId};
 
 /// How long dropping the handle waits for the engine's thread to finish before it leaves it behind. (A thread that is stuck on the graphics card
 /// cannot be stopped from outside: the program leaves it, and it ends with the program.)
 const HOW_LONG_TO_WAIT_FOR_THE_THREAD: Duration = Duration::from_millis(1000);
+
+/// What the guard did to the shader of an effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectShaderReport {
+    /// How many loops of the shader were given a limit on their passes (see `guard`). A loop that is cut short by it makes a picture that is not what the
+    /// shader would have made, which the engine does not say when it happens.
+    pub loops_capped: usize,
+}
 
 /// The picture engine, running on a thread of its own. See [the module](super).
 pub struct Engine {
@@ -23,12 +33,14 @@ pub struct Engine {
     events: Receiver<EngineEvent>,
     thread: Option<JoinHandle<()>>,
     next_serial: u64,
+    most_passes_of_a_loop: u32,
 }
 
 impl Engine {
     /// Starts the engine. This does not wait for it: making the device takes a good fraction of a second, and if that fails the engine says so
     /// as an [`EngineEvent::Stopped`]. `wake_up` is called, from the engine's thread, whenever there is an event to take.
     pub fn start(settings: EngineSettings, wake_up: WakeUp) -> Self {
+        let most_passes_of_a_loop = settings.most_passes_of_a_loop;
         let (request_sender, request_receiver) = mpsc::channel();
         let (event_sender, event_receiver) = mpsc::channel();
         let thread = std::thread::Builder::new()
@@ -40,7 +52,41 @@ impl Engine {
             events: event_receiver,
             thread: Some(thread),
             next_serial: 1,
+            most_passes_of_a_loop,
         }
+    }
+
+    /// Gives the engine a shader for the effect under `key`, so that frames can ask for it (an `EffectCall` with that key and the numbers the shader is
+    /// given): **this is the one way in for a shader that the engine did not write.** The shader is read and checked here, on the caller's thread, and
+    /// refused with the place of the mistake if it has one; every loop in it is given a limit on its passes (`EngineSettings::most_passes_of_a_loop`) and it is
+    /// sent to the engine, which makes it an effect on the graphics card. If the card's library will not take it (it wants more than an effect is given, or
+    /// something of another kind), the engine says so afterwards with an [`EngineEvent::EffectRejected`], and a frame that asks for the effect is made without
+    /// it. A shader that was under the key is replaced. Keys that begin with `engine:` are the engine's own. What a shader of an effect has to be is in
+    /// `effect_shaders`.
+    pub fn compile_effect_shader(&self, key: &str, source: &str) -> Result<EffectShaderReport, ShaderProblem> {
+        let refuse = |message: String| ShaderProblem {
+            message,
+            line: None,
+            column: None,
+        };
+        if key.is_empty() {
+            return Err(refuse("an effect has to have a key".to_owned()));
+        }
+        if key == COLOUR_MATRIX_KEY || key.starts_with("engine:") {
+            return Err(refuse(format!(
+                "the key {key} belongs to the engine's own effects, which keys that begin with engine: are"
+            )));
+        }
+        let shader = guard_wgsl(source, self.most_passes_of_a_loop)?;
+        check_that_it_is_an_effect(&shader).map_err(refuse)?;
+        let report = EffectShaderReport {
+            loops_capped: shader.loops_capped,
+        };
+        let _ = self.requests.send(EngineRequest::InstallEffect {
+            key: key.to_owned(),
+            shader: Arc::new(shader),
+        });
+        Ok(report)
     }
 
     /// Sends a picture, which frames can then refer to by `id`. The bytes are not copied.
@@ -72,9 +118,25 @@ impl Engine {
         let _ = self.requests.send(EngineRequest::Stop);
     }
 
-    /// Whether the engine's thread is still going.
+    /// Whether the engine's thread is still going. (An engine that has no thread of its own, which the tests make up, is always going.)
     pub fn is_running(&self) -> bool {
-        self.thread.as_ref().is_some_and(|thread| !thread.is_finished())
+        self.thread.as_ref().is_none_or(|thread| !thread.is_finished())
+    }
+
+    /// For the tests of what the window does with what the engine says: an engine that is not one. It has no thread and makes no frame: the test says what it
+    /// says (the events it sends are what [`Self::try_next_event`] gives) and reads what it was asked (the requests it gets).
+    #[cfg(test)]
+    pub(crate) fn scripted_for_tests() -> (Self, Sender<EngineEvent>, Receiver<EngineRequest>) {
+        let (request_sender, request_receiver) = mpsc::channel();
+        let (event_sender, event_receiver) = mpsc::channel();
+        let engine = Self {
+            requests: request_sender,
+            events: event_receiver,
+            thread: None,
+            next_serial: 1,
+            most_passes_of_a_loop: super::DEFAULT_MOST_PASSES_OF_A_LOOP,
+        };
+        (engine, event_sender, request_receiver)
     }
 }
 

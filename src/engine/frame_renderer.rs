@@ -11,16 +11,21 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use super::device::EngineDevice;
+use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_call};
+use super::guard::GuardedShader;
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
 use super::pictures::{PictureData, PicturePixels};
 use super::pipelines::{ACCUMULATION_FORMAT, OUTPUT_FORMAT, PLANE_FORMAT, Pipelines, SENT_PICTURE_FORMAT};
 use super::placement::PlacementUniforms;
-use super::plan::{PassPlan, plan_frame};
+use super::plan::{EffectsThatRun, KindOfEffect, PassPlan, plan_frame};
 use super::readback::{ReadbackBuffers, ReadbackProblem};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
 use super::yuv::chroma_size;
-use super::{FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, UniformBytes, UniformSlot};
+use super::{
+    COLOUR_MATRIX_KEY, FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, UniformBytes,
+    UniformSlot,
+};
 
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
 const IDLE_TEXTURE_BUDGET_IN_BYTES: u64 = 256 * 1024 * 1024;
@@ -49,6 +54,8 @@ pub enum RenderProblem {
     PicturesMissing(Vec<PictureId>),
     #[error("a picture that was sent cannot be used: {0}")]
     BadPicture(String),
+    #[error("the shader of an effect cannot be used: {0}")]
+    BadEffectShader(String),
 }
 
 /// Makes frames on a device. See the module documentation.
@@ -65,6 +72,14 @@ pub struct FrameRenderer {
     upload_arena: UniformArena,
     /// A picture of one white pixel, which a layer that is a colour is made of.
     white_pixel: wgpu::TextureView,
+    /// The effects that were given to the engine as shaders, by their keys.
+    shader_effects: HashMap<String, wgpu::RenderPipeline>,
+    /// Which effects the engine can run: its own, and the keys of `shader_effects`.
+    effects_that_run: EffectsThatRun,
+    /// For the tests of what happens when a frame does not finish (which no card can be made to do on purpose, in no time, without spending the processor for
+    /// as long as the program runs): the frames that are made say they did not finish.
+    #[cfg(test)]
+    the_card_never_finishes: bool,
 }
 
 impl FrameRenderer {
@@ -115,7 +130,58 @@ impl FrameRenderer {
             arena: UniformArena::default(),
             upload_uniforms: UniformBytes::new(alignment),
             upload_arena: UniformArena::default(),
+            shader_effects: HashMap::new(),
+            effects_that_run: EffectsThatRun::built_in_only(),
+            #[cfg(test)]
+            the_card_never_finishes: false,
         }
+    }
+
+    /// From now on a frame is made and then said not to have finished in time, as a frame is that the card does not finish.
+    #[cfg(test)]
+    pub fn pretend_the_card_never_finishes(&mut self) {
+        self.the_card_never_finishes = true;
+    }
+
+    /// Makes the effect under `key` an effect that frames can ask for, run by `shader`, which has been through the guard: its pipeline is made now, so that
+    /// a shader the graphics library will not take is found out now and not in the middle of a frame. An effect that was under `key` is replaced.
+    pub fn install_effect(&mut self, key: &str, shader: &GuardedShader) -> Result<(), RenderProblem> {
+        if key == COLOUR_MATRIX_KEY || key.starts_with("engine:") {
+            return Err(RenderProblem::BadEffectShader(format!(
+                "the key {key} belongs to the engine's own effects"
+            )));
+        }
+        check_that_it_is_an_effect(shader).map_err(RenderProblem::BadEffectShader)?;
+        let (pipeline, mistake) = self.device.catching_errors(|| {
+            self.pipelines
+                .foreign_effect
+                .pipeline_for(&self.device.device, key, shader)
+        });
+        if let Some(mistake) = mistake {
+            return Err(RenderProblem::BadEffectShader(format!(
+                "the graphics library would not take it: {mistake}"
+            )));
+        }
+        self.shader_effects.insert(key.to_owned(), pipeline);
+        self.effects_that_run.add_shader(key);
+        Ok(())
+    }
+
+    /// The keys of the effects of `description` that are run by a shader that was given to the engine, once each, in order: what a frame that did not
+    /// finish had in it that the engine did not write.
+    pub fn shader_effects_in(&self, description: &FrameDescription) -> Vec<String> {
+        let mut keys: Vec<String> = Vec::new();
+        for pass in &plan_frame(description, &self.effects_that_run).passes {
+            if let PassPlan::Effects { layer, calls } = pass {
+                for &call in calls {
+                    let key = &description.layers[*layer].effects[call].key;
+                    if self.effects_that_run.kind_of(key) == Some(KindOfEffect::Shader) && !keys.contains(key) {
+                        keys.push(key.clone());
+                    }
+                }
+            }
+        }
+        keys
     }
 
     pub fn device(&self) -> &EngineDevice {
@@ -321,7 +387,7 @@ impl FrameRenderer {
         }
         self.pictures.touch(pictures_used());
 
-        let plan = plan_frame(description);
+        let plan = plan_frame(description, &self.effects_that_run);
         let accumulation_shape = TextureShape {
             width_in_pixels: width,
             height_in_pixels: height,
@@ -390,10 +456,18 @@ impl FrameRenderer {
                             calls
                                 .iter()
                                 .map(|&call| {
-                                    let rows = colour_matrix_rows(&effects[call].values);
-                                    self.uniforms.add_slot(|writer| {
-                                        writer.mat3x3_from_rows(rows);
-                                    })
+                                    let effect = &effects[call];
+                                    match self.effects_that_run.kind_of(&effect.key) {
+                                        Some(KindOfEffect::Shader) => self.uniforms.add_slot(|writer| {
+                                            write_the_numbers_of_a_call(writer, &effect.values);
+                                        }),
+                                        _ => {
+                                            let rows = colour_matrix_rows(&effect.values);
+                                            self.uniforms.add_slot(|writer| {
+                                                writer.mat3x3_from_rows(rows);
+                                            })
+                                        }
+                                    }
                                 })
                                 .collect(),
                         );
@@ -428,7 +502,7 @@ impl FrameRenderer {
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         ));
                     }
-                    PassPlan::Effects { layer, .. } => {
+                    PassPlan::Effects { layer, calls } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with effects has uniforms");
                         let LayerSource::Picture(id) = description.layers[*layer].source else {
                             continue;
@@ -439,34 +513,61 @@ impl FrameRenderer {
                             .get(id)
                             .expect("the pictures of the frame are on the card")
                             .view;
-                        for (slot, &picture_number) in
-                            effect_slots[pass_number].iter().zip(&effect_picture_numbers[layer])
+                        for ((slot, &picture_number), &call) in effect_slots[pass_number]
+                            .iter()
+                            .zip(&effect_picture_numbers[layer])
+                            .zip(calls)
                         {
-                            let bind_group = self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("engine colour matrix pass"),
-                                layout: &self.pipelines.colour_matrix.bind_group_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                            buffer: uniform_buffer,
-                                            offset: 0,
-                                            size: NonZeroU64::new(u64::from(slot.size)),
-                                        }),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: wgpu::BindingResource::TextureView(input_view),
-                                    },
-                                ],
-                            });
+                            let effect = &description.layers[*layer].effects[call];
+                            let uniform_binding = wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: uniform_buffer,
+                                    offset: 0,
+                                    size: NonZeroU64::new(u64::from(slot.size)),
+                                }),
+                            };
+                            let picture_binding = wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(input_view),
+                            };
+                            // (The effect that mixes colours reads its picture with no sampler; one that a shader runs also has the sampler of the effects.)
+                            let (pipeline, bind_group, label) = match self.effects_that_run.kind_of(&effect.key) {
+                                Some(KindOfEffect::Shader) => (
+                                    &self.shader_effects[&effect.key],
+                                    self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("engine effect pass"),
+                                        layout: &self.pipelines.foreign_effect.bind_group_layout,
+                                        entries: &[
+                                            uniform_binding,
+                                            picture_binding,
+                                            wgpu::BindGroupEntry {
+                                                binding: 2,
+                                                resource: wgpu::BindingResource::Sampler(
+                                                    &self.pipelines.foreign_effect.sampler,
+                                                ),
+                                            },
+                                        ],
+                                    }),
+                                    "engine: an effect that was given to the engine as a shader",
+                                ),
+                                _ => (
+                                    &self.pipelines.colour_matrix.pipeline,
+                                    self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("engine colour matrix pass"),
+                                        layout: &self.pipelines.colour_matrix.bind_group_layout,
+                                        entries: &[uniform_binding, picture_binding],
+                                    }),
+                                    "engine: mix the colours of a layer's picture",
+                                ),
+                            };
                             let mut render_pass = begin_pass(
                                 &mut encoder,
-                                "engine: mix the colours of a layer's picture",
+                                label,
                                 &effect_views[picture_number],
                                 wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                             );
-                            render_pass.set_pipeline(&self.pipelines.colour_matrix.pipeline);
+                            render_pass.set_pipeline(pipeline);
                             render_pass.set_bind_group(0, &bind_group, &[slot.offset]);
                             render_pass.draw(0..3, 0..1);
                             drop(render_pass);
@@ -561,6 +662,10 @@ impl FrameRenderer {
             return Err(RenderProblem::GraphicsMistake(mistake));
         }
 
+        #[cfg(test)]
+        if self.the_card_never_finishes {
+            return Err(RenderProblem::TimedOut);
+        }
         let waiting_since = Instant::now();
         let rgba_pixels =
             self.readback

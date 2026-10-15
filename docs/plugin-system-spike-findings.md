@@ -102,6 +102,8 @@ Meaning:
    (**Believed**). Whether other programs on the card are disturbed is **Believed** to depend on the Windows version and **unknown here**. What *is* Verified by reading the source: **neither
    egui-wgpu 0.36.2 nor eframe 0.36.2 has any handling of a lost device** (no occurrence of `DeviceLost`, `set_device_lost_callback` or `on_uncaptured_error`), so if plugin passes ran on
    the *window's* device, a lost device would take the window down. This is the reason the plan has the engine on its own device and thread (phase 1).
+6. **Found in phase 1.6 (2026-10-16): letting go of the last handle to a device whose card is still running a draw does not return** (WARP; the engine's old renderer was let go of on the engine's own thread while a draw of two thousand million passes ran: the thread never came back, 60 seconds were watched). `destroy()` returns at once, as above, but what is left of the device
+   is waited for when the last handle is dropped. So whatever replaces a device has to let go of the old one on a thread that may stay there for ever, and keep no other handle to it on the thread that goes on working (`engine-phase-1-design.md`, section 6).
 
 **A guard that works: loop caps in the rewriting step (Verified).** `guard.rs` walks the naga IR and gives every loop a counter of its own that breaks the loop after N passes (about 60 lines, works for
 GLSL- and WGSL-made modules alike, because it works on the IR). Results with N = 20 000, at 256×192:
