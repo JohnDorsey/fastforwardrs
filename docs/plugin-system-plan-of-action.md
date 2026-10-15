@@ -128,6 +128,14 @@ and every later phase uses them.
 * **0.5 Spikes** (QA-07, S1-S3) [P], throwaway code, each ends with a written finding: **S1** one ISF shader through the rewriting step and naga to a picture; **S2** a deliberate hang and a
   lost device on a software adapter / WSL (never the maintainer's GPU), to decide how plugin passes are guarded (EN-05); **S3** one `.cube` in a shader against ffmpeg's `lut3d`.
   (The old S4, the seek latency of a linked libav, is dropped: libav linking is not on this plan, section 5.)
+  **0.5 is DONE (2026-10-15 [V]); the findings are in [plugin-system-spike-findings.md](plugin-system-spike-findings.md), the code in `tools/spikes/phase-0.5/`.** Only software adapters were
+  opened (WARP on Windows, lavapipe in WSL), on both. **S1:** eight ISF-style shaders (mine, not a third-party corpus) go through a rewriting step, naga (GLSL in, WGSL out) and wgpu to pictures
+  that agree with a CPU calculation to 1 of 255 and between WARP and lavapipe to 1 of 255; the rewriting step's job is now a list (no combined `sampler2D`, no `##`, no `varying`, bool as int, offsets
+  from naga, `IMG_*` calls rewritten to generated functions). **A real finding: on WARP, wgpu 30.0.1 gives two draws that use different static uniform buffers the data of the last one** (dynamic
+  offsets, textures, real GPUs and lavapipe are all right): the engine keeps the uniforms of a frame in one arena with dynamic offsets. **S2:** a watchdog (poll with a timeout) works and a
+  fresh device can be made at once, **but a runaway shader on a software adapter keeps using the CPU until the process ends**; a loop cap injected in naga's IR bounds every loop (0.5 s instead of
+  never) and leaves ordinary shaders' pictures byte-identical; a real card's timeout (TDR) was not tested (by rule). **S3:** the shader equals a CPU reference to 3e-7 and ffmpeg's `lut3d` to
+  1 of 255 (**ffmpeg truncates; and ignores `DOMAIN_MIN/MAX` for the table tried**). Two questions for the maintainer are at the end of the findings.
 
 ### Phase 1 — The engine skeleton, in compatibility mode (size L)
 
@@ -141,7 +149,10 @@ a frame out; EN-12), so that a command-line export and a render process stay pos
 *Gate (from the long-term plan):* random projects (the existing generators) rendered by the engine and by the oracle agree within a stated tolerance and a pixel-count budget; a typical stack
 (four layers, two blurs and a LUT) plays at **1080p60 on the integrated GPU**, measured by a benchmark in the repository (EN-07); a deliberately bad shader gives an error and never a hang
 (EN-05); CI is green on software adapters. *Delivers:* nothing visibly new except adaptive preview quality (EN-08: lower resolution before dropped frames, full resolution when still) and
-a preview that no longer converts colours in ffmpeg. *Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
+a preview that no longer converts colours in ffmpeg. **Rules from the spikes (see plugin-system-spike-findings.md):** the uniforms of every pass of a frame live in **one arena buffer bound
+with dynamic offsets** (WARP gets static ones wrong), bind groups come from **explicit layouts** (an automatic layout drops unused bindings), pictures inside the engine are in **GL orientation**
+(row 0 is the bottom row; flipped once at upload and once at output), and the engine runs on **its own device**, because egui-wgpu and eframe do not handle a lost device.
+*Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
 and each is listed and either fixed or accepted by the maintainer.
 
 ### Phase 2 — Export through the engine (size M)

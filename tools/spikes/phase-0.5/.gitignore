@@ -1,0 +1,6 @@
+/target/
+/out_*/
+/out_*.png
+/out_*.wgsl
+*.log
+*.err

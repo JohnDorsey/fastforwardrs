@@ -217,7 +217,9 @@ can be supported. The design notes answer that at length; here is what the syste
 * **EN-04 [P] M** A render of a frame is a **graph of passes** built from the plan: decode -> upload -> colour conversion -> placement ->
   effect stack -> composite -> (group effects) -> track effects -> output transform. Textures come from a pool.
 * **EN-05 [P] M** A **bad shader never hangs the program**: compile errors give a message with a line; a pass that takes too long, or a
-  lost device, disables that instance and says which; the device is recreated.
+  lost device, disables that instance and says which; the device is recreated. *(Spike S2, 2026-10-15: see plugin-system-spike-findings.md. Recommended guard: loop caps injected in the
+  rewriting step, the engine's own device and thread, a watchdog with a timeout and recreation, a first-use probe at small size; on a software adapter the abandoned work cannot be
+  cancelled and keeps using the CPU, so a render process stays an open option. Waiting for the maintainer's answer.)*
 * **EN-06 [P] M** An effect that depends on earlier frames (ISF persistent buffers, feedback) is marked so in its descriptor; a seek
   re-simulates from the clip's start or a checkpoint; the export is sequential. The interface says "this effect depends on earlier
   frames". **Decided 2026-10-15 (Q-21): see EN-14.**
