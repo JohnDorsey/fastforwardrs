@@ -255,12 +255,12 @@ fn picture_in_planes(
     }
 }
 
-/// The largest and the mean difference between two pictures of RGBA bytes, over the red, green and blue of every pixel.
+/// The largest and the mean difference between two pictures of RGBA bytes, over the red, green and blue of every pixel. (Not over how opaque they are:
+/// that is not what these tests are about, and what ffmpeg makes of it is looked at by a test of its own, in `media_frame_stream`.)
 fn differences(ours: &[u8], theirs: &[u8]) -> (u8, f64) {
     assert_eq!(ours.len(), theirs.len());
     let (mut largest, mut sum, mut count) = (0u8, 0u64, 0u64);
     for (ours, theirs) in ours.as_chunks::<4>().0.iter().zip(theirs.as_chunks::<4>().0) {
-        assert_eq!(ours[3], theirs[3], "the pictures are both opaque");
         for channel in 0..3 {
             let difference = ours[channel].abs_diff(theirs[channel]);
             largest = largest.max(difference);

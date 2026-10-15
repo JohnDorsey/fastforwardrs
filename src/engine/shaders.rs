@@ -12,6 +12,9 @@ pub const INGEST: &str = include_str!("shaders/ingest.wgsl");
 /// What is done once to a video picture that was sent in planes: it is made red, green and blue.
 pub const YUV: &str = include_str!("shaders/yuv.wgsl");
 
+/// The effect that mixes the colours of a layer's picture with a matrix.
+pub const COLOUR_MATRIX: &str = include_str!("shaders/colour_matrix.wgsl");
+
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");
 
@@ -21,6 +24,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("output.wgsl", OUTPUT),
     ("ingest.wgsl", INGEST),
     ("yuv.wgsl", YUV),
+    ("colour_matrix.wgsl", COLOUR_MATRIX),
     ("place.wgsl", PLACE),
 ];
 

@@ -324,6 +324,38 @@ fn first_picture_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamReq
     }
 }
 
+/// How opaque the pixels of `frame` are: which opacities there are, and how many pixels have each.
+fn opacities_of(frame: &DecodedFrame) -> std::collections::BTreeMap<u8, usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    for pixel in frame.rgba_pixels.as_chunks::<4>().0 {
+        *counts.entry(pixel[3]).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// The picture of a video has no clear parts: whatever size ffmpeg makes it, every pixel of what it delivers is fully opaque. (A picture that is clear
+/// shows nothing on the preview, so this is what the preview rests on; ffmpeg does it by itself when it makes RGBA of a picture that has no opacity of its
+/// own, and it is looked at here because that is done by code that is different on each kind of processor.)
+#[test]
+fn the_pictures_ffmpeg_makes_of_a_video_are_opaque_at_every_size() {
+    let toolchain = toolchain_or_skip!();
+    let video = counter_video(&toolchain); // 320x180
+    for (width, height) in [(320, 180), (160, 90), (200, 200), (321, 181), (100, 51), (640, 360)] {
+        let mut request = request_for(&video, 40, 2, 1);
+        request.picture_width_in_pixels = width;
+        request.picture_height_in_pixels = height;
+        let frame = first_picture_delivered(&toolchain, &request);
+        let opacities = opacities_of(&frame);
+        assert_eq!(
+            opacities.keys().collect::<Vec<_>>(),
+            vec![&255],
+            "a picture of {}x{} made from a video of 320x180 has pixels that are not opaque (opacity: how many pixels): {opacities:?}",
+            frame.width_in_pixels,
+            frame.height_in_pixels
+        );
+    }
+}
+
 #[test]
 fn a_video_of_another_shape_than_the_picture_is_delivered_as_big_as_fits_inside_it_in_its_own_shape() {
     let toolchain = toolchain_or_skip!();

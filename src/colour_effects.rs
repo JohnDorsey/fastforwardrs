@@ -29,6 +29,19 @@ impl ColourMatrix {
         rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
     };
 
+    /// The matrix with these rows (how much of the red, the green and the blue the new red is made of, then the new green, then the new blue). For the
+    /// tests, which make matrices that no effect makes.
+    #[cfg(test)]
+    pub fn from_rows(rows: [[f32; 3]; 3]) -> Self {
+        Self { rows }
+    }
+
+    /// The rows of the matrix: how much of the red, the green and the blue the new red (the first row), green (the second) and blue (the third) is
+    /// made of.
+    pub fn rows(&self) -> [[f32; 3]; 3] {
+        self.rows
+    }
+
     /// The matrix that turns the hues of the colours of a picture round the wheel of colours by `degrees` (clockwise, as the wheel
     /// is usually drawn: red turned by 120 degrees is green), as the hue rotation of CSS and SVG does, keeping how bright
     /// a colour is as far as that can be done. A whole number of turns changes nothing, exactly.

@@ -116,6 +116,15 @@ impl CompressedPicture {
         Ok(Self { jpeg_bytes, size })
     }
 
+    /// A compressed picture that cannot be decompressed, for the tests of what is done with a thumbnail that cannot be unpacked.
+    #[cfg(test)]
+    pub fn that_cannot_be_unpacked(size: PictureSize) -> Self {
+        Self {
+            jpeg_bytes: vec![1, 2, 3],
+            size,
+        }
+    }
+
     pub fn size(&self) -> PictureSize {
         self.size
     }

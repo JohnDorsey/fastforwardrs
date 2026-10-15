@@ -47,6 +47,8 @@ mod worker;
 mod yuv;
 
 #[cfg(test)]
+mod effect_tests;
+#[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
 mod oracle_tests;

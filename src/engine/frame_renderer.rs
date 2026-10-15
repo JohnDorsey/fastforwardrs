@@ -4,6 +4,7 @@
 //! Making one frame: everything of the frame is recorded into one batch of work for the card, the batch is submitted, and the pixels are taken back.
 //! Pictures that are sent to the engine are turned into what the passes work on when they arrive, and are kept for the frames that follow.
 
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
@@ -19,7 +20,7 @@ use super::readback::{ReadbackBuffers, ReadbackProblem};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
 use super::yuv::chroma_size;
-use super::{FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, UniformBytes};
+use super::{FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, UniformBytes, UniformSlot};
 
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
 const IDLE_TEXTURE_BUDGET_IN_BYTES: u64 = 256 * 1024 * 1024;
@@ -335,20 +336,76 @@ impl FrameRenderer {
         };
         let accumulation = self.pool.acquire(&self.device.device, accumulation_shape);
         let output = self.pool.acquire(&self.device.device, output_shape);
+
+        // What the effects of the layers make: a picture for each effect that runs, as big as the picture the effect is run on, from the pool and given back
+        // after the frame. `effect_picture_numbers` says, for each layer that has effects, which of them are its own, in the order they are made in (the last
+        // is the one the layer is put in its place from).
+        let mut effect_pictures: Vec<(TextureShape, wgpu::Texture)> = Vec::new();
+        let mut effect_picture_numbers: HashMap<usize, Vec<usize>> = HashMap::new();
+        for pass in &plan.passes {
+            let PassPlan::Effects { layer, calls } = pass else {
+                continue;
+            };
+            let LayerSource::Picture(id) = description.layers[*layer].source else {
+                continue;
+            };
+            let picture = self
+                .pictures
+                .get(id)
+                .expect("the pictures of the frame are on the card");
+            let shape = TextureShape {
+                width_in_pixels: picture.width_in_pixels,
+                height_in_pixels: picture.height_in_pixels,
+                format: ACCUMULATION_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            };
+            let numbers = calls
+                .iter()
+                .map(|_| {
+                    effect_pictures.push((shape, self.pool.acquire(&self.device.device, shape)));
+                    effect_pictures.len() - 1
+                })
+                .collect();
+            effect_picture_numbers.insert(*layer, numbers);
+        }
         self.uniforms.clear();
 
         let (pending, mistake) = self.device.catching_errors(|| {
             let accumulation_view = accumulation.create_view(&wgpu::TextureViewDescriptor::default());
             let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
+            let effect_views: Vec<wgpu::TextureView> = effect_pictures
+                .iter()
+                .map(|(_, texture)| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+                .collect();
 
-            // The uniforms of every layer, written to the card before anything is recorded that uses them.
+            // The uniforms of every pass of the frame that has some, written to the card before anything is recorded that uses them. For each pass of
+            // the plan, in its order: the slots of the effects it runs (none for the others); and, for the layers that are put in their places, each one's.
+            let mut effect_slots: Vec<Vec<UniformSlot>> = Vec::with_capacity(plan.passes.len());
             let mut slots = Vec::new();
             for pass in &plan.passes {
-                if let PassPlan::PlaceLayers { layers } = pass {
-                    for &number in layers {
-                        let uniforms = PlacementUniforms::of_layer(&description.layers[number], (width, height));
-                        slots.push((number, self.uniforms.add_slot(|writer| uniforms.write(writer))));
+                match pass {
+                    PassPlan::Effects { layer, calls } => {
+                        let effects = &description.layers[*layer].effects;
+                        effect_slots.push(
+                            calls
+                                .iter()
+                                .map(|&call| {
+                                    let rows = colour_matrix_rows(&effects[call].values);
+                                    self.uniforms.add_slot(|writer| {
+                                        writer.mat3x3_from_rows(rows);
+                                    })
+                                })
+                                .collect(),
+                        );
                     }
+                    PassPlan::PlaceLayers { layers } => {
+                        effect_slots.push(Vec::new());
+                        for &number in layers {
+                            let uniforms = PlacementUniforms::of_layer(&description.layers[number], (width, height));
+                            slots.push((number, self.uniforms.add_slot(|writer| uniforms.write(writer))));
+                        }
+                    }
+                    PassPlan::ClearAccumulation | PassPlan::Output => effect_slots.push(Vec::new()),
                 }
             }
             let uniform_buffer = self
@@ -361,7 +418,7 @@ impl FrameRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("engine frame"),
                 });
-            for pass in &plan.passes {
+            for (pass_number, pass) in plan.passes.iter().enumerate() {
                 match pass {
                     PassPlan::ClearAccumulation => {
                         drop(begin_pass(
@@ -371,17 +428,67 @@ impl FrameRenderer {
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         ));
                     }
+                    PassPlan::Effects { layer, .. } => {
+                        let uniform_buffer = uniform_buffer.expect("a frame with effects has uniforms");
+                        let LayerSource::Picture(id) = description.layers[*layer].source else {
+                            continue;
+                        };
+                        // Each effect works on the picture the one before it made (the first, on the layer's own).
+                        let mut input_view = &self
+                            .pictures
+                            .get(id)
+                            .expect("the pictures of the frame are on the card")
+                            .view;
+                        for (slot, &picture_number) in
+                            effect_slots[pass_number].iter().zip(&effect_picture_numbers[layer])
+                        {
+                            let bind_group = self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("engine colour matrix pass"),
+                                layout: &self.pipelines.colour_matrix.bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                            buffer: uniform_buffer,
+                                            offset: 0,
+                                            size: NonZeroU64::new(u64::from(slot.size)),
+                                        }),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::TextureView(input_view),
+                                    },
+                                ],
+                            });
+                            let mut render_pass = begin_pass(
+                                &mut encoder,
+                                "engine: mix the colours of a layer's picture",
+                                &effect_views[picture_number],
+                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            );
+                            render_pass.set_pipeline(&self.pipelines.colour_matrix.pipeline);
+                            render_pass.set_bind_group(0, &bind_group, &[slot.offset]);
+                            render_pass.draw(0..3, 0..1);
+                            drop(render_pass);
+                            input_view = &effect_views[picture_number];
+                        }
+                    }
                     PassPlan::PlaceLayers { .. } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with layers has uniforms");
                         let mut bind_groups = Vec::with_capacity(slots.len());
                         for &(number, slot) in &slots {
                             let picture_view = match description.layers[number].source {
                                 LayerSource::Picture(id) => {
-                                    &self
-                                        .pictures
-                                        .get(id)
-                                        .expect("the pictures of the frame are on the card")
-                                        .view
+                                    match effect_picture_numbers.get(&number).and_then(|numbers| numbers.last()) {
+                                        Some(&last) => &effect_views[last],
+                                        None => {
+                                            &self
+                                                .pictures
+                                                .get(id)
+                                                .expect("the pictures of the frame are on the card")
+                                                .view
+                                        }
+                                    }
                                 }
                                 LayerSource::Solid(_) => &self.white_pixel,
                             };
@@ -447,6 +554,9 @@ impl FrameRenderer {
         });
         self.pool.release(accumulation_shape, accumulation);
         self.pool.release(output_shape, output);
+        for (shape, texture) in effect_pictures {
+            self.pool.release(shape, texture);
+        }
         if let Some(mistake) = mistake {
             return Err(RenderProblem::GraphicsMistake(mistake));
         }
@@ -471,12 +581,22 @@ impl FrameRenderer {
             FrameStatistics {
                 time_taken: started.elapsed(),
                 time_waiting_for_the_graphics_card: waited,
-                passes_recorded: plan.passes.len(),
+                passes_recorded: plan.passes_recorded(),
                 came_from_the_cache: false,
-                effects_not_run: 0,
+                effects_not_run: plan.effects_not_run,
             },
         ))
     }
+}
+
+/// The three rows of the matrix of an effect that mixes colours, from its nine numbers (the plan only lets one through that has nine).
+fn colour_matrix_rows(values: &[f32]) -> [[f32; 3]; 3] {
+    debug_assert_eq!(values.len(), 9);
+    [
+        [values[0], values[1], values[2]],
+        [values[3], values[4], values[5]],
+        [values[6], values[7], values[8]],
+    ]
 }
 
 /// One of the textures that the bytes of a picture are put in before the picture is made what the frames work on.

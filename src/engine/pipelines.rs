@@ -24,6 +24,9 @@ pub const PLACEMENT_UNIFORM_BYTES: u64 = 64;
 /// How many bytes the uniforms of the pass that makes a video picture red, green and blue take up (see `yuv.wgsl`).
 pub const YUV_UNIFORM_BYTES: u64 = 64;
 
+/// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): a 3 by 3 matrix, three columns of 16 bytes.
+pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 48;
+
 /// The format of the planes of a video picture, which are sent as they are.
 pub const PLANE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
@@ -45,6 +48,12 @@ pub struct YuvPass {
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
+/// The effect that mixes the colours of a layer's picture: a picture in, a picture of the same size out.
+pub struct ColourMatrixPass {
+    pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
 /// The pass that puts a layer's picture in its place on the frame.
 pub struct PlacePass {
     pub pipeline: wgpu::RenderPipeline,
@@ -58,6 +67,7 @@ pub struct Pipelines {
     pub output: OutputPass,
     pub ingest: IngestPass,
     pub yuv: YuvPass,
+    pub colour_matrix: ColourMatrixPass,
     pub place: PlacePass,
 }
 
@@ -67,6 +77,7 @@ impl Pipelines {
             output: output_pass(device),
             ingest: ingest_pass(device),
             yuv: yuv_pass(device),
+            colour_matrix: colour_matrix_pass(device),
             place: place_pass(device),
         }
     }
@@ -197,6 +208,42 @@ fn yuv_pass(device: &wgpu::Device) -> YuvPass {
     });
     YuvPass {
         pipeline: pipeline(device, "engine yuv pass", &module, &layout, ACCUMULATION_FORMAT, None),
+        bind_group_layout,
+    }
+}
+
+fn colour_matrix_pass(device: &wgpu::Device) -> ColourMatrixPass {
+    let module = shader_module(device, "engine colour matrix pass", shaders::COLOUR_MATRIX);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine colour matrix pass bindings"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(COLOUR_MATRIX_UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            loaded_texture_entry(1),
+        ],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine colour matrix pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    ColourMatrixPass {
+        pipeline: pipeline(
+            device,
+            "engine colour matrix pass",
+            &module,
+            &layout,
+            ACCUMULATION_FORMAT,
+            None,
+        ),
         bind_group_layout,
     }
 }
