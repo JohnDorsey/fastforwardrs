@@ -20,6 +20,8 @@ path = [
     "docs/**",
     "tools/**/*.md",
     "tools/linux/*.sh",
+    "tools/ci/*.sh",
+    "tools/spikes/**",
     "LICENSE-PLUGIN-CLARIFICATION",
 ]
 precedence = "closest"

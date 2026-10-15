@@ -749,9 +749,14 @@ pub fn red_and_blue_picture(
     path
 }
 
-/// A scratch folder that is removed when dropped.
+/// A scratch folder that is removed when dropped. It is made beside the test videos (under `target`), not in the system's temporary folder: a project file saved
+/// in the scratch folder gets a *relative* path to a video only if both are on the same drive, and on the Windows machines of GitHub the system's temporary folder is on
+/// another drive than the checkout (the program is right to write no relative path between drives, and `relative_path` has a test for that).
 pub fn scratch_directory() -> tempfile::TempDir {
-    tempfile::tempdir().expect("could not make a scratch folder")
+    tempfile::Builder::new()
+        .prefix("scratch-")
+        .tempdir_in(fixture_directory())
+        .expect("could not make a scratch folder")
 }
 
 /// Every picture of a video file, decoded to RGB (three bytes per pixel), at the file's own size.
