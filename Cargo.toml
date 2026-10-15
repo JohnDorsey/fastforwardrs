@@ -27,6 +27,15 @@ zip = { version = "9.0.2", default-features = false, features = ["deflate-flate2
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 # The CRC-32 of the files that are written into an archive (the zip crate uses it too, so it is in the tree already).
 crc32fast = "1.5"
+# The picture engine (src/engine) uses the graphics library the window is already drawn with, directly: the same version and the same features as
+# eframe's (the lock file has them already), and its shader front end to check and limit the shaders it is given. `pollster` waits for what wgpu
+# does in the background (the window's own renderer needs it too).
+wgpu = "30.0.1"
+naga = { version = "30.0.1", features = ["wgsl-in", "wgsl-out"] }
+pollster = "0.4.0"
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["wgpu"] }
+# The tests of the picture engine draw the same triangles with the window's own renderer, as the oracle (default features of egui-wgpu are the
+# window's anyway: they are on already).
+egui-wgpu = "0.36.2"

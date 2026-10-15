@@ -41,8 +41,10 @@ repeated). This note says **Verified** for what was run and measured, and **Beli
 6. **Sampling with `textureLod(…, 0.0)` and not `texture(…)`** is a correctness choice, not something naga forced: naga and wgpu **accept** a plain `texture()` inside a branch on a
    non-uniform value (verified: it compiled and drew on both adapters), but its gradients are undefined on real graphics hardware at the edge of such a branch (**Believed**, from the WGSL
    rules; not testable here). Nothing in the ISF files uses mipmaps, so `textureLod` at 0 means the same.
-7. **Pictures inside the engine are stored in GL orientation (row 0 is the bottom row)**: flip once when a decoded frame is uploaded (free in the upload) and once in the output pass, and
-   **nothing in any shader needs rewriting** (verified by the checks above). This is the decision for phase 1.
+7. **Orientation.** The spike stored pictures in GL orientation (row 0 the bottom row), flipped at upload and at output, and nothing in any shader needed rewriting (verified by the checks above). **Corrected on
+   2026-10-15 when phase 1 was designed:** the built-in passes, the window and the test oracle are all top-row-first, so a bottom-row-first engine would add a flip to all of them, whereas the ISF host already generates
+   its `IMG_*` functions and `main`, so it can flip there (`isf_FragNormCoord = vec2(x, 1 - y)`, a flipped `v` in the generated sampling functions, `gl_FragCoord.y` as `RENDERSIZE.y - y`) at no cost.
+   **Decision for phase 1 and after: the engine is top-row-first; the ISF host flips at its boundary** (the same checks, repeated in phase 5).
 
 **Idioms (Verified that they compile, which is not the same as being right).** Of 39 small idioms, 33 compile unchanged, among them the ones that worried me: implicit `int` to
 `float` (`TIME * 2`, `pow(x, 2)`, `float f = 1;`, `mod(x, 2)`, `vec3(1)`, `clamp(x, 0, 1)`), `const` arrays with the old and the new initialiser style, a global with a non-constant

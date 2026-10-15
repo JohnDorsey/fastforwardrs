@@ -152,6 +152,9 @@ a frame out; EN-12), so that a command-line export and a render process stay pos
 a preview that no longer converts colours in ffmpeg. **Rules from the spikes (see plugin-system-spike-findings.md):** the uniforms of every pass of a frame live in **one arena buffer bound
 with dynamic offsets** (WARP gets static ones wrong), bind groups come from **explicit layouts** (an automatic layout drops unused bindings), pictures inside the engine are in **GL orientation**
 (row 0 is the bottom row; flipped once at upload and once at output), and the engine runs on **its own device**, because egui-wgpu and eframe do not handle a lost device.
+**Correction of 2026-10-15, when the design of phase 1 was written ([engine-phase-1-design.md](engine-phase-1-design.md), E5): pictures in the engine are top-row-first, like the window's and the oracle's; GL orientation is the ISF host's business
+(its generated `IMG_*` functions and `isf_FragNormCoord` flip at its own boundary, which costs nothing because they are generated anyway).** The design also records two deliberate departures from the list in EN-04, both open to the
+maintainer's objection: a clip's effects run **before** placement, in the clip's own picture (E2), and the hue shifts of a layer are one fused colour-matrix call (E3).
 *Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
 and each is listed and either fixed or accepted by the maintainer.
 

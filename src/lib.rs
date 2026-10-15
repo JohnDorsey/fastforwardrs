@@ -20,6 +20,8 @@
 //! * [`speed_indicator`] draws and positions the fast-forward symbol, for the preview and the
 //!   export alike.
 //! * [`playback`] runs the live preview: the clock, and getting the right picture for each frame.
+//! * [`engine`] makes the finished picture of the preview on the graphics card, on a thread and a device of its own, from messages
+//!   (what is on a frame) and gives it back as pixels.
 
 #![forbid(unsafe_code)]
 
@@ -27,6 +29,7 @@ pub mod application;
 mod atomic_file;
 pub mod colour_effects;
 pub mod composition;
+pub mod engine;
 pub mod media;
 pub mod playback;
 pub mod project;
