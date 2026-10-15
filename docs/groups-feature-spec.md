@@ -172,7 +172,7 @@ Each item has a number for the answer log. **Blocking** means the model or the f
   animated** (no stopwatch on them); keyframes for groups come with the plugin work or on request.
 * **G-15. Sound.** *My answer:* **groups have no effect on sound** in the first version (no gain, mute or sound effects on a group); a picture effect on a group is
   ignored by members that have no picture (sound clips, crates).
-* **G-16. Which effects can a group have.** *My answer:* every effect that applies to pictures (hue shift today), the same menu as a clip's, at most one of each kind per group.
+* **G-16. Which effects can a group have.** *My answer:* every effect that applies to pictures (hue shift today), the same menu as a clip's, at most one of each kind per group. *(Changed 2026-10-15, plugin plan phase 0.4 step B: a group, like a clip and a track, may have several effects of one kind, each with a name of its own in its chain, and what the menu offers is not taken out of it when the group has it.)*
 
 ### 4.4 Outlines
 

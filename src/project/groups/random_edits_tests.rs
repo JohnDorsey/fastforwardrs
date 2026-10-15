@@ -16,8 +16,8 @@ use super::*;
 use crate::project::groups::test_projects::{Laid, lay_out};
 use crate::project::racks_tests::{db, put_a_rack_in};
 use crate::project::{
-    AnimationTarget, ClipMove, ClipSide, EffectKind, FrameRate, Project, PropertyId, RackDestination, RackId,
-    TextObject, TimelineFrameIndex, TrackSide,
+    AnimationTarget, ClipMove, ClipSide, Effect, EffectInstanceId, EffectKind, FrameRate, Project, PropertyId,
+    RackDestination, RackId, TextObject, TimelineFrameIndex, TrackSide,
 };
 use crate::test_support::DeterministicRandomNumbers;
 
@@ -474,19 +474,23 @@ impl Randomly {
                 let Some(group) = self.some_group(None) else {
                     return ("an effect of a group", false, "no group".to_owned());
                 };
-                let present = self
+                let present: Vec<EffectInstanceId> = self
                     .laid
                     .project
                     .group(group)
                     .unwrap()
                     .effects()
-                    .contains(EffectKind::HueShift);
-                let result = if present {
+                    .iter()
+                    .map(Effect::instance)
+                    .collect();
+                let result = if present.is_empty() || self.below(2) == 0 {
                     self.laid
                         .project
-                        .remove_effect_from_the_group(group, EffectKind::HueShift)
+                        .add_effect_to_the_group(group, EffectKind::HueShift)
+                        .map(|_| ())
                 } else {
-                    self.laid.project.add_effect_to_the_group(group, EffectKind::HueShift)
+                    let instance = present[self.below(present.len())];
+                    self.laid.project.remove_effect_from_the_group(group, instance)
                 };
                 ("an effect of a group", result.is_ok(), format!("{group}"))
             }

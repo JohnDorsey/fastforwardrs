@@ -40,11 +40,27 @@ jobs:
           sudo apt-get install -y pkg-config libasound2-dev libudev-dev libx11-dev libxcb1-dev libxkbcommon-dev libwayland-dev \
             libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libvulkan1 mesa-vulkan-drivers
 
-      - name: ffmpeg
-        # The program is developed and tested against ffmpeg 9.0.2 (README). The integration tests need it; the library tests do not.
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        id: ffmpeg
-        continue-on-error: true
+      # ffmpeg 9 or newer is needed (README, "ffmpeg"): an older one is refused by the program. The actions that install ffmpeg give older versions
+      # or do not run on the Mac of the runner (arm64), so each system gets its own step.
+      - name: ffmpeg 9 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath "$env:RUNNER_TEMP/ffmpeg"
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Directory | Select-Object -First 1).FullName + "/bin"
+          Add-Content $env:GITHUB_PATH $bin
+
+      - name: ffmpeg 9 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz
+          mkdir "$RUNNER_TEMP/ffmpeg" && tar xf ffmpeg.tar.xz --strip-components=1 -C "$RUNNER_TEMP/ffmpeg"
+          echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
+
+      - name: ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
 
       - name: Show the ffmpeg version
         shell: bash
@@ -112,5 +128,5 @@ jobs:
 
       - name: Compare THIRD_PARTY.md with what cargo-about makes now
         run: |
-          cargo about generate about.hbs > "$RUNNER_TEMP/THIRD_PARTY.md"
+          cargo about generate about.hbs | tr -d '\r' > "$RUNNER_TEMP/THIRD_PARTY.md"
           diff -u THIRD_PARTY.md "$RUNNER_TEMP/THIRD_PARTY.md"

@@ -10,6 +10,7 @@
 //! to the graphics card again in every frame, with nothing to be seen of it on the screen (the preview draws last, so what is seen
 //! is as it should be: only the tests can tell).
 
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use egui::{Modifiers, vec2};
 
 use super::picture_tests::picture_source;
@@ -17,7 +18,7 @@ use super::test_window::{Window, project_of};
 use crate::application::commands::Command;
 use crate::application::textures::PictureFilter;
 use crate::colour_effects::ColourMatrix;
-use crate::project::{AnimationTarget, ClipId, PropertyId, PropertyValue, SourceMediaIdentifier, TimelineFrameIndex};
+use crate::project::{AnimationTarget, ClipId, PropertyValue, SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
 use crate::test_support::put_a_hue_shift_on;
 
@@ -45,7 +46,8 @@ fn window_with_a_picture_that_has_a_hue_shift() -> (Window, SourceMediaIdentifie
     let mut window = Window::showing(project);
     window
         .application_mut()
-        .source_files
+        .sources
+        .files
         .get_mut(&identifier)
         .expect("the window has the files of the project")
         .picture
@@ -74,7 +76,7 @@ fn a_window_that_is_not_changing_does_not_send_the_picture_of_a_file_to_the_grap
     zoom_the_preview_in_as_far_as_it_goes(&mut window);
     // (The picture is on the screen in the way that the preview puts it there, which is not the way that it is first sent to the
     // graphics card: it is made of blocks, and its colours are changed. That is what there is to keep as it is.)
-    let textures = &window.application().textures;
+    let textures = &window.application().interface.textures;
     assert_eq!(
         textures.filter_of_the_picture_of_the_file(picture_file),
         Some(PictureFilter::Pixels)
@@ -99,7 +101,7 @@ fn what_is_sent_to_the_graphics_card_is_counted_when_the_picture_is_changed() {
     let sent = window.textures_uploaded_while(|window| {
         window.do_this(Command::SetEffectValue {
             target: AnimationTarget::Clip(picture),
-            property: PropertyId::HueShift,
+            property: HUE,
             value: PropertyValue::Number(60.0),
         });
     });
@@ -111,6 +113,7 @@ fn what_is_sent_to_the_graphics_card_is_counted_when_the_picture_is_changed() {
     assert_eq!(
         window
             .application()
+            .interface
             .textures
             .colours_of_the_picture_of_the_file(picture_file),
         Some(ColourMatrix::hue_rotation(60.0))

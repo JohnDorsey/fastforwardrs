@@ -254,30 +254,43 @@ pub(crate) fn random_project_with_effects(random: &mut DeterministicRandomNumber
     }
     for (target, first_frame, length) in targets {
         for kind in EffectKind::ALL {
-            // (A sound has none of them, and neither has a track that has nothing on it to put keyframes in.)
-            if length == 0 || random.next_below(2) == 0 || project.add_effect(target, kind).is_err() {
-                continue;
-            }
-            let values_begin_as_they_are = random.next_below(4) == 0;
-            for property in kind.properties() {
-                if !values_begin_as_they_are {
-                    let value = random_value_of_the_kind(random, property.kind());
-                    project
-                        .set_property_at(target, *property, value, TimelineFrameIndex::new(first_frame))
-                        .expect("the effect was just put on");
+            // (Several of one kind may be put on one target: one more after each, now and then, with values of its own.)
+            let mut put_another_on = true;
+            while put_another_on {
+                // (A sound has none of them, and neither has a track that has nothing on it to put keyframes in.)
+                if length == 0 || random.next_below(2) == 0 {
+                    break;
                 }
-                if random.next_below(2) == 0 {
-                    continue;
-                }
-                for _ in 0..1 + random.next_below(3) {
-                    let at = TimelineFrameIndex::new(first_frame + random.next_below(length));
-                    let value = random_value_of_the_kind(random, property.kind());
-                    project
-                        .add_keyframe(target, *property, at)
-                        .expect("the frame is in what it is for");
-                    project
-                        .set_property_at(target, *property, value, at)
-                        .expect("a keyframe was just made there");
+                let Ok(instance) = project.add_effect(target, kind) else {
+                    break;
+                };
+                put_another_on = random.next_below(4) == 0;
+                let values_begin_as_they_are = random.next_below(4) == 0;
+                let properties: Vec<PropertyId> = project
+                    .effects_of(target)
+                    .and_then(|effects| effects.instance(instance))
+                    .map(|effect| effect.properties().collect())
+                    .expect("the effect was just put on");
+                for property in properties {
+                    if !values_begin_as_they_are {
+                        let value = random_value_of_the_kind(random, property.kind());
+                        project
+                            .set_property_at(target, property, value, TimelineFrameIndex::new(first_frame))
+                            .expect("the effect was just put on");
+                    }
+                    if random.next_below(2) == 0 {
+                        continue;
+                    }
+                    for _ in 0..1 + random.next_below(3) {
+                        let at = TimelineFrameIndex::new(first_frame + random.next_below(length));
+                        let value = random_value_of_the_kind(random, property.kind());
+                        project
+                            .add_keyframe(target, property, at)
+                            .expect("the frame is in what it is for");
+                        project
+                            .set_property_at(target, property, value, at)
+                            .expect("a keyframe was just made there");
+                    }
                 }
             }
         }

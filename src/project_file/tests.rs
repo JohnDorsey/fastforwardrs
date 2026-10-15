@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -72,7 +73,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 10,
+  "file_format_version": 11,
   "sources": [
     {
       "kind": "video",
@@ -795,7 +796,7 @@ pub(super) fn project_with_everything() -> Project {
     }
     for (target, degrees) in turned_hue_shifts {
         project
-            .set_property_at(target, PropertyId::HueShift, PropertyValue::Number(degrees), frame(0))
+            .set_property_at(target, HUE, PropertyValue::Number(degrees), frame(0))
             .unwrap();
     }
     project
@@ -1295,9 +1296,8 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
     let caption = AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
     let picture = AnimationTarget::Clip(project.tracks()[0].entries()[1].id());
     let videos_track = AnimationTarget::Track(project.tracks()[1].id());
-    let hue_at = |target: AnimationTarget, frame: u64| {
-        project.property_value_at(target, PropertyId::HueShift, TimelineFrameIndex::new(frame))
-    };
+    let hue_at =
+        |target: AnimationTarget, frame: u64| project.property_value_at(target, HUE, TimelineFrameIndex::new(frame));
     assert_eq!(
         hue_at(caption, 90),
         Some(PropertyValue::Number(180.0)),
@@ -1310,9 +1310,19 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
     );
     assert_eq!(hue_at(picture, 200), Some(PropertyValue::Number(90.0)));
     assert_eq!(hue_at(videos_track, 0), Some(PropertyValue::Number(15.0)));
-    assert!(project.has_the_effect(caption, EffectKind::HueShift));
+    // (The track of the videos has two hue shifts, which have the names 0 and 1 in its list: the second is another effect, with a turn of its own.)
+    assert_eq!(project.effects_of(videos_track).unwrap().len(), 2);
+    assert_eq!(
+        project.property_value_at(
+            videos_track,
+            PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(1), 0),
+            TimelineFrameIndex::new(0)
+        ),
+        Some(PropertyValue::Number(40.0))
+    );
+    assert!(project.has_the_effect(caption, EffectInstanceId::FIRST));
     assert!(
-        !project.has_the_effect(AnimationTarget::Clip(video), EffectKind::HueShift),
+        !project.has_the_effect(AnimationTarget::Clip(video), EffectInstanceId::FIRST),
         "the video has only its track's"
     );
     assert_eq!(

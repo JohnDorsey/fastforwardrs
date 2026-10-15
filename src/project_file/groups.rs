@@ -24,8 +24,9 @@ use crate::project::{
     Badge, ChainEntry, ClipId, EffectKind, Effects, Group, GroupId, GroupKind, Member, Project, TrackId,
 };
 
-/// The chain that the effects and the badges of a clip or a group make, if they make one: an effect of a kind that it can have, once, and a
-/// badge once and in a place that there is, of a tag that there is (`group_count` is how many groups the file has).
+/// The chain that the effects and the badges of a clip or a group make, if they make one: effects of kinds that it can have, each with a name
+/// of its own in the chain, and a badge once and in a place that there is, of a tag that there is (`group_count` is how many groups the
+/// file has).
 pub(super) fn chain_from_documents(
     effects: Vec<EffectDocument>,
     badges: Vec<BadgeDocument>,

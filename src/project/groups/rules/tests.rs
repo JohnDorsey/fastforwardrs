@@ -291,7 +291,7 @@ fn a_track_or_a_group_that_keeps_the_badge_of_a_track_breaks_a_rule_and_a_clip_d
         assert!(chain.move_before(
             crate::project::ChainItemKey::Badge(Badge::Track),
             Some(crate::project::ChainItemKey::Effect(
-                crate::project::EffectKind::HueShift
+                crate::project::EffectInstanceId::FIRST
             )),
             true
         ));

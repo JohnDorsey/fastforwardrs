@@ -51,7 +51,7 @@ fn is_enabled(window: &Window, label: &str) -> bool {
 
 /// What the message that is up says, as its title and its words.
 fn the_message_that_is_up(window: &Window) -> (String, String) {
-    match &window.application().dialog {
+    match &window.application().interface.dialog {
         Some(Dialog::Message { title, text }) => (title.clone(), text.clone()),
         other => panic!("the user is told: {other:?}"),
     }

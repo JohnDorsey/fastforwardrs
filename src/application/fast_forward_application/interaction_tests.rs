@@ -209,7 +209,7 @@ fn the_arrow_keys_move_the_playhead_one_frame_at_a_time_while_paused() {
     window.press_key(Key::ArrowLeft);
     assert_eq!(window.current_frame(), 102);
     assert!(
-        !window.application().clock.is_playing(),
+        !window.application().playback.clock.is_playing(),
         "moving does not start playing"
     );
     assert!(
@@ -254,30 +254,31 @@ fn the_arrow_keys_move_the_playhead_while_playing_and_playing_goes_on() {
     let total = 300;
     window
         .application_mut()
+        .playback
         .clock
         .seek(started, TimelineFrameIndex::new(100), total);
-    window.application_mut().clock.play(started, total);
+    window.application_mut().playback.clock.play(started, total);
 
     // Carried out at the very moment playing started, so that no time has passed to confuse the count.
     let context = egui::Context::default();
     window
         .application_mut()
         .execute(Command::MoveCurrentFrameBy(1), started, &context);
-    let position = |window: &Window| window.application().clock.position(started, total).value();
+    let position = |window: &Window| window.application().playback.clock.position(started, total).value();
     assert_eq!(position(&window), 101);
-    assert!(window.application().clock.is_playing());
+    assert!(window.application().playback.clock.is_playing());
     window
         .application_mut()
         .execute(Command::MoveCurrentFrameBy(-5), started, &context);
     assert_eq!(position(&window), 96);
-    assert!(window.application().clock.is_playing(), "still playing");
+    assert!(window.application().playback.clock.is_playing(), "still playing");
 }
 
 #[test]
 fn the_arrow_keys_do_nothing_while_a_dialog_is_open() {
     let mut window = Window::showing(project_of(300));
     window.move_current_frame_to(100);
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -321,11 +322,11 @@ fn clicking_the_ruler_moves_the_playhead_to_that_frame() {
 fn clicking_the_ruler_while_playing_moves_the_playhead_and_playing_goes_on() {
     let mut window = Window::showing(project_of(300));
     let now = std::time::Instant::now();
-    window.application_mut().clock.play(now, 300);
+    window.application_mut().playback.clock.play(now, 300);
 
     window.click(window.point_on_the_ruler_at(150));
 
-    assert!(window.application().clock.is_playing());
+    assert!(window.application().playback.clock.is_playing());
     assert!(
         (150..170).contains(&window.current_frame()),
         "playing carried on from frame 150: {}",
@@ -362,7 +363,7 @@ fn the_strip_stays_still_under_the_pointer_when_the_ruler_is_clicked() {
     // 30 seconds is about 5500 points of strip: far wider than the window, so it scrolls.
     let mut window = Window::showing(project_of(900));
     window.move_current_frame_to(450);
-    let scroll_before = window.application().timeline_view.scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.scroll_offset;
     assert!(
         scroll_before > 1000.0,
         "the strip follows the playhead to the middle: {scroll_before}"
@@ -374,7 +375,7 @@ fn the_strip_stays_still_under_the_pointer_when_the_ruler_is_clicked() {
 
     assert!(window.current_frame() > 450, "the playhead went where it was clicked");
     assert_eq!(
-        window.application().timeline_view.scroll_offset,
+        window.application().interface.timeline_view.scroll_offset,
         scroll_before,
         "the view did not scroll to put the new frame in the middle"
     );
@@ -384,9 +385,9 @@ fn the_strip_stays_still_under_the_pointer_when_the_ruler_is_clicked() {
 fn moving_the_playhead_any_other_way_still_scrolls_the_strip_to_follow_it() {
     let mut window = Window::showing(project_of(900));
     window.move_current_frame_to(450);
-    let scroll_before = window.application().timeline_view.scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.scroll_offset;
     window.move_current_frame_to(800);
-    assert!(window.application().timeline_view.scroll_offset > scroll_before + 500.0);
+    assert!(window.application().interface.timeline_view.scroll_offset > scroll_before + 500.0);
 }
 
 #[test]
@@ -412,7 +413,7 @@ fn the_red_line_of_the_playhead_goes_along_with_the_strips_when_they_are_scrolle
     window.move_current_frame_to(450);
     let before = window.x_of_the_drawn_playhead().expect("in view to start with");
 
-    window.application_mut().timeline_view.scroll_offset += 300.0;
+    window.application_mut().interface.timeline_view.scroll_offset += 300.0;
     window.settle();
     let after = window
         .x_of_the_drawn_playhead()
@@ -423,7 +424,7 @@ fn the_red_line_of_the_playhead_goes_along_with_the_strips_when_they_are_scrolle
     );
 
     // As far along as the strips go, which leaves the middle of the video far behind.
-    window.application_mut().timeline_view.scroll_offset = 100_000.0;
+    window.application_mut().interface.timeline_view.scroll_offset = 100_000.0;
     window.settle();
     assert_eq!(window.x_of_the_drawn_playhead(), None);
     assert_eq!(window.current_frame(), 450, "the current frame is where it was");
@@ -545,13 +546,13 @@ fn the_space_bar_does_not_cut() {
 fn the_space_bar_starts_playing_when_paused_and_pauses_when_playing() {
     let mut window = Window::showing(project_of(300));
     window.move_current_frame_to(60);
-    assert!(!window.application().clock.is_playing());
+    assert!(!window.application().playback.clock.is_playing());
 
     window.press_key(Key::Space);
-    assert!(window.application().clock.is_playing(), "space plays");
+    assert!(window.application().playback.clock.is_playing(), "space plays");
 
     window.press_key(Key::Space);
-    assert!(!window.application().clock.is_playing(), "space pauses");
+    assert!(!window.application().playback.clock.is_playing(), "space pauses");
     assert!(
         window.current_frame() >= 60,
         "pausing keeps the current frame (it is where playing had got to)"
@@ -563,7 +564,7 @@ fn the_space_bar_plays_again_from_the_start_when_the_end_has_been_reached() {
     let mut window = Window::showing(project_of(300));
     window.move_current_frame_to(299);
     window.press_key(Key::Space);
-    assert!(window.application().clock.is_playing());
+    assert!(window.application().playback.clock.is_playing());
     assert!(window.current_frame() < 299, "playing restarted from the first frame");
 }
 
@@ -573,30 +574,30 @@ fn the_space_bar_plays_even_when_a_button_has_the_keyboard_focus() {
     window.harness.get_by_label("File").focus();
     window.settle();
     window.press_key(Key::Space);
-    assert!(window.application().clock.is_playing());
+    assert!(window.application().playback.clock.is_playing());
 }
 
 #[test]
 fn the_space_bar_does_nothing_while_a_dialog_is_open_or_with_nothing_to_play() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
     window.settle();
     window.press_key(Key::Space);
-    assert!(!window.application().clock.is_playing());
+    assert!(!window.application().playback.clock.is_playing());
 
     let mut empty = Window::showing(Project::empty());
     empty.press_key(Key::Space);
-    assert!(!empty.application().clock.is_playing());
+    assert!(!empty.application().playback.clock.is_playing());
 }
 
 #[test]
 fn the_s_key_does_nothing_while_a_dialog_is_open() {
     let mut window = Window::showing(project_of(300));
     window.move_current_frame_to(60);
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -610,7 +611,7 @@ fn the_s_key_does_nothing_with_no_video() {
     let mut window = Window::showing(Project::empty());
     window.press_key(Key::S);
     window.press_key_with(Modifiers::SHIFT, Key::S);
-    assert!(window.application().project.has_no_clips());
+    assert!(window.application().document.project.has_no_clips());
     assert!(!window.application().has_unsaved_changes());
 }
 
@@ -618,10 +619,12 @@ fn project_cut_into_three() -> Window {
     let mut window = Window::showing(project_of(900));
     window
         .application_mut()
+        .document
         .project
         .split_at(TimelineFrameIndex::new(300), None);
     window
         .application_mut()
+        .document
         .project
         .split_at(TimelineFrameIndex::new(600), None);
     window.application_mut().note_everything_is_saved();
@@ -638,6 +641,7 @@ fn changing_the_speed_of_an_earlier_clip_keeps_the_picture_that_was_on_screen() 
         let current = TimelineFrameIndex::new(window.current_frame());
         let (_, placement_frame) = window
             .application()
+            .document
             .project
             .tracks()
             .iter()
@@ -712,23 +716,24 @@ fn the_play_button_plays_and_the_pause_and_stop_buttons_stop_it() {
     let now = std::time::Instant::now();
     window
         .application_mut()
+        .playback
         .clock
         .seek(now, TimelineFrameIndex::new(100), 900);
 
     window.harness.get_by_label("Play").click();
     window.harness.step();
-    assert!(window.application().clock.is_playing());
+    assert!(window.application().playback.clock.is_playing());
 
     window.harness.get_by_label("Pause").click();
     window.harness.step();
-    assert!(!window.application().clock.is_playing());
+    assert!(!window.application().playback.clock.is_playing());
     assert!(window.current_frame() >= 100, "pausing stays where it is");
 
     window.harness.get_by_label("Play").click();
     window.harness.step();
     window.harness.get_by_label("Stop").click();
     window.harness.step();
-    assert!(!window.application().clock.is_playing());
+    assert!(!window.application().playback.clock.is_playing());
     assert_eq!(window.current_frame(), 0, "stop goes back to the start");
 }
 
@@ -737,19 +742,19 @@ fn the_buttons_do_nothing_when_there_is_no_video() {
     let mut window = Window::showing(Project::empty());
     window.harness.get_by_label("Play").click();
     window.harness.step();
-    assert!(!window.application().clock.is_playing());
+    assert!(!window.application().playback.clock.is_playing());
 }
 
 #[test]
 fn the_warning_about_a_missing_file_is_in_the_middle_and_the_program_stays_usable() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().source_files.insert(
+    window.application_mut().sources.files.insert(
         VIDEO,
         SourceFileState::new(SourceStatus::Unavailable {
             reason: "there is no file there".to_owned(),
         }),
     );
-    window.application_mut().missing_sources_warning_open = true;
+    window.application_mut().interface.missing_sources_warning_open = true;
     window.settle();
 
     let warning = window.rectangle_of("Source files not found");
@@ -781,14 +786,14 @@ fn the_warning_lists_every_missing_file_with_where_it_was_and_why_it_cannot_be_u
         (VIDEO, "there is no file there"),
         (super::test_window::SOUND, "it is not a sound"),
     ] {
-        window.application_mut().source_files.insert(
+        window.application_mut().sources.files.insert(
             identifier,
             SourceFileState::new(SourceStatus::Unavailable {
                 reason: reason.to_owned(),
             }),
         );
     }
-    window.application_mut().missing_sources_warning_open = true;
+    window.application_mut().interface.missing_sources_warning_open = true;
     window.settle();
 
     assert!(window.harness.query_by_label_contains("holiday.mp4").is_some());
@@ -802,7 +807,7 @@ fn the_warning_lists_every_missing_file_with_where_it_was_and_why_it_cannot_be_u
 #[test]
 fn the_warning_is_gone_when_the_file_is_there_and_does_not_come_back_by_itself() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().missing_sources_warning_open = true;
+    window.application_mut().interface.missing_sources_warning_open = true;
     window.settle();
     assert!(
         window.harness.query_by_label("Source files not found").is_none(),
@@ -825,9 +830,10 @@ fn the_import_item_is_available_whatever_state_the_files_of_the_project_are_in()
         let mut window = Window::showing(project_of(300));
         window
             .application_mut()
-            .source_files
+            .sources
+            .files
             .insert(VIDEO, SourceFileState::new(status.clone()));
-        window.application_mut().missing_sources_warning_open = false;
+        window.application_mut().interface.missing_sources_warning_open = false;
         window.settle();
         window.harness.get_by_label("File").click();
         window.settle();
@@ -860,7 +866,7 @@ fn asking_for_a_new_project_with_unsaved_changes_asks_first_and_cancelling_keeps
 #[test]
 fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_is_up() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -876,7 +882,7 @@ fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_i
 
     window.click(Pos2::new(5.0, 400.0));
     assert!(
-        window.application().dialog.is_none(),
+        window.application().interface.dialog.is_none(),
         "clicking outside a message closes it"
     );
 
@@ -888,7 +894,7 @@ fn a_click_outside_a_dialog_closes_it_and_the_dialog_blocks_the_track_while_it_i
 #[test]
 fn the_ok_button_closes_a_message() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -898,7 +904,7 @@ fn the_ok_button_closes_a_message() {
     window.harness.get_by_label("OK").click();
     window.settle();
 
-    assert!(window.application().dialog.is_none());
+    assert!(window.application().interface.dialog.is_none());
     assert!(window.harness.query_by_label("Read me").is_none());
 }
 
@@ -913,7 +919,7 @@ fn a_click_outside_the_discard_question_means_no_and_keeps_the_changes() {
 
     window.click(Pos2::new(5.0, 400.0));
 
-    assert!(window.application().dialog.is_none());
+    assert!(window.application().interface.dialog.is_none());
     assert!(window.application().has_unsaved_changes());
     assert_eq!(window.clips().len(), 2, "nothing was discarded");
 }
@@ -929,12 +935,14 @@ fn the_fast_forward_symbol_is_only_there_inside_sped_up_clips() {
     let clip = window.clip(0, 0);
     window
         .application_mut()
+        .document
         .project
         .set_clip_speed(clip, SpeedFactor::new(4).unwrap())
         .unwrap();
     let now = std::time::Instant::now();
     window
         .application_mut()
+        .playback
         .clock
         .seek(now, TimelineFrameIndex::new(10), 75);
     window.settle();
@@ -944,7 +952,7 @@ fn the_fast_forward_symbol_is_only_there_inside_sped_up_clips() {
 #[test]
 fn dragging_the_symbol_moves_it_for_the_whole_project() {
     let mut window = window_inside_a_sped_up_clip();
-    let before = window.application().project.speed_indicator_layout();
+    let before = window.application().document.project.speed_indicator_layout();
     let symbol = window.rectangle_of("Fast-forward symbol");
 
     window.drag(
@@ -953,7 +961,7 @@ fn dragging_the_symbol_moves_it_for_the_whole_project() {
         PointerButton::Primary,
     );
 
-    let after = window.application().project.speed_indicator_layout();
+    let after = window.application().document.project.speed_indicator_layout();
     assert!(
         after.left_fraction_of_frame_width() > before.left_fraction_of_frame_width() + 0.1,
         "{before:?} -> {after:?}"
@@ -973,13 +981,13 @@ fn dragging_the_symbol_moves_it_for_the_whole_project() {
 #[test]
 fn dragging_the_corner_of_the_symbol_resizes_it() {
     let mut window = window_inside_a_sped_up_clip();
-    let before = window.application().project.speed_indicator_layout();
+    let before = window.application().document.project.speed_indicator_layout();
     let symbol_before = window.rectangle_of("Fast-forward symbol");
     let corner = symbol_before.right_bottom() - vec2(4.0, 4.0);
 
     window.drag(corner, corner + vec2(60.0, 60.0), PointerButton::Primary);
 
-    let after = window.application().project.speed_indicator_layout();
+    let after = window.application().document.project.speed_indicator_layout();
     assert!(
         after.height_fraction_of_frame_height() > before.height_fraction_of_frame_height() * 1.5,
         "{before:?} -> {after:?}"
@@ -1004,7 +1012,7 @@ fn the_symbol_cannot_be_dragged_out_of_the_picture() {
         symbol.center() + vec2(5000.0, 5000.0),
         PointerButton::Primary,
     );
-    let after = window.application().project.speed_indicator_layout();
+    let after = window.application().document.project.speed_indicator_layout();
     assert!(after.left_fraction_of_frame_width() <= 1.0 && after.top_fraction_of_frame_height() <= 1.0);
     // And it is still entirely on the picture.
     let symbol = window.rectangle_of("Fast-forward symbol");
@@ -1024,7 +1032,7 @@ fn a_changed_symbol_layout_is_remembered_in_the_project() {
         PointerButton::Primary,
     );
     assert_ne!(
-        window.application().project.speed_indicator_layout(),
+        window.application().document.project.speed_indicator_layout(),
         SpeedIndicatorLayout::DEFAULT
     );
 }
@@ -1034,7 +1042,7 @@ fn the_wheel_over_the_strip_scrolls_it_without_moving_the_current_frame() {
     let mut window = Window::showing(project_of(900));
     let track = window.strip_of_track(0);
     window.move_pointer_to(track.center());
-    let scroll_before = window.application().timeline_view.scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.scroll_offset;
 
     window.harness.event(Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
@@ -1045,7 +1053,7 @@ fn the_wheel_over_the_strip_scrolls_it_without_moving_the_current_frame() {
     window.settle();
 
     assert!(
-        window.application().timeline_view.scroll_offset > scroll_before,
+        window.application().interface.timeline_view.scroll_offset > scroll_before,
         "the strip moved along"
     );
     assert_eq!(window.current_frame(), 0, "the current frame did not");

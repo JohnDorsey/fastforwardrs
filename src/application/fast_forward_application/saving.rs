@@ -134,7 +134,7 @@ impl FastForwardApplication {
 
     /// [`Self::save_project_to`], and if it does not work the project is put back to `project_to_go_back_to`, if there is one.
     pub(super) fn save_the_project(&mut self, path: PathBuf, project_to_go_back_to: Option<Project>) -> bool {
-        if self.running_save.is_some() {
+        if self.jobs.running_save.is_some() {
             self.go_back_to(project_to_go_back_to);
             self.show_message(
                 "The project could not be saved",
@@ -152,12 +152,12 @@ impl FastForwardApplication {
         };
         // A project that is saved to the file that it has is added to, which writes none of the files that are included in it again;
         // saved to another file, it is written anew, with all that is included in it.
-        let how = if self.project_file_path.as_deref() == Some(path.as_path()) {
+        let how = if self.document.project_file_path.as_deref() == Some(path.as_path()) {
             HowToWrite::AddingToWhatIsThere
         } else {
             HowToWrite::Anew
         };
-        let plan = match plan_the_write(&self.project, &path, &included_files, how) {
+        let plan = match plan_the_write(&self.document.project, &path, &included_files, how) {
             Ok(plan) => plan,
             Err(error) => {
                 self.go_back_to(project_to_go_back_to);
@@ -165,7 +165,7 @@ impl FastForwardApplication {
                 return false;
             }
         };
-        if plan.bytes_to_copy() <= self.most_bytes_copied_at_once {
+        if plan.bytes_to_copy() <= self.jobs.most_bytes_copied_at_once {
             match plan.carry_out(&mut |_| Ok(())) {
                 Ok(written) => {
                     self.finish_a_save(path, &written);
@@ -204,9 +204,9 @@ impl FastForwardApplication {
         });
         let (sender, outcome) = mpsc::channel();
         let for_the_thread = Arc::clone(&progress);
-        let wake_up = Arc::clone(&self.wake_up);
+        let wake_up = Arc::clone(&self.environment.wake_up);
         #[cfg(test)]
-        let gate = self.copy_gate.clone();
+        let gate = self.jobs.copy_gate.clone();
         let thread = thread::spawn(move || {
             let mut last_report = Instant::now();
             let result = plan.carry_out(&mut |copied| {
@@ -231,7 +231,7 @@ impl FastForwardApplication {
             wake_up();
         });
         self.pause_playback_for_dialog();
-        self.running_save = Some(RunningSave {
+        self.jobs.running_save = Some(RunningSave {
             progress,
             thread: Some(thread),
             outcome,
@@ -244,7 +244,7 @@ impl FastForwardApplication {
 
     /// Picks up a save that was being written in the background, if it is done.
     pub(super) fn collect_the_running_save(&mut self) {
-        let Some(save) = &self.running_save else {
+        let Some(save) = &self.jobs.running_save else {
             return;
         };
         let result = match save.outcome.try_recv() {
@@ -255,7 +255,7 @@ impl FastForwardApplication {
                 source: io::Error::other("the program that writes the project stopped unexpectedly"),
             }),
         };
-        let Some(mut save) = self.running_save.take() else {
+        let Some(mut save) = self.jobs.running_save.take() else {
             return;
         };
         match (save.purpose, result) {
@@ -276,7 +276,7 @@ impl FastForwardApplication {
 
     /// The heading of the save that is being written in the background, and how many bytes it has copied and has to copy.
     pub(super) fn progress_of_the_running_save(&self) -> Option<(&'static str, u64, u64)> {
-        let save = self.running_save.as_ref()?;
+        let save = self.jobs.running_save.as_ref()?;
         Some((
             save.heading,
             save.progress.copied.load(Ordering::Relaxed),
@@ -286,14 +286,14 @@ impl FastForwardApplication {
 
     /// Asks the save that is being written in the background to stop. (It does, and says so, in a moment.)
     pub(super) fn stop_the_running_save(&self) {
-        if let Some(save) = &self.running_save {
+        if let Some(save) = &self.jobs.running_save {
             save.progress.stop.store(true, Ordering::Relaxed);
         }
     }
 
     fn go_back_to(&mut self, project: Option<Project>) {
         if let Some(project) = project {
-            self.project = project;
+            self.document.project = project;
         }
     }
 
@@ -310,17 +310,23 @@ impl FastForwardApplication {
     /// What can be done to write the project file again without the garbage in it, if the project file is an archive that has enough
     /// of it to be worth that, and nothing is being done that would be hurt by it.
     fn plan_to_tidy_the_project_file(&self) -> Option<WritePlan> {
-        if self.export.is_some() || self.running_save.is_some() || !self.project_file_is_an_archive() {
+        if self.jobs.export.is_some() || self.jobs.running_save.is_some() || !self.project_file_is_an_archive() {
             return None;
         }
-        plan_the_compaction(self.project_file_path.as_deref()?)
+        plan_the_compaction(self.document.project_file_path.as_deref()?)
     }
 
     /// After the user saved the project: writes the project file again without the garbage in it, if that is worth doing, and can be
     /// done at once and with nothing in the way: no file that is included is being read in place (so the files that are in the
     /// archive can be in other places, and the archive be replaced), which also means that there is little to copy.
     pub(super) fn tidy_the_project_file_after_saving(&mut self) {
-        if self.project.sources().iter().any(|source| source.link.is_included()) {
+        if self
+            .document
+            .project
+            .sources()
+            .iter()
+            .any(|source| source.link.is_included())
+        {
             return;
         }
         let Some(plan) = self.plan_to_tidy_the_project_file() else {
@@ -339,16 +345,19 @@ impl FastForwardApplication {
     /// on Windows cannot be replaced while one is open). If it is more than a little to copy, it is done in the background, with a
     /// window that says how far it has got and a button to give it up (and the window closes when it is done).
     pub(super) fn tidy_the_project_file_before_closing(&mut self) -> WhatToDoAboutClosing {
-        if self.tidying_before_closing_was_tried {
+        if self.jobs.tidying_before_closing_was_tried {
             return WhatToDoAboutClosing::Close;
         }
-        self.tidying_before_closing_was_tried = true;
-        let (Some(plan), Some(archive)) = (self.plan_to_tidy_the_project_file(), self.project_file_path.clone()) else {
+        self.jobs.tidying_before_closing_was_tried = true;
+        let (Some(plan), Some(archive)) = (
+            self.plan_to_tidy_the_project_file(),
+            self.document.project_file_path.clone(),
+        ) else {
             return WhatToDoAboutClosing::Close;
         };
         self.let_go_of_every_file_that_is_read();
-        self.close_when_not_busy = true;
-        if plan.bytes_to_copy() > self.most_bytes_copied_at_once {
+        self.interface.close_when_not_busy = true;
+        if plan.bytes_to_copy() > self.jobs.most_bytes_copied_at_once {
             self.start_a_job_in_the_background(
                 plan,
                 archive,
@@ -360,7 +369,7 @@ impl FastForwardApplication {
         }
         match plan.carry_out(&mut |_| Ok(())) {
             Ok(_) => {
-                self.close_when_not_busy = false;
+                self.interface.close_when_not_busy = false;
                 WhatToDoAboutClosing::Close
             }
             Err(error) => {
@@ -375,15 +384,15 @@ impl FastForwardApplication {
     /// supplied, the thumbnails and waveforms. (For the project file to be written again; the project itself is not changed. What
     /// was forgotten is made again when the project is loaded.)
     fn let_go_of_every_file_that_is_read(&mut self) {
-        self.openings.clear();
-        self.source_files.clear();
-        self.preview_pictures.set_setup(None);
-        self.textures.clear();
-        self.missing_sources_warning_open = false;
+        self.sources.openings.clear();
+        self.sources.files.clear();
+        self.playback.preview_pictures.set_setup(None);
+        self.interface.textures.clear();
+        self.interface.missing_sources_warning_open = false;
         let now = Instant::now();
-        let total_frames = self.project.total_frame_count();
-        let clock = self.clock_reading(now, total_frames);
-        self.audio_supplier.update(None, clock, now);
+        let total_frames = self.document.project.total_frame_count();
+        let clock = self.playback.reading(now, total_frames);
+        self.playback.audio_supplier.update(None, clock, now);
     }
 
     fn say_that_a_save_did_not_work(&mut self, error: &ProjectFileError) {
@@ -395,7 +404,7 @@ impl FastForwardApplication {
 
     /// The project was written to `path`, which is its file from now on.
     fn finish_a_save(&mut self, path: PathBuf, written: &Written) {
-        self.project_file_path = Some(path.clone());
+        self.document.project_file_path = Some(path.clone());
         self.note_everything_is_saved();
         self.read_the_included_files_where_they_are_in(&path, written);
     }
@@ -405,12 +414,18 @@ impl FastForwardApplication {
     /// now. The files that are included must all be found and opened for that.
     fn included_files_to_save(&self) -> Result<IncludedFiles, String> {
         let mut files = IncludedFiles::new();
-        for source in self.project.sources().iter().filter(|source| source.link.is_included()) {
+        for source in self
+            .document
+            .project
+            .sources()
+            .iter()
+            .filter(|source| source.link.is_included())
+        {
             let name = source.link.absolute_path.file_name().map_or_else(
                 || source.identifier.to_string(),
                 |name| name.to_string_lossy().into_owned(),
             );
-            match self.source_files.get(&source.identifier).map(|state| &state.status) {
+            match self.sources.files.get(&source.identifier).map(|state| &state.status) {
                 Some(SourceStatus::Available { location }) => {
                     files.insert(source.identifier, location.clone());
                 }
@@ -442,7 +457,7 @@ impl FastForwardApplication {
             return;
         };
         let archive_path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
-        for source in self.project.sources() {
+        for source in self.document.project.sources() {
             let Some(entry_name) = &source.link.included_as else {
                 continue;
             };
@@ -453,7 +468,7 @@ impl FastForwardApplication {
             else {
                 continue;
             };
-            if let Some(state) = self.source_files.get_mut(&source.identifier)
+            if let Some(state) = self.sources.files.get_mut(&source.identifier)
                 && matches!(state.status, SourceStatus::Available { .. })
                 && state.location_if_available() != Some(&location)
             {

@@ -8,10 +8,10 @@
 use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, EffectKind, FrameRate, Gain,
-    GroupColour, GroupId, GroupKind, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings, PropertyId,
-    PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout,
-    TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
+    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, EffectInstanceId, EffectKind,
+    FrameRate, Gain, GroupColour, GroupId, GroupKind, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings,
+    PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
+    SpeedIndicatorLayout, TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -194,16 +194,17 @@ pub enum Command {
     },
 
     // Effects.
-    /// Put an effect on a clip or a track (with the plus button of the properties panel), with the values it begins with.
+    /// Put an effect on a clip or a track (with the plus button of the properties panel), with the values it begins with. (It may have
+    /// effects of that kind already.)
     AddEffect {
         target: AnimationTarget,
         kind: EffectKind,
     },
     /// Delete an effect of a clip or a track (with *Delete effect*, in the menu of its box in the properties panel), with the
-    /// keyframes of its values.
+    /// keyframes of its values: the one that is named `instance` in its chain, and no other of its kind.
     RemoveEffect {
         target: AnimationTarget,
-        kind: EffectKind,
+        instance: EffectInstanceId,
     },
     /// Give a value of an effect of a clip or a track (a property of it) a value: at the playhead if it has keyframes, as for any
     /// property.
@@ -257,10 +258,10 @@ pub enum Command {
         group: GroupId,
         kind: EffectKind,
     },
-    /// Take an effect off a group.
+    /// Take an effect off a group: the one that is named `instance` in its chain.
     RemoveGroupEffect {
         group: GroupId,
-        kind: EffectKind,
+        instance: EffectInstanceId,
     },
     /// Give a value of an effect of a group a value. (It is not animated.)
     SetGroupEffectValue {

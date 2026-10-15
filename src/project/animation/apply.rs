@@ -80,7 +80,7 @@ pub fn text_value(object: &TextObject, property: PropertyId) -> Option<PropertyV
         PropertyId::Position | PropertyId::Size | PropertyId::Rotation => {
             placement_value(&object.placement(), property)
         }
-        PropertyId::Gain | PropertyId::Muted | PropertyId::HueShift => None,
+        PropertyId::Gain | PropertyId::Muted | PropertyId::EffectValue { .. } => None,
     }
 }
 
@@ -196,7 +196,7 @@ mod tests {
     fn the_lists_of_the_properties_of_a_placement_and_of_a_text_object_are_those_that_have_a_value_in_one() {
         let placement = somewhere();
         let object = TextObject::default();
-        for property in PropertyId::ALL {
+        for property in crate::test_support::properties_of_every_kind() {
             assert_eq!(
                 placement_value(&placement, property).is_some(),
                 PROPERTIES_OF_A_PLACEMENT.contains(&property),
@@ -215,12 +215,12 @@ mod tests {
     /// four would be changed by nothing.
     #[test]
     fn every_property_is_a_loudness_or_a_mute_switch_or_one_of_a_placement_or_of_a_text_object_or_of_an_effect() {
-        for property in PropertyId::ALL {
+        for property in crate::test_support::properties_of_every_kind() {
             assert!(
                 property.is_heard()
                     || PROPERTIES_OF_A_PLACEMENT.contains(&property)
                     || PROPERTIES_OF_A_TEXT_OBJECT.contains(&property)
-                    || property.effect().is_some(),
+                    || property.is_a_value_of_an_effect(),
                 "{property:?} is not changed by anything the window does"
             );
         }
@@ -330,7 +330,7 @@ mod tests {
             rotation: Angle::from_degrees(12.0),
             ..TextObject::default()
         };
-        for property in PropertyId::ALL {
+        for property in crate::test_support::properties_of_every_kind() {
             let Some(value) = text_value(&object, property) else {
                 continue;
             };

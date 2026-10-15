@@ -20,7 +20,7 @@ use crate::project::{
 
 /// What the message that is up says, as its title and its words.
 fn the_message_that_is_up(window: &Window) -> (String, String) {
-    match &window.application().dialog {
+    match &window.application().interface.dialog {
         Some(Dialog::Message { title, text }) => (title.clone(), text.clone()),
         other => panic!("the user is told: {other:?}"),
     }
@@ -186,12 +186,12 @@ fn a_new_text_object_where_nothing_is_but_the_rectangle_of_a_clip_group_is_refus
     assert_eq!(window.application().project(), &before);
 
     // Past the end of the rectangle it is made, as ever.
-    window.application_mut().dialog = None;
+    window.application_mut().interface.dialog = None;
     window.do_this(Command::NewTextObject {
         track: tracks[0],
         frame: TimelineFrameIndex::new(60),
     });
-    assert!(window.application().dialog.is_none());
+    assert!(window.application().interface.dialog.is_none());
     assert_eq!(window.application().project().tracks()[0].entries().len(), 2);
 }
 
@@ -293,7 +293,7 @@ fn edges_of_a_group_that_is_not_a_clip_group_and_edges_that_would_leave_nothing_
         &["the tag \"Tag 1\" has no edges to move: it is not a clip group."],
     );
 
-    window.application_mut().dialog = None;
+    window.application_mut().interface.dialog = None;
     window.do_this(Command::SetTheFramesOfAClipGroup {
         group,
         first_frame: 200,
@@ -390,6 +390,6 @@ fn a_message_about_a_refusal_is_not_given_for_what_has_nothing_to_do_with_groups
         to_position: 0,
     });
 
-    assert!(window.application().dialog.is_none());
+    assert!(window.application().interface.dialog.is_none());
     assert_eq!(window.application().project().tracks()[0].id(), tracks[1], "it went");
 }

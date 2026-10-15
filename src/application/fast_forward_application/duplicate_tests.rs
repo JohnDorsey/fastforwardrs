@@ -615,7 +615,7 @@ fn a_command_to_copy_a_clip_that_has_no_room_changes_nothing_and_tells_the_user(
 
     assert_eq!(window.application().project(), &before);
     assert!(!window.application().has_unsaved_changes(), "nothing was edited");
-    match &window.application().dialog {
+    match &window.application().interface.dialog {
         Some(Dialog::Message { title, .. }) => assert_eq!(title, "There is no room for a copy there"),
         other => panic!("the user is told: {other:?}"),
     }
@@ -646,7 +646,7 @@ fn a_command_to_copy_clips_of_which_only_some_have_room_copies_those_and_says_no
         "the copy of the text is what is selected"
     );
     assert!(
-        window.application().dialog.is_none(),
+        window.application().interface.dialog.is_none(),
         "something was copied, and nothing is said about the clip that had no room"
     );
 }
@@ -667,7 +667,7 @@ fn a_command_to_copy_clips_that_are_not_there_does_nothing() {
         "what was selected stays selected"
     );
     assert!(
-        window.application().dialog.is_none(),
+        window.application().interface.dialog.is_none(),
         "a clip that is not there is not for want of room, and nothing is said"
     );
 }

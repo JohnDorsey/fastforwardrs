@@ -6,8 +6,9 @@
 
 use super::*;
 use crate::project::groups::GroupId;
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 
-const HUE_SHIFT: ChainItemKey = ChainItemKey::Effect(EffectKind::HueShift);
+const HUE_SHIFT: ChainItemKey = ChainItemKey::Effect(EffectInstanceId::FIRST);
 const TRACK: ChainItemKey = ChainItemKey::Badge(Badge::Track);
 
 fn tag(number: u32) -> GroupId {
@@ -123,7 +124,7 @@ fn the_badge_of_the_track_is_not_kept_when_what_came_after_it_is_taken_away() {
     let mut chain = chain_of(true, &[]);
     assert!(chain.move_before(TRACK, Some(HUE_SHIFT), true));
     assert!(chain.keeps_the_badge_of_the_track());
-    assert!(chain.remove(EffectKind::HueShift));
+    assert!(chain.remove(EffectInstanceId::FIRST));
     assert!(!chain.keeps_the_badge_of_the_track());
     assert_eq!(chain, Effects::none(), "it is the chain that has nothing in it again");
 
@@ -187,7 +188,7 @@ fn an_effect_is_moved_among_the_badges_like_a_badge_is() {
     assert!(chain.move_before(HUE_SHIFT, Some(tag_badge(2)), false));
     assert_eq!(chain.keys(false), [tag_badge(1), HUE_SHIFT, tag_badge(2)]);
     assert_eq!(
-        chain.get(EffectKind::HueShift),
+        chain.instance(EffectInstanceId::FIRST),
         Some(&Effect::new(EffectKind::HueShift)),
         "it is the same effect"
     );
@@ -212,9 +213,9 @@ fn moving_something_before_itself_changes_nothing_and_moving_what_is_not_there_i
 #[test]
 fn moving_an_effect_keeps_the_values_it_has() {
     let mut chain = chain_of(true, &[1]);
-    assert!(chain.set_value(PropertyId::HueShift, &PropertyValue::Number(77.0)));
+    assert!(chain.set_value(HUE, &PropertyValue::Number(77.0)));
     assert!(chain.move_before(HUE_SHIFT, None, false));
-    assert_eq!(chain.value_of(PropertyId::HueShift), Some(PropertyValue::Number(77.0)));
+    assert_eq!(chain.value_of(HUE), Some(PropertyValue::Number(77.0)));
 }
 
 // --- badges of tags ---
@@ -302,9 +303,9 @@ fn the_items_of_a_chain_are_the_effects_themselves_and_the_badges_in_the_order_t
 #[test]
 fn an_effect_that_is_taken_off_leaves_the_badges_where_they_were() {
     let mut chain = chain_of(true, &[1, 2]);
-    assert!(chain.remove(EffectKind::HueShift));
+    assert!(chain.remove(EffectInstanceId::FIRST));
     assert_eq!(chain.keys(false), [tag_badge(1), tag_badge(2)]);
-    assert!(!chain.remove(EffectKind::HueShift), "there was none");
+    assert!(!chain.remove(EffectInstanceId::FIRST), "there was none");
 }
 
 #[test]
@@ -315,4 +316,217 @@ fn chains_with_the_same_things_in_the_same_order_are_equal_and_those_in_another_
     moved.move_before(HUE_SHIFT, None, false);
     assert_ne!(moved, chain_of(true, &[1, 2]), "the same things, in another order");
     assert_ne!(chain_of(true, &[]), chain_of(false, &[]));
+}
+
+// --- the names of the effects of a chain ---
+
+#[test]
+fn the_first_effect_that_is_put_on_a_chain_is_named_first_and_each_after_it_one_more_than_the_largest_name_there_is() {
+    let mut chain = Effects::none();
+    assert_eq!(chain.next_instance(), EffectInstanceId::FIRST);
+    assert_eq!(
+        chain.add(EffectKind::HueShift),
+        EffectInstanceId::FIRST,
+        "it is given back as the name"
+    );
+    assert_eq!(chain.iter().next().unwrap().instance(), EffectInstanceId::FIRST);
+    assert_eq!(chain.next_instance(), EffectInstanceId::new(1));
+
+    // A chain that was made with an effect that has another name goes on from it, whatever the effect it has in front of it is called.
+    let named_four = Effect::new(EffectKind::HueShift).named(EffectInstanceId::new(4));
+    let chain = Effects::from_entries([ChainEntry::Effect(named_four.clone())]).unwrap();
+    assert_eq!(
+        chain.instance(EffectInstanceId::new(4)),
+        Some(&named_four),
+        "it keeps the name it was given"
+    );
+    assert_eq!(chain.next_instance(), EffectInstanceId::new(5));
+    assert_eq!(chain.keys(false), [ChainItemKey::Effect(EffectInstanceId::new(4))]);
+}
+
+#[test]
+fn the_name_that_an_effect_has_is_given_again_when_nothing_in_the_chain_has_it_any_more() {
+    let mut chain = Effects::none();
+    chain.add(EffectKind::HueShift);
+    assert!(chain.remove(EffectInstanceId::FIRST));
+    assert_eq!(
+        chain.next_instance(),
+        EffectInstanceId::FIRST,
+        "nothing is left that the name could be mistaken for"
+    );
+    assert_eq!(
+        chain,
+        Effects::none(),
+        "so a chain that had an effect and has not is the chain that never had one"
+    );
+}
+
+#[test]
+fn an_effect_is_found_by_its_name_and_so_is_each_of_its_values() {
+    let chain = chain_of(true, &[1]);
+    let effect = chain.instance(EffectInstanceId::FIRST).unwrap();
+    assert_eq!(chain.instance(EffectInstanceId::new(1)), None);
+    assert!(chain.has_the_instance(EffectInstanceId::FIRST));
+    assert!(!chain.has_the_instance(EffectInstanceId::new(1)));
+
+    assert_eq!(effect.property(0), Some(HUE));
+    assert_eq!(effect.property(1), None, "it has one value");
+    assert!(chain.has_the_value(HUE));
+    assert_eq!(chain.effect_of_the_value(HUE), Some(effect));
+
+    let of_another_effect = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(3), 0);
+    assert!(!chain.has_the_value(of_another_effect));
+    assert_eq!(chain.effect_of_the_value(of_another_effect), None);
+    assert_eq!(chain.value_of(of_another_effect), None);
+    assert!(!chain_of(false, &[]).has_the_value(HUE));
+}
+
+// --- several effects of one kind ---
+
+/// The value of the hue shift that is named `number` in its chain.
+fn hue_of(number: u32) -> PropertyId {
+    PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(number), 0)
+}
+
+fn degrees(number: f32) -> PropertyValue {
+    PropertyValue::Number(number)
+}
+
+#[test]
+fn a_chain_has_as_many_effects_of_one_kind_as_were_put_on_each_with_a_name_and_the_values_of_its_own() {
+    let mut chain = Effects::none();
+    let names: Vec<EffectInstanceId> = (0..3).map(|_| chain.add(EffectKind::HueShift)).collect();
+    assert_eq!(
+        names,
+        [
+            EffectInstanceId::FIRST,
+            EffectInstanceId::new(1),
+            EffectInstanceId::new(2)
+        ]
+    );
+    assert_eq!(chain.len(), 3);
+    assert_eq!(
+        chain.keys(false),
+        [
+            ChainItemKey::Effect(names[0]),
+            ChainItemKey::Effect(names[1]),
+            ChainItemKey::Effect(names[2])
+        ]
+    );
+
+    assert!(chain.set_value(hue_of(1), &degrees(40.0)));
+
+    assert_eq!(
+        chain.value_of(hue_of(0)),
+        Some(degrees(0.0)),
+        "the effects before it are not changed"
+    );
+    assert_eq!(chain.value_of(hue_of(1)), Some(degrees(40.0)));
+    assert_eq!(chain.value_of(hue_of(2)), Some(degrees(0.0)), "nor are those after it");
+    for number in 0..3 {
+        assert!(chain.has_the_value(hue_of(number)), "{number}");
+        assert_eq!(
+            chain.effect_of_the_value(hue_of(number)).unwrap().instance(),
+            EffectInstanceId::new(number),
+            "each value is of the effect it names"
+        );
+    }
+}
+
+#[test]
+fn taking_an_effect_off_by_its_name_takes_that_one_and_not_another_of_its_kind() {
+    let mut chain = Effects::none();
+    for _ in 0..3 {
+        chain.add(EffectKind::HueShift);
+    }
+    chain.set_value(hue_of(0), &degrees(10.0));
+    chain.set_value(hue_of(2), &degrees(30.0));
+
+    assert!(chain.remove(EffectInstanceId::new(1)));
+
+    assert_eq!(
+        chain.iter().map(Effect::instance).collect::<Vec<_>>(),
+        [EffectInstanceId::FIRST, EffectInstanceId::new(2)]
+    );
+    assert_eq!(chain.value_of(hue_of(0)), Some(degrees(10.0)));
+    assert_eq!(chain.value_of(hue_of(2)), Some(degrees(30.0)));
+    assert!(!chain.has_the_value(hue_of(1)));
+    assert!(!chain.remove(EffectInstanceId::new(1)), "it is not there any more");
+    assert_eq!(chain.len(), 2);
+}
+
+#[test]
+fn which_of_its_kind_an_effect_is_counts_the_effects_of_that_kind_in_the_order_they_are_applied_in() {
+    let mut chain = Effects::none();
+    assert_eq!(
+        chain.place_among_its_kind(EffectInstanceId::FIRST),
+        None,
+        "there is no such effect"
+    );
+    chain.add(EffectKind::HueShift);
+    assert_eq!(
+        chain.place_among_its_kind(EffectInstanceId::FIRST),
+        Some((1, 1)),
+        "the only one"
+    );
+    chain.add(EffectKind::HueShift);
+    chain.add(EffectKind::HueShift);
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::FIRST), Some((1, 3)));
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(1)), Some((2, 3)));
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(2)), Some((3, 3)));
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(3)), None);
+
+    // It is the order they are applied in that counts, which is not the order they were put on in once one is moved.
+    assert!(chain.move_before(
+        ChainItemKey::Effect(EffectInstanceId::new(2)),
+        Some(ChainItemKey::Effect(EffectInstanceId::FIRST)),
+        false
+    ));
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(2)), Some((1, 3)));
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::FIRST), Some((2, 3)));
+    // (and the badges are not effects of any kind)
+    chain.add_tag_badge(tag(1));
+    assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(1)), Some((3, 3)));
+}
+
+#[test]
+fn an_effect_is_moved_by_its_name_among_the_others_of_its_kind() {
+    let mut chain = Effects::none();
+    for _ in 0..3 {
+        chain.add(EffectKind::HueShift);
+    }
+    chain.set_value(hue_of(2), &degrees(99.0));
+    let key = |number| ChainItemKey::Effect(EffectInstanceId::new(number));
+
+    assert!(chain.move_before(key(2), Some(key(0)), false));
+
+    assert_eq!(chain.keys(false), [key(2), key(0), key(1)]);
+    assert_eq!(
+        chain.value_of(hue_of(2)),
+        Some(degrees(99.0)),
+        "it has the values it had, and is the same effect"
+    );
+}
+
+#[test]
+fn a_chain_made_of_entries_that_give_two_effects_the_same_name_is_refused_but_the_same_kind_under_other_names_is_not() {
+    let first = Effect::new(EffectKind::HueShift);
+    let second = Effect::new(EffectKind::HueShift).named(EffectInstanceId::new(1));
+    let chain = Effects::from_entries([ChainEntry::Effect(first.clone()), ChainEntry::Effect(second.clone())])
+        .expect("two hue shifts with names of their own");
+    assert_eq!(chain.len(), 2);
+    assert_eq!(chain.instance(EffectInstanceId::FIRST), Some(&first));
+    assert_eq!(chain.instance(EffectInstanceId::new(1)), Some(&second));
+
+    assert_eq!(
+        Effects::from_entries([ChainEntry::Effect(first.clone()), ChainEntry::Effect(first.clone())]),
+        None,
+        "the same name twice"
+    );
+    let same_name_other_values = first.with_value(HUE, &degrees(5.0)).unwrap();
+    assert_eq!(
+        Effects::from_entries([ChainEntry::Effect(first), ChainEntry::Effect(same_name_other_values)]),
+        None,
+        "whatever the values are"
+    );
 }

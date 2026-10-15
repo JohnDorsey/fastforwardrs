@@ -123,7 +123,7 @@ fn the_file_chosen_after_embed_and_import_is_opened_to_be_embedded_and_after_lin
     fixture.window.do_this(Command::LinkAndImportFile);
 
     assert_eq!(
-        fixture.window.application().opening_purposes_started,
+        fixture.window.application().sources.opening_purposes_started,
         vec![
             OpeningPurpose::ImportNewSourceAndEmbedIt,
             OpeningPurpose::ImportNewSource
@@ -140,7 +140,7 @@ fn a_new_project_asks_for_a_file_to_be_linked_and_not_one_to_be_embedded() {
     fixture.window.do_this(Command::NewProject);
 
     assert_eq!(
-        fixture.window.application().opening_purposes_started,
+        fixture.window.application().sources.opening_purposes_started,
         vec![OpeningPurpose::ImportNewSource]
     );
     assert!(
@@ -163,7 +163,7 @@ fn the_file_chosen_after_the_project_was_saved_as_an_archive_to_embed_it_is_open
     click(&mut fixture, "Choose where to save it");
 
     assert_eq!(
-        fixture.window.application().opening_purposes_started,
+        fixture.window.application().sources.opening_purposes_started,
         vec![OpeningPurpose::ImportNewSourceAndEmbedIt]
     );
 }
@@ -317,7 +317,7 @@ fn a_file_that_is_a_great_deal_to_copy_is_embedded_in_the_background_with_the_wi
     let path = the_file_to_import(&fixture);
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
 
     the_file_opened(&mut fixture, OpeningPurpose::ImportNewSourceAndEmbedIt, path);
 
@@ -332,7 +332,7 @@ fn a_file_that_is_a_great_deal_to_copy_is_embedded_in_the_background_with_the_wi
     );
     gate.let_through();
     let started = Instant::now();
-    while fixture.window.application().running_save.is_some() {
+    while fixture.window.application().jobs.running_save.is_some() {
         assert!(started.elapsed() < Duration::from_secs(20), "the save did not finish");
         fixture.window.harness.step();
         std::thread::sleep(Duration::from_millis(2));

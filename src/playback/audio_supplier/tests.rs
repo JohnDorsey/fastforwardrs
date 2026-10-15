@@ -660,7 +660,7 @@ fn a_keyframe_for_how_loud_a_clip_is_changes_what_the_sound_is_made_of_and_start
 /// made the sound again.
 #[test]
 fn a_keyframe_for_anything_that_is_heard_of_a_clip_or_of_a_track_starts_the_sound_again() {
-    for property in PropertyId::ALL.into_iter().filter(|property| property.is_heard()) {
+    for property in PropertyId::OWN.into_iter().filter(|property| property.is_heard()) {
         let projects = [
             ("a clip", project_with_a_keyframe_for(property)),
             ("a track", project_with_a_keyframe_of_the_track_for(property)),

@@ -48,6 +48,7 @@ pub(super) fn window_with_a_tag_of_the_first_two_clips_selected() -> (Window, Gr
     let clips = the_three_clips(&window);
     let tag = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -152,6 +153,7 @@ fn the_kind_of_a_clip_group_and_of_a_track_group_is_at_the_head_of_their_boxes()
     let clips = the_three_clips(&window);
     let clip_group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -162,6 +164,7 @@ fn the_kind_of_a_clip_group_and_of_a_track_group_is_at_the_head_of_their_boxes()
     let track = window.application().project().tracks()[0].id();
     let track_group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::TrackGroup, &[Member::Track(track)])
         .unwrap();
@@ -311,10 +314,16 @@ fn the_name_of_a_group_can_be_the_name_of_another_and_can_be_empty() {
     let (mut window, tag, clips) = window_with_a_tag_of_the_first_two_clips_selected();
     let other = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Clip(clips[2])])
         .unwrap();
-    window.application_mut().project.rename_group(other, "Holiday").unwrap();
+    window
+        .application_mut()
+        .document
+        .project
+        .rename_group(other, "Holiday")
+        .unwrap();
     select_only(&mut window, SelectionItem::Group(tag));
 
     window.replace_text_in_the_field_showing("Tag 1", "Holiday");
@@ -443,6 +452,7 @@ fn delete_all_of_a_group_that_has_every_track_of_the_project_is_refused_with_a_m
     let track = window.application().project().tracks()[0].id();
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::TrackGroup, &[Member::Track(track)])
         .unwrap();
@@ -456,7 +466,7 @@ fn delete_all_of_a_group_that_has_every_track_of_the_project_is_refused_with_a_m
 
     assert_eq!(window.application().project(), &before);
     assert!(!window.application().has_unsaved_changes());
-    match &window.application().dialog {
+    match &window.application().interface.dialog {
         Some(crate::application::dialogs::Dialog::Message { title, text }) => {
             assert_eq!(title, "The group cannot be deleted with all that is in it");
             assert!(text.contains("always has a track"), "{text}");
@@ -494,11 +504,13 @@ fn a_member_that_is_a_group_is_selected_by_a_double_click_as_a_group() {
     let clips = the_three_clips(&window);
     let inner = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
     let outer = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Group(inner), Member::Clip(clips[2])])
         .unwrap();
@@ -622,6 +634,7 @@ fn deleting_a_group_with_all_that_is_in_it_takes_the_playhead_to_the_new_end_if_
     assert_eq!(
         window
             .application()
+            .playback
             .clock
             .position(std::time::Instant::now(), 10_000)
             .value(),
@@ -636,6 +649,7 @@ fn window_with_three_clips_and_a_tag_of_the_last_two() -> (Window, GroupId, [Cli
     let clips = the_three_clips(&window);
     let tag = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Clip(clips[1]), Member::Clip(clips[2])])
         .unwrap();
@@ -649,6 +663,7 @@ fn a_member_in_the_middle_of_a_clip_group_cannot_be_taken_out_and_the_user_is_to
     let clips = the_three_clips(&window);
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(
             GroupKind::ClipGroup,
@@ -672,7 +687,7 @@ fn a_member_in_the_middle_of_a_clip_group_cannot_be_taken_out_and_the_user_is_to
         "nothing changed"
     );
     assert!(!window.application().has_unsaved_changes());
-    match &window.application().dialog {
+    match &window.application().interface.dialog {
         Some(crate::application::dialogs::Dialog::Message { title, text }) => {
             assert_eq!(title, "That cannot be taken out of the group");
             assert!(
@@ -689,7 +704,7 @@ fn nothing_in_the_box_of_a_group_can_be_changed_while_a_message_is_up() {
     let (mut window, _, _) = window_with_a_tag_of_the_first_two_clips_selected();
     assert!(!window.text_field_showing("Tag 1").accesskit_node().is_disabled());
 
-    window.application_mut().dialog = Some(crate::application::dialogs::Dialog::Message {
+    window.application_mut().interface.dialog = Some(crate::application::dialogs::Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });

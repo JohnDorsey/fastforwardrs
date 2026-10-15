@@ -96,7 +96,7 @@ fn scroll_the_rows(window: &mut Window, notches: f32) {
 }
 
 fn scrolled_along(window: &Window) -> f64 {
-    window.application().timeline_view.scroll_offset
+    window.application().interface.timeline_view.scroll_offset
 }
 
 fn width_of_a_second(window: &Window) -> f32 {
@@ -205,10 +205,10 @@ fn zooming_the_rows_up_and_down_and_scrolling_them_are_in_the_history_too() {
     let zoomed_height = height_of_the_rows(&window);
     assert!(zoomed_height > height + 10.0, "the setup: the rows are taller");
     // (Zooming keeps the part of the rows that is under the pointer where it is, which scrolls them a little.)
-    let scrolled_by_the_zoom = window.application().timeline_view.rows_scroll_offset;
+    let scrolled_by_the_zoom = window.application().interface.timeline_view.rows_scroll_offset;
     pause(&mut window);
     scroll_the_rows(&mut window, 1.0);
-    let scrolled_by = window.application().timeline_view.rows_scroll_offset;
+    let scrolled_by = window.application().interface.timeline_view.rows_scroll_offset;
     assert!(
         scrolled_by > scrolled_by_the_zoom + 20.0,
         "the setup: they scrolled by {scrolled_by}"
@@ -216,7 +216,7 @@ fn zooming_the_rows_up_and_down_and_scrolling_them_are_in_the_history_too() {
 
     go_back(&mut window);
     assert_close(
-        f64::from(window.application().timeline_view.rows_scroll_offset),
+        f64::from(window.application().interface.timeline_view.rows_scroll_offset),
         f64::from(scrolled_by_the_zoom),
         "the rows are scrolled back",
     );
@@ -239,7 +239,7 @@ fn zooming_the_rows_up_and_down_and_scrolling_them_are_in_the_history_too() {
     go_forward(&mut window);
     go_forward(&mut window);
     assert_close(
-        f64::from(window.application().timeline_view.rows_scroll_offset),
+        f64::from(window.application().interface.timeline_view.rows_scroll_offset),
         f64::from(scrolled_by),
         "and forward again",
     );
@@ -292,7 +292,7 @@ fn framing_what_is_already_framed_changes_nothing_and_is_not_a_step() {
         "the setup: the first framing changed the view (it zoomed it)"
     );
     assert_eq!(
-        window.application().timeline_view.view_history_steps_back(),
+        window.application().interface.timeline_view.view_history_steps_back(),
         1,
         "the setup: it is a step"
     );
@@ -300,7 +300,7 @@ fn framing_what_is_already_framed_changes_nothing_and_is_not_a_step() {
     window.press_key(Key::F);
 
     assert_eq!(
-        window.application().timeline_view.view_history_steps_back(),
+        window.application().interface.timeline_view.view_history_steps_back(),
         1,
         "the second framing changed nothing, so it is not a step"
     );
@@ -329,7 +329,7 @@ fn two_framings_one_after_the_other_are_two_steps_though_the_time_between_them_i
         "the setup: the second framing is another view"
     );
     assert_eq!(
-        window.application().timeline_view.view_history_steps_back(),
+        window.application().interface.timeline_view.view_history_steps_back(),
         2,
         "each framing is a step, whatever the time between them"
     );
@@ -386,7 +386,7 @@ impl WhatTheWheelDoes {
 
 /// What the timeline is looked at as, in the numbers that the four things change.
 fn how_the_timeline_is_looked_at(window: &Window) -> (f64, f32, f32, f32) {
-    let view = &window.application().timeline_view;
+    let view = &window.application().interface.timeline_view;
     (
         view.scroll_offset,
         width_of_a_second(window),
@@ -416,7 +416,7 @@ fn what_the_wheel_does_is_one_action_with_what_it_did_a_moment_before_if_both_ar
         assert_ne!(before, between, "the setup: {first:?} changed how it is looked at");
         assert_ne!(between, after, "the setup: {second:?} changed it again");
         assert_eq!(
-            window.application().timeline_view.view_history_steps_back(),
+            window.application().interface.timeline_view.view_history_steps_back(),
             if first.is_a_zoom() == second.is_a_zoom() { 1 } else { 2 },
             "{first:?} and then {second:?} a moment later"
         );
@@ -450,7 +450,7 @@ fn a_zoom_and_a_scroll_in_one_frame_are_a_zoom_and_the_scrolling_that_goes_on_in
     );
 
     assert_eq!(
-        window.application().timeline_view.view_history_steps_back(),
+        window.application().interface.timeline_view.view_history_steps_back(),
         2,
         "the frame that had both was a zooming, and the scrolling that went on after it is another action; if the frame had been a scrolling \
          it would have been one action with it"
@@ -529,7 +529,10 @@ fn a_wheel_that_is_turned_where_it_does_nothing_is_not_a_step() {
     scroll_along(&mut window, -3.0);
     assert_close(scrolled_along(&window), 0.0, "the setup: it is at the start");
 
-    assert_eq!(window.application().timeline_view.view_history_steps_back(), 0);
+    assert_eq!(
+        window.application().interface.timeline_view.view_history_steps_back(),
+        0
+    );
 }
 
 // --- what a new step does to what was gone back from ---
@@ -541,7 +544,11 @@ fn a_new_step_after_going_back_leaves_the_views_that_were_gone_back_from_behind(
     let scrolled = scrolled_along(&window);
     go_back(&mut window);
     assert_eq!(
-        window.application().timeline_view.view_history_steps_forward(),
+        window
+            .application()
+            .interface
+            .timeline_view
+            .view_history_steps_forward(),
         1,
         "the setup: there is a view to go forward to"
     );
@@ -552,7 +559,11 @@ fn a_new_step_after_going_back_leaves_the_views_that_were_gone_back_from_behind(
     go_forward(&mut window);
 
     assert_eq!(
-        window.application().timeline_view.view_history_steps_forward(),
+        window
+            .application()
+            .interface
+            .timeline_view
+            .view_history_steps_forward(),
         0,
         "that is gone"
     );
@@ -623,7 +634,7 @@ fn the_buttons_do_nothing_while_a_dialog_has_to_be_dealt_with() {
     let mut window = window_with_a_long_video();
     scroll_along(&mut window, 2.0);
     let scrolled = scrolled_along(&window);
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Something".to_owned(),
         text: "Something happened.".to_owned(),
     });

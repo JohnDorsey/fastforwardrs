@@ -144,7 +144,7 @@ fn an_autosave_never_writes_the_project_file_again_however_much_garbage_there_is
     let (mut fixture, archive_path) = fixture_with_big_files();
     include(&mut fixture, vec![VIDEO]);
     take_out(&mut fixture, vec![VIDEO]);
-    fixture.window.application_mut().global_settings.autosave = true;
+    fixture.window.application_mut().environment.global_settings.autosave = true;
     let context = egui::Context::default();
     fixture.window.do_this(Command::AddTrack);
 
@@ -191,7 +191,7 @@ fn a_damaged_file_stops_the_tidying_that_follows_a_save_and_says_so_and_leaves_t
 /// do in all of them.
 fn commands_until_the_job_is_done(window: &mut Window) -> Vec<ViewportCommand> {
     let started = Instant::now();
-    while window.application().running_save.is_some() {
+    while window.application().jobs.running_save.is_some() {
         assert!(started.elapsed() < Duration::from_secs(20), "the job did not finish");
         window.harness.step();
         std::thread::sleep(Duration::from_millis(2));
@@ -304,14 +304,14 @@ fn closing_does_not_write_the_project_file_again_while_a_save_is_going_on() {
     let (mut fixture, _archive_path) = fixture_with_garbage_and_a_video_read_in_the_project_file();
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
     // The sound is put in the project file again, which is a copy that goes on in the background (and is being waited for).
     fixture
         .window
         .do_this(Command::IncludeFilesInTheProjectFile(vec![the_sound()]));
     assert!(fixture.window.application().is_working_in_the_background());
     // (What is not saved yet is a question of its own, answered before this one: it is as if it was answered.)
-    fixture.window.application_mut().close_confirmed = true;
+    fixture.window.application_mut().interface.close_confirmed = true;
 
     let commands = fixture.window.ask_to_close();
 
@@ -440,7 +440,7 @@ fn closing_with_a_great_deal_to_copy_keeps_the_window_open_with_a_window_that_sa
     let (mut fixture, archive_path) = fixture_with_garbage_and_a_video_read_in_the_project_file();
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
 
     let commands = fixture.window.ask_to_close();
     fixture.window.settle();
@@ -485,7 +485,7 @@ fn giving_up_the_tidying_before_closing_leaves_the_project_file_as_it_was_and_th
     let bytes_before = fs::read(&archive_path).unwrap();
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
     fixture.window.ask_to_close();
     fixture.window.settle();
 

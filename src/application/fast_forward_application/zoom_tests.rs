@@ -105,13 +105,13 @@ fn the_zoom_works_from_the_ruler_and_from_any_track_but_not_from_elsewhere_in_th
 fn the_wheel_without_control_scrolls_and_does_not_zoom() {
     let mut window = window_with_a_long_video();
     let normal = width_of_a_second(&window);
-    let scroll_before = window.application().timeline_view.scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.scroll_offset;
 
     let over_the_strip = window.middle_of_the_track_at(100);
     window.scroll_the_wheel(over_the_strip, vec2(0.0, -ONE_NOTCH), Modifiers::NONE);
 
     assert!((width_of_a_second(&window) - normal).abs() < 0.01);
-    assert!(window.application().timeline_view.scroll_offset > scroll_before);
+    assert!(window.application().interface.timeline_view.scroll_offset > scroll_before);
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn zooming_has_limits_a_second_is_never_narrower_than_two_points_nor_a_frame_wid
         width_of_a_second(&window)
     );
     assert_eq!(
-        window.application().timeline_view.scroll_offset,
+        window.application().interface.timeline_view.scroll_offset,
         0.0,
         "all of the strip fits, so there is nowhere to scroll to"
     );
@@ -149,7 +149,7 @@ fn zooming_out_never_leaves_the_view_before_the_start_or_past_the_end_of_the_str
 
     let strip = window.strip_of_track(0);
     let end_of_the_video = window.x_of_frame_on_the_strip(0, 900);
-    assert!(window.application().timeline_view.scroll_offset >= 0.0);
+    assert!(window.application().interface.timeline_view.scroll_offset >= 0.0);
     assert!(
         end_of_the_video >= strip.right() - 0.5 || window.x_of_frame_on_the_strip(0, 0) >= strip.left() - 0.5,
         "the strip is not scrolled past its end: it ends at {end_of_the_video}, the view at {}",

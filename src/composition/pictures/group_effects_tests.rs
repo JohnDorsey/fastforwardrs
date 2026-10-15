@@ -11,7 +11,7 @@ use crate::composition::test_projects::project_of;
 use crate::project::{Badge, ChainItemKey, EffectKind, GroupKind};
 use crate::test_support::{make_a_keyframe, put_a_hue_shift_on};
 
-const HUE: PropertyId = PropertyId::HueShift;
+const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
 
 fn turn(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
@@ -79,7 +79,7 @@ fn the_effects_of_a_tag_are_applied_where_its_badge_is_in_the_chain_of_the_clip_
         .move_chain_item(
             Member::Clip(first),
             ChainItemKey::Badge(Badge::Tag(tag)),
-            Some(ChainItemKey::Effect(EffectKind::HueShift)),
+            Some(ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST)),
         )
         .unwrap();
     let plan = plan(&project);

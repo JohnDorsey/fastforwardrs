@@ -56,6 +56,7 @@ pub(super) fn window_with_a_clip_group_of_the_first_two_clips() -> (Window, Grou
     let clips = the_three_clips(&window);
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -180,6 +181,7 @@ fn an_outline_of_a_track_group_reaches_left_over_the_boxes_of_the_titles_and_is_
         .collect();
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(
             GroupKind::TrackGroup,
@@ -210,6 +212,7 @@ fn a_tag_has_an_outline_that_goes_round_clips_that_are_on_different_tracks() {
     let clips = [window.clip(0, 0), window.clip(1, 0)];
     let tag = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -236,6 +239,7 @@ fn the_outlines_are_not_drawn_while_a_track_is_being_dragged_to_another_place() 
         .collect();
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(
             GroupKind::TrackGroup,

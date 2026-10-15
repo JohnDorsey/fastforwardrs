@@ -143,7 +143,7 @@ fn drawers_work_as_ever_and_say_nothing_when_the_editor_has_no_speakers() {
         distance_between_the_rows(&window) > distance_before + 10.0,
         "the drawer opened and pushed the row under it down"
     );
-    assert_eq!(window.application().sound_effects.last_problem(), None);
+    assert_eq!(window.application().playback.sound_effects.last_problem(), None);
 }
 
 #[test]

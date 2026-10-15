@@ -229,7 +229,7 @@ fn a_picture_clip_can_be_cut_at_the_playhead_and_the_halves_are_pictures_in_the_
 #[test]
 fn a_picture_whose_file_cannot_be_found_is_a_missing_clip_and_its_box_offers_to_choose_the_file_again() {
     let (mut window, _picture) = window_with_a_picture_selected();
-    window.application_mut().source_files.insert(
+    window.application_mut().sources.files.insert(
         PICTURE_FILE,
         SourceFileState::new(SourceStatus::Unavailable {
             reason: "there is no file there".to_owned(),

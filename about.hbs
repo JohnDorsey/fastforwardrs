@@ -1,7 +1,7 @@
 # Third-party notices
 
 fastforwardrs itself is licensed under the GNU General Public License, version 3 or (at your option) any later version (`LICENSE`, `LICENSE-PLUGIN-CLARIFICATION`).
-This file lists the libraries it is built from and the licences they come under. It is made by `cargo about generate about.hbs > THIRD_PARTY.md`
+This file lists the libraries it is built from and the licences they come under. It is made by `cargo about generate about.hbs | tr -d '\r' > THIRD_PARTY.md` (the carriage returns that some licence texts have are taken out, so that the file is the same on every system)
 (see `about.toml`); do not edit it by hand.
 
 **Not Rust libraries:** the font `assets/fonts/Hack-Regular.ttf` (MIT and the Bitstream Vera licence; the licence file is next to it), and the programs

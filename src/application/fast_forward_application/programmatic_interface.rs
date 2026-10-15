@@ -55,78 +55,79 @@ impl FastForwardApplication {
 
     /// The project being edited.
     pub fn project(&self) -> &Project {
-        &self.project
+        &self.document.project
     }
 
     /// The file the project was last saved to or loaded from.
     pub fn project_file_path(&self) -> Option<&Path> {
-        self.project_file_path.as_deref()
+        self.document.project_file_path.as_deref()
     }
 
     /// The clip that is selected, if exactly one is.
     pub fn selected_clip(&self) -> Option<ClipId> {
-        self.selection.single()
+        self.interface.selection.single()
     }
 
     /// The clips that are selected.
     pub fn selected_clips(&self) -> Vec<ClipId> {
-        self.selection.to_vec()
+        self.interface.selection.to_vec()
     }
 
     /// Everything that is selected, clips and tracks.
     pub fn selected_items(&self) -> Vec<SelectionItem> {
-        self.selection.to_items()
+        self.interface.selection.to_items()
     }
 
     /// Whether there is an edit that undoing would take back.
     pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
+        self.document.history.can_undo()
     }
 
     /// Whether there is an edit that was undone, which redoing would do again.
     pub fn can_redo(&self) -> bool {
-        self.history.can_redo()
+        self.document.history.can_redo()
     }
 
     /// Whether the source file `identifier` has been found and opens.
     pub fn source_file_is_available(&self, identifier: SourceMediaIdentifier) -> bool {
-        self.source_is_available(identifier)
+        self.sources.is_available(identifier)
     }
 
     /// Whether every source file of the project has been found and opens. (A project with no
     /// source files has every one of them.)
     pub fn every_source_file_is_available(&self) -> bool {
-        self.project
+        self.document
+            .project
             .sources()
             .iter()
-            .all(|source| self.source_is_available(source.identifier))
+            .all(|source| self.sources.is_available(source.identifier))
     }
 
     /// Where the bytes of the source file `identifier` are, if it has been found and opens: a file of its own, or (for one that is
     /// included in the project file) the stretch of the project file that it is.
     pub fn location_of_the_source(&self, identifier: SourceMediaIdentifier) -> Option<MediaLocation> {
-        self.source_files.get(&identifier)?.location_if_available().cloned()
+        self.sources.files.get(&identifier)?.location_if_available().cloned()
     }
 
     /// Sets how many bytes of files a save copies without doing it in the background (where there is a window that says how it goes,
     /// and a button to stop it). For a test that makes a save a small one cannot be.
     pub fn copy_in_the_background_from(&mut self, bytes: u64) {
-        self.most_bytes_copied_at_once = bytes;
+        self.jobs.most_bytes_copied_at_once = bytes;
     }
 
     /// Whether the warning that source files must be chosen again is showing.
     pub fn missing_sources_warning_is_showing(&self) -> bool {
-        self.missing_sources_warning_open && !self.missing_sources().is_empty()
+        self.interface.missing_sources_warning_open && !self.missing_sources().is_empty()
     }
 
     /// Whether a file is being opened, thumbnails, waveforms or pictures are being made, the fonts for
     /// the text are being loaded, or an export is running.
     pub fn is_working_in_the_background(&self) -> bool {
-        !self.openings.is_empty()
-            || self.export.is_some()
-            || self.running_save.is_some()
-            || self.text_renderer.is_loading()
-            || self.source_files.values().any(|state| {
+        !self.sources.openings.is_empty()
+            || self.jobs.export.is_some()
+            || self.jobs.running_save.is_some()
+            || self.environment.text_renderer.is_loading()
+            || self.sources.files.values().any(|state| {
                 state.thumbnails.extraction.is_some()
                     || state.thumbnails.finer.is_running()
                     || state.waveform.extraction.is_some()
@@ -137,7 +138,8 @@ impl FastForwardApplication {
     /// Whether the picture of the image file `identifier` has been decoded for drawing, which takes a
     /// moment after the file is opened.
     pub fn image_file_is_decoded(&self, identifier: SourceMediaIdentifier) -> bool {
-        self.source_files
+        self.sources
+            .files
             .get(&identifier)
             .is_some_and(|state| state.picture.picture.is_some())
     }
@@ -145,12 +147,12 @@ impl FastForwardApplication {
     /// Keeps the files that are taken out of project files that have files included in them in the folder `folder` (which is made
     /// when the first is put there). The program does this in the folder of the computer's cache; a test gives it one of its own.
     pub fn keep_archive_files_in(&mut self, folder: PathBuf) {
-        self.archive_cache = Some(super::ArchiveCache::at(folder));
+        self.document.archive_cache = Some(super::ArchiveCache::at(folder));
     }
 
     /// The title and text of the message the user has to read, if one is showing.
     pub fn message_showing(&self) -> Option<(&str, &str)> {
-        match &self.dialog {
+        match &self.interface.dialog {
             Some(super::Dialog::Message { title, text }) => Some((title, text)),
             _ => None,
         }
@@ -158,7 +160,7 @@ impl FastForwardApplication {
 
     /// The settings that are the same for every project.
     pub fn global_settings(&self) -> Settings {
-        self.global_settings
+        self.environment.global_settings
     }
 
     /// The settings in effect for the project being edited: its own where it has set them, the
@@ -169,49 +171,50 @@ impl FastForwardApplication {
 
     /// The current frame of the timeline.
     pub fn current_frame(&self) -> TimelineFrameIndex {
-        let total_frames = self.project.total_frame_count();
-        self.clock.position(Instant::now(), total_frames)
+        let total_frames = self.document.project.total_frame_count();
+        self.playback.clock.position(Instant::now(), total_frames)
     }
 
     pub fn is_playing(&self) -> bool {
-        self.clock.is_playing()
+        self.playback.clock.is_playing()
     }
 
     /// Plays the preview's sound through the speakers `open_speakers` makes (when sound is first
     /// needed). Until this is called there is no sound: a program that is only being tested, or
     /// driven by a script, must not make noise.
     pub fn play_sound_through(&mut self, open_speakers: AudioSinkOpener) {
-        self.audio_supplier.play_through(open_speakers);
+        self.playback.audio_supplier.play_through(open_speakers);
     }
 
     /// Plays the editor's own little sounds (the snip of a cut, say) through the speakers `open_speakers`
     /// makes (when the first of them is played). Until this is called they are silent, like the preview's sound.
     pub fn play_effects_through(&mut self, open_speakers: EffectSpeakersOpener) {
-        self.sound_effects.play_through(open_speakers);
+        self.playback.sound_effects.play_through(open_speakers);
     }
 
     /// Whether the preview's sound is being decoded and played right now.
     pub fn sound_is_running(&self) -> bool {
-        self.audio_supplier.is_running()
+        self.playback.audio_supplier.is_running()
     }
 
     /// What last went wrong with the preview's sound, if anything has.
     pub fn sound_problem(&self) -> Option<&str> {
-        self.audio_supplier.last_problem()
+        self.playback.audio_supplier.last_problem()
     }
 
     /// The latest picture the preview has of the video that is in front (of the front-most track that
     /// has one), which may be a moment older than the current frame.
     pub fn preview_picture(&self) -> Option<&SuppliedPicture> {
-        self.project
+        self.document
+            .project
             .tracks()
             .iter()
-            .find_map(|track| self.preview_pictures.picture_of(track.id()))
+            .find_map(|track| self.playback.preview_pictures.picture_of(track.id()))
     }
 
     /// How many thumbnails of the video `identifier` have been made, and how many there will be.
     pub fn thumbnail_progress(&self, identifier: SourceMediaIdentifier) -> (usize, usize) {
-        self.source_files.get(&identifier).map_or((0, 0), |state| {
+        self.sources.files.get(&identifier).map_or((0, 0), |state| {
             (
                 state.thumbnails.library.every_second().made_count(),
                 state.thumbnails.library.every_second().second_count(),
@@ -222,7 +225,8 @@ impl FastForwardApplication {
     /// How many finer thumbnails (more than one for every second) of the video `identifier` have
     /// been made so far.
     pub fn finer_thumbnails_made(&self, identifier: SourceMediaIdentifier) -> usize {
-        self.source_files
+        self.sources
+            .files
             .get(&identifier)
             .map_or(0, |state| state.thumbnails.library.finer_count())
     }
@@ -230,21 +234,24 @@ impl FastForwardApplication {
     /// How many finer thumbnails of the video `identifier` the timeline wanted, and did not have,
     /// when it was last drawn.
     pub fn finer_thumbnails_still_wanted(&self, identifier: SourceMediaIdentifier) -> usize {
-        self.source_files
+        self.sources
+            .files
             .get(&identifier)
             .map_or(0, |state| state.thumbnails.finer.wanted_count())
     }
 
     /// How many runs of ffmpeg have been started to make finer thumbnails of the video `identifier`.
     pub fn finer_thumbnail_runs_started(&self, identifier: SourceMediaIdentifier) -> usize {
-        self.source_files
+        self.sources
+            .files
             .get(&identifier)
             .map_or(0, |state| state.thumbnails.finer.runs_started())
     }
 
     /// How many peaks of the waveform of the sound file `identifier` have been made.
     pub fn waveform_peak_count(&self, identifier: SourceMediaIdentifier) -> usize {
-        self.source_files
+        self.sources
+            .files
             .get(&identifier)
             .map_or(0, |state| state.waveform.waveform.peak_count())
     }
@@ -254,9 +261,10 @@ impl FastForwardApplication {
     /// scrolled out of view.
     pub fn strip_offset_of_frame(&self, frame: TimelineFrameIndex) -> f32 {
         (self
+            .interface
             .timeline_view
             .geometry(self.timeline_geometry())
             .x_of_frame(frame.value())
-            - self.timeline_view.scroll_offset) as f32
+            - self.interface.timeline_view.scroll_offset) as f32
     }
 }

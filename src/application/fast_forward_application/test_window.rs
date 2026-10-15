@@ -122,12 +122,14 @@ pub(super) fn window_inside_a_sped_up_clip() -> Window {
     let clip = window.clip(0, 0);
     window
         .application_mut()
+        .document
         .project
         .set_clip_speed(clip, SpeedFactor::new(4).unwrap())
         .unwrap();
     let now = std::time::Instant::now();
     window
         .application_mut()
+        .playback
         .clock
         .seek(now, TimelineFrameIndex::new(10), 75);
     window.settle();
@@ -163,7 +165,7 @@ fn replace_project_with_all_its_files_available(application: &mut FastForwardApp
         .collect();
     application.replace_project(project, None);
     for (identifier, path) in sources {
-        application.source_files.insert(
+        application.sources.files.insert(
             identifier,
             SourceFileState::new(SourceStatus::Available { location: path.into() }),
         );
@@ -187,10 +189,10 @@ impl Window {
                 places_searched: "nowhere (in a test)".to_owned(),
             }),
         );
-        application.dialog = None; // the "ffmpeg was not found" message
+        application.interface.dialog = None; // the "ffmpeg was not found" message
         // (Edits about one thing that follow one another are one step of the history if they come within a second of one another, which
         // they do unless the computer is so busy that a frame takes that long: here they are one step however long it is between them.)
-        application.history.merge_edits_whenever_they_are_made();
+        application.document.history.merge_edits_whenever_they_are_made();
         replace_project_with_all_its_files_available(&mut application, project);
         let mut harness = Harness::builder()
             .with_size(vec2(WINDOW_SIZE[0], WINDOW_SIZE[1]))
@@ -254,7 +256,7 @@ impl Window {
 
     /// Makes the editor ask `chooser` for files, in place of the one that fails when it is asked.
     pub(super) fn use_file_chooser(&mut self, chooser: &ScriptedFileChooser) {
-        self.application_mut().file_chooser = Box::new(chooser.clone());
+        self.application_mut().environment.file_chooser = Box::new(chooser.clone());
     }
 
     /// Lets a few frames of the window go by, and then as many more as it takes for everything to
@@ -299,6 +301,24 @@ impl Window {
         self.harness.get_by_label(label).rect()
     }
 
+    /// Where the `number`th of the things that are called `label` is (counting from 0, from the top of the window to the bottom), for when
+    /// several are: the controls of the values of several effects of one kind have the same name.
+    pub(super) fn rectangle_of_the_nth(&self, label: &str, number: usize) -> Rect {
+        let mut found: Vec<Rect> = self.harness.query_all_by_label(label).map(|node| node.rect()).collect();
+        found.sort_by(|first, second| first.top().total_cmp(&second.top()));
+        *found.get(number).unwrap_or_else(|| {
+            panic!(
+                "there are {} things called {label:?}, and no number {number}",
+                found.len()
+            )
+        })
+    }
+
+    /// How many things are called `label`.
+    pub(super) fn how_many_are_called(&self, label: &str) -> usize {
+        self.harness.query_all_by_label(label).count()
+    }
+
     // --- the panels ---
 
     /// The rectangles drawn in the colour of panels that are big enough to be panels (and not the menu bar).
@@ -333,6 +353,7 @@ impl Window {
     /// is only so tall.)
     pub(super) fn the_bottom_of_what_can_be_seen_of_the_rows(&self) -> f32 {
         self.application()
+            .interface
             .timeline_view
             .timeline_area_in_the_last_frame
             .expect("the timeline was drawn")
@@ -523,7 +544,23 @@ impl Window {
 
     /// Sets a slider (found by its label) to `value`, the way a screen reader does.
     pub(super) fn set_slider(&mut self, label: &str, value: f64) {
-        let (target_node, target_tree) = self.harness.get_by_label(label).accesskit_node().locate();
+        self.set_the_nth_slider(label, 0, value);
+    }
+
+    /// Sets the `number`th of the sliders that have this label (counting from 0, from the top of the window to the bottom) to `value`.
+    pub(super) fn set_the_nth_slider(&mut self, label: &str, number: usize, value: f64) {
+        let mut found: Vec<_> = self.harness.query_all_by_label(label).collect();
+        found.sort_by(|first, second| first.rect().top().total_cmp(&second.rect().top()));
+        let (target_node, target_tree) = found
+            .get(number)
+            .unwrap_or_else(|| {
+                panic!(
+                    "there are {} sliders called {label:?}, and no number {number}",
+                    found.len()
+                )
+            })
+            .accesskit_node()
+            .locate();
         self.harness.event(Event::AccessKitActionRequest(ActionRequest {
             action: Action::SetValue,
             target_tree,
@@ -571,13 +608,15 @@ impl Window {
 
     /// The title of the track at `position` in the list of tracks (0 is the front).
     pub(super) fn title_of_track(&self, position: usize) -> String {
-        self.application().project.tracks()[position].title().to_owned()
+        self.application().document.project.tracks()[position]
+            .title()
+            .to_owned()
     }
 
     /// The clips of the track at `position` that come from a file, as the source frames they play
     /// and how fast.
     pub(super) fn clips_of_track(&self, position: usize) -> Vec<(u64, u64, u32)> {
-        self.application().project.tracks()[position]
+        self.application().document.project.tracks()[position]
             .placements()
             .filter_map(|placement| placement.clip.as_media())
             .map(|media| {
@@ -597,7 +636,7 @@ impl Window {
 
     /// The `index`th clip of the track at `position`.
     pub(super) fn clip(&self, position: usize, index: usize) -> ClipId {
-        let track = &self.application().project.tracks()[position];
+        let track = &self.application().document.project.tracks()[position];
         track
             .placement_at_index(index)
             .expect("the track has that many clips")
@@ -605,8 +644,9 @@ impl Window {
     }
 
     pub(super) fn current_frame(&self) -> u64 {
-        let total = self.application().project.total_frame_count();
+        let total = self.application().document.project.total_frame_count();
         self.application()
+            .playback
             .clock
             .position(std::time::Instant::now(), total)
             .value()
@@ -754,8 +794,9 @@ impl Window {
 
     /// Makes the current frame `frame`, as if the playhead had been moved there.
     pub(super) fn move_current_frame_to(&mut self, frame: u64) {
-        let total = self.application().project.total_frame_count();
+        let total = self.application().document.project.total_frame_count();
         self.application_mut()
+            .playback
             .clock
             .seek(std::time::Instant::now(), TimelineFrameIndex::new(frame), total);
         self.settle();

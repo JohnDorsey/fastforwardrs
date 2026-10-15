@@ -1214,7 +1214,7 @@ fn nothing_on_the_preview_reacts_to_the_pointer_while_a_dialog_is_over_it() {
     let (mut window, text) = window_with_a_text_object_in_the_middle_selected();
     window.do_this(Command::Deselect);
     let middle = window.rectangle_of(&text_object_label(text)).center();
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });

@@ -52,8 +52,8 @@ use std::collections::HashMap;
 use super::{Group, GroupId, Member};
 use crate::project::tracks::{ClipId, ClipKind, Track};
 use crate::project::{
-    AnimationTarget, Badge, ChainItem, ChainItemKey, EditError, Effect, EffectKind, Effects, Project, PropertyId,
-    PropertyValue,
+    AnimationTarget, Badge, ChainItem, ChainItemKey, EditError, Effect, EffectInstanceId, EffectKind, Effects, Project,
+    PropertyId, PropertyValue,
 };
 
 /// What has a chain of effects: a clip, a track or a group.
@@ -97,7 +97,7 @@ impl ChainRow<'_> {
     /// What names the row among the others of the chain, if it can be moved to another place in it.
     pub fn key(&self) -> Option<ChainItemKey> {
         match self {
-            Self::Effect(effect) => Some(ChainItemKey::Effect(effect.kind())),
+            Self::Effect(effect) => Some(ChainItemKey::Effect(effect.instance())),
             Self::TagBadge(group) => Some(ChainItemKey::Badge(Badge::Tag(group.id()))),
             Self::TrackBadge { .. } => Some(ChainItemKey::Badge(Badge::Track)),
             Self::ShapeBadge(_) => None,
@@ -248,28 +248,29 @@ impl Project {
         }
     }
 
-    /// Puts the effect `kind` on the group `group`, last, with the values it begins with. It is an error, and nothing is changed, if there
-    /// is no such group, a group of its kind cannot have the effect (see [`EffectKind::applies_to_a_group_of_kind`]), or it has it already.
-    pub fn add_effect_to_the_group(&mut self, group: GroupId, kind: EffectKind) -> Result<(), EditError> {
+    /// Puts the effect `kind` on the group `group`, last, with the values it begins with, and gives the name it has in the chain of the
+    /// group. (There may be effects of that kind on it already: it is one more.) It is an error, and nothing is changed, if there is no such
+    /// group, or a group of its kind cannot have the effect (see [`EffectKind::applies_to_a_group_of_kind`]).
+    pub fn add_effect_to_the_group(&mut self, group: GroupId, kind: EffectKind) -> Result<EffectInstanceId, EditError> {
         let found = self.group_mut(group).ok_or(EditError::UnknownGroup { group })?;
         if !kind.applies_to_a_group_of_kind(found.kind()) {
             return Err(EditError::NotAnEffectOfTheGroup { group, kind });
         }
-        if found.effects_mut().add(kind) {
-            Ok(())
-        } else {
-            Err(EditError::TheGroupHasThatEffectAlready { group, kind })
-        }
+        Ok(found.effects_mut().add(kind))
     }
 
-    /// Takes the effect `kind` off the group `group`. It is an error, and nothing is changed, if there is no such group or it does not
-    /// have the effect.
-    pub fn remove_effect_from_the_group(&mut self, group: GroupId, kind: EffectKind) -> Result<(), EditError> {
+    /// Takes the effect that is named `instance` off the group `group`. It is an error, and nothing is changed, if there is no such group
+    /// or it does not have the effect.
+    pub fn remove_effect_from_the_group(
+        &mut self,
+        group: GroupId,
+        instance: EffectInstanceId,
+    ) -> Result<(), EditError> {
         let found = self.group_mut(group).ok_or(EditError::UnknownGroup { group })?;
-        if found.effects_mut().remove(kind) {
+        if found.effects_mut().remove(instance) {
             Ok(())
         } else {
-            Err(EditError::TheGroupDoesNotHaveThatEffect { group, kind })
+            Err(EditError::TheGroupDoesNotHaveThatEffect { group, instance })
         }
     }
 

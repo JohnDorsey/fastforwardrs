@@ -186,7 +186,7 @@ fn a_text_object_can_be_made_in_a_project_with_no_video_at_all_and_the_preview_t
 #[test]
 fn the_panel_has_the_words_the_font_the_size_the_colour_and_how_long_the_text_is_shown() {
     let mut window = window_with_a_text_object();
-    window.application_mut().font_families = Some(vec!["Arial".to_owned(), "Courier New".to_owned()]);
+    window.application_mut().environment.font_families = Some(vec!["Arial".to_owned(), "Courier New".to_owned()]);
     window.settle();
     for label in ["Text", "Font", "Size", "Colour", "Shown for"] {
         assert!(window.harness.query_by_label(label).is_some(), "{label}");
@@ -244,7 +244,7 @@ fn the_keys_are_not_shortcuts_while_the_words_are_being_typed_in() {
 #[test]
 fn choosing_a_font_in_the_panel_sets_the_font_of_the_text_object() {
     let mut window = window_with_a_text_object();
-    window.application_mut().font_families = Some(vec!["Arial".to_owned(), "Courier New".to_owned()]);
+    window.application_mut().environment.font_families = Some(vec!["Arial".to_owned(), "Courier New".to_owned()]);
     window.settle();
     window.harness.get_by_value("Default font").click();
     window.settle();
@@ -479,7 +479,7 @@ fn dragging_the_text_object_itself_moves_it_without_resizing_it() {
 fn clicking_a_text_object_on_the_preview_selects_its_clip_and_its_properties_are_in_the_panel() {
     let mut window = window_with_a_text_object();
     let (location, _, _) = text_clip(&window, 0, 1);
-    window.application_mut().selection.clear();
+    window.application_mut().interface.selection.clear();
     window.settle();
     assert!(window.harness.query_by_label(TEXT_BOX_HEADING).is_none());
     let body = window.rectangle_of(&text_object_label(location));

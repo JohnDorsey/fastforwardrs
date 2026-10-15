@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 use crate::colour_effects::ColourMatrix;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, AppliedEffect, EffectKind, FrameRate, Member, Project, PropertyId, PropertyValue,
-    ResolvedAnimations, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, Member, Project, PropertyId,
+    PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -57,6 +57,8 @@ pub enum LayerContent {
 /// An effect that is on a layer: one that its clip has, or that its track has, with what its values are and the keyframes of them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerEffect {
+    /// Which effect of the chain of its clip or its track it is, which its values are named by.
+    pub instance: EffectInstanceId,
     pub kind: EffectKind,
     /// What its values are when they are not animated, one for each of the properties of the kind of effect, in their order.
     pub values: Vec<PropertyValue>,
@@ -75,12 +77,18 @@ impl LayerEffect {
     /// each that has none.
     pub fn values_at(&self, timeline_frame: u64) -> Vec<PropertyValue> {
         self.kind
-            .properties()
+            .value_kinds()
             .iter()
             .zip(&self.values)
-            .map(|(property, value)| {
+            .enumerate()
+            .map(|(slot, (_, value))| {
+                let property = PropertyId::effect_value(
+                    self.kind,
+                    self.instance,
+                    u8::try_from(slot).expect("an effect has fewer than 256 values"),
+                );
                 self.animation
-                    .value_at(*property, timeline_frame)
+                    .value_at(property, timeline_frame)
                     .unwrap_or_else(|| value.clone())
             })
             .collect()
@@ -91,6 +99,7 @@ impl LayerEffect {
     #[must_use]
     pub fn as_it_is_at(&self, timeline_frame: TimelineFrameIndex) -> LayerEffect {
         LayerEffect {
+            instance: self.instance,
             kind: self.kind,
             values: self.values_at(timeline_frame.value()),
             animation: Animation::default(),
@@ -394,9 +403,10 @@ fn layer_effect_of(animations: &ResolvedAnimations, applied: &AppliedEffect<'_>)
     .map_or_else(Animation::default, |target| {
         animations
             .of(target)
-            .restricted_to(|property| kind.properties().contains(&property))
+            .restricted_to(|property| applied.effect.value_of(property).is_some())
     });
     LayerEffect {
+        instance: applied.effect.instance(),
         kind,
         values: applied.effect.values().to_vec(),
         animation,
@@ -440,7 +450,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 // value of the same property.)
                 animation: animations
                     .of(AnimationTarget::Clip(placement.id))
-                    .restricted_to(|property| property.is_seen() && property.effect().is_none()),
+                    .restricted_to(|property| property.is_seen() && !property.is_a_value_of_an_effect()),
                 effects: applied_effects
                     .get(&placement.id)
                     .into_iter()

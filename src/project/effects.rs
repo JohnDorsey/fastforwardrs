@@ -3,11 +3,16 @@
 
 //! Effects: what is done to the picture of a clip, or of a track, on its way to the finished picture.
 //!
-//! A clip or a track has the effects that were put on it, each at most once, one after another in the order they were put on in (or
-//! the order they were put in since: they can be moved, see [`Effects::move_before`]). What an effect does is set by its *values*, which
+//! A clip or a track has the effects that were put on it, one after another in the order they were put on in (or the order they were put in
+//! since: they can be moved, see [`Effects::move_before`]). It may have several effects of one kind: two hue shifts, say, each with values
+//! of its own. What an effect does is set by its *values*, which
 //! are properties like any other (see [`PropertyId`]): each can be animated, with keyframes, and is changed in the properties panel
 //! with the same stopwatch. An effect that is put on a clip or a track has the values it begins with (see
 //! [`EffectKind::default_values`]), and is taken off with its keyframes.
+//!
+//! **Each effect in a chain is named by an [`EffectInstanceId`]**, which is what its values are named by too (see
+//! [`PropertyId::EffectValue`]): a value is *the value `slot` of the effect `instance`*, whatever kind of effect that is. The names are those of
+//! one chain: two chains (of a clip and of its track, say) may use the same, and keyframes are kept for a clip or a track, not for a name.
 //!
 //! A group has effects too, and what has effects has a *chain*: its effects, one after another, and among them the **badges** that say
 //! where the effects of something else are applied to it (see [`Badge`]). A clip has a badge for each tag it is in, and one that stands
@@ -21,10 +26,35 @@
 
 use std::fmt;
 
-use super::animation::{PropertyId, PropertyValue};
+use super::animation::{PropertyId, PropertyValue, ValueKind};
 use super::groups::{GroupId, GroupKind};
 use super::tracks::ClipKind;
 use crate::colour_effects::ColourMatrix;
+
+/// Which of the effects of a chain an effect is: a number that no other effect of the chain has, and that the effect keeps for as long as it is in
+/// the chain (the one that is put on a chain that has none is [`Self::FIRST`], and each after it has a number more than the largest there is
+/// then). It names the effect's values (see [`PropertyId::EffectValue`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EffectInstanceId(u32);
+
+impl EffectInstanceId {
+    /// The name of the effect that is put on a chain that has no effects.
+    pub const FIRST: Self = Self(0);
+
+    pub const fn new(number: u32) -> Self {
+        Self(number)
+    }
+
+    pub const fn number(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for EffectInstanceId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "effect {}", self.0)
+    }
+}
 
 /// The kinds of effect there are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -40,8 +70,11 @@ struct EffectRow {
     name: &'static str,
     /// What it does, in a few words, for the menu that it is chosen from.
     description: &'static str,
-    /// The values it has, each a property, in the order they are kept and shown in.
-    properties: &'static [PropertyId],
+    /// The kind of each of the values it has, in the order they are kept and shown in.
+    value_kinds: &'static [ValueKind],
+    /// The name each of them is saved under in a project file (a value of an effect is a property of its own there, called this), in the
+    /// same order.
+    value_names: &'static [&'static str],
     /// What its values are when it is put on, in the same order.
     default_values: fn() -> Vec<PropertyValue>,
     /// Whether it can be put on a video, a picture and a text object (what is seen), and on a track (everything seen on it).
@@ -68,7 +101,8 @@ const ROWS: [EffectRow; 1] = [EffectRow {
     kind: EffectKind::HueShift,
     name: "hue shift",
     description: "Turns the colours round the wheel of colours",
-    properties: &[PropertyId::HueShift],
+    value_kinds: &[ValueKind::Number],
+    value_names: &["hue shift"],
     default_values: hue_shift_defaults,
     on_what_is_seen: true,
     on_a_track: true,
@@ -137,12 +171,24 @@ impl EffectKind {
         self.row().description
     }
 
-    /// The properties that are the values of the effect, in order.
-    pub fn properties(self) -> &'static [PropertyId] {
-        self.row().properties
+    /// The kind of each of the values of the effect, in order.
+    pub fn value_kinds(self) -> &'static [ValueKind] {
+        self.row().value_kinds
     }
 
-    /// What the values of the effect are when it is put on something, one for each of its properties.
+    /// The name each of the values of the effect is saved under in a project file, in order.
+    pub fn value_names(self) -> &'static [&'static str] {
+        self.row().value_names
+    }
+
+    /// The kind of effect that has a value that is saved under `name` in a project file, if there is one.
+    pub fn with_a_value_named(name: &str) -> Option<Self> {
+        ROWS.iter()
+            .find(|row| row.value_names.contains(&name))
+            .map(|row| row.kind)
+    }
+
+    /// What the values of the effect are when it is put on something, one for each of its value kinds.
     pub fn default_values(self) -> Vec<PropertyValue> {
         (self.row().default_values)()
     }
@@ -174,8 +220,8 @@ impl EffectKind {
         (self.row().as_exported)(values)
     }
 
-    /// How the effect changes the colours of a picture when its values are `values` (one for each of its properties, in the
-    /// order of [`Self::properties`]), if it changes colours at all. A matrix that changes nothing if the values are not those
+    /// How the effect changes the colours of a picture when its values are `values` (one for each of its value kinds, in the
+    /// order of [`Self::value_kinds`]), if it changes colours at all. A matrix that changes nothing if the values are not those
     /// of the effect.
     pub fn colour_matrix(self, values: &[PropertyValue]) -> Option<ColourMatrix> {
         self.row().colour_matrix.map(|matrix| matrix(values))
@@ -185,54 +231,101 @@ impl EffectKind {
 /// An effect that a clip or a track has: which, and what its values are when they are not animated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
+    instance: EffectInstanceId,
     kind: EffectKind,
-    /// The value of each of the properties of the kind of effect, in the order of [`EffectKind::properties`].
+    /// The value of each of the values of the kind of effect, in the order of [`EffectKind::value_kinds`].
     values: Vec<PropertyValue>,
 }
 
 impl Effect {
-    /// The effect of this kind as it is when it is put on.
+    /// The effect of this kind as it is when it is put on. (It is named [`EffectInstanceId::FIRST`] until a chain gives it the name it has
+    /// there: see [`Effects::put_on`].)
     pub fn new(kind: EffectKind) -> Self {
         Self {
+            instance: EffectInstanceId::FIRST,
             kind,
             values: kind.default_values(),
         }
     }
 
-    /// The effect of this kind with these values, if there is one for each of its properties and each is the kind of value the
-    /// property has.
+    /// The effect of this kind with these values, if there is one for each of its values and each is the kind of value it has.
     pub fn with_values(kind: EffectKind, values: Vec<PropertyValue>) -> Option<Self> {
-        let right_values = values.len() == kind.properties().len()
+        let right_values = values.len() == kind.value_kinds().len()
             && values
                 .iter()
-                .zip(kind.properties())
-                .all(|(value, property)| value.kind() == property.kind());
-        right_values.then_some(Self { kind, values })
+                .zip(kind.value_kinds())
+                .all(|(value, value_kind)| value.kind() == *value_kind);
+        right_values.then_some(Self {
+            instance: EffectInstanceId::FIRST,
+            kind,
+            values,
+        })
+    }
+
+    /// The same effect, named `instance`.
+    #[must_use]
+    pub fn named(mut self, instance: EffectInstanceId) -> Self {
+        self.instance = instance;
+        self
+    }
+
+    pub fn instance(&self) -> EffectInstanceId {
+        self.instance
     }
 
     pub fn kind(&self) -> EffectKind {
         self.kind
     }
 
-    /// The values the effect has when they are not animated, one for each of its properties, in order.
+    /// The values the effect has when they are not animated, one for each of its value kinds, in order.
     pub fn values(&self) -> &[PropertyValue] {
         &self.values
     }
 
+    /// The property that is the value in place `slot` of this effect, if it has one there.
+    pub fn property(&self, slot: usize) -> Option<PropertyId> {
+        self.kind.value_kinds().get(slot)?;
+        Some(PropertyId::effect_value(
+            self.kind,
+            self.instance,
+            u8::try_from(slot).ok()?,
+        ))
+    }
+
+    /// The property that is the value of this effect that is saved under `name` in a project file, if it has one.
+    pub fn property_named(&self, name: &str) -> Option<PropertyId> {
+        let slot = self.kind.value_names().iter().position(|own| *own == name)?;
+        self.property(slot)
+    }
+
+    /// The properties that are the values of this effect, in order.
+    pub fn properties(&self) -> impl Iterator<Item = PropertyId> + '_ {
+        (0..self.kind.value_kinds().len()).filter_map(|slot| self.property(slot))
+    }
+
+    /// Where the value that `property` is, is among the values of this effect, if it is one of them.
+    fn slot_of(&self, property: PropertyId) -> Option<usize> {
+        let PropertyId::EffectValue { effect, instance, slot } = property else {
+            return None;
+        };
+        let slot = usize::from(slot);
+        (effect == self.kind && instance == self.instance && slot < self.kind.value_kinds().len()).then_some(slot)
+    }
+
     /// The value of `property` when it is not animated, if it is one of the effect's.
     pub fn value_of(&self, property: PropertyId) -> Option<&PropertyValue> {
-        let place = self.kind.properties().iter().position(|own| *own == property)?;
-        self.values.get(place)
+        self.values.get(self.slot_of(property)?)
     }
 
     /// The effect with `value` for `property`. `None` if it is not a property of the effect, or not the kind of value that it has.
     #[must_use]
     pub fn with_value(&self, property: PropertyId, value: &PropertyValue) -> Option<Self> {
-        let place = self.kind.properties().iter().position(|own| *own == property)?;
+        let place = self.slot_of(property)?;
         (value.kind() == property.kind()).then(|| {
             let mut values = self.values.clone();
             values[place] = value.clone();
             Self {
+                instance: self.instance,
                 kind: self.kind,
                 values,
             }
@@ -251,11 +344,11 @@ pub enum Badge {
     Tag(GroupId),
 }
 
-/// What is in a chain, named so that it can be pointed at without saying where it is: an effect is its kind (there is at most one of
-/// each kind in a chain), and a badge is what it is a badge of (there is at most one of each).
+/// What is in a chain, named so that it can be pointed at without saying where it is: an effect is its instance, and a badge is what it
+/// is a badge of (there is at most one of each).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChainItemKey {
-    Effect(EffectKind),
+    Effect(EffectInstanceId),
     Badge(Badge),
 }
 
@@ -270,7 +363,7 @@ impl ChainItem<'_> {
     /// What names the item.
     pub fn key(&self) -> ChainItemKey {
         match self {
-            Self::Effect(effect) => ChainItemKey::Effect(effect.kind()),
+            Self::Effect(effect) => ChainItemKey::Effect(effect.instance()),
             Self::Badge(badge) => ChainItemKey::Badge(*badge),
         }
     }
@@ -293,14 +386,15 @@ enum Link {
 impl Link {
     fn key(&self) -> ChainItemKey {
         match self {
-            Self::Effect(effect) => ChainItemKey::Effect(effect.kind()),
+            Self::Effect(effect) => ChainItemKey::Effect(effect.instance()),
             Self::Badge(badge) => ChainItemKey::Badge(*badge),
         }
     }
 }
 
 /// The effects of a clip, of a track or of a group, in the order they are applied in, and with them the badges that say where the
-/// effects of something else are applied. There is at most one effect of each kind, and at most one badge of each.
+/// effects of something else are applied. There may be several effects of one kind (each has a name of its own in the chain: see
+/// [`EffectInstanceId`]), and there is at most one badge of each.
 ///
 /// A chain that has nothing in it is the chain of a clip that has no effects and is in no tag: it is, as it was before there were
 /// badges. The badge of the track that a clip is on is not kept while it is **at the end** of the chain, where it begins: it is the
@@ -346,14 +440,14 @@ impl Effects {
         Self::default()
     }
 
-    /// The chain that has `entries` in it, in that order (a project file says what a chain has in it this way). `None` if two of the
-    /// entries are an effect of the same kind, or are the same badge. (A badge of the track that is last is not kept, as it is the
-    /// last thing in the chain without that.)
+    /// The chain that has `entries` in it, in that order, each effect with the name it has (a project file says what a chain has in it
+    /// this way). `None` if two of the entries are effects of the same name (whatever their kinds), or are the same badge. (A badge of the
+    /// track that is last is not kept, as it is the last thing in the chain without that.)
     pub fn from_entries(entries: impl IntoIterator<Item = ChainEntry>) -> Option<Self> {
         let mut chain = Self::none();
         for entry in entries {
             let key = match &entry {
-                ChainEntry::Effect(effect) => ChainItemKey::Effect(effect.kind()),
+                ChainEntry::Effect(effect) => ChainItemKey::Effect(effect.instance()),
                 ChainEntry::Badge(badge) => ChainItemKey::Badge(*badge),
             };
             if chain.links.iter().any(|link| link.key() == key) {
@@ -380,14 +474,29 @@ impl Effects {
             .collect()
     }
 
-    /// Puts `effect`, with the values it has, on, last (but before the badge of the track, if that is at the end). `false`, and
-    /// nothing is changed, if there is one of that kind already.
-    pub fn put_on(&mut self, effect: Effect) -> bool {
-        if self.contains(effect.kind()) {
-            return false;
-        }
-        self.links.push(Link::Effect(effect));
-        true
+    /// Puts `effect`, with the values it has, on, last (but before the badge of the track, if that is at the end), named as the next
+    /// effect of the chain is (see [`Self::next_instance`]), which is the name that it is given back as. (There may be effects of its kind
+    /// on the chain already.)
+    pub fn put_on(&mut self, effect: Effect) -> EffectInstanceId {
+        let instance = self.next_instance();
+        self.links.push(Link::Effect(effect.named(instance)));
+        instance
+    }
+
+    /// The name that the next effect that is put on gets: [`EffectInstanceId::FIRST`] if the chain has no effects, and otherwise one more
+    /// than the largest name there is (so that the name of an effect that is still there is never given again).
+    pub fn next_instance(&self) -> EffectInstanceId {
+        self.iter()
+            .map(|effect| effect.instance())
+            .max()
+            .map_or(EffectInstanceId::FIRST, |largest| {
+                EffectInstanceId::new(largest.number() + 1)
+            })
+    }
+
+    /// The effect that is named `instance`, if the chain has it.
+    pub fn instance(&self, instance: EffectInstanceId) -> Option<&Effect> {
+        self.iter().find(|effect| effect.instance() == instance)
     }
 
     /// Whether there is no effect. (There may be badges.)
@@ -408,27 +517,43 @@ impl Effects {
         }
     }
 
-    pub fn contains(&self, kind: EffectKind) -> bool {
-        self.get(kind).is_some()
+    /// Whether the chain has an effect that is named `instance`.
+    pub fn has_the_instance(&self, instance: EffectInstanceId) -> bool {
+        self.instance(instance).is_some()
     }
 
-    pub fn get(&self, kind: EffectKind) -> Option<&Effect> {
-        self.iter().find(|effect| effect.kind == kind)
+    /// Which of the effects of its kind the effect named `instance` is, counting from 1 in the order they are applied in, and how many
+    /// effects of that kind the chain has: `(2, 3)` for the second of three hue shifts. `None` if there is no such effect.
+    pub fn place_among_its_kind(&self, instance: EffectInstanceId) -> Option<(usize, usize)> {
+        let kind = self.instance(instance)?.kind();
+        let of_its_kind = || self.iter().filter(|effect| effect.kind() == kind);
+        let before_it = of_its_kind().take_while(|effect| effect.instance() != instance).count();
+        Some((before_it + 1, of_its_kind().count()))
     }
 
-    /// Puts the effect of `kind` on, last, with the values it begins with. `false`, and nothing is changed, if there is one of
-    /// that kind already.
-    pub fn add(&mut self, kind: EffectKind) -> bool {
+    /// Puts the effect of `kind` on, last, with the values it begins with, and gives back the name it has in the chain.
+    pub fn add(&mut self, kind: EffectKind) -> EffectInstanceId {
         self.put_on(Effect::new(kind))
     }
 
-    /// Takes the effect of `kind` off. `false` if there was none.
-    pub fn remove(&mut self, kind: EffectKind) -> bool {
+    /// Takes the effect that is named `instance` off. `false` if there was none.
+    pub fn remove(&mut self, instance: EffectInstanceId) -> bool {
         let before = self.links.len();
-        self.links.retain(|link| link.key() != ChainItemKey::Effect(kind));
+        self.links
+            .retain(|link| !matches!(link, Link::Effect(effect) if effect.instance() == instance));
         let removed = self.links.len() != before;
         self.settle();
         removed
+    }
+
+    /// Whether `property` is the value of one of the effects of the chain.
+    pub fn has_the_value(&self, property: PropertyId) -> bool {
+        self.iter().any(|effect| effect.value_of(property).is_some())
+    }
+
+    /// The effect that `property` is a value of, if the chain has it.
+    pub fn effect_of_the_value(&self, property: PropertyId) -> Option<&Effect> {
+        self.iter().find(|effect| effect.value_of(property).is_some())
     }
 
     /// The value of `property` when it is not animated, if it is a property of one of the effects.

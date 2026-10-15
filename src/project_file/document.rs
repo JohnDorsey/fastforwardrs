@@ -337,12 +337,17 @@ impl<'de> Deserialize<'de> for GroupColourDocument {
     }
 }
 
-/// An effect that a clip or a track has.
+/// An effect that a clip, a track or a group has.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct EffectDocument {
     /// The name of the kind of effect (see [`crate::project::EffectKind::name`]).
     pub effect: String,
+    /// The name the effect has in its chain (see [`crate::project::EffectInstanceId`]), which is what the racks of keyframes of its values say
+    /// they are of. A chain may have several effects of one kind, and then it is this that tells them apart. Left out in the files of
+    /// versions before 11, which have at most one effect of each kind: the effects of a chain are named in the order they are in then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<u32>,
     /// What its values are when they are not animated, one for each of the properties of the kind of effect, in their order.
     /// Left out when they are what the effect begins with. (The keyframes of its values are racks, like any other.)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -355,6 +360,12 @@ pub(super) struct EffectDocument {
 pub(super) struct RackDocument {
     /// The name of the property (see [`crate::project::PropertyId::name`]).
     pub property: String,
+    /// For a rack of the keyframes of a value of an effect: the name of that effect in the chain of the clip or the track that the keyframes
+    /// are of (see [`EffectDocument::instance`]), which says which of its effects the value is of when it has several of one kind. Left out
+    /// for the properties that a clip or a track has itself, and in the files of versions before 11, in which it is the one effect that has
+    /// a value of that name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<u32>,
     /// The clip or the track that the keyframes are of. Left out when it is the one whose drawer the rack is in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<TargetDocument>,

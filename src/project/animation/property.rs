@@ -4,7 +4,7 @@
 //! What can be animated, and the values it takes: the properties of clips and of tracks that can change over
 //! time, each with the kind of value it has.
 
-use crate::project::effects::{EffectKind, Effects};
+use crate::project::effects::{EffectInstanceId, EffectKind, Effects};
 use crate::project::tracks::{ClipKind, TextColour};
 
 /// A property that can be animated: given keyframes, so that it is not the same at every frame.
@@ -12,6 +12,10 @@ use crate::project::tracks::{ClipKind, TextColour};
 /// Everything that is a setting of a clip or of a track can be, except what makes the clip last longer or
 /// shorter (its speed, the speed of its track, and how long a picture or a text object is shown for), which
 /// would make the keyframes move about in time.
+///
+/// Most of the properties are the clip's and the track's own. The others are the values of the effects that a clip or a track has, and are
+/// not a row each: *the value in place `slot` of the effect `instance`, which is an effect of kind `effect`* is one property,
+/// [`Self::EffectValue`] (see [`crate::project::EffectInstanceId`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PropertyId {
     /// How loud a clip or a track is, in decibels.
@@ -32,13 +36,18 @@ pub enum PropertyId {
     FontSize,
     /// The colour of the letters of a text object.
     Colour,
-    /// How far the colours of a picture are turned round the wheel of colours, in degrees: the one value of the hue shift effect (and a
-    /// property only of what has that effect).
-    HueShift,
+    /// The value in place `slot` of the effect of kind `effect` that is named `instance` in the chain of effects of a clip or a track (and a
+    /// property only of what has that effect). The kind of effect is here so that what the property is, what kind of value it has and what
+    /// it is called can be said without looking in the chain.
+    EffectValue {
+        effect: EffectKind,
+        instance: EffectInstanceId,
+        slot: u8,
+    },
 }
 
 /// What a property's value is made of, which says how it changes between two keyframes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ValueKind {
     /// One number, which changes evenly.
     Number,
@@ -53,8 +62,9 @@ pub enum ValueKind {
 }
 
 impl PropertyId {
-    /// Every property, in the order they are kept and shown in.
-    pub const ALL: [PropertyId; 10] = [
+    /// Every property that a clip or a track has of its own, in the order they are kept and shown in. (The values of effects, which are
+    /// the others, are as many as the effects there are: see [`Effect::properties`](crate::project::Effect::properties).)
+    pub const OWN: [PropertyId; 9] = [
         Self::Gain,
         Self::Muted,
         Self::Position,
@@ -64,13 +74,23 @@ impl PropertyId {
         Self::FontFamily,
         Self::FontSize,
         Self::Colour,
-        Self::HueShift,
     ];
 
-    /// What the value of the property is made of.
+    /// The property that is the value in place `slot` of the effect `instance`, which is of the kind `effect`.
+    pub const fn effect_value(effect: EffectKind, instance: EffectInstanceId, slot: u8) -> Self {
+        Self::EffectValue { effect, instance, slot }
+    }
+
+    /// What the value of the property is made of. (A value of an effect is what the effect says its value in that place is; a place that the
+    /// effect has no value in is no property of anything, and is taken for a number.)
     pub fn kind(self) -> ValueKind {
         match self {
-            Self::Gain | Self::Rotation | Self::FontSize | Self::HueShift => ValueKind::Number,
+            Self::EffectValue { effect, slot, .. } => effect
+                .value_kinds()
+                .get(usize::from(slot))
+                .copied()
+                .unwrap_or(ValueKind::Number),
+            Self::Gain | Self::Rotation | Self::FontSize => ValueKind::Number,
             Self::Position | Self::Size => ValueKind::Pair,
             Self::Colour => ValueKind::Colour,
             Self::Muted => ValueKind::Flag,
@@ -78,9 +98,15 @@ impl PropertyId {
         }
     }
 
-    /// The name the property is saved under in a project file, and which is how it is called to people.
+    /// The name the property is saved under in a project file (the version 10 of it, where a value of an effect has a name of its own),
+    /// and which is how it is called to people.
     pub fn name(self) -> &'static str {
         match self {
+            Self::EffectValue { effect, slot, .. } => effect
+                .value_names()
+                .get(usize::from(slot))
+                .copied()
+                .unwrap_or("value of an effect"),
             Self::Gain => "gain",
             Self::Muted => "muted",
             Self::Position => "position",
@@ -90,25 +116,32 @@ impl PropertyId {
             Self::FontFamily => "font",
             Self::FontSize => "font size",
             Self::Colour => "colour",
-            Self::HueShift => "hue shift",
         }
     }
 
+    /// The property of a clip or a track that is called `name` in a project file. (Only the properties they have of their own have names
+    /// there: see [`Self::OWN`].)
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|property| property.name() == name)
+        Self::OWN.into_iter().find(|property| property.name() == name)
     }
 
-    /// The effect that this property is a value of, if it is one: it is a property only of what has the effect.
-    pub fn effect(self) -> Option<EffectKind> {
-        EffectKind::ALL
-            .into_iter()
-            .find(|kind| kind.properties().contains(&self))
+    /// Whether this is a value of an effect, which is a property only of what has that effect.
+    pub fn is_a_value_of_an_effect(self) -> bool {
+        matches!(self, Self::EffectValue { .. })
     }
 
-    /// Whether a track has this property of its own: how loud it is, and whether it is silent, and the values of the effects a
-    /// track can have.
+    /// The name, in the chain of what has it, of the effect that this is a value of, if it is the value of an effect.
+    pub fn effect_instance(self) -> Option<EffectInstanceId> {
+        match self {
+            Self::EffectValue { instance, .. } => Some(instance),
+            _ => None,
+        }
+    }
+
+    /// Whether a track can have this property: how loud it is, and whether it is silent, and, if it is a value of an effect, as far as a
+    /// track can have effects at all (whether it has the effect is for [`Self::is_had_by_a_track`] to say).
     pub fn applies_to_a_track(self) -> bool {
-        self.is_heard() || self.effect().is_some_and(EffectKind::applies_to_a_track)
+        self.is_heard() || self.is_a_value_of_an_effect()
     }
 
     /// Whether what the property is can be heard: how loud something is, and whether it is silent.
@@ -131,20 +164,29 @@ impl PropertyId {
                 matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text)
             }
             Self::Text | Self::FontFamily | Self::FontSize | Self::Colour => kind == ClipKind::Text,
-            Self::HueShift => EffectKind::HueShift.applies_to_a_clip_of_kind(kind),
+            // (A value of an effect is a property of a clip that can have effects: whether it has this one is for `is_had_by_a_clip`.)
+            Self::EffectValue { .. } => matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text),
         }
     }
 
     /// Whether a clip of kind `kind` that has the effects `effects` has this property: one that a clip of its kind can have and, if
-    /// it is a value of an effect, only if the clip has that effect.
+    /// it is a value of an effect, only if the clip has that effect, and the effect can be on a clip of that kind.
     pub fn is_had_by_a_clip(self, kind: ClipKind, effects: &Effects) -> bool {
-        self.applies_to_a_clip_of_kind(kind) && self.effect().is_none_or(|effect| effects.contains(effect))
+        self.applies_to_a_clip_of_kind(kind)
+            && (!self.is_a_value_of_an_effect()
+                || effects
+                    .effect_of_the_value(self)
+                    .is_some_and(|effect| effect.kind().applies_to_a_clip_of_kind(kind)))
     }
 
     /// Whether a track that has the effects `effects` has this property: one that a track can have and, if it is a value of an
-    /// effect, only if the track has that effect.
+    /// effect, only if the track has that effect, and the effect can be on a track.
     pub fn is_had_by_a_track(self, effects: &Effects) -> bool {
-        self.applies_to_a_track() && self.effect().is_none_or(|effect| effects.contains(effect))
+        self.applies_to_a_track()
+            && (!self.is_a_value_of_an_effect()
+                || effects
+                    .effect_of_the_value(self)
+                    .is_some_and(|effect| effect.kind().applies_to_a_track()))
     }
 }
 
@@ -218,16 +260,22 @@ impl PropertyValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE, properties_of_every_kind};
 
     #[test]
-    fn every_property_has_a_name_that_only_it_has_and_that_it_is_found_by() {
-        let mut names: Vec<&str> = PropertyId::ALL.iter().map(|property| property.name()).collect();
-        for property in PropertyId::ALL {
+    fn every_property_has_a_name_that_only_it_has_and_that_it_is_found_by_if_it_is_one_of_a_clip_or_a_track_itself() {
+        let mut names: Vec<&str> = properties_of_every_kind()
+            .iter()
+            .map(|property| property.name())
+            .collect();
+        for property in PropertyId::OWN {
             assert_eq!(PropertyId::from_name(property.name()), Some(property));
         }
+        // (The value of an effect is found by its name only in the chain of the effect it is of: see the project file.)
+        assert_eq!(PropertyId::from_name(HUE.name()), None);
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), PropertyId::ALL.len());
+        assert_eq!(names.len(), properties_of_every_kind().len());
         assert_eq!(PropertyId::from_name("speed"), None, "speeds are not animated");
         assert_eq!(PropertyId::from_name("duration"), None);
     }
@@ -235,37 +283,90 @@ mod tests {
     #[test]
     fn each_kind_of_clip_and_a_track_have_the_properties_they_have() {
         let of = |kind: ClipKind| -> Vec<PropertyId> {
-            PropertyId::ALL
+            properties_of_every_kind()
                 .into_iter()
                 .filter(|property| property.applies_to_a_clip_of_kind(kind))
                 .collect()
         };
         use PropertyId::*;
-        // (The values of effects are those of what can have the effect: of the effects that it has, as far as it does.)
-        assert_eq!(
-            of(ClipKind::Video),
-            vec![Gain, Muted, Position, Size, Rotation, HueShift]
-        );
+        // (The values of effects are those of what can have effects at all: whether it has the effect is for `is_had_by_a_clip`.)
+        assert_eq!(of(ClipKind::Video), vec![Gain, Muted, Position, Size, Rotation, HUE]);
         assert_eq!(of(ClipKind::Audio), vec![Gain, Muted]);
-        assert_eq!(of(ClipKind::Image), vec![Position, Size, Rotation, HueShift]);
+        assert_eq!(of(ClipKind::Image), vec![Position, Size, Rotation, HUE]);
         assert_eq!(
             of(ClipKind::Text),
-            vec![Position, Size, Rotation, Text, FontFamily, FontSize, Colour, HueShift]
+            vec![Position, Size, Rotation, Text, FontFamily, FontSize, Colour, HUE]
         );
         assert_eq!(of(ClipKind::Crate), Vec::<PropertyId>::new());
-        let of_a_track: Vec<PropertyId> = PropertyId::ALL
+        let of_a_track: Vec<PropertyId> = properties_of_every_kind()
             .into_iter()
             .filter(|property| property.applies_to_a_track())
             .collect();
-        assert_eq!(of_a_track, vec![Gain, Muted, HueShift]);
+        assert_eq!(of_a_track, vec![Gain, Muted, HUE]);
     }
 
     #[test]
-    fn the_list_of_properties_is_in_the_order_they_are_kept_in_and_has_each_once() {
-        let mut sorted = PropertyId::ALL;
+    fn the_value_of_an_effect_is_had_by_a_clip_or_a_track_that_has_that_effect_and_by_no_other() {
+        let mut with_the_effect = Effects::none();
+        with_the_effect.add(EffectKind::HueShift);
+        let without = Effects::none();
+        let another_one = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(5), 0);
+        assert_eq!(another_one.kind(), HUE.kind());
+
+        for kind in [ClipKind::Video, ClipKind::Image, ClipKind::Text] {
+            assert!(
+                HUE.is_had_by_a_clip(kind, &with_the_effect),
+                "{kind:?} that has the effect"
+            );
+            assert!(!HUE.is_had_by_a_clip(kind, &without), "{kind:?} that has not");
+            assert!(
+                !another_one.is_had_by_a_clip(kind, &with_the_effect),
+                "{kind:?}: another effect, not this one"
+            );
+        }
+        for kind in [ClipKind::Audio, ClipKind::Crate] {
+            assert!(!HUE.is_had_by_a_clip(kind, &with_the_effect), "{kind:?} cannot have it");
+        }
+        assert!(HUE.is_had_by_a_track(&with_the_effect));
+        assert!(!HUE.is_had_by_a_track(&without));
+        assert!(!another_one.is_had_by_a_track(&with_the_effect));
+        // (What a clip or a track has of its own does not depend on its effects.)
+        assert!(PropertyId::Gain.is_had_by_a_track(&without));
+        assert!(PropertyId::Position.is_had_by_a_clip(ClipKind::Video, &without));
+    }
+
+    #[test]
+    fn what_a_value_of_an_effect_is_and_is_called_is_what_the_effect_says_of_the_place_it_is_in() {
+        assert_eq!(HUE.kind(), ValueKind::Number);
+        assert_eq!(HUE.name(), "hue shift");
+        assert!(HUE.is_a_value_of_an_effect());
+        assert!(HUE.is_seen() && !HUE.is_heard());
+        // (A place that the effect has no value in is nothing that an effect makes, and is no more than a number with a name.)
+        let nowhere = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 9);
+        assert_eq!(nowhere.kind(), ValueKind::Number);
+        assert_eq!(nowhere.name(), "value of an effect");
+        assert!(
+            PropertyId::OWN
+                .iter()
+                .all(|property| !property.is_a_value_of_an_effect())
+        );
+    }
+
+    #[test]
+    fn the_list_of_properties_is_in_the_order_they_are_kept_in_and_has_each_once_and_the_values_of_effects_come_after()
+    {
+        let mut sorted = PropertyId::OWN;
         sorted.sort();
-        assert_eq!(sorted, PropertyId::ALL);
+        assert_eq!(sorted, PropertyId::OWN);
         sorted.windows(2).for_each(|pair| assert_ne!(pair[0], pair[1]));
+        for property in PropertyId::OWN {
+            assert!(property < HUE, "{property:?} before the values of effects");
+        }
+        let later_effect = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(1), 0);
+        assert!(
+            HUE < later_effect,
+            "the values of the effects are in the order the effects are in"
+        );
     }
 
     #[test]

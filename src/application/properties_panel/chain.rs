@@ -22,13 +22,14 @@ use super::effects::{
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
 use crate::application::commands::Command;
-use crate::application::naming::{describe_a_group, what_an_effect_is_called};
+use crate::application::naming::{describe_a_group, what_an_effect_in_a_chain_is_called, what_an_effect_is_called};
 use crate::application::plus_button;
 use crate::application::selection::SelectionItem;
 use crate::application::theme;
 use crate::application::timeline_panel::{GripDotArrangement, draw_grip_dots};
 use crate::project::{
-    AnimationTarget, Badge, ChainItemKey, ChainRow, Effect, EffectKind, Group, GroupKind, Member, Track,
+    AnimationTarget, Badge, ChainItemKey, ChainRow, Effect, EffectInstanceId, EffectKind, Effects, Group, GroupKind,
+    Member, Track,
 };
 
 /// How much room there is between the rows of the chain, in points.
@@ -60,12 +61,13 @@ struct DrawnRow {
 /// Shows the chain of `owner` (a clip, a track or a group), and adds a command for each change made in it.
 pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Member, commands: &mut Vec<Command>) {
     let rows = content.project.chain_rows_of(owner);
+    let chain = content.project.chain_of_the_member(owner);
     let mut drawn: Vec<DrawnRow> = Vec::new();
     for row in &rows {
         let shown = match row {
             ChainRow::Effect(effect) => {
                 ui.add_space(SPACE_BETWEEN_ROWS);
-                show_an_effect(ui, content, owner, effect, commands)
+                show_an_effect(ui, content, owner, chain, effect, commands)
             }
             ChainRow::TagBadge(tag) => {
                 ui.add_space(SPACE_BETWEEN_ROWS);
@@ -105,34 +107,39 @@ fn command_that_puts_on(owner: Member, kind: EffectKind) -> Command {
     }
 }
 
-/// The command that takes the effect of kind `kind` off `owner`.
-fn command_that_takes_off(owner: Member, kind: EffectKind) -> Command {
+/// The command that takes the effect that is named `instance` in the chain of `owner` off it.
+fn command_that_takes_off(owner: Member, instance: EffectInstanceId) -> Command {
     match owner {
         Member::Clip(clip) => Command::RemoveEffect {
             target: AnimationTarget::Clip(clip),
-            kind,
+            instance,
         },
         Member::Track(track) => Command::RemoveEffect {
             target: AnimationTarget::Track(track),
-            kind,
+            instance,
         },
-        Member::Group(group) => Command::RemoveGroupEffect { group, kind },
+        Member::Group(group) => Command::RemoveGroupEffect { group, instance },
     }
 }
 
-/// Shows the box of the effect `effect` of `owner`, which can be taken hold of by its heading.
+/// Shows the box of the effect `effect` of `owner`, whose chain is `chain`, which can be taken hold of by its heading.
 fn show_an_effect(
     ui: &mut Ui,
     content: &PropertiesContent<'_>,
     owner: Member,
+    chain: Option<&Effects>,
     effect: &Effect,
     commands: &mut Vec<Command>,
 ) -> DrawnRow {
     let kind = effect.kind();
     let mut to_be_deleted = false;
+    let title = chain.map_or_else(
+        || what_an_effect_is_called(kind),
+        |chain| what_an_effect_in_a_chain_is_called(chain, effect),
+    );
     let drawn = kind_box::show_with_a_menu(
         ui,
-        &what_an_effect_is_called(kind),
+        &title,
         |ui| {
             if ui.button(DELETE_EFFECT_LABEL).clicked() {
                 to_be_deleted = true;
@@ -140,21 +147,23 @@ fn show_an_effect(
             }
         },
         |ui| {
-            for property in kind.properties() {
+            for property in effect.properties() {
                 match owner {
                     Member::Clip(clip) => {
-                        show_the_control_of(ui, content, AnimationTarget::Clip(clip), *property, commands);
+                        show_the_control_of(ui, content, AnimationTarget::Clip(clip), kind, property, commands);
                     }
                     Member::Track(track) => {
-                        show_the_control_of(ui, content, AnimationTarget::Track(track), *property, commands);
+                        show_the_control_of(ui, content, AnimationTarget::Track(track), kind, property, commands);
                     }
-                    Member::Group(group) => show_the_control_of_a_group_effect(ui, group, effect, *property, commands),
+                    Member::Group(group) => {
+                        show_the_control_of_a_group_effect(ui, group, effect, property, commands);
+                    }
                 }
             }
         },
     );
     if to_be_deleted {
-        commands.push(command_that_takes_off(owner, kind));
+        commands.push(command_that_takes_off(owner, effect.instance()));
     }
     draw_grip_dots(
         ui.painter(),
@@ -165,7 +174,7 @@ fn show_an_effect(
         ),
     );
     DrawnRow {
-        key: ChainItemKey::Effect(kind),
+        key: ChainItemKey::Effect(effect.instance()),
         rectangle: drawn.rectangle,
         corners: CornerRadius::same(theme::CLIP_CORNER_RADIUS),
         handle: drawn.heading,
@@ -296,7 +305,7 @@ fn follow_what_is_taken_hold_of(ui: &mut Ui, owner: Member, drawn: &[DrawnRow], 
     }
 }
 
-/// The kinds of effect that a thing of the kind `owner` is can have, which the plus button offers when it does not have them yet.
+/// The kinds of effect that a thing of the kind `owner` is can have, which the plus button offers.
 fn kinds_that_can_be_put_on(content: &PropertiesContent<'_>, owner: Member) -> impl Fn(EffectKind) -> bool {
     let clip_kind = match owner {
         Member::Clip(clip) => content
@@ -320,14 +329,14 @@ fn kinds_that_can_be_put_on(content: &PropertiesContent<'_>, owner: Member) -> i
 /// Shows the plus button under the effects, which opens the menu of the effects that can be put on, and adds a command when one is chosen. A
 /// thing that no effect can be put on is not given a plus button, as it would have nothing to put on.
 fn show_the_plus_button(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Member, commands: &mut Vec<Command>) {
-    let Some(has) = content.project.chain_of_the_member(owner) else {
+    if content.project.chain_of_the_member(owner).is_none() {
         return;
-    };
+    }
     let can_have = kinds_that_can_be_put_on(content, owner);
     if !EffectKind::ALL.into_iter().any(&can_have) {
         return;
     }
-    let to_offer = effects_to_offer(EffectKind::ALL, &can_have, has);
+    let to_offer = effects_to_offer(EffectKind::ALL, &can_have);
     let room = vec2(
         ui.available_width(),
         plus_button::DIAMETER + 2.0 * SPACE_ROUND_THE_PLUS_BUTTON,
@@ -415,23 +424,27 @@ mod tests {
             command_that_puts_on(Member::Group(group), hue),
             Command::AddGroupEffect { group, kind: hue }
         );
+        let second = EffectInstanceId::new(1);
         assert_eq!(
-            command_that_takes_off(Member::Clip(clip), hue),
+            command_that_takes_off(Member::Clip(clip), second),
             Command::RemoveEffect {
                 target: AnimationTarget::Clip(clip),
-                kind: hue
+                instance: second
             }
         );
         assert_eq!(
-            command_that_takes_off(Member::Track(track), hue),
+            command_that_takes_off(Member::Track(track), second),
             Command::RemoveEffect {
                 target: AnimationTarget::Track(track),
-                kind: hue
+                instance: second
             }
         );
         assert_eq!(
-            command_that_takes_off(Member::Group(group), hue),
-            Command::RemoveGroupEffect { group, kind: hue }
+            command_that_takes_off(Member::Group(group), second),
+            Command::RemoveGroupEffect {
+                group,
+                instance: second
+            }
         );
     }
 }

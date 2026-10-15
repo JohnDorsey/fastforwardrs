@@ -134,6 +134,7 @@ fn a_bar_for_a_name_that_is_wider_than_the_group_goes_out_beyond_both_sides_of_i
     let clips = [window.clip(0, 0), window.clip(0, 1)];
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -248,6 +249,7 @@ fn dragging_the_bar_down_to_another_track_where_there_is_room_moves_the_group_to
     let clips = [window.clip(0, 0), window.clip(0, 1)];
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -292,6 +294,7 @@ fn the_name_of_a_tag_is_shown_over_one_of_its_clips_and_dragging_it_moves_the_cl
     let clips = the_three_clips(&window);
     let tag = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Clip(clips[0]), Member::Clip(clips[2])])
         .unwrap();
@@ -318,6 +321,7 @@ fn a_track_group_has_no_bar_and_a_group_that_is_not_under_the_pointer_has_none()
     let track = window.application().project().tracks()[0].id();
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::TrackGroup, &[Member::Track(track)])
         .unwrap();
@@ -335,11 +339,13 @@ fn of_groups_one_in_another_the_name_that_is_shown_is_the_innermost_that_the_poi
     let clips = the_three_clips(&window);
     let inner = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
     let outer = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Group(inner), Member::Clip(clips[2])])
         .unwrap();
@@ -464,12 +470,13 @@ fn no_bar_is_shown_for_a_pointer_that_is_over_the_title_boxes_though_the_group_h
     let clips = [window.clip(0, 0), window.clip(0, 1)];
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
     window.settle();
     let points_to_frame_320 = window.x_of_frame_on_the_strip(0, 320) - window.x_of_frame_on_the_strip(0, 0);
-    window.application_mut().timeline_view.scroll_offset = f64::from(points_to_frame_320);
+    window.application_mut().interface.timeline_view.scroll_offset = f64::from(points_to_frame_320);
     window.settle();
 
     window.move_pointer_to(in_frame(&window, 0, 330));
@@ -497,11 +504,13 @@ fn while_a_group_is_dragged_by_its_bar_only_its_bar_is_shown_and_not_that_of_a_s
     let [third, fourth] = [window.clip(1, 0), window.clip(1, 1)];
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(first), Member::Clip(second)])
         .unwrap();
     let smaller = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(third), Member::Clip(fourth)])
         .unwrap();
@@ -545,6 +554,7 @@ fn window_with_a_clip_group_over_an_empty_track() -> (Window, GroupId) {
     let clips = [window.clip(0, 0), window.clip(0, 1)];
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -593,7 +603,7 @@ fn no_bar_is_shown_while_a_rectangle_is_drawn_round_clips_or_a_track_is_made_tal
 #[test]
 fn no_bar_is_shown_while_a_message_is_up_and_nothing_can_be_edited() {
     let (mut window, group) = window_with_a_clip_group_of_the_first_two_clips();
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Something".to_owned(),
         text: "Something happened.".to_owned(),
     });

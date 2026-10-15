@@ -74,7 +74,7 @@ fn a_clip_dragged_into_the_rectangle_of_a_clip_group_goes_in_as_far_as_the_clip_
     assert_eq!(starts_on_track(&window, 0), vec![5, 70]);
     assert!(!is_in_the_clip_group(&window, x));
     assert!(
-        window.application().dialog.is_none(),
+        window.application().interface.dialog.is_none(),
         "stopping at what is in the way is not a refusal that is said"
     );
 }
@@ -136,5 +136,5 @@ fn a_clip_of_a_clip_group_dragged_to_where_the_group_would_take_in_another_clip_
         "up against Z's frame, and not past it"
     );
     assert_eq!(starts_on_track(&window, 1), vec![40, 130], "nothing else moved");
-    assert!(window.application().dialog.is_none());
+    assert!(window.application().interface.dialog.is_none());
 }

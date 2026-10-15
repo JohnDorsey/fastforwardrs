@@ -190,7 +190,7 @@ fn the_delete_key_does_nothing_when_no_clip_is_selected() {
 fn deleting_does_not_happen_while_a_dialog_is_open() {
     let mut window = window_with_three_clips();
     select_the_clip_at(&mut window, 0, 45);
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });

@@ -122,7 +122,7 @@ pub(super) fn names_of_the_entries(archive_path: &Path) -> Vec<String> {
 }
 
 pub(super) fn dialog_showing(window: &Window) -> Option<&Dialog> {
-    window.application().dialog.as_ref()
+    window.application().interface.dialog.as_ref()
 }
 
 fn click(window: &mut Window, label: &str) {
@@ -195,7 +195,7 @@ fn a_file_that_is_included_is_read_where_it_is_in_the_project_file_and_not_where
         .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
 
     let place = archive::entry_place(&archive_path, "resources/1-holiday.mp4").unwrap();
-    let SourceStatus::Available { location } = &fixture.window.application().source_files[&VIDEO].status else {
+    let SourceStatus::Available { location } = &fixture.window.application().sources.files[&VIDEO].status else {
         panic!("the file is available");
     };
     assert_eq!(
@@ -207,7 +207,7 @@ fn a_file_that_is_included_is_read_where_it_is_in_the_project_file_and_not_where
         )
     );
     assert_eq!(
-        fixture.window.application().source_files[&the_sound()].status,
+        fixture.window.application().sources.files[&the_sound()].status,
         SourceStatus::Available {
             location: fixture.path("media").join("song.mp3").into()
         },
@@ -312,7 +312,7 @@ fn several_files_are_included_at_once_and_each_is_in_the_project_file_as_its_own
 fn a_file_that_cannot_be_found_cannot_be_included_and_the_user_is_told_which() {
     let mut fixture = Fixture::new();
     fixture.save_as("trip.ffrs");
-    fixture.window.application_mut().source_files.insert(
+    fixture.window.application_mut().sources.files.insert(
         VIDEO,
         SourceFileState::new(SourceStatus::Unavailable {
             reason: "there is no file there".to_owned(),
@@ -337,7 +337,7 @@ fn a_file_that_cannot_be_found_cannot_be_included_and_the_user_is_told_which() {
 fn of_several_files_those_that_are_found_are_included_and_those_that_are_not_are_said_to_be_left_out() {
     let mut fixture = Fixture::new();
     fixture.save_as("trip.ffrs");
-    fixture.window.application_mut().source_files.insert(
+    fixture.window.application_mut().sources.files.insert(
         the_sound(),
         SourceFileState::new(SourceStatus::Unavailable {
             reason: "gone".to_owned(),
@@ -365,7 +365,7 @@ fn a_file_that_is_included_and_cannot_be_taken_out_is_listed_as_missing_with_whe
         (VIDEO, "the archive is damaged"),
         (the_sound(), "there is no file there"),
     ] {
-        fixture.window.application_mut().source_files.insert(
+        fixture.window.application_mut().sources.files.insert(
             identifier,
             SourceFileState::new(SourceStatus::Unavailable {
                 reason: reason.to_owned(),
@@ -630,7 +630,7 @@ fn a_file_that_is_included_and_cannot_be_found_stops_the_save_and_says_which() {
     fixture.window.do_this(Command::SaveProject);
     let before = fs::read(&archive_path).unwrap();
     fixture.window.do_this(Command::AddTrack);
-    fixture.window.application_mut().source_files.insert(
+    fixture.window.application_mut().sources.files.insert(
         VIDEO,
         SourceFileState::new(SourceStatus::Unavailable {
             reason: "it was taken out badly".to_owned(),
@@ -671,7 +671,7 @@ fn fixture_with_the_video_included_and_the_original_gone() -> (Fixture, PathBuf,
     let original = fixture.path("media").join("holiday.mp4");
     let in_the_cache = fixture.path("cache of the video.mp4");
     fs::copy(&original, &in_the_cache).unwrap();
-    fixture.window.application_mut().source_files.insert(
+    fixture.window.application_mut().sources.files.insert(
         VIDEO,
         SourceFileState::new(SourceStatus::Available {
             location: in_the_cache.clone().into(),
@@ -695,7 +695,7 @@ fn a_file_that_is_taken_out_is_put_back_where_it_was_and_is_no_longer_included()
     assert_eq!(link.absolute_path, original);
     assert_eq!(link.relative_path, Some(PathBuf::from("media/holiday.mp4")));
     assert_eq!(
-        fixture.window.application().source_files[&VIDEO].status,
+        fixture.window.application().sources.files[&VIDEO].status,
         SourceStatus::Available {
             location: original.into()
         },
@@ -777,7 +777,7 @@ fn when_the_project_has_been_moved_the_file_goes_to_the_same_place_from_the_fold
     // The project is saved in another folder, in which the folder for the media is (and the first folder is not there).
     let moved = fixture.path("moved");
     fs::create_dir_all(moved.join("media")).unwrap();
-    fixture.window.application_mut().project_file_path = Some(moved.join("trip.ffrs"));
+    fixture.window.application_mut().document.project_file_path = Some(moved.join("trip.ffrs"));
     fs::remove_dir_all(fixture.path("media")).unwrap();
     assert!(!original.exists());
 
@@ -924,7 +924,7 @@ fn autosave_of_a_project_that_has_a_great_deal_included_adds_only_the_text_of_th
     let place_before = archive::entry_place(&archive_path, entry).unwrap();
     let length_before = fs::metadata(&archive_path).unwrap().len();
     assert!(length_before > 70 << 20, "the setup: the video is in the archive");
-    fixture.window.application_mut().global_settings.autosave = true;
+    fixture.window.application_mut().environment.global_settings.autosave = true;
     let context = egui::Context::default();
     let tracks_at_the_start = fixture.window.application().project().tracks().len();
 

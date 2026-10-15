@@ -50,7 +50,7 @@ impl FfmpegVersion {
         }
     }
 
-    /// Whether this is a version the program works with (see [`OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS`]): not an older release. A development
+    /// Whether this is a version the program works with (see `OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS`): not an older release. A development
     /// build with no version number is taken to be recent.
     pub fn is_new_enough(&self) -> bool {
         self.major_version

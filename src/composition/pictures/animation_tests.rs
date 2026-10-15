@@ -467,7 +467,7 @@ fn every_layer_is_where_and_what_the_project_says_at_every_frame_it_is_seen_at()
                 moved_layers_checked += usize::from(layer.is_moved_by_keyframes());
                 if let Some(object) = layer.text_at(frame(timeline_frame)) {
                     animated_text_checked += usize::from(matches!(object, Cow::Owned(_)));
-                    let expected_object = PropertyId::ALL
+                    let expected_object = crate::test_support::properties_of_every_kind()
                         .into_iter()
                         .filter(|property| project.is_animated(target, *property))
                         .fold(placement.clip.as_text().unwrap().object.clone(), |object, property| {

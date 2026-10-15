@@ -15,8 +15,8 @@ objects; **[B]** my belief or estimate. Sizes are [B]: S, M, L, XL are orders of
 * **Round 12 is committed** (`222b3cc`) [V]. Groups (tag, clip group, track group) are built; their **effects are a placeholder** (applied to each member's picture, the same
   picture only where members are opaque: features list, section 13) until the engine can composite a group.
 * **The model is still closed** [V]: `PropertyId` is used 1380 times in 96 files and `EffectKind` 343 times in 42 files (the long-term plan counted 1250 and 262 in 79 and 25 on
-  2026-10-12; the work of rounds 11 and 12 added to both). There is one effect (the hue shift), at most one of each kind per clip or track.
-* **The project file is format 10** [V] (`FILE_FORMAT_VERSION`; groups took it). The features list called the plugin model "v10" and text generators "v11": **the plugin model is
+  2026-10-12; the work of rounds 11 and 12 added to both). There is one effect (the hue shift), at most one of each kind per clip or track *(until 0.4 step B, 2026-10-15: a chain may have several of one kind now)*.
+* **The project file was format 10** [V] (`FILE_FORMAT_VERSION`; groups took it; **0.4 step B made it 11**). The features list called the plugin model "v10" and text generators "v11": **the plugin model is
   therefore format 11 and text generators format 12.**
 * **The mutation tooling is in the repository** [V] (`tools/mutation_testing/`, round 12), the `.ffrs` archive reads media in place (round 10), and the whole library suite runs in about
   26 s.
@@ -69,6 +69,12 @@ and every later phase uses them.
 * **0.3 Split `FastForwardApplication`'s state** (agreed 2026-10-12) [D]. The application struct is still large (`fast_forward_application/mod.rs` is 702 lines [V]); it is split into
   sub-structs so that the engine, the plugin registry and the prompts have places to live that are not "yet another field". Mechanical; behind the existing tests, which must not
   change. *Gate:* all tests green and unmodified. *Size:* M.
+  **0.3 DONE 2026-10-15 [V]:** the 38 fields of `FastForwardApplication` are in six groups in `fast_forward_application/state.rs`: `document` (project, file path, history, unsaved flags,
+  archive cache), `playback` (clock, preview pictures, sound), `sources` (what is known of the source files, openings), `jobs` (export, background save, tidying), `interface` (selection,
+  views, dialog, closing) and `environment` (ffmpeg, file chooser, settings file, fonts, wake-up); three methods that touch one group moved into it (`sources.is_available`,
+  `sources.available_locations`, `playback.reading`). About 760 field paths were rewritten by a script and checked by the compiler (the paths in about 100 test lines changed; no test was
+  rewritten otherwise); all 3465 library tests and the 189 integration tests pass on Windows, and on Linux with ffmpeg 9. The groups are where the engine (`playback`), the plugin registry
+  (`environment`/`document`) and the prompts (`interface`) will go.
 * **0.4 Open up effect identity** (the refactor of the long-term plan, section 3) [D agreed 2026-10-12]. Descriptors in the project, effect instances with ids (several of one type allowed),
   parameter values by string id, `PropertyId::EffectParam { instance, slot }` so that the key stays `Copy + Ord`, the hue shift as `builtin:hue_shift`, **format 11** (reads 10 and older,
   keeps unknown fields: MG-03), the missing-effect behaviour (MD-07) with a badge, and copying/undo/racks working as today. The effects of groups use the same model (the placeholder of
@@ -76,6 +82,30 @@ and every later phase uses them.
   (more touching, nothing structural). *Gate:* every existing behaviour test passes unmodified except those that assert "at most one effect of each kind" and the file-format tests; a
   format-10 file round-trips to format 11 and back to the same project; a test file of each format version is in the tests (MG-03). *Size:* M-L (about 100 files, almost all mechanical).
   *Delivers to a user:* nothing visible, except that two hue shifts on one clip are now allowed.
+  **0.4 is done in three steps, each verified before the next (decided 2026-10-15 after the spike, which found the slot scheme sound: about 45 production sites and
+  70 test lines used the old hue shift property, and nothing else needed a deep change):**
+  **A. Effects are named (DONE 2026-10-15 [V]; behaviour unchanged, file format still 10).** An effect in a chain has an `EffectInstanceId` (the first is `FIRST`, each next is one more
+  than the largest in that chain: a name is unique in one chain, not in the project: keyframes are kept for a clip or a track, so two chains may use the same). The old property `PropertyId::HueShift`
+  is `PropertyId::EffectValue { effect: EffectKind, instance, slot }` (`Copy + Ord`; the kind of effect is in the key so that what kind of value it is, what it is called and where it can be are known
+  without looking in the chain), `PropertyId::ALL` became `PropertyId::OWN` (the nine a clip or a track has itself), chain items are named by instance (`ChainItemKey::Effect(EffectInstanceId)`), an
+  `EffectKind`'s table says the kind and the file name of each of its values (`value_kinds`, `value_names`) instead of listing properties, and the file code finds the value of an effect by its name in the
+  chain of what the keyframes are of (and writes it by the name the effect says). At most one effect of each kind per chain is still the rule, which is why the file did not need to change.
+  **B. Several effects of one kind, and file format 11 (DONE 2026-10-15 [V]).** A chain may have as many effects of one kind as are put on: `Effects::add` and `put_on` give back the
+  name the effect has (`EffectInstanceId`: the first is 0, each next one more than the largest in the chain), `remove` and the commands `RemoveEffect` / `RemoveGroupEffect` and the editing
+  methods work **by name**, and `AlreadyHasThatEffect` / `TheGroupHasThatEffectAlready` are gone. **File format 11**: an effect has `instance` (the number it has in its list) and a rack of the
+  keyframes of the value of an effect has `effect` (that number, in the list of what the keyframes are of); format 10 is read as before (effects are named in the order they are in, a rack is of
+  the one effect that has a value of that name). **What the person sees:** the menu of the plus button offers every effect the thing can have, also those it has; the box of an effect, and its
+  racks and keyframe buttons, say **which of its kind it is only when there are several** ("Hue shift 2", counting from 1 in the order the effects are done in: so the numbers follow the order
+  when a box is dragged, and a lone effect has none). **Tests changed on purpose:** the ones that asserted "at most one" (put on twice is refused, the menu does not offer what it has, the plus
+  button is dimmed when the clip has all, a file with two of a kind is refused, `TheGroupHasThatEffectAlready`) and the expectations of the saved file (version 11, `instance`). The suite has
+  28 more tests than after step A (3662 → 3690 on Windows; 3689 on Linux with ffmpeg 9, where the library has one test fewer): chains, editing, groups, names, panel, drag, files, files of version 10, the README example,
+  and real-ffmpeg exports of two hue shifts and of a second one with keyframes. **Mutation set `_b`**: 57 planted
+  mistakes (27 of step A's that still apply, 30 new), 52 noticed after two real gaps were fixed (the name of a rack in another drawer; deleting the *second* effect through the panel); **5 remain
+  and are equivalent only while there is one kind of effect with one value** ("a value of another kind of effect is a value of this one", "a value has the kind of the first place", "the values at
+  a frame are looked for in the place 0", "the control of a value is the control of the first place", "the place among its kind counts what is not of its kind"): **they must be killed by
+  the first test that has a second kind of effect or an effect with two values (step C or phase 4); rerun `mutations_round13_b.py` then.**
+  **C. Open effect types** (a key such as `builtin:hue_shift` and a descriptor instead of the enum,
+  descriptor snapshots in the file, missing effects kept as they are, unknown fields kept).
 * **0.5 Spikes** (QA-07, S1-S3) [P], throwaway code, each ends with a written finding: **S1** one ISF shader through the rewriting step and naga to a picture; **S2** a deliberate hang and a
   lost device on a software adapter / WSL (never the maintainer's GPU), to decide how plugin passes are guarded (EN-05); **S3** one `.cube` in a shader against ffmpeg's `lut3d`.
   (The old S4, the seek latency of a linked libav, is dropped: libav linking is not on this plan, section 5.)

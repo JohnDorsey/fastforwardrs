@@ -11,11 +11,12 @@ use crate::project::{
     ClipEditError, GroupColour, GroupKind, SourceAudioProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
     TimelineFrameIndex, TrackId,
 };
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 
 const HUE_SHIFT: EffectKind = EffectKind::HueShift;
 
 fn effect_key() -> ChainItemKey {
-    ChainItemKey::Effect(HUE_SHIFT)
+    ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST)
 }
 
 fn tag_key(group: GroupId) -> ChainItemKey {
@@ -116,7 +117,7 @@ fn the_badge_of_a_track_is_a_row_only_when_the_track_has_effects_and_says_how_ma
         "the clips of other tracks have none"
     );
     laid.project
-        .remove_effect(AnimationTarget::Track(laid.tracks[1]), HUE_SHIFT)
+        .remove_effect(AnimationTarget::Track(laid.tracks[1]), EffectInstanceId::FIRST)
         .unwrap();
     assert!(rows_of(&laid.project, laid.clip_member(1, 0)).is_empty());
 }
@@ -136,7 +137,7 @@ fn the_badge_of_a_track_is_where_it_was_put_in_the_chain_of_the_clip() {
     );
     // It is still where it was put when the track has no effects for a while and has some again.
     laid.project
-        .remove_effect(AnimationTarget::Track(laid.tracks[0]), HUE_SHIFT)
+        .remove_effect(AnimationTarget::Track(laid.tracks[0]), EffectInstanceId::FIRST)
         .unwrap();
     assert_eq!(
         rows_of(&laid.project, laid.clip_member(0, 0)),
@@ -443,35 +444,28 @@ fn every_kind_of_group_can_have_every_effect_that_there_is_for_now() {
 }
 
 #[test]
-fn an_effect_is_put_on_a_group_once_taken_off_and_its_value_is_changed() {
+fn an_effect_is_put_on_a_group_taken_off_and_its_value_is_changed() {
     let mut laid = four_tracks();
     let group = laid
         .project
         .create_group(GroupKind::Tag, &[laid.clip_member(0, 0)])
         .unwrap();
-    laid.project.add_effect_to_the_group(group, HUE_SHIFT).unwrap();
     assert_eq!(
         laid.project.add_effect_to_the_group(group, HUE_SHIFT),
-        Err(EditError::TheGroupHasThatEffectAlready { group, kind: HUE_SHIFT })
+        Ok(EffectInstanceId::FIRST),
+        "it is given back as the name that the effect has in the chain of the group"
     );
     laid.project
-        .set_effect_value_of_the_group(group, PropertyId::HueShift, &PropertyValue::Number(90.0))
+        .set_effect_value_of_the_group(group, HUE, &PropertyValue::Number(90.0))
         .unwrap();
     assert_eq!(
-        laid.project
-            .group(group)
-            .unwrap()
-            .effects()
-            .value_of(PropertyId::HueShift),
+        laid.project.group(group).unwrap().effects().value_of(HUE),
         Some(PropertyValue::Number(90.0))
     );
     assert_eq!(
         laid.project
-            .set_effect_value_of_the_group(group, PropertyId::HueShift, &PropertyValue::Flag(true)),
-        Err(EditError::NotAPropertyOfTheGroup {
-            group,
-            property: PropertyId::HueShift
-        }),
+            .set_effect_value_of_the_group(group, HUE, &PropertyValue::Flag(true)),
+        Err(EditError::NotAPropertyOfTheGroup { group, property: HUE }),
         "not the kind of value it has"
     );
     assert_eq!(
@@ -482,19 +476,69 @@ fn an_effect_is_put_on_a_group_once_taken_off_and_its_value_is_changed() {
             property: PropertyId::Gain
         })
     );
-    laid.project.remove_effect_from_the_group(group, HUE_SHIFT).unwrap();
+    laid.project
+        .remove_effect_from_the_group(group, EffectInstanceId::FIRST)
+        .unwrap();
     assert_eq!(
-        laid.project.remove_effect_from_the_group(group, HUE_SHIFT),
-        Err(EditError::TheGroupDoesNotHaveThatEffect { group, kind: HUE_SHIFT })
+        laid.project
+            .remove_effect_from_the_group(group, EffectInstanceId::FIRST),
+        Err(EditError::TheGroupDoesNotHaveThatEffect {
+            group,
+            instance: EffectInstanceId::FIRST
+        })
     );
     assert_eq!(
         laid.project
-            .set_effect_value_of_the_group(group, PropertyId::HueShift, &PropertyValue::Number(1.0)),
-        Err(EditError::NotAPropertyOfTheGroup {
-            group,
-            property: PropertyId::HueShift
-        }),
+            .set_effect_value_of_the_group(group, HUE, &PropertyValue::Number(1.0)),
+        Err(EditError::NotAPropertyOfTheGroup { group, property: HUE }),
         "it has no hue shift now"
+    );
+}
+
+#[test]
+fn a_group_has_several_effects_of_one_kind_each_with_values_of_its_own_and_each_is_taken_off_by_its_name() {
+    let mut laid = four_tracks();
+    let clip = laid.clip(0, 0);
+    let group = laid
+        .project
+        .create_group(GroupKind::Tag, &[laid.clip_member(0, 0)])
+        .unwrap();
+    let first = laid.project.add_effect_to_the_group(group, HUE_SHIFT).unwrap();
+    let second = laid.project.add_effect_to_the_group(group, HUE_SHIFT).unwrap();
+    assert_eq!((first, second), (EffectInstanceId::FIRST, EffectInstanceId::new(1)));
+    let second_hue = PropertyId::effect_value(HUE_SHIFT, second, 0);
+    laid.project
+        .set_effect_value_of_the_group(group, second_hue, &PropertyValue::Number(90.0))
+        .unwrap();
+
+    assert_eq!(
+        rows_of(&laid.project, Member::Group(group)),
+        ["effect hue shift", "effect hue shift"],
+        "both are rows of the chain of the group"
+    );
+    let turns_applied_to_the_clip = |laid: &Laid| -> Vec<PropertyValue> {
+        laid.project
+            .effects_applied_to_the_clip(clip)
+            .iter()
+            .flat_map(|applied| applied.effect.values().to_vec())
+            .collect()
+    };
+    assert_eq!(
+        turns_applied_to_the_clip(&laid),
+        [PropertyValue::Number(0.0), PropertyValue::Number(90.0)],
+        "both are applied to the member, in the order they are in"
+    );
+
+    laid.project.remove_effect_from_the_group(group, first).unwrap();
+    assert_eq!(turns_applied_to_the_clip(&laid), [PropertyValue::Number(90.0)]);
+    assert_eq!(
+        laid.project.group(group).unwrap().effects().value_of(second_hue),
+        Some(PropertyValue::Number(90.0)),
+        "the other is as it was"
+    );
+    assert_eq!(
+        laid.project.remove_effect_from_the_group(group, first),
+        Err(EditError::TheGroupDoesNotHaveThatEffect { group, instance: first })
     );
 }
 
@@ -507,12 +551,12 @@ fn a_group_that_is_not_there_has_no_effects_put_on_or_taken_off_it() {
         Err(EditError::UnknownGroup { group: none })
     );
     assert_eq!(
-        laid.project.remove_effect_from_the_group(none, HUE_SHIFT),
+        laid.project.remove_effect_from_the_group(none, EffectInstanceId::FIRST),
         Err(EditError::UnknownGroup { group: none })
     );
     assert_eq!(
         laid.project
-            .set_effect_value_of_the_group(none, PropertyId::HueShift, &PropertyValue::Number(1.0)),
+            .set_effect_value_of_the_group(none, HUE, &PropertyValue::Number(1.0)),
         Err(EditError::UnknownGroup { group: none })
     );
 }
@@ -835,7 +879,7 @@ fn an_applied_effect_is_the_effect_itself_with_its_own_values() {
         .unwrap();
     laid.project.add_effect_to_the_group(tag, HUE_SHIFT).unwrap();
     laid.project
-        .set_effect_value_of_the_group(tag, PropertyId::HueShift, &PropertyValue::Number(45.0))
+        .set_effect_value_of_the_group(tag, HUE, &PropertyValue::Number(45.0))
         .unwrap();
     let applied = laid.project.effects_applied_to_the_clip(laid.clip(0, 0));
     assert_eq!(applied.len(), 1);

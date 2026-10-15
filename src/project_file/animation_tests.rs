@@ -8,7 +8,8 @@ use super::tests::{
     valid_text_with, version_line,
 };
 use super::*;
-use crate::project::{AnimationTarget, TextColour};
+use crate::project::{AnimationTarget, PropertyId, TextColour};
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use crate::test_support::make_a_keyframe;
 
 /// The project that has everything, with keyframes on a video, a sound, a text object and two tracks.
@@ -68,24 +69,12 @@ fn project_with_keyframes() -> Project {
     );
 
     // (The hue shift of the video is turned a turn and a quarter between its keyframes, which is more than the colours go round.)
-    make_a_keyframe(
-        &mut project,
-        clip(video),
-        PropertyId::HueShift,
-        15,
-        PropertyValue::Number(-90.0),
-    );
-    make_a_keyframe(
-        &mut project,
-        clip(video),
-        PropertyId::HueShift,
-        75,
-        PropertyValue::Number(450.0),
-    );
+    make_a_keyframe(&mut project, clip(video), HUE, 15, PropertyValue::Number(-90.0));
+    make_a_keyframe(&mut project, clip(video), HUE, 75, PropertyValue::Number(450.0));
     make_a_keyframe(
         &mut project,
         AnimationTarget::Track(text_track),
-        PropertyId::HueShift,
+        HUE,
         130,
         PropertyValue::Number(10.0),
     );
@@ -192,7 +181,7 @@ fn the_project_that_makes_the_trip_through_the_file_has_keyframes_for_every_prop
         })
         .collect();
 
-    for property in PropertyId::ALL {
+    for property in crate::test_support::properties_of_every_kind() {
         assert!(
             targets.iter().any(|&target| project.is_animated(target, property)),
             "nothing in `project_with_keyframes` has keyframes for {property:?}, so the file is not tried with them"
@@ -843,4 +832,30 @@ fn keyframes_after_the_end_of_the_clip_that_has_the_drawer_are_brought_in_even_i
         "the one that was past the end is at the last frame of the caption, with its value"
     );
     assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
+}
+
+#[test]
+fn the_racks_that_come_from_an_animation_object_are_in_the_order_of_the_properties_with_the_values_of_effects_last_whatever_order_the_file_has_them_in()
+ {
+    // (The video has the hue shift, and keyframes of it, in `project_with_keyframes`.)
+    let text = saved_with(|file| {
+        file["tracks"][2]["clips"][0]["animation"] = serde_json::json!({
+            "hue shift": [{"frame": 2, "value": 10.0}],
+            "gain": [{"frame": 1, "value": 0.0}],
+        });
+    });
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let properties: Vec<PropertyId> = loaded
+        .drawer_of(video)
+        .unwrap()
+        .racks()
+        .iter()
+        .take(2)
+        .map(|rack| rack.property())
+        .collect();
+    assert_eq!(properties, vec![PropertyId::Gain, HUE]);
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
 }

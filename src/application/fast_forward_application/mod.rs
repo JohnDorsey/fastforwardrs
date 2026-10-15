@@ -6,7 +6,9 @@
 //! The work is divided between files by what it is about, all adding to the one
 //! [`FastForwardApplication`]:
 //!
-//! * this file: the state, starting up, and the loop that runs once for each frame drawn;
+//! * this file: starting up, and the loop that runs once for each frame drawn;
+//! * `state`: the state, in six groups by what it is about (the document, the playback, the source files, the background jobs, the
+//!   interface, and what the computer gives the editor);
 //! * `drawing`: laying out the window (the menu bar and the three panels: the properties, the preview, the
 //!   timeline);
 //! * `command_execution`: what each [`Command`] does;
@@ -120,6 +122,7 @@ mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
 mod source_media_flow;
+mod state;
 #[cfg(test)]
 mod still_window_tests;
 #[cfg(test)]
@@ -147,7 +150,6 @@ mod view_history_tests;
 #[cfg(test)]
 mod zoom_tests;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -158,18 +160,13 @@ use super::archive_cache::ArchiveCache;
 use super::background::BackgroundTask;
 use super::commands::Command;
 use super::dialogs::Dialog;
-use super::file_chooser::{FileChooser, NativeFileChooser, RefusingFileChooser};
-use super::gesture_frame::GestureFrame;
-use super::history::History;
+use super::file_chooser::{NativeFileChooser, RefusingFileChooser};
 use super::keyboard::{self, KeyboardState};
 use super::mouse_buttons;
 use super::opening::OpeningOutcome;
-use super::preview_panel::PreviewView;
-use super::selection::Selection;
-use super::settings_windows::{self, SettingsWindowsOpen};
-use super::textures::Textures;
+use super::settings_windows;
 use super::theme;
-use super::timeline_panel::{DrawerSound, TimelineViewState};
+use super::timeline_panel::DrawerSound;
 use crate::composition::{PicturePlan, plan_pictures};
 use crate::media::export::VideoExport;
 use crate::media::{
@@ -177,7 +174,7 @@ use crate::media::{
     UserInterfaceWakeUp, Waveform, WaveformExtraction,
 };
 use crate::playback::{
-    AudioContent, AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
+    AudioContent, AudioSupplier, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PicturesReport, PlaybackClock, PreviewPictures, PreviewSetup,
     PreviewVideo, SoundEffect, SoundEffects, opener_of_the_default_effect_speakers, opener_of_the_default_speakers,
     preview_picture_size, wanted_pictures,
@@ -186,6 +183,8 @@ use crate::project::{FrameRate, Project, Settings, SourceMediaIdentifier, Timeli
 use crate::rgba_picture::RgbaPicture;
 use crate::settings_file::default_settings_file_path;
 use crate::text_rendering::LazyTextRenderer;
+
+use state::{BackgroundJobs, Document, Environment, Interface, Playback, SourceFiles};
 
 /// Whether a source file of the project can be used.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -295,81 +294,20 @@ struct FrameState {
     pictures_report: PicturesReport,
 }
 
+/// The editor. Its state is in six groups (see `state.rs`) so that what belongs together is in one place.
 pub struct FastForwardApplication {
-    toolchain: Option<Arc<FfmpegToolchain>>,
-    project: Project,
-    /// Where the project was last saved or loaded from.
-    project_file_path: Option<PathBuf>,
-    /// The edits that can be undone, and the ones that were undone.
-    history: History,
-    /// The frame that the gesture that is going on (a value dragged, say) makes keyframes at: see [`GestureFrame`].
-    gesture_frame: GestureFrame,
-    /// The frame that the commands that are being carried out make or change keyframes at (`None` when none is being carried
-    /// out, or none of them is about what has keyframes): see [`Self::frame_to_make_keyframes_at`].
-    frame_keyframes_are_made_at: Option<TimelineFrameIndex>,
-    /// Whether something that is not in the history was changed since the project was saved: a
-    /// setting of the project, or the place a file was found.
-    unsaved_change_outside_history: bool,
-    /// When the project last changed in a way that has not been saved; see [`autosave`]. `None`
-    /// when nothing is waiting to be autosaved.
-    last_unsaved_change_at: Option<Instant>,
-    /// The settings that are the same for every project.
-    global_settings: Settings,
-    /// Where the global settings are kept. `None` keeps them only while the program runs.
-    global_settings_path: Option<PathBuf>,
-    settings_windows_open: SettingsWindowsOpen,
-    /// Where the files that are taken out of a project file that has files included in it are kept while the project is open.
-    /// `None` keeps none: such a project's included files cannot be opened (a test that wants them gives it a place, see
-    /// [`Self::keep_archive_files_in`]).
-    archive_cache: Option<ArchiveCache>,
-    /// What is known about each of the project's source files while the program runs.
-    source_files: HashMap<SourceMediaIdentifier, SourceFileState>,
-    /// Source files that are being looked for and opened, in the background.
-    openings: Vec<OpeningTask>,
-    /// The clips that were clicked, which Delete deletes and S cuts.
-    selection: Selection,
-    text_renderer: LazyTextRenderer,
-    /// The fonts the computer has, once they are known.
-    font_families: Option<Vec<String>>,
-    clock: PlaybackClock,
-    /// Gets the pictures of the videos that are seen, a stream of them for each track.
-    preview_pictures: PreviewPictures<FfmpegPictureStreamStarter>,
-    /// Plays the sound of the preview. It is silent until given speakers to play through.
-    audio_supplier: AudioSupplier<FfmpegAudioStreamStarter>,
-    /// Plays the editor's own little sounds, such as the snip of a cut. It is silent until given speakers to
-    /// play through.
-    sound_effects: SoundEffects,
-    textures: Textures,
-    timeline_view: TimelineViewState,
-    /// How the picture of the preview is zoomed, and where it is.
-    preview_view: PreviewView,
-    /// Where the preview panel was in the last frame, for the keys that mean something else when the pointer is over it.
-    preview_panel_in_the_last_frame: Option<egui::Rect>,
-    dialog: Option<Dialog>,
-    /// Whether the "source files not found" warning is showing.
-    missing_sources_warning_open: bool,
-    export: Option<RunningExport>,
-    /// A save that is being written on a thread of its own, because it copies a great deal.
-    running_save: Option<saving::RunningSave>,
-    /// How many bytes of files a save copies without doing it in the background.
-    most_bytes_copied_at_once: u64,
-    /// For tests: makes a copy in the background wait to be let go.
-    #[cfg(test)]
-    copy_gate: Option<std::sync::Arc<saving::Gate>>,
-    /// For tests: why each file that was asked to be opened was (there may be no ffmpeg to open it with, in a test).
-    #[cfg(test)]
-    opening_purposes_started: Vec<OpeningPurpose>,
-    /// Whether writing the project file again without its garbage has been tried (or looked at, and was not worth it) since the
-    /// window was asked to close: it is tried once.
-    tidying_before_closing_was_tried: bool,
-    /// Whether the window is to be closed as soon as nothing is being done in the background and no message is up (it was asked
-    /// to close, and was kept open for that).
-    close_when_not_busy: bool,
-    /// Set once the user has agreed to close the window with unsaved changes.
-    close_confirmed: bool,
-    /// What asks the person which file to open or where to save one.
-    file_chooser: Box<dyn FileChooser>,
-    wake_up: UserInterfaceWakeUp,
+    /// The project, and what is known of it as a file.
+    document: Document,
+    /// The clock, and what makes the pictures and the sound of the preview.
+    playback: Playback,
+    /// What is known about the files the project is made from.
+    sources: SourceFiles,
+    /// An export, a save, and other work that goes on in the background.
+    jobs: BackgroundJobs,
+    /// What the window shows and what is going on in it.
+    interface: Interface,
+    /// What the computer the editor runs on gives it.
+    environment: Environment,
 }
 
 impl FastForwardApplication {
@@ -378,12 +316,12 @@ impl FastForwardApplication {
     /// one is opened from the command line) it is loaded.
     pub fn new(creation_context: &eframe::CreationContext<'_>, project_to_open: Option<PathBuf>) -> Self {
         let mut application = Self::with_context(&creation_context.egui_ctx, FfmpegToolchain::locate());
-        application.file_chooser = Box::new(NativeFileChooser);
+        application.environment.file_chooser = Box::new(NativeFileChooser);
         if let Some(settings_path) = default_settings_file_path() {
             application.keep_global_settings_in(settings_path);
         }
         application.use_the_default_speakers();
-        application.archive_cache = ArchiveCache::in_the_usual_place();
+        application.document.archive_cache = ArchiveCache::in_the_usual_place();
         if let Some(path) = project_to_open {
             application.load_project(path);
         }
@@ -393,8 +331,12 @@ impl FastForwardApplication {
     /// Has the editor play the sound of the preview, and its own little sounds, through the computer's default speakers
     /// (which are opened when the first sound is made). Without this it is silent, which is what the tests want.
     fn use_the_default_speakers(&mut self) {
-        self.audio_supplier.play_through(opener_of_the_default_speakers());
-        self.sound_effects.play_through(opener_of_the_default_effect_speakers());
+        self.playback
+            .audio_supplier
+            .play_through(opener_of_the_default_speakers());
+        self.playback
+            .sound_effects
+            .play_through(opener_of_the_default_effect_speakers());
     }
 
     /// An editor drawing into `context`, using `toolchain` (or reporting that ffmpeg is missing).
@@ -422,76 +364,44 @@ impl FastForwardApplication {
 
         let project = Project::empty();
         Self {
-            preview_pictures: PreviewPictures::new(FfmpegPictureStreamStarter::new(
-                toolchain.clone(),
-                Arc::clone(&wake_up),
-            )),
-            audio_supplier: AudioSupplier::new(FfmpegAudioStreamStarter::new(toolchain.clone(), Arc::clone(&wake_up))),
-            sound_effects: SoundEffects::default(),
-            toolchain,
-            clock: PlaybackClock::new(project.frame_rate()),
-            project,
-            project_file_path: None,
-            history: History::new(),
-            gesture_frame: GestureFrame::default(),
-            frame_keyframes_are_made_at: None,
-            unsaved_change_outside_history: false,
-            last_unsaved_change_at: None,
-            global_settings: Settings::DEFAULT,
-            global_settings_path: None,
-            settings_windows_open: SettingsWindowsOpen::default(),
-            archive_cache: None,
-            source_files: HashMap::new(),
-            openings: Vec::new(),
-            selection: Selection::empty(),
-            text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),
-            font_families: None,
-            textures: Textures::default(),
-            timeline_view: TimelineViewState::default(),
-            preview_view: PreviewView::default(),
-            preview_panel_in_the_last_frame: None,
-            dialog: startup_dialog,
-            missing_sources_warning_open: false,
-            export: None,
-            running_save: None,
-            most_bytes_copied_at_once: saving::MOST_BYTES_COPIED_AT_ONCE,
-            #[cfg(test)]
-            copy_gate: None,
-            #[cfg(test)]
-            opening_purposes_started: Vec::new(),
-            tidying_before_closing_was_tried: false,
-            close_when_not_busy: false,
-            close_confirmed: false,
-            file_chooser: Box::new(RefusingFileChooser),
-            wake_up,
+            playback: Playback {
+                preview_pictures: PreviewPictures::new(FfmpegPictureStreamStarter::new(
+                    toolchain.clone(),
+                    Arc::clone(&wake_up),
+                )),
+                audio_supplier: AudioSupplier::new(FfmpegAudioStreamStarter::new(
+                    toolchain.clone(),
+                    Arc::clone(&wake_up),
+                )),
+                sound_effects: SoundEffects::default(),
+                clock: PlaybackClock::new(project.frame_rate()),
+            },
+            document: Document::new(project),
+            sources: SourceFiles::default(),
+            jobs: BackgroundJobs::default(),
+            interface: Interface::new(startup_dialog),
+            environment: Environment {
+                toolchain,
+                file_chooser: Box::new(RefusingFileChooser),
+                text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),
+                font_families: None,
+                global_settings: Settings::DEFAULT,
+                global_settings_path: None,
+                wake_up,
+            },
         }
-    }
-
-    /// Whether the source file `identifier` has been found and opens.
-    fn source_is_available(&self, identifier: SourceMediaIdentifier) -> bool {
-        self.source_files
-            .get(&identifier)
-            .is_some_and(|state| state.location_if_available().is_some())
-    }
-
-    /// Where the bytes of each source file that can be used are.
-    fn available_source_locations(&self) -> HashMap<SourceMediaIdentifier, MediaLocation> {
-        self.source_files
-            .iter()
-            .filter_map(|(identifier, state)| Some((*identifier, state.location_if_available()?.clone())))
-            .collect()
     }
 
     /// Stops playback before a window opens that waits for an answer (a file dialog, say), so
     /// that the video does not carry on playing unseen behind it.
     fn pause_playback_for_dialog(&mut self) {
-        let total_frames = self.project.total_frame_count();
-        self.clock.pause(Instant::now(), total_frames);
+        let total_frames = self.document.project.total_frame_count();
+        self.playback.clock.pause(Instant::now(), total_frames);
     }
 
     /// Whether a dialog or an export is in the way of editing.
     fn is_blocked(&self) -> bool {
-        self.dialog.is_some() || self.export.is_some() || self.running_save.is_some()
+        self.interface.dialog.is_some() || self.jobs.export.is_some() || self.jobs.running_save.is_some()
     }
 
     /// Everything that has to be done at the start of a frame: collecting what background work has
@@ -501,19 +411,19 @@ impl FastForwardApplication {
         self.forget_what_is_gone_from_the_project();
         self.synchronise_the_preview_with_the_project();
 
-        let total_frames = self.project.total_frame_count();
-        self.clock.stop_at_the_end(now, total_frames);
-        let current_frame = self.clock.position(now, total_frames);
-        let is_playing = self.clock.is_playing();
+        let total_frames = self.document.project.total_frame_count();
+        self.playback.clock.stop_at_the_end(now, total_frames);
+        let current_frame = self.playback.clock.position(now, total_frames);
+        let is_playing = self.playback.clock.is_playing();
 
-        let picture_plan = plan_pictures(&self.project, |source| self.source_is_available(source));
+        let picture_plan = plan_pictures(&self.document.project, |source| self.sources.is_available(source));
         let look_ahead_frames = if is_playing {
             PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY
         } else {
             0
         };
         let wanted = wanted_pictures(&picture_plan, current_frame, look_ahead_frames);
-        let report = self.preview_pictures.supply(&wanted, is_playing, now);
+        let report = self.playback.preview_pictures.supply(&wanted, is_playing, now);
         if let Some(wait) = report.ask_again_in {
             context.request_repaint_after(wait);
         }
@@ -525,7 +435,7 @@ impl FastForwardApplication {
         FrameState {
             current_frame,
             total_frames,
-            frame_rate: self.project.frame_rate(),
+            frame_rate: self.document.project.frame_rate(),
             is_playing,
             picture_plan,
             pictures_report: report,
@@ -535,8 +445,8 @@ impl FastForwardApplication {
     /// Plays the sounds that drawers began to make in this frame of the window: those of the drawers that a click opened or shut, and
     /// those that opened because a keyframe was put in them.
     fn play_the_sounds_of_the_drawers(&mut self, now: Instant) {
-        for sound in self.timeline_view.take_the_drawer_sounds() {
-            self.sound_effects.play(
+        for sound in self.interface.timeline_view.take_the_drawer_sounds() {
+            self.playback.sound_effects.play(
                 match sound {
                     DrawerSound::Opening => SoundEffect::DrawerOpening,
                     DrawerSound::Closing => SoundEffect::DrawerClosing,
@@ -548,13 +458,14 @@ impl FastForwardApplication {
 
     /// Lets go of a selection that is about a clip or a track that is not there any more.
     fn forget_what_is_gone_from_the_project(&mut self) {
-        self.selection.forget_what_is_gone(&self.project);
+        self.interface.selection.forget_what_is_gone(&self.document.project);
     }
 
     /// Tells the picture supplier which videos it can get pictures from, and how big the pictures
     /// are, whenever that has changed (a file was found, or the project was replaced).
     fn synchronise_the_preview_with_the_project(&mut self) {
         let videos: Vec<PreviewVideo> = self
+            .document
             .project
             .sources()
             .iter()
@@ -563,7 +474,8 @@ impl FastForwardApplication {
                 Some(PreviewVideo {
                     source: source.identifier,
                     location: self
-                        .source_files
+                        .sources
+                        .files
                         .get(&source.identifier)?
                         .location_if_available()?
                         .clone(),
@@ -573,41 +485,33 @@ impl FastForwardApplication {
             })
             .collect();
         let wanted_setup = (!videos.is_empty()).then(|| {
-            let (picture_width, picture_height) = self.project.picture_size();
+            let (picture_width, picture_height) = self.document.project.picture_size();
             let (picture_width_in_pixels, picture_height_in_pixels) =
                 preview_picture_size(picture_width, picture_height);
             PreviewSetup {
-                frame_rate: self.project.frame_rate(),
+                frame_rate: self.document.project.frame_rate(),
                 picture_width_in_pixels,
                 picture_height_in_pixels,
                 videos,
             }
         });
-        if self.preview_pictures.setup() != wanted_setup.as_ref() {
-            self.preview_pictures.set_setup(wanted_setup);
-        }
-    }
-
-    fn clock_reading(&self, now: Instant, total_frames: u64) -> ClockReading {
-        ClockReading {
-            frame: self.clock.position(now, total_frames),
-            seconds: self.clock.position_in_seconds(now, total_frames),
-            is_playing: self.clock.is_playing(),
+        if self.playback.preview_pictures.setup() != wanted_setup.as_ref() {
+            self.playback.preview_pictures.set_setup(wanted_setup);
         }
     }
 
     /// Starts, keeps in step, or stops the sound of the preview: it plays while the video plays.
     fn update_the_sound(&mut self, now: Instant, total_frames: u64) {
-        let clock = self.clock_reading(now, total_frames);
+        let clock = self.playback.reading(now, total_frames);
         let sped_up_clip_sound = self.effective_settings().sped_up_clip_sound;
-        let source_locations = self.available_source_locations();
+        let source_locations = self.sources.available_locations();
         // There is sound to play when some file that can be read is there to make it from.
         let content = (!source_locations.is_empty()).then_some(AudioContent {
-            project: &self.project,
+            project: &self.document.project,
             source_locations: &source_locations,
             sped_up_clip_sound,
         });
-        self.audio_supplier.update(content, clock, now);
+        self.playback.audio_supplier.update(content, clock, now);
     }
 
     /// Turns the keyboard (see [`keyboard`]) and the extra buttons of the mouse (see [`mouse_buttons`]) into commands, unless
@@ -617,15 +521,18 @@ impl FastForwardApplication {
             return;
         }
         let selected_clips_at_the_current_frame = self
+            .interface
             .selection
             .iter()
             .filter(|clip| {
-                self.project
+                self.document
+                    .project
                     .placement_of(*clip)
                     .is_some_and(|placement| placement.contains(frame_state.current_frame))
             })
             .collect();
         let pointer_is_over_the_preview = self
+            .interface
             .preview_panel_in_the_last_frame
             .zip(context.input(|input| input.pointer.hover_pos()))
             .is_some_and(|(panel, pointer)| panel.contains(pointer));
@@ -635,15 +542,15 @@ impl FastForwardApplication {
                 current_frame: frame_state.current_frame,
                 is_playing: frame_state.is_playing,
                 timeline_is_empty: frame_state.total_frames == 0,
-                selected_clips: self.selection.to_vec(),
-                selected_keyframes: self.selection.keyframes_to_vec(),
-                selected_racks: self.selection.racks_to_vec(),
-                selected_groups: self.selection.groups().collect(),
+                selected_clips: self.interface.selection.to_vec(),
+                selected_keyframes: self.interface.selection.keyframes_to_vec(),
+                selected_racks: self.interface.selection.racks_to_vec(),
+                selected_groups: self.interface.selection.groups().collect(),
                 selected_clips_at_the_current_frame,
                 pointer_is_over_the_preview,
                 clip_ends_to_go_between: self.clip_ends_to_go_between(frame_state.total_frames),
-                can_undo: self.history.can_undo(),
-                can_redo: self.history.can_redo(),
+                can_undo: self.document.history.can_undo(),
+                can_redo: self.document.history.can_redo(),
             },
         ));
         commands.extend(mouse_buttons::commands_for_the_buttons_pressed(context));
@@ -652,13 +559,14 @@ impl FastForwardApplication {
     /// The frames where the clips begin and end that the keys that go to the end of a clip go between: those of the selected
     /// clips if some are selected, and otherwise of every clip there is.
     fn clip_ends_to_go_between(&self, total_frames: u64) -> Vec<TimelineFrameIndex> {
-        let some_clips_are_selected = self.selection.iter().next().is_some();
+        let some_clips_are_selected = self.interface.selection.iter().next().is_some();
         let clips = self
+            .document
             .project
             .tracks()
             .iter()
             .flat_map(|track| track.placements())
-            .filter(|placement| !some_clips_are_selected || self.selection.contains(placement.id))
+            .filter(|placement| !some_clips_are_selected || self.interface.selection.contains(placement.id))
             .map(|placement| (placement.first_timeline_frame, placement.end_timeline_frame));
         keyboard::clip_ends_to_go_between(clips, total_frames)
     }
@@ -688,9 +596,9 @@ impl FastForwardApplication {
         self.ask_for_finer_thumbnails();
         settings_windows::show(
             &context,
-            &mut self.settings_windows_open,
-            (self.project.settings(), self.project.frame_rate()),
-            self.global_settings,
+            &mut self.interface.settings_windows_open,
+            (self.document.project.settings(), self.document.project.frame_rate()),
+            self.environment.global_settings,
             &mut commands,
         );
         let agreed_to = self.show_dialogs(&context);
@@ -700,6 +608,6 @@ impl FastForwardApplication {
         self.play_the_sounds_of_the_drawers(now);
         self.autosave_when_quiet_for_long_enough(&context, now);
 
-        self.textures.forget_thumbnails_not_used_this_frame();
+        self.interface.textures.forget_thumbnails_not_used_this_frame();
     }
 }

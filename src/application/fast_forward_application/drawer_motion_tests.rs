@@ -233,6 +233,7 @@ fn the_height_the_rows_are_laid_out_to_be_changes_exactly_as_the_height_of_what_
     let rows_in_the_last_frame = |window: &Window| {
         window
             .application()
+            .interface
             .timeline_view
             .rows_in_the_last_frame
             .expect("the rows have been drawn")

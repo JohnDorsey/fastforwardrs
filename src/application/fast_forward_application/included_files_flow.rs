@@ -32,12 +32,16 @@ use crate::project_file::{ARCHIVE_FILE_EXTENSION, is_the_name_of_an_archive, rel
 impl FastForwardApplication {
     /// Whether the project's file is an archive, which is what can have files included in it.
     pub(super) fn project_file_is_an_archive(&self) -> bool {
-        self.project_file_path.as_deref().is_some_and(is_the_name_of_an_archive)
+        self.document
+            .project_file_path
+            .as_deref()
+            .is_some_and(is_the_name_of_an_archive)
     }
 
     /// The name the file of the source file `identifier` is known by to the user, for saying which it is.
     fn name_of_the_file_of(&self, identifier: SourceMediaIdentifier) -> String {
-        self.project
+        self.document
+            .project
             .source(identifier)
             .and_then(|source| source.link.absolute_path.file_name())
             .map_or_else(
@@ -48,7 +52,7 @@ impl FastForwardApplication {
 
     /// Where the bytes of the file of the source file `identifier` are now, if it has been found and opens.
     fn location_of_the_file_of(&self, identifier: SourceMediaIdentifier) -> Option<MediaLocation> {
-        self.source_files.get(&identifier)?.location_if_available().cloned()
+        self.sources.files.get(&identifier)?.location_if_available().cloned()
     }
 
     /// Puts the files of the source files `identifiers` in the project file: the ones that are found, and are not included
@@ -64,21 +68,22 @@ impl FastForwardApplication {
             return;
         }
         if let Some(archive) = self
+            .document
             .project_file_path
             .clone()
             .filter(|_| self.project_file_is_an_archive())
         {
             let project_directory = self.project_directory();
-            let project_before = self.project.clone();
+            let project_before = self.document.project.clone();
             self.mark_as_included(&to_include, project_directory.as_deref());
             if self.save_the_project(archive, Some(project_before)) && !not_found.is_empty() {
                 self.show_message_about_files_that_are_not_found(&not_found);
             }
         } else {
             self.pause_playback_for_dialog();
-            self.dialog = Some(Dialog::MustSaveAsAnArchiveToIncludeFiles {
+            self.interface.dialog = Some(Dialog::MustSaveAsAnArchiveToIncludeFiles {
                 files: to_include,
-                has_a_plain_project_file: self.project_file_path.is_some(),
+                has_a_plain_project_file: self.document.project_file_path.is_some(),
             });
         }
     }
@@ -92,7 +97,7 @@ impl FastForwardApplication {
         let mut to_include = Vec::new();
         let mut not_found = Vec::new();
         for identifier in identifiers {
-            let Some(source) = self.project.source(*identifier) else {
+            let Some(source) = self.document.project.source(*identifier) else {
                 continue;
             };
             if source.link.is_included() || to_include.contains(identifier) {
@@ -124,7 +129,7 @@ impl FastForwardApplication {
 
     /// The folder the project's file is in, as a path from the root.
     fn project_directory(&self) -> Option<PathBuf> {
-        let folder = self.project_file_path.as_deref()?.parent()?;
+        let folder = self.document.project_file_path.as_deref()?.parent()?;
         std::path::absolute(folder).ok()
     }
 
@@ -142,7 +147,7 @@ impl FastForwardApplication {
             let file_name = absolute_path
                 .file_name()
                 .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-            self.project.set_source_link(
+            self.document.project.set_source_link(
                 *identifier,
                 SourceMediaLink {
                     absolute_path,
@@ -160,7 +165,7 @@ impl FastForwardApplication {
         let Some(path) = self.ask_where_to_save_an_archive("Save the project with the files included") else {
             return;
         };
-        let project_before = self.project.clone();
+        let project_before = self.document.project.clone();
         let project_directory = std::path::absolute(&path)
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf));
@@ -176,8 +181,8 @@ impl FastForwardApplication {
         if self.project_file_is_an_archive() {
             self.ask_for_a_file_to_embed();
         } else {
-            self.dialog = Some(Dialog::MustSaveAsAnArchiveToEmbedAFile {
-                has_a_plain_project_file: self.project_file_path.is_some(),
+            self.interface.dialog = Some(Dialog::MustSaveAsAnArchiveToEmbedAFile {
+                has_a_plain_project_file: self.document.project_file_path.is_some(),
             });
         }
     }
@@ -196,7 +201,7 @@ impl FastForwardApplication {
         let Some(path) = self.ask_where_to_save_an_archive("Save the project to embed a file in it") else {
             return;
         };
-        if self.save_the_project(path, None) && self.project_file_is_an_archive() && self.running_save.is_none() {
+        if self.save_the_project(path, None) && self.project_file_is_an_archive() && self.jobs.running_save.is_none() {
             self.ask_for_a_file_to_embed();
         }
     }
@@ -205,10 +210,10 @@ impl FastForwardApplication {
     /// whatever name is chosen.
     fn ask_where_to_save_an_archive(&self, title: &str) -> Option<PathBuf> {
         let suggested_file_name = self.suggested_name_for_a_project_file(ARCHIVE_FILE_EXTENSION);
-        let path = self.file_chooser.choose_where_to_save(&FileQuestion {
+        let path = self.environment.file_chooser.choose_where_to_save(&FileQuestion {
             title,
             suggested_file_name: Some(&suggested_file_name),
-            starting_directory: self.project_file_path.as_deref().and_then(Path::parent),
+            starting_directory: self.document.project_file_path.as_deref().and_then(Path::parent),
             kinds: &[FileKind {
                 name: "Project files (.ffrs)",
                 extensions: &[ARCHIVE_FILE_EXTENSION],
@@ -236,7 +241,12 @@ impl FastForwardApplication {
                 continue;
             }
             done.push(*identifier);
-            let Some(link) = self.project.source(*identifier).map(|source| source.link.clone()) else {
+            let Some(link) = self
+                .document
+                .project
+                .source(*identifier)
+                .map(|source| source.link.clone())
+            else {
                 continue;
             };
             if !link.is_included() {
@@ -253,7 +263,7 @@ impl FastForwardApplication {
                         .as_deref()
                         .and_then(|folder| relative_path_between(folder, &place))
                         .or(link.relative_path);
-                    self.project.set_source_link(
+                    self.document.project.set_source_link(
                         *identifier,
                         SourceMediaLink {
                             absolute_path: place.clone(),
@@ -262,7 +272,7 @@ impl FastForwardApplication {
                         },
                     );
                     // (It is the same file, wherever it is: what was made from it stays.)
-                    if let Some(state) = self.source_files.get_mut(identifier) {
+                    if let Some(state) = self.sources.files.get_mut(identifier) {
                         state.status = SourceStatus::Available {
                             location: MediaLocation::of_a_file(place),
                         };

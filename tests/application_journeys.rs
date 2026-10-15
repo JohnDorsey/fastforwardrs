@@ -17,7 +17,9 @@ use egui::{Key, Modifiers, PointerButton, vec2};
 use egui_kittest::kittest::Queryable;
 use fastforwardrs::colour_effects::ColourMatrix;
 use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::project::{AnimationTarget, Clip, EffectKind, Project, SourceMediaIdentifier, TimelineFrameIndex};
+use fastforwardrs::project::{
+    AnimationTarget, Clip, EffectInstanceId, Project, SourceMediaIdentifier, TimelineFrameIndex,
+};
 use journey::Journey;
 use support::{
     TestVideoSpecification, counter_video, decode_video, expected_source_frames, is_black, picture_shown_in_frame,
@@ -1602,7 +1604,7 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
     let (text_of_file, saved) = read_project_file_as_json(&project_path);
     assert_eq!(
         saved["tracks"][0]["clips"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "values": [120.0]}]),
+        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [120.0]}]),
         "{text_of_file}"
     );
     let mut fresh = Journey::start(&toolchain);
@@ -1613,7 +1615,7 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
         fresh
             .application()
             .project()
-            .has_the_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+            .has_the_effect(AnimationTarget::Clip(clip), EffectInstanceId::FIRST)
     );
 
     // The export has the colours turned as the arithmetic of the effect says, in every frame.

@@ -18,9 +18,9 @@ impl FastForwardApplication {
     /// Asks before closing the window if there are unsaved changes. (With autosave on and a file
     /// to save to, they are saved instead, and nothing is asked.)
     pub(super) fn handle_close_request(&mut self, context: &Context) {
-        if self.close_when_not_busy && self.running_save.is_none() && self.dialog.is_none() {
+        if self.interface.close_when_not_busy && self.jobs.running_save.is_none() && self.interface.dialog.is_none() {
             // (The window was kept open to write the project file again, which is done, or was stopped, or went wrong.)
-            self.close_when_not_busy = false;
+            self.interface.close_when_not_busy = false;
             context.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
@@ -29,10 +29,10 @@ impl FastForwardApplication {
             return;
         }
         self.autosave_now();
-        if self.has_unsaved_changes() && !self.close_confirmed {
+        if self.has_unsaved_changes() && !self.interface.close_confirmed {
             context.send_viewport_cmd(ViewportCommand::CancelClose);
             self.pause_playback_for_dialog();
-            self.dialog = Some(Dialog::ConfirmDiscardChanges {
+            self.interface.dialog = Some(Dialog::ConfirmDiscardChanges {
                 then: AfterConfirmation::CloseWindow,
             });
         } else if self.tidy_the_project_file_before_closing() == WhatToDoAboutClosing::KeepTheWindowOpen {
@@ -44,7 +44,7 @@ impl FastForwardApplication {
     /// agreed to have carried out, which they were asked about first (see [`Self::carry_out_all`]).
     pub(super) fn show_dialogs(&mut self, context: &Context) -> Vec<Command> {
         let mut agreed_to = Vec::new();
-        if let Some(export) = &self.export
+        if let Some(export) = &self.jobs.export
             && show_export_progress(context, export.frames_written, export.total_frames)
         {
             export.export.cancel();
@@ -54,12 +54,12 @@ impl FastForwardApplication {
         {
             self.stop_the_running_save();
         }
-        if let Some(dialog) = self.dialog.clone() {
+        if let Some(dialog) = self.interface.dialog.clone() {
             match show_dialog(context, &dialog) {
                 DialogAnswer::StillOpen => {}
-                DialogAnswer::Dismissed => self.dialog = None,
+                DialogAnswer::Dismissed => self.interface.dialog = None,
                 DialogAnswer::Confirmed => {
-                    self.dialog = None;
+                    self.interface.dialog = None;
                     match dialog {
                         Dialog::ConfirmDiscardChanges { then } => {
                             self.note_everything_is_saved();
@@ -78,10 +78,10 @@ impl FastForwardApplication {
             }
         }
         let missing = self.missing_sources();
-        if !missing.is_empty() && self.missing_sources_warning_open {
-            let mut open = self.missing_sources_warning_open;
+        if !missing.is_empty() && self.interface.missing_sources_warning_open {
+            let mut open = self.interface.missing_sources_warning_open;
             let chosen = dialogs::show_missing_sources_warning(context, &missing, &mut open);
-            self.missing_sources_warning_open = open;
+            self.interface.missing_sources_warning_open = open;
             if let Some(identifier) = chosen {
                 self.relink_source(identifier);
             }
@@ -94,7 +94,7 @@ impl FastForwardApplication {
             AfterConfirmation::NewProject => self.start_new_project(),
             AfterConfirmation::LoadProject => self.choose_and_load_project(),
             AfterConfirmation::CloseWindow => {
-                self.close_confirmed = true;
+                self.interface.close_confirmed = true;
                 context.send_viewport_cmd(ViewportCommand::Close);
             }
         }
@@ -102,7 +102,7 @@ impl FastForwardApplication {
 
     /// Makes room for a message the user has to read, in place of any message already showing.
     pub(super) fn show_message(&mut self, title: impl Into<String>, text: impl Into<String>) {
-        self.dialog = Some(Dialog::Message {
+        self.interface.dialog = Some(Dialog::Message {
             title: title.into(),
             text: text.into(),
         });
@@ -111,7 +111,7 @@ impl FastForwardApplication {
     /// Like [`Self::show_message`], but a message already showing stays, with this one added under
     /// it. (For the problems found while the program starts, of which there can be several.)
     pub(super) fn add_to_message(&mut self, title: impl Into<String>, text: impl Into<String>) {
-        match &mut self.dialog {
+        match &mut self.interface.dialog {
             Some(Dialog::Message {
                 title: shown_title,
                 text: shown_text,

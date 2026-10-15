@@ -302,7 +302,7 @@ fn nothing_in_the_file_menu_can_be_chosen_while_a_message_is_up() {
     let mut window = Window::showing(project_of(300));
     window.harness.get_by_label("File").click();
     window.settle();
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -379,7 +379,7 @@ fn loading_a_project_or_starting_a_new_one_asks_whether_to_discard_the_unsaved_c
         window.do_this(command);
 
         assert_eq!(
-            window.application().dialog,
+            window.application().interface.dialog,
             Some(Dialog::ConfirmDiscardChanges { then }),
             "the changes would be lost, so it asks first"
         );

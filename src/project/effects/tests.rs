@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::colour_effects::ColourMatrix;
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 
 fn degrees(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
@@ -40,36 +41,60 @@ fn every_kind_has_a_name_that_only_it_has_and_that_it_is_found_by_and_something_
     assert_eq!(EffectKind::from_name("not an effect"), None);
 }
 
-/// What ties the table of properties to the table of effects: a property of an effect says which effect it is of, and the
-/// effect lists it, and no other property is of an effect.
+/// What ties the table of effects to the properties: the values of an effect are properties that say which effect they are of, in which
+/// place, and what kind of value and what name they have; and a property of an effect is of no other.
 #[test]
-fn the_values_of_the_effects_are_the_properties_that_say_they_are_of_an_effect_and_each_has_one_effect() {
+fn the_values_of_an_effect_are_properties_that_say_which_effect_and_which_place_they_are_of() {
+    let mut names_of_values: Vec<&str> = Vec::new();
     for kind in EffectKind::ALL {
-        assert!(!kind.properties().is_empty(), "{kind:?} has values");
-        for property in kind.properties() {
-            assert_eq!(property.effect(), Some(kind), "{property:?}");
-        }
-    }
-    for property in PropertyId::ALL {
-        let effects_listing_it: Vec<EffectKind> = EffectKind::ALL
-            .into_iter()
-            .filter(|kind| kind.properties().contains(&property))
-            .collect();
-        assert!(
-            effects_listing_it.len() <= 1,
-            "{property:?} is a value of {effects_listing_it:?}"
+        assert!(!kind.value_kinds().is_empty(), "{kind:?} has values");
+        assert_eq!(
+            kind.value_names().len(),
+            kind.value_kinds().len(),
+            "{kind:?} names its values"
         );
-        assert_eq!(property.effect(), effects_listing_it.first().copied(), "{property:?}");
+        let effect = Effect::new(kind);
+        let properties: Vec<PropertyId> = effect.properties().collect();
+        assert_eq!(properties.len(), kind.value_kinds().len(), "{kind:?}");
+        for (slot, property) in properties.iter().enumerate() {
+            assert!(property.is_a_value_of_an_effect(), "{property:?}");
+            assert_eq!(property.kind(), kind.value_kinds()[slot], "{kind:?}, place {slot}");
+            assert_eq!(property.name(), kind.value_names()[slot], "{kind:?}, place {slot}");
+            assert_eq!(effect.value_of(*property), Some(&kind.default_values()[slot]));
+            // (Only this effect has it: not another effect, not another one of the same kind, not another place.)
+            let other_instance = effect.clone().named(EffectInstanceId::new(7));
+            assert_eq!(
+                other_instance.value_of(*property),
+                None,
+                "{property:?} of the effect named 7"
+            );
+            names_of_values.push(property.name());
+        }
+        assert_eq!(
+            effect.property(kind.value_kinds().len()),
+            None,
+            "{kind:?} has no value after its last"
+        );
     }
+    // (A file of version 10 names a value of an effect by one name, so the names are not those of another effect's values or of the properties
+    // that a clip or a track has of its own.)
+    for property in PropertyId::OWN {
+        assert!(!property.is_a_value_of_an_effect(), "{property:?}");
+        assert!(!names_of_values.contains(&property.name()), "{property:?}");
+    }
+    let mut sorted = names_of_values.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names_of_values.len(), "{names_of_values:?}");
 }
 
 #[test]
 fn what_an_effect_begins_with_is_a_value_of_the_kind_each_of_its_properties_has() {
     for kind in EffectKind::ALL {
         let values = kind.default_values();
-        assert_eq!(values.len(), kind.properties().len(), "{kind:?}");
-        for (value, property) in values.iter().zip(kind.properties()) {
-            assert_eq!(value.kind(), property.kind(), "{kind:?}: {property:?}");
+        assert_eq!(values.len(), kind.value_kinds().len(), "{kind:?}");
+        for (value, value_kind) in values.iter().zip(kind.value_kinds()) {
+            assert_eq!(value.kind(), *value_kind, "{kind:?}");
         }
         assert!(Effect::with_values(kind, values).is_some(), "{kind:?}");
     }
@@ -97,8 +122,14 @@ fn what_can_have_an_effect_is_what_is_seen_and_not_a_sound_or_a_crate_and_a_trac
             assert!(!kind.applies_to_a_clip_of_kind(not_seen), "{kind:?} on {not_seen:?}");
         }
         assert!(kind.applies_to_a_track());
-        for property in kind.properties() {
-            assert!(property.applies_to_a_track(), "{property:?}");
+        let mut chain = Effects::none();
+        chain.add(kind);
+        for property in Effect::new(kind).properties() {
+            assert!(property.is_had_by_a_track(&chain), "{property:?}");
+            assert!(
+                !property.is_had_by_a_track(&Effects::none()),
+                "{property:?} without the effect"
+            );
             for clip_kind in [
                 ClipKind::Video,
                 ClipKind::Audio,
@@ -107,9 +138,13 @@ fn what_can_have_an_effect_is_what_is_seen_and_not_a_sound_or_a_crate_and_a_trac
                 ClipKind::Crate,
             ] {
                 assert_eq!(
-                    property.applies_to_a_clip_of_kind(clip_kind),
+                    property.is_had_by_a_clip(clip_kind, &chain),
                     kind.applies_to_a_clip_of_kind(clip_kind),
                     "{property:?} and {clip_kind:?} are as the effect says"
+                );
+                assert!(
+                    !property.is_had_by_a_clip(clip_kind, &Effects::none()),
+                    "{property:?} and {clip_kind:?} without the effect"
                 );
             }
         }
@@ -147,18 +182,18 @@ fn a_new_effect_has_the_values_its_kind_begins_with_and_its_values_can_be_read_a
     let effect = Effect::new(EffectKind::HueShift);
     assert_eq!(effect.kind(), EffectKind::HueShift);
     assert_eq!(effect.values(), [degrees(0.0)]);
-    assert_eq!(effect.value_of(PropertyId::HueShift), Some(&degrees(0.0)));
+    assert_eq!(effect.value_of(HUE), Some(&degrees(0.0)));
     assert_eq!(effect.value_of(PropertyId::Gain), None, "not one of its properties");
 
-    let turned = effect.with_value(PropertyId::HueShift, &degrees(120.0)).unwrap();
-    assert_eq!(turned.value_of(PropertyId::HueShift), Some(&degrees(120.0)));
+    let turned = effect.with_value(HUE, &degrees(120.0)).unwrap();
+    assert_eq!(turned.value_of(HUE), Some(&degrees(120.0)));
     assert_eq!(
         effect.values(),
         [degrees(0.0)],
         "the effect it was made from is as it was"
     );
     assert_eq!(
-        effect.with_value(PropertyId::HueShift, &PropertyValue::Flag(true)),
+        effect.with_value(HUE, &PropertyValue::Flag(true)),
         None,
         "not the kind of value it has"
     );
@@ -183,63 +218,93 @@ fn an_effect_is_not_made_from_values_that_are_not_the_ones_its_kind_has() {
 // --- the effects of a clip or a track ---
 
 #[test]
-fn a_clip_or_a_track_has_no_effects_to_begin_with_and_an_effect_is_put_on_once_and_taken_off() {
+fn a_clip_or_a_track_has_no_effects_to_begin_with_and_an_effect_is_put_on_as_often_as_it_is_asked_for_and_taken_off_by_its_name()
+ {
     let mut effects = Effects::none();
     assert!(effects.is_empty());
     assert_eq!(effects.len(), 0);
-    assert!(!effects.contains(EffectKind::HueShift));
+    assert!(!effects.has_the_instance(EffectInstanceId::FIRST));
 
-    assert!(effects.add(EffectKind::HueShift));
-    assert!(effects.contains(EffectKind::HueShift));
+    let first = effects.add(EffectKind::HueShift);
+    assert!(effects.has_the_instance(first));
     assert_eq!(effects.len(), 1);
-    assert!(!effects.add(EffectKind::HueShift), "there is one already");
-    assert_eq!(effects.len(), 1);
+    let second = effects.add(EffectKind::HueShift);
+    assert_ne!(first, second, "it is one more, and not the same effect again");
+    assert_eq!(effects.len(), 2);
+    assert!(effects.has_the_instance(first) && effects.has_the_instance(second));
 
-    assert!(effects.remove(EffectKind::HueShift));
+    assert!(effects.remove(first));
+    assert_eq!(effects.len(), 1);
+    assert!(effects.has_the_instance(second), "the other of its kind is still on");
+    assert!(effects.remove(second));
     assert!(effects.is_empty());
-    assert!(!effects.remove(EffectKind::HueShift), "there is none to take off");
+    assert!(!effects.remove(second), "there is none to take off");
 }
 
 #[test]
 fn the_value_of_a_property_of_an_effect_that_is_on_is_found_and_changed_and_one_that_is_not_on_is_not() {
     let mut effects = Effects::none();
-    assert_eq!(effects.value_of(PropertyId::HueShift), None, "not on");
+    assert_eq!(effects.value_of(HUE), None, "not on");
     assert!(
-        !effects.set_value(PropertyId::HueShift, &degrees(30.0)),
+        !effects.set_value(HUE, &degrees(30.0)),
         "not on, so there is no value to change"
     );
 
     effects.add(EffectKind::HueShift);
-    assert_eq!(effects.value_of(PropertyId::HueShift), Some(degrees(0.0)));
-    assert!(effects.set_value(PropertyId::HueShift, &degrees(30.0)));
-    assert_eq!(effects.value_of(PropertyId::HueShift), Some(degrees(30.0)));
+    assert_eq!(effects.value_of(HUE), Some(degrees(0.0)));
+    assert!(effects.set_value(HUE, &degrees(30.0)));
+    assert_eq!(effects.value_of(HUE), Some(degrees(30.0)));
     assert!(
-        !effects.set_value(PropertyId::HueShift, &PropertyValue::Flag(false)),
+        !effects.set_value(HUE, &PropertyValue::Flag(false)),
         "not that kind of value"
     );
     assert!(
         !effects.set_value(PropertyId::Gain, &degrees(1.0)),
         "not a value of an effect"
     );
-    assert_eq!(effects.value_of(PropertyId::HueShift), Some(degrees(30.0)), "as it was");
+    assert_eq!(effects.value_of(HUE), Some(degrees(30.0)), "as it was");
 
-    effects.remove(EffectKind::HueShift);
+    effects.remove(EffectInstanceId::FIRST);
     effects.add(EffectKind::HueShift);
     assert_eq!(
-        effects.value_of(PropertyId::HueShift),
+        effects.value_of(HUE),
         Some(degrees(0.0)),
         "put on again, it begins again"
     );
 }
 
 #[test]
-fn effects_that_are_put_on_are_in_the_order_they_are_put_on_in_with_only_the_first_of_each_kind() {
+fn effects_that_are_put_on_are_in_the_order_they_are_put_on_in_with_the_values_they_have_and_each_named_in_the_chain() {
     let first = Effect::with_values(EffectKind::HueShift, vec![degrees(10.0)]).unwrap();
     let second = Effect::with_values(EffectKind::HueShift, vec![degrees(20.0)]).unwrap();
     let mut effects = Effects::none();
-    assert!(effects.put_on(first.clone()));
-    assert!(!effects.put_on(second), "there is one of that kind already");
-    assert_eq!(effects.len(), 1);
-    assert_eq!(effects.get(EffectKind::HueShift), Some(&first));
-    assert_eq!(effects.iter().collect::<Vec<_>>(), vec![&first]);
+    let first_name = effects.put_on(first.clone());
+    let second_name = effects.put_on(second.clone());
+    assert_eq!(
+        (first_name, second_name),
+        (EffectInstanceId::FIRST, EffectInstanceId::new(1))
+    );
+    assert_eq!(effects.len(), 2);
+    assert_eq!(
+        effects.iter().collect::<Vec<_>>(),
+        vec![&first.named(first_name), &second.named(second_name)],
+        "both of the kind, in the order they were put on in, with the values they came with"
+    );
+}
+
+#[test]
+fn a_value_in_a_place_the_effect_has_no_value_in_is_not_a_value_of_it_and_is_not_changed() {
+    let effect = Effect::new(EffectKind::HueShift);
+    let nowhere = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 1);
+
+    assert_eq!(effect.value_of(nowhere), None);
+    assert_eq!(
+        effect.with_value(nowhere, &degrees(10.0)),
+        None,
+        "and trying to change it is not a crash"
+    );
+    let mut chain = Effects::none();
+    chain.put_on(effect);
+    assert!(!chain.set_value(nowhere, &degrees(10.0)));
+    assert!(!chain.has_the_value(nowhere));
 }

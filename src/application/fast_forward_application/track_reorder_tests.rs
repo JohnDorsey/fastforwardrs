@@ -445,7 +445,7 @@ fn dragging_a_track_to_the_bottom_of_the_rows_scrolls_them_to_bring_the_others_i
     assert_eq!(window.application().project().tracks().len(), 6);
     let from = on_the_box(&window, 0);
     let bottom_of_the_rows = top_of_strip(&window, 2) + TrackHeight::DEFAULT_IN_POINTS;
-    assert_eq!(window.application().timeline_view.rows_scroll_offset, 0.0);
+    assert_eq!(window.application().interface.timeline_view.rows_scroll_offset, 0.0);
 
     window.drag_and_hold(
         from,
@@ -455,9 +455,9 @@ fn dragging_a_track_to_the_bottom_of_the_rows_scrolls_them_to_bring_the_others_i
     window.harness.run_steps(60);
 
     assert!(
-        window.application().timeline_view.rows_scroll_offset > 100.0,
+        window.application().interface.timeline_view.rows_scroll_offset > 100.0,
         "the rows scrolled down: {}",
-        window.application().timeline_view.rows_scroll_offset
+        window.application().interface.timeline_view.rows_scroll_offset
     );
     window.release(Pos2::new(from.x, bottom_of_the_rows + 20.0), PointerButton::Primary);
     let_the_rows_settle(&mut window);

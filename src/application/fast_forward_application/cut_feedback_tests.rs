@@ -198,13 +198,37 @@ fn cutting_when_no_speakers_were_given_works_and_is_silent() {
 #[test]
 fn an_editor_is_silent_until_it_is_given_the_default_speakers_and_is_then_given_them_for_all_its_sounds() {
     let mut window = Window::showing(project_of(300));
-    assert!(!window.application().sound_effects.is_given_speakers_to_play_through());
-    assert!(!window.application().audio_supplier.is_given_speakers_to_play_through());
+    assert!(
+        !window
+            .application()
+            .playback
+            .sound_effects
+            .is_given_speakers_to_play_through()
+    );
+    assert!(
+        !window
+            .application()
+            .playback
+            .audio_supplier
+            .is_given_speakers_to_play_through()
+    );
 
     window.application_mut().use_the_default_speakers();
 
-    assert!(window.application().sound_effects.is_given_speakers_to_play_through());
-    assert!(window.application().audio_supplier.is_given_speakers_to_play_through());
+    assert!(
+        window
+            .application()
+            .playback
+            .sound_effects
+            .is_given_speakers_to_play_through()
+    );
+    assert!(
+        window
+            .application()
+            .playback
+            .audio_supplier
+            .is_given_speakers_to_play_through()
+    );
 }
 
 #[test]

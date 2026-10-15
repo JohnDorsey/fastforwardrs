@@ -8,10 +8,10 @@ use super::tests::{frame, long_video, picture, text};
 use super::*;
 use crate::colour_effects::ColourMatrix;
 use crate::composition::test_projects::{project_of, random_project_with_effects};
-use crate::project::{AnimationTarget, EffectKind, PropertyValue};
+use crate::project::{AnimationTarget, Effect, EffectInstanceId, EffectKind, PropertyValue};
 use crate::test_support::{self, DeterministicRandomNumbers, put_a_hue_shift_on};
 
-const HUE: PropertyId = PropertyId::HueShift;
+const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
 
 fn turn(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
@@ -81,6 +81,7 @@ fn a_layer_has_the_effects_of_its_clip_with_the_values_they_have_when_they_are_n
     assert_eq!(
         layer.effects,
         vec![LayerEffect {
+            instance: crate::project::EffectInstanceId::FIRST,
             kind: EffectKind::HueShift,
             values: vec![turn(90.0)],
             animation: Animation::default(),
@@ -176,6 +177,56 @@ fn what_an_effect_does_at_a_frame_is_what_its_keyframes_say_there() {
     );
     assert_eq!(layer.colour_matrix_at(frame(50)), ColourMatrix::hue_rotation(60.0));
     assert_eq!(layer.colour_matrix_at(frame(20)), ColourMatrix::NOTHING_CHANGES);
+}
+
+#[test]
+fn the_several_effects_of_one_kind_of_a_clip_are_in_its_layer_in_order_each_with_the_values_and_the_keyframes_of_its_own()
+ {
+    let mut project = project_of(vec![vec![(20, long_video(0, 100, 1))]]);
+    let target = AnimationTarget::Clip(the_first_clip(&project));
+    let first = put_a_hue_shift_on(&mut project, target, 90.0);
+    let second = put_a_hue_shift_on(&mut project, target, 5.0);
+    let hue_of = |instance| PropertyId::effect_value(EffectKind::HueShift, instance, 0);
+    test_support::make_a_keyframe(&mut project, target, hue_of(second), 20, turn(0.0));
+    test_support::make_a_keyframe(&mut project, target, hue_of(second), 80, turn(120.0));
+
+    let plan = plan(&project);
+    let layer = &plan.section_at(frame(50)).unwrap().layers[0];
+
+    assert_eq!(layer.effects.len(), 2);
+    assert_eq!(
+        (layer.effects[0].instance, layer.effects[1].instance),
+        (first, second),
+        "in the order they were put on in, each named as it is in the chain of the clip"
+    );
+    assert!(!layer.effects[0].is_animated(), "the keyframes are the second's alone");
+    assert!(layer.effects[1].is_animated());
+    assert_eq!(
+        layer.effects[1]
+            .animation
+            .keyframes_of(hue_of(second))
+            .map(|keyframes| keyframes.len()),
+        Some(2)
+    );
+    assert!(
+        layer.effects[0].animation.keyframes_of(hue_of(first)).is_none(),
+        "so the first has none, in what it carries"
+    );
+    assert_eq!(layer.effects[0].values_at(50), vec![turn(90.0)]);
+    assert_eq!(
+        layer.effects[1].values_at(50),
+        vec![turn(60.0)],
+        "half way from 0 at frame 20 to 120 at frame 80"
+    );
+    assert_eq!(
+        layer.colour_matrix_at(frame(50)),
+        ColourMatrix::hue_rotation(90.0).then(ColourMatrix::hue_rotation(60.0))
+    );
+    assert_eq!(
+        layer.colour_matrix_at(frame(20)),
+        ColourMatrix::hue_rotation(90.0).then(ColourMatrix::hue_rotation(0.0)),
+        "at the first keyframe of the second, only the first turns the colours"
+    );
 }
 
 #[test]
@@ -281,12 +332,10 @@ fn effects_by_looking_at_the_project(
                 .iter()
                 .map(move |effect| {
                     let values = effect
-                        .kind()
                         .properties()
-                        .iter()
                         .map(|property| {
                             project
-                                .property_value_at(target, *property, frame(timeline_frame))
+                                .property_value_at(target, property, frame(timeline_frame))
                                 .expect("the thing has the effect")
                         })
                         .collect();
@@ -367,11 +416,15 @@ fn effects_do_not_change_where_the_sections_of_the_plan_begin_and_end_or_what_th
             })
             .collect();
         for target in targets {
-            for kind in EffectKind::ALL {
-                if without.has_the_effect(target, kind) {
-                    without.remove_effect(target, kind).unwrap();
-                    had_one = true;
-                }
+            let on_it: Vec<EffectInstanceId> = without
+                .effects_of(target)
+                .unwrap()
+                .iter()
+                .map(Effect::instance)
+                .collect();
+            for instance in on_it {
+                without.remove_effect(target, instance).unwrap();
+                had_one = true;
             }
         }
 

@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use super::document::{AnimationDocument, KeyframeDocument, MemberDocument, RackDocument, TargetDocument};
 use super::value_from_document;
 use crate::project::{
-    AnimationTarget, ClipId, ClipKind, Drawer, Effects, GroupId, Member, PropertyId, Rack, RackId, Track, TrackId,
+    AnimationTarget, ClipId, ClipKind, Drawer, EffectInstanceId, EffectKind, Effects, GroupId, Member, PropertyId,
+    Rack, RackId, Track, TrackId,
 };
 
 /// What is known of what a file has, which is what the racks it has can be checked against.
@@ -47,6 +48,35 @@ impl FileContents {
                 "there is no clip {clip} on track {} to be the target of keyframes",
                 target.track
             )),
+        }
+    }
+
+    /// The effects that `target` (which the file has) has.
+    fn effects_of(&self, target: AnimationTarget) -> &Effects {
+        match target {
+            AnimationTarget::Track(track) => &self.effects_of_the_tracks[track.value() as usize],
+            AnimationTarget::Clip(clip) => {
+                &self.effects_of_the_clips[clip.origin().value() as usize][clip.number() as usize]
+            }
+        }
+    }
+
+    /// The property of `target` (which the file has) that is saved under `name`: one that a clip or a track has of its own (if `effect` is
+    /// `None`), or the value of an effect that it has, which is saved under a name of its own. The effect is the one that is named `effect` in
+    /// its chain; a file of version 10 does not say (`None`), and then it is the one effect that has a value of that name, as there is at most
+    /// one effect of each kind in a file of that version.
+    fn property_named(
+        &self,
+        name: &str,
+        effect: Option<EffectInstanceId>,
+        target: AnimationTarget,
+    ) -> Option<PropertyId> {
+        let effects = self.effects_of(target);
+        match effect {
+            None => {
+                PropertyId::from_name(name).or_else(|| effects.iter().find_map(|effect| effect.property_named(name)))
+            }
+            Some(instance) => effects.instance(instance)?.property_named(name),
         }
     }
 
@@ -88,11 +118,19 @@ pub(super) fn drawer_from_documents(
         .into_iter()
         .map(|(property, keyframes)| RackDocument {
             property,
+            effect: None,
             target: None,
             keyframes,
         })
         .collect();
-    from_the_old_animation.sort_by_key(|rack| PropertyId::from_name(&rack.property));
+    from_the_old_animation.sort_by_key(|rack| {
+        // (The names that are not names of anything come first; then those of the properties of a clip or a track; then those of values of effects.)
+        match PropertyId::from_name(&rack.property) {
+            Some(property) => (1, Some(property)),
+            None if EffectKind::with_a_value_named(&rack.property).is_some() => (2, None),
+            None => (0, None),
+        }
+    });
     let mut drawer = Drawer::default();
     for (number, document) in from_the_old_animation.into_iter().chain(racks).enumerate() {
         let rack = rack_from_document(document, owner, RackId::new(track, *next_rack_number), length, contents)
@@ -110,32 +148,41 @@ fn rack_from_document(
     length: Option<u64>,
     contents: &FileContents,
 ) -> Result<Rack, String> {
-    let property = PropertyId::from_name(&document.property).ok_or_else(|| {
-        format!(
-            "the keyframes are of \"{}\", which is not something that can be animated",
-            document.property
-        )
-    })?;
     let target = match document.target {
         None => owner,
         Some(target) => contents.target_from(target)?,
     };
-    if !contents.has_the_property(target, property) {
-        return Err(match property.effect() {
-            Some(effect) => format!(
+    let Some(property) =
+        contents.property_named(&document.property, document.effect.map(EffectInstanceId::new), target)
+    else {
+        return Err(if let Some(instance) = document.effect {
+            format!(
+                "\"{}\" cannot be animated for what the keyframes are of: it does not have {} that has a value of that name",
+                document.property,
+                EffectInstanceId::new(instance)
+            )
+        } else if let Some(effect) = EffectKind::with_a_value_named(&document.property) {
+            format!(
                 "\"{}\" cannot be animated for what the keyframes are of: it does not have the {effect} effect",
                 document.property
-            ),
-            None => format!(
-                "\"{}\" cannot be animated for what the keyframes are of: it has none",
+            )
+        } else {
+            format!(
+                "the keyframes are of \"{}\", which is not something that can be animated",
                 document.property
-            ),
+            )
         });
+    };
+    if !contents.has_the_property(target, property) {
+        return Err(format!(
+            "\"{}\" cannot be animated for what the keyframes are of: it has none",
+            document.property
+        ));
     }
     let mut rack = Rack::new(id, target, property);
     for keyframe in document.keyframes {
         let KeyframeDocument { frame, value } = keyframe;
-        let value = value_from_document(value, property)
+        let value = value_from_document(value, property.kind())
             .map_err(|reason| format!("the keyframe of \"{}\" at frame {frame}: {reason}", document.property))?;
         rack.set(frame, value)
             .map_err(|error| format!("the keyframe of \"{}\" at frame {frame}: {error}", document.property))?;
@@ -232,6 +279,7 @@ pub(super) fn rack_documents_of(
         .map(|rack| {
             Ok(RackDocument {
                 property: rack.property().name().to_owned(),
+                effect: rack.property().effect_instance().map(EffectInstanceId::number),
                 target: (rack.target() != owner)
                     .then(|| positions.target_document_of(rack.target()))
                     .transpose()?,

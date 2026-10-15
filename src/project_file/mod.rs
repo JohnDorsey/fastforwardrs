@@ -28,9 +28,9 @@ use thiserror::Error;
 use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
-    Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect, EffectKind, Effects,
-    FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings, PropertyId, PropertyValue,
-    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    Angle, AnimationTarget, CanvasArea, ChainEntry, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect,
+    EffectInstanceId, EffectKind, Effects, FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings,
+    PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
     SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
     TrackHeight, TrackId, ValueKind,
 };
@@ -90,8 +90,11 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// as a rack of the keyframes of its own properties in its own drawer), and has keyframe crates. Version 8 added the effects of
 /// clips and of tracks (a file of version 7 has none). Version 9 added the files that are included in the project file (a file of
 /// version 8 has none). Version 10 added groups, and with them the badges in the chains of effects of clips and groups (a file of version 9
-/// has none: it is a project with no group, in which each clip has its effects and then those of its track, as it always had).
-pub const FILE_FORMAT_VERSION: u32 = 10;
+/// has none: it is a project with no group, in which each clip has its effects and then those of its track, as it always had). Version 11
+/// names each effect in its chain, so that a chain can have several effects of one kind, and says in the racks of the keyframes of the values
+/// of effects which effect they are of (a file of version 10 has at most one effect of each kind, and names none: they are named in the
+/// order they are in, and a rack is of the effect that has a value of the name it says).
+pub const FILE_FORMAT_VERSION: u32 = 11;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -578,10 +581,10 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
     }
 }
 
-/// What the value `document` is for `property`.
-fn value_from_document(document: KeyframeValueDocument, property: PropertyId) -> Result<PropertyValue, String> {
+/// What the value `document` is, for a value of the kind `value_kind`.
+fn value_from_document(document: KeyframeValueDocument, value_kind: ValueKind) -> Result<PropertyValue, String> {
     let wrong_kind = |found: &str| {
-        let wanted = match property.kind() {
+        let wanted = match value_kind {
             ValueKind::Number => "a number",
             ValueKind::Pair => "two numbers, as [across, down] or [wide, tall]",
             ValueKind::Colour => "a colour such as \"#FFFFFFFF\"",
@@ -597,7 +600,7 @@ fn value_from_document(document: KeyframeValueDocument, property: PropertyId) ->
             Err("a number that is not a number".to_owned())
         }
     };
-    match (property.kind(), document) {
+    match (value_kind, document) {
         (ValueKind::Number, KeyframeValueDocument::Number(number)) => Ok(PropertyValue::Number(finite(number)?)),
         (ValueKind::Pair, KeyframeValueDocument::Pair([first, second])) => {
             Ok(PropertyValue::Pair(finite(first)?, finite(second)?))
@@ -622,42 +625,65 @@ fn effect_from_document(document: EffectDocument) -> Result<Effect, String> {
     if document.values.is_empty() {
         return Ok(Effect::new(kind));
     }
-    if document.values.len() != kind.properties().len() {
+    if document.values.len() != kind.value_kinds().len() {
         return Err(format!(
             "the values of the {kind} effect should be a list of {}, and the file's list is of {}",
-            kind.properties().len(),
+            kind.value_kinds().len(),
             document.values.len()
         ));
     }
     let values = document
         .values
         .into_iter()
-        .zip(kind.properties())
-        .map(|(value, property)| {
-            value_from_document(value, *property).map_err(|reason| format!("the {kind} effect: {reason}"))
+        .zip(kind.value_kinds())
+        .map(|(value, value_kind)| {
+            value_from_document(value, *value_kind).map_err(|reason| format!("the {kind} effect: {reason}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     Effect::with_values(kind, values).ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
 }
 
-/// The effects that the documents describe, in their order. It is an error to put an effect on a clip that cannot have it (a
-/// sound), or to put on one twice.
+/// The effects that the documents describe, in their order, each named as the document names it: a file of version 10 names none, and
+/// they are named in the order they are in (as they would be if they were put on one after another). It is an error to put an effect on
+/// something that cannot have it (a sound), to name some of the effects of a chain and not the others, or to give two the same name.
 fn effects_from_documents(
     documents: Vec<EffectDocument>,
     can_have: impl Fn(EffectKind) -> bool,
-) -> Result<Effects, String> {
-    let mut effects = Effects::none();
-    for document in documents {
-        let effect = effect_from_document(document)?;
+) -> Result<Vec<Effect>, String> {
+    let named = documents.iter().filter(|document| document.instance.is_some()).count();
+    if named != 0 && named != documents.len() {
+        return Err("some of its effects have a name in its chain and some have not".to_owned());
+    }
+    let mut effects: Vec<Effect> = Vec::with_capacity(documents.len());
+    for (place, document) in documents.into_iter().enumerate() {
+        let instance = EffectInstanceId::new(match document.instance {
+            Some(number) => number,
+            None => u32::try_from(place).map_err(|_| "it has too many effects".to_owned())?,
+        });
+        let effect = effect_from_document(document)?.named(instance);
         let kind = effect.kind();
         if !can_have(kind) {
             return Err(format!("it cannot have the {kind} effect"));
         }
-        if !effects.put_on(effect) {
-            return Err(format!("it has the {kind} effect twice"));
+        if effects.iter().any(|other| other.instance() == instance) {
+            return Err(format!("it has two effects that are named {instance}"));
         }
+        effects.push(effect);
     }
     Ok(effects)
+}
+
+/// The chain that the documents of the effects of a track make (a track has no badges in its chain).
+fn chain_of_the_effects_from_documents(
+    documents: Vec<EffectDocument>,
+    can_have: impl Fn(EffectKind) -> bool,
+) -> Result<Effects, String> {
+    Effects::from_entries(
+        effects_from_documents(documents, can_have)?
+            .into_iter()
+            .map(ChainEntry::Effect),
+    )
+    .ok_or_else(|| "it has two effects with the same name".to_owned())
 }
 
 /// The documents of the effects `effects`, in their order, with the values left out of each that has the values it begins with.
@@ -666,6 +692,7 @@ fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
         .iter()
         .map(|effect| EffectDocument {
             effect: effect.kind().name().to_owned(),
+            instance: Some(effect.instance().number()),
             values: if effect.values() == effect.kind().default_values() {
                 Vec::new()
             } else {
@@ -878,7 +905,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             effects,
             clips: clip_documents,
         } = track;
-        let effects = effects_from_documents(effects, EffectKind::applies_to_a_track)
+        let effects = chain_of_the_effects_from_documents(effects, EffectKind::applies_to_a_track)
             .map_err(|reason| invalid_project(format!("track number {}: {reason}", track_number + 1)))?;
         let mut clips = Vec::with_capacity(clip_documents.len());
         for (clip_number, clip) in clip_documents.into_iter().enumerate() {

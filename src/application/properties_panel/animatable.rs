@@ -15,6 +15,7 @@ use egui::{Rect, Ui, pos2};
 use super::PropertiesContent;
 use super::keyframe_buttons::{self, KeyframesHere, ROOM_FOR_THE_BUTTONS};
 use crate::application::commands::Command;
+use crate::application::naming::name_of_a_property_of;
 use crate::project::{AnimationTarget, PropertyId, PropertyValue};
 
 /// The narrowest a control is made to make room for the buttons, in points.
@@ -105,6 +106,7 @@ pub(super) fn row<R>(
         pos2(row_left + row_width, control.response.rect.bottom()),
     );
     let is_hovered = ui.rect_contains_pointer(row);
-    keyframe_buttons::show(ui, row, &here, is_hovered, commands);
+    let name = name_of_a_property_of(content.project, target, property);
+    keyframe_buttons::show(ui, row, &here, &name, is_hovered, commands);
     control.inner
 }

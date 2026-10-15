@@ -43,7 +43,9 @@ pub use animation::{
     ValueKind, placement_value, text_value, with_placement_value, with_text_value,
 };
 pub use duplicating::{ClipSide, TrackSide};
-pub use effects::{Badge, ChainEntry, ChainItem, ChainItemKey, Effect, EffectKind, Effects, EffectsIter};
+pub use effects::{
+    Badge, ChainEntry, ChainItem, ChainItemKey, Effect, EffectInstanceId, EffectKind, Effects, EffectsIter,
+};
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
 pub use groups::{
@@ -177,10 +179,11 @@ pub enum EditError {
     NotAPropertyOfTheTrack { track: TrackId, property: PropertyId },
     #[error("{track} cannot have the {kind} effect")]
     NotAnEffectOfTheTrack { track: TrackId, kind: EffectKind },
-    #[error("{target} has the {kind} effect already")]
-    AlreadyHasThatEffect { target: AnimationTarget, kind: EffectKind },
-    #[error("{target} does not have the {kind} effect")]
-    DoesNotHaveThatEffect { target: AnimationTarget, kind: EffectKind },
+    #[error("{target} does not have the {instance}")]
+    DoesNotHaveThatEffect {
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+    },
     #[error(transparent)]
     Clip(#[from] ClipEditError),
     #[error("the project has no {rack}")]
@@ -228,10 +231,8 @@ pub enum EditError {
     WouldDeleteEveryTrack,
     #[error("{group} cannot have the {kind} effect")]
     NotAnEffectOfTheGroup { group: GroupId, kind: EffectKind },
-    #[error("{group} has the {kind} effect already")]
-    TheGroupHasThatEffectAlready { group: GroupId, kind: EffectKind },
-    #[error("{group} does not have the {kind} effect")]
-    TheGroupDoesNotHaveThatEffect { group: GroupId, kind: EffectKind },
+    #[error("{group} does not have the {instance}")]
+    TheGroupDoesNotHaveThatEffect { group: GroupId, instance: EffectInstanceId },
     #[error("{property:?} is not the value of an effect of {group}")]
     NotAPropertyOfTheGroup { group: GroupId, property: PropertyId },
     #[error("{item:?} is not in the chain of effects of {owner}")]

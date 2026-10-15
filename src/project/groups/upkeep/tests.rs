@@ -158,7 +158,7 @@ fn the_second_half_of_a_clip_that_is_cut_is_in_the_groups_of_the_first_with_the_
         chain_of_the_clip(&laid.project, second_half),
         [
             tag_badge(first_tag),
-            ChainItemKey::Effect(crate::project::EffectKind::HueShift),
+            ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST),
             tag_badge(second_tag),
             TRACK_BADGE
         ]

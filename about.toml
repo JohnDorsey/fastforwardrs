@@ -1,4 +1,4 @@
-# Settings for `cargo about generate about.hbs > THIRD_PARTY.md` (the notices of the libraries the program is built from).
+# Settings for `cargo about generate about.hbs | tr -d '\r' > THIRD_PARTY.md` (the notices of the libraries the program is built from).
 # The accepted licences are the ones of deny.toml; keep the two lists the same.
 accepted = [
     "GPL-3.0-or-later",

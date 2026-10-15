@@ -25,7 +25,7 @@ impl FastForwardApplication {
     /// Asks which project file to load, and loads it.
     pub(super) fn choose_and_load_project(&mut self) {
         self.pause_playback_for_dialog();
-        let Some(path) = self.file_chooser.choose_a_file_to_open(&FileQuestion {
+        let Some(path) = self.environment.file_chooser.choose_a_file_to_open(&FileQuestion {
             title: "Load a project",
             suggested_file_name: None,
             starting_directory: None,
@@ -58,7 +58,7 @@ impl FastForwardApplication {
 
     /// Saves the project to the file it came from, or asks where to save it the first time.
     pub(super) fn save_project(&mut self) {
-        let path = match &self.project_file_path {
+        let path = match &self.document.project_file_path {
             Some(path) => path.clone(),
             None => {
                 self.pause_playback_for_dialog();
@@ -88,6 +88,7 @@ impl FastForwardApplication {
     /// file in the project with `extension` after it (`.fastforwardrs.json` for a plain project file, as it always was).
     pub(super) fn suggested_name_for_a_project_file(&self, extension: &str) -> String {
         let first_file_name = self
+            .document
             .project
             .sources()
             .first()
@@ -105,6 +106,7 @@ impl FastForwardApplication {
     /// offered first, and what is made if the name chosen has no ending.
     fn ask_where_to_save_project(&self, title: &str) -> Option<PathBuf> {
         let suggested_file_name = match self
+            .document
             .project_file_path
             .as_deref()
             .and_then(Path::file_name)
@@ -113,10 +115,10 @@ impl FastForwardApplication {
             Some(name_of_the_file_it_has) => name_of_the_file_it_has,
             None => self.suggested_name_for_a_project_file(ARCHIVE_FILE_EXTENSION),
         };
-        let path = self.file_chooser.choose_where_to_save(&FileQuestion {
+        let path = self.environment.file_chooser.choose_where_to_save(&FileQuestion {
             title,
             suggested_file_name: Some(&suggested_file_name),
-            starting_directory: self.project_file_path.as_deref().and_then(Path::parent),
+            starting_directory: self.document.project_file_path.as_deref().and_then(Path::parent),
             kinds: &[
                 FileKind {
                     name: "Project files (.ffrs)",
@@ -137,28 +139,31 @@ impl FastForwardApplication {
 
     /// Makes `project` the project being edited, forgetting everything about the previous one.
     pub(super) fn replace_project(&mut self, project: Project, project_file_path: Option<PathBuf>) {
-        self.openings.clear();
-        self.source_files.clear();
-        self.gesture_frame.forget();
-        self.selection.clear();
-        self.preview_pictures.set_setup(None);
-        self.textures.clear();
-        self.timeline_view.reset();
-        self.preview_view = PreviewView::default();
-        self.project = project;
-        self.project_file_path = project_file_path;
-        self.history.reset();
+        self.sources.openings.clear();
+        self.sources.files.clear();
+        self.interface.gesture_frame.forget();
+        self.interface.selection.clear();
+        self.playback.preview_pictures.set_setup(None);
+        self.interface.textures.clear();
+        self.interface.timeline_view.reset();
+        self.interface.preview_view = PreviewView::default();
+        self.document.project = project;
+        self.document.project_file_path = project_file_path;
+        self.document.history.reset();
         self.note_everything_is_saved();
-        self.missing_sources_warning_open = false;
-        self.clock.reset_for_frame_rate(self.project.frame_rate());
+        self.interface.missing_sources_warning_open = false;
+        self.playback
+            .clock
+            .reset_for_frame_rate(self.document.project.frame_rate());
     }
 
     /// Starts looking for the source files of a project that has just been loaded: where the
     /// project says each was, and then (as a backup) relative to the project file; and for each that is included in the project
     /// file, taking it out of it (see [`Self::start_opening_an_included_file`]).
     fn locate_source_files_of_loaded_project(&mut self) {
-        let project_directory = self.project_file_path.as_deref().and_then(Path::parent);
+        let project_directory = self.document.project_file_path.as_deref().and_then(Path::parent);
         let wanted: Vec<_> = self
+            .document
             .project
             .sources()
             .iter()
@@ -171,7 +176,7 @@ impl FastForwardApplication {
             })
             .collect();
         for (identifier, included_as, candidates) in wanted {
-            match (included_as, self.project_file_path.clone()) {
+            match (included_as, self.document.project_file_path.clone()) {
                 (Some(entry_name), Some(archive)) => {
                     self.start_opening_an_included_file(identifier, archive, entry_name)
                 }

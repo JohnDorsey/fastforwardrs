@@ -27,14 +27,17 @@ use crate::project::{
 impl FastForwardApplication {
     /// The frame of the timeline the playhead is at.
     pub(super) fn frame_at_the_playhead(&self, now: Instant) -> TimelineFrameIndex {
-        self.clock.position(now, self.project.total_frame_count())
+        self.playback
+            .clock
+            .position(now, self.document.project.total_frame_count())
     }
 
     /// The frame of the timeline that the keyframes that the commands being carried out make or change are at: the one that the
     /// gesture they are of began at (see [`Self::frame_of_the_edits_of_what_has_keyframes`]), and the playhead's if they are of no
     /// gesture, or are not about what has keyframes.
     pub(super) fn frame_to_make_keyframes_at(&self, now: Instant) -> TimelineFrameIndex {
-        self.frame_keyframes_are_made_at
+        self.interface
+            .frame_keyframes_are_made_at
             .unwrap_or_else(|| self.frame_at_the_playhead(now))
     }
 
@@ -51,10 +54,12 @@ impl FastForwardApplication {
         press_began_at: Option<f64>,
         now: Instant,
     ) -> TimelineFrameIndex {
-        let total_frames = self.project.total_frame_count();
-        self.clock.pause(now, total_frames);
+        let total_frames = self.document.project.total_frame_count();
+        self.playback.clock.pause(now, total_frames);
         let playhead = self.frame_at_the_playhead(now);
-        self.gesture_frame.frame_for(gesture_key, press_began_at, playhead)
+        self.interface
+            .gesture_frame
+            .frame_for(gesture_key, press_began_at, playhead)
     }
 
     /// Whether `command` changes something that has keyframes, so that what it does is a keyframe at the playhead (as
@@ -63,7 +68,7 @@ impl FastForwardApplication {
         let is_animated = |target, properties: &[PropertyId]| {
             properties
                 .iter()
-                .any(|property| self.project.is_animated(target, *property))
+                .any(|property| self.document.project.is_animated(target, *property))
         };
         match command {
             Command::SetClipGain { clip, .. } => is_animated(AnimationTarget::Clip(*clip), &[PropertyId::Gain]),
@@ -93,8 +98,8 @@ impl FastForwardApplication {
     ) {
         let frame = self.frame_to_make_keyframes_at(now);
         // (If that made a keyframe, the drawer it is in opens, so that it is seen where it is.)
-        if let Ok(Some(made)) = self.project.set_property_at(target, property, value, frame) {
-            self.timeline_view.open_the_drawer_of(made.owner);
+        if let Ok(Some(made)) = self.document.project.set_property_at(target, property, value, frame) {
+            self.interface.timeline_view.open_the_drawer_of(made.owner);
         }
     }
 
@@ -128,10 +133,10 @@ impl FastForwardApplication {
         let target = AnimationTarget::Clip(clip);
         if !PROPERTIES_OF_A_PLACEMENT
             .into_iter()
-            .any(|property| self.project.is_animated(target, property))
+            .any(|property| self.document.project.is_animated(target, property))
         {
             // Nothing about where it is is animated: it is put there, as it always was.
-            let _ = self.project.set_clip_placement(clip, placement);
+            let _ = self.document.project.set_clip_placement(clip, placement);
             return;
         }
         // (What is different from what it was is worked out from what the window showed, which is what it is at the playhead.)
@@ -140,7 +145,13 @@ impl FastForwardApplication {
             let Some(wanted) = placement_value(&placement, property) else {
                 continue;
             };
-            if self.project.property_value_at(target, property, shown_at).as_ref() != Some(&wanted) {
+            if self
+                .document
+                .project
+                .property_value_at(target, property, shown_at)
+                .as_ref()
+                != Some(&wanted)
+            {
                 self.change_a_property_at_the_playhead(target, property, wanted, now);
             }
         }
@@ -151,9 +162,9 @@ impl FastForwardApplication {
         let target = AnimationTarget::Clip(clip);
         if !PROPERTIES_OF_A_TEXT_OBJECT
             .into_iter()
-            .any(|property| self.project.is_animated(target, property))
+            .any(|property| self.document.project.is_animated(target, property))
         {
-            let _ = self.project.set_text_object(clip, object);
+            let _ = self.document.project.set_text_object(clip, object);
             return;
         }
         let shown_at = self.frame_at_the_playhead(now);
@@ -161,7 +172,13 @@ impl FastForwardApplication {
             let Some(wanted) = text_value(&object, property) else {
                 continue;
             };
-            if self.project.property_value_at(target, property, shown_at).as_ref() != Some(&wanted) {
+            if self
+                .document
+                .project
+                .property_value_at(target, property, shown_at)
+                .as_ref()
+                != Some(&wanted)
+            {
                 self.change_a_property_at_the_playhead(target, property, wanted, now);
             }
         }

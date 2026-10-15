@@ -8,14 +8,17 @@ use super::tests::{
     assert_same_content, edited_project, link_to_missing_video, project_with_everything, saved, version_line,
 };
 use super::*;
-use crate::project::{Badge, ChainItemKey, GroupColour, GroupKind, Member, RackDestination, TimelineFrameIndex};
+use crate::project::{
+    Badge, ChainItemKey, GroupColour, GroupKind, Member, PropertyId, RackDestination, TimelineFrameIndex,
+};
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 
 fn turn(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
 }
 
 fn hue_shift() -> ChainItemKey {
-    ChainItemKey::Effect(EffectKind::HueShift)
+    ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST)
 }
 
 fn tag_badge(group: crate::project::GroupId) -> ChainItemKey {
@@ -70,9 +73,7 @@ pub(super) fn a_project_with_groups_of_every_kind() -> Project {
         .unwrap();
     project.rename_group(tag, "titles and sound").unwrap();
     project.add_effect_to_the_group(tag, EffectKind::HueShift).unwrap();
-    project
-        .set_effect_value_of_the_group(tag, PropertyId::HueShift, &turn(45.0))
-        .unwrap();
+    project.set_effect_value_of_the_group(tag, HUE, &turn(45.0)).unwrap();
 
     let clip_group = project
         .create_group(
@@ -99,9 +100,7 @@ pub(super) fn a_project_with_groups_of_every_kind() -> Project {
         )
         .unwrap();
     project.add_effect_to_the_group(outer, EffectKind::HueShift).unwrap();
-    project
-        .set_effect_value_of_the_group(outer, PropertyId::HueShift, &turn(-30.0))
-        .unwrap();
+    project.set_effect_value_of_the_group(outer, HUE, &turn(-30.0)).unwrap();
 
     // The first video has its effect and then the badge of the tag: put the badge first. The second video's badge of its track, which
     // begins at the end of its chain, is put first too. The clip group has the badge of the outer tag and its effect: put the effect first.
@@ -161,7 +160,7 @@ fn a_group_is_saved_with_its_kind_name_and_colour_and_what_is_in_it_by_where_it_
     );
     assert_eq!(
         groups[0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "values": [45.0]}])
+        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [45.0]}])
     );
 
     assert_eq!(groups[1]["kind"], "clip_group");
@@ -170,7 +169,10 @@ fn a_group_is_saved_with_its_kind_name_and_colour_and_what_is_in_it_by_where_it_
         groups[1]["members"],
         serde_json::json!([{"clip": {"track": 2, "clip": 0}}, {"clip": {"track": 2, "clip": 1}}])
     );
-    assert_eq!(groups[1]["effects"], serde_json::json!([{"effect": "hue shift"}]));
+    assert_eq!(
+        groups[1]["effects"],
+        serde_json::json!([{"effect": "hue shift", "instance": 0}])
+    );
 
     assert_eq!(groups[2]["kind"], "track_group");
     assert_eq!(groups[2]["members"], serde_json::json!([{"track": 0}, {"track": 1}]));
@@ -232,7 +234,7 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    assert_eq!(FILE_FORMAT_VERSION, 10);
+    assert_eq!(FILE_FORMAT_VERSION, 11);
 }
 
 // --- the trip through the file ---
@@ -258,8 +260,8 @@ fn groups_with_their_effects_and_the_badges_in_the_chains_survive_a_trip_through
         ]
     );
     assert_eq!(groups[1].colour(), GroupColour::new(1, 2, 3));
-    assert_eq!(groups[0].effects().value_of(PropertyId::HueShift), Some(turn(45.0)));
-    assert_eq!(groups[3].effects().value_of(PropertyId::HueShift), Some(turn(-30.0)));
+    assert_eq!(groups[0].effects().value_of(HUE), Some(turn(45.0)));
+    assert_eq!(groups[3].effects().value_of(HUE), Some(turn(-30.0)));
     assert_eq!(groups[0].members().len(), 4);
 
     // The chains: the first video has the badge of the tag, and then its effect; the second has the badge of its track first.
@@ -544,10 +546,38 @@ fn an_effect_that_a_group_cannot_have_and_a_bad_colour_and_an_unknown_kind_are_r
         "{reason}"
     );
 
-    let twice = text_of_the_file_with(|file| {
-        file["groups"][0]["effects"] = serde_json::json!([{"effect": "hue shift"}, {"effect": "hue shift"}]);
+    let same_name = text_of_the_file_with(|file| {
+        file["groups"][0]["effects"] = serde_json::json!([
+            {"effect": "hue shift", "instance": 4},
+            {"effect": "hue shift", "instance": 4, "values": [9.0]}
+        ]);
     });
-    assert!(reason_it_is_refused(&twice).contains("twice"));
+    let reason = reason_it_is_refused(&same_name);
+    assert!(
+        reason.contains("group number 1") && reason.contains("two effects that are named effect 4"),
+        "{reason}"
+    );
+
+    // (Two of one kind under names of their own are two effects, which a group may have.)
+    let two_hue_shifts = text_of_the_file_with(|file| {
+        file["groups"][0]["effects"] = serde_json::json!([
+            {"effect": "hue shift", "instance": 4},
+            {"effect": "hue shift", "instance": 7, "values": [9.0]}
+        ]);
+    });
+    let project = project_from_json_text(&two_hue_shifts).unwrap();
+    let group = project.groups().first().unwrap();
+    assert_eq!(group.effects().len(), 2);
+    assert!(
+        group
+            .effects()
+            .has_the_instance(crate::project::EffectInstanceId::new(4))
+    );
+    assert!(
+        group
+            .effects()
+            .has_the_instance(crate::project::EffectInstanceId::new(7))
+    );
 
     for bad in ["red", "#FF00", "#GG0000", "#FF0000FF", "FF0000"] {
         let text = text_of_the_file_with(|file| {

@@ -19,6 +19,7 @@ use crate::project::{
     AnimationTarget, CanvasArea, ClipId, EffectKind, Gain, Placement, PropertyId, PropertyValue, TextObject,
     TimelineFrameIndex,
 };
+use crate::test_support::properties_of_every_kind;
 
 fn frame(number: u64) -> TimelineFrameIndex {
     TimelineFrameIndex::new(number)
@@ -32,7 +33,7 @@ fn window_with_the_video_selected() -> (Window, ClipId) {
 }
 
 fn label_of(property: PropertyId, button: KeyframeButton, has_one_here: bool) -> String {
-    keyframe_button_label(property, button, has_one_here)
+    keyframe_button_label(property.name(), button, has_one_here)
 }
 
 /// The colour that the button with `label` is drawn in (the orange or the grey of the buttons), if it is drawn.
@@ -436,7 +437,7 @@ fn a_property_that_is_not_animated_can_be_changed_wherever_the_playhead_is_even_
 #[test]
 fn nothing_about_keyframes_can_be_done_while_a_message_is_up() {
     let (mut window, _) = window_with_the_video_selected();
-    window.application_mut().dialog = Some(super::Dialog::Message {
+    window.application_mut().interface.dialog = Some(super::Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -501,9 +502,12 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
     };
     // (A value of an effect has its buttons only when what is selected has the effect.)
     let has_what_the_property_is_of = |window: &Window, target: AnimationTarget, property: PropertyId| {
-        property
-            .effect()
-            .is_none_or(|effect| window.application().project().has_the_effect(target, effect))
+        !property.is_a_value_of_an_effect()
+            || window
+                .application()
+                .project()
+                .effects_of(target)
+                .is_some_and(|effects| effects.has_the_value(property))
     };
 
     // Before an effect is put on anything, and then with every effect there is put on all that can have it.
@@ -520,7 +524,7 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
                 }
             }
             select(&mut window, clip);
-            for property in PropertyId::ALL {
+            for property in properties_of_every_kind() {
                 assert_eq!(
                     has_the_buttons_of(&window, property),
                     property.applies_to_a_clip_of_kind(kind) && has_what_the_property_is_of(&window, target, property),
@@ -539,7 +543,7 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
             }
         }
         window.select_the_track_at(0);
-        for property in PropertyId::ALL {
+        for property in properties_of_every_kind() {
             assert_eq!(
                 has_the_buttons_of(&window, property),
                 property.applies_to_a_track()

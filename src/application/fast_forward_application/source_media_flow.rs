@@ -57,7 +57,7 @@ impl FastForwardApplication {
     /// Asks the user for the file to use in place of the source file `identifier`, which cannot be
     /// found. All the edits are kept.
     pub(super) fn relink_source(&mut self, identifier: SourceMediaIdentifier) {
-        if self.project.source(identifier).is_none() {
+        if self.document.project.source(identifier).is_none() {
             return;
         }
         self.pause_playback_for_dialog();
@@ -75,21 +75,22 @@ impl FastForwardApplication {
         archive: PathBuf,
         entry_name: String,
     ) {
-        let Some(toolchain) = self.toolchain.clone() else {
-            self.source_files.insert(
+        let Some(toolchain) = self.environment.toolchain.clone() else {
+            self.sources.files.insert(
                 identifier,
                 SourceFileState::new(SourceStatus::Unavailable {
                     reason: "ffmpeg could not be found".to_owned(),
                 }),
             );
-            self.missing_sources_warning_open = true;
+            self.interface.missing_sources_warning_open = true;
             return;
         };
-        let cache = self.archive_cache.clone();
-        self.source_files
+        let cache = self.document.archive_cache.clone();
+        self.sources
+            .files
             .insert(identifier, SourceFileState::new(SourceStatus::Opening));
         let archive = std::path::absolute(&archive).unwrap_or(archive);
-        let task = BackgroundTask::start(Arc::clone(&self.wake_up), move || {
+        let task = BackgroundTask::start(Arc::clone(&self.environment.wake_up), move || {
             let failed = |reason: String| OpeningOutcome::Failed {
                 attempts: vec![(MediaLocation::of_a_file(&entry_name), reason)],
             };
@@ -114,7 +115,7 @@ impl FastForwardApplication {
             };
             open_first_that_works(&[location], |location| probe_source_media(&toolchain, location))
         });
-        self.openings.push(OpeningTask {
+        self.sources.openings.push(OpeningTask {
             purpose: OpeningPurpose::LocateForLoadedProject(identifier),
             task,
         });
@@ -123,10 +124,10 @@ impl FastForwardApplication {
     /// Starts trying `candidates`, in order, in the background.
     pub(super) fn start_opening(&mut self, purpose: OpeningPurpose, candidates: Vec<PathBuf>) {
         #[cfg(test)]
-        self.opening_purposes_started.push(purpose);
-        let Some(toolchain) = self.toolchain.clone() else {
+        self.sources.opening_purposes_started.push(purpose);
+        let Some(toolchain) = self.environment.toolchain.clone() else {
             if let OpeningPurpose::LocateForLoadedProject(identifier) = purpose {
-                self.source_files.insert(
+                self.sources.files.insert(
                     identifier,
                     SourceFileState::new(SourceStatus::Unavailable {
                         reason: "ffmpeg could not be found".to_owned(),
@@ -140,14 +141,15 @@ impl FastForwardApplication {
             return;
         };
         if let OpeningPurpose::LocateForLoadedProject(identifier) = purpose {
-            self.source_files
+            self.sources
+                .files
                 .insert(identifier, SourceFileState::new(SourceStatus::Opening));
         }
         let candidates: Vec<MediaLocation> = candidates.into_iter().map(MediaLocation::of_a_file).collect();
-        let task = BackgroundTask::start(Arc::clone(&self.wake_up), move || {
+        let task = BackgroundTask::start(Arc::clone(&self.environment.wake_up), move || {
             open_first_that_works(&candidates, |location| probe_source_media(&toolchain, location))
         });
-        self.openings.push(OpeningTask { purpose, task });
+        self.sources.openings.push(OpeningTask { purpose, task });
     }
 
     /// Picks up whatever the background work has finished since the last frame.
@@ -164,8 +166,8 @@ impl FastForwardApplication {
     fn collect_opening_results(&mut self) {
         let mut finished = Vec::new();
         let mut index = 0;
-        while index < self.openings.len() {
-            let outcome = match self.openings[index].task.status() {
+        while index < self.sources.openings.len() {
+            let outcome = match self.sources.openings[index].task.status() {
                 TaskStatus::Pending => {
                     index += 1;
                     continue;
@@ -178,7 +180,7 @@ impl FastForwardApplication {
                     )],
                 },
             };
-            let task = self.openings.remove(index);
+            let task = self.sources.openings.remove(index);
             finished.push((task.purpose, outcome));
         }
         for (purpose, outcome) in finished {
@@ -208,7 +210,7 @@ impl FastForwardApplication {
 
             (OpeningPurpose::RelinkMissingSource(identifier), OpeningOutcome::Opened { location, properties }) => {
                 let link = self.link_to(location.file());
-                match self.project.relink_source(identifier, link, properties) {
+                match self.document.project.relink_source(identifier, link, properties) {
                     Ok(relinked) => {
                         self.note_unsaved_change();
                         self.source_is_now_available(identifier, location, properties);
@@ -247,27 +249,34 @@ impl FastForwardApplication {
         location: MediaLocation,
         properties: SourceMediaProperties,
     ) -> Option<SourceMediaIdentifier> {
-        let identifier = self.project.next_source_identifier();
+        let identifier = self.document.project.next_source_identifier();
         let source = SourceMedia {
             identifier,
             link: self.link_to(location.file()),
             properties,
         };
-        let frame_rate_before = self.project.frame_rate();
-        let total_frames = self.project.total_frame_count();
+        let frame_rate_before = self.document.project.frame_rate();
+        let total_frames = self.document.project.total_frame_count();
         let now = Instant::now();
-        let current_frame = self.clock.position(now, total_frames);
-        let project_before = self.project.clone();
-        match self.project.import_source(source, current_frame) {
+        let current_frame = self.playback.clock.position(now, total_frames);
+        let project_before = self.document.project.clone();
+        match self.document.project.import_source(source, current_frame) {
             Ok(_) => {
                 // Importing is an edit like any other: undoing it takes the file off the timeline again.
-                self.history
-                    .record_change(project_before, self.selection.to_items(), None, now, false);
+                self.document.history.record_change(
+                    project_before,
+                    self.interface.selection.to_items(),
+                    None,
+                    now,
+                    false,
+                );
                 self.note_the_project_was_edited(now);
                 // The first video decides the frame rate of the whole project.
-                if self.project.frame_rate() != frame_rate_before {
-                    self.clock.reset_for_frame_rate(self.project.frame_rate());
-                    self.timeline_view.reset();
+                if self.document.project.frame_rate() != frame_rate_before {
+                    self.playback
+                        .clock
+                        .reset_for_frame_rate(self.document.project.frame_rate());
+                    self.interface.timeline_view.reset();
                 }
                 self.source_is_now_available(identifier, location, properties);
                 Some(identifier)
@@ -288,7 +297,7 @@ impl FastForwardApplication {
         location: MediaLocation,
         properties: SourceMediaProperties,
     ) {
-        let Some(source) = self.project.source(identifier).cloned() else {
+        let Some(source) = self.document.project.source(identifier).cloned() else {
             return;
         };
         if source.properties.kind() != properties.kind() {
@@ -304,16 +313,17 @@ impl FastForwardApplication {
         if !source.link.is_included() {
             let link = self.link_to(location.file());
             // Only the link changes: the project keeps the properties it was edited with.
-            let _ = self.project.relink_source(identifier, link, source.properties);
+            let _ = self.document.project.relink_source(identifier, link, source.properties);
         }
         self.source_is_now_available(identifier, location, properties);
     }
 
     /// The source file cannot be used: say so, and show the warning.
     fn mark_source_unavailable(&mut self, identifier: SourceMediaIdentifier, reason: String) {
-        self.source_files
+        self.sources
+            .files
             .insert(identifier, SourceFileState::new(SourceStatus::Unavailable { reason }));
-        self.missing_sources_warning_open = true;
+        self.interface.missing_sources_warning_open = true;
     }
 
     /// The file is usable: show its pictures, and make the thumbnails or the waveform its clips show.
@@ -323,15 +333,15 @@ impl FastForwardApplication {
         location: MediaLocation,
         properties: SourceMediaProperties,
     ) {
-        self.textures.clear();
-        self.source_files.insert(
+        self.interface.textures.clear();
+        self.sources.files.insert(
             identifier,
             SourceFileState::new(SourceStatus::Available {
                 location: location.clone(),
             }),
         );
         if self.missing_sources().is_empty() {
-            self.missing_sources_warning_open = false;
+            self.interface.missing_sources_warning_open = false;
         }
         match properties {
             SourceMediaProperties::Video(video) => self.start_thumbnails(identifier, &location, video),
@@ -348,29 +358,30 @@ impl FastForwardApplication {
         location: &MediaLocation,
         properties: SourceImageProperties,
     ) {
-        let (picture_width, picture_height) = self.project.picture_size();
+        let (picture_width, picture_height) = self.document.project.picture_size();
         let largest = preview_picture_size(picture_width, picture_height);
         let size = size_to_decode_at(
             (properties.display_width_in_pixels, properties.display_height_in_pixels),
             largest,
         );
-        let Some(state) = self.source_files.get_mut(&identifier) else {
+        let Some(state) = self.sources.files.get_mut(&identifier) else {
             return;
         };
         state.picture = PictureState::default();
-        let Some(toolchain) = self.toolchain.clone() else {
+        let Some(toolchain) = self.environment.toolchain.clone() else {
             return;
         };
         let location = location.clone();
-        state.picture.load = Some(BackgroundTask::start(Arc::clone(&self.wake_up), move || {
-            decode_picture(&toolchain, &location, size).map_err(|error| error.to_string())
-        }));
+        state.picture.load = Some(BackgroundTask::start(
+            Arc::clone(&self.environment.wake_up),
+            move || decode_picture(&toolchain, &location, size).map_err(|error| error.to_string()),
+        ));
     }
 
     /// Picks up the pictures that have been decoded since the last frame.
     fn collect_pictures(&mut self) {
         let mut problems = Vec::new();
-        for state in self.source_files.values_mut() {
+        for state in self.sources.files.values_mut() {
             let Some(load) = &state.picture.load else {
                 continue;
             };
@@ -405,20 +416,22 @@ impl FastForwardApplication {
             .frame_rate
             .seconds_at_frame(properties.total_frame_count)
             .ceil() as usize;
-        let Some(state) = self.source_files.get_mut(&identifier) else {
+        let Some(state) = self.sources.files.get_mut(&identifier) else {
             return;
         };
         state.thumbnails = ThumbnailState {
             library: ThumbnailLibrary::with_room_for(seconds_of_video),
             ..ThumbnailState::default()
         };
-        let Some(toolchain) = &self.toolchain else { return };
+        let Some(toolchain) = &self.environment.toolchain else {
+            return;
+        };
         let size = PictureSize::thumbnail_for(
             properties.display_width_in_pixels,
             properties.display_height_in_pixels,
             theme::THUMBNAIL_HEIGHT_IN_PIXELS,
         );
-        match ThumbnailExtraction::start(toolchain, location, size, Arc::clone(&self.wake_up)) {
+        match ThumbnailExtraction::start(toolchain, location, size, Arc::clone(&self.environment.wake_up)) {
             Ok(extraction) => state.thumbnails.extraction = Some(extraction),
             Err(error) => {
                 let problem = error.to_string();
@@ -428,12 +441,14 @@ impl FastForwardApplication {
     }
 
     fn start_waveform(&mut self, identifier: SourceMediaIdentifier, location: &MediaLocation) {
-        let Some(state) = self.source_files.get_mut(&identifier) else {
+        let Some(state) = self.sources.files.get_mut(&identifier) else {
             return;
         };
         state.waveform = WaveformState::default();
-        let Some(toolchain) = &self.toolchain else { return };
-        match WaveformExtraction::start(toolchain, location, Arc::clone(&self.wake_up)) {
+        let Some(toolchain) = &self.environment.toolchain else {
+            return;
+        };
+        match WaveformExtraction::start(toolchain, location, Arc::clone(&self.environment.wake_up)) {
             Ok(extraction) => state.waveform.extraction = Some(extraction),
             Err(error) => {
                 let problem = error.to_string();
@@ -444,7 +459,7 @@ impl FastForwardApplication {
 
     fn collect_thumbnails(&mut self) {
         let mut problems = Vec::new();
-        for state in self.source_files.values_mut() {
+        for state in self.sources.files.values_mut() {
             let Some(extraction) = &state.thumbnails.extraction else {
                 continue;
             };
@@ -474,8 +489,8 @@ impl FastForwardApplication {
     /// Tells each video which of its finer pictures the timeline wanted, and did not have, when it
     /// was drawn (see [`crate::application::textures::Textures::take_finer_thumbnails_wanted`]).
     pub(super) fn ask_for_finer_thumbnails(&mut self) {
-        let mut wanted = self.textures.take_finer_thumbnails_wanted();
-        for (identifier, state) in &mut self.source_files {
+        let mut wanted = self.interface.textures.take_finer_thumbnails_wanted();
+        for (identifier, state) in &mut self.sources.files {
             state
                 .thumbnails
                 .finer
@@ -487,7 +502,7 @@ impl FastForwardApplication {
     /// wanted: one run of pictures at a time, and not while the pictures of every second are still
     /// being made, which come first.
     fn collect_finer_thumbnails(&mut self) {
-        for (identifier, state) in &mut self.source_files {
+        for (identifier, state) in &mut self.sources.files {
             let thumbnails = &mut state.thumbnails;
             thumbnails.finer.collect_into(&mut thumbnails.library);
             thumbnails
@@ -497,9 +512,10 @@ impl FastForwardApplication {
                 continue;
             }
             let (Some(toolchain), Some(location), Some(video)) = (
-                &self.toolchain,
+                &self.environment.toolchain,
                 state.location_if_available().cloned(),
-                self.project
+                self.document
+                    .project
                     .source(*identifier)
                     .and_then(|source| source.properties.video()),
             ) else {
@@ -516,9 +532,13 @@ impl FastForwardApplication {
             );
             // (If ffmpeg cannot be started the pictures are simply not made: they were asked for, so
             // they are not asked for again, and the coarser ones stay on show.)
-            if let Ok(extraction) =
-                ThumbnailExtraction::start_range(toolchain, &location, size, range, Arc::clone(&self.wake_up))
-            {
+            if let Ok(extraction) = ThumbnailExtraction::start_range(
+                toolchain,
+                &location,
+                size,
+                range,
+                Arc::clone(&self.environment.wake_up),
+            ) {
                 thumbnails.finer.start(range, extraction);
             }
         }
@@ -526,7 +546,7 @@ impl FastForwardApplication {
 
     fn collect_waveforms(&mut self) {
         let mut problems = Vec::new();
-        for state in self.source_files.values_mut() {
+        for state in self.sources.files.values_mut() {
             let Some(extraction) = &state.waveform.extraction else {
                 continue;
             };
@@ -552,11 +572,12 @@ impl FastForwardApplication {
 
     /// The source files that cannot be found or opened, in the order the project has them.
     pub(super) fn missing_sources(&self) -> Vec<MissingSource> {
-        self.project
+        self.document
+            .project
             .sources()
             .iter()
             .filter_map(|source| {
-                let SourceStatus::Unavailable { reason } = &self.source_files.get(&source.identifier)?.status else {
+                let SourceStatus::Unavailable { reason } = &self.sources.files.get(&source.identifier)?.status else {
                     return None;
                 };
                 Some(MissingSource {
@@ -577,6 +598,7 @@ impl FastForwardApplication {
     fn link_to(&self, path: &Path) -> SourceMediaLink {
         let absolute_path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
         let relative_path = self
+            .document
             .project_file_path
             .as_deref()
             .and_then(Path::parent)
@@ -598,7 +620,7 @@ impl FastForwardApplication {
             .chain(PICTURE_FILE_EXTENSIONS.iter())
             .copied()
             .collect();
-        self.file_chooser.choose_a_file_to_open(&FileQuestion {
+        self.environment.file_chooser.choose_a_file_to_open(&FileQuestion {
             title,
             suggested_file_name: None,
             starting_directory: None,

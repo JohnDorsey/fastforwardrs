@@ -31,11 +31,13 @@ fn window_with_a_position_that_has_two_keyframes() -> (Window, ClipId) {
     for (frame, across) in [(10, 0.5), (50, 0.7)] {
         window
             .application_mut()
+            .document
             .project
             .add_keyframe(target, PropertyId::Position, TimelineFrameIndex::new(frame))
             .unwrap();
         window
             .application_mut()
+            .document
             .project
             .set_property_at(
                 target,
@@ -46,7 +48,7 @@ fn window_with_a_position_that_has_two_keyframes() -> (Window, ClipId) {
             .unwrap();
     }
     window.application_mut().note_everything_is_saved();
-    window.application_mut().history.reset();
+    window.application_mut().document.history.reset();
     window.move_current_frame_to(20);
     (window, clip)
 }
@@ -261,6 +263,7 @@ fn a_drag_of_the_video_on_the_preview_keeps_to_the_frame_it_began_at_when_the_pl
         // The playhead goes on (as it does while the video plays, or a key that moves it is held), a frame in each step.
         window
             .application_mut()
+            .playback
             .clock
             .seek(Instant::now(), TimelineFrameIndex::new(20 + step), total_frames);
         window.move_pointer_to(from + egui::vec2(3.0 * step as f32, 1.0 * step as f32));
@@ -318,6 +321,7 @@ fn what_a_drag_goes_on_with_after_an_undo_in_the_middle_of_it_is_made_where_the_
     assert_eq!(keyframes_of(&window, clip, PropertyId::Position), vec![10, 50]);
     window
         .application_mut()
+        .playback
         .clock
         .seek(Instant::now(), TimelineFrameIndex::new(40), total_frames);
     window.move_pointer_to(from + egui::vec2(18.0, 6.0));
@@ -340,7 +344,7 @@ fn replacing_the_project_lets_go_of_the_gesture_that_was_going_on() {
     window.move_pointer_to(from + egui::vec2(6.0, 2.0));
     window.move_pointer_to(from + egui::vec2(12.0, 4.0));
     assert_ne!(
-        window.application().gesture_frame,
+        window.application().interface.gesture_frame,
         GestureFrame::default(),
         "the setup: the drag is a gesture that keeps to a frame"
     );
@@ -349,5 +353,5 @@ fn replacing_the_project_lets_go_of_the_gesture_that_was_going_on() {
     // next, however it comes.)
     window.application_mut().start_empty_project();
 
-    assert_eq!(window.application().gesture_frame, GestureFrame::default());
+    assert_eq!(window.application().interface.gesture_frame, GestureFrame::default());
 }

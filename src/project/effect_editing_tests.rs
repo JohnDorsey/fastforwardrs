@@ -9,7 +9,12 @@ use super::tests::{audio_source, frame, picture_source, video_source};
 use super::*;
 use crate::test_support::make_a_keyframe;
 
-const HUE: PropertyId = PropertyId::HueShift;
+const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
+
+/// The value of the hue shift that is named `instance` in its chain.
+fn hue_of(instance: EffectInstanceId) -> PropertyId {
+    PropertyId::effect_value(EffectKind::HueShift, instance, 0)
+}
 
 fn turn(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
@@ -115,7 +120,7 @@ fn what_is_seen_and_each_track_can_have_a_hue_shift_which_begins_as_a_turn_of_no
         track(video_track),
         track(sound_track),
     ] {
-        assert!(!project.has_the_effect(target, EffectKind::HueShift), "{target}");
+        assert!(!project.has_the_effect(target, EffectInstanceId::FIRST), "{target}");
         assert!(project.effects_of(target).unwrap().is_empty(), "{target}");
         assert_eq!(
             project.property_value_at(target, HUE, frame(10)),
@@ -125,7 +130,7 @@ fn what_is_seen_and_each_track_can_have_a_hue_shift_which_begins_as_a_turn_of_no
 
         project.add_effect(target, EffectKind::HueShift).unwrap();
 
-        assert!(project.has_the_effect(target, EffectKind::HueShift), "{target}");
+        assert!(project.has_the_effect(target, EffectInstanceId::FIRST), "{target}");
         assert_eq!(project.effects_of(target).unwrap().len(), 1, "{target}");
         assert_eq!(
             project.property_value_at(target, HUE, frame(10)),
@@ -151,7 +156,7 @@ fn an_effect_put_on_one_clip_is_not_on_any_other_clip_or_track() {
     project.add_effect(clip(picture), EffectKind::HueShift).unwrap();
 
     for other in [clip(video), clip(text), track(video_track)] {
-        assert!(!project.has_the_effect(other, EffectKind::HueShift), "{other}");
+        assert!(!project.has_the_effect(other, EffectInstanceId::FIRST), "{other}");
     }
 }
 
@@ -176,7 +181,7 @@ fn a_sound_and_a_keyframe_crate_cannot_have_an_effect_and_the_error_says_which_c
             "{not_seen}"
         );
         assert!(
-            !project.has_the_effect(clip(not_seen), EffectKind::HueShift),
+            !project.has_the_effect(clip(not_seen), EffectInstanceId::FIRST),
             "{not_seen}"
         );
         assert_eq!(
@@ -188,32 +193,140 @@ fn a_sound_and_a_keyframe_crate_cannot_have_an_effect_and_the_error_says_which_c
 }
 
 #[test]
-fn an_effect_cannot_be_put_on_twice_and_the_values_it_has_are_not_what_the_second_time_would_begin_with() {
+fn an_effect_that_is_put_on_again_is_another_effect_that_begins_as_the_effect_begins_and_the_first_keeps_its_values() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let first = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
     project.set_property_at(clip(video), HUE, turn(45.0), frame(0)).unwrap();
 
-    assert_eq!(
-        project.add_effect(clip(video), EffectKind::HueShift),
-        Err(EditError::AlreadyHasThatEffect {
-            target: clip(video),
-            kind: EffectKind::HueShift
-        })
-    );
+    let second = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
 
-    assert_eq!(hue_at(&project, clip(video), 0), 45.0, "it is as it was");
-    assert_eq!(project.effects_of(clip(video)).unwrap().len(), 1);
+    assert_eq!(first, EffectInstanceId::FIRST);
+    assert_eq!(second, EffectInstanceId::new(1), "named as the next of the chain is");
+    assert_eq!(project.effects_of(clip(video)).unwrap().len(), 2);
+    assert_eq!(hue_at(&project, clip(video), 0), 45.0, "the first is as it was");
+    assert_eq!(
+        project.property_value_at(clip(video), hue_of(second), frame(0)),
+        Some(turn(0.0)),
+        "the second begins as the effect begins, and not as the first is"
+    );
+    assert!(project.has_the_effect(clip(video), first) && project.has_the_effect(clip(video), second));
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn the_value_of_one_of_two_effects_of_one_kind_is_changed_and_animated_without_the_other() {
+    let OneOfEach { mut project, video, .. } = one_of_each();
+    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let second = hue_of(project.add_effect(clip(video), EffectKind::HueShift).unwrap());
+
+    project.set_property_at(clip(video), HUE, turn(30.0), frame(0)).unwrap();
+    make_a_keyframe(&mut project, clip(video), second, 10, turn(100.0));
+    make_a_keyframe(&mut project, clip(video), second, 20, turn(200.0));
+
+    assert!(!project.is_animated(clip(video), HUE));
+    assert!(project.is_animated(clip(video), second));
+    assert_eq!(
+        hue_at(&project, clip(video), 15),
+        30.0,
+        "the first is not changed by the second's keyframes"
+    );
+    assert_eq!(
+        project.property_value_at(clip(video), second, frame(15)),
+        Some(turn(150.0)),
+        "and the second is not changed by the first's value"
+    );
+    assert_eq!(keyframe_frames(&project, clip(video), second), vec![10, 20]);
+    assert_eq!(keyframe_frames(&project, clip(video), HUE), Vec::<u64>::new());
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn an_effect_that_is_taken_off_takes_its_own_keyframes_and_leaves_those_of_the_others_of_its_kind() {
+    let OneOfEach { mut project, video, .. } = one_of_each();
+    let first = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let second = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let third = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    for (instance, degrees) in [(first, 10.0), (second, 20.0), (third, 30.0)] {
+        make_a_keyframe(&mut project, clip(video), hue_of(instance), 5, turn(degrees));
+        make_a_keyframe(&mut project, clip(video), hue_of(instance), 50, turn(degrees * 2.0));
+    }
+
+    project.remove_effect(clip(video), second).unwrap();
+
+    let chain = project.effects_of(clip(video)).unwrap();
+    assert_eq!(
+        chain.iter().map(Effect::instance).collect::<Vec<_>>(),
+        vec![first, third]
+    );
+    assert_eq!(
+        keyframe_frames(&project, clip(video), hue_of(second)),
+        Vec::<u64>::new()
+    );
+    assert_eq!(project.property_value_at(clip(video), hue_of(second), frame(5)), None);
+    for (instance, degrees) in [(first, 10.0), (third, 30.0)] {
+        assert_eq!(
+            keyframe_frames(&project, clip(video), hue_of(instance)),
+            vec![5, 50],
+            "{instance}"
+        );
+        assert_eq!(
+            project.property_value_at(clip(video), hue_of(instance), frame(5)),
+            Some(turn(degrees)),
+            "{instance}"
+        );
+    }
+    assert_the_racks_are_sound(&project);
+}
+
+#[test]
+fn an_effect_that_is_put_on_after_another_is_taken_off_is_named_by_the_largest_name_left_and_not_by_how_many_there_are()
+{
+    let OneOfEach { mut project, video, .. } = one_of_each();
+    let first = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let second = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.remove_effect(clip(video), first).unwrap();
+
+    let next = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+
+    assert_eq!(second, EffectInstanceId::new(1));
+    assert_eq!(
+        next,
+        EffectInstanceId::new(2),
+        "not 1, which is the name of an effect that is still there"
+    );
+    assert_eq!(
+        project
+            .effects_of(clip(video))
+            .unwrap()
+            .iter()
+            .map(Effect::instance)
+            .collect::<Vec<_>>(),
+        vec![second, next]
+    );
 }
 
 #[test]
 fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_not_there() {
     let OneOfEach { mut project, video, .. } = one_of_each();
     assert_eq!(
-        project.remove_effect(clip(video), EffectKind::HueShift),
+        project.remove_effect(clip(video), EffectInstanceId::FIRST),
         Err(EditError::DoesNotHaveThatEffect {
             target: clip(video),
-            kind: EffectKind::HueShift
+            instance: EffectInstanceId::FIRST
         })
+    );
+    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    assert_eq!(
+        project.remove_effect(clip(video), EffectInstanceId::new(1)),
+        Err(EditError::DoesNotHaveThatEffect {
+            target: clip(video),
+            instance: EffectInstanceId::new(1)
+        }),
+        "an effect of that kind is on, but not the one that is named"
+    );
+    assert!(
+        project.has_the_effect(clip(video), EffectInstanceId::FIRST),
+        "and it was not taken off"
     );
 
     let no_such_clip = ClipId::new(TrackId::new(99), 0);
@@ -223,7 +336,7 @@ fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_n
         Err(EditError::Clip(ClipEditError::UnknownClip { clip: no_such_clip }))
     );
     assert_eq!(
-        project.remove_effect(clip(no_such_clip), EffectKind::HueShift),
+        project.remove_effect(clip(no_such_clip), EffectInstanceId::FIRST),
         Err(EditError::Clip(ClipEditError::UnknownClip { clip: no_such_clip }))
     );
     assert_eq!(
@@ -231,12 +344,12 @@ fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_n
         Err(EditError::UnknownTrack { track: no_such_track })
     );
     assert_eq!(
-        project.remove_effect(track(no_such_track), EffectKind::HueShift),
+        project.remove_effect(track(no_such_track), EffectInstanceId::FIRST),
         Err(EditError::UnknownTrack { track: no_such_track })
     );
     assert_eq!(project.effects_of(clip(no_such_clip)), None);
     assert_eq!(project.effects_of(track(no_such_track)), None);
-    assert!(!project.has_the_effect(clip(no_such_clip), EffectKind::HueShift));
+    assert!(!project.has_the_effect(clip(no_such_clip), EffectInstanceId::FIRST));
 }
 
 /// What ties the effects to the table of them: whatever is in it can be put on exactly what its row says can have it, and its values
@@ -257,9 +370,9 @@ fn every_effect_in_the_table_goes_on_what_it_says_can_have_it_and_its_values_are
         ];
         for (target, can_have_it) in cases {
             let mut project = base.project.clone();
-            for property in kind.properties() {
+            for property in Effect::new(kind).properties() {
                 assert_eq!(
-                    project.property_value_at(target, *property, frame(5)),
+                    project.property_value_at(target, property, frame(5)),
                     None,
                     "{kind:?} {target}"
                 );
@@ -268,9 +381,9 @@ fn every_effect_in_the_table_goes_on_what_it_says_can_have_it_and_its_values_are
             let result = project.add_effect(target, kind);
 
             assert_eq!(result.is_ok(), can_have_it, "{kind:?} on {target}: {result:?}");
-            for (property, value) in kind.properties().iter().zip(kind.default_values()) {
+            for (property, value) in Effect::new(kind).properties().zip(kind.default_values()) {
                 assert_eq!(
-                    project.property_value_at(target, *property, frame(5)),
+                    project.property_value_at(target, property, frame(5)),
                     can_have_it.then_some(value),
                     "{property:?} of {target} with {kind:?} put on"
                 );
@@ -377,7 +490,7 @@ fn when_the_last_keyframe_of_an_effect_is_taken_away_it_stays_what_that_keyframe
     assert!(!project.is_animated(clip(video), HUE));
     assert_eq!(hue_at(&project, clip(video), 0), 30.0);
     assert!(
-        project.has_the_effect(clip(video), EffectKind::HueShift),
+        project.has_the_effect(clip(video), EffectInstanceId::FIRST),
         "the effect is still on"
     );
 }
@@ -431,9 +544,9 @@ fn an_effect_that_is_taken_off_takes_the_keyframes_of_its_values_with_it_whereve
     assert_eq!(racks_of_the_hue_shift_of(&project, clip(video)), 3);
     assert_the_racks_are_sound(&project);
 
-    project.remove_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.remove_effect(clip(video), EffectInstanceId::FIRST).unwrap();
 
-    assert!(!project.has_the_effect(clip(video), EffectKind::HueShift));
+    assert!(!project.has_the_effect(clip(video), EffectInstanceId::FIRST));
     assert_eq!(
         racks_of_the_hue_shift_of(&project, clip(video)),
         0,
@@ -445,7 +558,7 @@ fn an_effect_that_is_taken_off_takes_the_keyframes_of_its_values_with_it_whereve
         vec![50],
         "its loudness is not an effect's"
     );
-    assert!(project.has_the_effect(clip(text), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(text), EffectInstanceId::FIRST));
     assert_eq!(
         keyframe_frames(&project, clip(text), HUE),
         vec![10],
@@ -474,7 +587,7 @@ fn a_keyframe_crate_that_holds_racks_of_other_things_too_stays_when_the_racks_of
         &[(5, db(-6.0))],
     );
 
-    project.remove_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.remove_effect(clip(video), EffectInstanceId::FIRST).unwrap();
 
     let crate_placement = project.placement_of(a_crate).expect("the crate is still there");
     assert_eq!(crate_placement.drawer.len(), 1);
@@ -490,7 +603,7 @@ fn an_effect_put_on_again_after_it_was_taken_off_begins_again_with_nothing_of_wh
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(10.0));
     make_a_keyframe(&mut project, clip(video), HUE, 200, turn(20.0));
 
-    project.remove_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.remove_effect(clip(video), EffectInstanceId::FIRST).unwrap();
     project.add_effect(clip(video), EffectKind::HueShift).unwrap();
 
     assert_eq!(hue_at(&project, clip(video), 150), 0.0);
@@ -511,17 +624,19 @@ fn the_effect_of_a_track_is_taken_off_with_the_keyframes_of_its_values_and_not_t
     make_a_keyframe(&mut project, track(video_track), HUE, 40, turn(10.0));
     make_a_keyframe(&mut project, clip(video), HUE, 40, turn(20.0));
 
-    project.remove_effect(track(video_track), EffectKind::HueShift).unwrap();
+    project
+        .remove_effect(track(video_track), EffectInstanceId::FIRST)
+        .unwrap();
 
     assert!(
-        !project.has_the_effect(track(video_track), EffectKind::HueShift),
+        !project.has_the_effect(track(video_track), EffectInstanceId::FIRST),
         "the track has not got it any more"
     );
     assert!(project.effects_of(track(video_track)).unwrap().is_empty());
     assert_eq!(project.property_value_at(track(video_track), HUE, frame(40)), None);
     assert_eq!(racks_of_the_hue_shift_of(&project, track(video_track)), 0);
     assert!(
-        project.has_the_effect(clip(video), EffectKind::HueShift),
+        project.has_the_effect(clip(video), EffectInstanceId::FIRST),
         "the clip has still got its own"
     );
     assert_eq!(keyframe_frames(&project, clip(video), HUE), vec![40]);
@@ -556,7 +671,7 @@ fn a_cut_clip_has_the_effect_in_both_halves_and_what_its_keyframes_said_goes_on_
         .unwrap();
     let (first, second) = (outcome.first_half, outcome.second_half);
     for half in [first, second] {
-        assert!(project.has_the_effect(clip(half), EffectKind::HueShift), "{half}");
+        assert!(project.has_the_effect(clip(half), EffectInstanceId::FIRST), "{half}");
     }
     let near = |left: f32, right: f32| (left - right).abs() < 0.01;
     assert!(near(hue_at(&project, clip(first), 100), 0.0));
@@ -605,7 +720,7 @@ fn a_copy_of_a_clip_has_its_effects_and_keyframes_of_its_own_in_which_changing_o
 
     let copy = project.duplicate_clip(video, ClipSide::Right).unwrap();
 
-    assert!(project.has_the_effect(clip(copy), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(copy), EffectInstanceId::FIRST));
     assert_eq!(
         keyframe_frames(&project, clip(copy), HUE),
         vec![700, 800],
@@ -641,11 +756,11 @@ fn a_copy_of_a_track_has_its_effects_and_those_of_its_clips_with_their_keyframes
     let copy = project.duplicate_track(video_track, TrackSide::Above).unwrap();
 
     let copied_clip = project.track(copy).unwrap().entries()[0].id();
-    assert!(project.has_the_effect(track(copy), EffectKind::HueShift));
-    assert!(project.has_the_effect(clip(copied_clip), EffectKind::HueShift));
+    assert!(project.has_the_effect(track(copy), EffectInstanceId::FIRST));
+    assert!(project.has_the_effect(clip(copied_clip), EffectInstanceId::FIRST));
     assert_eq!(keyframe_frames(&project, track(copy), HUE), vec![50]);
     assert_eq!(keyframe_frames(&project, clip(copied_clip), HUE), vec![100]);
-    project.remove_effect(track(copy), EffectKind::HueShift).unwrap();
+    project.remove_effect(track(copy), EffectInstanceId::FIRST).unwrap();
     assert_eq!(
         keyframe_frames(&project, track(video_track), HUE),
         vec![50],
@@ -684,7 +799,7 @@ fn a_clip_moved_to_another_track_takes_its_effects_and_their_keyframes_with_it()
         video_track,
         "it is on the other track now"
     );
-    assert!(project.has_the_effect(clip(picture), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(picture), EffectInstanceId::FIRST));
     assert_eq!(
         keyframe_frames(&project, clip(picture), HUE),
         vec![710, 790],
@@ -708,11 +823,11 @@ fn what_an_edit_did_with_effects_is_put_back_as_it_was_by_restoring_an_earlier_p
     let with_the_effect = project.clone();
 
     project.restore(before.clone());
-    assert!(!project.has_the_effect(clip(video), EffectKind::HueShift));
+    assert!(!project.has_the_effect(clip(video), EffectInstanceId::FIRST));
     assert_eq!(project.keyframe_count(), 0);
 
     project.restore(with_the_effect);
-    assert!(project.has_the_effect(clip(video), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(video), EffectInstanceId::FIRST));
     assert_eq!(keyframe_frames(&project, clip(video), HUE), vec![100]);
 }
 
@@ -755,7 +870,7 @@ fn the_effects_of_a_clip_stay_on_it_when_its_speed_or_the_speed_of_its_track_cha
 
     project.set_clip_speed(video, SpeedFactor::new(2).unwrap()).unwrap();
 
-    assert!(project.has_the_effect(clip(video), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(video), EffectInstanceId::FIRST));
     assert_eq!(
         keyframe_frames(&project, clip(video), HUE),
         vec![50, 150],
@@ -772,8 +887,8 @@ fn the_effects_of_a_clip_stay_on_it_when_its_speed_or_the_speed_of_its_track_cha
         .set_track_speed(video_track, SpeedFactor::new(2).unwrap())
         .unwrap();
 
-    assert!(project.has_the_effect(clip(video), EffectKind::HueShift));
-    assert!(project.has_the_effect(track(video_track), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(video), EffectInstanceId::FIRST));
+    assert!(project.has_the_effect(track(video_track), EffectInstanceId::FIRST));
     assert_eq!(keyframe_frames(&project, clip(video), HUE), vec![25, 75]);
     assert_eq!(hue_at(&project, clip(video), 50), 90.0);
     assert_the_racks_are_sound(&project);
@@ -790,7 +905,7 @@ fn the_effects_of_a_picture_stay_on_it_when_it_is_shown_for_less_time_and_its_ke
 
     project.set_clip_duration(picture, 100).unwrap();
 
-    assert!(project.has_the_effect(clip(picture), EffectKind::HueShift));
+    assert!(project.has_the_effect(clip(picture), EffectInstanceId::FIRST));
     let frames = keyframe_frames(&project, clip(picture), HUE);
     assert_eq!(
         frames.len(),
@@ -841,7 +956,7 @@ fn whatever_effects_are_put_on_and_taken_off_and_whatever_is_done_to_the_clips_a
                 }
                 2 => {
                     let target = a_target(&mut random);
-                    let result = project.remove_effect(target, EffectKind::HueShift).is_ok();
+                    let result = project.remove_effect(target, EffectInstanceId::FIRST).is_ok();
                     effects_taken_off += usize::from(result);
                     result
                 }

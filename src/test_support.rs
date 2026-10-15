@@ -4,23 +4,39 @@
 //! Helpers shared by the unit tests in several modules.
 
 use crate::project::{
-    AnimationTarget, ClipId, EffectKind, Project, PropertyId, PropertyValue, RackDestination, TimelineFrameIndex,
-    TrackId,
+    AnimationTarget, ClipId, EffectInstanceId, EffectKind, Project, PropertyId, PropertyValue, RackDestination,
+    TimelineFrameIndex, TrackId,
 };
 
-/// Puts the hue shift effect on `target` (a clip or a track), turned by `degrees` for what it is when it is not animated.
-pub fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) {
-    project
+/// The property that is the one value of the hue shift when the hue shift is the first effect of the chain it is in, which is what it is
+/// when it is the only effect, as it is in nearly every test (see [`EffectInstanceId::FIRST`]).
+pub const HUE_SHIFT_AS_THE_FIRST_EFFECT: PropertyId =
+    PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 0);
+
+/// Every property that a clip or a track has of its own, and, as the sample of the values of effects, the value of the hue shift that is
+/// the first effect of its chain: for the tests that go through every property there is.
+pub fn properties_of_every_kind() -> Vec<PropertyId> {
+    PropertyId::OWN
+        .into_iter()
+        .chain([HUE_SHIFT_AS_THE_FIRST_EFFECT])
+        .collect()
+}
+
+/// Puts the hue shift effect on `target` (a clip or a track), turned by `degrees` for what it is when it is not animated, and gives the name
+/// it has in the chain of `target`. (The effect is another one when `target` has a hue shift already.)
+pub fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) -> EffectInstanceId {
+    let instance = project
         .add_effect(target, EffectKind::HueShift)
         .expect("it is something that can have the effect");
     project
         .set_property_at(
             target,
-            PropertyId::HueShift,
+            PropertyId::effect_value(EffectKind::HueShift, instance, 0),
             PropertyValue::Number(degrees),
             TimelineFrameIndex::new(0),
         )
         .expect("the effect was just put on");
+    instance
 }
 
 /// Puts a keyframe at `timeline_frame` that makes `property` of `target` have `value` there. (The property is animated from

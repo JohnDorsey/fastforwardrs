@@ -213,7 +213,7 @@ fn a_new_project_follows_every_global_setting_so_the_controls_are_greyed_out() {
         );
     }
     assert_eq!(
-        window.application().project.settings(),
+        window.application().document.project.settings(),
         ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     );
 }
@@ -221,8 +221,8 @@ fn a_new_project_follows_every_global_setting_so_the_controls_are_greyed_out() {
 #[test]
 fn the_greyed_out_control_shows_the_global_value_that_is_being_used() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings.sped_up_clip_sound = SpedUpClipSound::IncreasePitch;
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.sped_up_clip_sound = SpedUpClipSound::IncreasePitch;
+    window.application_mut().environment.global_settings.autosave = true;
 
     window.open_from_the_edit_menu("Project settings");
 
@@ -238,7 +238,7 @@ fn the_greyed_out_control_shows_the_global_value_that_is_being_used() {
 #[test]
 fn unticking_use_global_setting_frees_the_control_starting_at_the_global_value() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings.sped_up_clip_sound = SpedUpClipSound::Mute;
+    window.application_mut().environment.global_settings.sped_up_clip_sound = SpedUpClipSound::Mute;
     window.open_from_the_edit_menu("Project settings");
     assert!(!window.application().has_unsaved_changes());
 
@@ -246,7 +246,7 @@ fn unticking_use_global_setting_frees_the_control_starting_at_the_global_value()
     window.click_checkbox_number(USE_GLOBAL_SETTING, 1);
 
     assert_eq!(
-        window.application().project.settings(),
+        window.application().document.project.settings(),
         ProjectSettings {
             autosave: None,
             sped_up_clip_sound: Some(SpedUpClipSound::Mute),
@@ -264,14 +264,14 @@ fn unticking_use_global_setting_frees_the_control_starting_at_the_global_value()
 #[test]
 fn a_project_can_set_its_own_value_against_the_global_one_in_either_direction() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.autosave = true;
     window.open_from_the_edit_menu("Project settings");
 
     window.click_checkbox_number(USE_GLOBAL_SETTING, 0); // let go of the global autosave
     window.harness.get_by_label(AUTOSAVE).click(); // and turn it off for this project
     window.settle();
 
-    assert_eq!(window.application().project.settings().autosave, Some(false));
+    assert_eq!(window.application().document.project.settings().autosave, Some(false));
     assert!(
         window.application().global_settings().autosave,
         "the global setting is untouched"
@@ -289,12 +289,12 @@ fn ticking_use_global_setting_again_goes_back_to_following_and_forgets_the_proje
     window.click_checkbox_number(USE_GLOBAL_SETTING, 0);
     window.harness.get_by_label(AUTOSAVE).click();
     window.settle();
-    assert_eq!(window.application().project.settings().autosave, Some(true));
+    assert_eq!(window.application().document.project.settings().autosave, Some(true));
 
     window.click_checkbox_number(USE_GLOBAL_SETTING, 0);
 
     assert_eq!(
-        window.application().project.settings(),
+        window.application().document.project.settings(),
         ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     );
     assert!(window.is_disabled(AUTOSAVE));
@@ -303,7 +303,7 @@ fn ticking_use_global_setting_again_goes_back_to_following_and_forgets_the_proje
 #[test]
 fn a_global_change_reaches_a_project_that_follows_and_not_one_that_has_its_own_value() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().project.set_settings(ProjectSettings {
+    window.application_mut().document.project.set_settings(ProjectSettings {
         autosave: Some(false),
         sped_up_clip_sound: None,
     });
@@ -323,7 +323,7 @@ fn a_global_change_reaches_a_project_that_follows_and_not_one_that_has_its_own_v
 #[test]
 fn a_new_project_follows_the_global_settings_again_whatever_the_old_one_had_set() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().project.set_settings(ProjectSettings {
+    window.application_mut().document.project.set_settings(ProjectSettings {
         autosave: Some(true),
         sped_up_clip_sound: Some(SpedUpClipSound::Mute),
     });
@@ -331,7 +331,7 @@ fn a_new_project_follows_the_global_settings_again_whatever_the_old_one_had_set(
     window.application_mut().start_empty_project();
 
     assert_eq!(
-        window.application().project.settings(),
+        window.application().document.project.settings(),
         ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     );
 }
@@ -422,7 +422,7 @@ fn a_settings_file_that_cannot_be_written_gives_a_message_and_the_setting_still_
     let path = folder.path().join("settings.json");
     std::fs::create_dir(&path).unwrap();
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings_path = Some(path);
+    window.application_mut().environment.global_settings_path = Some(path);
 
     window.open_from_the_edit_menu("Global settings");
     window.harness.get_by_label(AUTOSAVE).click();
@@ -473,7 +473,7 @@ fn with_autosave_off_nothing_is_saved_by_itself_however_long_it_takes() {
 fn with_autosave_on_a_change_is_saved_once_the_project_has_been_quiet_for_a_while_and_not_before() {
     let folder = tempfile::tempdir().unwrap();
     let (mut window, path) = window_with_a_saved_project(&folder);
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.autosave = true;
     let context = egui::Context::default();
 
     window.cut_at_frame(100);
@@ -496,7 +496,7 @@ fn with_autosave_on_a_change_is_saved_once_the_project_has_been_quiet_for_a_whil
 fn a_project_that_sets_autosave_for_itself_is_autosaved_even_though_the_global_one_is_off() {
     let folder = tempfile::tempdir().unwrap();
     let (mut window, path) = window_with_a_saved_project(&folder);
-    window.application_mut().project.set_settings(ProjectSettings {
+    window.application_mut().document.project.set_settings(ProjectSettings {
         autosave: Some(true),
         sped_up_clip_sound: None,
     });
@@ -512,7 +512,7 @@ fn a_project_that_sets_autosave_for_itself_is_autosaved_even_though_the_global_o
 #[test]
 fn a_project_that_never_had_a_file_is_not_autosaved_because_that_would_need_a_question() {
     let mut window = Window::showing(project_of(300));
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.autosave = true;
     window.cut_at_frame(100);
     window
         .application_mut()
@@ -526,7 +526,7 @@ fn a_project_that_never_had_a_file_is_not_autosaved_because_that_would_need_a_qu
 fn autosave_asks_for_another_look_when_it_will_be_time() {
     let folder = tempfile::tempdir().unwrap();
     let (mut window, _) = window_with_a_saved_project(&folder);
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.autosave = true;
     window.cut_at_frame(100);
     let context = egui::Context::default();
 
@@ -544,7 +544,7 @@ fn autosave_asks_for_another_look_when_it_will_be_time() {
 fn with_autosave_on_closing_or_starting_a_new_project_does_not_ask_about_unsaved_changes() {
     let folder = tempfile::tempdir().unwrap();
     let (mut window, path) = window_with_a_saved_project(&folder);
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.autosave = true;
     window.cut_at_frame(100);
     assert!(
         window.application().has_unsaved_changes(),
@@ -557,7 +557,10 @@ fn with_autosave_on_closing_or_starting_a_new_project_does_not_ask_about_unsaved
         .ask_before_discarding(AfterConfirmation::CloseWindow);
 
     assert!(
-        !matches!(window.application().dialog, Some(Dialog::ConfirmDiscardChanges { .. })),
+        !matches!(
+            window.application().interface.dialog,
+            Some(Dialog::ConfirmDiscardChanges { .. })
+        ),
         "nothing to ask: the changes were saved first"
     );
     assert_eq!(clip_count_in_file(&path), 2);
@@ -574,7 +577,7 @@ fn without_autosave_the_question_is_still_asked() {
         .ask_before_discarding(AfterConfirmation::NewProject);
 
     assert!(matches!(
-        window.application().dialog,
+        window.application().interface.dialog,
         Some(Dialog::ConfirmDiscardChanges { .. })
     ));
     assert_eq!(
@@ -588,11 +591,11 @@ fn without_autosave_the_question_is_still_asked() {
 fn a_failed_autosave_says_so_once_and_does_not_try_again_until_the_project_changes() {
     let folder = tempfile::tempdir().unwrap();
     let (mut window, original_path) = window_with_a_saved_project(&folder);
-    window.application_mut().global_settings.autosave = true;
+    window.application_mut().environment.global_settings.autosave = true;
     // The file's place becomes impossible to write to: its folder is replaced by a file.
     let folder_of_project = folder.path().join("blocked");
     std::fs::write(&folder_of_project, "in the way").unwrap();
-    window.application_mut().project_file_path = Some(folder_of_project.join("holiday.fastforwardrs.json"));
+    window.application_mut().document.project_file_path = Some(folder_of_project.join("holiday.fastforwardrs.json"));
     window.cut_at_frame(100);
     let context = egui::Context::default();
     let later = Instant::now() + Duration::from_secs(5);
@@ -604,7 +607,7 @@ fn a_failed_autosave_says_so_once_and_does_not_try_again_until_the_project_chang
     assert_eq!(title, "The project could not be saved");
     assert!(window.application().has_unsaved_changes());
 
-    window.application_mut().dialog = None;
+    window.application_mut().interface.dialog = None;
     window
         .application_mut()
         .autosave_when_quiet_for_long_enough(&context, later + Duration::from_secs(5));

@@ -184,7 +184,7 @@ fn the_zoom_works_from_the_ruler_the_strips_and_the_title_boxes_but_not_from_the
 fn the_wheel_with_control_and_alt_zooms_up_and_down_alone_and_does_not_zoom_or_scroll_along_the_strips() {
     let mut window = Window::showing(project_of(900));
     let second = width_of_a_second(&window);
-    let scroll_before = window.application().timeline_view.scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.scroll_offset;
     let over_a_strip = window.middle_of_the_strip_at(0, 100);
 
     zoom_up_and_down(&mut window, over_a_strip, 1.0);
@@ -195,7 +195,7 @@ fn the_wheel_with_control_and_alt_zooms_up_and_down_alone_and_does_not_zoom_or_s
     );
     assert_close(width_of_a_second(&window), second, "a second is as wide as it was");
     assert_eq!(
-        window.application().timeline_view.scroll_offset,
+        window.application().interface.timeline_view.scroll_offset,
         scroll_before,
         "and the strips were not scrolled along"
     );
@@ -333,6 +333,7 @@ fn zooming_keeps_the_part_of_a_drawer_that_is_under_the_pointer_the_same_distanc
     let track = window.application().project().tracks()[2].id();
     window
         .application_mut()
+        .interface
         .timeline_view
         .open_the_drawer_of(crate::project::AnimationTarget::Track(track));
     // (The drawer slides open in a fifth of a second, and the rows are scrolled to show all of it as it does: nothing is moving
@@ -376,7 +377,7 @@ fn scroll_the_rows_further_down_than_they_go_with_the_pointer_at(window: &mut Wi
 }
 
 fn rows_scroll_offset(window: &Window) -> f32 {
-    window.application().timeline_view.rows_scroll_offset
+    window.application().interface.timeline_view.rows_scroll_offset
 }
 
 /// A point over the rows, a little under the ruler: near the top of what can be seen of them.
@@ -455,6 +456,7 @@ fn the_racks_in_the_drawer_of_a_track_are_under_the_racks_of_a_crate_that_reache
     let mut window = Window::showing(project);
     window
         .application_mut()
+        .interface
         .timeline_view
         .open_the_drawer_of(AnimationTarget::Track(crate_track));
     window.settle();
@@ -539,6 +541,7 @@ fn the_rows_are_laid_out_as_tall_as_the_area_they_are_in_finds_them_when_they_ar
     let rows = |window: &Window| {
         window
             .application()
+            .interface
             .timeline_view
             .rows_in_the_last_frame
             .expect("the rows have been drawn")
@@ -682,7 +685,7 @@ fn the_wheel_with_control_and_alt_held_does_nothing_while_a_boundary_is_being_dr
 
     // (What is drawn while a boundary is held is what the pointer has made of it, so a zoom would not show until it is let go.)
     assert_eq!(
-        window.application().timeline_view.vertical_zoom.factor(),
+        window.application().interface.timeline_view.vertical_zoom.factor(),
         1.0,
         "the rows were not zoomed by the wheel while the boundary was held"
     );
@@ -718,7 +721,7 @@ fn the_wheel_with_control_and_alt_held_does_nothing_while_a_track_is_being_moved
     window.harness.run_steps(40);
 
     assert_eq!(
-        window.application().timeline_view.vertical_zoom.factor(),
+        window.application().interface.timeline_view.vertical_zoom.factor(),
         1.0,
         "the rows were not zoomed by the wheel while a track was moved"
     );

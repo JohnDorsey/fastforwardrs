@@ -10,7 +10,8 @@ use super::tests::{
 };
 use super::*;
 use crate::composition::test_projects::random_project_with_effects;
-use crate::project::TimelineFrameIndex;
+use crate::project::{PropertyId, TimelineFrameIndex};
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use crate::test_support::{DeterministicRandomNumbers, make_a_keyframe};
 
 fn turn(degrees: f32) -> PropertyValue {
@@ -42,20 +43,20 @@ fn effects_are_saved_with_the_name_of_the_effect_and_the_values_it_has_when_they
     // The first video has it as it begins, the second is turned 90 degrees.
     assert_eq!(
         file["tracks"][2]["clips"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift"}])
+        serde_json::json!([{"effect": "hue shift", "instance": 0}])
     );
     assert_eq!(
         file["tracks"][2]["clips"][1]["effects"],
-        serde_json::json!([{"effect": "hue shift", "values": [90.0]}])
+        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [90.0]}])
     );
     // The text object as it begins, and the track of the text turned back.
     assert_eq!(
         file["tracks"][0]["clips"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift"}])
+        serde_json::json!([{"effect": "hue shift", "instance": 0}])
     );
     assert_eq!(
         file["tracks"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "values": [-30.0]}])
+        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [-30.0]}])
     );
 }
 
@@ -78,22 +79,12 @@ fn the_values_of_an_effect_that_are_turned_back_to_what_it_begins_with_are_left_
         .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
         .unwrap();
     project
-        .set_property_at(
-            AnimationTarget::Clip(clip),
-            PropertyId::HueShift,
-            turn(45.0),
-            TimelineFrameIndex::new(0),
-        )
+        .set_property_at(AnimationTarget::Clip(clip), HUE, turn(45.0), TimelineFrameIndex::new(0))
         .unwrap();
     assert!(saved(&project).contains("\"values\""));
 
     project
-        .set_property_at(
-            AnimationTarget::Clip(clip),
-            PropertyId::HueShift,
-            turn(0.0),
-            TimelineFrameIndex::new(0),
-        )
+        .set_property_at(AnimationTarget::Clip(clip), HUE, turn(0.0), TimelineFrameIndex::new(0))
         .unwrap();
 
     let text = saved(&project);
@@ -111,11 +102,8 @@ fn the_effects_of_clips_and_of_tracks_with_their_values_survive_a_trip_through_t
 
     assert_same_content(&loaded, &project);
     let clip_at = |track: usize, clip: usize| AnimationTarget::Clip(loaded.tracks()[track].entries()[clip].id());
-    let value_of_the_hue_shift_of = |target: AnimationTarget| {
-        loaded
-            .effects_of(target)
-            .and_then(|effects| effects.value_of(PropertyId::HueShift))
-    };
+    let value_of_the_hue_shift_of =
+        |target: AnimationTarget| loaded.effects_of(target).and_then(|effects| effects.value_of(HUE));
     assert_eq!(value_of_the_hue_shift_of(clip_at(2, 0)), Some(turn(0.0)));
     assert_eq!(value_of_the_hue_shift_of(clip_at(2, 1)), Some(turn(90.0)));
     assert_eq!(value_of_the_hue_shift_of(clip_at(0, 0)), Some(turn(0.0)));
@@ -136,17 +124,16 @@ fn the_keyframes_of_the_value_of_an_effect_survive_a_trip_through_the_text_even_
     let mut project = project_with_everything();
     let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
     let captions = AnimationTarget::Track(project.tracks()[0].id());
-    make_a_keyframe(&mut project, video, PropertyId::HueShift, 15, turn(-90.0));
-    make_a_keyframe(&mut project, video, PropertyId::HueShift, 75, turn(450.0));
-    make_a_keyframe(&mut project, captions, PropertyId::HueShift, 130, turn(10.0));
+    make_a_keyframe(&mut project, video, HUE, 15, turn(-90.0));
+    make_a_keyframe(&mut project, video, HUE, 75, turn(450.0));
+    make_a_keyframe(&mut project, captions, HUE, 130, turn(10.0));
 
     let loaded = project_from_json_text(&saved(&project)).unwrap();
 
     assert_same_content(&loaded, &project);
     assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
     let loaded_video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
-    let hue_at =
-        |frame: u64| loaded.property_value_at(loaded_video, PropertyId::HueShift, TimelineFrameIndex::new(frame));
+    let hue_at = |frame: u64| loaded.property_value_at(loaded_video, HUE, TimelineFrameIndex::new(frame));
     assert_eq!(hue_at(15), Some(turn(-90.0)));
     assert_eq!(hue_at(45), Some(turn(180.0)), "half way from -90 to 450");
     assert_eq!(
@@ -206,7 +193,7 @@ fn projects_made_at_random_with_effects_survive_a_trip_through_the_text() {
         with_animated_effects += usize::from(
             loaded
                 .located_racks()
-                .any(|located| located.rack.property().effect().is_some()),
+                .any(|located| located.rack.property().is_a_value_of_an_effect()),
         );
     }
     // (So that the projects made at random cannot stop having effects in them without this noticing.)
@@ -274,14 +261,59 @@ fn an_effect_that_there_is_not_is_refused_by_name_and_the_clip_or_track_is_named
 }
 
 #[test]
-fn an_effect_that_is_put_on_twice_is_refused() {
+fn two_effects_that_have_the_same_name_in_one_chain_are_refused_and_so_are_some_named_and_some_not() {
     let text = the_file_of_everything_with(|file| {
-        file["tracks"][0]["effects"] =
-            serde_json::json!([{"effect": "hue shift"}, {"effect": "hue shift", "values": [5.0]}]);
+        file["tracks"][0]["effects"] = serde_json::json!([
+            {"effect": "hue shift", "instance": 3},
+            {"effect": "hue shift", "instance": 3, "values": [5.0]}
+        ]);
     });
     let reason = reason_for_invalid_project(&text);
-    assert!(reason.contains("has the hue shift effect twice"), "{reason}");
+    assert!(reason.contains("two effects that are named effect 3"), "{reason}");
     assert!(reason.contains("track number 1"), "{reason}");
+
+    let text = the_file_of_everything_with(|file| {
+        file["tracks"][0]["effects"] = serde_json::json!([
+            {"effect": "hue shift", "instance": 0},
+            {"effect": "hue shift", "values": [5.0]}
+        ]);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(
+        reason.contains("some of its effects have a name in its chain and some have not"),
+        "{reason}"
+    );
+    assert!(reason.contains("track number 1"), "{reason}");
+}
+
+#[test]
+fn a_rack_of_keyframes_that_names_an_effect_that_the_thing_does_not_have_is_refused_by_the_name() {
+    let text = the_file_of_everything_with(|file| {
+        file["tracks"][2]["clips"][0]["drawer"] = serde_json::json!([
+            {"property": "hue shift", "effect": 5, "keyframes": [{"frame": 5, "value": 10.0}]}
+        ]);
+    });
+    let reason = reason_for_invalid_project(&text);
+    assert!(reason.contains("\"hue shift\" cannot be animated"), "{reason}");
+    assert!(
+        reason.contains("it does not have effect 5 that has a value of that name"),
+        "{reason}"
+    );
+    assert!(reason.contains("clip number 1 of track number 3"), "{reason}");
+
+    // A value that the effect named does not have is as bad, and so is the name of a property that a clip has itself.
+    for property in ["rotation", "turn"] {
+        let text = the_file_of_everything_with(|file| {
+            file["tracks"][2]["clips"][0]["drawer"] = serde_json::json!([
+                {"property": property, "effect": 0, "keyframes": [{"frame": 5, "value": 10.0}]}
+            ]);
+        });
+        let reason = reason_for_invalid_project(&text);
+        assert!(
+            reason.contains("it does not have effect 0 that has a value of that name"),
+            "{property}: {reason}"
+        );
+    }
 }
 
 #[test]
@@ -396,10 +428,10 @@ fn keyframes_of_an_effect_the_thing_has_are_accepted_wherever_they_are_kept() {
     let project = project_from_json_text(&text).unwrap();
 
     let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
-    assert!(project.is_animated(video, PropertyId::HueShift));
+    assert!(project.is_animated(video, HUE));
     // (The drawer of the text, which starts at frame 120 of the timeline, so its keyframes are at 125 and 141: 133 is half way.)
     assert_eq!(
-        project.property_value_at(video, PropertyId::HueShift, TimelineFrameIndex::new(133)),
+        project.property_value_at(video, HUE, TimelineFrameIndex::new(133)),
         Some(turn(55.0))
     );
     assert_eq!(project.problems_with_the_racks(), Vec::<String>::new());
@@ -412,13 +444,225 @@ fn an_effect_that_what_it_is_on_cannot_have_is_refused_whichever_effect_it_is() 
     let documents = || {
         vec![EffectDocument {
             effect: EffectKind::HueShift.name().to_owned(),
+            instance: None,
             values: Vec::new(),
         }]
     };
 
     let allowed = effects_from_documents(documents(), |_| true).unwrap();
-    assert!(allowed.contains(EffectKind::HueShift));
+    assert_eq!(allowed.len(), 1);
+    assert_eq!(allowed[0].kind(), EffectKind::HueShift);
 
     let reason = effects_from_documents(documents(), |_| false).unwrap_err();
     assert!(reason.contains("it cannot have the hue shift effect"), "{reason}");
+}
+
+// --- several effects of one kind ---
+
+/// The value of the hue shift that is named `number` in its chain.
+fn hue_of(number: u32) -> PropertyId {
+    PropertyId::effect_value(EffectKind::HueShift, crate::project::EffectInstanceId::new(number), 0)
+}
+
+/// The project of everything, with two more hue shifts on its first video (it has one, named 0, already): the effects 0, 1 and 2, turning by
+/// 0, 60 and -45 degrees, and keyframes of the values of the first and the third.
+fn project_with_three_hue_shifts_on_the_first_video() -> (Project, AnimationTarget) {
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    for degrees in [60.0, -45.0] {
+        let instance = project.add_effect(video, EffectKind::HueShift).unwrap();
+        project
+            .set_property_at(
+                video,
+                hue_of(instance.number()),
+                turn(degrees),
+                TimelineFrameIndex::new(0),
+            )
+            .unwrap();
+    }
+    make_a_keyframe(&mut project, video, hue_of(0), 15, turn(-90.0));
+    make_a_keyframe(&mut project, video, hue_of(0), 75, turn(450.0));
+    make_a_keyframe(&mut project, video, hue_of(2), 30, turn(100.0));
+    (project, video)
+}
+
+#[test]
+fn several_effects_of_one_kind_are_saved_each_with_its_name_and_values_and_come_back_as_they_were_in_the_same_order() {
+    let (project, _) = project_with_three_hue_shifts_on_the_first_video();
+
+    let file: serde_json::Value = serde_json::from_str(&saved(&project)).unwrap();
+
+    assert_eq!(
+        file["tracks"][2]["clips"][0]["effects"],
+        serde_json::json!([
+            {"effect": "hue shift", "instance": 0},
+            {"effect": "hue shift", "instance": 1, "values": [60.0]},
+            {"effect": "hue shift", "instance": 2, "values": [-45.0]}
+        ])
+    );
+    let loaded = project_from_json_text(&saved(&project)).unwrap();
+    assert_same_content(&loaded, &project);
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let chain = loaded.effects_of(video).unwrap();
+    assert_eq!(chain.len(), 3);
+    assert_eq!(
+        chain
+            .iter()
+            .map(|effect| effect.instance().number())
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert_eq!(chain.value_of(hue_of(1)), Some(turn(60.0)));
+    assert_eq!(chain.value_of(hue_of(2)), Some(turn(-45.0)));
+}
+
+#[test]
+fn the_keyframes_of_each_of_several_effects_of_one_kind_are_racks_that_say_which_effect_they_are_of_and_come_back_to_it()
+ {
+    let (project, _) = project_with_three_hue_shifts_on_the_first_video();
+
+    let file: serde_json::Value = serde_json::from_str(&saved(&project)).unwrap();
+
+    let racks = file["tracks"][2]["clips"][0]["drawer"].as_array().unwrap();
+    let keyframes_of_the_effect_named = |number: u32| {
+        racks
+            .iter()
+            .find(|rack| rack["property"] == "hue shift" && rack["effect"] == number)
+            .map(|rack| rack["keyframes"].clone())
+    };
+    assert_eq!(
+        keyframes_of_the_effect_named(0),
+        Some(serde_json::json!([{"frame": 15, "value": -90.0}, {"frame": 75, "value": 450.0}]))
+    );
+    assert_eq!(keyframes_of_the_effect_named(1), None, "the second has none");
+    assert_eq!(
+        keyframes_of_the_effect_named(2),
+        Some(serde_json::json!([{"frame": 30, "value": 100.0}]))
+    );
+    let loaded = project_from_json_text(&saved(&project)).unwrap();
+    assert_same_content(&loaded, &project);
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let at = |number: u32, frame: u64| loaded.property_value_at(video, hue_of(number), TimelineFrameIndex::new(frame));
+    assert_eq!(at(0, 45), Some(turn(180.0)), "half way from -90 to 450, of the first");
+    assert_eq!(at(1, 45), Some(turn(60.0)), "the second does not move");
+    assert_eq!(at(2, 5), Some(turn(100.0)), "the third has one keyframe: that");
+}
+
+#[test]
+fn the_names_of_the_effects_are_kept_by_the_file_when_they_are_not_the_first_numbers() {
+    let (mut project, video) = project_with_three_hue_shifts_on_the_first_video();
+    project
+        .remove_effect(video, crate::project::EffectInstanceId::new(0))
+        .unwrap();
+    project
+        .remove_effect(video, crate::project::EffectInstanceId::new(1))
+        .unwrap();
+    assert_eq!(
+        project
+            .effects_of(video)
+            .unwrap()
+            .iter()
+            .map(|effect| effect.instance().number())
+            .collect::<Vec<_>>(),
+        [2]
+    );
+
+    let loaded = project_from_json_text(&saved(&project)).unwrap();
+
+    assert_same_content(&loaded, &project);
+    let video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    assert_eq!(
+        loaded
+            .effects_of(video)
+            .unwrap()
+            .iter()
+            .map(|effect| effect.instance().number())
+            .collect::<Vec<_>>(),
+        [2],
+        "it is not given the name of the first"
+    );
+    assert_eq!(
+        loaded.property_value_at(video, hue_of(2), TimelineFrameIndex::new(5)),
+        Some(turn(100.0)),
+        "and its keyframes are still its own"
+    );
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+}
+
+/// The text of `project` as a file of version 10 had it: no effect has a name, and no rack says which effect its keyframes are of.
+fn saved_as_a_file_of_version_10(project: &Project) -> String {
+    fn take_out_what_version_11_added(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(object) => {
+                object.remove("instance");
+                if object.contains_key("property") {
+                    object.remove("effect");
+                }
+                object.values_mut().for_each(take_out_what_version_11_added);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(take_out_what_version_11_added),
+            _ => {}
+        }
+    }
+    let mut file: serde_json::Value = serde_json::from_str(&saved(project)).unwrap();
+    take_out_what_version_11_added(&mut file);
+    file["file_format_version"] = serde_json::json!(10);
+    serde_json::to_string_pretty(&file).unwrap()
+}
+
+#[test]
+fn a_file_of_version_10_names_no_effect_and_no_rack_names_one_and_is_read_as_the_project_it_was() {
+    // (One hue shift on each of the clips and the track that have one, with keyframes of the values of two of them, as version 10 had them.)
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let captions = AnimationTarget::Track(project.tracks()[0].id());
+    make_a_keyframe(&mut project, video, HUE, 15, turn(-90.0));
+    make_a_keyframe(&mut project, video, HUE, 75, turn(450.0));
+    make_a_keyframe(&mut project, captions, HUE, 130, turn(10.0));
+    let text = saved_as_a_file_of_version_10(&project);
+    assert!(text.contains(&version_line(10)), "{text}");
+    assert!(!text.contains("\"instance\""), "{text}");
+    assert!(
+        !text.contains("\"effect\": 0"),
+        "no rack says which effect it is of: {text}"
+    );
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    assert_same_content(&loaded, &project);
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+    let loaded_video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    assert_eq!(
+        loaded.property_value_at(loaded_video, HUE, TimelineFrameIndex::new(45)),
+        Some(turn(180.0)),
+        "the keyframes are those of the one hue shift there is"
+    );
+    assert!(
+        saved(&loaded).contains(&current_version_line()),
+        "it is saved in the layout of today"
+    );
+    assert!(
+        saved(&loaded).contains("\"instance\": 0"),
+        "with the effects named, in the order they were in"
+    );
+}
+
+#[test]
+fn a_file_of_version_10_that_has_two_effects_of_one_kind_names_them_in_the_order_they_are_in() {
+    // (Version 10 did not allow it, but a file that was edited by hand may: nothing is lost by reading it, as the order is all there is.)
+    let text = the_file_of_everything_with(|file| {
+        file["file_format_version"] = serde_json::json!(10);
+        file["tracks"][2]["clips"][0]["effects"] = serde_json::json!([
+            {"effect": "hue shift", "values": [10.0]},
+            {"effect": "hue shift", "values": [20.0]}
+        ]);
+    });
+
+    let project = project_from_json_text(&text).unwrap();
+
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    assert_eq!(project.effects_of(video).unwrap().len(), 2);
+    assert_eq!(project.effects_of(video).unwrap().value_of(hue_of(0)), Some(turn(10.0)));
+    assert_eq!(project.effects_of(video).unwrap().value_of(hue_of(1)), Some(turn(20.0)));
 }

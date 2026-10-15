@@ -7,9 +7,9 @@
 use super::tests::{THE_TRACK, clip_id, frame, picture, sound, text, track_of, video};
 use super::*;
 use crate::project::tracks::ids::TrackId;
-use crate::project::{Effect, EffectKind, Effects, PropertyId, PropertyValue};
+use crate::project::{Effect, EffectInstanceId, EffectKind, Effects, PropertyId, PropertyValue};
 
-const HUE: PropertyId = PropertyId::HueShift;
+const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
 
 fn turn(degrees: f32) -> PropertyValue {
     PropertyValue::Number(degrees)
@@ -48,18 +48,31 @@ fn a_track_and_its_clips_have_no_effects_when_they_are_made() {
 }
 
 #[test]
-fn a_track_has_an_effect_once_and_has_it_as_it_begins_and_takes_it_off() {
+fn a_track_has_an_effect_as_it_begins_and_another_of_its_kind_after_it_and_takes_each_off_by_its_name() {
     let mut track = Track::new(THE_TRACK, "track 0");
 
-    assert!(track.add_effect(EffectKind::HueShift));
-    assert!(track.effects().contains(EffectKind::HueShift));
+    assert_eq!(track.add_effect(EffectKind::HueShift), Some(EffectInstanceId::FIRST));
+    assert!(track.effects().has_the_instance(EffectInstanceId::FIRST));
     assert_eq!(track.effects().value_of(HUE), Some(turn(0.0)));
-    assert!(!track.add_effect(EffectKind::HueShift), "it has it already");
-    assert_eq!(track.effects().len(), 1);
+    assert_eq!(
+        track.add_effect(EffectKind::HueShift),
+        Some(EffectInstanceId::new(1)),
+        "another one, named after the first"
+    );
+    assert_eq!(track.effects().len(), 2);
 
-    assert!(track.remove_effect(EffectKind::HueShift));
+    assert!(track.remove_effect(EffectInstanceId::FIRST));
+    assert!(!track.effects().has_the_instance(EffectInstanceId::FIRST));
+    assert!(
+        track.effects().has_the_instance(EffectInstanceId::new(1)),
+        "the other is still on"
+    );
+    assert!(
+        !track.remove_effect(EffectInstanceId::FIRST),
+        "it did not have it any more"
+    );
+    assert!(track.remove_effect(EffectInstanceId::new(1)));
     assert!(track.effects().is_empty());
-    assert!(!track.remove_effect(EffectKind::HueShift), "it did not have it");
 }
 
 #[test]
@@ -69,14 +82,14 @@ fn a_clip_that_is_seen_can_have_an_effect_and_a_sound_cannot_and_nothing_is_chan
     for seen in [video_clip, picture_clip, text_clip] {
         assert_eq!(
             track.add_effect_to_the_clip(seen, EffectKind::HueShift),
-            Ok(true),
+            Ok(EffectInstanceId::FIRST),
             "{seen}"
         );
         assert_eq!(the_hue_shift_of(&track, seen), Some(turn(0.0)), "{seen}");
         assert_eq!(
             track.add_effect_to_the_clip(seen, EffectKind::HueShift),
-            Ok(false),
-            "{seen} has it already"
+            Ok(EffectInstanceId::new(1)),
+            "{seen} has it already, and this is another of its kind"
         );
     }
 
@@ -99,18 +112,18 @@ fn an_effect_is_taken_off_one_clip_and_the_others_keep_theirs() {
     }
 
     assert_eq!(
-        track.remove_effect_from_the_clip(picture_clip, EffectKind::HueShift),
+        track.remove_effect_from_the_clip(picture_clip, EffectInstanceId::FIRST),
         Ok(true)
     );
     assert_eq!(
-        track.remove_effect_from_the_clip(picture_clip, EffectKind::HueShift),
+        track.remove_effect_from_the_clip(picture_clip, EffectInstanceId::FIRST),
         Ok(false),
         "it was not there to take off"
     );
 
     assert!(effects_of(&track, picture_clip).is_empty());
-    assert!(effects_of(&track, video_clip).contains(EffectKind::HueShift));
-    assert!(effects_of(&track, text_clip).contains(EffectKind::HueShift));
+    assert!(effects_of(&track, video_clip).has_the_instance(EffectInstanceId::FIRST));
+    assert!(effects_of(&track, text_clip).has_the_instance(EffectInstanceId::FIRST));
 }
 
 #[test]
@@ -124,7 +137,7 @@ fn a_clip_that_is_not_there_is_named_in_the_error_of_each_edit_of_effects() {
         Err(error)
     );
     assert_eq!(
-        track.remove_effect_from_the_clip(not_there, EffectKind::HueShift),
+        track.remove_effect_from_the_clip(not_there, EffectInstanceId::FIRST),
         Err(error)
     );
     assert_eq!(

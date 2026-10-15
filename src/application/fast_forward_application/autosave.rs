@@ -23,32 +23,34 @@ impl FastForwardApplication {
     /// saved (undoing back to what was saved leaves none), or changes of what is not edited, such
     /// as the project's settings.
     pub fn has_unsaved_changes(&self) -> bool {
-        self.unsaved_change_outside_history || !self.history.is_saved()
+        self.document.unsaved_change_outside_history || !self.document.history.is_saved()
     }
 
     /// Records that the project has been changed, in a way that is not an edit of the history (a
     /// setting of the project, or the place a file was found), and is not saved yet.
     pub(super) fn note_unsaved_change(&mut self) {
-        self.unsaved_change_outside_history = true;
-        self.last_unsaved_change_at = Some(Instant::now());
+        self.document.unsaved_change_outside_history = true;
+        self.document.last_unsaved_change_at = Some(Instant::now());
     }
 
     /// Records that the project was edited, or that an edit was undone or redone, at `now`: it is
     /// the history that knows whether that leaves anything unsaved.
     pub(super) fn note_the_project_was_edited(&mut self, now: Instant) {
-        self.last_unsaved_change_at = Some(now);
+        self.document.last_unsaved_change_at = Some(now);
     }
 
     /// Records that the project is as saved.
     pub(super) fn note_everything_is_saved(&mut self) {
-        self.history.mark_saved();
-        self.unsaved_change_outside_history = false;
-        self.last_unsaved_change_at = None;
+        self.document.history.mark_saved();
+        self.document.unsaved_change_outside_history = false;
+        self.document.last_unsaved_change_at = None;
     }
 
     /// Whether autosave is on and the project has a file to save to.
     fn autosave_can_save(&self) -> bool {
-        self.effective_settings().autosave && self.project_file_path.is_some() && self.running_save.is_none()
+        self.effective_settings().autosave
+            && self.document.project_file_path.is_some()
+            && self.jobs.running_save.is_none()
     }
 
     /// Saves the project now if autosave is on, there is a file, and there is something to save.
@@ -58,12 +60,12 @@ impl FastForwardApplication {
         if !self.has_unsaved_changes() || !self.autosave_can_save() {
             return;
         }
-        let Some(path) = self.project_file_path.clone() else {
+        let Some(path) = self.document.project_file_path.clone() else {
             return;
         };
         // If saving fails the message says so once, and there is no new try until the project
         // changes again; trying again on every frame would only repeat the message.
-        self.last_unsaved_change_at = None;
+        self.document.last_unsaved_change_at = None;
         // (Saving a project that is an archive adds the text of the project to it and nothing else, so that this is quick however much
         // video is included in it.)
         self.save_project_to(path);
@@ -75,7 +77,7 @@ impl FastForwardApplication {
         if !self.has_unsaved_changes() || !self.autosave_can_save() {
             return;
         }
-        let Some(changed_at) = self.last_unsaved_change_at else {
+        let Some(changed_at) = self.document.last_unsaved_change_at else {
             return;
         };
         let quiet_for = now.saturating_duration_since(changed_at);

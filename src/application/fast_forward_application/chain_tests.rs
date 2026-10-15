@@ -8,6 +8,7 @@
 //! What the controls are called is written out in words here, and not taken from the constants of the code, so that these tests pin what the
 //! person sees.
 
+use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use egui::{PointerButton, Rect, Shape};
 use egui_kittest::kittest::Queryable;
 
@@ -19,7 +20,8 @@ use crate::application::selection::SelectionItem;
 use crate::application::theme;
 use crate::application::timeline_panel::GripDotArrangement;
 use crate::project::{
-    AnimationTarget, ChainRow, ClipId, EffectKind, GroupId, GroupKind, Member, PropertyId, PropertyValue, TrackId,
+    AnimationTarget, ChainRow, ClipId, EffectInstanceId, EffectKind, GroupId, GroupKind, Member, PropertyId,
+    PropertyValue, TrackId,
 };
 
 const HUE_SHIFT: &str = "Hue shift";
@@ -48,11 +50,13 @@ fn window_with_a_clip_that_is_in_a_tag_and_has_an_effect() -> (Window, ClipId, G
     let clips = the_three_clips(&window);
     let tag = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
     window
         .application_mut()
+        .document
         .project
         .add_effect(AnimationTarget::Clip(clips[0]), EffectKind::HueShift)
         .unwrap();
@@ -313,6 +317,7 @@ fn window_with_a_track_that_has_an_effect_and_a_clip_of_it_selected() -> (Window
     let track = window.application().project().tracks()[0].id();
     window
         .application_mut()
+        .document
         .project
         .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
         .unwrap();
@@ -379,6 +384,7 @@ fn the_badge_of_the_track_can_be_dragged_above_the_effects_of_the_clip_and_is_ke
     let (mut window, clip, _) = window_with_a_track_that_has_an_effect_and_a_clip_of_it_selected();
     window
         .application_mut()
+        .document
         .project
         .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
         .unwrap();
@@ -412,6 +418,7 @@ fn window_with_a_clip_that_is_in_a_clip_group() -> (Window, ClipId, GroupId) {
     let clips = the_three_clips(&window);
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
@@ -427,6 +434,7 @@ fn the_clip_group_a_clip_is_in_has_its_badge_last_in_the_chain_with_no_dots_beca
     let (mut window, clip, group) = window_with_a_clip_that_is_in_a_clip_group();
     window
         .application_mut()
+        .document
         .project
         .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
         .unwrap();
@@ -467,6 +475,7 @@ fn the_badge_of_the_clip_group_cannot_be_dragged_and_nothing_can_be_dragged_past
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_clip_group();
     window
         .application_mut()
+        .document
         .project
         .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
         .unwrap();
@@ -520,6 +529,7 @@ fn a_track_that_is_in_a_track_group_has_the_badge_of_the_group_last_in_its_chain
         .collect();
     window
         .application_mut()
+        .document
         .project
         .create_group(
             GroupKind::TrackGroup,
@@ -559,7 +569,7 @@ fn the_value_of_the_hue_shift_of_the_group(window: &Window, group: GroupId) -> O
         .effects()
         .iter()
         .find(|effect| effect.kind() == EffectKind::HueShift)
-        .and_then(|effect| match effect.value_of(PropertyId::HueShift) {
+        .and_then(|effect| match effect.value_of(HUE) {
             Some(PropertyValue::Number(degrees)) => Some(*degrees),
             _ => None,
         })
@@ -634,6 +644,7 @@ fn a_clip_group_and_a_track_group_have_the_plus_button_too() {
     let track = window.application().project().tracks()[0].id();
     let track_group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::TrackGroup, &[Member::Track(track)])
         .unwrap();
@@ -649,6 +660,7 @@ fn an_effect_of_a_group_is_dragged_by_its_heading_like_any_other_and_a_group_in_
     let clips = the_three_clips(&window);
     let tag = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::Tag, &[Member::Group(group), Member::Clip(clips[2])])
         .unwrap();
@@ -695,6 +707,7 @@ fn the_tab_key_does_not_stop_at_a_badge_or_at_the_heading_of_the_box_of_an_effec
     let track = window.application().project().tracks()[0].id();
     window
         .application_mut()
+        .document
         .project
         .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
         .unwrap();
@@ -732,4 +745,65 @@ fn the_tab_key_does_not_stop_at_the_bar_of_the_box_of_a_group_either() {
     let on_the_bar = middle_of(&window, "Tag");
 
     assert!(!tab_ever_stops_at_what_has(&mut window, on_the_bar));
+}
+
+#[test]
+fn dragging_the_second_of_two_hue_shifts_above_the_first_puts_it_first_with_the_values_it_has_and_is_one_step_of_the_history()
+ {
+    let (mut window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
+    let target = AnimationTarget::Clip(clip);
+    let second = window
+        .application_mut()
+        .document
+        .project
+        .add_effect(target, EffectKind::HueShift)
+        .unwrap();
+    for (instance, degrees) in [(EffectInstanceId::FIRST, 10.0), (second, 20.0)] {
+        window
+            .application_mut()
+            .document
+            .project
+            .set_property_at(
+                target,
+                PropertyId::effect_value(EffectKind::HueShift, instance, 0),
+                PropertyValue::Number(degrees),
+                crate::project::TimelineFrameIndex::new(0),
+            )
+            .unwrap();
+    }
+    window.application_mut().note_everything_is_saved();
+    window.settle();
+    let order = |window: &Window| -> Vec<(EffectInstanceId, PropertyValue)> {
+        window
+            .application()
+            .project()
+            .effects_of(target)
+            .unwrap()
+            .iter()
+            .map(|effect| (effect.instance(), effect.values()[0].clone()))
+            .collect()
+    };
+    assert_eq!(
+        order(&window),
+        [
+            (EffectInstanceId::FIRST, PropertyValue::Number(10.0)),
+            (second, PropertyValue::Number(20.0))
+        ]
+    );
+    let from = middle_of(&window, "Hue shift 2");
+    let above_the_first = middle_of(&window, "Hue shift 1") - egui::vec2(0.0, 12.0);
+
+    window.drag(from, above_the_first, PointerButton::Primary);
+
+    assert_eq!(
+        order(&window),
+        [
+            (second, PropertyValue::Number(20.0)),
+            (EffectInstanceId::FIRST, PropertyValue::Number(10.0))
+        ],
+        "the second is first now, and each has its own values"
+    );
+    assert!(window.application().has_unsaved_changes());
+    undo(&mut window);
+    assert_eq!(order(&window)[0].0, EffectInstanceId::FIRST, "one step puts it back");
 }

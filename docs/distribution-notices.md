@@ -15,7 +15,7 @@ include, so that it is not found out on the day.
 | `LICENSE` | the GNU General Public License, version 3 |
 | `LICENSE-PLUGIN-CLARIFICATION` | the copyright holder's clarification about plugins (adopted 2026-10-15) |
 | `LICENSES/` | the texts of the licences named in the SPDX lines (`reuse lint` checks that every file has one) |
-| `THIRD_PARTY.md` | the Rust libraries and their licences, made by `cargo about generate about.hbs > THIRD_PARTY.md`; CI fails if it is out of date |
+| `THIRD_PARTY.md` | the Rust libraries and their licences, made by `cargo about generate about.hbs | tr -d '\r' > THIRD_PARTY.md`; CI fails if it is out of date |
 | `deny.toml` | which licences, sources and advisories are accepted (`cargo deny check`; CI) |
 | `assets/fonts/Hack-Regular-license.txt` | the licence of the font the program draws with (Hack: MIT; Bitstream Vera) |
 

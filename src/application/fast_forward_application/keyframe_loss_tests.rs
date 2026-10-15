@@ -75,7 +75,7 @@ fn keyframes(window: &Window) -> usize {
 
 /// The question that is open, and how many keyframes it says would be lost.
 fn the_question_open(window: &Window) -> Option<(Command, usize)> {
-    match &window.application().dialog {
+    match &window.application().interface.dialog {
         Some(Dialog::ConfirmLosingKeyframes { change, how_many }) => Some(((**change).clone(), *how_many)),
         _ => None,
     }
@@ -108,7 +108,7 @@ fn a_clip_asked_to_last_less_is_made_to_without_a_question_while_it_has_a_frame_
 
     window.do_this(Command::SetClipDuration { clip: text, frames: 4 });
 
-    assert_eq!(window.application().dialog, None);
+    assert_eq!(window.application().interface.dialog, None);
     assert_eq!(duration_of(&window, text), 4);
     assert_eq!(keyframes(&window), 4, "none is lost: they are a frame apart now");
     assert!(window.application().has_unsaved_changes());
@@ -277,7 +277,7 @@ fn a_change_that_does_not_lose_anything_is_never_asked_about_whatever_it_is() {
         },
     ] {
         window.do_this(command.clone());
-        assert_eq!(window.application().dialog, None, "{command:?}");
+        assert_eq!(window.application().interface.dialog, None, "{command:?}");
     }
     assert_eq!(
         keyframes(&window),
@@ -296,7 +296,7 @@ fn agreeing_makes_the_change_and_loses_the_keyframes_and_undoing_it_brings_them_
 
     agree(&mut window);
 
-    assert_eq!(window.application().dialog, None);
+    assert_eq!(window.application().interface.dialog, None);
     assert_eq!(duration_of(&window, text), 3);
     assert_eq!(keyframes(&window), 3);
     assert!(window.application().has_unsaved_changes());
@@ -320,13 +320,13 @@ fn cancelling_changes_nothing_and_neither_does_closing_the_question_with_escape(
 
     window.do_this(Command::SetClipDuration { clip: text, frames: 3 });
     cancel(&mut window);
-    assert_eq!(window.application().dialog, None);
+    assert_eq!(window.application().interface.dialog, None);
     assert_eq!(window.application().project(), &before);
 
     window.do_this(Command::SetClipDuration { clip: text, frames: 3 });
     assert!(the_question_open(&window).is_some());
     window.press_key(Key::Escape);
-    assert_eq!(window.application().dialog, None, "closed");
+    assert_eq!(window.application().interface.dialog, None, "closed");
     assert_eq!(window.application().project(), &before);
     assert!(!window.application().has_unsaved_changes());
 }
@@ -370,7 +370,7 @@ fn while_the_question_is_open_what_is_asked_for_by_a_gesture_that_is_still_going
 #[test]
 fn a_question_that_is_open_already_is_not_replaced_by_this_one_and_nothing_is_lost_behind_it() {
     let (mut window, text) = window_with_a_text_object_turned_at(&[0, 10, 20, 30]);
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "A message".to_owned(),
         text: "Something to read".to_owned(),
     });
@@ -379,7 +379,7 @@ fn a_question_that_is_open_already_is_not_replaced_by_this_one_and_nothing_is_lo
     window.do_this(Command::SetClipDuration { clip: text, frames: 3 });
 
     assert!(
-        matches!(window.application().dialog, Some(Dialog::Message { .. })),
+        matches!(window.application().interface.dialog, Some(Dialog::Message { .. })),
         "it is still there"
     );
     assert_eq!(window.application().project(), &before);
@@ -389,12 +389,16 @@ fn a_question_that_is_open_already_is_not_replaced_by_this_one_and_nothing_is_lo
 fn the_question_stops_the_playback_so_that_it_does_not_go_on_unseen_behind_it() {
     let (mut window, text) = window_with_a_text_object_turned_at(&[0, 10, 20, 30]);
     let total = window.application().project().total_frame_count();
-    window.application_mut().clock.play(std::time::Instant::now(), total);
-    assert!(window.application().clock.is_playing());
+    window
+        .application_mut()
+        .playback
+        .clock
+        .play(std::time::Instant::now(), total);
+    assert!(window.application().playback.clock.is_playing());
 
     window.do_this(Command::SetClipDuration { clip: text, frames: 3 });
 
-    assert!(!window.application().clock.is_playing());
+    assert!(!window.application().playback.clock.is_playing());
 }
 
 #[test]
@@ -521,7 +525,11 @@ fn putting_a_clip_on_a_track_that_plays_so_fast_that_it_has_fewer_frames_than_ke
         track: fast,
         speed_factor: speed(100),
     });
-    assert_eq!(window.application().dialog, None, "an empty track loses nothing");
+    assert_eq!(
+        window.application().interface.dialog,
+        None,
+        "an empty track loses nothing"
+    );
     let before = the_project_now(&window);
     let moves = vec![ClipMove {
         clip: video,
@@ -554,7 +562,7 @@ fn moving_a_clip_to_a_track_that_plays_at_the_same_speed_is_not_asked_about_howe
         start: frame(10),
     }]));
 
-    assert_eq!(window.application().dialog, None);
+    assert_eq!(window.application().interface.dialog, None);
     assert_eq!(window.application().project().track_holding(video).unwrap().id(), other);
     assert_eq!(keyframes(&window), 9);
 }

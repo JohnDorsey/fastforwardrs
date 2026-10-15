@@ -14,8 +14,8 @@ use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ChainItemKey, ClipId, ClipMove, ClipSide, EffectKind, GroupColour, GroupId, GroupKind, Member,
-    Project, TimelineFrameIndex, TrackId, TrackSide,
+    AnimationTarget, ChainItemKey, ClipId, ClipMove, ClipSide, Effect, EffectInstanceId, EffectKind, GroupColour,
+    GroupId, GroupKind, Member, Project, TimelineFrameIndex, TrackId, TrackSide,
 };
 use crate::test_support::DeterministicRandomNumbers;
 
@@ -220,12 +220,19 @@ impl Fuzz {
             }
             13 => {
                 let groups = self.groups(None);
+                let group = self.some(&groups)?;
+                let on_it: Vec<EffectInstanceId> = self
+                    .project()
+                    .group(group)?
+                    .effects()
+                    .iter()
+                    .map(Effect::instance)
+                    .collect();
+                // (One that is not on it, when none is: the command is refused, and the project is as it was.)
+                let instance = self.some(&on_it).unwrap_or(EffectInstanceId::FIRST);
                 (
                     "take an effect off a group",
-                    Command::RemoveGroupEffect {
-                        group: self.some(&groups)?,
-                        kind: EffectKind::HueShift,
-                    },
+                    Command::RemoveGroupEffect { group, instance },
                 )
             }
             14 => {
@@ -234,6 +241,19 @@ impl Fuzz {
                 } else {
                     AnimationTarget::Clip(self.some(&clips)?)
                 };
+                if self.below(3) == 0 {
+                    let on_it: Vec<EffectInstanceId> = self
+                        .project()
+                        .effects_of(target)?
+                        .iter()
+                        .map(Effect::instance)
+                        .collect();
+                    let instance = self.some(&on_it).unwrap_or(EffectInstanceId::FIRST);
+                    return Some((
+                        "take an effect off a clip or a track",
+                        Command::RemoveEffect { target, instance },
+                    ));
+                }
                 (
                     "put an effect on a clip or a track",
                     Command::AddEffect {
@@ -356,7 +376,7 @@ impl Fuzz {
     /// (it goes away), and what was refused is told by the project being as it was.
     fn do_it(&mut self, command: Command) {
         self.window.do_this_and_draw_nothing(command);
-        self.window.application_mut().dialog = None;
+        self.window.application_mut().interface.dialog = None;
         self.window.harness.step();
     }
 

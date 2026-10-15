@@ -45,9 +45,9 @@ pub enum KeyframeButton {
 }
 
 /// The name a button is known by to screen readers (and the tests): the stopwatch says what it does, which is the other thing
-/// when there is a keyframe at the playhead already (`has_one_here`).
-pub fn keyframe_button_label(property: PropertyId, button: KeyframeButton, has_one_here: bool) -> String {
-    let name = property.name();
+/// when there is a keyframe at the playhead already (`has_one_here`). `name` is what the property is called, in lower case (see
+/// [`crate::application::naming::name_of_a_property_of`]).
+pub fn keyframe_button_label(name: &str, button: KeyframeButton, has_one_here: bool) -> String {
     match (button, has_one_here) {
         (KeyframeButton::Before, _) => format!("Previous keyframe of {name}"),
         (KeyframeButton::After, _) => format!("Next keyframe of {name}"),
@@ -108,8 +108,8 @@ fn rectangles_of_the_buttons(row: Rect) -> [Rect; 3] {
 }
 
 /// Makes the three buttons of `here` in the room at the right end of `row`, and draws them if `shown` (the pointer is over the
-/// row). A button that is clicked adds a command.
-pub(super) fn show(ui: &mut Ui, row: Rect, here: &KeyframesHere, shown: bool, commands: &mut Vec<Command>) {
+/// row). A button that is clicked adds a command. `name` is what the property is called, in lower case.
+pub(super) fn show(ui: &mut Ui, row: Rect, here: &KeyframesHere, name: &str, shown: bool, commands: &mut Vec<Command>) {
     let [before, stopwatch, after] = rectangles_of_the_buttons(row);
     let enabled = ui.is_enabled();
     let property = here.property;
@@ -125,7 +125,7 @@ pub(super) fn show(ui: &mut Ui, row: Rect, here: &KeyframesHere, shown: bool, co
     ];
     for (button, rectangle, can_be_used) in buttons {
         let can_be_used = can_be_used && enabled;
-        let label = keyframe_button_label(property, button, here.has_one_here);
+        let label = keyframe_button_label(name, button, here.has_one_here);
         let id = ui.id().with(("keyframe button", here.target, property, button));
         let response = ui.interact(rectangle, id, if can_be_used { Sense::CLICK } else { Sense::hover() });
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, can_be_used, label.clone()));

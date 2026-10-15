@@ -13,13 +13,16 @@ use std::path::Path;
 use fastforwardrs::colour_effects::ColourMatrix;
 use fastforwardrs::media::{FfmpegToolchain, probe_source_media};
 use fastforwardrs::project::{
-    AnimationTarget, ClipId, EffectKind, GroupId, GroupKind, Member, Project, PropertyId, PropertyValue, SourceMedia,
-    SourceMediaIdentifier, SourceMediaLink, TextColour, TextObject, TimelineFrameIndex,
+    AnimationTarget, ClipId, EffectInstanceId, EffectKind, GroupId, GroupKind, Member, Project, PropertyId,
+    PropertyValue, SourceMedia, SourceMediaIdentifier, SourceMediaLink, TextColour, TextObject, TimelineFrameIndex,
 };
 use support::{
     DecodedVideo, decode_video, export, export_with_text_pictures, make_a_keyframe,
     project_with_a_picture_over_a_video, scratch_directory, solid_text_picture,
 };
+
+/// The one value of the hue shift, when the hue shift is the first effect of its clip, track or group (as it is in every project here).
+const HUE: PropertyId = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 0);
 
 const WIDTH: usize = 320;
 const HEIGHT: usize = 180;
@@ -55,16 +58,19 @@ fn project_of_a_flat_colour_video(
     (project, clip)
 }
 
-fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) {
-    project.add_effect(target, EffectKind::HueShift).unwrap();
+/// Puts a hue shift on `target`, turned by `degrees`, and gives the value of it as a property (which is `HUE` when it is the first).
+fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) -> PropertyId {
+    let instance = project.add_effect(target, EffectKind::HueShift).unwrap();
+    let value = PropertyId::effect_value(EffectKind::HueShift, instance, 0);
     project
         .set_property_at(
             target,
-            PropertyId::HueShift,
+            value,
             PropertyValue::Number(degrees),
             TimelineFrameIndex::new(0),
         )
         .unwrap();
+    value
 }
 
 /// The colour that `colour` becomes when the hue is turned by `degrees`, by the arithmetic of the effect.
@@ -183,6 +189,45 @@ fn the_hue_shifts_of_a_clip_and_of_its_track_are_both_done() {
 }
 
 #[test]
+fn two_hue_shifts_of_one_clip_are_both_done_and_turn_the_colours_by_both_turns() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let first = put_a_hue_shift_on(&mut project, AnimationTarget::Clip(clip), 70.0);
+    let second = put_a_hue_shift_on(&mut project, AnimationTarget::Clip(clip), 50.0);
+    assert_ne!(first, second, "they are two effects");
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "two_hue_shifts.mp4");
+
+    assert_every_picture_is(&decoded, turned(ORANGE, 120.0), "70 degrees and then 50, of one clip");
+}
+
+#[test]
+fn the_keyframes_of_the_second_of_two_hue_shifts_turn_the_colours_by_what_the_second_says_on_top_of_the_first() {
+    let toolchain = toolchain_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let target = AnimationTarget::Clip(clip);
+    put_a_hue_shift_on(&mut project, target, 30.0);
+    let second = put_a_hue_shift_on(&mut project, target, 0.0);
+    make_a_keyframe(&mut project, target, second, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, target, second, 59, PropertyValue::Number(177.0));
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "second_hue_shift_animated.mp4");
+
+    assert_eq!(decoded.pictures.len(), 60);
+    for (number, picture) in decoded.pictures.iter().enumerate() {
+        // (The first is 30 degrees all the time, and the second goes three degrees a frame.)
+        let wanted = turned(ORANGE, 30.0 + 3.0 * number as f32);
+        assert_near(
+            colour_at(picture, WIDTH / 2, HEIGHT / 2),
+            wanted,
+            &format!("frame {number}"),
+        );
+    }
+}
+
+#[test]
 fn only_the_clip_that_has_the_effect_has_its_colours_turned() {
     let toolchain = toolchain_or_skip!();
     let scratch = scratch_directory();
@@ -213,20 +258,8 @@ fn a_hue_shift_with_keyframes_turns_the_colours_a_little_more_at_each_frame() {
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let target = AnimationTarget::Clip(clip);
     project.add_effect(target, EffectKind::HueShift).unwrap();
-    make_a_keyframe(
-        &mut project,
-        target,
-        PropertyId::HueShift,
-        0,
-        PropertyValue::Number(0.0),
-    );
-    make_a_keyframe(
-        &mut project,
-        target,
-        PropertyId::HueShift,
-        59,
-        PropertyValue::Number(177.0),
-    );
+    make_a_keyframe(&mut project, target, HUE, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, target, HUE, 59, PropertyValue::Number(177.0));
 
     let decoded = exported(&toolchain, &project, scratch.path(), "animated_hue.mp4");
 
@@ -363,7 +396,7 @@ fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
 fn put_a_hue_shift_on_the_group(project: &mut Project, group: GroupId, degrees: f32) {
     project.add_effect_to_the_group(group, EffectKind::HueShift).unwrap();
     project
-        .set_effect_value_of_the_group(group, PropertyId::HueShift, &PropertyValue::Number(degrees))
+        .set_effect_value_of_the_group(group, HUE, &PropertyValue::Number(degrees))
         .unwrap();
 }
 

@@ -3,13 +3,14 @@
 
 //! What things are called to the person editing: a clip by the kind of thing it is and what tells it from the others of its
 //! kind (the name of its file, the beginning of its words), a property of it by its name, and a rack of keyframes by what
-//! it animates.
+//! it animates. (An effect, and a value of an effect, that has others of its kind in the same chain is told from them by a number: "Hue
+//! shift 2", the second of the hue shifts, counting in the order they are applied in. Where there is only one it has none.)
 
 use std::collections::HashMap;
 
 use super::timeline_panel::SourceLook;
 use crate::project::{
-    AnimationTarget, Clip, ClipId, ClipKind, EffectKind, Group, Member, Project, PropertyId, Rack,
+    AnimationTarget, Clip, ClipId, ClipKind, Effect, EffectKind, Effects, Group, Member, Project, PropertyId, Rack,
     SourceMediaIdentifier, format_timecode,
 };
 
@@ -63,14 +64,42 @@ fn with_a_capital_letter(name: &str) -> String {
     }
 }
 
-/// What a property is called: its name, with a capital letter.
-pub fn what_a_property_is_called(property: PropertyId) -> String {
-    with_a_capital_letter(property.name())
+/// `name`, and when `chain` has several effects of the kind of the effect named `instance`, which of them that is: "hue shift 2".
+fn with_its_place_among_its_kind(
+    name: &str,
+    chain: Option<&Effects>,
+    instance: Option<crate::project::EffectInstanceId>,
+) -> String {
+    match instance.and_then(|instance| chain?.place_among_its_kind(instance)) {
+        Some((place, of)) if of > 1 => format!("{name} {place}"),
+        _ => name.to_owned(),
+    }
+}
+
+/// What a property of the clip or the track `target` is called, in lower case: its name, and for the value of an effect of which there are
+/// several of its kind on `target`, which one that is ("hue shift 2").
+pub fn name_of_a_property_of(project: &Project, target: AnimationTarget, property: PropertyId) -> String {
+    with_its_place_among_its_kind(property.name(), project.effects_of(target), property.effect_instance())
+}
+
+/// What a property of the clip or the track `target` is called: [`name_of_a_property_of`], with a capital letter.
+pub fn what_a_property_of_is_called(project: &Project, target: AnimationTarget, property: PropertyId) -> String {
+    with_a_capital_letter(&name_of_a_property_of(project, target, property))
 }
 
 /// What a kind of effect is called: its name, with a capital letter.
 pub fn what_an_effect_is_called(kind: EffectKind) -> String {
     with_a_capital_letter(kind.name())
+}
+
+/// What the effect `effect` is called in the chain `chain` (which it is in): [`what_an_effect_is_called`], and when the chain has several of
+/// its kind, which one it is ("Hue shift 2").
+pub fn what_an_effect_in_a_chain_is_called(chain: &Effects, effect: &Effect) -> String {
+    with_its_place_among_its_kind(
+        &what_an_effect_is_called(effect.kind()),
+        Some(chain),
+        Some(effect.instance()),
+    )
 }
 
 /// What a clip or a track is called, in a few words: a clip by what tells it from the others of its kind, or if nothing does
@@ -132,7 +161,7 @@ pub fn what_a_rack_is_called(
     in_the_drawer_of: AnimationTarget,
     source_looks: &SourceLooks<'_>,
 ) -> String {
-    let property = what_a_property_is_called(rack.property());
+    let property = what_a_property_of_is_called(project, rack.target(), rack.property());
     if rack.target() == in_the_drawer_of {
         return property;
     }
@@ -148,23 +177,129 @@ mod tests {
 
     use super::*;
     use crate::project::{
-        FrameRate, SourceMedia, SourceMediaLink, SourceVideoProperties, TextObject, TimelineFrameIndex, TrackId,
+        EffectInstanceId, FrameRate, RackId, SourceMedia, SourceMediaLink, SourceVideoProperties, TextObject,
+        TimelineFrameIndex, TrackId,
     };
 
-    #[test]
-    fn a_property_is_called_by_its_name_with_a_capital() {
-        assert_eq!(what_a_property_is_called(PropertyId::Gain), "Gain");
-        assert_eq!(what_a_property_is_called(PropertyId::FontSize), "Font size");
-        assert_eq!(what_a_property_is_called(PropertyId::Rotation), "Rotation");
+    /// A project whose one track has a text object, and on it as many hue shifts as `effects_on_the_clip` says. (And the target that is the
+    /// clip.)
+    fn project_with_hue_shifts(effects_on_the_clip: usize) -> (Project, AnimationTarget) {
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let (clip, _) = project
+            .insert_text(track, TimelineFrameIndex::new(0), TextObject::default(), 30)
+            .unwrap();
+        for _ in 0..effects_on_the_clip {
+            project
+                .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+                .unwrap();
+        }
+        (project, AnimationTarget::Clip(clip))
+    }
+
+    fn hue_of(number: u32) -> PropertyId {
+        PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(number), 0)
     }
 
     #[test]
-    fn every_property_has_a_name_that_starts_with_a_capital_and_is_otherwise_its_own() {
-        for property in PropertyId::ALL {
-            let called = what_a_property_is_called(property);
+    fn a_property_is_called_by_its_name_with_a_capital() {
+        let (project, target) = project_with_hue_shifts(0);
+        let called = |property| what_a_property_of_is_called(&project, target, property);
+        assert_eq!(called(PropertyId::Gain), "Gain");
+        assert_eq!(called(PropertyId::FontSize), "Font size");
+        assert_eq!(called(PropertyId::Rotation), "Rotation");
+    }
+
+    #[test]
+    fn every_property_has_a_name_that_starts_with_a_capital_and_is_otherwise_its_own_when_there_is_one_effect_of_each_kind()
+     {
+        let (project, target) = project_with_hue_shifts(1);
+        for property in crate::test_support::properties_of_every_kind() {
+            let called = what_a_property_of_is_called(&project, target, property);
             assert!(called.chars().next().unwrap().is_uppercase(), "{called}");
             assert_eq!(called.to_lowercase(), property.name());
+            assert_eq!(name_of_a_property_of(&project, target, property), property.name());
         }
+    }
+
+    #[test]
+    fn the_values_of_several_effects_of_one_kind_are_told_apart_by_which_of_them_they_are_counting_from_one() {
+        let (project, target) = project_with_hue_shifts(3);
+
+        assert_eq!(name_of_a_property_of(&project, target, hue_of(0)), "hue shift 1");
+        assert_eq!(name_of_a_property_of(&project, target, hue_of(1)), "hue shift 2");
+        assert_eq!(name_of_a_property_of(&project, target, hue_of(2)), "hue shift 3");
+        assert_eq!(what_a_property_of_is_called(&project, target, hue_of(1)), "Hue shift 2");
+        assert_eq!(
+            name_of_a_property_of(&project, target, hue_of(7)),
+            "hue shift",
+            "one that is not in the chain has no place in it to say"
+        );
+        assert_eq!(
+            name_of_a_property_of(&project, target, PropertyId::Rotation),
+            "rotation",
+            "what is not a value of an effect has no number"
+        );
+    }
+
+    #[test]
+    fn when_the_other_effects_of_its_kind_are_gone_an_effect_is_called_by_its_name_alone_again() {
+        let (mut project, target) = project_with_hue_shifts(2);
+        assert_eq!(name_of_a_property_of(&project, target, hue_of(1)), "hue shift 2");
+
+        project.remove_effect(target, EffectInstanceId::FIRST).unwrap();
+
+        assert_eq!(
+            name_of_a_property_of(&project, target, hue_of(1)),
+            "hue shift",
+            "the first is gone: it is the only hue shift, and the second is not counted from where it was"
+        );
+    }
+
+    #[test]
+    fn a_rack_is_told_from_the_others_by_the_chain_of_what_it_is_of_and_not_by_that_of_the_drawer_it_is_in() {
+        let (mut project, with_two) = project_with_hue_shifts(2);
+        let track = project.tracks()[0].id();
+        let (without_any, _) = project
+            .insert_text(track, TimelineFrameIndex::new(100), TextObject::default(), 30)
+            .unwrap();
+        let without_any = AnimationTarget::Clip(without_any);
+        let rack = Rack::new(RackId::new(track, 0), with_two, hue_of(1));
+        let looks = SourceLooks::new();
+
+        assert_eq!(
+            what_a_rack_is_called(&project, &rack, with_two, &looks),
+            "Hue shift 2",
+            "in the drawer of what it is of"
+        );
+        let in_another_drawer = what_a_rack_is_called(&project, &rack, without_any, &looks);
+        assert!(
+            in_another_drawer.starts_with("Hue shift 2 of "),
+            "it is the second hue shift of what it is of, whatever the drawer has: {in_another_drawer}"
+        );
+    }
+
+    #[test]
+    fn an_effect_in_a_chain_is_called_by_its_kind_and_which_of_its_kind_it_is_when_the_chain_has_several() {
+        let (project, target) = project_with_hue_shifts(2);
+        let chain = project.effects_of(target).unwrap();
+        let called: Vec<String> = chain
+            .iter()
+            .map(|effect| what_an_effect_in_a_chain_is_called(chain, effect))
+            .collect();
+        assert_eq!(called, ["Hue shift 1", "Hue shift 2"]);
+
+        let (alone, target) = project_with_hue_shifts(1);
+        let chain = alone.effects_of(target).unwrap();
+        assert_eq!(
+            what_an_effect_in_a_chain_is_called(chain, chain.iter().next().unwrap()),
+            "Hue shift"
+        );
+        assert_eq!(
+            what_an_effect_is_called(EffectKind::HueShift),
+            "Hue shift",
+            "the menu has no number"
+        );
     }
 
     #[test]

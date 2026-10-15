@@ -253,6 +253,7 @@ fn f_frames_a_keyframe_by_a_second_of_the_timeline_and_a_rack_by_the_frames_its_
         .map(|frame| {
             window
                 .application_mut()
+                .document
                 .project
                 .add_keyframe(target, PropertyId::Gain, TimelineFrameIndex::new(frame))
                 .unwrap()
@@ -299,7 +300,7 @@ fn f_with_nothing_selected_leaves_the_timeline_as_it_is_and_so_does_a_track_that
     let mut window = window_with_clips_ending_at_100_150_200_and_300();
     window.move_pointer_to(window.strip_of_track(1).center());
     let before = (
-        window.application().timeline_view.scroll_offset,
+        window.application().interface.timeline_view.scroll_offset,
         window.x_of_frame_on_the_strip(1, 100),
         window.x_of_frame_on_the_strip(1, 200),
     );
@@ -307,7 +308,7 @@ fn f_with_nothing_selected_leaves_the_timeline_as_it_is_and_so_does_a_track_that
     window.press_key(Key::F);
     assert_eq!(
         (
-            window.application().timeline_view.scroll_offset,
+            window.application().interface.timeline_view.scroll_offset,
             window.x_of_frame_on_the_strip(1, 100),
             window.x_of_frame_on_the_strip(1, 200)
         ),
@@ -371,7 +372,7 @@ fn f_with_the_pointer_over_the_preview_makes_the_picture_fit_the_panel_like_the_
     let mut window = Window::showing(project_with_a_video_and_a_sound(300, 5));
     zoom_the_preview_in(&mut window);
     assert!(the_picture_of_the_preview_is_zoomed(&window), "the setup: it is zoomed");
-    let timeline_before = window.application().timeline_view.scroll_offset;
+    let timeline_before = window.application().interface.timeline_view.scroll_offset;
     window.click(window.middle_of_the_strip_at(0, 60)); // something is selected: it is not what F is about here
     window.move_pointer_to(window.the_preview_panel().center());
 
@@ -382,7 +383,7 @@ fn f_with_the_pointer_over_the_preview_makes_the_picture_fit_the_panel_like_the_
         "the button is gone: it fits"
     );
     assert_eq!(
-        window.application().timeline_view.scroll_offset,
+        window.application().interface.timeline_view.scroll_offset,
         timeline_before,
         "the timeline was left alone"
     );

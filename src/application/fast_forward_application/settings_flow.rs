@@ -13,7 +13,10 @@ impl FastForwardApplication {
     /// The settings in effect for the project being edited: its own where it has set them, the
     /// global ones everywhere else.
     pub(super) fn effective_settings(&self) -> Settings {
-        self.project.settings().resolve(self.global_settings)
+        self.document
+            .project
+            .settings()
+            .resolve(self.environment.global_settings)
     }
 
     /// Uses `path` as the file the global settings are kept in: the settings are read from it now
@@ -22,24 +25,24 @@ impl FastForwardApplication {
     /// settings are changed.
     pub fn keep_global_settings_in(&mut self, path: PathBuf) {
         match read_settings_file(&path) {
-            Ok(settings) => self.global_settings = settings,
+            Ok(settings) => self.environment.global_settings = settings,
             Err(error) => {
-                self.global_settings = Settings::DEFAULT;
+                self.environment.global_settings = Settings::DEFAULT;
                 self.add_to_message(
                     "The settings could not be loaded",
                     format!("{error}\n\nThe default settings are being used until you change them."),
                 );
             }
         }
-        self.global_settings_path = Some(path);
+        self.environment.global_settings_path = Some(path);
     }
 
     pub(super) fn set_global_settings(&mut self, settings: Settings) {
-        if settings == self.global_settings {
+        if settings == self.environment.global_settings {
             return;
         }
-        self.global_settings = settings;
-        if let Some(path) = self.global_settings_path.clone()
+        self.environment.global_settings = settings;
+        if let Some(path) = self.environment.global_settings_path.clone()
             && let Err(error) = write_settings_file(settings, &path)
         {
             self.show_message("The settings could not be saved", error.to_string());
@@ -47,10 +50,10 @@ impl FastForwardApplication {
     }
 
     pub(super) fn set_project_settings(&mut self, settings: ProjectSettings) {
-        if settings == self.project.settings() {
+        if settings == self.document.project.settings() {
             return;
         }
-        self.project.set_settings(settings);
+        self.document.project.set_settings(settings);
         self.note_unsaved_change();
     }
 }

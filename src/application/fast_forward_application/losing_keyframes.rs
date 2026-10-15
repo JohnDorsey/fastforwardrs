@@ -25,7 +25,7 @@ impl FastForwardApplication {
     /// the mouse button is held, does not go on changing the project. And while another window is waiting for an answer, nothing
     /// is asked in its place, and nothing that would lose keyframes is done either.
     pub(super) fn ask_before_losing_keyframes(&mut self, commands: Vec<Command>, context: &Context) -> Vec<Command> {
-        match &self.dialog {
+        match &self.interface.dialog {
             Some(Dialog::ConfirmLosingKeyframes { .. }) => {
                 return commands
                     .into_iter()
@@ -53,7 +53,7 @@ impl FastForwardApplication {
             } else if !asked {
                 asked = true;
                 self.pause_playback_for_dialog();
-                self.dialog = Some(Dialog::ConfirmLosingKeyframes {
+                self.interface.dialog = Some(Dialog::ConfirmLosingKeyframes {
                     change: Box::new(command),
                     how_many,
                 });
@@ -66,7 +66,7 @@ impl FastForwardApplication {
     /// How many keyframes carrying `command` out would lose, worked out by carrying it out on a copy of the project, so that what is
     /// said is what would be done. Nothing for a command that does not change how long anything lasts.
     fn keyframes_it_would_lose(&self, command: &Command) -> usize {
-        let mut copy = self.project.clone();
+        let mut copy = self.document.project.clone();
         // (A change that cannot be made loses nothing.)
         match command {
             Command::SetClipSpeed { clip, speed_factor } => {
@@ -90,6 +90,9 @@ impl FastForwardApplication {
                 return 0;
             }
         }
-        self.project.keyframe_count().saturating_sub(copy.keyframe_count())
+        self.document
+            .project
+            .keyframe_count()
+            .saturating_sub(copy.keyframe_count())
     }
 }

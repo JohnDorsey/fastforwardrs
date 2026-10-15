@@ -839,6 +839,7 @@ fn a_rack_is_put_in_a_drawer_that_has_finished_sliding_open_and_not_before() {
 
     window
         .application_mut()
+        .interface
         .timeline_view
         .open_the_drawer_of(AnimationTarget::Clip(text));
     for _ in 0..3 {
@@ -875,6 +876,7 @@ fn the_keyframes_in_a_drawer_that_is_still_sliding_open_cannot_be_taken_hold_of(
     assert_eq!(racks_drawn(&window).len(), 0, "shut");
     window
         .application_mut()
+        .interface
         .timeline_view
         .open_the_drawer_of(AnimationTarget::Clip(text));
     window.harness.run_steps(4);
@@ -904,7 +906,7 @@ fn nothing_in_a_drawer_can_be_taken_hold_of_while_a_message_is_up() {
     let per_frame = points_per_frame(&window);
     let on_the_keyframe = where_it_is(&window, keyframe);
     let on_the_rack = at_frame(&window, 140, racks_drawn(&window)[0].center().y);
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -929,7 +931,7 @@ fn nothing_in_a_drawer_can_be_taken_hold_of_while_a_message_is_up() {
     assert_eq!(selected_keyframes(&window), vec![]);
 
     // With the message gone, the same drag moves the keyframe.
-    window.application_mut().dialog = None;
+    window.application_mut().interface.dialog = None;
     window.settle();
     window.drag(
         on_the_keyframe,
@@ -1044,7 +1046,7 @@ fn a_drag_of_a_keyframe_that_is_going_on_when_a_message_comes_up_does_not_go_on(
     let went_to = frame_of(&window, keyframe);
     assert!(went_to >= 108, "it went along with the pointer: {went_to}");
 
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });
@@ -1070,7 +1072,7 @@ fn a_drag_of_a_rack_that_is_going_on_when_a_message_comes_up_does_not_go_on() {
     let went_to = frames_of_the_keyframes_of_the_loudness_of(&window, video);
     assert!(went_to[0] >= 108, "it went along with the pointer: {went_to:?}");
 
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });

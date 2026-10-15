@@ -10,10 +10,10 @@ use crate::colour_effects::ColourMatrix;
 use crate::composition::test_projects::random_project_with_effects;
 use crate::composition::{Layer, PicturePlan, plan_pictures};
 use crate::media::export::animated_sections::{self, MOST_STRETCHES_OF_ANIMATION};
-use crate::project::{AnimationTarget, EffectKind, PropertyId, PropertyValue, TextObject};
+use crate::project::{AnimationTarget, EffectInstanceId, EffectKind, PropertyId, PropertyValue, TextObject};
 use crate::test_support::{DeterministicRandomNumbers, make_a_keyframe, put_a_hue_shift_on};
 
-const HUE: PropertyId = PropertyId::HueShift;
+const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
 const PICTURE_SIZE: (u32, u32) = (640, 360);
 
 fn turn(degrees: f32) -> PropertyValue {
@@ -170,7 +170,7 @@ fn a_hue_shift_on_the_front_track_does_not_change_the_video_on_the_track_behind_
         .insert_text(front, frame(30), TextObject::default(), 60)
         .unwrap();
     put_a_hue_shift_on(&mut project, AnimationTarget::Track(front), 45.0);
-    assert!(project.has_the_effect(AnimationTarget::Track(front), EffectKind::HueShift));
+    assert!(project.has_the_effect(AnimationTarget::Track(front), EffectInstanceId::FIRST));
     assert_eq!(
         project.tracks()[0].placement_of(text).unwrap().first_timeline_frame,
         frame(30)
@@ -366,12 +366,10 @@ fn exported_effects_at(
         .iter()
         .map(|effect| {
             let values: Vec<PropertyValue> = effect
-                .kind()
                 .properties()
-                .iter()
                 .map(|property| {
                     project
-                        .property_value_at(target, *property, frame(timeline_frame))
+                        .property_value_at(target, property, frame(timeline_frame))
                         .expect("it has the effect")
                 })
                 .collect();

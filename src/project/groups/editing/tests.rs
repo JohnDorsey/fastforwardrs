@@ -655,7 +655,7 @@ fn disbanding_a_tag_takes_away_the_tag_and_its_badges_and_leaves_everything_else
         [
             tag_badge(kept),
             tag_badge(tag),
-            ChainItemKey::Effect(EffectKind::HueShift),
+            ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST),
             TRACK_BADGE
         ]
     );
@@ -669,7 +669,11 @@ fn disbanding_a_tag_takes_away_the_tag_and_its_badges_and_leaves_everything_else
     );
     assert_eq!(
         chain_of_the_clip(&laid, first),
-        [tag_badge(kept), ChainItemKey::Effect(EffectKind::HueShift), TRACK_BADGE],
+        [
+            tag_badge(kept),
+            ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST),
+            TRACK_BADGE
+        ],
         "only the badge of the tag that is gone is gone"
     );
     assert_eq!(chain_of_the_clip(&laid, second), [tag_badge(kept), TRACK_BADGE]);
@@ -733,7 +737,7 @@ fn disbanding_a_tag_that_is_in_a_tag_puts_its_members_in_the_outer_tag_where_its
         chain_of_the_clip(&laid, x),
         [
             tag_badge(inner),
-            ChainItemKey::Effect(EffectKind::HueShift),
+            ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST),
             TRACK_BADGE
         ]
     );
@@ -744,7 +748,7 @@ fn disbanding_a_tag_that_is_in_a_tag_puts_its_members_in_the_outer_tag_where_its
         chain_of_the_clip(&laid, x),
         [
             tag_badge(outer),
-            ChainItemKey::Effect(EffectKind::HueShift),
+            ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST),
             TRACK_BADGE
         ],
         "the badge of the outer tag is where the inner one was, before the effect"

@@ -1172,7 +1172,7 @@ fn window_with_many_tracks_scrolled_to_the_bottom() -> Window {
         project.add_track_in_front();
     }
     let mut window = Window::showing(project);
-    window.application_mut().timeline_view.rows_scroll_offset = 1.0e6;
+    window.application_mut().interface.timeline_view.rows_scroll_offset = 1.0e6;
     window.harness.run_steps(5);
     window
 }
@@ -1195,7 +1195,7 @@ fn the_drawer_and_where_it_is_cut_off(window: &Window) -> (Rect, Rect) {
 fn the_rows_scroll_down_to_bring_a_drawer_into_view_when_it_is_opened_on_a_clip_in_the_bottom_track() {
     let mut window = window_with_many_tracks_scrolled_to_the_bottom();
     let last = window.application().project().tracks().len() - 1;
-    let scroll_before = window.application().timeline_view.rows_scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.rows_scroll_offset;
     assert!(
         scroll_before > 0.0,
         "the setup: the rows are scrolled down, and there is more of them above"
@@ -1213,7 +1213,7 @@ fn the_rows_scroll_down_to_bring_a_drawer_into_view_when_it_is_opened_on_a_clip_
         cut_off_at.bottom()
     );
     assert!(
-        window.application().timeline_view.rows_scroll_offset > scroll_before,
+        window.application().interface.timeline_view.rows_scroll_offset > scroll_before,
         "the rows were scrolled down to bring it into view"
     );
 }
@@ -1229,18 +1229,20 @@ fn a_drawer_that_is_brought_into_view_with_rows_under_it_is_scrolled_to_with_som
     // can be scrolled as far as that takes.
     let bottom_of_the_view = window.the_bottom_of_what_can_be_seen_of_the_rows();
     let bottom_of_the_strip = window.strip_of_track(the_one_over_the_last).bottom();
-    window.application_mut().timeline_view.rows_scroll_offset -= bottom_of_the_view - 10.0 - bottom_of_the_strip;
+    window.application_mut().interface.timeline_view.rows_scroll_offset -=
+        bottom_of_the_view - 10.0 - bottom_of_the_strip;
     window.harness.run_steps(5);
-    let scroll_before = window.application().timeline_view.rows_scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.rows_scroll_offset;
 
     window
         .application_mut()
+        .interface
         .timeline_view
         .open_the_drawer_of(AnimationTarget::Track(track));
     let_the_drawers_finish(&mut window);
 
     assert!(
-        window.application().timeline_view.rows_scroll_offset > scroll_before + 10.0,
+        window.application().interface.timeline_view.rows_scroll_offset > scroll_before + 10.0,
         "the drawer did not fit in what was in view, and the rows were scrolled down to it"
     );
     let (drawer, _) = the_drawer_and_where_it_is_cut_off(&window);
@@ -1300,7 +1302,7 @@ fn the_rows_scroll_down_as_the_drawer_slides_so_that_its_bottom_is_in_view_at_ev
     let mut offsets = Vec::new();
     for _ in 0..20 {
         window.harness.step();
-        offsets.push(window.application().timeline_view.rows_scroll_offset);
+        offsets.push(window.application().interface.timeline_view.rows_scroll_offset);
     }
 
     // (Never back up, except by what the rows are held to by the end of them: a fraction of a point.)
@@ -1326,22 +1328,23 @@ fn a_drawer_that_is_in_view_when_it_opens_does_not_scroll_the_rows_and_one_above
     window.click(button);
     let_the_drawers_finish(&mut window);
     assert_eq!(
-        window.application().timeline_view.rows_scroll_offset,
+        window.application().interface.timeline_view.rows_scroll_offset,
         0.0,
         "nothing was scrolled"
     );
 
     // Scrolled to the bottom: a drawer that is opened on a track that cannot be seen is not brought into view by going up.
     let mut window = window_with_many_tracks_scrolled_to_the_bottom();
-    let scroll_before = window.application().timeline_view.rows_scroll_offset;
+    let scroll_before = window.application().interface.timeline_view.rows_scroll_offset;
     let top_track = window.application().project().tracks()[0].id();
     window
         .application_mut()
+        .interface
         .timeline_view
         .open_the_drawer_of(AnimationTarget::Track(top_track));
     let_the_drawers_finish(&mut window);
     assert_eq!(
-        window.application().timeline_view.rows_scroll_offset,
+        window.application().interface.timeline_view.rows_scroll_offset,
         scroll_before,
         "the rows were not scrolled up to it"
     );
@@ -1355,11 +1358,11 @@ fn the_rows_are_left_alone_once_the_drawer_has_stopped_sliding_so_that_scrolling
     click_the_button(&mut window, last);
     let_the_drawers_finish(&mut window);
 
-    window.application_mut().timeline_view.rows_scroll_offset = 0.0;
+    window.application_mut().interface.timeline_view.rows_scroll_offset = 0.0;
     window.harness.run_steps(20);
 
     assert_eq!(
-        window.application().timeline_view.rows_scroll_offset,
+        window.application().interface.timeline_view.rows_scroll_offset,
         0.0,
         "scrolled up by hand, the rows are not taken down again to the drawer"
     );

@@ -24,7 +24,7 @@ const ENTRY: &str = "resources/1-holiday.mp4";
 /// Draws the window until the save that is being written in the background is done.
 pub(super) fn wait_until_the_save_is_done(window: &mut Window) {
     let started = Instant::now();
-    while window.application().running_save.is_some() {
+    while window.application().jobs.running_save.is_some() {
         assert!(started.elapsed() < Duration::from_secs(20), "the save did not finish");
         window.harness.step();
         std::thread::sleep(Duration::from_millis(2));
@@ -38,7 +38,7 @@ fn fixture_whose_saves_wait() -> (Fixture, std::path::PathBuf, std::sync::Arc<Ga
     let archive_path = fixture.save_as("trip.ffrs");
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
     (fixture, archive_path, gate)
 }
 
@@ -127,7 +127,7 @@ fn the_window_says_how_much_of_what_is_to_be_copied_has_been_copied_so_far() {
     fs::write(fixture.path("media").join("holiday.mp4"), vec![7_u8; 3 << 20]).unwrap();
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
     fixture
         .window
         .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
@@ -211,11 +211,12 @@ fn what_saving_says_when_the_included_video_is_in_the_state(
             fixture
                 .window
                 .application_mut()
-                .source_files
+                .sources
+                .files
                 .insert(VIDEO, SourceFileState::new(status));
         }
         None => {
-            fixture.window.application_mut().source_files.remove(&VIDEO);
+            fixture.window.application_mut().sources.files.remove(&VIDEO);
         }
     }
     fixture.window.do_this(Command::AddTrack);
@@ -307,7 +308,7 @@ fn a_save_asked_for_while_another_is_going_on_is_refused_and_the_one_that_is_goi
 #[test]
 fn autosave_waits_while_a_save_is_going_on_and_works_when_it_is_done() {
     let (mut fixture, archive_path, gate) = fixture_whose_saves_wait();
-    fixture.window.application_mut().global_settings.autosave = true;
+    fixture.window.application_mut().environment.global_settings.autosave = true;
     let context = egui::Context::default();
     fixture
         .window
@@ -353,7 +354,7 @@ fn a_project_that_is_saved_as_another_file_is_written_with_its_files_in_the_back
         .do_this(Command::IncludeFilesInTheProjectFile(vec![VIDEO]));
     fixture.window.application_mut().copy_in_the_background_from(0);
     let gate = Gate::closed();
-    fixture.window.application_mut().copy_gate = Some(gate.clone());
+    fixture.window.application_mut().jobs.copy_gate = Some(gate.clone());
     let second_archive = fixture.path("second.ffrs");
 
     assert!(fixture.window.application_mut().save_project_to(second_archive.clone()));

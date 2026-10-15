@@ -98,7 +98,7 @@ impl Project {
             return None;
         }
         match property {
-            PropertyId::HueShift => placement.effects.value_of(property),
+            PropertyId::EffectValue { .. } => placement.effects.value_of(property),
             PropertyId::Gain => clip
                 .as_media()
                 .map(|media| PropertyValue::Number(media.gain().decibels())),
@@ -143,7 +143,7 @@ impl Project {
             return Err(wrong().into());
         }
         match (property, value) {
-            (PropertyId::HueShift, _) => Ok(self
+            (PropertyId::EffectValue { .. }, _) => Ok(self
                 .track_holding_mut_or_error(clip_id)?
                 .set_effect_value_of_the_clip(clip_id, property, value)?),
             (PropertyId::Gain, PropertyValue::Number(decibels)) => {
@@ -176,7 +176,7 @@ impl Project {
                 self.set_track_gain(track, Gain::from_decibels(*decibels))
             }
             (PropertyId::Muted, PropertyValue::Flag(muted)) => self.set_track_muted(track, *muted),
-            (property, value) if property.effect().is_some() => {
+            (property, value) if property.is_a_value_of_an_effect() => {
                 if self.track_mut_or_error(track)?.set_effect_value(property, value) {
                     Ok(())
                 } else {

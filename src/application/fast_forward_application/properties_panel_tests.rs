@@ -445,7 +445,7 @@ fn is_shown_containing(window: &Window, text: &str) -> bool {
 #[test]
 fn the_clip_of_a_file_that_cannot_be_found_says_so_and_offers_to_choose_the_file_again() {
     let mut window = Window::showing(project_with_a_video_and_a_sound(90, 3));
-    window.application_mut().source_files.insert(
+    window.application_mut().sources.files.insert(
         SOUND,
         SourceFileState::new(SourceStatus::Unavailable {
             reason: "there is no file there".to_owned(),
@@ -471,7 +471,7 @@ fn nothing_in_the_panel_can_be_changed_while_a_message_is_up() {
     select_the_clip_at(&mut window, 0, 45);
     assert!(!window.harness.get_by_label("Speed").accesskit_node().is_disabled());
 
-    window.application_mut().dialog = Some(super::Dialog::Message {
+    window.application_mut().interface.dialog = Some(super::Dialog::Message {
         title: "Note".into(),
         text: "Read me".into(),
     });

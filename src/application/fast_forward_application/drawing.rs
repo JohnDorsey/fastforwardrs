@@ -45,16 +45,16 @@ impl FastForwardApplication {
 
         let geometry = self.timeline_geometry();
         let can_edit = !self.is_blocked();
-        let source_looks = source_looks_of(&self.project, &self.source_files);
+        let source_looks = source_looks_of(&self.document.project, &self.sources.files);
         let timeline_content = TimelineContent {
-            project: &self.project,
+            project: &self.document.project,
             geometry,
             current_frame: frame_state.current_frame,
-            selection: &self.selection,
+            selection: &self.interface.selection,
             source_looks: &source_looks,
             can_edit,
         };
-        timeline_panel::prepare(ui.ctx(), &timeline_content, &mut self.timeline_view);
+        timeline_panel::prepare(ui.ctx(), &timeline_content, &mut self.interface.timeline_view);
 
         // (The gaps are made by the margins round the panels: half of a gap between two panels is round each
         // of them, and the whole of it between a panel and the edge of the window.)
@@ -77,8 +77,8 @@ impl FastForwardApplication {
                 timeline_panel::show(
                     ui,
                     &timeline_content,
-                    &mut self.timeline_view,
-                    &mut self.textures,
+                    &mut self.interface.timeline_view,
+                    &mut self.interface.textures,
                     commands,
                 );
             });
@@ -92,11 +92,11 @@ impl FastForwardApplication {
                 properties_panel::show(
                     ui,
                     &PropertiesContent {
-                        project: &self.project,
-                        selection: &self.selection,
+                        project: &self.document.project,
+                        selection: &self.interface.selection,
                         current_frame: frame_state.current_frame,
                         source_looks: &source_looks,
-                        font_families: self.font_families.as_deref(),
+                        font_families: self.environment.font_families.as_deref(),
                         can_edit,
                     },
                     commands,
@@ -104,9 +104,9 @@ impl FastForwardApplication {
             });
 
         let content = preview_content(
-            &self.project,
-            &self.preview_pictures,
-            self.selection.single(),
+            &self.document.project,
+            &self.playback.preview_pictures,
+            self.interface.selection.single(),
             frame_state,
             &source_looks,
         );
@@ -116,37 +116,38 @@ impl FastForwardApplication {
                 preview_panel::show(
                     ui,
                     &content,
-                    &mut self.preview_view,
-                    &mut self.textures,
-                    &mut self.text_renderer,
+                    &mut self.interface.preview_view,
+                    &mut self.interface.textures,
+                    &mut self.environment.text_renderer,
                     commands,
                 );
             });
-        self.preview_panel_in_the_last_frame = Some(preview.response.rect);
+        self.interface.preview_panel_in_the_last_frame = Some(preview.response.rect);
     }
 
     /// Looks for the names of the fonts the computer has once a text object is selected, which it
     /// takes a moment to do (the properties panel lists them to choose from when it has them).
     fn find_out_the_fonts_when_a_text_object_is_selected(&mut self) {
-        if self.font_families.is_some() {
+        if self.environment.font_families.is_some() {
             return;
         }
         let a_text_object_is_selected = self
+            .interface
             .selection
             .single()
-            .and_then(|clip| self.project.placement_of(clip))
+            .and_then(|clip| self.document.project.placement_of(clip))
             .is_some_and(|placement| placement.clip.as_text().is_some());
-        if a_text_object_is_selected && let Some(renderer) = self.text_renderer.get_if_ready() {
-            self.font_families = Some(renderer.font_family_names());
+        if a_text_object_is_selected && let Some(renderer) = self.environment.text_renderer.get_if_ready() {
+            self.environment.font_families = Some(renderer.font_family_names());
         }
     }
 
     /// The scale the strips start at, from the shape of the finished picture. (The user can zoom in
     /// and out from it: see [`crate::application::timeline_panel::TimelineViewState::geometry`].)
     pub(super) fn timeline_geometry(&self) -> TimelineGeometry {
-        let (picture_width, picture_height) = self.project.picture_size();
+        let (picture_width, picture_height) = self.document.project.picture_size();
         TimelineGeometry::for_picture(
-            self.project.frame_rate(),
+            self.document.project.frame_rate(),
             picture_width,
             picture_height,
             TrackHeight::DEFAULT_IN_POINTS,
@@ -156,17 +157,17 @@ impl FastForwardApplication {
     /// Which menu items can be used right now.
     fn menu_availability(&self) -> MenuAvailability {
         MenuAvailability {
-            can_save: !self.project.sources().is_empty() || !self.project.has_no_clips(),
-            can_export: self.toolchain.is_some()
-                && !self.project.has_no_clips()
+            can_save: !self.document.project.sources().is_empty() || !self.document.project.has_no_clips(),
+            can_export: self.environment.toolchain.is_some()
+                && !self.document.project.has_no_clips()
                 && self.sources_in_use_that_are_not_available().is_empty(),
-            has_selection: !self.selection.is_empty(),
-            can_undo: self.history.can_undo(),
-            can_redo: self.history.can_redo(),
-            busy: self.export.is_some()
-                || self.running_save.is_some()
-                || !self.openings.is_empty()
-                || self.dialog.is_some(),
+            has_selection: !self.interface.selection.is_empty(),
+            can_undo: self.document.history.can_undo(),
+            can_redo: self.document.history.can_redo(),
+            busy: self.jobs.export.is_some()
+                || self.jobs.running_save.is_some()
+                || !self.sources.openings.is_empty()
+                || self.interface.dialog.is_some(),
         }
     }
 }
@@ -321,10 +322,10 @@ mod tests {
     use crate::composition::plan_pictures;
     use crate::playback::PicturesReport;
     use crate::project::{
-        AnimationTarget, Clip, EffectKind, FrameRate, MediaClip, PropertyId, PropertyValue, SourceFrameIndex,
-        SourceMedia, SourceMediaLink, SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex,
-        Track, TrackId,
+        AnimationTarget, Clip, EffectKind, FrameRate, MediaClip, PropertyValue, SourceFrameIndex, SourceMedia,
+        SourceMediaLink, SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex, Track, TrackId,
     };
+    use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
     use crate::test_support::{make_a_keyframe, put_a_hue_shift_on};
 
     /// A project with one video clip of 600 frames at `clip_speed` on a track that plays at `track_speed`.
@@ -399,14 +400,8 @@ mod tests {
         let track = AnimationTarget::Track(project.tracks()[0].id());
         put_a_hue_shift_on(&mut project, clip, 90.0);
         project.add_effect(track, EffectKind::HueShift).unwrap();
-        make_a_keyframe(&mut project, track, PropertyId::HueShift, 0, PropertyValue::Number(0.0));
-        make_a_keyframe(
-            &mut project,
-            track,
-            PropertyId::HueShift,
-            100,
-            PropertyValue::Number(60.0),
-        );
+        make_a_keyframe(&mut project, track, HUE, 0, PropertyValue::Number(0.0));
+        make_a_keyframe(&mut project, track, HUE, 100, PropertyValue::Number(60.0));
 
         for (frame, track_turn) in [(0, 0.0), (50, 30.0), (100, 60.0), (400, 60.0)] {
             let colour = look_at_the_preview(&project, frame, |content| {

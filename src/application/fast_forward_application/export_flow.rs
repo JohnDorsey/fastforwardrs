@@ -50,6 +50,7 @@ impl FastForwardApplication {
     /// now (they are missing, or still being opened).
     pub(super) fn sources_in_use_that_are_not_available(&self) -> Vec<SourceMediaIdentifier> {
         let mut in_use: Vec<SourceMediaIdentifier> = self
+            .document
             .project
             .tracks()
             .iter()
@@ -58,7 +59,7 @@ impl FastForwardApplication {
             .collect();
         in_use.sort();
         in_use.dedup();
-        in_use.retain(|identifier| !self.source_is_available(*identifier));
+        in_use.retain(|identifier| !self.sources.is_available(*identifier));
         in_use
     }
 
@@ -76,7 +77,7 @@ impl FastForwardApplication {
     /// Starts exporting the finished video to `destination`, in the background. A message
     /// reports how it ended; see [`Self::is_working_in_the_background`].
     pub fn export_video_to(&mut self, destination: PathBuf) {
-        let Some(toolchain) = self.toolchain.clone() else {
+        let Some(toolchain) = self.environment.toolchain.clone() else {
             return;
         };
         if !self.sources_in_use_that_are_not_available().is_empty() {
@@ -84,6 +85,7 @@ impl FastForwardApplication {
         }
         let settings = self.effective_settings();
         let has_text = self
+            .document
             .project
             .tracks()
             .iter()
@@ -91,11 +93,11 @@ impl FastForwardApplication {
             .any(|entry| entry.clip().as_text().is_some());
         // The fonts are wanted now, if any text is to be drawn: wait for them if they are not ready.
         let text_renderer = has_text
-            .then(|| self.text_renderer.get_waiting_if_needed())
+            .then(|| self.environment.text_renderer.get_waiting_if_needed())
             .flatten()
             .map(RefCell::new);
         let plan = plan_export(
-            &self.project,
+            &self.document.project,
             settings,
             &|object, picture_width, picture_height| match &text_renderer {
                 Some(renderer) => renderer.borrow_mut().render(object, picture_width, picture_height),
@@ -112,17 +114,17 @@ impl FastForwardApplication {
         let source_file_locations: Vec<MediaLocation> = plan
             .source_files
             .iter()
-            .filter_map(|identifier| Some(self.source_files.get(identifier)?.location_if_available()?.clone()))
+            .filter_map(|identifier| Some(self.sources.files.get(identifier)?.location_if_available()?.clone()))
             .collect();
         match VideoExport::start(
             &toolchain,
             &plan,
             &source_file_locations,
             &destination,
-            Arc::clone(&self.wake_up),
+            Arc::clone(&self.environment.wake_up),
         ) {
             Ok(export) => {
-                self.export = Some(RunningExport {
+                self.jobs.export = Some(RunningExport {
                     export,
                     frames_written: 0,
                     total_frames: plan.total_frame_count,
@@ -136,6 +138,7 @@ impl FastForwardApplication {
 
     fn ask_where_to_export(&self) -> Option<PathBuf> {
         let first_file_name = self
+            .document
             .project
             .sources()
             .first()
@@ -143,7 +146,7 @@ impl FastForwardApplication {
             .map_or_else(|| "video".to_owned(), |stem| stem.to_string_lossy().into_owned());
         // Not the name of a source file, which exporting must never overwrite.
         let suggested_file_name = format!("{first_file_name}_fastforward.{DEFAULT_EXPORT_EXTENSION}");
-        let path = self.file_chooser.choose_where_to_save(&FileQuestion {
+        let path = self.environment.file_chooser.choose_where_to_save(&FileQuestion {
             title: "Export the video",
             suggested_file_name: Some(&suggested_file_name),
             starting_directory: None,
@@ -161,7 +164,7 @@ impl FastForwardApplication {
 
     /// Picks up the progress of a running export, and reports how it ended.
     pub(super) fn collect_export_events(&mut self) {
-        let Some(running) = &mut self.export else { return };
+        let Some(running) = &mut self.jobs.export else { return };
         let mut result = None;
         while let Some(event) = running.export.try_next_event() {
             match event {
@@ -175,7 +178,7 @@ impl FastForwardApplication {
         let Some(result) = result else { return };
         let destination = running.destination.clone();
         let frames_missing_a_picture = running.frames_missing_a_picture;
-        self.export = None;
+        self.jobs.export = None;
         match result {
             ExportResult::Completed => {
                 self.show_message(

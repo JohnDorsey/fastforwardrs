@@ -151,7 +151,7 @@ fn alt_and_the_wheel_scroll_the_rows_up_and_down_and_the_wheel_alone_scrolls_the
         add_a_track(&mut window);
     }
     let strip_top_before = window.strip_of_track(0).top();
-    let horizontal_before = window.application().timeline_view.scroll_offset;
+    let horizontal_before = window.application().interface.timeline_view.scroll_offset;
     let over_the_strips = window.strip_of_track(0).center();
 
     window.scroll_the_wheel(over_the_strips, egui::vec2(0.0, -150.0), Modifiers::ALT);
@@ -163,7 +163,7 @@ fn alt_and_the_wheel_scroll_the_rows_up_and_down_and_the_wheel_alone_scrolls_the
         window.strip_of_track(0).top()
     );
     assert_eq!(
-        window.application().timeline_view.scroll_offset,
+        window.application().interface.timeline_view.scroll_offset,
         horizontal_before,
         "and the strips did not scroll along"
     );
@@ -179,7 +179,7 @@ fn alt_and_the_wheel_scroll_the_rows_up_and_down_and_the_wheel_alone_scrolls_the
 
     // The wheel by itself still scrolls along and not up and down.
     window.scroll_the_wheel(over_the_strips, egui::vec2(0.0, -150.0), Modifiers::NONE);
-    assert!(window.application().timeline_view.scroll_offset > horizontal_before);
+    assert!(window.application().interface.timeline_view.scroll_offset > horizontal_before);
     assert_eq!(
         window.strip_of_track(0).top(),
         strip_top_before,

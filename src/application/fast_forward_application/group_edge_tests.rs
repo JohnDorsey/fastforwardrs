@@ -348,12 +348,13 @@ fn an_edge_that_is_scrolled_out_of_the_strips_has_no_stripe_over_the_title_boxes
     let clips = [window.clip(0, 0), window.clip(0, 1)];
     let group = window
         .application_mut()
+        .document
         .project
         .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[0]), Member::Clip(clips[1])])
         .unwrap();
     window.settle();
     let points_to_frame_20 = window.x_of_frame_on_the_strip(0, 20) - window.x_of_frame_on_the_strip(0, 0);
-    window.application_mut().timeline_view.scroll_offset = f64::from(points_to_frame_20 + 50.0);
+    window.application_mut().interface.timeline_view.scroll_offset = f64::from(points_to_frame_20 + 50.0);
     window.settle();
 
     let the_edge_that_can_be_seen = on_the_right_edge(&window, group);
@@ -390,7 +391,7 @@ fn an_edge_that_is_held_when_a_message_comes_up_is_let_go_of_and_nothing_is_chan
         "the setup: the edge is held out at the clip: {held_at}"
     );
 
-    window.application_mut().dialog = Some(Dialog::Message {
+    window.application_mut().interface.dialog = Some(Dialog::Message {
         title: "Something".to_owned(),
         text: "Something happened.".to_owned(),
     });
