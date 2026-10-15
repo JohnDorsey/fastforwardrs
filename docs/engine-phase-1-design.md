@@ -181,6 +181,13 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 * the **fast-forward symbol** as a layer of its own right after its video layer (so that what is in front still covers it): `Picture(hash(speed, height))` placed at `place_indicator`'s rectangle, rendered at the height it has in render pixels.
 `PictureWanted` says how to make the pixels when they are not in the engine yet (`VideoPicture(track)`, `Image(source)`, `Text(object)`, `Thumbnail(source, key)`, `Symbol(speed, height)`); the pixels are made only then.
 
+**As built (piece 1.4, `application/preview_panel/engine_view.rs`):** `describe_frame(content, render_size, generation, supply) -> FrameDescription`. It sends nothing itself: for each picture a layer needs it asks a `PictureSupply`
+(`make_sure_the_engine_has(&PictureWanted) -> bool`) and leaves the layer out when the answer is no (fonts not loaded, a thumbnail that does not unpack: the old drawing draws nothing for those either). `SentPictures` is the supply that the
+window will use: it remembers which ids the engine was sent, makes the pixels with `HowToMakeIt::make` and sends each once. Ids: a video picture's serial number; every other kind has its kind in the top four bits and a hash of what makes
+it below (a picture file: file, size and the `generation`, which the window changes when it lets go of what it knows of its files; a text: its `TextAppearance`; a thumbnail: file, the thumbnail that was made, `generation`; the symbol: speed and
+height in pixels). A layer without a picture is a `Solid` of `theme::TRACK_BACKGROUND`. A layer's colours are `EffectCall::colour_matrix(layer.colour.rows())` unless the matrix changes nothing (the engine's planner and the window agree on
+which those are: a test holds `plan::NEAR_ENOUGH_TO_CHANGE_NOTHING` to `ColourMatrix::changes_nothing`).
+
 ## 9. Decoding (CM-17 in part), the probe and the formats
 
 * `ffprobe` is asked for `pix_fmt`, `color_space`, `color_range`, `color_primaries`, `color_transfer` of the video stream (a new function next to `probe_video`, run once for each video **in the background when the file is found**,
@@ -228,7 +235,8 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 
 ## 11. Visible differences expected (to be measured and shown, each fixed or accepted by the maintainer)
 
-1. A colour effect is worked in float with no 8-bit stage: values differ from today's by up to 1 level where the old code rounded between steps.
+1. A colour effect is worked in float with no 8-bit stage: values differ from today's by up to 1 level where the old code rounded between steps (**measured in 1.4a: 1 level at most, for nine kinds of matrix, opaque and see-through pictures,
+   upright, turned and cut off; and 2 levels at most in the whole preview, with up to four see-through layers and the symbol, over 400 random scenes**).
 2. Chroma at coloured edges: replicated like ffmpeg's, so within 3 levels of it at 1 to 1 and 2 to 1 scales; at other scales (which one it is depends on the video and on the size of the picture) ffmpeg scales the colour planes in
    more bits and the engine has the 8-bit planes ffmpeg made: at the harshest stripes up to 36 to 194 levels in single pixels (mean 4 to 23), a few levels (mean about 2) in anything smooth. All the numbers are in section 9. **For the
    maintainer's eye:** this is the difference most likely to be visible, at the edges of saturated colours in screen recordings and graphics, and it is shown in the before and after pictures at the end of the phase.
@@ -238,7 +246,10 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 5. The symbol is a layer of the picture: it is drawn at the render resolution, not at the screen's.
 6. Dithering: egui's own dithering is applied over the window as before, so it is still there.
 7. One window frame more of delay at most between a decoded picture arriving and its being shown (the frame goes to the engine and back).
-8. Anything the oracle comparison turns up that is not in this list.
+8. Anything the oracle comparison turns up that is not in this list. Found in 1.4c, over 400 random scenes: **(a)** the rectangle that stands for a video whose picture has not come, or a picture file that is not decoded yet, has a
+   hard edge in the engine; egui draws it with an edge that is soft over about a pixel (this is the only visible difference of the placeholders: where they are, their colour and what covers them are the same); **(b)** where the edge of a
+   picture goes through the middle of a pixel (to a thousandth of a pixel), which of the two layers shows in that pixel can differ: single pixels, at most 2 in a frame of 320 by 180 in all 400 scenes, each on the edge of a picture (the gate checks
+   that every such pixel is within 0.05 pixel of an edge). Nothing else was found: every other pixel of every scene agrees to within 2 levels.
 
 ## 12. Order of work, and the gate of each piece
 
@@ -247,7 +258,7 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 | **1.1** | `engine` skeleton: device, pools, arena, read-back, caches, the thread and its messages, `plan_frame`, the harness and the lock; the clear-and-read-back frame (no layers: black) | thread/protocol tests, a black frame of any size, the device replaced after `destroy()`, no-GPU tests of the planning and the shaders, CI green on all three systems |
 | **1.2** | pictures: ingest, **place and composite**, output; the **egui-wgpu oracle** in the tests | placement parity as in section 10 (upright, turned, off the picture, alpha, several layers) |
 | **1.3** | YUV: probe, `FrameDelivery::Yuv420p`, the planes event, the yuv pass | against the matrix by hand, against ffmpeg's own conversion on tagged and untagged test videos, odd sizes (**done 2026-10-15; see section 9 for what was measured and the one decision it changed**) |
-| **1.4** | colour matrix pass; `describe_frame`; the fusing | against the CPU matrix; random plan parity (EN-02 gate) |
+| **1.4** | colour matrix pass; `describe_frame`; the fusing | against the CPU matrix; random plan parity (EN-02 gate) (**done 2026-10-15: `engine_parity_tests.rs` runs the real old drawing, `preview_panel::show` in an egui context, through egui-wgpu on the software adapter, against `describe_frame` and the engine, on random `PreviewContent`s: the level at which both drawings are given the same thing; random *projects* would only add the old `preview_content()` conversion, which belongs to the window tests of 1.5**) |
 | **1.5** | the window: `EnginePreview`, the shown texture, the aids, the symbol, text, thumbnails, the fallback, `FASTFORWARDRS_PREVIEW` | window tests with a software engine; all the old window tests unmodified |
 | **1.6** | the guard: watchdog, replacement, loop caps, `compile_effect_shader`, the child-process hang test | the gate tests of section 6 |
 | **1.7** | the governor, the frame-cache hits in the window, the benchmark, the mutation campaign, README, the list of visible differences | the usual end-of-phase list, and the benchmark's numbers |

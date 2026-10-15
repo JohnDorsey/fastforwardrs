@@ -162,11 +162,7 @@ pub fn engine_frame(graphics: &SoftwareGraphics, size: (u32, u32), layers: &[Tes
 /// The pixels of the frame that the window's renderer makes of the same layers.
 pub fn oracle_frame(device: &EngineDevice, size: (u32, u32), layers: &[TestLayer]) -> Vec<u8> {
     let (width, height) = size;
-    let mut renderer = Renderer::new(
-        &device.device,
-        wgpu::TextureFormat::Rgba8Unorm,
-        RendererOptions::PREDICTABLE,
-    );
+    let mut textures = Vec::new();
     let mut paint_jobs = Vec::new();
     for (number, layer) in layers.iter().enumerate() {
         let texture_id = TextureId::Managed(number as u64);
@@ -177,12 +173,7 @@ pub fn oracle_frame(device: &EngineDevice, size: (u32, u32), layers: &[TestLayer
             // (One white pixel: the window draws a layer that is only a colour with the colour of the vertices.)
             TestSource::Solid(_) => ColorImage::from_rgba_unmultiplied([1, 1], &[255, 255, 255, 255]),
         };
-        renderer.update_texture(
-            &device.device,
-            &device.queue,
-            texture_id,
-            &ImageDelta::full(image, TextureOptions::LINEAR),
-        );
+        textures.push((texture_id, ImageDelta::full(image, TextureOptions::LINEAR)));
         let colour = match layer.source {
             TestSource::Picture(_) => Color32::WHITE,
             TestSource::Solid([red, green, blue, alpha]) => Color32::from_rgba_unmultiplied(red, green, blue, alpha),
@@ -201,6 +192,26 @@ pub fn oracle_frame(device: &EngineDevice, size: (u32, u32), layers: &[TestLayer
             clip_rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(width as f32, height as f32)),
             primitive: Primitive::Mesh(mesh),
         });
+    }
+    render_with_egui(device, size, &textures, &paint_jobs)
+}
+
+/// The pixels of a frame of `size` that egui's own renderer (the window's: egui-wgpu, in the mode made for tests that compare pictures) makes of `paint_jobs`,
+/// with the textures that they use, at one pixel to the point, over black.
+pub fn render_with_egui(
+    device: &EngineDevice,
+    size: (u32, u32),
+    textures: &[(TextureId, ImageDelta)],
+    paint_jobs: &[ClippedPrimitive],
+) -> Vec<u8> {
+    let (width, height) = size;
+    let mut renderer = Renderer::new(
+        &device.device,
+        wgpu::TextureFormat::Rgba8Unorm,
+        RendererOptions::PREDICTABLE,
+    );
+    for (texture_id, delta) in textures {
+        renderer.update_texture(&device.device, &device.queue, *texture_id, delta);
     }
     let screen = ScreenDescriptor {
         size_in_pixels: [width, height],
@@ -224,7 +235,7 @@ pub fn oracle_frame(device: &EngineDevice, size: (u32, u32), layers: &[TestLayer
     let mut encoder = device
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("oracle") });
-    let callbacks = renderer.update_buffers(&device.device, &device.queue, &mut encoder, &paint_jobs, &screen);
+    let callbacks = renderer.update_buffers(&device.device, &device.queue, &mut encoder, paint_jobs, &screen);
     {
         let mut pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -244,7 +255,7 @@ pub fn oracle_frame(device: &EngineDevice, size: (u32, u32), layers: &[TestLayer
                 multiview_mask: None,
             })
             .forget_lifetime();
-        renderer.render(&mut pass, &paint_jobs, &screen);
+        renderer.render(&mut pass, paint_jobs, &screen);
     }
     let mut readback = ReadbackBuffers::default();
     let pending = readback.record_copy(&device.device, &mut encoder, &target);

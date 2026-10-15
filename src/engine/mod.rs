@@ -39,7 +39,7 @@ mod recycler;
 mod scene;
 mod shaders;
 #[cfg(test)]
-mod testing;
+pub(crate) mod testing;
 mod texture_pool;
 mod uniform_arena;
 mod uniform_bytes;
@@ -51,7 +51,7 @@ mod effect_tests;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
-mod oracle_tests;
+pub(crate) mod oracle_tests;
 #[cfg(test)]
 mod picture_tests;
 #[cfg(test)]

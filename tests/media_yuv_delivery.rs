@@ -16,31 +16,17 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::path::Path;
 
 use fastforwardrs::engine::{YuvColour, YuvMatrix, YuvRange, chroma_size, rgba_of_yuv420p_planes};
-use fastforwardrs::media::{
-    DecodedFrame, DecodedYuvFrame, FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamEvent, FrameStreamRequest,
-    NativeMatrix, NativeYuv420p, probe_video_stream_format,
-};
+use fastforwardrs::media::{DecodedFrame, FfmpegToolchain, NativeMatrix, NativeYuv420p, probe_video_stream_format};
 use fastforwardrs::playback::colour_for_the_engine;
-use fastforwardrs::project::{FrameRate, SourceFrameIndex, SpeedFactor};
 use support::scratch_directory;
-
-const TIME_ALLOWED_FOR_A_STREAM: Duration = Duration::from_secs(30);
-
-/// What a video is made to say about its colours, as the options of ffmpeg's `setparams` filter: nothing, or a matrix and a range.
-type Tags = &'static [&'static str];
-
-const UNTAGGED: Tags = &[];
-const BT709_LIMITED: Tags = &["colorspace=bt709", "range=tv"];
-const BT709_FULL: Tags = &["colorspace=bt709", "range=pc"];
-const SMPTE170M_LIMITED: Tags = &["colorspace=smpte170m", "range=tv"];
-const BT470BG_FULL: Tags = &["colorspace=bt470bg", "range=pc"];
-const BT2020_LIMITED: Tags = &["colorspace=bt2020nc", "range=tv"];
+use support::yuv_videos::{
+    BT470BG_FULL, BT709_FULL, BT709_LIMITED, BT2020_LIMITED, FOUR_COLOURS, HARD_CHROMA_STRIPES, SMPTE170M_LIMITED,
+    Tags, UNTAGGED, ffmpeg, picture_as_rgba, picture_in_planes, planes_of_noise, run, tagging_filter,
+    video_made_by_geq, video_of_planes,
+};
 
 /// Each way of tagging a video, and the colour that the engine must be given for it.
 const TAGGINGS: [(&str, Tags, YuvColour); 6] = [
@@ -80,181 +66,6 @@ const TAGGINGS: [(&str, Tags, YuvColour); 6] = [
     ),
 ];
 
-/// A picture of four flat colours, one in each quarter, with a ramp of brightness across: strong colour differences (more than 60 either side of grey),
-/// and borders between the colours that are as hard as can be.
-const FOUR_COLOURS: &str = "lum='60+120*X*SW/W':cb='if(lt(X*SW,W/2),if(lt(Y*SH,H/2),64,192),if(lt(Y*SH,H/2),128,224))':\
-cr='if(lt(X*SW,W/2),if(lt(Y*SH,H/2),192,64),if(lt(Y*SH,H/2),224,96))'";
-
-/// A picture of stripes of colour four pixels of the colour planes wide, which are 48 on one side of their edge and 208 on the other: the hardest edges
-/// of colour there are, which the colour planes of a video have no room to smooth.
-const HARD_CHROMA_STRIPES: &str =
-    "lum='128+60*sin(X/23)*sin(Y/17)':cb='if(lt(mod(X,8),4),48,208)':cr='if(lt(mod(Y,8),4),48,208)'";
-
-fn ffmpeg(toolchain: &FfmpegToolchain) -> Command {
-    let mut command = Command::new(toolchain.ffmpeg_path());
-    command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
-    command
-}
-
-fn run(mut command: Command) {
-    let output = command.output().expect("ffmpeg could not be run");
-    assert!(
-        output.status.success(),
-        "ffmpeg failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-/// The filter that makes a video say it has these colours, without changing a number of it.
-fn tagging_filter(tags: Tags) -> String {
-    if tags.is_empty() {
-        "null".to_owned()
-    } else {
-        format!("setparams={}", tags.join(":"))
-    }
-}
-
-/// How a picture in `pixel_format` is stored so that every number of it is kept, and what it says about its range with it: the numbers as they are,
-/// uncompressed, for `yuv420p` (the lossless codec of ffmpeg, FFV1, keeps only the limited range of it, and changes the numbers of a picture that says
-/// it is full range to fit), and FFV1 for the others (the tests that use them look at nothing but how they are stored).
-fn stored_without_a_change(pixel_format: &str) -> Vec<&str> {
-    if pixel_format == "yuv420p" {
-        vec!["-c:v", "rawvideo"]
-    } else {
-        vec!["-c:v", "ffv1", "-pix_fmt", pixel_format]
-    }
-}
-
-/// A video of one picture, with the three planes the `geq` filter makes of `expressions`, in `pixel_format`, tagged as `tags` say.
-fn video_made_by_geq(
-    toolchain: &FfmpegToolchain,
-    folder: &Path,
-    name: &str,
-    (width, height): (u32, u32),
-    expressions: &str,
-    pixel_format: &str,
-    tags: Tags,
-) -> PathBuf {
-    let path = folder.join(format!("{name}.mkv"));
-    let mut command = ffmpeg(toolchain);
-    command
-        .args(["-f", "lavfi", "-i"])
-        .arg(format!(
-            "nullsrc=s={width}x{height}:r=1:d=2,format=yuv420p,geq={expressions},{}",
-            tagging_filter(tags)
-        ))
-        .args(stored_without_a_change(pixel_format));
-    command.args(["-frames:v", "1"]).arg(&path);
-    run(command);
-    path
-}
-
-/// The three planes of a picture: numbers that look random and are the same every time.
-fn planes_of_noise(width: u32, height: u32, seed: u64) -> [Vec<u8>; 3] {
-    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-    let mut noise = |count: usize| -> Vec<u8> {
-        (0..count)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                (state >> 24) as u8
-            })
-            .collect()
-    };
-    let (chroma_width, chroma_height) = chroma_size(width, height);
-    let chroma_bytes = (chroma_width * chroma_height) as usize;
-    [
-        noise((width * height) as usize),
-        noise(chroma_bytes),
-        noise(chroma_bytes),
-    ]
-}
-
-/// A video of one picture whose planes are exactly `planes`, tagged as `tags` say.
-fn video_of_planes(
-    toolchain: &FfmpegToolchain,
-    folder: &Path,
-    name: &str,
-    (width, height): (u32, u32),
-    planes: &[Vec<u8>; 3],
-    tags: Tags,
-) -> PathBuf {
-    let raw = folder.join(format!("{name}.yuv"));
-    std::fs::write(&raw, planes.concat()).expect("the planes could be written");
-    let path = folder.join(format!("{name}.mkv"));
-    let mut command = ffmpeg(toolchain);
-    command
-        .args(["-f", "rawvideo", "-pixel_format", "yuv420p", "-video_size"])
-        .arg(format!("{width}x{height}"))
-        .args(["-framerate", "1", "-i"])
-        .arg(&raw)
-        .args(["-vf", &tagging_filter(tags)])
-        .args(stored_without_a_change("yuv420p"))
-        .args(["-frames:v", "1"])
-        .arg(&path);
-    run(command);
-    path
-}
-
-/// The first picture that a stream of `video` (which is `video_size` big) delivers when the preview picture is `picture_size`.
-fn first_picture(
-    toolchain: &FfmpegToolchain,
-    video: &Path,
-    video_size: (u32, u32),
-    picture_size: (u32, u32),
-    delivery: FrameDelivery,
-) -> FrameStreamEvent {
-    let request = FrameStreamRequest {
-        video: video.to_path_buf().into(),
-        project_frame_rate: FrameRate::new(1, 1).unwrap(),
-        video_frame_rate: FrameRate::new(1, 1).unwrap(),
-        first_source_frame: SourceFrameIndex::new(0),
-        source_frame_count: 1,
-        speed_factor: SpeedFactor::new(1).unwrap(),
-        video_display_size_in_pixels: video_size,
-        picture_width_in_pixels: picture_size.0,
-        picture_height_in_pixels: picture_size.1,
-        delivery,
-    };
-    let stream = FrameStream::start(toolchain, &request, Arc::new(|| {})).expect("the stream should start");
-    let started = Instant::now();
-    loop {
-        match stream.try_next_event() {
-            Some(FrameStreamEvent::Finished { error_output }) => panic!("no picture came: {error_output:?}"),
-            Some(picture) => return picture,
-            None => {
-                assert!(started.elapsed() < TIME_ALLOWED_FOR_A_STREAM, "no picture came in time");
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        }
-    }
-}
-
-fn picture_as_rgba(
-    toolchain: &FfmpegToolchain,
-    video: &Path,
-    video_size: (u32, u32),
-    picture_size: (u32, u32),
-) -> DecodedFrame {
-    match first_picture(toolchain, video, video_size, picture_size, FrameDelivery::Rgba) {
-        FrameStreamEvent::Frame(frame) => frame,
-        other => panic!("RGBA was asked for: {other:?}"),
-    }
-}
-
-fn picture_in_planes(
-    toolchain: &FfmpegToolchain,
-    video: &Path,
-    video_size: (u32, u32),
-    picture_size: (u32, u32),
-) -> DecodedYuvFrame {
-    match first_picture(toolchain, video, video_size, picture_size, FrameDelivery::Yuv420p) {
-        FrameStreamEvent::YuvFrame(frame) => frame,
-        other => panic!("planes were asked for: {other:?}"),
-    }
-}
-
 /// The largest and the mean difference between two pictures of RGBA bytes, over the red, green and blue of every pixel. (Not over how opaque they are:
 /// that is not what these tests are about, and what ffmpeg makes of it is looked at by a test of its own, in `media_frame_stream`.)
 fn differences(ours: &[u8], theirs: &[u8]) -> (u8, f64) {
@@ -269,6 +80,13 @@ fn differences(ours: &[u8], theirs: &[u8]) -> (u8, f64) {
         }
     }
     (largest, sum as f64 / count as f64)
+}
+
+/// Whether every pixel of ffmpeg's picture is opaque, as the picture of a video must be. (On ffmpeg for macOS on ARM it is not, for a picture of an odd width:
+/// ffmpeg's own conversion leaves clear pixels there, and `media_ffmpeg_quirks` says so. The comparisons below are of the engine with what ffmpeg makes right,
+/// so they leave a case alone where ffmpeg's own picture is broken, and only where the picture is of an odd size: everywhere else it must be right.)
+fn ffmpeg_made_it_opaque(frame: &DecodedFrame) -> bool {
+    frame.rgba_pixels.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 255)
 }
 
 /// What the preview makes of a video it decodes in planes: the colour comes from what ffprobe says of the video, as in the program.
@@ -474,6 +292,7 @@ const LARGEST_MEAN_DIFFERENCE_FROM_FFMPEG_AT_HARD_EDGES: f64 = 1.5;
 fn the_colours_the_engine_makes_of_the_planes_are_those_ffmpeg_makes_for_every_tag_at_every_size_and_scale() {
     let toolchain = toolchain_or_skip!();
     let folder = scratch_directory();
+    let (mut compared, mut skipped) = (0, 0);
     // (the size of the video, the size of the picture it is delivered for), as the preview asks for them: unscaled and scaled, halved, doubled, and at
     // odd sizes across, down, and both.
     for (video_size, picture_size) in [
@@ -506,8 +325,18 @@ fn the_colours_the_engine_makes_of_the_planes_are_those_ffmpeg_makes_for_every_t
             assert_eq!((theirs.width_in_pixels, theirs.height_in_pixels), (width, height));
             let ours = rgba_of_yuv420p_planes(width, height, &planes.y, &planes.u, &planes.v, colour);
 
-            let (largest, mean) = differences(&ours, &theirs.rgba_pixels);
             let what = format!("{video_size:?} made {width}x{height} [{name}]");
+            if !ffmpeg_made_it_opaque(&theirs) {
+                assert!(
+                    width % 2 == 1 || height % 2 == 1,
+                    "{what}: ffmpeg's own picture has clear pixels"
+                );
+                eprintln!("SKIPPED {what}: ffmpeg's own picture of this odd size has clear pixels");
+                skipped += 1;
+                continue;
+            }
+            compared += 1;
+            let (largest, mean) = differences(&ours, &theirs.rgba_pixels);
             assert!(
                 largest <= LARGEST_DIFFERENCE_FROM_FFMPEG_IN_FLAT_COLOURS,
                 "{what}: the engine's picture is off from ffmpeg's by {largest} levels"
@@ -518,6 +347,10 @@ fn the_colours_the_engine_makes_of_the_planes_are_those_ffmpeg_makes_for_every_t
             );
         }
     }
+    assert!(
+        compared >= 2 * skipped,
+        "{compared} cases were compared and {skipped} left alone: that is too few that were compared"
+    );
 }
 
 #[test]
@@ -573,6 +406,7 @@ fn the_wrong_matrix_or_range_or_planes_the_wrong_way_round_would_be_far_off_so_t
 fn hard_edges_of_colour_come_out_as_ffmpeg_makes_them_which_is_one_colour_difference_for_each_square_of_four_pixels() {
     let toolchain = toolchain_or_skip!();
     let folder = scratch_directory();
+    let (mut compared, mut skipped) = (0, 0);
     // Where ffmpeg turns the planes into colours at the size they have, or at half of the size of the video (and the picture has an even number of
     // rows), it gives every pixel the colour difference of the square of four it is in. (At the other scales it scales the colour planes first by its
     // own way, which the planes that arrive here are not; see `docs/engine-phase-1-design.md`.)
@@ -596,8 +430,18 @@ fn hard_edges_of_colour_come_out_as_ffmpeg_makes_them_which_is_one_colour_differ
             assert!(highest - lowest >= 100, "{video_size:?}: the stripes are not there");
 
             let ours = rgba_of_yuv420p_planes(width, height, &planes.y, &planes.u, &planes.v, colour);
-            let (largest, mean) = differences(&ours, &theirs.rgba_pixels);
             let what = format!("{video_size:?} made {width}x{height} [{name}]");
+            if !ffmpeg_made_it_opaque(&theirs) {
+                assert!(
+                    width % 2 == 1 || height % 2 == 1,
+                    "{what}: ffmpeg's own picture has clear pixels"
+                );
+                eprintln!("SKIPPED {what}: ffmpeg's own picture of this odd size has clear pixels");
+                skipped += 1;
+                continue;
+            }
+            compared += 1;
+            let (largest, mean) = differences(&ours, &theirs.rgba_pixels);
             assert!(
                 largest <= LARGEST_DIFFERENCE_FROM_FFMPEG_AT_HARD_EDGES,
                 "{what}: off from ffmpeg's by {largest} levels at most"
@@ -608,4 +452,8 @@ fn hard_edges_of_colour_come_out_as_ffmpeg_makes_them_which_is_one_colour_differ
             );
         }
     }
+    assert!(
+        compared >= 2 * skipped,
+        "{compared} cases were compared and {skipped} left alone: that is too few that were compared"
+    );
 }

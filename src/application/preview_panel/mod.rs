@@ -27,6 +27,8 @@
 //! the zoom is. A button in the bottom right corner of the panel brings the picture back to where it fits, while it is not there.
 
 mod catchers;
+#[cfg(test)]
+mod engine_parity_tests;
 mod engine_view;
 #[cfg(test)]
 mod engine_view_tests;

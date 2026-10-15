@@ -25,6 +25,8 @@ use fastforwardrs::project::{
 };
 use fastforwardrs::rgba_picture::RgbaPicture;
 
+pub mod yuv_videos;
+
 /// Set this to `1` to make the tests fail (instead of skipping themselves) when ffmpeg is missing.
 pub const REQUIRE_FFMPEG_ENVIRONMENT_VARIABLE: &str = "FASTFORWARDRS_REQUIRE_FFMPEG";
 
