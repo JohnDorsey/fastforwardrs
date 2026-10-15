@@ -22,13 +22,17 @@
 //! * making a frame: `plan` (which passes, worked out without a card), `pipelines` and `shaders`, and `frame_renderer` (one frame, recorded and
 //!   submitted).
 
+mod byte_lru;
 mod device;
 mod frame_cache;
 mod frame_renderer;
 mod frames;
 mod handle;
 mod messages;
+mod picture_cache;
+mod pictures;
 mod pipelines;
+mod placement;
 mod plan;
 mod readback;
 mod recycler;
@@ -37,11 +41,16 @@ mod shaders;
 #[cfg(test)]
 mod testing;
 mod texture_pool;
+mod uniform_arena;
 mod uniform_bytes;
 mod worker;
 
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod oracle_tests;
+#[cfg(test)]
+mod picture_tests;
 
 pub use device::{AdapterChoice, DeviceError, DeviceTrouble, EngineDevice};
 pub use frame_cache::FrameCache;
@@ -49,6 +58,7 @@ pub use frame_renderer::{FrameRenderer, RenderProblem};
 pub use frames::{FrameStatistics, RenderedFrame};
 pub use handle::Engine;
 pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
+pub use pictures::{PictureData, PicturePixels, PictureProblem};
 pub use plan::{FramePlan, PassPlan, plan_frame};
 pub use scene::{
     COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameDescription, LayerDescription, LayerSource,

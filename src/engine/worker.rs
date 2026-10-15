@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use super::FrameStatistics;
 use super::device::{DeviceTrouble, EngineDevice};
 use super::frame_cache::FrameCache;
-use super::frame_renderer::FrameRenderer;
+use super::frame_renderer::{FrameRenderer, RenderProblem};
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 
 /// The body of the thread.
@@ -51,6 +51,22 @@ pub(super) fn run(
         let mut stop = false;
         for request in batch {
             match request {
+                EngineRequest::Upload { id, data } => {
+                    // (A picture is always the same pixels under the same id, so this is not meant to happen. If it does, the frames that were
+                    // made with the old picture are not what would be made now, and none of them is kept.)
+                    let replaces_a_picture = renderer.picture_size(id).is_some();
+                    match renderer.upload_picture(id, &data) {
+                        Ok(()) if replaces_a_picture => cache.clear(),
+                        Ok(()) => {}
+                        Err(problem) => {
+                            tell(EngineEvent::PictureRejected {
+                                id,
+                                problem: problem.to_string(),
+                            });
+                        }
+                    }
+                }
+                EngineRequest::Forget(ids) => renderer.forget_pictures(ids),
                 EngineRequest::Render { serial, description } => newest_render = Some((serial, description)),
                 EngineRequest::Stop => stop = true,
             }
@@ -95,6 +111,7 @@ pub(super) fn run(
                         statistics,
                     }
                 }
+                Err(RenderProblem::PicturesMissing(ids)) => EngineEvent::PicturesMissing { serial, ids },
                 Err(problem) => EngineEvent::FrameFailed {
                     serial,
                     problem: problem.to_string(),

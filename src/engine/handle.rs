@@ -7,9 +7,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use super::FrameDescription;
+use std::sync::Arc;
+
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::worker;
+use super::{FrameDescription, PictureData, PictureId};
 
 /// How long dropping the handle waits for the engine's thread to finish before it leaves it behind. (A thread that is stuck on the graphics card
 /// cannot be stopped from outside: the program leaves it, and it ends with the program.)
@@ -39,6 +41,16 @@ impl Engine {
             thread: Some(thread),
             next_serial: 1,
         }
+    }
+
+    /// Sends a picture, which frames can then refer to by `id`. The bytes are not copied.
+    pub fn upload_picture(&self, id: PictureId, data: Arc<PictureData>) {
+        let _ = self.requests.send(EngineRequest::Upload { id, data });
+    }
+
+    /// Tells the engine to let go of these pictures.
+    pub fn forget_pictures(&self, ids: Vec<PictureId>) {
+        let _ = self.requests.send(EngineRequest::Forget(ids));
     }
 
     /// Asks for a frame, and gives the serial number that its [`EngineEvent::Frame`] will have. Serial numbers go up by one for each request.

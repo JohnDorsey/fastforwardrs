@@ -6,9 +6,15 @@
 /// The last pass of a frame: the finished picture as 8-bit.
 pub const OUTPUT: &str = include_str!("shaders/output.wgsl");
 
+/// What is done once to a picture that was sent as bytes: it is premultiplied and made half-float.
+pub const INGEST: &str = include_str!("shaders/ingest.wgsl");
+
+/// Putting a layer's picture in its place on the frame.
+pub const PLACE: &str = include_str!("shaders/place.wgsl");
+
 /// Every shader of the engine, with the name of its file.
 #[cfg(test)]
-pub const ALL: &[(&str, &str)] = &[("output.wgsl", OUTPUT)];
+pub const ALL: &[(&str, &str)] = &[("output.wgsl", OUTPUT), ("ingest.wgsl", INGEST), ("place.wgsl", PLACE)];
 
 #[cfg(test)]
 mod tests {

@@ -5,13 +5,21 @@
 //! from the shader): with an automatic layout wgpu leaves out the bindings that a shader does not use, and then a bind group has to be made
 //! differently for each shader (found in phase 0.5).
 
+use std::num::NonZeroU64;
+
 use super::shaders;
 
-/// The format of the picture that the layers are put together in.
+/// The format of the picture that the layers are put together in, and of the pictures of the layers: premultiplied, in half floats.
 pub const ACCUMULATION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+/// The format a picture is sent in, before it is made premultiplied half-float.
+pub const SENT_PICTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// The format of a finished frame.
 pub const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// How many bytes the uniforms of the pass that puts a layer in its place take up (see `place.wgsl`).
+pub const PLACEMENT_UNIFORM_BYTES: u64 = 64;
 
 /// The last pass: the accumulation picture to the 8-bit frame.
 pub struct OutputPass {
@@ -19,15 +27,33 @@ pub struct OutputPass {
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
+/// The pass that makes a picture that was sent as bytes into one the passes of a frame work on.
+pub struct IngestPass {
+    pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
+/// The pass that puts a layer's picture in its place on the frame.
+pub struct PlacePass {
+    pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+    /// How layers' pictures are read: smoothly between their pixels, and the colour of the edge pixel beyond their edges.
+    pub sampler: wgpu::Sampler,
+}
+
 /// Every pipeline of the engine.
 pub struct Pipelines {
     pub output: OutputPass,
+    pub ingest: IngestPass,
+    pub place: PlacePass,
 }
 
 impl Pipelines {
     pub fn create(device: &wgpu::Device) -> Self {
         Self {
             output: output_pass(device),
+            ingest: ingest_pass(device),
+            place: place_pass(device),
         }
     }
 }
@@ -39,42 +65,45 @@ fn shader_module(device: &wgpu::Device, label: &str, source: &str) -> wgpu::Shad
     })
 }
 
-fn output_pass(device: &wgpu::Device) -> OutputPass {
-    let module = shader_module(device, "engine output pass", shaders::OUTPUT);
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("engine output pass bindings"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        }],
-    });
-    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("engine output pass layout"),
-        bind_group_layouts: &[Some(&bind_group_layout)],
-        immediate_size: 0,
-    });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("engine output pass"),
-        layout: Some(&layout),
+/// A bind group layout entry for a texture that is read with `textureLoad` only.
+fn loaded_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+/// A pipeline that draws with the shader's `vs_main` and `fs_main` into `format`, with `blend`.
+fn pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
         vertex: wgpu::VertexState {
-            module: &module,
+            module,
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
-            module: &module,
+            module,
             entry_point: Some("fs_main"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
-                format: OUTPUT_FORMAT,
-                blend: None,
+                format,
+                blend,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -83,9 +112,124 @@ fn output_pass(device: &wgpu::Device) -> OutputPass {
         multisample: Default::default(),
         multiview_mask: None,
         cache: None,
+    })
+}
+
+fn output_pass(device: &wgpu::Device) -> OutputPass {
+    let module = shader_module(device, "engine output pass", shaders::OUTPUT);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine output pass bindings"),
+        entries: &[loaded_texture_entry(0)],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine output pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
     });
     OutputPass {
-        pipeline,
+        pipeline: pipeline(device, "engine output pass", &module, &layout, OUTPUT_FORMAT, None),
         bind_group_layout,
+    }
+}
+
+fn ingest_pass(device: &wgpu::Device) -> IngestPass {
+    let module = shader_module(device, "engine ingest pass", shaders::INGEST);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine ingest pass bindings"),
+        entries: &[loaded_texture_entry(0)],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine ingest pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    IngestPass {
+        pipeline: pipeline(
+            device,
+            "engine ingest pass",
+            &module,
+            &layout,
+            ACCUMULATION_FORMAT,
+            None,
+        ),
+        bind_group_layout,
+    }
+}
+
+/// How a layer is laid over what is under it: its colours are premultiplied already, so they are added to what shows through; the same as the
+/// window's own renderer does, so that the same layers over the same picture come to the same numbers.
+const PREMULTIPLIED_OVER: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::OneMinusDstAlpha,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
+
+fn place_pass(device: &wgpu::Device) -> PlacePass {
+    let module = shader_module(device, "engine place pass", shaders::PLACE);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine place pass bindings"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    // (Dynamic: every layer's uniforms are in one buffer, each at an offset of its own. See `uniform_bytes`.)
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(PLACEMENT_UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine place pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("engine layer sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    });
+    PlacePass {
+        pipeline: pipeline(
+            device,
+            "engine place pass",
+            &module,
+            &layout,
+            ACCUMULATION_FORMAT,
+            Some(PREMULTIPLIED_OVER),
+        ),
+        bind_group_layout,
+        sampler,
     }
 }
