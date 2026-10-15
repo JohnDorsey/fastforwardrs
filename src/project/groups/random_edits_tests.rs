@@ -486,7 +486,7 @@ impl Randomly {
                 let result = if present.is_empty() || self.below(2) == 0 {
                     self.laid
                         .project
-                        .add_effect_to_the_group(group, EffectKind::HueShift)
+                        .add_effect_to_the_group(group, EffectKind::HUE_SHIFT)
                         .map(|_| ())
                 } else {
                     let instance = present[self.below(present.len())];
@@ -518,7 +518,7 @@ impl Randomly {
                         Member::Group(_) => None,
                     };
                     let added = target
-                        .map(|target| self.laid.project.add_effect(target, EffectKind::HueShift).is_ok())
+                        .map(|target| self.laid.project.add_effect(target, EffectKind::HUE_SHIFT).is_ok())
                         .unwrap_or(false);
                     return ("an effect of a clip or track", added, format!("{owner:?}"));
                 }

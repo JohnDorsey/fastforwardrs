@@ -11,7 +11,7 @@
 //! like any other, so it is an edit that is undone with one step, and a value that has keyframes is changed at the playhead. (The values of
 //! the effect of a group have no keyframes: they are not animated.)
 
-use egui::{Slider, SliderClamping, Ui};
+use egui::{DragValue, Slider, SliderClamping, Ui};
 
 use super::PropertiesContent;
 use super::animatable::{self, Animatable};
@@ -24,6 +24,10 @@ pub const ADD_EFFECT_LABEL: &str = "Add an effect";
 
 /// What the item of the menu of a box of an effect that deletes the effect is called.
 pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
+
+/// What the box of an effect that the program does not have says (a project file can bring one): that it does nothing, and that nothing of it is
+/// lost.
+pub const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";
 
 /// The effects among `kinds` that the menu of the plus button offers: those that `can_have` says the thing can have, in the order they are
 /// in `kinds`. (What it has already is offered again: it may have several effects of one kind.)
@@ -50,6 +54,12 @@ pub(super) fn show_the_control_of(
     else {
         return;
     };
+    // (A value that is not a number has a line that says what it is, and no keyframe buttons: the controls of the other kinds of value, and the
+    // animation of them, come with the effects that need them.)
+    if !matches!(shown, PropertyValue::Number(_)) {
+        labelled_row(ui, |ui| control_for(ui, kind, property, &shown));
+        return;
+    }
     let changed = animatable::row(ui, content, Animatable { target, property }, commands, |ui, _| {
         labelled_row(ui, |ui| control_for(ui, kind, property, &shown))
     });
@@ -80,29 +90,54 @@ pub(super) fn show_the_control_of_a_group_effect(
 }
 
 /// The control that changes the value of an effect that `property` is, which shows `shown`: the new value if it was changed. A
-/// property that is not a value of an effect has none.
+/// property that is not a value of an effect has none. What the control looks like is what the effect says of its value (its label, the range
+/// it shows, what it is in): a number has a slider, or a box to drag in if it has no range; the other kinds of value are only said.
 fn control_for(ui: &mut Ui, kind: EffectKind, property: PropertyId, shown: &PropertyValue) -> Option<PropertyValue> {
     let PropertyId::EffectValue { slot, .. } = property else {
         return None;
     };
-    match (kind, slot, shown) {
-        (EffectKind::HueShift, 0, PropertyValue::Number(degrees)) => {
-            let mut degrees = *degrees;
-            let label = ui.label("Turn");
-            // (From half a turn back to half a turn on: that is all the colours there are to turn to. The value can be typed to
-            // go further, as a turn is typed, which is how many times the colours go round between two keyframes.)
-            let changed = ui
-                .add(
-                    Slider::new(&mut degrees, -180.0..=180.0)
-                        .clamping(SliderClamping::Never)
-                        .suffix("°")
-                        .max_decimals(1),
-                )
-                .labelled_by(label.id)
-                .changed();
-            changed.then_some(PropertyValue::Number(degrees))
+    let parameter = kind.parameters().get(usize::from(slot))?;
+    let PropertyValue::Number(number) = shown else {
+        ui.label(format!("{}: {}", parameter.label, what_a_value_says(shown)));
+        return None;
+    };
+    let mut number = *number;
+    let label = ui.label(&*parameter.label);
+    // (The range is what the slider shows: the value can be typed to go further, as a turn of the colours is typed to go round more than
+    // once, which is how many times they go round between two keyframes.)
+    let changed = match parameter.range {
+        Some((least, most)) => {
+            let mut slider = Slider::new(&mut number, least..=most)
+                .clamping(SliderClamping::Never)
+                .suffix(&*parameter.unit);
+            if let Some(decimals) = parameter.decimals {
+                slider = slider.max_decimals(usize::from(decimals));
+            }
+            ui.add(slider).labelled_by(label.id).changed()
         }
-        _ => None,
+        None => {
+            let mut drag = DragValue::new(&mut number).suffix(&*parameter.unit);
+            if let Some(decimals) = parameter.decimals {
+                drag = drag.max_decimals(usize::from(decimals));
+            }
+            ui.add(drag).labelled_by(label.id).changed()
+        }
+    };
+    changed.then_some(PropertyValue::Number(number))
+}
+
+/// What a value is, in words, for a value that has no control.
+fn what_a_value_says(value: &PropertyValue) -> String {
+    match value {
+        PropertyValue::Number(number) => number.to_string(),
+        PropertyValue::Pair(first, second) => format!("{first}, {second}"),
+        PropertyValue::Colour(colour) => format!(
+            "#{:02X}{:02X}{:02X}{:02X}",
+            colour.red, colour.green, colour.blue, colour.alpha
+        ),
+        PropertyValue::Flag(true) => "yes".to_owned(),
+        PropertyValue::Flag(false) => "no".to_owned(),
+        PropertyValue::Words(words) => words.clone(),
     }
 }
 
@@ -113,7 +148,7 @@ mod tests {
     #[test]
     fn the_menu_offers_the_effects_the_thing_can_have_in_the_order_they_are_in_and_what_it_has_already_too() {
         // (A thing may have several effects of one kind, so what it has is offered as much as what it has not: the menu is not told what it has.)
-        let kinds = EffectKind::ALL;
+        let kinds = EffectKind::BUILT_IN;
 
         assert_eq!(effects_to_offer(kinds, |_| true), kinds.to_vec(), "all of them");
         assert_eq!(
@@ -122,12 +157,12 @@ mod tests {
             "what it cannot have is not offered"
         );
         assert_eq!(
-            effects_to_offer(kinds, |kind| kind != EffectKind::HueShift),
+            effects_to_offer(kinds, |kind| kind != EffectKind::HUE_SHIFT),
             Vec::<EffectKind>::new(),
             "whichever it is that it cannot have"
         );
         assert_eq!(
-            effects_to_offer([EffectKind::HueShift, EffectKind::HueShift], |_| true).len(),
+            effects_to_offer([EffectKind::HUE_SHIFT, EffectKind::HUE_SHIFT], |_| true).len(),
             2,
             "(it offers what it is given: the table has each kind once)"
         );

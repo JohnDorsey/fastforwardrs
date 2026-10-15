@@ -13,8 +13,10 @@
 pub mod archive;
 mod document;
 mod drawers;
+mod effects;
 mod groups;
 mod legacy;
+mod legacy_effects;
 mod relative_path;
 
 use std::collections::{HashMap, HashSet};
@@ -28,17 +30,20 @@ use thiserror::Error;
 use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
-    Angle, AnimationTarget, CanvasArea, ChainEntry, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect,
-    EffectInstanceId, EffectKind, Effects, FontSize, ImageClip, MediaClip, Placement, Project, ProjectSettings,
-    PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
-    SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
-    TrackHeight, TrackId, ValueKind,
+    Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectKind, Effects, FontSize,
+    ImageClip, MediaClip, Placement, Project, ProjectSettings, PropertyValue, SourceAudioProperties,
+    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
+    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track, TrackHeight, TrackId,
+    ValueKind,
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
-    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ColourDocument, EffectDocument,
-    KeyframeValueDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument,
-    SpeedIndicatorDocument, TrackDocument,
+    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ColourDocument, KeyframeValueDocument,
+    PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument,
+    TrackDocument,
+};
+use effects::{
+    EffectDocument, KindsOfEffects, chain_of_the_effects_from_documents, effect_documents_of, plugin_documents_of,
 };
 use legacy::LegacyProjectDocument;
 pub use relative_path::relative_path_between;
@@ -91,9 +96,13 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// clips and of tracks (a file of version 7 has none). Version 9 added the files that are included in the project file (a file of
 /// version 8 has none). Version 10 added groups, and with them the badges in the chains of effects of clips and groups (a file of version 9
 /// has none: it is a project with no group, in which each clip has its effects and then those of its track, as it always had). Version 11
-/// names each effect in its chain, so that a chain can have several effects of one kind, and says in the racks of the keyframes of the values
-/// of effects which effect they are of (a file of version 10 has at most one effect of each kind, and names none: they are named in the
-/// order they are in, and a rack is of the effect that has a value of the name it says).
+/// opens up the effects (see `effects.rs` of this module): each type of effect that a project uses has a snapshot of its descriptor in `plugins`, an effect
+/// says the key and the version of its type, and its values are by the id of each; each effect is named in its chain, so that a chain can have
+/// several effects of one kind, and the racks of the keyframes of the values of effects say which effect they are of and call the value by
+/// its id; and what the program does not know of an effect, a type of effect or a value is kept. (A file of version 10 calls an effect by the
+/// name that the program had for it, `hue shift`, has the values in a list, has at most one effect of each kind and names none: they are
+/// named in the order they are in, and a rack is of the effect that has a value of the name it says: see `legacy_effects.rs`. So is a file of
+/// version 11 as it was written while the effects were being named.)
 pub const FILE_FORMAT_VERSION: u32 = 11;
 
 /// The newest version that has the old layout.
@@ -617,91 +626,6 @@ fn value_from_document(document: KeyframeValueDocument, value_kind: ValueKind) -
     }
 }
 
-/// The effect that `document` describes, if it describes one: of a kind there is, with a value of the kind it has for each of its
-/// properties, or none (which are what it begins with).
-fn effect_from_document(document: EffectDocument) -> Result<Effect, String> {
-    let kind = EffectKind::from_name(&document.effect)
-        .ok_or_else(|| format!("\"{}\" is not an effect there is", document.effect))?;
-    if document.values.is_empty() {
-        return Ok(Effect::new(kind));
-    }
-    if document.values.len() != kind.value_kinds().len() {
-        return Err(format!(
-            "the values of the {kind} effect should be a list of {}, and the file's list is of {}",
-            kind.value_kinds().len(),
-            document.values.len()
-        ));
-    }
-    let values = document
-        .values
-        .into_iter()
-        .zip(kind.value_kinds())
-        .map(|(value, value_kind)| {
-            value_from_document(value, *value_kind).map_err(|reason| format!("the {kind} effect: {reason}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Effect::with_values(kind, values).ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
-}
-
-/// The effects that the documents describe, in their order, each named as the document names it: a file of version 10 names none, and
-/// they are named in the order they are in (as they would be if they were put on one after another). It is an error to put an effect on
-/// something that cannot have it (a sound), to name some of the effects of a chain and not the others, or to give two the same name.
-fn effects_from_documents(
-    documents: Vec<EffectDocument>,
-    can_have: impl Fn(EffectKind) -> bool,
-) -> Result<Vec<Effect>, String> {
-    let named = documents.iter().filter(|document| document.instance.is_some()).count();
-    if named != 0 && named != documents.len() {
-        return Err("some of its effects have a name in its chain and some have not".to_owned());
-    }
-    let mut effects: Vec<Effect> = Vec::with_capacity(documents.len());
-    for (place, document) in documents.into_iter().enumerate() {
-        let instance = EffectInstanceId::new(match document.instance {
-            Some(number) => number,
-            None => u32::try_from(place).map_err(|_| "it has too many effects".to_owned())?,
-        });
-        let effect = effect_from_document(document)?.named(instance);
-        let kind = effect.kind();
-        if !can_have(kind) {
-            return Err(format!("it cannot have the {kind} effect"));
-        }
-        if effects.iter().any(|other| other.instance() == instance) {
-            return Err(format!("it has two effects that are named {instance}"));
-        }
-        effects.push(effect);
-    }
-    Ok(effects)
-}
-
-/// The chain that the documents of the effects of a track make (a track has no badges in its chain).
-fn chain_of_the_effects_from_documents(
-    documents: Vec<EffectDocument>,
-    can_have: impl Fn(EffectKind) -> bool,
-) -> Result<Effects, String> {
-    Effects::from_entries(
-        effects_from_documents(documents, can_have)?
-            .into_iter()
-            .map(ChainEntry::Effect),
-    )
-    .ok_or_else(|| "it has two effects with the same name".to_owned())
-}
-
-/// The documents of the effects `effects`, in their order, with the values left out of each that has the values it begins with.
-fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
-    effects
-        .iter()
-        .map(|effect| EffectDocument {
-            effect: effect.kind().name().to_owned(),
-            instance: Some(effect.instance().number()),
-            values: if effect.values() == effect.kind().default_values() {
-                Vec::new()
-            } else {
-                effect.values().iter().map(value_document_of).collect()
-            },
-        })
-        .collect()
-}
-
 /// A clip as a document describes it.
 struct ClipFromDocument {
     /// How many empty frames come before it.
@@ -717,8 +641,12 @@ struct ClipFromDocument {
 
 /// The clip a document describes: with what is in its drawer as it is in the document, which is made into racks when what the
 /// racks can be of is known (see [`project_from_document`]). `group_count` is how many groups the file has, which the badges in the
-/// chain of the clip are of.
-fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<ClipFromDocument, String> {
+/// chain of the clip are of, and `kinds` are the types of effect that the effects of the clip can be of.
+fn clip_from_document(
+    document: ClipDocument,
+    group_count: usize,
+    kinds: &KindsOfEffects,
+) -> Result<ClipFromDocument, String> {
     match document {
         ClipDocument::Video {
             gap_before_frames,
@@ -747,6 +675,7 @@ fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<Clip
                 effects: groups::chain_from_documents(
                     effects,
                     badges,
+                    kinds,
                     |kind| kind.applies_to_a_clip_of_kind(ClipKind::Video),
                     group_count,
                 )?,
@@ -771,7 +700,7 @@ fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<Clip
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Audio(media.with_gain(gain_decibels).with_muted(muted)),
-                effects: groups::chain_from_documents(Vec::new(), badges, |_| false, group_count)?,
+                effects: groups::chain_from_documents(Vec::new(), badges, kinds, |_| false, group_count)?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -793,6 +722,7 @@ fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<Clip
                 effects: groups::chain_from_documents(
                     effects,
                     badges,
+                    kinds,
                     |kind| kind.applies_to_a_clip_of_kind(ClipKind::Image),
                     group_count,
                 )?,
@@ -829,6 +759,7 @@ fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<Clip
                 effects: groups::chain_from_documents(
                     effects,
                     badges,
+                    kinds,
                     |kind| kind.applies_to_a_clip_of_kind(ClipKind::Text),
                     group_count,
                 )?,
@@ -846,7 +777,7 @@ fn clip_from_document(document: ClipDocument, group_count: usize) -> Result<Clip
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Crate(crate_clip),
-                effects: groups::chain_from_documents(Vec::new(), badges, |_| false, group_count)?,
+                effects: groups::chain_from_documents(Vec::new(), badges, kinds, |_| false, group_count)?,
                 legacy_animation: AnimationDocument::default(),
                 racks: drawer,
             })
@@ -889,6 +820,7 @@ fn placement_document_of(placement: Placement) -> PlacementDocument {
 fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFileError> {
     let sources = document.sources.into_iter().map(source_from_document).collect();
     let group_count = document.groups.len();
+    let kinds = KindsOfEffects::from_documents(document.plugins).map_err(invalid_project)?;
 
     // The clips are made first: the racks of keyframes may be of any clip of any track, and which clips there are, of what
     // kind, and how long each lasts is what the racks are checked against.
@@ -905,11 +837,11 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             effects,
             clips: clip_documents,
         } = track;
-        let effects = chain_of_the_effects_from_documents(effects, EffectKind::applies_to_a_track)
+        let effects = chain_of_the_effects_from_documents(effects, &kinds, EffectKind::applies_to_a_track)
             .map_err(|reason| invalid_project(format!("track number {}: {reason}", track_number + 1)))?;
         let mut clips = Vec::with_capacity(clip_documents.len());
         for (clip_number, clip) in clip_documents.into_iter().enumerate() {
-            clips.push(clip_from_document(clip, group_count).map_err(|reason| {
+            clips.push(clip_from_document(clip, group_count, &kinds).map_err(|reason| {
                 invalid_project(format!(
                     "clip number {} of track number {}: {reason}",
                     clip_number + 1,
@@ -985,7 +917,8 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
         );
     }
 
-    let groups = groups::groups_from_documents(document.groups, &clips_in_each_track).map_err(invalid_project)?;
+    let groups =
+        groups::groups_from_documents(document.groups, &clips_in_each_track, &kinds).map_err(invalid_project)?;
     let layout = speed_indicator_from_document(&document.speed_indicator);
     Project::from_parts_and_groups(sources, tracks, layout, groups)
         .map(|project| {
@@ -1128,6 +1061,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         file_format: FILE_FORMAT_NAME.to_owned(),
         file_format_version: FILE_FORMAT_VERSION,
         sources,
+        plugins: plugin_documents_of(project),
         tracks,
         groups,
         speed_indicator: SpeedIndicatorDocument {
@@ -1254,5 +1188,7 @@ mod effects_tests;
 mod groups_tests;
 #[cfg(test)]
 mod included_files_tests;
+#[cfg(test)]
+mod plugins_tests;
 #[cfg(test)]
 mod tests;

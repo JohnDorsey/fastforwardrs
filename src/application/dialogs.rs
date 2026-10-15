@@ -27,6 +27,10 @@ pub enum Dialog {
     /// A warning that a change would lose `how_many` keyframes, because it makes something last so little time that there is no
     /// frame for them. The `change` is carried out if the user agrees, and not otherwise.
     ConfirmLosingKeyframes { change: Box<Command>, how_many: usize },
+    /// A warning that the video that would be exported does not have what some of the effects of the project do, because the program does
+    /// not have them (a project file brought them): `effects` says which, each by its name, its key and its version. If the user agrees
+    /// the video is exported anyway, and otherwise it is not.
+    ConfirmExportWithMissingEffects { effects: Vec<String> },
     /// Files cannot be included in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked
     /// where to save it as one, and if the user agrees the `files` are included as it is.
     MustSaveAsAnArchiveToIncludeFiles {
@@ -132,6 +136,26 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui.button("Choose where to save it").clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                });
+            }
+            Dialog::ConfirmExportWithMissingEffects { effects } => {
+                ui.heading("Export without some effects?");
+                ui.add_space(6.0);
+                ui.label(
+                    "The project has effects that this program does not have, so the video would not have what they do. \
+                     Their values are kept in the project, and the video can be exported again when the program has them:",
+                );
+                for effect in effects {
+                    ui.label(format!("  - {effect}"));
+                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Export anyway").clicked() {
                         answer = DialogAnswer::Confirmed;
                     }
                     if ui.button("Cancel").clicked() {

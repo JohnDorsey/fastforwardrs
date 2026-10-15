@@ -1,7 +1,8 @@
 # Continuous integration: the same checks on Windows, Ubuntu and macOS.
 #
-# Written on 2026-10-15 (phase 0.1 of docs/plugin-system-plan-of-action.md) and NOT YET RUN on GitHub: the first push will show what
-# needs adjusting (the ffmpeg install steps most of all). What was run for real is the Ubuntu column, by hand, in WSL: see tools/linux/.
+# Written on 2026-10-15 (phase 0.1 of docs/plugin-system-plan-of-action.md). The runs since then show that Ubuntu, the licence checks and the
+# tools pass, and that the integration tests of Windows and macOS fail (what they say is written as an annotation of the job: see the
+# "Integration tests" step). The Ubuntu column was also run by hand, in WSL: see tools/linux/.
 #
 # What "supported" means per platform (decision Q-19): Windows and Linux: the whole suite passes. macOS: it builds and the headless
 # tests pass (nobody here can look at the window on a Mac).
@@ -85,7 +86,19 @@ jobs:
           version=$(ffmpeg -version | head -n 1 | sed -n 's/^ffmpeg version [^0-9]*\([0-9]*\)\..*/\1/p')
           echo "ffmpeg major version: ${version:-none}"
           if [ "${version:-0}" -ge 9 ]; then
-            FASTFORWARDRS_REQUIRE_FFMPEG=1 cargo test --no-fail-fast --tests
+            # The log is kept in a file as well: the names of the tests that failed and what they said are then also written as an annotation
+            # of the job, which can be read without signing in to GitHub (the log itself cannot).
+            set -o pipefail
+            if ! FASTFORWARDRS_REQUIRE_FFMPEG=1 cargo test --no-fail-fast --tests 2>&1 | tee "$RUNNER_TEMP/integration_tests.log"; then
+              failed=$(grep -E '^test .* FAILED$' "$RUNNER_TEMP/integration_tests.log" | head -n 40)
+              said=$(grep -A8 -E '^---- .* stdout ----$' "$RUNNER_TEMP/integration_tests.log" | cut -c1-300 | head -n 60)
+              message=$(printf '%s\n\n%s' "$failed" "$said" | head -c 3500)
+              message="${message//'%'/'%25'}"
+              message="${message//$'\r'/}"
+              message="${message//$'\n'/'%0A'}"
+              echo "::error title=Integration tests that failed::$message"
+              exit 1
+            fi
           else
             echo "::warning::ffmpeg ${version:-none} is older than 9: the integration tests were not run"
           fi

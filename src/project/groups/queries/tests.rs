@@ -293,7 +293,7 @@ fn the_chain_of_a_thing_is_the_chain_of_a_clip_a_track_or_a_group_and_none_if_it
         .create_group(GroupKind::Tag, &[laid.clip_member(0, 0)])
         .unwrap();
     laid.project
-        .add_effect_to_the_group(tag, crate::project::EffectKind::HueShift)
+        .add_effect_to_the_group(tag, crate::project::EffectKind::HUE_SHIFT)
         .unwrap();
     let project = &laid.project;
 

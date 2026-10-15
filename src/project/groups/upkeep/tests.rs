@@ -130,7 +130,7 @@ fn the_second_half_of_a_clip_that_is_cut_is_in_the_groups_of_the_first_with_the_
     laid.project
         .add_effect(
             crate::project::AnimationTarget::Clip(laid.clip(0, 0)),
-            crate::project::EffectKind::HueShift,
+            crate::project::EffectKind::HUE_SHIFT,
         )
         .unwrap();
     let second_tag = laid.project.create_group(GroupKind::Tag, &[a, b]).unwrap();
@@ -694,7 +694,7 @@ fn edits_that_cannot_break_a_rule_are_made_when_there_are_groups_as_they_are_whe
     laid.project
         .add_effect(
             crate::project::AnimationTarget::Track(laid.tracks[1]),
-            crate::project::EffectKind::HueShift,
+            crate::project::EffectKind::HUE_SHIFT,
         )
         .unwrap();
     let added = laid.project.add_track_in_front();

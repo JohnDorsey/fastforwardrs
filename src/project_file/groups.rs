@@ -15,11 +15,10 @@
 use std::collections::HashMap;
 
 use super::document::{
-    BadgeDocument, BadgeOfDocument, EffectDocument, GroupColourDocument, GroupDocument, GroupKindDocument,
-    MemberDocument,
+    BadgeDocument, BadgeOfDocument, GroupColourDocument, GroupDocument, GroupKindDocument, MemberDocument,
 };
 use super::drawers::Positions;
-use super::{effect_documents_of, effects_from_documents};
+use super::effects::{EffectDocument, KindsOfEffects, effect_documents_of, effects_from_documents};
 use crate::project::{
     Badge, ChainEntry, ClipId, EffectKind, Effects, Group, GroupId, GroupKind, Member, Project, TrackId,
 };
@@ -30,10 +29,11 @@ use crate::project::{
 pub(super) fn chain_from_documents(
     effects: Vec<EffectDocument>,
     badges: Vec<BadgeDocument>,
+    kinds: &KindsOfEffects,
     can_have: impl Fn(EffectKind) -> bool,
     group_count: usize,
 ) -> Result<Effects, String> {
-    let effects = effects_from_documents(effects, can_have)?;
+    let effects = effects_from_documents(effects, kinds, can_have)?;
     let effect_count = effects.len();
     let mut places_of_the_badges: Vec<(usize, Badge)> = Vec::with_capacity(badges.len());
     for document in badges {
@@ -147,6 +147,7 @@ fn member_from_document(
 pub(super) fn groups_from_documents(
     documents: Vec<GroupDocument>,
     clips_in_each_track: &[usize],
+    kinds: &KindsOfEffects,
 ) -> Result<Vec<Group>, String> {
     let group_count = documents.len();
     let mut groups = Vec::with_capacity(group_count);
@@ -162,6 +163,7 @@ pub(super) fn groups_from_documents(
         let effects = chain_from_documents(
             document.effects,
             document.badges,
+            kinds,
             |effect| effect.applies_to_a_group_of_kind(kind),
             group_count,
         )

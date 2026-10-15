@@ -1,0 +1,185 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! What a type of effect is, as data: its key, its version, what it is called and does, and the values it has, each with a name that does not
+//! change (the *id* of the value), what kind of value it is, what it begins as and how a control for it looks. Nothing here says what the effect
+//! *does* to a picture: that is for what runs it (see [`EffectKind::colour_matrix`](super::EffectKind::colour_matrix)), so a descriptor is
+//! something that a file can bring, and that a project file keeps a copy of (a *snapshot*) for each type of effect that it uses.
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+
+use crate::project::animation::{PropertyValue, ValueKind};
+
+/// The most values that an effect can have (a value is named in the code by a small number, its *slot*: see
+/// [`PropertyId::EffectValue`](crate::project::PropertyId::EffectValue)).
+pub const MOST_VALUES_OF_AN_EFFECT: usize = 255;
+
+/// What a type of effect works on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EffectDomain {
+    /// The picture of a clip, or of a track: what is seen. (Video, pictures and text objects have one.)
+    Picture,
+    /// The sound of a clip, or of a track. (Nothing makes use of one yet: that comes with the sound engine.)
+    Sound,
+}
+
+/// What a file says that this version of the program does not know, kept as it was, so that it is written back as it was (a file that a newer
+/// program wrote, with more in it, survives being opened and saved by this one).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UnknownFields(BTreeMap<String, Value>);
+
+impl UnknownFields {
+    /// No unknown fields.
+    pub const fn none() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn new(fields: BTreeMap<String, Value>) -> Self {
+        Self(fields)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The fields, by name.
+    pub fn fields(&self) -> &BTreeMap<String, Value> {
+        &self.0
+    }
+}
+
+/// One of the values that a type of effect has.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParameterDescriptor {
+    /// What names the value in project files, and for as long as the effect type exists: it is never a position, and never changes. (The
+    /// values of an effect are kept by their place in the descriptor in the program, and by their ids in a file.)
+    pub id: Cow<'static, str>,
+    /// What the value is called when it is told apart from the other properties of a clip or a track (its keyframes, the buttons of them):
+    /// in lower case, as the names of the other properties are.
+    pub name: Cow<'static, str>,
+    /// What the control of the value says.
+    pub label: Cow<'static, str>,
+    /// What the value is when the effect is put on. Which kind of value it is, is the kind of this.
+    pub default: PropertyValue,
+    /// The least and the most that the control of a number shows: it can be typed past them, as a turn of the colours is typed to go round more
+    /// than once. (Nothing limits what a number is yet.)
+    pub range: Option<(f32, f32)>,
+    /// What is written after a number (a degree sign, say), or nothing.
+    pub unit: Cow<'static, str>,
+    /// The most decimals that a number is shown with, or as many as it has.
+    pub decimals: Option<u8>,
+    /// What a file said of the value that this version of the program does not know, to be written back as it was.
+    pub unknown_fields: UnknownFields,
+}
+
+impl ParameterDescriptor {
+    /// What kind of value the value is.
+    pub fn value_kind(&self) -> ValueKind {
+        self.default.kind()
+    }
+}
+
+/// A type of effect: what is the same about all the effects of it that there are.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectDescriptor {
+    /// What names the type of effect, in project files and everywhere else it is told from others: a namespace, a colon and an id
+    /// (`builtin:hue_shift`). It never has a file path in it, and never a position.
+    pub key: Cow<'static, str>,
+    /// The major and the minor number. The same major number means that what was made with one can be used with the other.
+    pub version: (u32, u32),
+    /// What it is called, in lower case.
+    pub name: Cow<'static, str>,
+    /// What it does, in a few words, for the menu that it is chosen from.
+    pub description: Cow<'static, str>,
+    pub domain: EffectDomain,
+    /// Whether it changes each pixel of a picture by itself, whatever the pixels round it are (as a change of colours does, and a blur does
+    /// not). An effect that does can be put on a clip group or a track group, which is done to each of its members for now instead of to
+    /// the picture they make together, which is only the same picture for such an effect (see `project::groups::effects_of_groups`).
+    pub changes_each_pixel_by_itself: bool,
+    /// The values that it has, in the order they are kept and shown in.
+    pub parameters: Cow<'static, [ParameterDescriptor]>,
+    /// What a file said of it that this version does not know.
+    pub unknown_fields: UnknownFields,
+}
+
+impl EffectDescriptor {
+    /// What is wrong with the descriptor, if anything is: it has to be one that the rest of the program can rely on.
+    pub fn problem(&self) -> Option<String> {
+        let key_is_right = self
+            .key
+            .split_once(':')
+            .is_some_and(|(namespace, id)| !namespace.is_empty() && !id.is_empty());
+        if !key_is_right {
+            return Some(format!(
+                "the key \"{}\" is not a namespace, a colon and an id",
+                self.key
+            ));
+        }
+        if self.name.is_empty() {
+            return Some(format!("the effect \"{}\" has no name", self.key));
+        }
+        if self.parameters.len() > MOST_VALUES_OF_AN_EFFECT {
+            return Some(format!(
+                "the effect \"{}\" has {} values, and {MOST_VALUES_OF_AN_EFFECT} are the most there can be",
+                self.key,
+                self.parameters.len()
+            ));
+        }
+        for (place, parameter) in self.parameters.iter().enumerate() {
+            if parameter.id.is_empty() || parameter.name.is_empty() {
+                return Some(format!(
+                    "value number {} of the effect \"{}\" has no id or no name",
+                    place + 1,
+                    self.key
+                ));
+            }
+            if self.parameters[..place].iter().any(|other| other.id == parameter.id) {
+                return Some(format!(
+                    "the effect \"{}\" has two values with the id \"{}\"",
+                    self.key, parameter.id
+                ));
+            }
+            if !is_a_number_that_can_be_used(&parameter.default) {
+                return Some(format!(
+                    "the value \"{}\" of the effect \"{}\" begins as a number that is not one",
+                    parameter.id, self.key
+                ));
+            }
+            if let Some((least, most)) = parameter.range
+                && !(least.is_finite() && most.is_finite() && least <= most)
+            {
+                return Some(format!(
+                    "the range of the value \"{}\" of the effect \"{}\" is not a least that is no more than a most",
+                    parameter.id, self.key
+                ));
+            }
+        }
+        None
+    }
+
+    /// Whether an effect that was made with the type of effect that `snapshot` describes can be used as an effect of this type instead:
+    /// the same key and major number, the same domain, and every value that the snapshot has is a value of this one of the same kind. (What
+    /// this has more than the snapshot does has what it begins as.)
+    pub fn can_stand_in_for(&self, snapshot: &EffectDescriptor) -> bool {
+        self.key == snapshot.key
+            && self.version.0 == snapshot.version.0
+            && self.domain == snapshot.domain
+            && snapshot.parameters.iter().all(|wanted| {
+                self.parameters
+                    .iter()
+                    .any(|own| own.id == wanted.id && own.value_kind() == wanted.value_kind())
+            })
+    }
+}
+
+/// Whether `value`, if it is a number or two, is made of numbers that are not infinite and are numbers.
+fn is_a_number_that_can_be_used(value: &PropertyValue) -> bool {
+    match value {
+        PropertyValue::Number(number) => number.is_finite(),
+        PropertyValue::Pair(first, second) => first.is_finite() && second.is_finite(),
+        PropertyValue::Colour(_) | PropertyValue::Flag(_) | PropertyValue::Words(_) => true,
+    }
+}

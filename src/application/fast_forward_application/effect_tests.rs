@@ -19,8 +19,10 @@ use crate::application::properties_panel::{
 };
 use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ClipId, EffectInstanceId, EffectKind, PropertyId, PropertyValue, TextObject, TimelineFrameIndex,
+    AnimationTarget, ClipId, Effect, EffectInstanceId, EffectKind, PropertyId, PropertyValue, TextObject,
+    TimelineFrameIndex,
 };
+use crate::test_support::a_kind_of_effect_the_program_does_not_have;
 
 const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
 /// What the slider of the value of the hue shift is called.
@@ -70,7 +72,7 @@ fn click_the_plus_button(window: &mut Window) {
 /// on, and its item has the name of the kind of effect, which a box that has no number is called as well: it is the last of those.)
 fn put_the_hue_shift_on_with_the_plus_button(window: &mut Window) {
     click_the_plus_button(window);
-    let name = what_an_effect_is_called(EffectKind::HueShift);
+    let name = what_an_effect_is_called(EffectKind::HUE_SHIFT);
     let item = window
         .rectangle_of_the_nth(&name, window.how_many_are_called(&name) - 1)
         .center();
@@ -143,7 +145,7 @@ fn a_track_has_a_plus_button_and_so_does_nothing_that_is_not_selected_or_a_keyfr
 fn the_menu_of_the_plus_button_has_each_effect_that_the_clip_can_have_and_choosing_one_puts_it_on() {
     let (mut window, video) = window_with_the_video_selected();
     click_the_plus_button(&mut window);
-    for kind in EffectKind::ALL {
+    for kind in EffectKind::BUILT_IN {
         assert!(
             is_shown(&window, &what_an_effect_is_called(kind)),
             "the menu has {kind}: the effects of the table are all offered"
@@ -155,7 +157,7 @@ fn the_menu_of_the_plus_button_has_each_effect_that_the_clip_can_have_and_choosi
     );
 
     let item = window
-        .rectangle_of(&what_an_effect_is_called(EffectKind::HueShift))
+        .rectangle_of(&what_an_effect_is_called(EffectKind::HUE_SHIFT))
         .center();
     window.click(item);
 
@@ -174,13 +176,13 @@ fn the_effect_that_is_put_on_has_a_box_with_its_name_and_the_controls_of_its_val
 
     assert!(has_the_effect(&window, clip(video), EffectInstanceId::FIRST));
     assert!(
-        is_shown(&window, &what_an_effect_is_called(EffectKind::HueShift)),
+        is_shown(&window, &what_an_effect_is_called(EffectKind::HUE_SHIFT)),
         "the box has its name"
     );
     assert!(is_shown(&window, TURN), "and the control of its value");
     assert!(
         window
-            .rectangle_of(&what_an_effect_is_called(EffectKind::HueShift))
+            .rectangle_of(&what_an_effect_is_called(EffectKind::HUE_SHIFT))
             .top()
             > box_of_the_clip.top(),
         "under the box of the clip"
@@ -244,7 +246,7 @@ fn the_slider_of_a_value_that_is_not_animated_changes_it_for_the_whole_clip_and_
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.move_current_frame_to(120);
 
@@ -269,7 +271,7 @@ fn the_slider_can_be_given_more_than_half_a_turn_either_way_and_keeps_what_it_is
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
 
     window.set_slider(TURN, 450.0);
@@ -283,7 +285,7 @@ fn the_stopwatch_of_the_value_starts_its_keyframes_and_the_slider_then_changes_t
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.set_slider(TURN, 30.0);
     window.move_current_frame_to(40);
@@ -330,7 +332,7 @@ fn the_slider_of_an_animated_value_shows_what_it_is_at_the_playhead_and_is_dimme
     select(&mut window, video);
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     for (at, degrees) in [(10, 0.0), (90, 80.0)] {
         window.move_current_frame_to(at);
@@ -374,7 +376,7 @@ fn the_menu_of_the_box_deletes_the_effect_with_its_keyframes_and_undo_brings_the
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     for (at, degrees) in [(20, 10.0), (200, 100.0)] {
         window.move_current_frame_to(at);
@@ -391,7 +393,7 @@ fn the_menu_of_the_box_deletes_the_effect_with_its_keyframes_and_undo_brings_the
     }
     window.application_mut().note_everything_is_saved();
     let heading = window
-        .rectangle_of(&what_an_effect_is_called(EffectKind::HueShift))
+        .rectangle_of(&what_an_effect_is_called(EffectKind::HUE_SHIFT))
         .center();
 
     window.right_click(heading);
@@ -426,7 +428,7 @@ fn deleting_an_effect_leaves_what_was_selected_that_is_still_there_and_forgets_t
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.move_current_frame_to(20);
     window.do_this(Command::AddKeyframe {
@@ -481,7 +483,7 @@ fn putting_an_effect_on_and_changing_its_value_and_deleting_it_are_edits_that_ar
 
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.do_this(Command::SetEffectValue {
         target: clip(video),
@@ -518,7 +520,7 @@ fn commands_that_cannot_be_done_leave_the_project_as_it_is_and_are_not_edits_to_
     let (mut window, video) = window_with_a_video();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.application_mut().note_everything_is_saved();
 
@@ -559,7 +561,7 @@ fn a_project_with_effects_is_saved_and_opened_again_with_them() {
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.set_slider(TURN, 75.0);
     let project_before = window.application().project().clone();
@@ -579,11 +581,11 @@ fn changing_the_value_of_an_effect_again_and_again_is_one_edit_and_the_value_of_
     let track = AnimationTarget::Track(window.application().project().tracks()[0].id());
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.do_this(Command::AddEffect {
         target: track,
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     let set = |window: &mut Window, target, degrees| {
         window.do_this(Command::SetEffectValue {
@@ -626,7 +628,7 @@ fn changing_an_animated_value_at_another_frame_is_another_edit_however_soon_it_c
     let (mut window, video) = window_with_a_video();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.do_this(Command::AddKeyframe {
         target: clip(video),
@@ -660,7 +662,7 @@ fn changing_an_animated_value_at_another_frame_is_another_edit_however_soon_it_c
 
 /// The value of the hue shift that is named `number` in its chain.
 fn hue_of(number: u32) -> PropertyId {
-    PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(number), 0)
+    PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(number), 0)
 }
 
 /// A window with the video selected and two hue shifts on it, which turn the colours by 10 degrees and by 20. Nothing is unsaved and there is
@@ -670,7 +672,7 @@ fn window_with_two_hue_shifts() -> (Window, ClipId) {
     for _ in 0..2 {
         window.do_this(Command::AddEffect {
             target: clip(video),
-            kind: EffectKind::HueShift,
+            kind: EffectKind::HUE_SHIFT,
         });
     }
     // (The value of the second last of all: two changes of one value in a row are one edit, so the change that the tests make to the second
@@ -874,11 +876,11 @@ fn putting_a_second_hue_shift_on_is_an_edit_of_its_own_that_is_undone_and_done_a
     let (mut window, video) = window_with_a_video();
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     window.do_this(Command::AddEffect {
         target: clip(video),
-        kind: EffectKind::HueShift,
+        kind: EffectKind::HUE_SHIFT,
     });
     let on_it = |window: &Window| window.application().project().effects_of(clip(video)).unwrap().len();
     assert_eq!(on_it(&window), 2);
@@ -891,4 +893,205 @@ fn putting_a_second_hue_shift_on_is_an_edit_of_its_own_that_is_undone_and_done_a
     redo(&mut window);
     redo(&mut window);
     assert_eq!(on_it(&window), 2);
+}
+
+// --- an effect that the program does not have ---
+
+/// What the box of an effect that the program does not have says, written out: that it does nothing, and that its values are kept.
+const NOT_INSTALLED: &str = "Not installed: it does nothing here, and its values are kept.";
+
+/// A window with the video selected, which has an effect that a project file could bring and the program does not have: three values, a number
+/// (`amount`, 0.5), a pair (`point`) and a flag (`on`). Nothing is unsaved and there is nothing to undo.
+fn window_with_an_effect_the_program_does_not_have() -> (Window, ClipId, EffectKind) {
+    let (mut window, video) = window_with_a_video();
+    let kind = a_kind_of_effect_the_program_does_not_have(
+        "isf:window_made_up",
+        &[
+            ("amount", turn(0.5)),
+            ("point", PropertyValue::Pair(0.5, 0.25)),
+            ("on", PropertyValue::Flag(true)),
+        ],
+    );
+    window
+        .application_mut()
+        .document
+        .project
+        .add_effect(clip(video), kind)
+        .unwrap();
+    select(&mut window, video);
+    window.application_mut().note_everything_is_saved();
+    (window, video, kind)
+}
+
+#[test]
+fn an_effect_the_program_does_not_have_has_a_box_with_its_name_a_note_that_it_does_nothing_and_a_control_for_each_value()
+ {
+    let (window, _, _) = window_with_an_effect_the_program_does_not_have();
+
+    assert!(
+        is_shown(&window, "Window made up"),
+        "the box has the name the file gave the effect"
+    );
+    assert!(is_shown(&window, NOT_INSTALLED));
+    assert_eq!(
+        window.harness.get_by_label("Amount").accesskit_node().numeric_value(),
+        Some(0.5),
+        "a number has a slider, with the label the effect gives it"
+    );
+    assert!(
+        is_shown(&window, "Point: 0.5, 0.25"),
+        "a pair, which has no control yet, is said"
+    );
+    assert!(is_shown(&window, "On: yes"), "and so is a flag");
+    assert!(!is_shown(&window, TURN), "none of what the program's own effect has");
+}
+
+#[test]
+fn the_effects_of_the_program_do_not_say_that_they_are_not_installed() {
+    let (mut window, _) = window_with_the_video_selected();
+    put_the_hue_shift_on_with_the_plus_button(&mut window);
+
+    assert!(is_shown(&window, "Hue shift"));
+    assert!(!is_shown(&window, NOT_INSTALLED));
+}
+
+#[test]
+fn the_menu_of_the_plus_button_offers_the_effects_of_the_program_and_not_one_that_a_file_brought() {
+    let (mut window, _, _) = window_with_an_effect_the_program_does_not_have();
+    assert!(
+        !window
+            .harness
+            .get_by_label(ADD_EFFECT_LABEL)
+            .accesskit_node()
+            .is_disabled()
+    );
+
+    click_the_plus_button(&mut window);
+
+    assert_eq!(
+        window.how_many_are_called("Hue shift"),
+        1,
+        "the effect of the program is offered"
+    );
+    assert_eq!(
+        window.how_many_are_called("Window made up"),
+        1,
+        "and the one that is not is there as the box that it is, and not as a thing that can be put on"
+    );
+}
+
+#[test]
+fn the_number_of_an_effect_the_program_does_not_have_is_changed_with_its_slider_and_animated_as_any_and_is_one_step_of_undo()
+ {
+    let (mut window, video, kind) = window_with_an_effect_the_program_does_not_have();
+    let amount = Effect::new(kind).property(0).unwrap();
+    let value = |window: &Window| {
+        window
+            .application()
+            .project()
+            .property_value_at(clip(video), amount, frame(10))
+    };
+    window.move_current_frame_to(10);
+
+    window.set_slider("Amount", 0.8);
+
+    assert_eq!(value(&window), Some(turn(0.8)));
+    assert!(window.application().has_unsaved_changes());
+    undo(&mut window);
+    assert_eq!(value(&window), Some(turn(0.5)), "one step takes it back");
+
+    let middle_of_the_row = window.rectangle_of("Amount").center();
+    window.move_pointer_to(middle_of_the_row);
+    let stopwatch = window
+        .rectangle_of(&keyframe_button_label("amount", KeyframeButton::Stopwatch, false))
+        .center();
+    window.click(stopwatch);
+    assert_eq!(
+        keyframes_of(&window, video, amount),
+        vec![10],
+        "it has the stopwatch of a number, which makes a keyframe of it"
+    );
+}
+
+#[test]
+fn an_effect_the_program_does_not_have_is_deleted_with_its_keyframes_and_undo_brings_it_all_back() {
+    let (mut window, video, kind) = window_with_an_effect_the_program_does_not_have();
+    let amount = Effect::new(kind).property(0).unwrap();
+    window.move_current_frame_to(10);
+    window.do_this(Command::AddKeyframe {
+        target: clip(video),
+        property: amount,
+        frame: frame(10),
+    });
+    window.application_mut().note_everything_is_saved();
+
+    let heading = window.rectangle_of("Window made up").center();
+    window.right_click(heading);
+    let item = window.rectangle_of("Delete effect").center();
+    window.click(item);
+
+    assert!(!has_the_effect(&window, clip(video), EffectInstanceId::FIRST));
+    assert_eq!(keyframes_of(&window, video, amount), Vec::<u64>::new());
+    assert!(!is_shown(&window, "Window made up"));
+    undo(&mut window);
+    assert!(has_the_effect(&window, clip(video), EffectInstanceId::FIRST));
+    assert_eq!(keyframes_of(&window, video, amount), vec![10]);
+    assert!(is_shown(&window, "Window made up") && is_shown(&window, NOT_INSTALLED));
+}
+
+#[test]
+fn an_effect_the_program_does_not_have_is_saved_with_the_project_and_opened_again_as_it_was() {
+    let (window, video, _) = window_with_an_effect_the_program_does_not_have();
+    let project = window.application().project().clone();
+
+    let text = crate::project_file::project_to_json_text(&project, std::path::Path::new("/projects")).unwrap();
+    let opened = crate::project_file::project_from_json_text(&text).unwrap();
+
+    let before = project.effects_of(clip(video)).unwrap().iter().next().unwrap();
+    let opened_video = opened.tracks()[0].entries()[0].id();
+    let after = opened.effects_of(clip(opened_video)).unwrap().iter().next().unwrap();
+    assert_eq!(after, before, "the same effect, of the same kind, with the same values");
+    assert!(!after.kind().is_installed());
+    assert!(text.contains("isf:window_made_up"), "{text}");
+}
+
+#[test]
+fn a_value_that_is_not_a_number_has_no_stopwatch_and_a_number_that_has_a_unit_shows_it() {
+    let (mut window, _, _) = window_with_an_effect_the_program_does_not_have();
+    let middle_of_the_row = window.rectangle_of("Amount").center();
+    window.move_pointer_to(middle_of_the_row);
+    assert_eq!(
+        window.how_many_are_called(&keyframe_button_label("amount", KeyframeButton::Stopwatch, false)),
+        1,
+        "a number has the stopwatch"
+    );
+    let middle_of_the_pair = window.rectangle_of("Point: 0.5, 0.25").center();
+    window.move_pointer_to(middle_of_the_pair);
+    for (name, what) in [("point", "a pair"), ("on", "a flag")] {
+        assert_eq!(
+            window.how_many_are_called(&keyframe_button_label(name, KeyframeButton::Stopwatch, false)),
+            0,
+            "{what} has none, as it has no control that changes it"
+        );
+    }
+
+    let (window, _) = window_with_the_video_selected();
+    let mut window = window;
+    put_the_hue_shift_on_with_the_plus_button(&mut window);
+    // (The number that the slider shows is drawn at the end of its row, with the unit after it: the turn of the clip is another row, with its own.)
+    let row_of_the_slider = window.rectangle_of(TURN);
+    let units_in_the_row: Vec<String> = window
+        .shapes_drawn()
+        .into_iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) if (row_of_the_slider.top()..=row_of_the_slider.bottom()).contains(&text.pos.y) => {
+                Some(text.galley.text().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        units_in_the_row.iter().any(|text| text == "°"),
+        "the hue shift is in degrees, and says so: {units_in_the_row:?}"
+    );
 }

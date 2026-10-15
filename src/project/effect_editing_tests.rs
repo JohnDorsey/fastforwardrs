@@ -13,7 +13,7 @@ const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
 
 /// The value of the hue shift that is named `instance` in its chain.
 fn hue_of(instance: EffectInstanceId) -> PropertyId {
-    PropertyId::effect_value(EffectKind::HueShift, instance, 0)
+    PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0)
 }
 
 fn turn(degrees: f32) -> PropertyValue {
@@ -128,7 +128,7 @@ fn what_is_seen_and_each_track_can_have_a_hue_shift_which_begins_as_a_turn_of_no
             "{target}: a value of an effect is not a property of what does not have it"
         );
 
-        project.add_effect(target, EffectKind::HueShift).unwrap();
+        project.add_effect(target, EffectKind::HUE_SHIFT).unwrap();
 
         assert!(project.has_the_effect(target, EffectInstanceId::FIRST), "{target}");
         assert_eq!(project.effects_of(target).unwrap().len(), 1, "{target}");
@@ -153,7 +153,7 @@ fn an_effect_put_on_one_clip_is_not_on_any_other_clip_or_track() {
         ..
     } = one_of_each();
 
-    project.add_effect(clip(picture), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(picture), EffectKind::HUE_SHIFT).unwrap();
 
     for other in [clip(video), clip(text), track(video_track)] {
         assert!(!project.has_the_effect(other, EffectInstanceId::FIRST), "{other}");
@@ -173,10 +173,10 @@ fn a_sound_and_a_keyframe_crate_cannot_have_an_effect_and_the_error_says_which_c
 
     for not_seen in [sound, a_crate] {
         assert_eq!(
-            project.add_effect(clip(not_seen), EffectKind::HueShift),
+            project.add_effect(clip(not_seen), EffectKind::HUE_SHIFT),
             Err(EditError::Clip(ClipEditError::NotAnEffectOfThisClip {
                 clip: not_seen,
-                kind: EffectKind::HueShift
+                kind: EffectKind::HUE_SHIFT
             })),
             "{not_seen}"
         );
@@ -195,10 +195,10 @@ fn a_sound_and_a_keyframe_crate_cannot_have_an_effect_and_the_error_says_which_c
 #[test]
 fn an_effect_that_is_put_on_again_is_another_effect_that_begins_as_the_effect_begins_and_the_first_keeps_its_values() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    let first = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let first = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     project.set_property_at(clip(video), HUE, turn(45.0), frame(0)).unwrap();
 
-    let second = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let second = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
 
     assert_eq!(first, EffectInstanceId::FIRST);
     assert_eq!(second, EffectInstanceId::new(1), "named as the next of the chain is");
@@ -216,8 +216,8 @@ fn an_effect_that_is_put_on_again_is_another_effect_that_begins_as_the_effect_be
 #[test]
 fn the_value_of_one_of_two_effects_of_one_kind_is_changed_and_animated_without_the_other() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
-    let second = hue_of(project.add_effect(clip(video), EffectKind::HueShift).unwrap());
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
+    let second = hue_of(project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap());
 
     project.set_property_at(clip(video), HUE, turn(30.0), frame(0)).unwrap();
     make_a_keyframe(&mut project, clip(video), second, 10, turn(100.0));
@@ -243,9 +243,9 @@ fn the_value_of_one_of_two_effects_of_one_kind_is_changed_and_animated_without_t
 #[test]
 fn an_effect_that_is_taken_off_takes_its_own_keyframes_and_leaves_those_of_the_others_of_its_kind() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    let first = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
-    let second = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
-    let third = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let first = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
+    let second = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
+    let third = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     for (instance, degrees) in [(first, 10.0), (second, 20.0), (third, 30.0)] {
         make_a_keyframe(&mut project, clip(video), hue_of(instance), 5, turn(degrees));
         make_a_keyframe(&mut project, clip(video), hue_of(instance), 50, turn(degrees * 2.0));
@@ -282,11 +282,11 @@ fn an_effect_that_is_taken_off_takes_its_own_keyframes_and_leaves_those_of_the_o
 fn an_effect_that_is_put_on_after_another_is_taken_off_is_named_by_the_largest_name_left_and_not_by_how_many_there_are()
 {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    let first = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
-    let second = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let first = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
+    let second = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     project.remove_effect(clip(video), first).unwrap();
 
-    let next = project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    let next = project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
 
     assert_eq!(second, EffectInstanceId::new(1));
     assert_eq!(
@@ -315,7 +315,7 @@ fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_n
             instance: EffectInstanceId::FIRST
         })
     );
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     assert_eq!(
         project.remove_effect(clip(video), EffectInstanceId::new(1)),
         Err(EditError::DoesNotHaveThatEffect {
@@ -332,7 +332,7 @@ fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_n
     let no_such_clip = ClipId::new(TrackId::new(99), 0);
     let no_such_track = TrackId::new(99);
     assert_eq!(
-        project.add_effect(clip(no_such_clip), EffectKind::HueShift),
+        project.add_effect(clip(no_such_clip), EffectKind::HUE_SHIFT),
         Err(EditError::Clip(ClipEditError::UnknownClip { clip: no_such_clip }))
     );
     assert_eq!(
@@ -340,7 +340,7 @@ fn an_effect_that_is_not_on_cannot_be_taken_off_and_neither_can_one_of_what_is_n
         Err(EditError::Clip(ClipEditError::UnknownClip { clip: no_such_clip }))
     );
     assert_eq!(
-        project.add_effect(track(no_such_track), EffectKind::HueShift),
+        project.add_effect(track(no_such_track), EffectKind::HUE_SHIFT),
         Err(EditError::UnknownTrack { track: no_such_track })
     );
     assert_eq!(
@@ -359,7 +359,7 @@ fn every_effect_in_the_table_goes_on_what_it_says_can_have_it_and_its_values_are
  {
     let mut base = one_of_each();
     let a_crate = a_crate_holding_a_rack(&mut base.project, base.picture_track, base.video);
-    for kind in EffectKind::ALL {
+    for kind in EffectKind::BUILT_IN {
         let cases = [
             (clip(base.video), kind.applies_to_a_clip_of_kind(ClipKind::Video)),
             (clip(base.sound), kind.applies_to_a_clip_of_kind(ClipKind::Audio)),
@@ -404,8 +404,8 @@ fn the_value_of_an_effect_is_changed_as_the_property_it_is_and_only_where_the_ef
         video_track,
         ..
     } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
-    project.add_effect(track(video_track), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
+    project.add_effect(track(video_track), EffectKind::HUE_SHIFT).unwrap();
 
     let new_keyframe = project
         .set_property_at(clip(video), HUE, turn(120.0), frame(7))
@@ -453,7 +453,7 @@ fn the_value_of_an_effect_is_changed_as_the_property_it_is_and_only_where_the_ef
 #[test]
 fn the_value_of_an_effect_with_keyframes_goes_from_one_to_the_next_even_by_more_than_a_turn() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(-90.0));
     make_a_keyframe(&mut project, clip(video), HUE, 160, turn(450.0));
 
@@ -482,7 +482,7 @@ fn the_value_of_an_effect_with_keyframes_goes_from_one_to_the_next_even_by_more_
 #[test]
 fn when_the_last_keyframe_of_an_effect_is_taken_away_it_stays_what_that_keyframe_said() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(30.0));
 
     project.remove_keyframe(clip(video), HUE, frame(100)).unwrap();
@@ -523,7 +523,7 @@ fn an_effect_that_is_taken_off_takes_the_keyframes_of_its_values_with_it_whereve
         ..
     } = one_of_each();
     for target in [video, text] {
-        project.add_effect(clip(target), EffectKind::HueShift).unwrap();
+        project.add_effect(clip(target), EffectKind::HUE_SHIFT).unwrap();
     }
     // In the drawer of the video itself, and the loudness of the video, which is not the effect's.
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(0.0));
@@ -576,7 +576,7 @@ fn a_keyframe_crate_that_holds_racks_of_other_things_too_stays_when_the_racks_of
         picture_track,
         ..
     } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     let a_crate = project.insert_crate(picture_track, frame(300), 50).unwrap();
     put_a_rack_in(&mut project, clip(a_crate), clip(video), HUE, &[(5, turn(1.0))]);
     put_a_rack_in(
@@ -598,13 +598,13 @@ fn a_keyframe_crate_that_holds_racks_of_other_things_too_stays_when_the_racks_of
 #[test]
 fn an_effect_put_on_again_after_it_was_taken_off_begins_again_with_nothing_of_what_it_had() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     project.set_property_at(clip(video), HUE, turn(77.0), frame(0)).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(10.0));
     make_a_keyframe(&mut project, clip(video), HUE, 200, turn(20.0));
 
     project.remove_effect(clip(video), EffectInstanceId::FIRST).unwrap();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
 
     assert_eq!(hue_at(&project, clip(video), 150), 0.0);
     assert!(!project.is_animated(clip(video), HUE));
@@ -619,8 +619,8 @@ fn the_effect_of_a_track_is_taken_off_with_the_keyframes_of_its_values_and_not_t
         video_track,
         ..
     } = one_of_each();
-    project.add_effect(track(video_track), EffectKind::HueShift).unwrap();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(track(video_track), EffectKind::HUE_SHIFT).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, track(video_track), HUE, 40, turn(10.0));
     make_a_keyframe(&mut project, clip(video), HUE, 40, turn(20.0));
 
@@ -643,7 +643,7 @@ fn the_effect_of_a_track_is_taken_off_with_the_keyframes_of_its_values_and_not_t
     assert_the_racks_are_sound(&project);
 
     // Put on again it begins again, as it does for a clip.
-    project.add_effect(track(video_track), EffectKind::HueShift).unwrap();
+    project.add_effect(track(video_track), EffectKind::HUE_SHIFT).unwrap();
     assert_eq!(hue_at(&project, track(video_track), 40), 0.0);
     assert!(!project.is_animated(track(video_track), HUE));
 }
@@ -658,7 +658,7 @@ fn a_cut_clip_has_the_effect_in_both_halves_and_what_its_keyframes_said_goes_on_
         video_track,
         ..
     } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(0.0));
     make_a_keyframe(&mut project, clip(video), HUE, 300, turn(180.0));
 
@@ -697,7 +697,7 @@ fn a_cut_clip_whose_effect_is_not_animated_has_it_with_the_same_value_in_both_ha
         video_track,
         ..
     } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     project.set_property_at(clip(video), HUE, turn(75.0), frame(0)).unwrap();
 
     let cut = project.split_at(frame(250), None);
@@ -714,7 +714,7 @@ fn a_cut_clip_whose_effect_is_not_animated_has_it_with_the_same_value_in_both_ha
 #[test]
 fn a_copy_of_a_clip_has_its_effects_and_keyframes_of_its_own_in_which_changing_one_does_not_change_the_other() {
     let OneOfEach { mut project, video, .. } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(10.0));
     make_a_keyframe(&mut project, clip(video), HUE, 200, turn(60.0));
 
@@ -745,8 +745,8 @@ fn a_copy_of_a_track_has_its_effects_and_those_of_its_clips_with_their_keyframes
         video_track,
         ..
     } = one_of_each();
-    project.add_effect(track(video_track), EffectKind::HueShift).unwrap();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(track(video_track), EffectKind::HUE_SHIFT).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     project
         .set_property_at(track(video_track), HUE, turn(15.0), frame(0))
         .unwrap();
@@ -780,7 +780,7 @@ fn a_clip_moved_to_another_track_takes_its_effects_and_their_keyframes_with_it()
         ..
     } = one_of_each();
     for target in [picture, video] {
-        project.add_effect(clip(target), EffectKind::HueShift).unwrap();
+        project.add_effect(clip(target), EffectKind::HUE_SHIFT).unwrap();
     }
     project.set_property_at(clip(video), HUE, turn(33.0), frame(0)).unwrap();
     make_a_keyframe(&mut project, clip(picture), HUE, 10, turn(10.0));
@@ -818,7 +818,7 @@ fn a_clip_moved_to_another_track_takes_its_effects_and_their_keyframes_with_it()
 fn what_an_edit_did_with_effects_is_put_back_as_it_was_by_restoring_an_earlier_project() {
     let OneOfEach { mut project, video, .. } = one_of_each();
     let before = project.clone();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(10.0));
     let with_the_effect = project.clone();
 
@@ -846,10 +846,13 @@ fn a_rack_of_the_values_of_an_effect_is_a_problem_when_what_it_animates_does_not
     let problems = project.problems_with_the_racks();
 
     assert_eq!(problems.len(), 1, "{problems:?}");
-    assert!(problems[0].contains("HueShift"), "{problems:?}");
+    assert!(
+        problems[0].contains("builtin:hue_shift"),
+        "it says which effect it is of: {problems:?}"
+    );
     assert!(problems[0].contains("does not have it"), "{problems:?}");
 
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
     assert_the_racks_are_sound(&project);
 }
 
@@ -862,8 +865,8 @@ fn the_effects_of_a_clip_stay_on_it_when_its_speed_or_the_speed_of_its_track_cha
         video_track,
         ..
     } = one_of_each();
-    project.add_effect(clip(video), EffectKind::HueShift).unwrap();
-    project.add_effect(track(video_track), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(video), EffectKind::HUE_SHIFT).unwrap();
+    project.add_effect(track(video_track), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(video), HUE, 100, turn(0.0));
     make_a_keyframe(&mut project, clip(video), HUE, 300, turn(180.0));
     make_a_keyframe(&mut project, track(video_track), HUE, 100, turn(10.0));
@@ -899,7 +902,7 @@ fn the_effects_of_a_picture_stay_on_it_when_it_is_shown_for_less_time_and_its_ke
     let OneOfEach {
         mut project, picture, ..
     } = one_of_each();
-    project.add_effect(clip(picture), EffectKind::HueShift).unwrap();
+    project.add_effect(clip(picture), EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, clip(picture), HUE, 20, turn(0.0));
     make_a_keyframe(&mut project, clip(picture), HUE, 140, turn(120.0));
 
@@ -950,7 +953,7 @@ fn whatever_effects_are_put_on_and_taken_off_and_whatever_is_done_to_the_clips_a
             let was_done = match random.next_below(14) {
                 0 | 1 => {
                     let target = a_target(&mut random);
-                    let result = project.add_effect(target, EffectKind::HueShift).is_ok();
+                    let result = project.add_effect(target, EffectKind::HUE_SHIFT).is_ok();
                     effects_put_on += usize::from(result);
                     result
                 }

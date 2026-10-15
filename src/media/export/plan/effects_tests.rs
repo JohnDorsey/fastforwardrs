@@ -187,7 +187,7 @@ fn a_hue_shift_on_the_front_track_does_not_change_the_video_on_the_track_behind_
 fn a_hue_shift_with_keyframes_is_a_stretch_for_each_whole_degree_it_comes_to_and_is_exported_in_whole_degrees() {
     let (mut project, clip) = project_with_a_video_of(300);
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 0, turn(0.0));
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 299, turn(30.0));
@@ -224,7 +224,7 @@ fn a_hue_shift_with_keyframes_is_a_stretch_for_each_whole_degree_it_comes_to_and
 fn a_stretch_begins_at_the_first_frame_whose_hue_shift_comes_to_a_whole_degree_more() {
     let (mut project, clip) = project_with_a_video_of(300);
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 0, turn(0.0));
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 299, turn(0.9));
@@ -249,7 +249,7 @@ fn a_stretch_begins_at_the_first_frame_whose_hue_shift_comes_to_a_whole_degree_m
 fn a_hue_shift_that_changes_by_less_than_a_whole_degree_is_one_stretch_and_changes_nothing() {
     let (mut project, clip) = project_with_a_video_of(300);
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 0, turn(0.0));
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 299, turn(0.4));
@@ -262,7 +262,7 @@ fn a_hue_shift_that_changes_by_less_than_a_whole_degree_is_one_stretch_and_chang
 fn a_hue_shift_that_goes_round_more_than_once_between_keyframes_is_a_stretch_for_each_degree_all_the_way() {
     let (mut project, clip) = project_with_a_video_of(400);
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 0, turn(0.0));
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 399, turn(720.0));
@@ -293,7 +293,7 @@ fn the_stretches_of_a_hue_shift_count_with_the_rest_and_one_stretch_too_many_is_
     let project_turned_a_degree_every_frame = |frames: u64| {
         let (mut project, clip) = project_with_a_video_of(frames);
         project
-            .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+            .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
             .unwrap();
         make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 0, turn(0.0));
         make_a_keyframe(
@@ -325,7 +325,7 @@ fn the_hue_shift_of_a_track_that_has_keyframes_cuts_the_sections_of_what_is_on_i
     let (mut project, _) = project_with_a_video_of(300);
     let track = project.tracks()[0].id();
     project
-        .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Track(track), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Track(track), HUE, 0, turn(0.0));
     make_a_keyframe(&mut project, AnimationTarget::Track(track), HUE, 299, turn(10.0));
@@ -437,5 +437,28 @@ fn every_stretch_is_exported_as_the_project_says_at_every_one_of_its_frames_and_
     assert!(
         projects_refused < 20,
         "{projects_refused} of the projects had too much animation to export"
+    );
+}
+
+// --- an effect that the program does not have ---
+
+#[test]
+fn an_effect_that_the_program_does_not_have_is_not_in_the_export_and_its_keyframes_do_not_make_stretches() {
+    let (mut project, clip) = project_with_a_video_of(300);
+    let target = AnimationTarget::Clip(clip);
+    put_a_hue_shift_on(&mut project, target, 40.0);
+    let without_it = (the_graph_of(&project), stretches_of(&project));
+    let kind =
+        crate::test_support::a_kind_of_effect_the_program_does_not_have("isf:export_made_up", &[("amount", turn(0.5))]);
+    let instance = project.add_effect(target, kind).unwrap();
+    let amount = PropertyId::effect_value(kind, instance, 0);
+    make_a_keyframe(&mut project, target, amount, 0, turn(0.0));
+    make_a_keyframe(&mut project, target, amount, 299, turn(1.0));
+
+    let with_it = (the_graph_of(&project), stretches_of(&project));
+
+    assert_eq!(
+        with_it, without_it,
+        "it does nothing to the colours, and its keyframes are not a reason to stretch the export"
     );
 }

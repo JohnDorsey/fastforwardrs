@@ -58,7 +58,7 @@ fn window_with_a_clip_that_is_in_a_tag_and_has_an_effect() -> (Window, ClipId, G
         .application_mut()
         .document
         .project
-        .add_effect(AnimationTarget::Clip(clips[0]), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clips[0]), EffectKind::HUE_SHIFT)
         .unwrap();
     select_only(&mut window, SelectionItem::Clip(clips[0]));
     window.application_mut().note_everything_is_saved();
@@ -319,7 +319,7 @@ fn window_with_a_track_that_has_an_effect_and_a_clip_of_it_selected() -> (Window
         .application_mut()
         .document
         .project
-        .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Track(track), EffectKind::HUE_SHIFT)
         .unwrap();
     select_only(&mut window, SelectionItem::Clip(clips[0]));
     window.application_mut().note_everything_is_saved();
@@ -386,7 +386,7 @@ fn the_badge_of_the_track_can_be_dragged_above_the_effects_of_the_clip_and_is_ke
         .application_mut()
         .document
         .project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     window.settle();
     let owner = Member::Clip(clip);
@@ -436,7 +436,7 @@ fn the_clip_group_a_clip_is_in_has_its_badge_last_in_the_chain_with_no_dots_beca
         .application_mut()
         .document
         .project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     window.settle();
 
@@ -477,7 +477,7 @@ fn the_badge_of_the_clip_group_cannot_be_dragged_and_nothing_can_be_dragged_past
         .application_mut()
         .document
         .project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     window.settle();
     window.application_mut().note_everything_is_saved();
@@ -568,7 +568,7 @@ fn the_value_of_the_hue_shift_of_the_group(window: &Window, group: GroupId) -> O
         .unwrap()
         .effects()
         .iter()
-        .find(|effect| effect.kind() == EffectKind::HueShift)
+        .find(|effect| effect.kind() == EffectKind::HUE_SHIFT)
         .and_then(|effect| match effect.value_of(HUE) {
             Some(PropertyValue::Number(degrees)) => Some(*degrees),
             _ => None,
@@ -590,7 +590,7 @@ fn a_group_has_a_plus_button_that_puts_an_effect_on_it_with_a_box_of_its_own_and
 
     put_the_hue_shift_on_the_selected_group_with_the_plus_button(&mut window);
 
-    assert_eq!(effects_of_the_group(&window, tag), [EffectKind::HueShift]);
+    assert_eq!(effects_of_the_group(&window, tag), [EffectKind::HUE_SHIFT]);
     assert_eq!(
         the_value_of_the_hue_shift_of_the_group(&window, tag),
         Some(0.0),
@@ -639,7 +639,7 @@ fn a_clip_group_and_a_track_group_have_the_plus_button_too() {
     let (mut window, _, group) = window_with_a_clip_that_is_in_a_clip_group();
     select_only(&mut window, SelectionItem::Group(group));
     put_the_hue_shift_on_the_selected_group_with_the_plus_button(&mut window);
-    assert_eq!(effects_of_the_group(&window, group), [EffectKind::HueShift]);
+    assert_eq!(effects_of_the_group(&window, group), [EffectKind::HUE_SHIFT]);
 
     let track = window.application().project().tracks()[0].id();
     let track_group = window
@@ -650,7 +650,7 @@ fn a_clip_group_and_a_track_group_have_the_plus_button_too() {
         .unwrap();
     select_only(&mut window, SelectionItem::Group(track_group));
     put_the_hue_shift_on_the_selected_group_with_the_plus_button(&mut window);
-    assert_eq!(effects_of_the_group(&window, track_group), [EffectKind::HueShift]);
+    assert_eq!(effects_of_the_group(&window, track_group), [EffectKind::HUE_SHIFT]);
 }
 
 #[test]
@@ -709,7 +709,7 @@ fn the_tab_key_does_not_stop_at_a_badge_or_at_the_heading_of_the_box_of_an_effec
         .application_mut()
         .document
         .project
-        .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Track(track), EffectKind::HUE_SHIFT)
         .unwrap();
     window.settle();
     assert_eq!(
@@ -756,7 +756,7 @@ fn dragging_the_second_of_two_hue_shifts_above_the_first_puts_it_first_with_the_
         .application_mut()
         .document
         .project
-        .add_effect(target, EffectKind::HueShift)
+        .add_effect(target, EffectKind::HUE_SHIFT)
         .unwrap();
     for (instance, degrees) in [(EffectInstanceId::FIRST, 10.0), (second, 20.0)] {
         window
@@ -765,7 +765,7 @@ fn dragging_the_second_of_two_hue_shifts_above_the_first_puts_it_first_with_the_
             .project
             .set_property_at(
                 target,
-                PropertyId::effect_value(EffectKind::HueShift, instance, 0),
+                PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0),
                 PropertyValue::Number(degrees),
                 crate::project::TimelineFrameIndex::new(0),
             )

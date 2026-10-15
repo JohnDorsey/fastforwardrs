@@ -67,7 +67,8 @@ cargo run --release -- "C:\path\to\project.ffrs"     # open a project straight a
     after all (the project file cannot be written), it is on the timeline all the same, linked, and a message says why.
     *New project* asks for a file by *Link and import*.
   * *Export* asks where to save the finished video (`.mp4`, `.mkv` or `.mov`) and shows its progress, with a
-    Cancel button.
+    Cancel button. If the project has effects that the program does not have (a project file brought them), it first says
+    which, because the video would not have what they do, and asks whether to export anyway (*Export anyway* or *Cancel*).
   * Loading, starting a new project and closing the window ask first if there are changes that have not been
     saved, unless Autosave is on (see *Settings*).
 * **Edit**: *Undo* and *Redo*, *Deselect* (with its key, **Esc**, shown beside it; it can be used while a clip is
@@ -114,7 +115,7 @@ just that one.
 | change a text object | select it: its properties have the words, the font, the size in points (on a picture 1080 tall), the colour, for how long it is shown, and where it is (see below) |
 | set where something is on the picture with numbers | a video, a picture or a text object has the rows *Position* (where its middle is, as percentages of the picture across and down), *Size* (how wide and tall it is, in percentages of the picture; *Box size* for a text object, whose letters have a size of their own) and *Rotation* (in degrees, clockwise), which show where it is at the playhead, and can be dragged or typed in. It is the same as dragging it on the preview. |
 | **animate** a property | **move the pointer over a control** whose property can be animated (how loud a clip or a track is, whether it is muted, where a video, picture or text object is, how big, how far turned, what a text says, its font, the size and the colour of its letters): three little buttons come to the right of it, an **arrow to the left**, a **stopwatch** and an **arrow to the right**. The stopwatch is **grey** when the property has no keyframe at the playhead and **bright orange** when it has: click it to make one (with what the property is there) or, when it is orange, to take it away. The arrows are orange when the property has a keyframe before (or after) the playhead, however far off, and grey when it has not: click one to go to that keyframe. Once a property has keyframes the control shows what it is **at the playhead**, and changing it there (with the control, or by dragging the thing on the preview) makes or changes the keyframe at the playhead; the keyframes at other frames are as they were. **A change of something that has keyframes stops the video if it is playing** (the keyframe is made where it stopped; something that has no keyframes can be changed while the video plays), and a drag, which is one change that goes on, **makes one keyframe**, at the frame the playhead was at when it began, whatever moves the playhead while it goes on (a key that is held, say): it never writes the movement of the hand down as a keyframe at every frame it goes over. What has no keyframes is changed for the whole clip, as it always was. A control of a property that has keyframes cannot be changed where the playhead is not on the clip (there is nowhere to put a keyframe), and is dimmed there. The speed of a clip or a track and for how long something is shown cannot be animated (that would move the keyframes about). The keyframe is made as a **diamond** on a **rack** in the drawer of the clip or the track, which opens to show it (see *racks* below). |
-| put an **effect** on a clip, a track or a group | **select** a video, a picture or a text object, or a track, or a group: under its box in the properties panel is a round **+** button (a sound has none, and neither does a keyframe crate: they have no picture to change). Click it and choose the effect from the menu (so far: **Hue shift**). The effect gets a **box of its own** under the box of the clip, track or group, headed with its name, with the controls of its values (for the hue shift, *Turn*, in degrees), which are animated with the stopwatch like any other property. **Right-click the heading of an effect's box** and choose *Delete effect*: the effect is deleted with the keyframes of its values, in one edit (undo puts both back). An effect can be put on again and again: a second hue shift is an effect of its own, with values of its own, and when there are several of one kind their boxes say which is which (*Hue shift 1*, *Hue shift 2*, counting from the top; one that is alone has no number). (The values of the effects of a group are not animated: they have no stopwatch.) |
+| put an **effect** on a clip, a track or a group | **select** a video, a picture or a text object, or a track, or a group: under its box in the properties panel is a round **+** button (a sound has none, and neither does a keyframe crate: they have no picture to change). Click it and choose the effect from the menu (so far: **Hue shift**). The effect gets a **box of its own** under the box of the clip, track or group, headed with its name, with the controls of its values (for the hue shift, *Turn*, in degrees), which are animated with the stopwatch like any other property. **Right-click the heading of an effect's box** and choose *Delete effect*: the effect is deleted with the keyframes of its values, in one edit (undo puts both back). An effect can be put on again and again: a second hue shift is an effect of its own, with values of its own, and when there are several of one kind their boxes say which is which (*Hue shift 1*, *Hue shift 2*, counting from the top; one that is alone has no number). (An effect that a project file brought and that the program does not have is a box too, with the name the file gave it, a note that says *Not installed*, and a control for each of its values: it does nothing to the picture, and its values are kept, and saved again as they were. The values of the effects of a group are not animated: they have no stopwatch.) |
 | change the order of the effects and badges of a chain | **drag the box of an effect by its heading** (it has grip dots at the top), or **a badge** by any part of it: a line shows where it will go, and it goes there when it is let go of. The effects of the chain are done in the order they are in, from the top to the bottom (see *Effects* and *Groups*). One step of the history. |
 | select what a badge, or an item of the list of a group, stands for | **double-click** it. (A click does not: so that a badge can be taken hold of to be moved without selecting what it stands for. The list that is shown when *several* things are selected keeps its single click.) |
 | make a **group** | **select two or more clips** and **right-click** one of them: *Create tag* (one clip will do) makes a **tag** of them, wherever they are, and *Create clip group* makes a **clip group** of them, which they have to fit in a rectangle of the timeline that has no other clip in it, or the program says which clip is in the way. A track group is made from the menu of the **box of a track**: *Create track group* makes one of the tracks that are selected (or of the track that was right-clicked, if it is not one of them), which have to be next to each other. The group that is made is **the only thing selected** afterwards. (A group can be selected together with clips, and made one of the members of another group that way.) |
@@ -301,7 +302,7 @@ something is on the picture is always **fractions of the picture's width and hei
 degrees, clockwise), so it comes out in the same place whatever size the picture is shown or exported at. A clip, a
 track or a keyframe crate that has **racks of keyframes** has a `drawer`: a list with a rack for each property that has
 keyframes kept there. A rack has the `property` (`gain`, `muted`, `position`, `size`, `rotation`, `text`, `font`,
-`font size`, `colour`, `hue shift`), its `keyframes`, each a `frame` (counted from the clip's or the crate's first frame, or from the
+`font size`, `colour`, or, for the value of an effect, its id: `degrees`), its `keyframes`, each a `frame` (counted from the clip's or the crate's first frame, or from the
 start of the timeline for a track) and a `value`: a number, a pair of numbers (`[across, down]` or `[wide, tall]` as
 fractions of the picture), true or false, words, or a colour like `"#FFFFFFFF"`; and, when the keyframes are of
 something other than what has the drawer, a `target`: the `track` (its place in the list of tracks, counting from 0) and,
@@ -309,16 +310,27 @@ for a clip, the `clip` (its place in the list of that track's clips, counting fr
 gain, its place, its words) is what the property is while it has no keyframes, and is left as it was when it has some.
 A drawer may have several racks of one property of one thing (they say it together, in the order they are in). A video,
 a picture, a text object or a track that has **effects** has `effects`: a list with an entry for each, in the order they are
-done in, which is its `effect` (the name of the kind of effect, `hue shift`), its `instance` (the number that the effect has in this
-list, which no other effect of the list has: there may be several effects of one kind, and this is what tells them apart) and its
-`values`, one for each of the properties the effect has, in their order (for the hue shift, the turn in degrees); the `values` are left
-out when they are what the effect begins with, and are what the effect is while its properties have no keyframes (the keyframes of an
-effect's values are racks like any other, with the name of the property, `hue shift`, and the `effect` that they are of: the `instance`
-of that effect in the list of the clip or the track that the keyframes are of). A file with keyframes for what the target does not
+done in, which is its `effect` (the key of the type of effect: a namespace, a colon and an id, `builtin:hue_shift`), its `version` (the
+major and the minor number of the type that it was made with), its `instance` (the number that the effect has in this list, which no
+other effect of the list has: there may be several effects of one kind, and this is what tells them apart) and its `values`, an object
+with a value for each of the values of the effect that is not what it begins with, **by the id of the value** (for the hue shift, `degrees`,
+the turn); they are what the effect is while its values have no keyframes (the keyframes of an effect's values are racks like any other,
+with the id of the value for the `property`, and the `effect` that they are of: the `instance` of that effect in the list of the clip or the
+track that the keyframes are of). **What an effect is** is in `plugins`, a list that a project that has effects has: a snapshot of the
+descriptor of each type of effect that it uses (once for each key and version): the `key`, the `version`, the `name`, the `description`,
+whether it works on the `picture` or the `sound`, whether it `changes_each_pixel_by_itself`, and its `params`, each with an `id`, a `name`
+(what its keyframes are called), a `label` (what its control says), a `type` (`number`, `pair`, `colour`, `flag` or `words`), what it
+begins as (`default`) and, for a number, the `range` of its control, its `unit` and its `decimals`. So a project can be read, shown and
+edited without its effects being installed. An effect with the same key and major number as one that the program has, whose snapshot has no
+value that the program's has not, **is** the program's; any other is an effect that the program does not have: it is kept with all its values
+and keyframes, does nothing to a picture or to the export, and is saved again as it was. **Whatever an effect, a type of effect or one of its
+values has that this version does not know is kept and written back as it was.** A file with keyframes for what the target does not
 have (the values of an effect that it does not have are not its properties, and nor are those of an `effect` that is not in its
 list), a target that is not in the file, or a value of the wrong kind, is refused with the rack named, and so is an effect that
-there is not, two effects of one list with the same `instance` (or some with an `instance` and some without), one on a sound or a
-crate, and values that are not the right number or kind, with the clip or the track named.
+there is not (one that has no snapshot in `plugins` and is not the program's, or that says a version that has none), two effects of one
+list with the same `instance` (or some with an `instance` and some without), one on a sound or a crate, a snapshot that cannot be used
+(a key that is not a namespace, a colon and an id, two values with one id, a range that is not from the least to the most) or two of
+one key and version, and values that are not of an id that the effect has, or not the right kind, with the clip or the track named.
 
 A project that has **groups** has `groups`: a list with an entry for each, in the order they were made in (a group is named in the
 rest of the file by its place in this list, counted from 0), which is its `kind` (`tag`, `clip_group` or `track_group`), its `name`,
@@ -365,6 +377,28 @@ is in a tag and has no badge of it) is refused with the group named.
       "display_height_in_pixels": 400
     }
   ],
+  "plugins": [
+    {
+      "key": "builtin:hue_shift",
+      "version": [1, 0],
+      "name": "hue shift",
+      "description": "Turns the colours round the wheel of colours",
+      "domain": "picture",
+      "changes_each_pixel_by_itself": true,
+      "params": [
+        {
+          "id": "degrees",
+          "name": "hue shift",
+          "label": "Turn",
+          "type": "number",
+          "default": 0.0,
+          "range": [-180.0, 180.0],
+          "unit": "°",
+          "decimals": 1
+        }
+      ]
+    }
+  ],
   "tracks": [
     {
       "title": "track 1",
@@ -405,7 +439,7 @@ is in a tag and has no badge of it) is refused with the group named.
               ]
             },
             {
-              "property": "hue shift",
+              "property": "degrees",
               "effect": 0,
               "keyframes": [
                 { "frame": 0, "value": 0.0 },
@@ -413,7 +447,7 @@ is in a tag and has no badge of it) is refused with the group named.
               ]
             }
           ],
-          "effects": [ { "effect": "hue shift", "instance": 0 } ],
+          "effects": [ { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 0 } ],
           "badges": [ { "of": { "tag": 0 }, "effects_before": 1 } ]
         },
         {
@@ -430,7 +464,7 @@ is in a tag and has no badge of it) is refused with the group named.
             },
             "rotation_degrees": 20.0
           },
-          "effects": [ { "effect": "hue shift", "instance": 0, "values": [90.0] } ]
+          "effects": [ { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 0, "values": { "degrees": 90.0 } } ]
         },
         {
           "kind": "crate",
@@ -455,7 +489,7 @@ is in a tag and has no badge of it) is refused with the group named.
       "speed_factor": 1,
       "muted": false,
       "drawer": [ { "property": "gain", "keyframes": [ { "frame": 0, "value": -3.0 }, { "frame": 600, "value": 0.0 } ] } ],
-      "effects": [ { "effect": "hue shift", "instance": 0, "values": [15.0] }, { "effect": "hue shift", "instance": 1, "values": [40.0] } ],
+      "effects": [ { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 0, "values": { "degrees": 15.0 } }, { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 1, "values": { "degrees": 40.0 } } ],
       "clips": [
         { "kind": "video", "source_identifier": 1, "first_source_frame": 0, "end_source_frame": 300, "speed_factor": 1, "drawer": [ { "property": "position", "keyframes": [ { "frame": 0, "value": [0.5, 0.5] }, { "frame": 120, "value": [0.25, 0.5] } ] } ], "badges": [ { "of": "track" }, { "of": { "tag": 0 } } ] },
         { "kind": "video", "source_identifier": 1, "first_source_frame": 300, "end_source_frame": 600, "speed_factor": 4, "muted": true },
@@ -469,7 +503,7 @@ is in a tag and has no badge of it) is refused with the group named.
       "name": "intro",
       "colour": "#4BD254",
       "members": [ { "clip": { "track": 0, "clip": 0 } }, { "clip": { "track": 1, "clip": 0 } } ],
-      "effects": [ { "effect": "hue shift", "instance": 0, "values": [30.0] } ]
+      "effects": [ { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 0, "values": { "degrees": 30.0 } } ]
     },
     {
       "kind": "clip_group",
@@ -510,7 +544,7 @@ itself, and is left out altogether when the project follows them all. `frame_rat
 the project, and is left out while the project follows its first video. A source that is included in the project file
 (which is an archive then) has `included_as`, the name of its entry, besides the two paths it had when it was included, which
 are kept as they were (they are where it is put back); it is left out for a source that is not included. **Older files are still
-read**: version 9 files have no groups and no badges (nothing in them is in a group), and what the program writes is always version 11; version 10 files have no `instance` in their effects and no `effect` in their racks (they have at most one effect of each kind: the effects are named in the order they are in, and a rack of the keyframes of the values of an effect is of the effect that has a value of that name);
+read**: version 9 files have no groups and no badges (nothing in them is in a group), and what the program writes is always version 11; version 10 files (and version 11 as it was while the effects were being given names) call an effect by the name that the program had for it, `hue shift`, have their values in a list, have no `plugins`, and have no `instance` in their effects and no `effect` in their racks (they have at most one effect of each kind: the effects are named in the order they are in, and a rack of the keyframes of the values of an effect is of the effect that has a value of that name);
 version 8 files have no `included_as` (nothing in them is included); version 7
 files have no effects (nothing in them has one); version 6
 files have an `animation` object in a clip or a track where version 7 has a rack in its drawer (it is read as a rack of
@@ -573,7 +607,7 @@ The code is a library plus a thin `main`. It is layered, and each layer only dep
 
 | Module | What is in it |
 |---|---|
-| `project` | What a project *is*: its source files, its tracks (`project::tracks`: a `Track` is a row of clips with gaps, a speed, a gain, a height and a mute switch, and holds all the arithmetic of which clip is at which frame, what moves when a length changes and whether clips may be moved; a clip's `ClipId` is the track it was first made on and a number, so that it keeps its id when it is moved to another track, which `Project::move_clips` does for several clips at once or not at all), the speed and gain types, text objects, pictures, **placements** (`placement.rs`: a rectangle on the picture as fractions, with its middle on the picture and free to reach past its edges, an angle, how a corner drags and what a point is on), the fit of a video inside a picture, settings, and **animation** (`project::animation`: the table of properties that can be animated and the kind of value each has, the keyframes of one property, and the animation of a clip or a track, which is worked out from the racks). The keyframes are kept in **racks** (`project::tracks::rack`) in **drawers** (`drawer`) of the clips, the tracks and the keyframe crates (a crate is a kind of clip: `crate_clip.rs`); `project/racks.rs` puts together what all the racks that are of one thing say, `project/animating.rs` is the project's way of asking what a property is at a frame and of making a keyframe or changing a property at a frame, `project/rack_editing.rs` moves keyframes and racks about (`rack_merging.rs` merges racks and `keyframe_copying.rs` copies keyframes), `project/duplicating.rs` copies a clip or a track with what is in its drawers, and **effects** are a table in `project/effects.rs` (`EffectKind`: the rows are what each effect is called, what it does to colours, its values, what it can be put on and how its values are exported; each effect in a chain is named by an `EffectInstanceId`, one number in that chain, and a value of an effect is the property `PropertyId::EffectValue { effect, instance, slot }`, which is what lets a chain have several effects of one kind, each with a name of its own in its chain) with `project/effect_editing.rs` putting them on and taking them off. A value of an effect is a `PropertyId` like any other, and `PropertyId::is_had_by_a_clip` and `is_had_by_a_track` are the one rule for whether a clip or a track has a property (the keyframes of an effect's value only where it is on). Pure logic: no files, processes or drawing. In whole frames (`SourceFrameIndex`, `TimelineFrameIndex`, `SpeedFactor`...). |
+| `project` | What a project *is*: its source files, its tracks (`project::tracks`: a `Track` is a row of clips with gaps, a speed, a gain, a height and a mute switch, and holds all the arithmetic of which clip is at which frame, what moves when a length changes and whether clips may be moved; a clip's `ClipId` is the track it was first made on and a number, so that it keeps its id when it is moved to another track, which `Project::move_clips` does for several clips at once or not at all), the speed and gain types, text objects, pictures, **placements** (`placement.rs`: a rectangle on the picture as fractions, with its middle on the picture and free to reach past its edges, an angle, how a corner drags and what a point is on), the fit of a video inside a picture, settings, and **animation** (`project::animation`: the table of properties that can be animated and the kind of value each has, the keyframes of one property, and the animation of a clip or a track, which is worked out from the racks). The keyframes are kept in **racks** (`project::tracks::rack`) in **drawers** (`drawer`) of the clips, the tracks and the keyframe crates (a crate is a kind of clip: `crate_clip.rs`); `project/racks.rs` puts together what all the racks that are of one thing say, `project/animating.rs` is the project's way of asking what a property is at a frame and of making a keyframe or changing a property at a frame, `project/rack_editing.rs` moves keyframes and racks about (`rack_merging.rs` merges racks and `keyframe_copying.rs` copies keyframes), `project/duplicating.rs` copies a clip or a track with what is in its drawers, and **effects** are data in `project/effects.rs` (an `EffectKind` is a small value that is a reference to an `EffectDescriptor`: the key of the type of effect, its version, what it is called and does, what it works on, and its values, each with an id, a name, a label, what it begins as and how its control looks; the program has some in itself, in `project/effects/built_in.rs`, with what each does, and a project file brings others, which are kept and do nothing; each effect in a chain is named by an `EffectInstanceId`, one number in that chain, and a value of an effect is the property `PropertyId::EffectValue { effect, instance, slot }`, which is what lets a chain have several effects of one kind, each with a name of its own in its chain) with `project/effect_editing.rs` putting them on and taking them off. A value of an effect is a `PropertyId` like any other, and `PropertyId::is_had_by_a_clip` and `is_had_by_a_track` are the one rule for whether a clip or a track has a property (the keyframes of an effect's value only where it is on). Pure logic: no files, processes or drawing. In whole frames (`SourceFrameIndex`, `TimelineFrameIndex`, `SpeedFactor`...). |
 | `colour_effects` | The arithmetic of the effects that change the colours of a picture: a `ColourMatrix` (the hue rotation of CSS is one), what it does to the pixels of a picture and the `colorchannelmixer` filter that asks ffmpeg to do the same, so that the preview and the export agree. No other part of the program is in it. |
 | `composition` | Works out from a project what the finished video is: the **picture plan** (for each stretch of the timeline, the layers that are seen: their video, picture or text, where each is, its effects, and its keyframes, from which the preview works out where it is at a frame and how the colours are changed) and the **sound plan** (for each track, which clips are heard when, and how loud, which for a clip with keyframes is a loudness that changes; a clip muted by keyframes is cut into the stretches that are heard). Plain logic. The live preview and the export both use these plans, which is what makes them agree. |
 | `project_file` | Saving and loading the project JSON, including the older versions, and as a `.ffrs` archive that can have files included in it (`archive`: a zip file of stored entries, with the names of the entries checked before they are believed, that is written whole to a temporary file and renamed into place when it is saved as another file, and added to (`layout`: its own reader and writer of the zip directory, with zip64, that finds the last whole end record and cuts off a save that was cut off) when the project's own file is saved, so that the files in it stay where they are and are read there; `WritePlan` works out what is to be written first, so that a copy of a great deal can be done in the background and stopped). Separate document types keep the file format independent of the in-memory model. |
@@ -650,16 +684,25 @@ Some choices that are not obvious from the code:
   settings windows are built from it, and tests go through it to check that every setting survives both files.
   Adding a setting is a field, a row, and a line in each file's document type (see the notes at the top of
   `project/settings.rs`).
-* **Effects are a table.** `EffectKind::ALL` lists the effects and each has one row: its name (which is also what it is
-  called in a file), what it does in a few words, its values (each a `PropertyId`, in their order, with what they begin
-  as), whether it can be put on what is seen and on a track, how it changes the colours of a picture from its values, and
-  how its values are rounded when they are exported. The **+** button's menu, the box of an effect and the stopwatches of
-  its values, the file (`effects`), the picture plan, the preview (the colours of the pictures put on the graphics card)
-  and the export (the filter and the stretches of an animated value) are all driven from that table, and a test goes
-  through it for each: a new effect is a row, a `PropertyId` for each of its values, and the one control that changes
-  each of them (`properties_panel/effects.rs`), not a change in the code that is the same for all of them. (An effect that
-  does something other than change colours, such as one that needs the sound or other pictures, adds a way of changing
-  what it changes to the row, which is the one thing that does not exist yet.)
+* **Effects are descriptors.** An `EffectKind` is a small value that can be copied, compared and put in order, and that stands for an
+  `EffectDescriptor` (`project/effects/descriptor.rs`): the key (`builtin:hue_shift`), the version, the name, what it does in a few
+  words, what it works on (pictures or sounds), whether it changes each pixel by itself (which says whether a clip group or a track
+  group can have it), and its values: each has an id (what a file calls it for ever), a name (what its keyframes are called), a label
+  (what its control says), what it begins as, and the range, unit and decimals of its control. It is made by being *interned*: a
+  descriptor that is made into a kind is kept for the rest of the run, and the same descriptor made into a kind twice is the same
+  kind, which is how a kind can be part of the key of a keyframe (`PropertyId::EffectValue`) without a list of the effects there are
+  being at hand. The program has some effects in itself (`EffectKind::BUILT_IN`; each a descriptor, and in `project/effects/built_in.rs`
+  what it does: how it changes the colours of a picture from its values, and how its values are rounded when they are exported); a
+  project file brings the others, as snapshots of their descriptors. The **+** button's menu, the box of an effect and the stopwatches
+  of its values, the file (`plugins` and `effects`), the picture plan, the preview (the colours of the pictures put on the graphics
+  card) and the export (the filter and the stretches of an animated value) are all driven from the descriptors, and a test goes
+  through each: a new effect of the program is a descriptor, a constant, and a row of what it does, not a change in the code that is
+  the same for all of them. (Controls for values that are not numbers are said in words for now; they come with the effect surface of
+  the plan. An effect that does something other than change colours, such as one that needs the sound or other pictures, adds a way
+  of changing what it changes to what the program does for it, which is the one thing that does not exist yet.) **A descriptor of the
+  program is never changed without its version being changed** (a test has the hue shift as it was in version 1.0), because a project
+  file keeps a snapshot of it. An effect that the program does not have (a file brought it) is kept with its values and keyframes,
+  does nothing, and is saved again as it was.
 * **Keyframes are not lost by accident.** What changes how many frames a drawer has (a length, a speed, the frame rate)
   puts the keyframes on the frames nearest to where they were, with the empty space between them used up first
   (`project/tracks/keyframe_fitting.rs`: the nearest way to give each keyframe a frame of its own, the same as the least
@@ -819,7 +862,7 @@ final run of the tests that noticed; `py -m unittest discover -s tools/mutation_
   away.
 * The controls that have the buttons for keyframes are a little narrower than the others, to leave them room.
 * **Effects**: a clip, a track or a group may have several effects of one kind (and one on the clip and one on its track are
-  both done), and they are done in the order of the chain, which is changed by dragging. The only effect is the hue shift, which changes colours and nothing else
+  both done), and they are done in the order of the chain, which is changed by dragging. The only effect that the program has is the hue shift, which changes colours and nothing else
   (not how clear a pixel is, and not where anything is), and is exported to the nearest whole degree. The pictures on the
   **timeline** (the thumbnails of videos and the pictures of picture files) are the pictures as they are, with no effect on
   them; the preview has the effects, including the thumbnail that stands in for the picture of a video for a moment while

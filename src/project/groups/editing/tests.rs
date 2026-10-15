@@ -648,7 +648,7 @@ fn disbanding_a_tag_takes_away_the_tag_and_its_badges_and_leaves_everything_else
     let tag = laid.project.create_group(GroupKind::Tag, &[first, second]).unwrap();
     let first_clip = laid.clip(0, 0);
     laid.project
-        .add_effect(crate::project::AnimationTarget::Clip(first_clip), EffectKind::HueShift)
+        .add_effect(crate::project::AnimationTarget::Clip(first_clip), EffectKind::HUE_SHIFT)
         .unwrap();
     assert_eq!(
         chain_of_the_clip(&laid, first),
@@ -730,7 +730,7 @@ fn disbanding_a_tag_that_is_in_a_tag_puts_its_members_in_the_outer_tag_where_its
     laid.project
         .add_effect(
             crate::project::AnimationTarget::Clip(laid.clip(0, 0)),
-            EffectKind::HueShift,
+            EffectKind::HUE_SHIFT,
         )
         .unwrap();
     assert_eq!(

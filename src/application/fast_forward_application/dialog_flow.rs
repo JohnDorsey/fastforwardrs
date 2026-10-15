@@ -66,6 +66,7 @@ impl FastForwardApplication {
                             self.carry_on_after_confirmation(context, then);
                         }
                         Dialog::ConfirmLosingKeyframes { change, .. } => agreed_to.push(*change),
+                        Dialog::ConfirmExportWithMissingEffects { .. } => self.ask_where_to_export_and_export(),
                         Dialog::MustSaveAsAnArchiveToIncludeFiles { files, .. } => {
                             self.save_as_an_archive_with_files_included(&files);
                         }

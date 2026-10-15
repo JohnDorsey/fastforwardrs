@@ -76,12 +76,10 @@ impl LayerEffect {
     /// What the values of the effect are at `timeline_frame`: what the keyframes say for each that has some, and what it is for
     /// each that has none.
     pub fn values_at(&self, timeline_frame: u64) -> Vec<PropertyValue> {
-        self.kind
-            .value_kinds()
+        self.values
             .iter()
-            .zip(&self.values)
             .enumerate()
-            .map(|(slot, (_, value))| {
+            .map(|(slot, value)| {
                 let property = PropertyId::effect_value(
                     self.kind,
                     self.instance,
@@ -451,10 +449,13 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 animation: animations
                     .of(AnimationTarget::Clip(placement.id))
                     .restricted_to(|property| property.is_seen() && !property.is_a_value_of_an_effect()),
+                // (An effect that the program does not have, which a project file brought, does nothing to the picture: it is not here, so
+                // that its keyframes do not make the picture different at every frame, which makes the export slower.)
                 effects: applied_effects
                     .get(&placement.id)
                     .into_iter()
                     .flatten()
+                    .filter(|applied| applied.effect.kind().is_installed())
                     .map(|applied| layer_effect_of(&animations, applied))
                     .collect(),
             });

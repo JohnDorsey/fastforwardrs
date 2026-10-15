@@ -51,11 +51,11 @@ fn a_track_and_its_clips_have_no_effects_when_they_are_made() {
 fn a_track_has_an_effect_as_it_begins_and_another_of_its_kind_after_it_and_takes_each_off_by_its_name() {
     let mut track = Track::new(THE_TRACK, "track 0");
 
-    assert_eq!(track.add_effect(EffectKind::HueShift), Some(EffectInstanceId::FIRST));
+    assert_eq!(track.add_effect(EffectKind::HUE_SHIFT), Some(EffectInstanceId::FIRST));
     assert!(track.effects().has_the_instance(EffectInstanceId::FIRST));
     assert_eq!(track.effects().value_of(HUE), Some(turn(0.0)));
     assert_eq!(
-        track.add_effect(EffectKind::HueShift),
+        track.add_effect(EffectKind::HUE_SHIFT),
         Some(EffectInstanceId::new(1)),
         "another one, named after the first"
     );
@@ -81,23 +81,23 @@ fn a_clip_that_is_seen_can_have_an_effect_and_a_sound_cannot_and_nothing_is_chan
 
     for seen in [video_clip, picture_clip, text_clip] {
         assert_eq!(
-            track.add_effect_to_the_clip(seen, EffectKind::HueShift),
+            track.add_effect_to_the_clip(seen, EffectKind::HUE_SHIFT),
             Ok(EffectInstanceId::FIRST),
             "{seen}"
         );
         assert_eq!(the_hue_shift_of(&track, seen), Some(turn(0.0)), "{seen}");
         assert_eq!(
-            track.add_effect_to_the_clip(seen, EffectKind::HueShift),
+            track.add_effect_to_the_clip(seen, EffectKind::HUE_SHIFT),
             Ok(EffectInstanceId::new(1)),
             "{seen} has it already, and this is another of its kind"
         );
     }
 
     assert_eq!(
-        track.add_effect_to_the_clip(sound_clip, EffectKind::HueShift),
+        track.add_effect_to_the_clip(sound_clip, EffectKind::HUE_SHIFT),
         Err(ClipEditError::NotAnEffectOfThisClip {
             clip: sound_clip,
-            kind: EffectKind::HueShift
+            kind: EffectKind::HUE_SHIFT
         })
     );
     assert!(effects_of(&track, sound_clip).is_empty());
@@ -108,7 +108,7 @@ fn a_clip_that_is_seen_can_have_an_effect_and_a_sound_cannot_and_nothing_is_chan
 fn an_effect_is_taken_off_one_clip_and_the_others_keep_theirs() {
     let (mut track, [video_clip, _, picture_clip, text_clip]) = track_with_a_clip_of_each_kind();
     for clip in [video_clip, picture_clip, text_clip] {
-        track.add_effect_to_the_clip(clip, EffectKind::HueShift).unwrap();
+        track.add_effect_to_the_clip(clip, EffectKind::HUE_SHIFT).unwrap();
     }
 
     assert_eq!(
@@ -133,7 +133,7 @@ fn a_clip_that_is_not_there_is_named_in_the_error_of_each_edit_of_effects() {
     let error = ClipEditError::UnknownClip { clip: not_there };
 
     assert_eq!(
-        track.add_effect_to_the_clip(not_there, EffectKind::HueShift),
+        track.add_effect_to_the_clip(not_there, EffectKind::HUE_SHIFT),
         Err(error)
     );
     assert_eq!(
@@ -153,7 +153,7 @@ fn the_value_of_the_effect_of_a_track_is_changed_when_it_has_the_effect_and_is_t
     let mut track = Track::new(THE_TRACK, "track 0");
     assert!(!track.set_effect_value(HUE, &turn(30.0)), "it does not have the effect");
 
-    track.add_effect(EffectKind::HueShift);
+    track.add_effect(EffectKind::HUE_SHIFT);
     assert!(track.set_effect_value(HUE, &turn(30.0)));
     assert_eq!(track.effects().value_of(HUE), Some(turn(30.0)));
 
@@ -172,9 +172,9 @@ fn the_value_of_the_effect_of_a_track_is_changed_when_it_has_the_effect_and_is_t
 fn the_value_of_the_effect_of_a_clip_is_changed_for_that_clip_only_and_a_wrong_change_is_an_error_that_changes_nothing()
 {
     let (mut track, [video_clip, _, picture_clip, _]) = track_with_a_clip_of_each_kind();
-    track.add_effect_to_the_clip(video_clip, EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(video_clip, EffectKind::HUE_SHIFT).unwrap();
     track
-        .add_effect_to_the_clip(picture_clip, EffectKind::HueShift)
+        .add_effect_to_the_clip(picture_clip, EffectKind::HUE_SHIFT)
         .unwrap();
 
     track
@@ -219,7 +219,7 @@ fn the_value_of_the_effect_of_a_clip_is_changed_for_that_clip_only_and_a_wrong_c
 #[test]
 fn keyframes_of_the_value_of_an_effect_are_only_made_for_what_has_the_effect() {
     let (mut track, [video_clip, _, picture_clip, _]) = track_with_a_clip_of_each_kind();
-    track.add_effect_to_the_clip(video_clip, EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(video_clip, EffectKind::HUE_SHIFT).unwrap();
 
     track.set_clip_keyframe(video_clip, HUE, 10, turn(90.0)).unwrap();
     assert_eq!(
@@ -237,7 +237,7 @@ fn keyframes_of_the_value_of_an_effect_are_only_made_for_what_has_the_effect() {
         "the track does not have the effect"
     );
     assert!(track.drawer().is_empty());
-    track.add_effect(EffectKind::HueShift);
+    track.add_effect(EffectKind::HUE_SHIFT);
     assert!(track.set_own_keyframe(HUE, frame(5), turn(90.0)));
     assert_eq!(track.drawer().len(), 1);
 }
@@ -249,7 +249,7 @@ fn a_track_made_from_its_parts_has_the_effects_it_is_given_as_they_are_and_so_ha
     let (track, [video_clip, sound_clip, picture_clip, text_clip]) = track_with_a_clip_of_each_kind();
     let turned_by = |degrees: f32| {
         let mut effects = Effects::none();
-        effects.put_on(Effect::with_values(EffectKind::HueShift, vec![turn(degrees)]).unwrap());
+        effects.put_on(Effect::with_values(EffectKind::HUE_SHIFT, vec![turn(degrees)]).unwrap());
         effects
     };
 
@@ -275,7 +275,7 @@ fn a_track_made_from_its_parts_has_the_effects_it_is_given_as_they_are_and_so_ha
 #[test]
 fn both_halves_of_a_cut_clip_have_the_effects_and_the_values_the_clip_had() {
     let mut track = track_of(vec![(0, video(0, 100, 1))]);
-    track.add_effect_to_the_clip(clip_id(0), EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(clip_id(0), EffectKind::HUE_SHIFT).unwrap();
     track
         .set_effect_value_of_the_clip(clip_id(0), HUE, &turn(75.0))
         .unwrap();
@@ -292,7 +292,7 @@ fn both_halves_of_a_cut_clip_have_the_effects_and_the_values_the_clip_had() {
 #[test]
 fn a_copy_of_a_clip_has_its_effects_and_changing_the_copy_does_not_change_the_clip() {
     let mut track = track_of(vec![(0, video(0, 100, 1))]);
-    track.add_effect_to_the_clip(clip_id(0), EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(clip_id(0), EffectKind::HUE_SHIFT).unwrap();
     track
         .set_effect_value_of_the_clip(clip_id(0), HUE, &turn(75.0))
         .unwrap();
@@ -312,9 +312,9 @@ fn a_copy_of_a_clip_has_its_effects_and_changing_the_copy_does_not_change_the_cl
 #[test]
 fn a_copy_of_a_track_has_its_effects_and_those_of_each_of_its_clips_which_it_changes_alone() {
     let (mut track, [video_clip, sound_clip, ..]) = track_with_a_clip_of_each_kind();
-    track.add_effect(EffectKind::HueShift);
+    track.add_effect(EffectKind::HUE_SHIFT);
     track.set_effect_value(HUE, &turn(15.0));
-    track.add_effect_to_the_clip(video_clip, EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(video_clip, EffectKind::HUE_SHIFT).unwrap();
     track
         .set_effect_value_of_the_clip(video_clip, HUE, &turn(30.0))
         .unwrap();
@@ -341,11 +341,11 @@ fn a_copy_of_a_track_has_its_effects_and_those_of_each_of_its_clips_which_it_cha
 #[test]
 fn clips_that_are_moved_along_a_track_keep_their_effects_each_with_its_own() {
     let (mut track, [video_clip, sound_clip, picture_clip, text_clip]) = track_with_a_clip_of_each_kind();
-    track.add_effect_to_the_clip(video_clip, EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(video_clip, EffectKind::HUE_SHIFT).unwrap();
     track
         .set_effect_value_of_the_clip(video_clip, HUE, &turn(30.0))
         .unwrap();
-    track.add_effect_to_the_clip(text_clip, EffectKind::HueShift).unwrap();
+    track.add_effect_to_the_clip(text_clip, EffectKind::HUE_SHIFT).unwrap();
     track
         .set_effect_value_of_the_clip(text_clip, HUE, &turn(-30.0))
         .unwrap();

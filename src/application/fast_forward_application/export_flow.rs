@@ -8,10 +8,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::{FastForwardApplication, RunningExport};
+use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::media::MediaLocation;
 use crate::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
-use crate::project::{SourceMediaIdentifier, TextObject};
+use crate::project::{EffectKind, SourceMediaIdentifier, TextObject};
 use crate::rgba_picture::RgbaPicture;
 use crate::text_rendering::area_size_in_pixels;
 
@@ -63,12 +64,46 @@ impl FastForwardApplication {
         in_use
     }
 
-    /// Asks where to save the finished video and starts exporting it.
+    /// The effects that the program does not have (a project file brought them) that are applied to the clips of the project, so that the
+    /// video would not have what they do: each once, by its name, its key and its version, in the order of their keys.
+    pub(super) fn effects_that_the_export_would_leave_out(&self) -> Vec<String> {
+        let mut missing: Vec<EffectKind> = self
+            .document
+            .project
+            .effects_applied_to_every_clip()
+            .values()
+            .flatten()
+            .map(|applied| applied.effect.kind())
+            .filter(|kind| !kind.is_installed())
+            .collect();
+        missing.sort();
+        missing.dedup();
+        missing
+            .into_iter()
+            .map(|kind| {
+                let (major, minor) = kind.version();
+                format!("{} ({}, version {major}.{minor})", kind.name(), kind.key())
+            })
+            .collect()
+    }
+
+    /// Asks where to save the finished video and starts exporting it, if the video would have all that the project says; and if it would
+    /// not, because it has effects that the program does not have, asks about that first (see [`Dialog::ConfirmExportWithMissingEffects`]).
     pub(super) fn export_video(&mut self) {
         if !self.sources_in_use_that_are_not_available().is_empty() {
             return;
         }
         self.pause_playback_for_dialog();
+        let left_out = self.effects_that_the_export_would_leave_out();
+        if !left_out.is_empty() {
+            self.interface.dialog = Some(Dialog::ConfirmExportWithMissingEffects { effects: left_out });
+            return;
+        }
+        self.ask_where_to_export_and_export();
+    }
+
+    /// Asks where to save the finished video and starts exporting it.
+    pub(super) fn ask_where_to_export_and_export(&mut self) {
         if let Some(destination) = self.ask_where_to_export() {
             self.export_video_to(destination);
         }

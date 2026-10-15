@@ -104,8 +104,27 @@ and every later phase uses them.
   and are equivalent only while there is one kind of effect with one value** ("a value of another kind of effect is a value of this one", "a value has the kind of the first place", "the values at
   a frame are looked for in the place 0", "the control of a value is the control of the first place", "the place among its kind counts what is not of its kind"): **they must be killed by
   the first test that has a second kind of effect or an effect with two values (step C or phase 4); rerun `mutations_round13_b.py` then.**
-  **C. Open effect types** (a key such as `builtin:hue_shift` and a descriptor instead of the enum,
-  descriptor snapshots in the file, missing effects kept as they are, unknown fields kept).
+  **C. Open effect types (DONE 2026-10-15 [V]; so 0.4 is done).** Done in three verified pieces. **C1, the model:** `EffectKind` is no longer an enum: it is a small `Copy + Eq + Hash + Ord` value that
+  is a reference to an `EffectDescriptor` (`project/effects/descriptor.rs`: key, version, name, description, domain (picture or sound), whether it changes each pixel by itself, and its values, each a
+  `ParameterDescriptor` with an id, a name, a label, what it begins as, and the range, unit and decimals of its control), made by **interning** (`EffectKind::from_snapshot`: the descriptor is kept for the rest
+  of the run, so the same descriptor is the same kind, and a kind can stay a part of `PropertyId::EffectValue` with names and kinds of values that need no project or list at hand: the step-A design). The
+  program's own effects are descriptors too (`project/effects/built_in.rs`, with the one place that knows what each does: colour matrix and export rounding), `EffectKind::BUILT_IN` lists them, `HUE_SHIFT` is
+  `builtin:hue_shift` 1.0 with the value `degrees`. **A snapshot is the program's effect when it has the same key and major number, the same domain and no value that the program's has not** (ID-04, as
+  far as it goes); any other is a kind of its own that is *not installed*. **C2, the file (format 11, final):** `plugins` has a snapshot of each descriptor in use; an effect says its key, version, instance
+  and values **by id**; racks of effect values say the id and the instance; unknown fields of an effect, a snapshot and a value are kept and written back (`UnknownFields`; the misspelt-field test became
+  "kept" on purpose); old shapes are read through the frozen table `project_file/legacy_effects.rs` (version 10, and version 11 as step B wrote it: effects by name, values in a list, no `plugins`). New code
+  is in `project_file/effects.rs`. **C3, missing effects:** an effect the program does not have is kept with all values and keyframes, shown in the properties panel with the name its file gave it, a note
+  (*Not installed: it does nothing here, and its values are kept.*) and controls from its snapshot (a number has a slider, the other kinds are said in words until the effect surface of phase 4), does nothing
+  to the picture, the preview or the export (it is left out of the picture plan, so its keyframes do not split sections), is edited, deleted, undone, copied and saved back like any, **and exporting asks
+  first, listing what would be left out, with *Export anyway* (Q-12, decided earlier)**. **Verified:** fmt, clippy `-D warnings`, rustdoc `-D warnings`, reuse; Windows 3740 tests (3549 library + 191
+  integration), Linux with ffmpeg 9 3739, 0 failed. **Mutation sets** `_c` (88) + `_d` (6) + `_e` (12): 106 planted mistakes, all noticed after **6 real test gaps** were fixed (a foreign key with major 1 and
+  few values was taken for the hue shift; a sound effect that changes each pixel was allowed on a group; the clip kinds of a sound effect's values; the label of a value read without one; keyframe buttons
+  for non-numbers; the unit of a slider), and **the 5 equivalents that step B left are killed now** (a second kind and an effect with several values exist as tests). **Limits, so that nobody is surprised:**
+  (1) binding is the simple rule above: no alias table for renamed values, no "newest minor wins" beyond it, and no clamping of values to a changed range (a number can be typed beyond its range anyway);
+  (2) the kinds that a file brought live for the whole run (a few hundred bytes each: interning leaks on purpose); (3) unknown fields are kept at the effect, snapshot and value level only (clips, tracks
+  and the rest still refuse an unknown field); (4) no `enabled` flag (bypass), `category`, `role`, input slots, resources or `extra` blob yet: a file that has them keeps them as unknown fields, but the
+  program does not use them (phase 4+); (5) a sound-domain effect can be kept and shown but nothing makes it do anything (phase 7); (6) the descriptor of a built-in effect must not change without a version
+  change (a test has the hue shift as it was in 1.0, but a version change brings the job of *migrating* what was saved with the old one, which is not written, because nothing changed yet).
 * **0.5 Spikes** (QA-07, S1-S3) [P], throwaway code, each ends with a written finding: **S1** one ISF shader through the rewriting step and naga to a picture; **S2** a deliberate hang and a
   lost device on a software adapter / WSL (never the maintainer's GPU), to decide how plugin passes are guarded (EN-05); **S3** one `.cube` in a shader against ffmpeg's `lut3d`.
   (The old S4, the seek latency of a linked libav, is dropped: libav linking is not on this plan, section 5.)

@@ -13,10 +13,11 @@
 use std::collections::HashMap;
 
 use super::document::{AnimationDocument, KeyframeDocument, MemberDocument, RackDocument, TargetDocument};
+use super::legacy_effects;
 use super::value_from_document;
 use crate::project::{
-    AnimationTarget, ClipId, ClipKind, Drawer, EffectInstanceId, EffectKind, Effects, GroupId, Member, PropertyId,
-    Rack, RackId, Track, TrackId,
+    AnimationTarget, ClipId, ClipKind, Drawer, EffectInstanceId, Effects, GroupId, Member, PropertyId, Rack, RackId,
+    Track, TrackId,
 };
 
 /// What is known of what a file has, which is what the racks it has can be checked against.
@@ -61,10 +62,10 @@ impl FileContents {
         }
     }
 
-    /// The property of `target` (which the file has) that is saved under `name`: one that a clip or a track has of its own (if `effect` is
-    /// `None`), or the value of an effect that it has, which is saved under a name of its own. The effect is the one that is named `effect` in
-    /// its chain; a file of version 10 does not say (`None`), and then it is the one effect that has a value of that name, as there is at most
-    /// one effect of each kind in a file of that version.
+    /// The property of `target` (which the file has) that is saved under `name`: if `effect` is `None`, one that a clip or a track has of its
+    /// own, or (in a file that was written before the effects were open, which does not say which effect: there was at most one of each kind) the
+    /// value of an effect that it has that the old files called `name`; and if the effect is named, the value of that effect, which `name` is
+    /// the id of (or what the old files called it).
     fn property_named(
         &self,
         name: &str,
@@ -73,10 +74,17 @@ impl FileContents {
     ) -> Option<PropertyId> {
         let effects = self.effects_of(target);
         match effect {
-            None => {
-                PropertyId::from_name(name).or_else(|| effects.iter().find_map(|effect| effect.property_named(name)))
+            None => PropertyId::from_name(name).or_else(|| {
+                effects
+                    .iter()
+                    .find_map(|effect| legacy_effects::the_value_of_the_effect_called(effect, name))
+            }),
+            Some(instance) => {
+                let effect = effects.instance(instance)?;
+                effect
+                    .property_with_id(name)
+                    .or_else(|| legacy_effects::the_value_of_the_effect_called(effect, name))
             }
-            Some(instance) => effects.instance(instance)?.property_named(name),
         }
     }
 
@@ -127,7 +135,7 @@ pub(super) fn drawer_from_documents(
         // (The names that are not names of anything come first; then those of the properties of a clip or a track; then those of values of effects.)
         match PropertyId::from_name(&rack.property) {
             Some(property) => (1, Some(property)),
-            None if EffectKind::with_a_value_named(&rack.property).is_some() => (2, None),
+            None if legacy_effects::the_effect_that_has_a_value_called(&rack.property).is_some() => (2, None),
             None => (0, None),
         }
     });
@@ -161,7 +169,7 @@ fn rack_from_document(
                 document.property,
                 EffectInstanceId::new(instance)
             )
-        } else if let Some(effect) = EffectKind::with_a_value_named(&document.property) {
+        } else if let Some(effect) = legacy_effects::the_effect_that_has_a_value_called(&document.property) {
             format!(
                 "\"{}\" cannot be animated for what the keyframes are of: it does not have the {effect} effect",
                 document.property
@@ -278,7 +286,7 @@ pub(super) fn rack_documents_of(
         .iter()
         .map(|rack| {
             Ok(RackDocument {
-                property: rack.property().name().to_owned(),
+                property: rack.property().name_in_a_file().to_owned(),
                 effect: rack.property().effect_instance().map(EffectInstanceId::number),
                 target: (rack.target() != owner)
                     .then(|| positions.target_document_of(rack.target()))

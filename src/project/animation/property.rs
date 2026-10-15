@@ -85,11 +85,7 @@ impl PropertyId {
     /// effect has no value in is no property of anything, and is taken for a number.)
     pub fn kind(self) -> ValueKind {
         match self {
-            Self::EffectValue { effect, slot, .. } => effect
-                .value_kinds()
-                .get(usize::from(slot))
-                .copied()
-                .unwrap_or(ValueKind::Number),
+            Self::EffectValue { effect, slot, .. } => effect.value_kind(usize::from(slot)).unwrap_or(ValueKind::Number),
             Self::Gain | Self::Rotation | Self::FontSize => ValueKind::Number,
             Self::Position | Self::Size => ValueKind::Pair,
             Self::Colour => ValueKind::Colour,
@@ -98,15 +94,14 @@ impl PropertyId {
         }
     }
 
-    /// The name the property is saved under in a project file (the version 10 of it, where a value of an effect has a name of its own),
-    /// and which is how it is called to people.
+    /// What the property is called, in lower case: the name that a clip's or a track's own property is saved under in a project file, and
+    /// how a value of an effect is called when it is told apart from the others (the name that its effect says it has).
     pub fn name(self) -> &'static str {
         match self {
             Self::EffectValue { effect, slot, .. } => effect
-                .value_names()
+                .parameters()
                 .get(usize::from(slot))
-                .copied()
-                .unwrap_or("value of an effect"),
+                .map_or("value of an effect", |parameter| &parameter.name),
             Self::Gain => "gain",
             Self::Muted => "muted",
             Self::Position => "position",
@@ -116,6 +111,19 @@ impl PropertyId {
             Self::FontFamily => "font",
             Self::FontSize => "font size",
             Self::Colour => "colour",
+        }
+    }
+
+    /// What the property is called in a project file: what a clip or a track has of its own is called by its name, and the value of an effect by
+    /// the id that its effect gives it (a name that does not change, and that is not a place: see
+    /// [`ParameterDescriptor::id`](crate::project::ParameterDescriptor::id)).
+    pub fn name_in_a_file(self) -> &'static str {
+        match self {
+            Self::EffectValue { effect, slot, .. } => effect
+                .parameters()
+                .get(usize::from(slot))
+                .map_or("value of an effect", |parameter| &parameter.id),
+            other => other.name(),
         }
     }
 
@@ -141,7 +149,10 @@ impl PropertyId {
     /// Whether a track can have this property: how loud it is, and whether it is silent, and, if it is a value of an effect, as far as a
     /// track can have effects at all (whether it has the effect is for [`Self::is_had_by_a_track`] to say).
     pub fn applies_to_a_track(self) -> bool {
-        self.is_heard() || self.is_a_value_of_an_effect()
+        match self {
+            Self::EffectValue { effect, .. } => effect.applies_to_a_track(),
+            _ => self.is_heard(),
+        }
     }
 
     /// Whether what the property is can be heard: how loud something is, and whether it is silent.
@@ -164,8 +175,8 @@ impl PropertyId {
                 matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text)
             }
             Self::Text | Self::FontFamily | Self::FontSize | Self::Colour => kind == ClipKind::Text,
-            // (A value of an effect is a property of a clip that can have effects: whether it has this one is for `is_had_by_a_clip`.)
-            Self::EffectValue { .. } => matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text),
+            // (A value of an effect is a property of a clip that can have the kind of effect: whether it has this one is for `is_had_by_a_clip`.)
+            Self::EffectValue { effect, .. } => effect.applies_to_a_clip_of_kind(kind),
         }
     }
 
@@ -308,9 +319,9 @@ mod tests {
     #[test]
     fn the_value_of_an_effect_is_had_by_a_clip_or_a_track_that_has_that_effect_and_by_no_other() {
         let mut with_the_effect = Effects::none();
-        with_the_effect.add(EffectKind::HueShift);
+        with_the_effect.add(EffectKind::HUE_SHIFT);
         let without = Effects::none();
-        let another_one = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(5), 0);
+        let another_one = PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(5), 0);
         assert_eq!(another_one.kind(), HUE.kind());
 
         for kind in [ClipKind::Video, ClipKind::Image, ClipKind::Text] {
@@ -342,7 +353,7 @@ mod tests {
         assert!(HUE.is_a_value_of_an_effect());
         assert!(HUE.is_seen() && !HUE.is_heard());
         // (A place that the effect has no value in is nothing that an effect makes, and is no more than a number with a name.)
-        let nowhere = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 9);
+        let nowhere = PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::FIRST, 9);
         assert_eq!(nowhere.kind(), ValueKind::Number);
         assert_eq!(nowhere.name(), "value of an effect");
         assert!(
@@ -362,7 +373,7 @@ mod tests {
         for property in PropertyId::OWN {
             assert!(property < HUE, "{property:?} before the values of effects");
         }
-        let later_effect = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(1), 0);
+        let later_effect = PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(1), 0);
         assert!(
             HUE < later_effect,
             "the values of the effects are in the order the effects are in"

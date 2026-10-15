@@ -13,7 +13,7 @@ use crate::project::{
 };
 use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 
-const HUE_SHIFT: EffectKind = EffectKind::HueShift;
+const HUE_SHIFT: EffectKind = EffectKind::HUE_SHIFT;
 
 fn effect_key() -> ChainItemKey {
     ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST)
@@ -436,7 +436,7 @@ fn something_that_is_not_there_has_no_chain_to_move_things_in() {
 
 #[test]
 fn every_kind_of_group_can_have_every_effect_that_there_is_for_now() {
-    for effect in EffectKind::ALL {
+    for effect in EffectKind::BUILT_IN {
         for kind in GroupKind::ALL {
             assert!(effect.applies_to_a_group_of_kind(kind), "{effect} on a {kind}");
         }

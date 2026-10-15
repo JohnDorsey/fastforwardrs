@@ -72,7 +72,7 @@ pub(super) fn a_project_with_groups_of_every_kind() -> Project {
         )
         .unwrap();
     project.rename_group(tag, "titles and sound").unwrap();
-    project.add_effect_to_the_group(tag, EffectKind::HueShift).unwrap();
+    project.add_effect_to_the_group(tag, EffectKind::HUE_SHIFT).unwrap();
     project.set_effect_value_of_the_group(tag, HUE, &turn(45.0)).unwrap();
 
     let clip_group = project
@@ -83,7 +83,7 @@ pub(super) fn a_project_with_groups_of_every_kind() -> Project {
         .unwrap();
     project.set_group_colour(clip_group, GroupColour::new(1, 2, 3)).unwrap();
     project
-        .add_effect_to_the_group(clip_group, EffectKind::HueShift)
+        .add_effect_to_the_group(clip_group, EffectKind::HUE_SHIFT)
         .unwrap();
 
     let track_group = project
@@ -99,7 +99,7 @@ pub(super) fn a_project_with_groups_of_every_kind() -> Project {
             ],
         )
         .unwrap();
-    project.add_effect_to_the_group(outer, EffectKind::HueShift).unwrap();
+    project.add_effect_to_the_group(outer, EffectKind::HUE_SHIFT).unwrap();
     project.set_effect_value_of_the_group(outer, HUE, &turn(-30.0)).unwrap();
 
     // The first video has its effect and then the badge of the tag: put the badge first. The second video's badge of its track, which
@@ -160,7 +160,7 @@ fn a_group_is_saved_with_its_kind_name_and_colour_and_what_is_in_it_by_where_it_
     );
     assert_eq!(
         groups[0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [45.0]}])
+        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0, "values": {"degrees": 45.0}}])
     );
 
     assert_eq!(groups[1]["kind"], "clip_group");
@@ -171,7 +171,7 @@ fn a_group_is_saved_with_its_kind_name_and_colour_and_what_is_in_it_by_where_it_
     );
     assert_eq!(
         groups[1]["effects"],
-        serde_json::json!([{"effect": "hue shift", "instance": 0}])
+        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0}])
     );
 
     assert_eq!(groups[2]["kind"], "track_group");
@@ -386,7 +386,7 @@ fn a_file_of_version_9_loads_as_a_project_with_no_groups_and_the_effects_of_the_
     let track = loaded.tracks()[2].id();
     let mut loaded = loaded;
     loaded
-        .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Track(track), EffectKind::HUE_SHIFT)
         .unwrap();
     let applied = loaded.effects_applied_to_the_clip(video);
     assert_eq!(

@@ -8,7 +8,7 @@ use super::tests::{frame, long_video, picture, text};
 use super::*;
 use crate::colour_effects::ColourMatrix;
 use crate::composition::test_projects::{project_of, random_project_with_effects};
-use crate::project::{AnimationTarget, Effect, EffectInstanceId, EffectKind, PropertyValue};
+use crate::project::{AnimationTarget, Effect, EffectInstanceId, EffectKind, PropertyId, PropertyValue};
 use crate::test_support::{self, DeterministicRandomNumbers, put_a_hue_shift_on};
 
 const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
@@ -48,7 +48,7 @@ fn a_video_whose_colours_turn() -> (Project, ClipId) {
     let mut project = project_of(vec![vec![(20, long_video(0, 100, 1))]]);
     let clip = the_first_clip(&project);
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), 20, 0.0);
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), 80, 120.0);
@@ -82,7 +82,7 @@ fn a_layer_has_the_effects_of_its_clip_with_the_values_they_have_when_they_are_n
         layer.effects,
         vec![LayerEffect {
             instance: crate::project::EffectInstanceId::FIRST,
-            kind: EffectKind::HueShift,
+            kind: EffectKind::HUE_SHIFT,
             values: vec![turn(90.0)],
             animation: Animation::default(),
         }]
@@ -186,7 +186,7 @@ fn the_several_effects_of_one_kind_of_a_clip_are_in_its_layer_in_order_each_with
     let target = AnimationTarget::Clip(the_first_clip(&project));
     let first = put_a_hue_shift_on(&mut project, target, 90.0);
     let second = put_a_hue_shift_on(&mut project, target, 5.0);
-    let hue_of = |instance| PropertyId::effect_value(EffectKind::HueShift, instance, 0);
+    let hue_of = |instance| PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0);
     test_support::make_a_keyframe(&mut project, target, hue_of(second), 20, turn(0.0));
     test_support::make_a_keyframe(&mut project, target, hue_of(second), 80, turn(120.0));
 
@@ -234,7 +234,7 @@ fn the_keyframes_of_the_effect_of_a_track_are_at_the_frames_of_the_timeline_and_
     let (mut project, clip) = a_video_whose_colours_turn();
     let track = the_front_track(&project);
     project
-        .add_effect(AnimationTarget::Track(track), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Track(track), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Track(track), 30, 10.0);
     make_a_keyframe(&mut project, AnimationTarget::Track(track), 90, 70.0);
@@ -299,7 +299,7 @@ fn a_layer_as_it_is_at_a_frame_has_its_effects_as_they_are_there_and_no_keyframe
     let at_50 = layer.as_it_is_at(frame(50));
 
     assert_eq!(at_50.effects.len(), 1);
-    assert_eq!(at_50.effects[0].kind, EffectKind::HueShift);
+    assert_eq!(at_50.effects[0].kind, EffectKind::HUE_SHIFT);
     assert_eq!(at_50.effects[0].values, vec![turn(60.0)]);
     assert!(!at_50.effects[0].is_animated());
     assert!(!at_50.has_keyframes());
@@ -459,5 +459,66 @@ fn effects_do_not_change_where_the_sections_of_the_plan_begin_and_end_or_what_th
     assert!(
         projects_with_effects_checked > 80,
         "only {projects_with_effects_checked} projects had effects"
+    );
+}
+
+// --- an effect that the program does not have ---
+
+#[test]
+fn an_effect_that_the_program_does_not_have_is_not_in_the_layer_and_its_keyframes_do_not_make_the_layer_change() {
+    let mut project = project_of(vec![vec![(20, long_video(0, 100, 1))]]);
+    let target = AnimationTarget::Clip(the_first_clip(&project));
+    put_a_hue_shift_on(&mut project, target, 90.0);
+    let without_it = project.clone();
+    let kind = test_support::a_kind_of_effect_the_program_does_not_have("isf:layer_made_up", &[("amount", turn(0.5))]);
+    let instance = project.add_effect(target, kind).unwrap();
+    let amount = PropertyId::effect_value(kind, instance, 0);
+    test_support::make_a_keyframe(&mut project, target, amount, 20, turn(0.0));
+    test_support::make_a_keyframe(&mut project, target, amount, 80, turn(1.0));
+
+    let plan = plan(&project);
+    let layer = &plan.section_at(frame(50)).unwrap().layers[0];
+
+    assert_eq!(layer.effects.len(), 1, "only the hue shift, which the program has");
+    assert_eq!(layer.effects[0].kind, EffectKind::HUE_SHIFT);
+    assert!(
+        !layer.has_keyframes(),
+        "so the keyframes of the other are not keyframes of the layer"
+    );
+    assert_eq!(layer.colour_matrix(), ColourMatrix::hue_rotation(90.0));
+    assert_eq!(
+        plan.sections.len(),
+        super::tests::plan(&without_it).sections.len(),
+        "and the picture is not made in more stretches because of it"
+    );
+}
+
+#[test]
+fn what_an_effect_with_several_values_has_at_a_frame_is_what_the_keyframes_of_each_value_say_of_that_value_alone() {
+    let kind = test_support::a_kind_of_effect_the_program_does_not_have(
+        "isf:layer_effect_with_values",
+        &[("first", turn(1.0)), ("second", turn(2.0)), ("third", turn(3.0))],
+    );
+    let instance = crate::project::EffectInstanceId::new(4);
+    let third = PropertyId::effect_value(kind, instance, 2);
+    let mut animation = Animation::default();
+    assert!(animation.set_keyframe(third, 10, turn(30.0)));
+    assert!(animation.set_keyframe(third, 20, turn(50.0)));
+    let effect = LayerEffect {
+        instance,
+        kind,
+        values: vec![turn(1.0), turn(2.0), turn(3.0)],
+        animation,
+    };
+
+    assert_eq!(
+        effect.values_at(15),
+        vec![turn(1.0), turn(2.0), turn(40.0)],
+        "only the third moves"
+    );
+    assert_eq!(effect.values_at(5), vec![turn(1.0), turn(2.0), turn(30.0)]);
+    assert_eq!(
+        effect.as_it_is_at(frame(15)).values,
+        vec![turn(1.0), turn(2.0), turn(40.0)]
     );
 }

@@ -344,6 +344,112 @@ fn exporting_asks_where_and_suggests_a_name_that_is_not_the_name_of_a_source_fil
     );
 }
 
+/// A window like [`window_that_asks`], whose video has an effect that the program does not have, and whose track has one of the same kind (so that
+/// it is the same effect twice) and one that is of another key.
+fn window_that_asks_with_effects_the_program_does_not_have(chooser: &ScriptedFileChooser) -> Window {
+    let mut window = window_that_asks(chooser);
+    let made_up = crate::test_support::a_kind_of_effect_the_program_does_not_have(
+        "isf:export_question_made_up",
+        &[("amount", crate::project::PropertyValue::Number(0.5))],
+    );
+    let another = crate::test_support::a_kind_of_effect_the_program_does_not_have(
+        "isf:export_question_another",
+        &[("amount", crate::project::PropertyValue::Number(0.5))],
+    );
+    let project = &mut window.application_mut().document.project;
+    let clip = crate::project::AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
+    let track = crate::project::AnimationTarget::Track(project.tracks()[0].id());
+    project.add_effect(clip, made_up).unwrap();
+    project.add_effect(track, made_up).unwrap();
+    project.add_effect(track, another).unwrap();
+    project.add_effect(clip, crate::project::EffectKind::HUE_SHIFT).unwrap();
+    window.settle();
+    window
+}
+
+#[test]
+fn exporting_a_project_that_has_effects_the_program_does_not_have_says_which_before_asking_anything_else() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks_with_effects_the_program_does_not_have(&chooser);
+
+    window.do_this(Command::ExportVideo);
+
+    assert_eq!(chooser.questions_asked().len(), 0, "where to put it is not asked yet");
+    let Some(Dialog::ConfirmExportWithMissingEffects { effects }) = window.application().interface.dialog.clone()
+    else {
+        panic!("a question about the effects was expected");
+    };
+    assert_eq!(
+        effects,
+        [
+            "export question another (isf:export_question_another, version 1.0)",
+            "export question made up (isf:export_question_made_up, version 1.0)"
+        ],
+        "each once, though one is on the clip and the track, and not the hue shift, which the program has"
+    );
+    assert!(window.harness.query_by_label("Export without some effects?").is_some());
+    assert!(window.harness.query_by_label("Export anyway").is_some());
+    assert!(window.harness.query_by_label("Cancel").is_some());
+    assert!(
+        window
+            .harness
+            .query_by_label("  - export question made up (isf:export_question_made_up, version 1.0)")
+            .is_some(),
+        "the dialog lists them"
+    );
+}
+
+#[test]
+fn cancelling_the_export_that_would_leave_effects_out_asks_nothing_and_exports_nothing() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks_with_effects_the_program_does_not_have(&chooser);
+    window.do_this(Command::ExportVideo);
+
+    window.harness.get_by_label("Cancel").click();
+    window.settle();
+
+    assert!(window.application().interface.dialog.is_none());
+    assert_eq!(chooser.questions_asked().len(), 0);
+    assert!(!window.application().is_working_in_the_background());
+}
+
+#[test]
+fn exporting_anyway_asks_where_to_put_the_video_as_exporting_does_when_nothing_is_left_out() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks_with_effects_the_program_does_not_have(&chooser);
+    window.do_this(Command::ExportVideo);
+
+    window.harness.get_by_label("Export anyway").click();
+    window.settle();
+
+    assert!(window.application().interface.dialog.is_none());
+    let asked = chooser.questions_asked();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].title, "Export the video");
+}
+
+#[test]
+fn a_project_whose_effects_are_all_the_programs_is_exported_without_a_question_about_effects() {
+    let chooser = ScriptedFileChooser::default();
+    chooser.will_answer(None);
+    let mut window = window_that_asks(&chooser);
+    let clip = crate::project::AnimationTarget::Clip(window.application().project().tracks()[0].entries()[0].id());
+    window
+        .application_mut()
+        .document
+        .project
+        .add_effect(clip, crate::project::EffectKind::HUE_SHIFT)
+        .unwrap();
+
+    window.do_this(Command::ExportVideo);
+
+    assert!(window.application().interface.dialog.is_none());
+    assert_eq!(chooser.questions_asked().len(), 1);
+}
+
 #[test]
 fn loading_a_project_asks_for_a_project_file_when_nothing_would_be_lost() {
     let chooser = ScriptedFileChooser::default();

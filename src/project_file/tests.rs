@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::project::{
-    Angle, AnimationTarget, CanvasArea, Clip, ClipId, FrameRate, Gain, Placement, PropertyId, PropertyValue, SETTINGS,
-    SourceImageProperties, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TimelineFrameIndex,
-    TrackHeight,
+    Angle, AnimationTarget, CanvasArea, Clip, ClipId, EffectInstanceId, FrameRate, Gain, Placement, PropertyId,
+    PropertyValue, SETTINGS, SourceImageProperties, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
+    TimelineFrameIndex, TrackHeight,
 };
 
 fn video_properties() -> SourceVideoProperties {
@@ -792,7 +792,7 @@ pub(super) fn project_with_everything() -> Project {
         .into_iter()
         .chain(turned_hue_shifts.map(|(target, _)| target))
     {
-        project.add_effect(target, EffectKind::HueShift).unwrap();
+        project.add_effect(target, EffectKind::HUE_SHIFT).unwrap();
     }
     for (target, degrees) in turned_hue_shifts {
         project
@@ -1315,7 +1315,7 @@ fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_i
     assert_eq!(
         project.property_value_at(
             videos_track,
-            PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(1), 0),
+            PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(1), 0),
             TimelineFrameIndex::new(0)
         ),
         Some(PropertyValue::Number(40.0))

@@ -516,7 +516,7 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
             let target = AnimationTarget::Clip(clip);
             let kind = window.application().project().placement_of(clip).unwrap().clip.kind();
             if effects_are_on {
-                for effect in EffectKind::ALL
+                for effect in EffectKind::BUILT_IN
                     .into_iter()
                     .filter(|effect| effect.applies_to_a_clip_of_kind(kind))
                 {
@@ -535,7 +535,10 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
 
         let track = window.application().project().tracks()[0].id();
         if effects_are_on {
-            for effect in EffectKind::ALL.into_iter().filter(|effect| effect.applies_to_a_track()) {
+            for effect in EffectKind::BUILT_IN
+                .into_iter()
+                .filter(|effect| effect.applies_to_a_track())
+            {
                 window.do_this(Command::AddEffect {
                     target: AnimationTarget::Track(track),
                     kind: effect,

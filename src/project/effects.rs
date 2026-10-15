@@ -5,10 +5,9 @@
 //!
 //! A clip or a track has the effects that were put on it, one after another in the order they were put on in (or the order they were put in
 //! since: they can be moved, see [`Effects::move_before`]). It may have several effects of one kind: two hue shifts, say, each with values
-//! of its own. What an effect does is set by its *values*, which
-//! are properties like any other (see [`PropertyId`]): each can be animated, with keyframes, and is changed in the properties panel
-//! with the same stopwatch. An effect that is put on a clip or a track has the values it begins with (see
-//! [`EffectKind::default_values`]), and is taken off with its keyframes.
+//! of its own. What an effect does is set by its *values*, which are properties like any other (see [`PropertyId`]): each can be animated, with
+//! keyframes, and is changed in the properties panel with the same stopwatch. An effect that is put on a clip or a track has the values it begins
+//! with (see [`EffectKind::default_values`]), and is taken off with its keyframes.
 //!
 //! **Each effect in a chain is named by an [`EffectInstanceId`]**, which is what its values are named by too (see
 //! [`PropertyId::EffectValue`]): a value is *the value `slot` of the effect `instance`*, whatever kind of effect that is. The names are those of
@@ -18,18 +17,24 @@
 //! where the effects of something else are applied to it (see [`Badge`]). A clip has a badge for each tag it is in, and one that stands
 //! for the effects of its track; a group that is in a tag has a badge for it. The chain says in what order everything is applied.
 //!
-//! What there is to know about each *kind* of effect is a row of one table ([`EffectKind::ALL`] is its rows, in the order
-//! they are offered in): its name, what it does, its values, what it can be put on, and how it changes a picture. A new effect is
-//! a new row, and the code that is the same for all of them (putting them on, taking them off, saving them, the panel that
-//! has them, the preview, the export) is not changed. (So far there is one row, and the ways that an effect can change a picture
-//! are the ways of changing its colours; sound, and what is seen of other pictures, come with the effects that need them.)
+//! **The kinds of effect are open**: what there is to know about a *kind* of effect is data, a descriptor (see [`EffectDescriptor`]): its key,
+//! its name, what it does, its values and what it can be put on. The program has some in itself (see [`EffectKind::BUILT_IN`]) and a project
+//! file can bring others, which are kept with all their values and keyframes and do nothing to a picture until the program has them (see
+//! [`EffectKind::is_installed`]). (So far the one effect that the program has is the hue shift, which changes colours; sound, and what is
+//! seen of other pictures, come with the effects that need them.)
+
+use super::animation::{PropertyId, PropertyValue};
+use super::groups::GroupId;
+
+mod built_in;
+mod descriptor;
+mod kind;
+
+pub use built_in::HUE_SHIFT_KEY;
+pub use descriptor::{EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterDescriptor, UnknownFields};
+pub use kind::EffectKind;
 
 use std::fmt;
-
-use super::animation::{PropertyId, PropertyValue, ValueKind};
-use super::groups::{GroupId, GroupKind};
-use super::tracks::ClipKind;
-use crate::colour_effects::ColourMatrix;
 
 /// Which of the effects of a chain an effect is: a number that no other effect of the chain has, and that the effect keeps for as long as it is in
 /// the chain (the one that is put on a chain that has none is [`Self::FIRST`], and each after it has a number more than the largest there is
@@ -56,185 +61,15 @@ impl fmt::Display for EffectInstanceId {
     }
 }
 
-/// The kinds of effect there are.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum EffectKind {
-    /// The hues of the colours of the picture are turned round the wheel of colours, as far as the effect says.
-    HueShift,
-}
-
-/// What a kind of effect is: one row of the table.
-struct EffectRow {
-    kind: EffectKind,
-    /// The name it is saved under in a project file, and called by to the people who use it (with a capital letter).
-    name: &'static str,
-    /// What it does, in a few words, for the menu that it is chosen from.
-    description: &'static str,
-    /// The kind of each of the values it has, in the order they are kept and shown in.
-    value_kinds: &'static [ValueKind],
-    /// The name each of them is saved under in a project file (a value of an effect is a property of its own there, called this), in the
-    /// same order.
-    value_names: &'static [&'static str],
-    /// What its values are when it is put on, in the same order.
-    default_values: fn() -> Vec<PropertyValue>,
-    /// Whether it can be put on a video, a picture and a text object (what is seen), and on a track (everything seen on it).
-    on_what_is_seen: bool,
-    on_a_track: bool,
-    /// Whether it can be put on a tag, which has it applied to each member that it can be applied to.
-    on_a_tag: bool,
-    /// Whether it can be put on a clip group or a track group, which has it applied to the picture that its members make together.
-    /// Until the preview and the export can make that picture, an effect is applied to each member instead, which makes the same
-    /// picture only for an effect that changes each pixel by itself, whatever the pixels round it are, and does not change how clear
-    /// it is (as the effects that are colour matrices do, except where a colour is cut off at the least or the most there is, when it is
-    /// a little different: see `groups::effects_of_groups`). An effect that does not make the same picture that way (a blur, say) is
-    /// not given a `true` here until they can.
-    on_a_composite: bool,
-    /// How it changes the colours of a picture, if it does, from its values.
-    colour_matrix: Option<fn(&[PropertyValue]) -> ColourMatrix>,
-    /// Which values the export uses in place of the values the effect has at a frame: what it has, as near as is worth telling
-    /// apart (a change that nobody can see is not a stretch of its own in the export, which is slow to make: see
-    /// [`EffectKind::as_exported`]).
-    as_exported: fn(&[PropertyValue]) -> Vec<PropertyValue>,
-}
-
-const ROWS: [EffectRow; 1] = [EffectRow {
-    kind: EffectKind::HueShift,
-    name: "hue shift",
-    description: "Turns the colours round the wheel of colours",
-    value_kinds: &[ValueKind::Number],
-    value_names: &["hue shift"],
-    default_values: hue_shift_defaults,
-    on_what_is_seen: true,
-    on_a_track: true,
-    on_a_tag: true,
-    on_a_composite: true,
-    colour_matrix: Some(hue_shift_matrix),
-    as_exported: hue_shift_as_exported,
-}];
-
-/// The steps, in degrees, that the hue shift is exported in: a turn of the colours that is a degree off is not seen.
-const HUE_STEP_IN_DEGREES: f32 = 1.0;
-
-/// The hue shift is exported in whole steps of [`HUE_STEP_IN_DEGREES`]. (An animated hue shift that is slow then makes a stretch
-/// of the export of its own for every few frames, and not for every frame.)
-fn hue_shift_as_exported(values: &[PropertyValue]) -> Vec<PropertyValue> {
-    match values {
-        [PropertyValue::Number(degrees)] => {
-            vec![PropertyValue::Number(
-                (degrees / HUE_STEP_IN_DEGREES).round() * HUE_STEP_IN_DEGREES,
-            )]
-        }
-        other => other.to_vec(),
-    }
-}
-
-/// The one value of the hue shift, how far it turns the colours, is nothing to begin with.
-fn hue_shift_defaults() -> Vec<PropertyValue> {
-    vec![PropertyValue::Number(0.0)]
-}
-
-/// How the hue shift changes colours: it turns them by the degrees that its one value says.
-fn hue_shift_matrix(values: &[PropertyValue]) -> ColourMatrix {
-    match values {
-        [PropertyValue::Number(degrees)] => ColourMatrix::hue_rotation(*degrees),
-        _ => ColourMatrix::NOTHING_CHANGES,
-    }
-}
-
-impl fmt::Display for EffectKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
-    }
-}
-
-impl EffectKind {
-    /// Every kind of effect, in the order they are offered in.
-    pub const ALL: [EffectKind; 1] = [Self::HueShift];
-
-    fn row(self) -> &'static EffectRow {
-        ROWS.iter()
-            .find(|row| row.kind == self)
-            .expect("every kind of effect has a row in the table")
-    }
-
-    /// The name of the kind of effect in a project file, which is what it is called, in lower case.
-    pub fn name(self) -> &'static str {
-        self.row().name
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.name() == name)
-    }
-
-    /// What the effect does, in a few words.
-    pub fn description(self) -> &'static str {
-        self.row().description
-    }
-
-    /// The kind of each of the values of the effect, in order.
-    pub fn value_kinds(self) -> &'static [ValueKind] {
-        self.row().value_kinds
-    }
-
-    /// The name each of the values of the effect is saved under in a project file, in order.
-    pub fn value_names(self) -> &'static [&'static str] {
-        self.row().value_names
-    }
-
-    /// The kind of effect that has a value that is saved under `name` in a project file, if there is one.
-    pub fn with_a_value_named(name: &str) -> Option<Self> {
-        ROWS.iter()
-            .find(|row| row.value_names.contains(&name))
-            .map(|row| row.kind)
-    }
-
-    /// What the values of the effect are when it is put on something, one for each of its value kinds.
-    pub fn default_values(self) -> Vec<PropertyValue> {
-        (self.row().default_values)()
-    }
-
-    /// Whether a clip of this kind can have the effect.
-    pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
-        self.row().on_what_is_seen && matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text)
-    }
-
-    /// Whether a track can have the effect.
-    pub fn applies_to_a_track(self) -> bool {
-        self.row().on_a_track
-    }
-
-    /// Whether a group of kind `kind` can have the effect: a tag, which has it applied to each member, if the effect can be put on a
-    /// tag; and a clip group or a track group, which have it applied to what their members make together, if the effect can be put on
-    /// what several things make together.
-    pub fn applies_to_a_group_of_kind(self, kind: GroupKind) -> bool {
-        match kind {
-            GroupKind::Tag => self.row().on_a_tag,
-            GroupKind::ClipGroup | GroupKind::TrackGroup => self.row().on_a_composite,
-        }
-    }
-
-    /// The values that are exported when the values of the effect at a frame are `values` (the same values of the same kinds): the
-    /// values as near as is worth telling apart, which is `values` themselves for an effect whose values are all that there is to
-    /// see of them. What is the same when it is exported is exported as one thing, which makes the export quicker to get ready.
-    pub fn as_exported(self, values: &[PropertyValue]) -> Vec<PropertyValue> {
-        (self.row().as_exported)(values)
-    }
-
-    /// How the effect changes the colours of a picture when its values are `values` (one for each of its value kinds, in the
-    /// order of [`Self::value_kinds`]), if it changes colours at all. A matrix that changes nothing if the values are not those
-    /// of the effect.
-    pub fn colour_matrix(self, values: &[PropertyValue]) -> Option<ColourMatrix> {
-        self.row().colour_matrix.map(|matrix| matrix(values))
-    }
-}
-
 /// An effect that a clip or a track has: which, and what its values are when they are not animated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
     instance: EffectInstanceId,
     kind: EffectKind,
-    /// The value of each of the values of the kind of effect, in the order of [`EffectKind::value_kinds`].
+    /// The value of each of the values of the kind of effect, in the order of [`EffectKind::parameters`].
     values: Vec<PropertyValue>,
+    /// What a project file said of the effect that this version of the program does not know, to be written back as it was.
+    unknown_fields: UnknownFields,
 }
 
 impl Effect {
@@ -245,20 +80,22 @@ impl Effect {
             instance: EffectInstanceId::FIRST,
             kind,
             values: kind.default_values(),
+            unknown_fields: UnknownFields::none(),
         }
     }
 
     /// The effect of this kind with these values, if there is one for each of its values and each is the kind of value it has.
     pub fn with_values(kind: EffectKind, values: Vec<PropertyValue>) -> Option<Self> {
-        let right_values = values.len() == kind.value_kinds().len()
+        let right_values = values.len() == kind.value_count()
             && values
                 .iter()
-                .zip(kind.value_kinds())
-                .all(|(value, value_kind)| value.kind() == *value_kind);
+                .enumerate()
+                .all(|(slot, value)| kind.value_kind(slot) == Some(value.kind()));
         right_values.then_some(Self {
             instance: EffectInstanceId::FIRST,
             kind,
             values,
+            unknown_fields: UnknownFields::none(),
         })
     }
 
@@ -266,6 +103,13 @@ impl Effect {
     #[must_use]
     pub fn named(mut self, instance: EffectInstanceId) -> Self {
         self.instance = instance;
+        self
+    }
+
+    /// The same effect, with what a file said of it that this version does not know.
+    #[must_use]
+    pub fn with_unknown_fields(mut self, unknown_fields: UnknownFields) -> Self {
+        self.unknown_fields = unknown_fields;
         self
     }
 
@@ -277,14 +121,19 @@ impl Effect {
         self.kind
     }
 
-    /// The values the effect has when they are not animated, one for each of its value kinds, in order.
+    /// What a file said of the effect that this version does not know.
+    pub fn unknown_fields(&self) -> &UnknownFields {
+        &self.unknown_fields
+    }
+
+    /// The values the effect has when they are not animated, one for each of its values, in order.
     pub fn values(&self) -> &[PropertyValue] {
         &self.values
     }
 
     /// The property that is the value in place `slot` of this effect, if it has one there.
     pub fn property(&self, slot: usize) -> Option<PropertyId> {
-        self.kind.value_kinds().get(slot)?;
+        self.kind.value_kind(slot)?;
         Some(PropertyId::effect_value(
             self.kind,
             self.instance,
@@ -292,15 +141,14 @@ impl Effect {
         ))
     }
 
-    /// The property that is the value of this effect that is saved under `name` in a project file, if it has one.
-    pub fn property_named(&self, name: &str) -> Option<PropertyId> {
-        let slot = self.kind.value_names().iter().position(|own| *own == name)?;
-        self.property(slot)
+    /// The property that is the value of this effect that has the id `id`, if it has one.
+    pub fn property_with_id(&self, id: &str) -> Option<PropertyId> {
+        self.property(self.kind.slot_of_the_value_with_id(id)?)
     }
 
     /// The properties that are the values of this effect, in order.
     pub fn properties(&self) -> impl Iterator<Item = PropertyId> + '_ {
-        (0..self.kind.value_kinds().len()).filter_map(|slot| self.property(slot))
+        (0..self.kind.value_count()).filter_map(|slot| self.property(slot))
     }
 
     /// Where the value that `property` is, is among the values of this effect, if it is one of them.
@@ -309,7 +157,7 @@ impl Effect {
             return None;
         };
         let slot = usize::from(slot);
-        (effect == self.kind && instance == self.instance && slot < self.kind.value_kinds().len()).then_some(slot)
+        (effect == self.kind && instance == self.instance && slot < self.kind.value_count()).then_some(slot)
     }
 
     /// The value of `property` when it is not animated, if it is one of the effect's.
@@ -328,6 +176,7 @@ impl Effect {
                 instance: self.instance,
                 kind: self.kind,
                 values,
+                unknown_fields: self.unknown_fields.clone(),
             }
         })
     }
@@ -710,5 +559,7 @@ impl Effects {
 
 #[cfg(test)]
 mod chain_tests;
+#[cfg(test)]
+mod kind_tests;
 #[cfg(test)]
 mod tests;

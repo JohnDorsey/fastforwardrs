@@ -12,12 +12,13 @@
 //!
 //! What a badge stands for is selected with a **double click**, so that taking hold of a badge to move it does not select anything.
 
-use egui::{CornerRadius, Popup, Rect, Response, Stroke, Ui, pos2, vec2};
+use egui::{CornerRadius, Popup, Rect, Response, RichText, Stroke, Ui, pos2, vec2};
 
 use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
-    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, effects_to_offer, show_the_control_of, show_the_control_of_a_group_effect,
+    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, NOT_INSTALLED_NOTE, effects_to_offer, show_the_control_of,
+    show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -147,6 +148,9 @@ fn show_an_effect(
             }
         },
         |ui| {
+            if !kind.is_installed() {
+                ui.label(RichText::new(NOT_INSTALLED_NOTE).weak());
+            }
             for property in effect.properties() {
                 match owner {
                     Member::Clip(clip) => {
@@ -333,10 +337,10 @@ fn show_the_plus_button(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Mem
         return;
     }
     let can_have = kinds_that_can_be_put_on(content, owner);
-    if !EffectKind::ALL.into_iter().any(&can_have) {
+    if !EffectKind::BUILT_IN.into_iter().any(&can_have) {
         return;
     }
-    let to_offer = effects_to_offer(EffectKind::ALL, &can_have);
+    let to_offer = effects_to_offer(EffectKind::BUILT_IN, &can_have);
     let room = vec2(
         ui.available_width(),
         plus_button::DIAMETER + 2.0 * SPACE_ROUND_THE_PLUS_BUTTON,
@@ -405,7 +409,7 @@ mod tests {
         let track = TrackId::new(2);
         let clip = ClipId::new(track, 5);
         let group = GroupId::new(1);
-        let hue = EffectKind::HueShift;
+        let hue = EffectKind::HUE_SHIFT;
         assert_eq!(
             command_that_puts_on(Member::Clip(clip), hue),
             Command::AddEffect {

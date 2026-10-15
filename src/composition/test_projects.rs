@@ -253,7 +253,7 @@ pub(crate) fn random_project_with_effects(random: &mut DeterministicRandomNumber
         }
     }
     for (target, first_frame, length) in targets {
-        for kind in EffectKind::ALL {
+        for kind in EffectKind::BUILT_IN {
             // (Several of one kind may be put on one target: one more after each, now and then, with values of its own.)
             let mut put_another_on = true;
             while put_another_on {

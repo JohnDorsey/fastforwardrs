@@ -38,7 +38,7 @@ fn values_of_the_effects_of(plan: &PicturePlan, clip: ClipId) -> Vec<PropertyVal
 }
 
 fn put_an_effect_of_a_group(project: &mut Project, group: crate::project::GroupId, degrees: f32) {
-    project.add_effect_to_the_group(group, EffectKind::HueShift).unwrap();
+    project.add_effect_to_the_group(group, EffectKind::HUE_SHIFT).unwrap();
     project
         .set_effect_value_of_the_group(group, HUE, &turn(degrees))
         .unwrap();
@@ -156,7 +156,7 @@ fn the_keyframes_of_a_clips_effect_stay_with_the_clips_effect_and_the_effect_of_
     let mut project = project_of(vec![vec![(0, long_video(0, 100, 1))]]);
     let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 0, turn(0.0));
     make_a_keyframe(&mut project, AnimationTarget::Clip(clip), HUE, 50, turn(100.0));

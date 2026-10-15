@@ -4,13 +4,14 @@
 //! Tests of how the effects of clips and tracks are saved in a project file and read back, and what is refused when a file says
 //! something that cannot be.
 
+use super::effects::{EffectDocument, KindsOfEffects, ValuesDocument, effects_from_documents};
 use super::tests::{
     assert_same_content, current_version_line, edited_project, link_to_missing_video, project_with_everything,
     reason_for_unreadable_project, saved, valid_text_with, version_line,
 };
 use super::*;
 use crate::composition::test_projects::random_project_with_effects;
-use crate::project::{PropertyId, TimelineFrameIndex};
+use crate::project::{HUE_SHIFT_KEY, PropertyId, TimelineFrameIndex};
 use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use crate::test_support::{DeterministicRandomNumbers, make_a_keyframe};
 
@@ -21,13 +22,13 @@ fn turn(degrees: f32) -> PropertyValue {
 /// The JSON of the file of `project_with_everything`, after `change` has been made to it. (The captions track is the first of the
 /// tracks and has the text object as its clip, the music track is the second and has the sound, and the track of the video is the
 /// third and has two clips. See `project_with_everything`, which gives all of them a hue shift but the sound.)
-fn the_file_of_everything_with(change: impl FnOnce(&mut serde_json::Value)) -> String {
+pub(super) fn the_file_of_everything_with(change: impl FnOnce(&mut serde_json::Value)) -> String {
     let mut file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
     change(&mut file);
     serde_json::to_string_pretty(&file).unwrap()
 }
 
-fn reason_for_invalid_project(text: &str) -> String {
+pub(super) fn reason_for_invalid_project(text: &str) -> String {
     match project_from_json_text(text) {
         Err(ProjectFileError::InvalidProject { reason }) => reason,
         other => panic!("expected InvalidProject, got {other:?}"),
@@ -37,26 +38,35 @@ fn reason_for_invalid_project(text: &str) -> String {
 // --- what the file says ---
 
 #[test]
-fn effects_are_saved_with_the_name_of_the_effect_and_the_values_it_has_when_they_are_not_what_it_begins_with() {
+fn effects_are_saved_with_the_key_of_the_effect_and_the_values_it_has_when_they_are_not_what_it_begins_with_by_their_ids()
+ {
     let file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
+    let hue_shift = |extra: serde_json::Value| {
+        let mut effect = serde_json::json!({"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0});
+        effect
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        effect
+    };
 
     // The first video has it as it begins, the second is turned 90 degrees.
     assert_eq!(
         file["tracks"][2]["clips"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "instance": 0}])
+        serde_json::json!([hue_shift(serde_json::json!({}))])
     );
     assert_eq!(
         file["tracks"][2]["clips"][1]["effects"],
-        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [90.0]}])
+        serde_json::json!([hue_shift(serde_json::json!({"values": {"degrees": 90.0}}))])
     );
     // The text object as it begins, and the track of the text turned back.
     assert_eq!(
         file["tracks"][0]["clips"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "instance": 0}])
+        serde_json::json!([hue_shift(serde_json::json!({}))])
     );
     assert_eq!(
         file["tracks"][0]["effects"],
-        serde_json::json!([{"effect": "hue shift", "instance": 0, "values": [-30.0]}])
+        serde_json::json!([hue_shift(serde_json::json!({"values": {"degrees": -30.0}}))])
     );
 }
 
@@ -76,7 +86,7 @@ fn the_values_of_an_effect_that_are_turned_back_to_what_it_begins_with_are_left_
     let mut project = edited_project(link_to_missing_video());
     let clip = project.tracks()[0].entries()[0].id();
     project
-        .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
         .unwrap();
     project
         .set_property_at(AnimationTarget::Clip(clip), HUE, turn(45.0), TimelineFrameIndex::new(0))
@@ -88,7 +98,7 @@ fn the_values_of_an_effect_that_are_turned_back_to_what_it_begins_with_are_left_
         .unwrap();
 
     let text = saved(&project);
-    assert!(text.contains("\"effect\": \"hue shift\""), "{text}");
+    assert!(text.contains("\"effect\": \"builtin:hue_shift\""), "{text}");
     assert!(!text.contains("\"values\""), "{text}");
 }
 
@@ -147,7 +157,7 @@ fn the_keyframes_of_the_value_of_an_effect_survive_a_trip_through_the_text_even_
             .as_array()
             .unwrap()
             .iter()
-            .find(|rack| rack["property"] == "hue shift")
+            .find(|rack| rack["property"] == "degrees")
             .unwrap()["keyframes"],
         serde_json::json!([{"frame": 15, "value": -90.0}, {"frame": 75, "value": 450.0}])
     );
@@ -163,7 +173,7 @@ fn the_effects_of_clips_that_were_cut_and_of_a_track_that_was_copied_are_still_w
         .duplicate_track(video_track, crate::project::TrackSide::Above)
         .unwrap();
     project
-        .add_effect(AnimationTarget::Track(copy), EffectKind::HueShift)
+        .add_effect(AnimationTarget::Track(copy), EffectKind::HUE_SHIFT)
         .unwrap();
 
     let loaded = project_from_json_text(&saved(&project)).unwrap();
@@ -373,12 +383,23 @@ fn a_sound_and_a_keyframe_crate_have_no_effects_to_be_given_in_a_file() {
 }
 
 #[test]
-fn a_misspelt_field_of_an_effect_is_reported_instead_of_silently_ignored() {
+fn a_field_of_an_effect_that_this_version_does_not_know_is_kept_and_written_back_even_if_it_is_a_misspelling() {
+    // (What a newer program wrote is kept, and so is what is misspelt: there is no telling them apart. The effect has its values still.)
     let text = the_file_of_everything_with(|file| {
-        file["tracks"][0]["effects"] = serde_json::json!([{"effect": "hue shift", "value": [5.0]}]);
+        file["tracks"][0]["effects"] = serde_json::json!([{"effect": "hue shift", "value": [5.0], "values": [3.0]}]);
     });
-    let reason = reason_for_unreadable_project(&text);
-    assert!(reason.contains("unknown field `value`"), "{reason}");
+
+    let project = project_from_json_text(&text).unwrap();
+
+    let captions = AnimationTarget::Track(project.tracks()[0].id());
+    let chain = project.effects_of(captions).unwrap();
+    assert_eq!(chain.value_of(HUE), Some(turn(3.0)));
+    assert_eq!(
+        chain.iter().next().unwrap().unknown_fields().fields().get("value"),
+        Some(&serde_json::json!([5.0]))
+    );
+    let written: serde_json::Value = serde_json::from_str(&saved(&project)).unwrap();
+    assert_eq!(written["tracks"][0]["effects"][0]["value"], serde_json::json!([5.0]));
 }
 
 #[test]
@@ -443,17 +464,20 @@ fn an_effect_that_what_it_is_on_cannot_have_is_refused_whichever_effect_it_is() 
     // reads them, told what can and what cannot be had.)
     let documents = || {
         vec![EffectDocument {
-            effect: EffectKind::HueShift.name().to_owned(),
+            effect: HUE_SHIFT_KEY.to_owned(),
+            version: None,
             instance: None,
-            values: Vec::new(),
+            values: ValuesDocument::default(),
+            unknown: std::collections::BTreeMap::new(),
         }]
     };
+    let kinds = KindsOfEffects::from_documents(Vec::new()).unwrap();
 
-    let allowed = effects_from_documents(documents(), |_| true).unwrap();
+    let allowed = effects_from_documents(documents(), &kinds, |_| true).unwrap();
     assert_eq!(allowed.len(), 1);
-    assert_eq!(allowed[0].kind(), EffectKind::HueShift);
+    assert_eq!(allowed[0].kind(), EffectKind::HUE_SHIFT);
 
-    let reason = effects_from_documents(documents(), |_| false).unwrap_err();
+    let reason = effects_from_documents(documents(), &kinds, |_| false).unwrap_err();
     assert!(reason.contains("it cannot have the hue shift effect"), "{reason}");
 }
 
@@ -461,7 +485,7 @@ fn an_effect_that_what_it_is_on_cannot_have_is_refused_whichever_effect_it_is() 
 
 /// The value of the hue shift that is named `number` in its chain.
 fn hue_of(number: u32) -> PropertyId {
-    PropertyId::effect_value(EffectKind::HueShift, crate::project::EffectInstanceId::new(number), 0)
+    PropertyId::effect_value(EffectKind::HUE_SHIFT, crate::project::EffectInstanceId::new(number), 0)
 }
 
 /// The project of everything, with two more hue shifts on its first video (it has one, named 0, already): the effects 0, 1 and 2, turning by
@@ -470,7 +494,7 @@ fn project_with_three_hue_shifts_on_the_first_video() -> (Project, AnimationTarg
     let mut project = project_with_everything();
     let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
     for degrees in [60.0, -45.0] {
-        let instance = project.add_effect(video, EffectKind::HueShift).unwrap();
+        let instance = project.add_effect(video, EffectKind::HUE_SHIFT).unwrap();
         project
             .set_property_at(
                 video,
@@ -495,9 +519,9 @@ fn several_effects_of_one_kind_are_saved_each_with_its_name_and_values_and_come_
     assert_eq!(
         file["tracks"][2]["clips"][0]["effects"],
         serde_json::json!([
-            {"effect": "hue shift", "instance": 0},
-            {"effect": "hue shift", "instance": 1, "values": [60.0]},
-            {"effect": "hue shift", "instance": 2, "values": [-45.0]}
+            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0},
+            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 1, "values": {"degrees": 60.0}},
+            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 2, "values": {"degrees": -45.0}}
         ])
     );
     let loaded = project_from_json_text(&saved(&project)).unwrap();
@@ -527,7 +551,7 @@ fn the_keyframes_of_each_of_several_effects_of_one_kind_are_racks_that_say_which
     let keyframes_of_the_effect_named = |number: u32| {
         racks
             .iter()
-            .find(|rack| rack["property"] == "hue shift" && rack["effect"] == number)
+            .find(|rack| rack["property"] == "degrees" && rack["effect"] == number)
             .map(|rack| rack["keyframes"].clone())
     };
     assert_eq!(
@@ -590,42 +614,82 @@ fn the_names_of_the_effects_are_kept_by_the_file_when_they_are_not_the_first_num
     assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
 }
 
-/// The text of `project` as a file of version 10 had it: no effect has a name, and no rack says which effect its keyframes are of.
-fn saved_as_a_file_of_version_10(project: &Project) -> String {
-    fn take_out_what_version_11_added(value: &mut serde_json::Value) {
+/// What the old files called the hue shift, and its one value: both `hue shift`.
+const OLD_NAME_OF_THE_HUE_SHIFT: &str = "hue shift";
+
+/// The text of `project` as the old files had it: the effects are called by name (`hue shift`, where a file of today has a key), their values are
+/// a list, there are no snapshots of descriptors, and a rack of the keyframes of the value of an effect calls the value by its name. A file of
+/// version 10 had no names for the effects in their chains and did not say which effect a rack was of (`with_instances` is `false`); a file
+/// of version 11 as it was written while the effects were being given names of their own in their chains did (`true`).
+fn saved_the_way_the_old_files_did(project: &Project, with_instances: bool) -> String {
+    fn change(value: &mut serde_json::Value, with_instances: bool) {
         match value {
             serde_json::Value::Object(object) => {
-                object.remove("instance");
-                if object.contains_key("property") {
-                    object.remove("effect");
+                let is_a_rack = object.contains_key("property");
+                let is_an_effect = object.get("effect").is_some_and(serde_json::Value::is_string);
+                if is_a_rack && let Some(instance) = object.remove("effect") {
+                    object.insert("property".to_owned(), serde_json::json!(OLD_NAME_OF_THE_HUE_SHIFT));
+                    if with_instances {
+                        object.insert("effect".to_owned(), instance);
+                    }
                 }
-                object.values_mut().for_each(take_out_what_version_11_added);
+                if is_an_effect {
+                    object.insert("effect".to_owned(), serde_json::json!(OLD_NAME_OF_THE_HUE_SHIFT));
+                    object.remove("version");
+                    if !with_instances {
+                        object.remove("instance");
+                    }
+                    if let Some(serde_json::Value::Object(values)) = object.remove("values") {
+                        let in_order: Vec<serde_json::Value> = values.get("degrees").into_iter().cloned().collect();
+                        object.insert("values".to_owned(), serde_json::Value::Array(in_order));
+                    }
+                }
+                object.values_mut().for_each(|inner| change(inner, with_instances));
             }
-            serde_json::Value::Array(items) => items.iter_mut().for_each(take_out_what_version_11_added),
+            serde_json::Value::Array(items) => items.iter_mut().for_each(|inner| change(inner, with_instances)),
             _ => {}
         }
     }
     let mut file: serde_json::Value = serde_json::from_str(&saved(project)).unwrap();
-    take_out_what_version_11_added(&mut file);
-    file["file_format_version"] = serde_json::json!(10);
+    file.as_object_mut().unwrap().remove("plugins");
+    change(&mut file, with_instances);
+    file["file_format_version"] = serde_json::json!(if with_instances { 11 } else { 10 });
     serde_json::to_string_pretty(&file).unwrap()
 }
 
-#[test]
-fn a_file_of_version_10_names_no_effect_and_no_rack_names_one_and_is_read_as_the_project_it_was() {
-    // (One hue shift on each of the clips and the track that have one, with keyframes of the values of two of them, as version 10 had them.)
+/// The project of everything with keyframes of the values of two of its hue shifts: the video's first, and the captions track's.
+fn project_with_keyframes_of_hue_shifts() -> Project {
     let mut project = project_with_everything();
     let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
     let captions = AnimationTarget::Track(project.tracks()[0].id());
     make_a_keyframe(&mut project, video, HUE, 15, turn(-90.0));
     make_a_keyframe(&mut project, video, HUE, 75, turn(450.0));
     make_a_keyframe(&mut project, captions, HUE, 130, turn(10.0));
-    let text = saved_as_a_file_of_version_10(&project);
+    project
+}
+
+#[test]
+fn a_file_of_version_10_names_no_effect_and_no_rack_names_one_and_is_read_as_the_project_it_was() {
+    // (One hue shift on each of the clips and the track that have one, with keyframes of the values of two of them, as version 10 had them.)
+    let project = project_with_keyframes_of_hue_shifts();
+    let text = saved_the_way_the_old_files_did(&project, false);
     assert!(text.contains(&version_line(10)), "{text}");
     assert!(!text.contains("\"instance\""), "{text}");
     assert!(
+        !text.contains("plugins") && !text.contains("builtin:"),
+        "no key and no snapshot: {text}"
+    );
+    assert!(
         !text.contains("\"effect\": 0"),
         "no rack says which effect it is of: {text}"
+    );
+    assert!(
+        text.contains("\"effect\": \"hue shift\""),
+        "the effects are called by their names: {text}"
+    );
+    assert!(
+        text.contains("\"values\": ["),
+        "and have their values in a list: {text}"
     );
 
     let loaded = project_from_json_text(&text).unwrap();
@@ -645,6 +709,38 @@ fn a_file_of_version_10_names_no_effect_and_no_rack_names_one_and_is_read_as_the
     assert!(
         saved(&loaded).contains("\"instance\": 0"),
         "with the effects named, in the order they were in"
+    );
+    assert!(
+        saved(&loaded).contains("\"key\": \"builtin:hue_shift\""),
+        "and a snapshot of what the effect is"
+    );
+}
+
+#[test]
+fn a_file_of_version_11_as_it_was_written_while_the_effects_were_being_named_is_read_as_the_project_it_was() {
+    // (Effects that had names in their chains and were called by name, with their values in a list, and racks that said which effect they were of and
+    // called the value by its name. Nothing was released like that, but a program that was being built did write it.)
+    let mut project = project_with_keyframes_of_hue_shifts();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let second = project.add_effect(video, EffectKind::HUE_SHIFT).unwrap();
+    project
+        .set_property_at(video, hue_of(second.number()), turn(60.0), TimelineFrameIndex::new(0))
+        .unwrap();
+    make_a_keyframe(&mut project, video, hue_of(second.number()), 30, turn(100.0));
+    let text = saved_the_way_the_old_files_did(&project, true);
+    assert!(text.contains(&version_line(11)), "{text}");
+    assert!(text.contains("\"instance\": 1"), "{text}");
+    assert!(!text.contains("plugins") && !text.contains("builtin:"), "{text}");
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    assert_same_content(&loaded, &project);
+    assert_eq!(loaded.problems_with_the_racks(), Vec::<String>::new());
+    let loaded_video = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    assert_eq!(
+        loaded.property_value_at(loaded_video, hue_of(1), TimelineFrameIndex::new(5)),
+        Some(turn(100.0)),
+        "the keyframes of the second are the second's"
     );
 }
 

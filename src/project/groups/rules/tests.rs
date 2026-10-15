@@ -287,7 +287,7 @@ fn a_track_or_a_group_that_keeps_the_badge_of_a_track_breaks_a_rule_and_a_clip_d
     let (clip, track) = (laid.clip_member(0, 0), laid.track_member(1));
     for owner in [clip, track, Member::Group(tag)] {
         let chain = laid.project.chain_of_the_member_mut(owner).unwrap();
-        chain.add(crate::project::EffectKind::HueShift);
+        chain.add(crate::project::EffectKind::HUE_SHIFT);
         assert!(chain.move_before(
             crate::project::ChainItemKey::Badge(Badge::Track),
             Some(crate::project::ChainItemKey::Effect(

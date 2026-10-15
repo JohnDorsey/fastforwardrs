@@ -94,7 +94,7 @@ fn a_group_is_made_from_its_parts_and_tells_what_they_are() {
     assert!(bare.effects().has_nothing_in_it());
 
     let mut effects = Effects::none();
-    effects.add(crate::project::EffectKind::HueShift);
+    effects.add(crate::project::EffectKind::HUE_SHIFT);
     let group = bare
         .with_members([Member::Clip(clip(0, 1)), Member::Clip(clip(2, 0))])
         .with_effects(effects.clone());

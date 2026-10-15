@@ -399,7 +399,7 @@ mod tests {
         let clip = AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
         let track = AnimationTarget::Track(project.tracks()[0].id());
         put_a_hue_shift_on(&mut project, clip, 90.0);
-        project.add_effect(track, EffectKind::HueShift).unwrap();
+        project.add_effect(track, EffectKind::HUE_SHIFT).unwrap();
         make_a_keyframe(&mut project, track, HUE, 0, PropertyValue::Number(0.0));
         make_a_keyframe(&mut project, track, HUE, 100, PropertyValue::Number(60.0));
 

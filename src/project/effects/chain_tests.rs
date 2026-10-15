@@ -23,7 +23,7 @@ fn tag_badge(number: u32) -> ChainItemKey {
 fn chain_of(effect: bool, tags: &[u32]) -> Effects {
     let mut chain = Effects::none();
     if effect {
-        chain.add(EffectKind::HueShift);
+        chain.add(EffectKind::HUE_SHIFT);
     }
     for number in tags {
         chain.add_tag_badge(tag(*number));
@@ -79,7 +79,7 @@ fn the_badge_of_the_track_is_shown_in_the_chain_of_a_clip_wherever_it_was_put_an
 #[test]
 fn what_is_put_in_the_chain_goes_before_the_badge_of_the_track_while_that_is_at_the_end() {
     let mut chain = chain_of(false, &[1]);
-    chain.add(EffectKind::HueShift);
+    chain.add(EffectKind::HUE_SHIFT);
     chain.add_tag_badge(tag(2));
     assert_eq!(
         chain.keys(true),
@@ -189,7 +189,7 @@ fn an_effect_is_moved_among_the_badges_like_a_badge_is() {
     assert_eq!(chain.keys(false), [tag_badge(1), HUE_SHIFT, tag_badge(2)]);
     assert_eq!(
         chain.instance(EffectInstanceId::FIRST),
-        Some(&Effect::new(EffectKind::HueShift)),
+        Some(&Effect::new(EffectKind::HUE_SHIFT)),
         "it is the same effect"
     );
 }
@@ -285,7 +285,7 @@ fn the_effects_are_counted_and_listed_without_the_badges() {
     assert_eq!(chain.iter().len(), 1, "the iterator knows how many there are");
     assert_eq!(
         chain.iter().map(Effect::kind).collect::<Vec<_>>(),
-        [EffectKind::HueShift]
+        [EffectKind::HUE_SHIFT]
     );
 }
 
@@ -294,7 +294,7 @@ fn the_items_of_a_chain_are_the_effects_themselves_and_the_badges_in_the_order_t
     let chain = chain_of(true, &[3]);
     let items = chain.items(true);
     assert_eq!(items.len(), 3);
-    assert_eq!(items[0], ChainItem::Effect(&Effect::new(EffectKind::HueShift)));
+    assert_eq!(items[0], ChainItem::Effect(&Effect::new(EffectKind::HUE_SHIFT)));
     assert_eq!(items[1], ChainItem::Badge(Badge::Tag(tag(3))));
     assert_eq!(items[2], ChainItem::Badge(Badge::Track));
     assert_eq!(items.iter().map(ChainItem::key).collect::<Vec<_>>(), chain.keys(true));
@@ -325,7 +325,7 @@ fn the_first_effect_that_is_put_on_a_chain_is_named_first_and_each_after_it_one_
     let mut chain = Effects::none();
     assert_eq!(chain.next_instance(), EffectInstanceId::FIRST);
     assert_eq!(
-        chain.add(EffectKind::HueShift),
+        chain.add(EffectKind::HUE_SHIFT),
         EffectInstanceId::FIRST,
         "it is given back as the name"
     );
@@ -333,7 +333,7 @@ fn the_first_effect_that_is_put_on_a_chain_is_named_first_and_each_after_it_one_
     assert_eq!(chain.next_instance(), EffectInstanceId::new(1));
 
     // A chain that was made with an effect that has another name goes on from it, whatever the effect it has in front of it is called.
-    let named_four = Effect::new(EffectKind::HueShift).named(EffectInstanceId::new(4));
+    let named_four = Effect::new(EffectKind::HUE_SHIFT).named(EffectInstanceId::new(4));
     let chain = Effects::from_entries([ChainEntry::Effect(named_four.clone())]).unwrap();
     assert_eq!(
         chain.instance(EffectInstanceId::new(4)),
@@ -347,7 +347,7 @@ fn the_first_effect_that_is_put_on_a_chain_is_named_first_and_each_after_it_one_
 #[test]
 fn the_name_that_an_effect_has_is_given_again_when_nothing_in_the_chain_has_it_any_more() {
     let mut chain = Effects::none();
-    chain.add(EffectKind::HueShift);
+    chain.add(EffectKind::HUE_SHIFT);
     assert!(chain.remove(EffectInstanceId::FIRST));
     assert_eq!(
         chain.next_instance(),
@@ -374,7 +374,7 @@ fn an_effect_is_found_by_its_name_and_so_is_each_of_its_values() {
     assert!(chain.has_the_value(HUE));
     assert_eq!(chain.effect_of_the_value(HUE), Some(effect));
 
-    let of_another_effect = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(3), 0);
+    let of_another_effect = PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(3), 0);
     assert!(!chain.has_the_value(of_another_effect));
     assert_eq!(chain.effect_of_the_value(of_another_effect), None);
     assert_eq!(chain.value_of(of_another_effect), None);
@@ -385,7 +385,7 @@ fn an_effect_is_found_by_its_name_and_so_is_each_of_its_values() {
 
 /// The value of the hue shift that is named `number` in its chain.
 fn hue_of(number: u32) -> PropertyId {
-    PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(number), 0)
+    PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(number), 0)
 }
 
 fn degrees(number: f32) -> PropertyValue {
@@ -395,7 +395,7 @@ fn degrees(number: f32) -> PropertyValue {
 #[test]
 fn a_chain_has_as_many_effects_of_one_kind_as_were_put_on_each_with_a_name_and_the_values_of_its_own() {
     let mut chain = Effects::none();
-    let names: Vec<EffectInstanceId> = (0..3).map(|_| chain.add(EffectKind::HueShift)).collect();
+    let names: Vec<EffectInstanceId> = (0..3).map(|_| chain.add(EffectKind::HUE_SHIFT)).collect();
     assert_eq!(
         names,
         [
@@ -437,7 +437,7 @@ fn a_chain_has_as_many_effects_of_one_kind_as_were_put_on_each_with_a_name_and_t
 fn taking_an_effect_off_by_its_name_takes_that_one_and_not_another_of_its_kind() {
     let mut chain = Effects::none();
     for _ in 0..3 {
-        chain.add(EffectKind::HueShift);
+        chain.add(EffectKind::HUE_SHIFT);
     }
     chain.set_value(hue_of(0), &degrees(10.0));
     chain.set_value(hue_of(2), &degrees(30.0));
@@ -463,14 +463,14 @@ fn which_of_its_kind_an_effect_is_counts_the_effects_of_that_kind_in_the_order_t
         None,
         "there is no such effect"
     );
-    chain.add(EffectKind::HueShift);
+    chain.add(EffectKind::HUE_SHIFT);
     assert_eq!(
         chain.place_among_its_kind(EffectInstanceId::FIRST),
         Some((1, 1)),
         "the only one"
     );
-    chain.add(EffectKind::HueShift);
-    chain.add(EffectKind::HueShift);
+    chain.add(EffectKind::HUE_SHIFT);
+    chain.add(EffectKind::HUE_SHIFT);
     assert_eq!(chain.place_among_its_kind(EffectInstanceId::FIRST), Some((1, 3)));
     assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(1)), Some((2, 3)));
     assert_eq!(chain.place_among_its_kind(EffectInstanceId::new(2)), Some((3, 3)));
@@ -493,7 +493,7 @@ fn which_of_its_kind_an_effect_is_counts_the_effects_of_that_kind_in_the_order_t
 fn an_effect_is_moved_by_its_name_among_the_others_of_its_kind() {
     let mut chain = Effects::none();
     for _ in 0..3 {
-        chain.add(EffectKind::HueShift);
+        chain.add(EffectKind::HUE_SHIFT);
     }
     chain.set_value(hue_of(2), &degrees(99.0));
     let key = |number| ChainItemKey::Effect(EffectInstanceId::new(number));
@@ -510,8 +510,8 @@ fn an_effect_is_moved_by_its_name_among_the_others_of_its_kind() {
 
 #[test]
 fn a_chain_made_of_entries_that_give_two_effects_the_same_name_is_refused_but_the_same_kind_under_other_names_is_not() {
-    let first = Effect::new(EffectKind::HueShift);
-    let second = Effect::new(EffectKind::HueShift).named(EffectInstanceId::new(1));
+    let first = Effect::new(EffectKind::HUE_SHIFT);
+    let second = Effect::new(EffectKind::HUE_SHIFT).named(EffectInstanceId::new(1));
     let chain = Effects::from_entries([ChainEntry::Effect(first.clone()), ChainEntry::Effect(second.clone())])
         .expect("two hue shifts with names of their own");
     assert_eq!(chain.len(), 2);
@@ -529,4 +529,49 @@ fn a_chain_made_of_entries_that_give_two_effects_the_same_name_is_refused_but_th
         None,
         "whatever the values are"
     );
+}
+
+#[test]
+fn which_of_its_kind_an_effect_is_counts_only_the_effects_of_its_kind_when_the_chain_has_effects_of_other_kinds() {
+    let other = crate::test_support::a_kind_of_effect_the_program_does_not_have(
+        "isf:chain_other_kind",
+        &[("amount", PropertyValue::Number(0.5))],
+    );
+    let mut chain = Effects::none();
+    let first_hue = chain.add(EffectKind::HUE_SHIFT);
+    let between = chain.add(other);
+    let second_hue = chain.add(EffectKind::HUE_SHIFT);
+    let last_other = chain.add(other);
+
+    assert_eq!(chain.place_among_its_kind(first_hue), Some((1, 2)));
+    assert_eq!(
+        chain.place_among_its_kind(second_hue),
+        Some((2, 2)),
+        "the other kind between them is not counted"
+    );
+    assert_eq!(
+        chain.place_among_its_kind(between),
+        Some((1, 2)),
+        "and the others are counted among themselves"
+    );
+    assert_eq!(chain.place_among_its_kind(last_other), Some((2, 2)));
+}
+
+#[test]
+fn a_value_of_one_kind_of_effect_is_not_a_value_of_an_effect_of_another_kind_that_has_the_same_name_and_place() {
+    let other = crate::test_support::a_kind_of_effect_the_program_does_not_have(
+        "isf:chain_same_place",
+        &[("amount", PropertyValue::Number(0.5))],
+    );
+    let mut chain = Effects::none();
+    let hue = chain.add(EffectKind::HUE_SHIFT);
+    let value_of_the_other_kind = PropertyId::effect_value(other, hue, 0);
+
+    assert!(
+        !chain.has_the_value(value_of_the_other_kind),
+        "the effect that is named the same is of another kind"
+    );
+    assert_eq!(chain.value_of(value_of_the_other_kind), None);
+    assert!(!chain.set_value(value_of_the_other_kind, &PropertyValue::Number(1.0)));
+    assert!(chain.has_the_value(PropertyId::effect_value(EffectKind::HUE_SHIFT, hue, 0)));
 }

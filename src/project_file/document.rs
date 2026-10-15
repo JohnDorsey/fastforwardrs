@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The exact shape of a project file on disk (the current version, 10).
+//! The exact shape of a project file on disk (the current version, 11).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::effects::{EffectDocument, PluginDocument};
 use crate::project::{
     FrameRate, Gain, GroupColour, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
     TrackHeight,
@@ -24,6 +25,10 @@ pub(super) struct ProjectDocument {
     pub file_format: String,
     pub file_format_version: u32,
     pub sources: Vec<SourceDocument>,
+    /// A snapshot of the descriptor of each type of effect that the project uses. Left out when it uses none, and in the files of versions before
+    /// 11, which say what an effect is by its name (see `super::effects`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugins: Vec<PluginDocument>,
     /// The tracks, the one in front first.
     pub tracks: Vec<TrackDocument>,
     /// The groups, in the order they were made in. A group is named in the rest of the file by its place in this list, counted from 0.
@@ -337,31 +342,15 @@ impl<'de> Deserialize<'de> for GroupColourDocument {
     }
 }
 
-/// An effect that a clip, a track or a group has.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct EffectDocument {
-    /// The name of the kind of effect (see [`crate::project::EffectKind::name`]).
-    pub effect: String,
-    /// The name the effect has in its chain (see [`crate::project::EffectInstanceId`]), which is what the racks of keyframes of its values say
-    /// they are of. A chain may have several effects of one kind, and then it is this that tells them apart. Left out in the files of
-    /// versions before 11, which have at most one effect of each kind: the effects of a chain are named in the order they are in then.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instance: Option<u32>,
-    /// What its values are when they are not animated, one for each of the properties of the kind of effect, in their order.
-    /// Left out when they are what the effect begins with. (The keyframes of its values are racks, like any other.)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub values: Vec<KeyframeValueDocument>,
-}
-
 /// The keyframes of one property that are kept together, in a drawer.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RackDocument {
-    /// The name of the property (see [`crate::project::PropertyId::name`]).
+    /// The name of the property (see [`crate::project::PropertyId::name_in_a_file`]): what a clip or a track has of its own is called by its name,
+    /// and the value of an effect by the id that the effect gives it (see [`crate::project::ParameterDescriptor::id`]).
     pub property: String,
     /// For a rack of the keyframes of a value of an effect: the name of that effect in the chain of the clip or the track that the keyframes
-    /// are of (see [`EffectDocument::instance`]), which says which of its effects the value is of when it has several of one kind. Left out
+    /// are of (see [`super::effects::EffectDocument::instance`]), which says which of its effects the value is of when it has several of one kind. Left out
     /// for the properties that a clip or a track has itself, and in the files of versions before 11, in which it is the one effect that has
     /// a value of that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -22,7 +22,7 @@ use support::{
 };
 
 /// The one value of the hue shift, when the hue shift is the first effect of its clip, track or group (as it is in every project here).
-const HUE: PropertyId = PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 0);
+const HUE: PropertyId = PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::FIRST, 0);
 
 const WIDTH: usize = 320;
 const HEIGHT: usize = 180;
@@ -60,8 +60,8 @@ fn project_of_a_flat_colour_video(
 
 /// Puts a hue shift on `target`, turned by `degrees`, and gives the value of it as a property (which is `HUE` when it is the first).
 fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) -> PropertyId {
-    let instance = project.add_effect(target, EffectKind::HueShift).unwrap();
-    let value = PropertyId::effect_value(EffectKind::HueShift, instance, 0);
+    let instance = project.add_effect(target, EffectKind::HUE_SHIFT).unwrap();
+    let value = PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0);
     project
         .set_property_at(
             target,
@@ -257,7 +257,7 @@ fn a_hue_shift_with_keyframes_turns_the_colours_a_little_more_at_each_frame() {
     let scratch = scratch_directory();
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let target = AnimationTarget::Clip(clip);
-    project.add_effect(target, EffectKind::HueShift).unwrap();
+    project.add_effect(target, EffectKind::HUE_SHIFT).unwrap();
     make_a_keyframe(&mut project, target, HUE, 0, PropertyValue::Number(0.0));
     make_a_keyframe(&mut project, target, HUE, 59, PropertyValue::Number(177.0));
 
@@ -394,7 +394,7 @@ fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
 // --- groups ---
 
 fn put_a_hue_shift_on_the_group(project: &mut Project, group: GroupId, degrees: f32) {
-    project.add_effect_to_the_group(group, EffectKind::HueShift).unwrap();
+    project.add_effect_to_the_group(group, EffectKind::HUE_SHIFT).unwrap();
     project
         .set_effect_value_of_the_group(group, HUE, &PropertyValue::Number(degrees))
         .unwrap();

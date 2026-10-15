@@ -61,11 +61,11 @@ impl Fuzz {
             },
             Command::AddEffect {
                 target: AnimationTarget::Clip(clips[0]),
-                kind: EffectKind::HueShift,
+                kind: EffectKind::HUE_SHIFT,
             },
             Command::AddEffect {
                 target: AnimationTarget::Track(tracks[0]),
-                kind: EffectKind::HueShift,
+                kind: EffectKind::HUE_SHIFT,
             },
         ] {
             run.window.do_this_and_draw_nothing(command);
@@ -214,7 +214,7 @@ impl Fuzz {
                     "put an effect on a group",
                     Command::AddGroupEffect {
                         group: self.some(&groups)?,
-                        kind: EffectKind::HueShift,
+                        kind: EffectKind::HUE_SHIFT,
                     },
                 )
             }
@@ -258,7 +258,7 @@ impl Fuzz {
                     "put an effect on a clip or a track",
                     Command::AddEffect {
                         target,
-                        kind: EffectKind::HueShift,
+                        kind: EffectKind::HUE_SHIFT,
                     },
                 )
             }

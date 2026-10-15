@@ -191,14 +191,14 @@ mod tests {
             .unwrap();
         for _ in 0..effects_on_the_clip {
             project
-                .add_effect(AnimationTarget::Clip(clip), EffectKind::HueShift)
+                .add_effect(AnimationTarget::Clip(clip), EffectKind::HUE_SHIFT)
                 .unwrap();
         }
         (project, AnimationTarget::Clip(clip))
     }
 
     fn hue_of(number: u32) -> PropertyId {
-        PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::new(number), 0)
+        PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(number), 0)
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
             "Hue shift"
         );
         assert_eq!(
-            what_an_effect_is_called(EffectKind::HueShift),
+            what_an_effect_is_called(EffectKind::HUE_SHIFT),
             "Hue shift",
             "the menu has no number"
         );

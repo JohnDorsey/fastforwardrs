@@ -3,15 +3,62 @@
 
 //! Helpers shared by the unit tests in several modules.
 
+use std::borrow::Cow;
+
 use crate::project::{
-    AnimationTarget, ClipId, EffectInstanceId, EffectKind, Project, PropertyId, PropertyValue, RackDestination,
-    TimelineFrameIndex, TrackId,
+    AnimationTarget, ClipId, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, ParameterDescriptor,
+    Project, PropertyId, PropertyValue, RackDestination, TimelineFrameIndex, TrackId, UnknownFields,
 };
 
 /// The property that is the one value of the hue shift when the hue shift is the first effect of the chain it is in, which is what it is
 /// when it is the only effect, as it is in nearly every test (see [`EffectInstanceId::FIRST`]).
 pub const HUE_SHIFT_AS_THE_FIRST_EFFECT: PropertyId =
-    PropertyId::effect_value(EffectKind::HueShift, EffectInstanceId::FIRST, 0);
+    PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::FIRST, 0);
+
+/// The descriptor of an effect that the program does not have, as a file would bring it: the key `key`, the version 1.0, a picture effect that
+/// changes each pixel by itself, and these values, `(id, what it begins as)`, each named by its id, with a label that is its id with a
+/// capital letter, and no range.
+pub fn the_descriptor_of_an_effect_the_program_does_not_have(
+    key: &str,
+    values: &[(&str, PropertyValue)],
+) -> EffectDescriptor {
+    EffectDescriptor {
+        key: Cow::Owned(key.to_owned()),
+        version: (1, 0),
+        name: Cow::Owned(key.split_once(':').map_or(key, |(_, id)| id).replace('_', " ")),
+        description: Cow::Borrowed("Made up for a test"),
+        domain: EffectDomain::Picture,
+        changes_each_pixel_by_itself: true,
+        parameters: Cow::Owned(
+            values
+                .iter()
+                .map(|(id, default)| ParameterDescriptor {
+                    id: Cow::Owned((*id).to_owned()),
+                    name: Cow::Owned((*id).replace('_', " ")),
+                    label: Cow::Owned(
+                        id.chars()
+                            .next()
+                            .map(|first| first.to_uppercase().chain(id.chars().skip(1)).collect())
+                            .unwrap_or_default(),
+                    ),
+                    default: default.clone(),
+                    range: None,
+                    unit: Cow::Borrowed(""),
+                    decimals: None,
+                    unknown_fields: UnknownFields::none(),
+                })
+                .collect(),
+        ),
+        unknown_fields: UnknownFields::none(),
+    }
+}
+
+/// The kind of an effect that the program does not have (see [`the_descriptor_of_an_effect_the_program_does_not_have`]), made as a file's
+/// snapshot makes one.
+pub fn a_kind_of_effect_the_program_does_not_have(key: &str, values: &[(&str, PropertyValue)]) -> EffectKind {
+    EffectKind::from_snapshot(the_descriptor_of_an_effect_the_program_does_not_have(key, values))
+        .expect("the descriptor is one that can be used")
+}
 
 /// Every property that a clip or a track has of its own, and, as the sample of the values of effects, the value of the hue shift that is
 /// the first effect of its chain: for the tests that go through every property there is.
@@ -26,12 +73,12 @@ pub fn properties_of_every_kind() -> Vec<PropertyId> {
 /// it has in the chain of `target`. (The effect is another one when `target` has a hue shift already.)
 pub fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degrees: f32) -> EffectInstanceId {
     let instance = project
-        .add_effect(target, EffectKind::HueShift)
+        .add_effect(target, EffectKind::HUE_SHIFT)
         .expect("it is something that can have the effect");
     project
         .set_property_at(
             target,
-            PropertyId::effect_value(EffectKind::HueShift, instance, 0),
+            PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0),
             PropertyValue::Number(degrees),
             TimelineFrameIndex::new(0),
         )

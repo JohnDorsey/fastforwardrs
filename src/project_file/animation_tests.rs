@@ -492,7 +492,14 @@ fn written_the_way_version_6_did(project: &Project) -> String {
                 rack.get("target").is_none(),
                 "only racks of what has the drawer: {rack}"
             );
-            animation.insert(rack["property"].as_str().unwrap().to_owned(), rack["keyframes"].clone());
+            // (A rack of the value of an effect is in an animation object under the name that the old files gave the value: the hue shift is
+            // the one effect there is, and its one value was called `hue shift`.)
+            let name = if rack.get("effect").is_some() {
+                "hue shift"
+            } else {
+                rack["property"].as_str().unwrap()
+            };
+            animation.insert(name.to_owned(), rack["keyframes"].clone());
         }
         holder["animation"] = serde_json::Value::Object(animation);
     };
