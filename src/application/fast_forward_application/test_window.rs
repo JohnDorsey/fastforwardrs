@@ -19,8 +19,11 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use super::{FastForwardApplication, SourceFileState, SourceStatus};
 use crate::application::commands::Command;
 use crate::application::file_chooser::ScriptedFileChooser;
+use crate::application::preview_panel::EnginePreview;
 use crate::application::theme;
 use crate::application::timeline_panel::{GripDotArrangement, VERTICES_IN_A_GRIP_DOT, strip_label};
+use crate::engine::AdapterChoice;
+use crate::engine::testing::{SoftwareGraphics, software_graphics};
 use crate::media::ToolchainError;
 use crate::playback::{SpeakersLog, speakers_that_only_keep_a_log};
 use crate::project::{
@@ -178,11 +181,30 @@ pub(super) struct Window {
     /// How many pictures the frames of the window have put on the graphics card, or changed there, so far (see
     /// [`Self::textures_uploaded_while`]).
     textures_uploaded: Arc<AtomicUsize>,
+    /// For a window whose preview is made by a picture engine: the right to use the software graphics adapter, which one test has at a time.
+    /// (It is after the harness, which has the engine, so that the engine is gone when the right is let go of.)
+    _graphics: Option<SoftwareGraphics>,
 }
 
 impl Window {
     /// A window showing `project`, all of whose source files are there and can be used.
     pub(super) fn showing(project: Project) -> Self {
+        Self::showing_after(project, |_| {})
+    }
+
+    /// Like [`Self::showing`], but the preview is made by the picture engine, on the software graphics adapter, which a computer may not have (a Mac has none: then
+    /// there is no window, and the test is to stop at once).
+    pub(super) fn showing_with_the_engine(project: Project) -> Option<Self> {
+        let graphics = software_graphics()?;
+        let mut window = Self::showing_after(project, |application| {
+            application.use_the_picture_engine(EnginePreview::start(AdapterChoice::SoftwareOnly, Arc::new(|| {})));
+        });
+        window._graphics = Some(graphics);
+        Some(window)
+    }
+
+    /// A window showing `project` that `prepare` has done something to the editor of before the first frame.
+    fn showing_after(project: Project, prepare: impl FnOnce(&mut FastForwardApplication)) -> Self {
         let mut application = FastForwardApplication::with_context(
             &egui::Context::default(),
             Err(ToolchainError::NotFound {
@@ -190,6 +212,7 @@ impl Window {
             }),
         );
         application.interface.dialog = None; // the "ffmpeg was not found" message
+        prepare(&mut application);
         // (Edits about one thing that follow one another are one step of the history if they come within a second of one another, which
         // they do unless the computer is so busy that a frame takes that long: here they are one step however long it is between them.)
         application.document.history.merge_edits_whenever_they_are_made();
@@ -218,9 +241,42 @@ impl Window {
         let mut window = Self {
             harness,
             textures_uploaded,
+            _graphics: None,
         };
         window.settle();
         window
+    }
+
+    /// Draws frames until `done`, or fails after a while. (What the picture engine makes arrives on another thread, and is taken in the next frame drawn after
+    /// it is made.)
+    pub(super) fn draw_frames_until(&mut self, what: &str, done: impl Fn(&Self) -> bool) {
+        let started = std::time::Instant::now();
+        while !done(self) {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(30),
+                "it did not happen: {what}"
+            );
+            self.harness.step();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Draws frames until the picture engine has made the frame that the window is showing now, and the window is showing it (the engine has made as many
+    /// frames as the window has asked for, and the last of them is on the preview). Fails after a while.
+    pub(super) fn wait_for_the_engine(&mut self) {
+        self.draw_frames_until("the engine has made the frame the window asked for", |window| {
+            window
+                .application()
+                .interface
+                .engine_preview
+                .as_ref()
+                .is_some_and(|engine_preview| engine_preview.has_shown_the_last_frame_asked_for())
+        });
+    }
+
+    /// The picture engine's side of the preview, if the window has one that is going.
+    pub(super) fn engine_preview(&self) -> Option<&EnginePreview> {
+        self.application().interface.engine_preview.as_ref()
     }
 
     /// How many pictures were put on the graphics card, or changed there, in the frames drawn while `what` was done to the window.

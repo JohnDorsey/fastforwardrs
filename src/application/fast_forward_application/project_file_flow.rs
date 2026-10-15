@@ -144,7 +144,7 @@ impl FastForwardApplication {
         self.interface.gesture_frame.forget();
         self.interface.selection.clear();
         self.playback.preview_pictures.set_setup(None);
-        self.interface.textures.clear();
+        self.interface.let_go_of_the_pictures_of_files();
         self.interface.timeline_view.reset();
         self.interface.preview_view = PreviewView::default();
         self.document.project = project;

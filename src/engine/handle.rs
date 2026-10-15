@@ -67,6 +67,11 @@ impl Engine {
         self.events.try_recv().ok()
     }
 
+    /// Tells the engine to stop: it says so (an [`EngineEvent::Stopped`]) and makes no more frames.
+    pub fn stop(&self) {
+        let _ = self.requests.send(EngineRequest::Stop);
+    }
+
     /// Whether the engine's thread is still going.
     pub fn is_running(&self) -> bool {
         self.thread.as_ref().is_some_and(|thread| !thread.is_finished())

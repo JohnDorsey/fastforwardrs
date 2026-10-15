@@ -77,24 +77,26 @@ impl SymbolOnScreen {
     }
 }
 
-/// Draws the symbol for `speed_factor` on the picture, with an outline and its corner when
-/// `emphasised`, which is while the pointer is over it or has hold of it.
+/// Draws the symbol for `speed_factor` on the picture (with `textures`, unless the picture engine has drawn it: then it is only where the symbol is, to be
+/// pointed at), with an outline and its corner when `emphasised`, which is while the pointer is over it or has hold of it.
 pub(super) fn show(
     ui: &mut Ui,
     symbol: &SymbolOnScreen,
     speed_factor: SpeedFactor,
     emphasised: bool,
-    textures: &mut Textures,
+    textures: Option<&mut Textures>,
 ) {
-    let height_in_pixels =
-        ((symbol.body.height() * ui.ctx().pixels_per_point()).round() as u32).max(SMALLEST_HEIGHT_IN_PIXELS);
-    let texture = textures.symbol(ui.ctx(), speed_factor, height_in_pixels);
-    ui.painter().image(
-        texture.id(),
-        symbol.body,
-        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-        Color32::WHITE,
-    );
+    if let Some(textures) = textures {
+        let height_in_pixels =
+            ((symbol.body.height() * ui.ctx().pixels_per_point()).round() as u32).max(SMALLEST_HEIGHT_IN_PIXELS);
+        let texture = textures.symbol(ui.ctx(), speed_factor, height_in_pixels);
+        ui.painter().image(
+            texture.id(),
+            symbol.body,
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    }
 
     // Neither of these takes anything from the mouse (that is for the preview as a whole), and they
     // cannot take the keyboard focus either, so the keys keep their meanings.

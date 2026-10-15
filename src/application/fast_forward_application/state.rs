@@ -23,7 +23,7 @@ use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::FileChooser;
 use crate::application::gesture_frame::GestureFrame;
 use crate::application::history::History;
-use crate::application::preview_panel::PreviewView;
+use crate::application::preview_panel::{EnginePreview, PreviewView};
 use crate::application::selection::Selection;
 use crate::application::settings_windows::SettingsWindowsOpen;
 use crate::application::textures::Textures;
@@ -163,6 +163,9 @@ pub(super) struct Interface {
     /// of them is about what has keyframes): see [`super::FastForwardApplication::frame_to_make_keyframes_at`].
     pub(super) frame_keyframes_are_made_at: Option<TimelineFrameIndex>,
     pub(super) textures: Textures,
+    /// The picture engine that makes the picture of the preview, if there is one that is going. (There is none in the tests of the window unless
+    /// a test asks for one, and none when the preview is to be made the old way, which is what it is made when the engine stops.)
+    pub(super) engine_preview: Option<EnginePreview>,
     pub(super) timeline_view: TimelineViewState,
     /// How the picture of the preview is zoomed, and where it is.
     pub(super) preview_view: PreviewView,
@@ -180,12 +183,22 @@ pub(super) struct Interface {
 }
 
 impl Interface {
+    /// Lets go of every picture that was made from a file (the window does this when another project is opened, and when a file is replaced): the
+    /// pictures that are kept for drawing, and what the picture engine has of them.
+    pub(super) fn let_go_of_the_pictures_of_files(&mut self) {
+        self.textures.clear();
+        if let Some(engine_preview) = &mut self.engine_preview {
+            engine_preview.forget_what_is_known_of_the_files();
+        }
+    }
+
     pub(super) fn new(startup_dialog: Option<Dialog>) -> Self {
         Self {
             selection: Selection::empty(),
             gesture_frame: GestureFrame::default(),
             frame_keyframes_are_made_at: None,
             textures: Textures::default(),
+            engine_preview: None,
             timeline_view: TimelineViewState::default(),
             preview_view: PreviewView::default(),
             preview_panel_in_the_last_frame: None,

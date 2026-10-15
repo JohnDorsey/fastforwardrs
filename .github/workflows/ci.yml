@@ -114,9 +114,9 @@ jobs:
         shell: bash
         run: FASTFORWARDRS_REQUIRE_FFMPEG=1 bash tools/ci/run_tests_and_report.sh warning "Real-time tests that failed" cargo test --no-fail-fast --test application_playback --test application_sound -- --test-threads=1
 
-      # What ffmpeg itself does that is not the same on every system. The first CI run of the tests of video pictures in planes found that ffmpeg for macOS on ARM leaves
-      # pixels that are not opaque in the pictures it makes of a video of an odd size. That is not the program's to mend, and the preview that does not use ffmpeg for the
-      # colours does not have it, so a failure is a WARNING that says what was found, and does not make the build red.
+      # What ffmpeg itself does that is not the same on every system. The first CI runs of the tests of video pictures in planes found that ffmpeg for macOS on ARM leaves the
+      # last column of a picture that is 65 across and 48 down with no colour and not opaque. That is not the program's to mend, and the preview that does not use ffmpeg for
+      # the colours does not have it, so a failure is a WARNING that says what was found, and does not make the build red.
       - name: Integration tests of what ffmpeg itself does on this system (failures are warnings)
         if: ${{ steps.ffmpeg.outputs.major >= 9 }}
         shell: bash

@@ -45,7 +45,7 @@ pub enum PictureFilter {
 }
 
 impl PictureFilter {
-    fn options(self) -> TextureOptions {
+    pub(crate) fn options(self) -> TextureOptions {
         match self {
             Self::Smooth => TextureOptions::LINEAR,
             // (When a picture is made smaller it is blended all the same.)

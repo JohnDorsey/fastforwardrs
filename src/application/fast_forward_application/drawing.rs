@@ -112,15 +112,23 @@ impl FastForwardApplication {
         );
         let preview = egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
-            .show(ui, |ui| {
-                preview_panel::show(
+            .show(ui, |ui| match &mut self.interface.engine_preview {
+                Some(engine_preview) => preview_panel::show_drawn_by_the_engine(
+                    ui,
+                    &content,
+                    &mut self.interface.preview_view,
+                    engine_preview,
+                    &mut self.environment.text_renderer,
+                    commands,
+                ),
+                None => preview_panel::show(
                     ui,
                     &content,
                     &mut self.interface.preview_view,
                     &mut self.interface.textures,
                     &mut self.environment.text_renderer,
                     commands,
-                );
+                ),
             });
         self.interface.preview_panel_in_the_last_frame = Some(preview.response.rect);
     }

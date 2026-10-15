@@ -34,6 +34,18 @@ use crate::media::ThumbnailKey;
 use crate::project::Corner;
 use crate::text_rendering::{LazyTextRenderer, TextAppearance};
 
+/// Who draws the pictures of the layers and the symbol.
+pub(super) enum Drawing<'a> {
+    /// The window does, a texture and a quad for each layer.
+    ByTheWindow {
+        textures: &'a mut Textures,
+        text_renderer: &'a mut LazyTextRenderer,
+    },
+    /// The picture engine has, and its picture of all of them together is on the screen already, under what is drawn here: what is drawn here is only what
+    /// shows where the layers are, and what the mouse can take hold of.
+    ByTheEngine,
+}
+
 /// Draws the layers (and the symbol over the front-most video) and adds a command for each thing
 /// the user does to them. `panel_rectangle` is all of the room the preview has, of which the
 /// picture is a part (all of the panel, or more, if the picture is zoomed in): the box of the selected layer, and the places
@@ -43,8 +55,7 @@ pub(super) fn show(
     content: &PreviewContent<'_>,
     picture: PictureOnScreen,
     panel_rectangle: Rect,
-    textures: &mut Textures,
-    text_renderer: &mut LazyTextRenderer,
+    mut drawing: Drawing<'_>,
     commands: &mut Vec<Command>,
 ) {
     // What is drawn is cut off at the edge of the picture, as the export cuts it off (and at the edge of the panel, if the picture
@@ -60,7 +71,13 @@ pub(super) fn show(
     let pointing = gestures::handle(ui, &catchers, content, &picture, commands);
 
     for layer in &content.layers {
-        draw_layer(ui, &painter, layer, picture, textures, text_renderer);
+        if let Drawing::ByTheWindow {
+            textures,
+            text_renderer,
+        } = &mut drawing
+        {
+            draw_layer(ui, &painter, layer, picture, textures, text_renderer);
+        }
         name_the_layer(ui, layer, &picture);
         if pointing.outlines(content, layer) {
             painter_of_what_shows_where_things_are.add(Shape::closed_line(
@@ -72,7 +89,17 @@ pub(super) fn show(
             && symbol.over == layer.clip
         {
             let on_screen = SymbolOnScreen::of(content.indicator_layout, symbol.speed, picture.rectangle);
-            speed_indicator_overlay::show(ui, &on_screen, symbol.speed, pointing.emphasises_the_symbol(), textures);
+            let textures_that_draw_the_symbol = match &mut drawing {
+                Drawing::ByTheWindow { textures, .. } => Some(&mut **textures),
+                Drawing::ByTheEngine => None,
+            };
+            speed_indicator_overlay::show(
+                ui,
+                &on_screen,
+                symbol.speed,
+                pointing.emphasises_the_symbol(),
+                textures_that_draw_the_symbol,
+            );
         }
     }
 

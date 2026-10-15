@@ -43,6 +43,12 @@ cargo run --release                                  # an empty window
 cargo run --release -- "C:\path\to\project.ffrs"     # open a project straight away (a .ffrs or a .json one)
 ```
 
+**The picture engine (experimental).** The preview is drawn by the window itself, one texture for each layer. A new way of making it, by a picture engine on the
+graphics card (design: `docs/engine-phase-1-design.md`), is tried by setting `FASTFORWARDRS_PREVIEW=engine` before the program is started: the preview is then one
+picture that the engine made of all the layers, and the window still draws the outlines, the handles and the places the mouse can take hold of itself. If the engine
+cannot start, or stops, the program says so and makes the preview the old way from then on. The old way (`FASTFORWARDRS_PREVIEW=simple`, or no setting) is what the preview is
+made by until the engine has been tried on more graphics cards. The export does not use the engine.
+
 ## Using it
 
 **The menus** are File and Edit.

@@ -13,9 +13,6 @@
 //! The layers that cannot show a picture (a video whose picture has not come, a picture file that is not decoded yet) are a colour, as the old drawing makes
 //! them: [`theme::TRACK_BACKGROUND`].
 
-// The window uses this from piece 1.5 of phase 1 on; until then only the tests do.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

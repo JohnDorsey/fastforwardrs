@@ -4,11 +4,12 @@
 //! What ffmpeg does that is not the program's own, and that is not the same on every system. CI runs these as **warnings** with the names of the ones that failed
 //! (a failure here says something about the ffmpeg of that system, which the program cannot mend, and does not make the build red).
 //!
-//! **Found by the first CI run of the tests of video pictures in planes (2026-10-15):** on macOS, with the ffmpeg that Homebrew installs, the pictures that ffmpeg
-//! makes of a video in RGBA are right at the sizes that are even across and down and wrong at the others (a difference of up to 255 from the arithmetic of the
-//! conversion, and pixels that are not opaque). The preview always asked ffmpeg for RGBA (`format=rgba`), so on that system a video whose preview picture is of an
-//! odd size (a portrait video of 1080 by 1920 has a preview picture 405 wide) was drawn with a part that is clear, until the engine takes the pictures of
-//! 8-bit 4:2:0 video in planes and makes the colours itself. What is known of it, and what is not, is said by the test's failure.
+//! **Found by CI (2026-10-15), on macOS ARM with the ffmpeg that Homebrew installs:** the picture that ffmpeg makes of a video that is 65 across and 48 down, shown at
+//! its own size, has its whole last column (48 pixels) with no colour and not opaque; the other odd sizes tried (odd down, odd both ways, and a bigger video made
+//! into a picture of an odd size) are right, and so are all the even ones. The preview always asked ffmpeg for RGBA (`format=rgba`), so on that system a video that
+//! is shown at its own size with an odd width and an even height has a column of its picture that is clear (which is rare: the preview picture is a shrunk one for
+//! any video bigger than 1280 by 720, and nearly all video has an even width). The picture engine makes the colours of 8-bit 4:2:0 video itself and does not have
+//! it. What is known of it, and what is not, is said by the failure of the test below, where the CI runs it.
 
 mod support;
 

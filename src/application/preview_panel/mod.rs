@@ -29,6 +29,7 @@
 mod catchers;
 #[cfg(test)]
 mod engine_parity_tests;
+mod engine_preview;
 mod engine_view;
 #[cfg(test)]
 mod engine_view_tests;
@@ -45,6 +46,9 @@ mod view;
 mod zoomed_pictures_tests;
 mod zooming;
 
+pub use engine_preview::EnginePreview;
+#[cfg(test)]
+pub use engine_preview::render_size_for;
 pub use view::PreviewView;
 #[cfg(test)]
 pub use zooming::FIT_BUTTON_LABEL;
@@ -173,13 +177,63 @@ impl<'a> PreviewContent<'a> {
 }
 
 /// Fills the rest of the window with the preview, with the picture zoomed and moved as `view` says (which the wheel and the mouse
-/// change).
+/// change). The pictures of the layers are drawn by the window itself, one texture and one quad for each.
 pub fn show(
     ui: &mut Ui,
     content: &PreviewContent<'_>,
     view: &mut PreviewView,
     textures: &mut Textures,
     text_renderer: &mut LazyTextRenderer,
+    commands: &mut Vec<Command>,
+) {
+    show_how(
+        ui,
+        content,
+        view,
+        HowThePicturesAreMade::ByTheWindow {
+            textures,
+            text_renderer,
+        },
+        commands,
+    );
+}
+
+/// Like [`show`], but the picture of all the layers together is made by the picture engine, and the window puts it on the screen as one picture under
+/// everything else that it draws: the outlines, the handles, the places the mouse can take hold of.
+pub fn show_drawn_by_the_engine(
+    ui: &mut Ui,
+    content: &PreviewContent<'_>,
+    view: &mut PreviewView,
+    engine: &mut EnginePreview,
+    text_renderer: &mut LazyTextRenderer,
+    commands: &mut Vec<Command>,
+) {
+    show_how(
+        ui,
+        content,
+        view,
+        HowThePicturesAreMade::ByTheEngine { engine, text_renderer },
+        commands,
+    );
+}
+
+/// Who makes the picture of the preview.
+enum HowThePicturesAreMade<'a> {
+    ByTheWindow {
+        textures: &'a mut Textures,
+        text_renderer: &'a mut LazyTextRenderer,
+    },
+    ByTheEngine {
+        engine: &'a mut EnginePreview,
+        text_renderer: &'a mut LazyTextRenderer,
+    },
+}
+
+fn show_how(
+    ui: &mut Ui,
+    content: &PreviewContent<'_>,
+    view: &mut PreviewView,
+    how: HowThePicturesAreMade<'_>,
     commands: &mut Vec<Command>,
 ) {
     let panel_rectangle = ui.available_rect_before_wrap();
@@ -191,14 +245,29 @@ pub fn show(
     let picture_rectangle = view.picture_rectangle(panel_rectangle, picture_size);
     // (What is drawn is cut off at the edge of the panel, as everything is.)
     ui.painter().rect_filled(picture_rectangle, 0.0, egui::Color32::BLACK);
-    let filter = view.filter(panel_rectangle, picture_size, ui.ctx().pixels_per_point());
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    let filter = view.filter(panel_rectangle, picture_size, pixels_per_point);
+    let drawing = match how {
+        HowThePicturesAreMade::ByTheWindow {
+            textures,
+            text_renderer,
+        } => layers::Drawing::ByTheWindow {
+            textures,
+            text_renderer,
+        },
+        HowThePicturesAreMade::ByTheEngine { engine, text_renderer } => {
+            let render_size = engine_preview::render_size_for(picture_rectangle.size(), pixels_per_point, picture_size);
+            engine.update(ui.ctx(), content, render_size, filter, text_renderer);
+            engine.paint(&ui.painter().with_clip_rect(picture_rectangle), picture_rectangle);
+            layers::Drawing::ByTheEngine
+        }
+    };
     layers::show(
         ui,
         content,
         PictureOnScreen::new(picture_rectangle, picture_size.0, picture_size.1).shown_as(filter),
         panel_rectangle,
-        textures,
-        text_renderer,
+        drawing,
         commands,
     );
     zooming::show_the_button_that_makes_the_picture_fit(ui, view, panel_rectangle);

@@ -388,7 +388,7 @@ impl FastForwardApplication {
         location: MediaLocation,
         properties: SourceMediaProperties,
     ) {
-        self.interface.textures.clear();
+        self.interface.let_go_of_the_pictures_of_files();
         self.sources.files.insert(
             identifier,
             SourceFileState::new(SourceStatus::Available {

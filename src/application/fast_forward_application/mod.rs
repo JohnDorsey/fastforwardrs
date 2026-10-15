@@ -49,6 +49,8 @@ mod duplicate_tests;
 mod effect_tests;
 #[cfg(test)]
 mod embed_and_import_tests;
+#[cfg(test)]
+mod engine_window_tests;
 mod export_flow;
 #[cfg(test)]
 mod file_question_tests;
@@ -166,10 +168,12 @@ use super::file_chooser::{NativeFileChooser, RefusingFileChooser};
 use super::keyboard::{self, KeyboardState};
 use super::mouse_buttons;
 use super::opening::OpeningOutcome;
+use super::preview_panel::EnginePreview;
 use super::settings_windows;
 use super::theme;
 use super::timeline_panel::DrawerSound;
 use crate::composition::{PicturePlan, plan_pictures};
+use crate::engine::AdapterChoice;
 use crate::media::export::VideoExport;
 use crate::media::{
     FfmpegToolchain, FinerThumbnails, MediaLocation, ThumbnailExtraction, ThumbnailLibrary, ToolchainError,
@@ -339,11 +343,59 @@ impl FastForwardApplication {
             application.keep_global_settings_in(settings_path);
         }
         application.use_the_default_speakers();
+        application.start_the_picture_engine_if_it_is_asked_for(creation_context);
         application.document.archive_cache = ArchiveCache::in_the_usual_place();
         if let Some(path) = project_to_open {
             application.load_project(path);
         }
         application
+    }
+
+    /// Makes the preview with the picture engine instead of with the window's own drawing, if `FASTFORWARDRS_PREVIEW` is `engine` (the engine is new and has not
+    /// been tried on every graphics card: until it has been, the preview is made the old way unless it is asked for) and the window is drawn by wgpu, which the
+    /// engine's device is made from the adapter of. If the engine stops, the preview is made the old way from then on (see
+    /// [`Self::go_back_to_the_old_drawing_if_the_engine_has_stopped`]).
+    fn start_the_picture_engine_if_it_is_asked_for(&mut self, creation_context: &eframe::CreationContext<'_>) {
+        if std::env::var("FASTFORWARDRS_PREVIEW").as_deref() != Ok("engine") {
+            return;
+        }
+        let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
+            self.show_message(
+                "The picture engine cannot be used",
+                "FASTFORWARDRS_PREVIEW=engine asks for the preview to be made by the picture engine, but the window is not drawn by wgpu, which the engine needs. The preview is made the old way.",
+            );
+            return;
+        };
+        self.use_the_picture_engine(EnginePreview::start(
+            AdapterChoice::Window(Arc::new(render_state.adapter.clone())),
+            Arc::clone(&self.environment.wake_up),
+        ));
+    }
+
+    /// Makes the preview with this engine from now on. (The pictures of videos that are stored in a way that the engine can use as it is are then given to
+    /// it in planes: ffmpeg does not make them RGBA.)
+    fn use_the_picture_engine(&mut self, engine_preview: EnginePreview) {
+        self.interface.engine_preview = Some(engine_preview);
+        self.playback.planes_wanted = true;
+    }
+
+    /// If the picture engine has stopped (it could not start, or lost its device, or its thread ended), says so and makes the preview the old way from now on.
+    fn go_back_to_the_old_drawing_if_the_engine_has_stopped(&mut self) {
+        let Some(why) = self
+            .interface
+            .engine_preview
+            .as_ref()
+            .and_then(|engine_preview| engine_preview.why_it_stopped())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        self.interface.engine_preview = None;
+        self.playback.planes_wanted = false;
+        self.add_to_message(
+            "The picture engine stopped",
+            format!("{why}\n\nThe preview is made the old way from now on. (Nothing of the project is changed, and the export does not use the picture engine.)"),
+        );
     }
 
     /// Has the editor play the sound of the preview, and its own little sounds, through the computer's default speakers
@@ -428,6 +480,7 @@ impl FastForwardApplication {
     /// Everything that has to be done at the start of a frame: collecting what background work has
     /// finished, moving the clock on, and getting the preview picture.
     fn prepare_frame(&mut self, context: &Context, now: Instant) -> FrameState {
+        self.go_back_to_the_old_drawing_if_the_engine_has_stopped();
         self.collect_finished_background_work();
         self.forget_what_is_gone_from_the_project();
         self.synchronise_the_preview_with_the_project();

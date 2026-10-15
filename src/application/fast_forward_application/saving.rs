@@ -387,7 +387,7 @@ impl FastForwardApplication {
         self.sources.openings.clear();
         self.sources.files.clear();
         self.playback.preview_pictures.set_setup(None);
-        self.interface.textures.clear();
+        self.interface.let_go_of_the_pictures_of_files();
         self.interface.missing_sources_warning_open = false;
         let now = Instant::now();
         let total_frames = self.document.project.total_frame_count();
