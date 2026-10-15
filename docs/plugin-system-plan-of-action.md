@@ -155,6 +155,9 @@ with dynamic offsets** (WARP gets static ones wrong), bind groups come from **ex
 **Correction of 2026-10-15, when the design of phase 1 was written ([engine-phase-1-design.md](engine-phase-1-design.md), E5): pictures in the engine are top-row-first, like the window's and the oracle's; GL orientation is the ISF host's business
 (its generated `IMG_*` functions and `isf_FragNormCoord` flip at its own boundary, which costs nothing because they are generated anyway).** The design also records two deliberate departures from the list in EN-04, both open to the
 maintainer's objection: a clip's effects run **before** placement, in the clip's own picture (E2), and the hue shifts of a layer are one fused colour-matrix call (E3).
+**Progress, 2026-10-15 [V]:** pieces 1.1 (skeleton), 1.2 (place and composite, the egui-wgpu oracle) and 1.3 (video pictures in planes: probe, `FrameDelivery::Yuv420p`, the planes event, the YUV pass) are built and verified on
+Windows (WARP) and Linux (lavapipe); 1.3 is described in section 9 of the design, with the one decision that measuring it changed: **chroma is replicated like ffmpeg does, not blended** (within 3 levels of ffmpeg at 1 to 1 and 2 to 1;
+a blend was off by up to 82). The window does not use any of it yet (1.5).
 *Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
 and each is listed and either fixed or accepted by the maintainer.
 
@@ -172,7 +175,8 @@ tags are the same as before. *Delivers:* animated values are no longer quantised
 
 CM-01 to CM-05, CM-07 to CM-12, CM-14 to CM-16, CM-17 (complete), MD-11, MG-01. **A separate, reviewed change** (CM-20).
 
-The compatibility mode is turned off: compositing in linear light, a working colour space per project (linear Rec.709 primaries by default; ACEScg offered), an input space per source (read
+The compatibility mode is turned off (and with it the compromises of phase 1 that exist only to keep today's pictures: **copying the colour planes of a video to the pixels they stand for, as ffmpeg does, where a smooth reconstruction is
+the better picture; the files ffprobe calls `yuvj420p` (full-range H.264), 10-bit, 4:2:2 and 4:4:4 being decoded to RGBA by ffmpeg instead of being given to the engine as they are**): compositing in linear light, a working colour space per project (linear Rec.709 primaries by default; ACEScg offered), an input space per source (read
 from the file's tags; the assumption for untagged video is **BT.709 for HD and BT.601 for SD**, Q-05), a display transform in the global settings, an output space and correct tags
 on export. **Old projects are converted** (Q-05: no legacy flag): they look slightly different at scaled edges, in blends and for untagged HD video, and the release notes say so. Effects
 declare their colour domain (CM-10); the hue shift stays display-referred (Q-07). *Gate:* the round-trip tests and the tests against published numbers (CM-16, including "50 % white over

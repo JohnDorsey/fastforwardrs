@@ -24,9 +24,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::wanted::{UpcomingVideo, WantedPicture};
+use crate::engine::{YuvColour, YuvMatrix, YuvRange, rgba_of_yuv420p_planes};
 use crate::media::{
-    DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, MediaLocation,
-    UserInterfaceWakeUp,
+    DecodedFrame, DecodedYuvFrame, FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent,
+    FrameStreamRequest, MediaLocation, NativeMatrix, NativeYuv420p, UserInterfaceWakeUp, VideoStreamFormat,
 };
 use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
@@ -105,6 +106,9 @@ pub struct PreviewVideo {
     pub display_size_in_pixels: (u32, u32),
     /// The frame rate of the video itself, which may be another than the project's.
     pub frame_rate: FrameRate,
+    /// How the video's pictures are stored and what colours they say they stand for, once that is known (it takes a moment to find out, after the file is
+    /// found). Only used when the setup asks for planes.
+    pub format: Option<VideoStreamFormat>,
 }
 
 /// The videos the preview shows pictures of, and how big the pictures are.
@@ -114,6 +118,75 @@ pub struct PreviewSetup {
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
     pub videos: Vec<PreviewVideo>,
+    /// Whether the pictures of a video that is stored in a way that the picture engine can use directly (8 bits to a number, 4:2:0, and a matrix that is
+    /// known: see [`VideoStreamFormat::as_native_yuv420p`]) are wanted as ffmpeg decodes them, in planes. If not, or for any other video, they are RGBA,
+    /// made by ffmpeg.
+    pub planes_wanted: bool,
+}
+
+/// What the colour of a video in planes is, for the picture engine.
+pub fn colour_for_the_engine(native: NativeYuv420p) -> YuvColour {
+    YuvColour {
+        matrix: match native.matrix {
+            NativeMatrix::Bt601 => YuvMatrix::Bt601,
+            NativeMatrix::Bt709 => YuvMatrix::Bt709,
+            NativeMatrix::Bt2020 => YuvMatrix::Bt2020,
+        },
+        range: if native.full_range {
+            YuvRange::Full
+        } else {
+            YuvRange::Limited
+        },
+    }
+}
+
+/// The pixels of a picture the preview can show.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SuppliedFrame {
+    /// RGBA, as ffmpeg made it.
+    Rgba(DecodedFrame),
+    /// In planes, as ffmpeg decoded it, with what the numbers stand for.
+    Yuv420p {
+        frame: DecodedYuvFrame,
+        colour: NativeYuv420p,
+    },
+}
+
+impl From<DecodedFrame> for SuppliedFrame {
+    fn from(frame: DecodedFrame) -> Self {
+        Self::Rgba(frame)
+    }
+}
+
+impl SuppliedFrame {
+    /// How many pixels across and down the picture is.
+    pub fn size_in_pixels(&self) -> (u32, u32) {
+        match self {
+            Self::Rgba(frame) => (frame.width_in_pixels, frame.height_in_pixels),
+            Self::Yuv420p { frame, .. } => (frame.width_in_pixels, frame.height_in_pixels),
+        }
+    }
+
+    /// The picture as RGBA: as it is, or, for one in planes, made on the processor the way the graphics card makes it. (The window draws pictures it
+    /// has as RGBA; a picture in planes only comes when the picture engine is the one drawing, so this is for when it has stopped and the
+    /// window must draw for itself.)
+    pub fn rgba(&self) -> std::borrow::Cow<'_, DecodedFrame> {
+        match self {
+            Self::Rgba(frame) => std::borrow::Cow::Borrowed(frame),
+            Self::Yuv420p { frame, colour } => std::borrow::Cow::Owned(DecodedFrame {
+                width_in_pixels: frame.width_in_pixels,
+                height_in_pixels: frame.height_in_pixels,
+                rgba_pixels: rgba_of_yuv420p_planes(
+                    frame.width_in_pixels,
+                    frame.height_in_pixels,
+                    &frame.y,
+                    &frame.u,
+                    &frame.v,
+                    colour_for_the_engine(*colour),
+                ),
+            }),
+        }
+    }
 }
 
 /// The picture the preview can show right now.
@@ -122,7 +195,7 @@ pub struct SuppliedPicture {
     pub source: SourceMediaIdentifier,
     /// Which source frame this is a picture of.
     pub source_frame: SourceFrameIndex,
-    pub frame: DecodedFrame,
+    pub frame: SuppliedFrame,
     /// Different for every picture ever supplied (by any supplier), so the screen code can tell
     /// cheaply whether there is a new picture to upload.
     pub serial_number: u64,
@@ -146,6 +219,8 @@ struct RunningStream<Stream> {
     speed_factor: SpeedFactor,
     first_source_frame: u64,
     source_frame_count: u64,
+    /// What the numbers of the pictures stand for, for a stream that delivers planes.
+    native_colour: Option<NativeYuv420p>,
     /// How many pictures have been taken from the stream so far.
     pictures_taken: u64,
     /// Set once the stream has reported its end. A stream that has ended delivers nothing more.
@@ -153,13 +228,19 @@ struct RunningStream<Stream> {
 }
 
 impl<Stream> RunningStream<Stream> {
-    fn new(stream: Stream, source: SourceMediaIdentifier, request: &FrameStreamRequest) -> Self {
+    fn new(
+        stream: Stream,
+        source: SourceMediaIdentifier,
+        request: &FrameStreamRequest,
+        native_colour: Option<NativeYuv420p>,
+    ) -> Self {
         Self {
             stream,
             source,
             speed_factor: request.speed_factor,
             first_source_frame: request.first_source_frame.value(),
             source_frame_count: request.source_frame_count,
+            native_colour,
             pictures_taken: 0,
             ended: false,
         }
@@ -350,11 +431,20 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         let Some(stream) = self.current_stream.as_mut() else {
             return;
         };
-        let mut latest_picture: Option<(u64, DecodedFrame)> = None;
+        let mut latest_picture: Option<(u64, SuppliedFrame)> = None;
         while stream.pictures_taken <= picture_number {
             match stream.stream.try_next_event() {
                 Some(FrameStreamEvent::Frame(frame)) => {
-                    latest_picture = Some((stream.pictures_taken, frame));
+                    latest_picture = Some((stream.pictures_taken, SuppliedFrame::Rgba(frame)));
+                    stream.pictures_taken += 1;
+                }
+                Some(FrameStreamEvent::YuvFrame(frame)) => {
+                    // (A stream only delivers planes if it was asked to, and was then given the colour to say they stand for.)
+                    let colour = stream.native_colour.unwrap_or(NativeYuv420p {
+                        matrix: NativeMatrix::Bt601,
+                        full_range: false,
+                    });
+                    latest_picture = Some((stream.pictures_taken, SuppliedFrame::Yuv420p { frame, colour }));
                     stream.pictures_taken += 1;
                 }
                 Some(FrameStreamEvent::Finished { error_output }) => {
@@ -388,7 +478,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 return Some(MINIMUM_TIME_BETWEEN_STREAM_STARTS - since);
             }
         }
-        let request = self.request_for(
+        let (request, native_colour) = self.request_for(
             wanted.source,
             wanted.source_frame,
             wanted.range_end_source_frame,
@@ -398,7 +488,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         self.upcoming_stream = None;
         match self.starter.start(&request) {
             Ok(stream) => {
-                self.current_stream = Some(RunningStream::new(stream, wanted.source, &request));
+                self.current_stream = Some(RunningStream::new(stream, wanted.source, &request, native_colour));
                 if let Some(picture_number) = self.picture_number_in_current_stream(wanted) {
                     self.take_pictures_up_to(picture_number, wanted);
                 }
@@ -435,7 +525,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
     }
 
     fn start_upcoming_stream(&mut self, next_video: &UpcomingVideo) {
-        let Some(request) = self.request_for(
+        let Some((request, native_colour)) = self.request_for(
             next_video.source,
             next_video.first_source_frame,
             next_video.end_source_frame,
@@ -444,22 +534,28 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             return;
         };
         if let Ok(stream) = self.starter.start(&request) {
-            self.upcoming_stream = Some(RunningStream::new(stream, next_video.source, &request));
+            self.upcoming_stream = Some(RunningStream::new(stream, next_video.source, &request, native_colour));
         }
     }
 
     /// The request for a stream of the pictures of one stretch of video, from `first_source_frame`
-    /// to the end of the stretch, or `None` if the video is not one this supplier shows.
+    /// to the end of the stretch, and what the numbers of its pictures stand for if it delivers planes, or `None` if the video is not one this
+    /// supplier shows.
     fn request_for(
         &self,
         source: SourceMediaIdentifier,
         first_source_frame: SourceFrameIndex,
         range_end_source_frame: SourceFrameIndex,
         speed_factor: SpeedFactor,
-    ) -> Option<FrameStreamRequest> {
+    ) -> Option<(FrameStreamRequest, Option<NativeYuv420p>)> {
         let setup = self.setup.as_ref()?;
         let video = setup.videos.iter().find(|video| video.source == source)?;
-        Some(FrameStreamRequest {
+        let native_colour = video
+            .format
+            .as_ref()
+            .and_then(VideoStreamFormat::as_native_yuv420p)
+            .filter(|_| setup.planes_wanted);
+        let request = FrameStreamRequest {
             video: video.location.clone(),
             project_frame_rate: setup.frame_rate,
             video_frame_rate: video.frame_rate,
@@ -471,7 +567,13 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             video_display_size_in_pixels: video.display_size_in_pixels,
             picture_width_in_pixels: setup.picture_width_in_pixels,
             picture_height_in_pixels: setup.picture_height_in_pixels,
-        })
+            delivery: if native_colour.is_some() {
+                FrameDelivery::Yuv420p
+            } else {
+                FrameDelivery::Rgba
+            },
+        };
+        Some((request, native_colour))
     }
 }
 

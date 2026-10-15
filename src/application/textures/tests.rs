@@ -137,7 +137,8 @@ fn supplied_picture(serial_number: u64, shade: u8) -> SuppliedPicture {
             width_in_pixels: 1,
             height_in_pixels: 1,
             rgba_pixels: vec![shade, 0, 0, 255],
-        },
+        }
+        .into(),
         serial_number,
     }
 }
@@ -427,9 +428,11 @@ fn a_pixel(rgba: [u8; 4]) -> Color32 {
 fn supplied_orange_picture(serial_number: u64) -> SuppliedPicture {
     SuppliedPicture {
         frame: DecodedFrame {
+            width_in_pixels: 1,
+            height_in_pixels: 1,
             rgba_pixels: ORANGE.to_vec(),
-            ..supplied_picture(serial_number, 0).frame
-        },
+        }
+        .into(),
         ..supplied_picture(serial_number, 0)
     }
 }

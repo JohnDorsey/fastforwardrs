@@ -109,14 +109,17 @@ mod tests {
                     location: MediaLocation::from("holiday.mp4"),
                     display_size_in_pixels: (1280, 720),
                     frame_rate: FrameRate::new(30, 1).unwrap(),
+                    format: None,
                 },
                 PreviewVideo {
                     source: ANOTHER_VIDEO,
                     location: MediaLocation::from("birthday.mp4"),
                     display_size_in_pixels: (720, 1280),
                     frame_rate: FrameRate::new(25, 1).unwrap(),
+                    format: None,
                 },
             ],
+            planes_wanted: false,
         }
     }
 
@@ -142,7 +145,7 @@ mod tests {
     fn shown_frame_number(pictures: &PreviewPictures<ScriptedStarter>, track: u32) -> Option<u8> {
         pictures
             .picture_of(TrackId::new(track))
-            .map(|picture| picture.frame.rgba_pixels[0])
+            .map(|picture| picture.frame.rgba().rgba_pixels[0])
     }
 
     #[test]

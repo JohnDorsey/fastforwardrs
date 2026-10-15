@@ -44,6 +44,6 @@ pub use sound_effects::{SpeakersLog, speakers_that_only_keep_a_log};
 pub use supplier::{
     FfmpegPictureStreamStarter, MINIMUM_TIME_BETWEEN_STREAM_STARTS, MOST_PICTURES_TO_WAIT_FOR,
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PictureStream, PictureStreamStarter, PictureSupplier,
-    PreviewSetup, PreviewVideo, SuppliedPicture, SupplyReport,
+    PreviewSetup, PreviewVideo, SuppliedFrame, SuppliedPicture, SupplyReport, colour_for_the_engine,
 };
 pub use wanted::{UpcomingVideo, WantedPicture, wanted_pictures};

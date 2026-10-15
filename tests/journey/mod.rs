@@ -261,12 +261,8 @@ impl Journey {
     /// The frame number written into the picture the preview shows (see the support module).
     pub fn frame_number_in_the_preview(&self) -> u64 {
         let picture = self.application().preview_picture().expect("the preview has a picture");
-        frame_number_in_picture(
-            &picture.frame.rgba_pixels,
-            picture.frame.width_in_pixels,
-            picture.frame.height_in_pixels,
-            4,
-        )
+        let frame = picture.frame.rgba();
+        frame_number_in_picture(&frame.rgba_pixels, frame.width_in_pixels, frame.height_in_pixels, 4)
     }
 
     pub fn rectangle_of(&self, label: &str) -> Rect {

@@ -1,13 +1,25 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::borrow::Cow;
+
 use super::*;
+use crate::media::FrameDelivery;
 use crate::playback::scripted_streams::{Script, ScriptedStarter};
 use crate::project::TrackId;
 
 const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
 
 fn supplier() -> (PictureSupplier<ScriptedStarter>, Script) {
+    supplier_of_a_video_that_is(None, false)
+}
+
+/// A supplier of the pictures of one video, which is stored as `format` says (if anyone knows), and for a preview that wants pictures in planes
+/// or does not.
+fn supplier_of_a_video_that_is(
+    format: Option<VideoStreamFormat>,
+    planes_wanted: bool,
+) -> (PictureSupplier<ScriptedStarter>, Script) {
     let script = Script::default();
     let mut supplier = PictureSupplier::new(ScriptedStarter(script.clone()));
     supplier.set_setup(Some(PreviewSetup {
@@ -19,9 +31,21 @@ fn supplier() -> (PictureSupplier<ScriptedStarter>, Script) {
             location: MediaLocation::from("holiday.mp4"),
             display_size_in_pixels: (1280, 720),
             frame_rate: FrameRate::new(25, 1).unwrap(),
+            format,
         }],
+        planes_wanted,
     }));
     (supplier, script)
+}
+
+/// What ffprobe says of an ordinary video: 8 bits to a number, 4:2:0.
+fn eight_bit_four_two_zero(colour_space: Option<&str>, colour_range: Option<&str>) -> VideoStreamFormat {
+    VideoStreamFormat {
+        pixel_format: Some("yuv420p".to_owned()),
+        colour_space: colour_space.map(str::to_owned),
+        colour_range: colour_range.map(str::to_owned),
+        ..VideoStreamFormat::default()
+    }
 }
 
 /// A picture wanted from a clip that ends at source frame 200, with plenty of pictures left.
@@ -57,7 +81,7 @@ fn upcoming(first: u64, end: u64, speed: u32) -> UpcomingVideo {
 }
 
 fn shown_frame_number(supplier: &PictureSupplier<ScriptedStarter>) -> Option<u8> {
-    supplier.picture().map(|picture| picture.frame.rgba_pixels[0])
+    supplier.picture().map(|picture| picture.frame.rgba().rgba_pixels[0])
 }
 
 fn after(start: Instant, milliseconds: u64) -> Instant {
@@ -88,6 +112,7 @@ fn the_first_request_starts_a_stream_at_the_wanted_picture_that_runs_to_the_end_
             video_display_size_in_pixels: (1280, 720),
             picture_width_in_pixels: 64,
             picture_height_in_pixels: 36,
+            delivery: FrameDelivery::Rgba,
         }]
     );
 }
@@ -509,4 +534,182 @@ fn changing_or_removing_the_source_forgets_everything() {
     let report = supplier.supply(Some(wanted(50)), false, after(start, 1000));
     assert!(!report.shows_the_wanted_picture);
     assert_eq!(script.started_count(), 1, "nothing was started without a source");
+}
+
+#[test]
+fn pictures_are_asked_for_in_planes_only_for_a_video_that_is_stored_that_way_and_only_when_planes_are_wanted() {
+    let stored_another_way = |pixel_format: &str| VideoStreamFormat {
+        pixel_format: Some(pixel_format.to_owned()),
+        ..VideoStreamFormat::default()
+    };
+    for (format, planes_wanted, expected) in [
+        (Some(eight_bit_four_two_zero(None, None)), true, FrameDelivery::Yuv420p),
+        (
+            Some(eight_bit_four_two_zero(Some("bt709"), Some("tv"))),
+            true,
+            FrameDelivery::Yuv420p,
+        ),
+        (Some(eight_bit_four_two_zero(None, None)), false, FrameDelivery::Rgba),
+        (
+            Some(eight_bit_four_two_zero(Some("bt709"), Some("pc"))),
+            false,
+            FrameDelivery::Rgba,
+        ),
+        (None, true, FrameDelivery::Rgba),
+        (None, false, FrameDelivery::Rgba),
+        (Some(stored_another_way("yuv422p")), true, FrameDelivery::Rgba),
+        (Some(stored_another_way("yuv420p10le")), true, FrameDelivery::Rgba),
+        (Some(stored_another_way("rgb24")), true, FrameDelivery::Rgba),
+        (
+            Some(eight_bit_four_two_zero(Some("bt2020c"), None)),
+            true,
+            FrameDelivery::Rgba,
+        ),
+    ] {
+        let (mut supplier, script) = supplier_of_a_video_that_is(format.clone(), planes_wanted);
+        supplier.supply(Some(wanted(50)), false, Instant::now());
+        assert_eq!(
+            script.requests()[0].delivery,
+            expected,
+            "the format {format:?} when planes are wanted: {planes_wanted}"
+        );
+    }
+}
+
+#[test]
+fn a_picture_in_planes_is_supplied_with_the_colour_its_video_says_it_has() {
+    for (colour_space, colour_range, matrix, full_range) in [
+        (None, None, NativeMatrix::Bt601, false),
+        (Some("bt709"), Some("tv"), NativeMatrix::Bt709, false),
+        (Some("bt709"), Some("pc"), NativeMatrix::Bt709, true),
+        (Some("bt2020nc"), None, NativeMatrix::Bt2020, false),
+        (Some("smpte170m"), Some("pc"), NativeMatrix::Bt601, true),
+    ] {
+        let (mut supplier, script) =
+            supplier_of_a_video_that_is(Some(eight_bit_four_two_zero(colour_space, colour_range)), true);
+        let now = Instant::now();
+        supplier.supply(Some(wanted(50)), false, now);
+        script.deliver(0, 1);
+        let report = supplier.supply(Some(wanted(50)), false, now);
+
+        assert!(report.shows_the_wanted_picture);
+        let picture = supplier.picture().expect("the picture arrived");
+        match &picture.frame {
+            SuppliedFrame::Yuv420p { frame, colour } => {
+                assert_eq!(
+                    frame.y,
+                    vec![50],
+                    "the brightness is the frame number the script gave it"
+                );
+                assert_eq!(
+                    *colour,
+                    NativeYuv420p { matrix, full_range },
+                    "{colour_space:?} {colour_range:?}"
+                );
+            }
+            other => panic!("the picture is not in planes: {other:?}"),
+        }
+        assert_eq!(picture.source_frame, SourceFrameIndex::new(50));
+    }
+}
+
+#[test]
+fn a_stream_of_planes_goes_on_like_any_other_and_shows_the_picture_that_was_wanted_of_it() {
+    let (mut supplier, script) = supplier_of_a_video_that_is(Some(eight_bit_four_two_zero(None, None)), true);
+    let start = Instant::now();
+    supplier.supply(Some(wanted(50)), true, start);
+    script.deliver(0, 5);
+    supplier.supply(Some(wanted(52)), true, start);
+    assert_eq!(script.started_count(), 1, "the same stream goes on");
+    let picture = supplier.picture().unwrap();
+    let SuppliedFrame::Yuv420p { frame, .. } = &picture.frame else {
+        panic!("not in planes");
+    };
+    assert_eq!(frame.y, vec![52]);
+}
+
+#[test]
+fn a_picture_in_planes_can_be_had_as_rgba_and_one_that_is_rgba_is_not_copied_to_be_had_so() {
+    // Y 81, U 90, V 240 is pure red in BT.601 limited range (the numbers the standard gives).
+    let red = SuppliedFrame::Yuv420p {
+        frame: DecodedYuvFrame {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            y: vec![81; 4],
+            u: vec![90],
+            v: vec![240],
+        },
+        colour: NativeYuv420p {
+            matrix: NativeMatrix::Bt601,
+            full_range: false,
+        },
+    };
+    let as_rgba = red.rgba();
+    assert!(matches!(as_rgba, Cow::Owned(_)));
+    assert_eq!((as_rgba.width_in_pixels, as_rgba.height_in_pixels), (2, 2));
+    assert_eq!(as_rgba.rgba_pixels.len(), 16);
+    for pixel in as_rgba.rgba_pixels.as_chunks::<4>().0 {
+        assert!(
+            pixel[0] >= 254 && pixel[1] <= 2 && pixel[2] <= 2 && pixel[3] == 255,
+            "{pixel:?}"
+        );
+    }
+    assert_eq!(red.size_in_pixels(), (2, 2));
+
+    let already = SuppliedFrame::from(DecodedFrame {
+        width_in_pixels: 1,
+        height_in_pixels: 1,
+        rgba_pixels: vec![1, 2, 3, 4],
+    });
+    assert!(matches!(already.rgba(), Cow::Borrowed(_)));
+    assert_eq!(already.rgba().rgba_pixels, vec![1, 2, 3, 4]);
+    assert_eq!(already.size_in_pixels(), (1, 1));
+}
+
+#[test]
+fn a_picture_in_planes_of_an_odd_size_can_be_had_as_rgba() {
+    for (width, height) in [(1, 1), (3, 1), (1, 3), (3, 3), (5, 3)] {
+        let (chroma_width, chroma_height) = (usize::div_ceil(width, 2), usize::div_ceil(height, 2));
+        let picture = SuppliedFrame::Yuv420p {
+            frame: DecodedYuvFrame {
+                width_in_pixels: width as u32,
+                height_in_pixels: height as u32,
+                y: vec![128; width * height],
+                u: vec![128; chroma_width * chroma_height],
+                v: vec![128; chroma_width * chroma_height],
+            },
+            colour: NativeYuv420p {
+                matrix: NativeMatrix::Bt709,
+                full_range: true,
+            },
+        };
+        let rgba = picture.rgba();
+        assert_eq!(rgba.rgba_pixels.len(), width * height * 4, "{width}x{height}");
+        // Full range grey: 128 in all three planes is a grey of 128.
+        for pixel in rgba.rgba_pixels.as_chunks::<4>().0 {
+            assert_eq!(*pixel, [128, 128, 128, 255], "{width}x{height}");
+        }
+    }
+}
+
+#[test]
+fn every_matrix_and_range_a_video_can_say_is_the_same_one_for_the_engine() {
+    for (native, expected) in [
+        (NativeMatrix::Bt601, YuvMatrix::Bt601),
+        (NativeMatrix::Bt709, YuvMatrix::Bt709),
+        (NativeMatrix::Bt2020, YuvMatrix::Bt2020),
+    ] {
+        for (full_range, range) in [(false, YuvRange::Limited), (true, YuvRange::Full)] {
+            assert_eq!(
+                colour_for_the_engine(NativeYuv420p {
+                    matrix: native,
+                    full_range
+                }),
+                YuvColour {
+                    matrix: expected,
+                    range
+                }
+            );
+        }
+    }
 }

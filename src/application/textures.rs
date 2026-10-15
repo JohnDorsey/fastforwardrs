@@ -112,7 +112,7 @@ impl Textures {
                 {
                     texture
                         .handle
-                        .set(color_image_of(&picture.frame, colour), filter.options());
+                        .set(color_image_of(&picture.frame.rgba(), colour), filter.options());
                     texture.serial_number = picture.serial_number;
                     texture.filter = filter;
                     texture.colour = colour;
@@ -122,7 +122,7 @@ impl Textures {
                 vacancy.insert(PreviewTexture {
                     handle: context.load_texture(
                         format!("preview picture of {track}"),
-                        color_image_of(&picture.frame, colour),
+                        color_image_of(&picture.frame.rgba(), colour),
                         filter.options(),
                     ),
                     serial_number: picture.serial_number,

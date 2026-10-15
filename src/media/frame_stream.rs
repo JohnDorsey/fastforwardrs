@@ -28,6 +28,17 @@ const FRAMES_BUFFERED_AHEAD: usize = 6;
 
 const BYTES_PER_PIXEL: usize = 4;
 
+/// What the pictures of a stream are delivered as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameDelivery {
+    /// Red, green, blue and how opaque, four bytes to a pixel, made by ffmpeg (which does what it does with the colours of the video).
+    Rgba,
+    /// As ffmpeg decodes them, in `yuv420p`: a plane of brightness, and two planes of colour differences with a pixel for every square of four, each plane
+    /// after the one before. What the numbers stand for is not said by the bytes: whoever asked for them knows it from the video's tags. Only for a
+    /// video that is stored that way (see `VideoStreamFormat::as_native_yuv420p`).
+    Yuv420p,
+}
+
 /// What to decode.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameStreamRequest {
@@ -52,6 +63,8 @@ pub struct FrameStreamRequest {
     /// inside it, in its own shape: see [`Self::delivered_size`].
     pub picture_width_in_pixels: u32,
     pub picture_height_in_pixels: u32,
+    /// What the pictures are delivered as.
+    pub delivery: FrameDelivery,
 }
 
 impl FrameStreamRequest {
@@ -78,11 +91,26 @@ pub struct DecodedFrame {
     pub rgba_pixels: Vec<u8>,
 }
 
+/// One decoded picture, as ffmpeg decodes it, in planes (see [`FrameDelivery::Yuv420p`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecodedYuvFrame {
+    pub width_in_pixels: u32,
+    pub height_in_pixels: u32,
+    /// The brightness of every pixel, row by row, the top row first.
+    pub y: Vec<u8>,
+    /// The colour difference toward blue of every square of four pixels, and `v` the one toward red. (A picture that is not an even number of pixels across
+    /// or down has one for the last single column or row.)
+    pub u: Vec<u8>,
+    pub v: Vec<u8>,
+}
+
 /// What a running stream reports.
 #[derive(Debug)]
 pub enum FrameStreamEvent {
     /// The next frame of the clip. Frames arrive in order, starting from the clip's frame 0.
     Frame(DecodedFrame),
+    /// The next frame of the clip, for a stream that delivers [`FrameDelivery::Yuv420p`].
+    YuvFrame(DecodedYuvFrame),
     /// The stream has ended: it reached the end of the clip, or ffmpeg stopped. `error_output`
     /// holds ffmpeg's complaint if it stopped because of an error.
     Finished { error_output: Option<String> },
@@ -119,6 +147,7 @@ impl FrameStream {
         let frame_size = FrameSize {
             width_in_pixels: delivered_width,
             height_in_pixels: delivered_height,
+            delivery: request.delivery,
         };
         let tool = StreamingTool::start(
             command,
@@ -147,11 +176,54 @@ impl FrameStream {
 struct FrameSize {
     width_in_pixels: u32,
     height_in_pixels: u32,
+    delivery: FrameDelivery,
 }
 
 impl FrameSize {
+    /// How many pixels across and down each of the two planes of colour differences is, in a picture of this size.
+    fn chroma_size(self) -> (usize, usize) {
+        (
+            (self.width_in_pixels as usize).div_ceil(2),
+            (self.height_in_pixels as usize).div_ceil(2),
+        )
+    }
+
+    /// How many bytes one picture takes up in the pipe.
     fn byte_count(self) -> usize {
-        self.width_in_pixels as usize * self.height_in_pixels as usize * BYTES_PER_PIXEL
+        let pixels = self.width_in_pixels as usize * self.height_in_pixels as usize;
+        match self.delivery {
+            FrameDelivery::Rgba => pixels * BYTES_PER_PIXEL,
+            FrameDelivery::Yuv420p => {
+                let (chroma_width, chroma_height) = self.chroma_size();
+                pixels + 2 * chroma_width * chroma_height
+            }
+        }
+    }
+
+    /// The picture that these bytes (as many as [`Self::byte_count`]) are.
+    fn into_event(self, bytes: Vec<u8>) -> FrameStreamEvent {
+        match self.delivery {
+            FrameDelivery::Rgba => FrameStreamEvent::Frame(DecodedFrame {
+                width_in_pixels: self.width_in_pixels,
+                height_in_pixels: self.height_in_pixels,
+                rgba_pixels: bytes,
+            }),
+            FrameDelivery::Yuv420p => {
+                let brightness_bytes = self.width_in_pixels as usize * self.height_in_pixels as usize;
+                let (chroma_width, chroma_height) = self.chroma_size();
+                let chroma_bytes = chroma_width * chroma_height;
+                let mut planes = bytes;
+                let v = planes.split_off(brightness_bytes + chroma_bytes);
+                let u = planes.split_off(brightness_bytes);
+                FrameStreamEvent::YuvFrame(DecodedYuvFrame {
+                    width_in_pixels: self.width_in_pixels,
+                    height_in_pixels: self.height_in_pixels,
+                    y: planes,
+                    u,
+                    v,
+                })
+            }
+        }
     }
 }
 
@@ -165,18 +237,13 @@ fn read_frames(
     error_output_when_finished: impl FnOnce() -> String,
 ) {
     loop {
-        let mut rgba_pixels = vec![0u8; frame_size.byte_count()];
-        if standard_output.read_exact(&mut rgba_pixels).is_err() {
+        let mut bytes = vec![0u8; frame_size.byte_count()];
+        if standard_output.read_exact(&mut bytes).is_err() {
             break;
         }
-        let frame = DecodedFrame {
-            width_in_pixels: frame_size.width_in_pixels,
-            height_in_pixels: frame_size.height_in_pixels,
-            rgba_pixels,
-        };
         // A full buffer makes this wait, which is what keeps the decoder from racing ahead. An
         // error means the stream was dropped, so nobody wants more frames.
-        if sender.send(FrameStreamEvent::Frame(frame)).is_err() {
+        if sender.send(frame_size.into_event(bytes)).is_err() {
             return;
         }
         wake_up();
@@ -285,8 +352,12 @@ pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
         filters.push_str(&format!(",select='not(mod(n,{}))'", request.speed_factor.value()));
     }
     let (delivered_width, delivered_height) = request.delivered_size();
+    let delivered_format = match request.delivery {
+        FrameDelivery::Rgba => "rgba",
+        FrameDelivery::Yuv420p => "yuv420p",
+    };
     filters.push_str(&format!(
-        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags=fast_bilinear,format=rgba",
+        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags=fast_bilinear,format={delivered_format}",
         project_frame_rate.denominator(),
         project_frame_rate.numerator(),
     ));
@@ -328,6 +399,7 @@ mod tests {
             video_display_size_in_pixels: (1280, 720),
             picture_width_in_pixels: 640,
             picture_height_in_pixels: 360,
+            delivery: FrameDelivery::Rgba,
         }
     }
 
@@ -631,6 +703,7 @@ mod tests {
         let frame_size = FrameSize {
             width_in_pixels: 2,
             height_in_pixels: 1,
+            delivery: FrameDelivery::Rgba,
         };
         let bytes: Vec<u8> = (0..16).collect(); // two 8-byte frames
         let (sender, receiver) = mpsc::sync_channel(10);
@@ -658,6 +731,7 @@ mod tests {
         let frame_size = FrameSize {
             width_in_pixels: 2,
             height_in_pixels: 1,
+            delivery: FrameDelivery::Rgba,
         };
         let bytes: Vec<u8> = (0..12).collect(); // one whole frame and half of another
         let (sender, receiver) = mpsc::sync_channel(10);
@@ -672,11 +746,124 @@ mod tests {
         let frame_size = FrameSize {
             width_in_pixels: 2,
             height_in_pixels: 1,
+            delivery: FrameDelivery::Rgba,
         };
         let bytes: Vec<u8> = (0..64).collect();
         let (sender, receiver) = mpsc::sync_channel(1);
         drop(receiver);
         // Must return rather than block or panic.
         read_frames(&bytes[..], frame_size, &sender, &do_nothing_when_woken(), String::new);
+    }
+
+    fn size_in_planes(width_in_pixels: u32, height_in_pixels: u32) -> FrameSize {
+        FrameSize {
+            width_in_pixels,
+            height_in_pixels,
+            delivery: FrameDelivery::Yuv420p,
+        }
+    }
+
+    #[test]
+    fn asking_for_planes_changes_nothing_in_the_command_line_but_the_pixel_format_that_the_filters_end_with() {
+        let rgba_request = request(300, 300, 1);
+        let planes_request = FrameStreamRequest {
+            delivery: FrameDelivery::Yuv420p,
+            ..request(300, 300, 1)
+        };
+        let rgba_arguments = arguments_as_text(&rgba_request);
+        let planes_arguments = arguments_as_text(&planes_request);
+        assert_eq!(rgba_arguments.len(), planes_arguments.len());
+        let differences: Vec<_> = rgba_arguments
+            .iter()
+            .zip(&planes_arguments)
+            .filter(|(rgba, planes)| rgba != planes)
+            .collect();
+        assert_eq!(differences.len(), 1, "{differences:?}");
+        let (rgba_filters, planes_filters) = differences[0];
+        assert!(
+            rgba_filters.ends_with(",scale=640:360:flags=fast_bilinear,format=rgba"),
+            "{rgba_filters}"
+        );
+        assert!(
+            planes_filters.ends_with(",scale=640:360:flags=fast_bilinear,format=yuv420p"),
+            "{planes_filters}"
+        );
+        assert_eq!(
+            rgba_filters.strip_suffix("format=rgba"),
+            planes_filters.strip_suffix("format=yuv420p"),
+            "everything before the pixel format is the same"
+        );
+    }
+
+    #[test]
+    fn a_picture_takes_as_many_bytes_in_the_pipe_as_its_delivery_makes_it() {
+        let rgba = |width_in_pixels, height_in_pixels| FrameSize {
+            width_in_pixels,
+            height_in_pixels,
+            delivery: FrameDelivery::Rgba,
+        };
+        assert_eq!(rgba(3, 5).byte_count(), 60, "four bytes a pixel");
+        assert_eq!(rgba(640, 360).byte_count(), 921_600);
+        // A plane of brightness, and two of colour differences that have a pixel for every square of four (rounded up).
+        for (width, height, bytes) in [
+            (4, 2, 12),
+            (2, 2, 6),
+            (3, 2, 10),
+            (2, 3, 10),
+            (3, 3, 17),
+            (5, 3, 27),
+            (1, 1, 3),
+            (640, 360, 345_600),
+        ] {
+            assert_eq!(size_in_planes(width, height).byte_count(), bytes, "{width} by {height}");
+        }
+    }
+
+    #[test]
+    fn the_three_planes_of_a_picture_are_cut_out_of_its_bytes_in_order() {
+        let bytes: Vec<u8> = (0..17).collect();
+        let FrameStreamEvent::YuvFrame(frame) = size_in_planes(3, 3).into_event(bytes) else {
+            panic!("a picture in planes was asked for");
+        };
+        assert_eq!((frame.width_in_pixels, frame.height_in_pixels), (3, 3));
+        assert_eq!(frame.y, (0..9).collect::<Vec<u8>>());
+        assert_eq!(
+            frame.u,
+            (9..13).collect::<Vec<u8>>(),
+            "2 by 2: the last single column and row have one each"
+        );
+        assert_eq!(frame.v, (13..17).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn pictures_in_planes_are_read_whole_in_order_and_a_partial_one_at_the_end_is_dropped() {
+        let bytes: Vec<u8> = (0..15).collect(); // pictures of 2 by 2 take 6 bytes: two and half of a third
+        let (sender, receiver) = mpsc::sync_channel(10);
+        read_frames(
+            &bytes[..],
+            size_in_planes(2, 2),
+            &sender,
+            &do_nothing_when_woken(),
+            String::new,
+        );
+        let events: Vec<FrameStreamEvent> = receiver.try_iter().collect();
+        assert_eq!(events.len(), 3, "{events:?}");
+        match (&events[0], &events[1], &events[2]) {
+            (
+                FrameStreamEvent::YuvFrame(first),
+                FrameStreamEvent::YuvFrame(second),
+                FrameStreamEvent::Finished { error_output: None },
+            ) => {
+                assert_eq!(
+                    (&first.y[..], &first.u[..], &first.v[..]),
+                    (&[0, 1, 2, 3][..], &[4][..], &[5][..])
+                );
+                assert_eq!(
+                    (&second.y[..], &second.u[..], &second.v[..]),
+                    (&[6, 7, 8, 9][..], &[10][..], &[11][..])
+                );
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
     }
 }

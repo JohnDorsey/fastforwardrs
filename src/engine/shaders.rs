@@ -9,12 +9,20 @@ pub const OUTPUT: &str = include_str!("shaders/output.wgsl");
 /// What is done once to a picture that was sent as bytes: it is premultiplied and made half-float.
 pub const INGEST: &str = include_str!("shaders/ingest.wgsl");
 
+/// What is done once to a video picture that was sent in planes: it is made red, green and blue.
+pub const YUV: &str = include_str!("shaders/yuv.wgsl");
+
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");
 
 /// Every shader of the engine, with the name of its file.
 #[cfg(test)]
-pub const ALL: &[(&str, &str)] = &[("output.wgsl", OUTPUT), ("ingest.wgsl", INGEST), ("place.wgsl", PLACE)];
+pub const ALL: &[(&str, &str)] = &[
+    ("output.wgsl", OUTPUT),
+    ("ingest.wgsl", INGEST),
+    ("yuv.wgsl", YUV),
+    ("place.wgsl", PLACE),
+];
 
 #[cfg(test)]
 mod tests {

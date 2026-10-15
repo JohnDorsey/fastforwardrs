@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::state::VideoFormatProber;
 use super::{
     FastForwardApplication, OpeningPurpose, OpeningTask, PictureState, SourceFileState, SourceStatus, ThumbnailState,
     WaveformState,
@@ -18,8 +19,9 @@ use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::application::opening::{OpeningOutcome, open_first_that_works};
 use crate::application::theme;
 use crate::media::{
-    MediaLocation, PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailKey, ThumbnailLibrary, WaveformEvent,
-    WaveformExtraction, decode_picture, probe_source_media, size_to_decode_at,
+    FfmpegToolchain, MediaLocation, PictureSize, ThumbnailEvent, ThumbnailExtraction, ThumbnailKey, ThumbnailLibrary,
+    WaveformEvent, WaveformExtraction, decode_picture, probe_source_media, probe_video_stream_format,
+    size_to_decode_at,
 };
 use crate::playback::preview_picture_size;
 use crate::project::{
@@ -42,6 +44,17 @@ const SOUND_FILE_EXTENSIONS: [&str; 10] = ["mp3", "wav", "flac", "ogg", "oga", "
 
 /// ...and for a picture. (A GIF is not one: ffprobe says it is a video, and so does the program.)
 const PICTURE_FILE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"];
+
+/// Finds out how the pictures of a video are stored with ffprobe, if there is any (if not, it says nothing, and the pictures stay RGBA made by
+/// ffmpeg, which is no better off for it than it was).
+pub(super) fn ffprobe_as_the_video_format_prober(toolchain: Option<Arc<FfmpegToolchain>>) -> VideoFormatProber {
+    match toolchain {
+        Some(toolchain) => {
+            Arc::new(move |location: &MediaLocation| probe_video_stream_format(&toolchain, location.clone()).ok())
+        }
+        None => Arc::new(|_: &MediaLocation| None),
+    }
+}
 
 impl FastForwardApplication {
     /// Asks the user for a video, a sound or a picture and puts all of it on the timeline, at the
@@ -155,12 +168,54 @@ impl FastForwardApplication {
     /// Picks up whatever the background work has finished since the last frame.
     pub(super) fn collect_finished_background_work(&mut self) {
         self.collect_opening_results();
+        self.keep_the_video_formats_up_to_date();
         self.collect_thumbnails();
         self.collect_finer_thumbnails();
         self.collect_waveforms();
         self.collect_pictures();
         self.collect_export_events();
         self.collect_the_running_save();
+    }
+
+    /// Takes in what ffprobe has told of how the pictures of a video are stored, and, while the preview wants pictures in planes (see
+    /// `Playback::planes_wanted`), asks it about each video that it has not been asked about yet: once, as soon as the file is found.
+    fn keep_the_video_formats_up_to_date(&mut self) {
+        for state in self.sources.files.values_mut() {
+            let Some(probe) = &state.video_format.probe else {
+                continue;
+            };
+            match probe.status() {
+                TaskStatus::Pending => {}
+                TaskStatus::Finished(format) => {
+                    state.video_format.known = format;
+                    state.video_format.probe = None;
+                }
+                TaskStatus::Lost => state.video_format.probe = None,
+            }
+        }
+        if !self.playback.planes_wanted {
+            return;
+        }
+        for (identifier, state) in &mut self.sources.files {
+            if state.video_format.was_asked {
+                continue;
+            }
+            let is_a_video = self
+                .document
+                .project
+                .source(*identifier)
+                .is_some_and(|source| source.properties.video().is_some());
+            let Some(location) = state.location_if_available().cloned().filter(|_| is_a_video) else {
+                continue;
+            };
+            state.video_format.was_asked = true;
+            let prober = Arc::clone(&self.environment.video_format_prober);
+            // (If it cannot say, the pictures of the video are RGBA made by ffmpeg, as they always were.)
+            state.video_format.probe = Some(BackgroundTask::start(
+                Arc::clone(&self.environment.wake_up),
+                move || prober(&location),
+            ));
+        }
     }
 
     fn collect_opening_results(&mut self) {

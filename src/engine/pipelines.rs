@@ -21,6 +21,12 @@ pub const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// How many bytes the uniforms of the pass that puts a layer in its place take up (see `place.wgsl`).
 pub const PLACEMENT_UNIFORM_BYTES: u64 = 64;
 
+/// How many bytes the uniforms of the pass that makes a video picture red, green and blue take up (see `yuv.wgsl`).
+pub const YUV_UNIFORM_BYTES: u64 = 64;
+
+/// The format of the planes of a video picture, which are sent as they are.
+pub const PLANE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+
 /// The last pass: the accumulation picture to the 8-bit frame.
 pub struct OutputPass {
     pub pipeline: wgpu::RenderPipeline,
@@ -29,6 +35,12 @@ pub struct OutputPass {
 
 /// The pass that makes a picture that was sent as bytes into one the passes of a frame work on.
 pub struct IngestPass {
+    pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
+/// The pass that makes a video picture in planes red, green and blue.
+pub struct YuvPass {
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -45,6 +57,7 @@ pub struct PlacePass {
 pub struct Pipelines {
     pub output: OutputPass,
     pub ingest: IngestPass,
+    pub yuv: YuvPass,
     pub place: PlacePass,
 }
 
@@ -53,6 +66,7 @@ impl Pipelines {
         Self {
             output: output_pass(device),
             ingest: ingest_pass(device),
+            yuv: yuv_pass(device),
             place: place_pass(device),
         }
     }
@@ -152,6 +166,37 @@ fn ingest_pass(device: &wgpu::Device) -> IngestPass {
             ACCUMULATION_FORMAT,
             None,
         ),
+        bind_group_layout,
+    }
+}
+
+fn yuv_pass(device: &wgpu::Device) -> YuvPass {
+    let module = shader_module(device, "engine yuv pass", shaders::YUV);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine yuv pass bindings"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(YUV_UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            loaded_texture_entry(1),
+            loaded_texture_entry(2),
+            loaded_texture_entry(3),
+        ],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine yuv pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    YuvPass {
+        pipeline: pipeline(device, "engine yuv pass", &module, &layout, ACCUMULATION_FORMAT, None),
         bind_group_layout,
     }
 }

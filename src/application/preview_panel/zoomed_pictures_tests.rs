@@ -80,7 +80,8 @@ impl Preview {
                     width_in_pixels: 2,
                     height_in_pixels: 2,
                     rgba_pixels: vec![255; 16],
-                },
+                }
+                .into(),
                 serial_number: 1,
             },
             from_a_file: RgbaPicture {

@@ -58,6 +58,96 @@ pub fn probe_source_media(
     })
 }
 
+/// Opens the video at `video` with ffprobe and reports how its pictures are stored and what they say about their colours: what the picture engine
+/// needs to know to make the pictures itself from the planes ffmpeg decodes, instead of asking ffmpeg to make them RGBA.
+pub fn probe_video_stream_format(
+    toolchain: &FfmpegToolchain,
+    video: impl Into<MediaLocation>,
+) -> Result<VideoStreamFormat, ProbeError> {
+    let video = video.into();
+    let probe_output_json = run_ffprobe(toolchain, &video)?;
+    video_stream_format_from_probe_output(&probe_output_json)
+}
+
+/// What ffprobe's JSON says about how the pictures of the first real video stream are stored and what colours they stand for.
+pub fn video_stream_format_from_probe_output(probe_output_json: &str) -> Result<VideoStreamFormat, ProbeError> {
+    let probe_output = parse_probe_output(probe_output_json)?;
+    let video_stream = probe_output
+        .streams
+        .iter()
+        .find(|stream| stream.is_video() && !stream.is_cover_art())
+        .ok_or(ProbeError::NoVideoStream)?;
+    let stated = |text: &Option<String>| {
+        text.as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && !matches!(*text, "unknown" | "unspecified" | "N/A"))
+            .map(str::to_owned)
+    };
+    Ok(VideoStreamFormat {
+        pixel_format: stated(&video_stream.pix_fmt),
+        colour_space: stated(&video_stream.color_space),
+        colour_range: stated(&video_stream.color_range),
+        colour_primaries: stated(&video_stream.color_primaries),
+        colour_transfer: stated(&video_stream.color_transfer),
+    })
+}
+
+/// How the pictures of a video are stored and what colours they say they stand for, as ffprobe prints it (the names it uses: `yuv420p`, `bt709`, `tv`,
+/// and so on). What the file does not say is `None`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct VideoStreamFormat {
+    pub pixel_format: Option<String>,
+    /// The matrix that turns brightness and colour differences into red, green and blue.
+    pub colour_space: Option<String>,
+    /// `tv` (limited: 16 to 235) or `pc` (full: 0 to 255).
+    pub colour_range: Option<String>,
+    pub colour_primaries: Option<String>,
+    pub colour_transfer: Option<String>,
+}
+
+/// The matrices that the preview can turn into colours itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeMatrix {
+    Bt601,
+    Bt709,
+    Bt2020,
+}
+
+/// A video whose pictures the preview can take as ffmpeg decodes them, in planes, and turn into colours itself: 8 bits to a number, 4:2:0, with a
+/// matrix it knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NativeYuv420p {
+    pub matrix: NativeMatrix,
+    pub full_range: bool,
+}
+
+impl VideoStreamFormat {
+    /// Whether the pictures of the video can be had as planes and turned into colours by the preview, and how. `None` for every video that is stored
+    /// another way (10 bits to a number, 4:2:2 or 4:4:4, RGB, a pixel format that is only for full range, and so on) or that says it uses a matrix that
+    /// is not known: those are decoded by ffmpeg into RGBA, as they always were.
+    ///
+    /// **A file that does not say which matrix it uses is BT.601**, and one that does not say its range is limited, because that is what ffmpeg does with
+    /// it when it makes the RGBA itself (verified: untagged video is converted with the BT.601 limited-range matrix at every size, 4K included), and the
+    /// preview must not change by the move to the graphics card. Whether that is a good choice for high-definition video is for phase 3.
+    pub fn as_native_yuv420p(&self) -> Option<NativeYuv420p> {
+        if self.pixel_format.as_deref() != Some("yuv420p") {
+            return None;
+        }
+        let matrix = match self.colour_space.as_deref() {
+            None | Some("bt470bg" | "smpte170m") => NativeMatrix::Bt601,
+            Some("bt709") => NativeMatrix::Bt709,
+            Some("bt2020nc") => NativeMatrix::Bt2020,
+            Some(_) => return None,
+        };
+        let full_range = match self.colour_range.as_deref() {
+            None | Some("tv" | "mpeg") => false,
+            Some("pc" | "jpeg") => true,
+            Some(_) => return None,
+        };
+        Some(NativeYuv420p { matrix, full_range })
+    }
+}
+
 /// Runs ffprobe on `location` and returns the JSON it prints.
 fn run_ffprobe(toolchain: &FfmpegToolchain, location: &MediaLocation) -> Result<String, ProbeError> {
     let output = background_command(toolchain.ffprobe_path())
@@ -300,6 +390,11 @@ struct ProbeStream {
     tags: std::collections::HashMap<String, String>,
     #[serde(default)]
     disposition: ProbeDisposition,
+    pix_fmt: Option<String>,
+    color_space: Option<String>,
+    color_range: Option<String>,
+    color_primaries: Option<String>,
+    color_transfer: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -447,6 +542,147 @@ mod tests {
         ],
         "format": { "duration": "20.000000" }
     }"#;
+
+    fn format_of(stream_fields: &str) -> VideoStreamFormat {
+        video_stream_format_from_probe_output(&format!(
+            r#"{{ "streams": [ {{ "index": 0, "codec_type": "video", "width": 64, "height": 48 {stream_fields} }} ] }}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_pixel_format_and_the_colours_a_video_says_are_read_and_what_it_does_not_say_is_nothing() {
+        let format = format_of(
+            r#", "pix_fmt": "yuv420p", "color_space": "bt709", "color_range": "tv", "color_primaries": "bt709", "color_transfer": "bt709""#,
+        );
+        assert_eq!(
+            format,
+            VideoStreamFormat {
+                pixel_format: Some("yuv420p".to_owned()),
+                colour_space: Some("bt709".to_owned()),
+                colour_range: Some("tv".to_owned()),
+                colour_primaries: Some("bt709".to_owned()),
+                colour_transfer: Some("bt709".to_owned()),
+            }
+        );
+        assert_eq!(format_of(""), VideoStreamFormat::default());
+        for nothing in ["unknown", "unspecified", "N/A", "", "  "] {
+            let format = format_of(&format!(
+                r#", "pix_fmt": "yuv420p", "color_space": "{nothing}", "color_range": "{nothing}""#
+            ));
+            assert_eq!(format.colour_space, None, "{nothing:?}");
+            assert_eq!(format.colour_range, None, "{nothing:?}");
+            assert_eq!(format.pixel_format.as_deref(), Some("yuv420p"));
+        }
+    }
+
+    #[test]
+    fn the_format_is_that_of_the_first_real_video_stream_and_not_of_cover_art_or_sound() {
+        let json = r#"{ "streams": [
+            { "index": 0, "codec_type": "audio" },
+            { "index": 1, "codec_type": "video", "pix_fmt": "yuvj444p", "disposition": { "attached_pic": 1 } },
+            { "index": 2, "codec_type": "video", "pix_fmt": "yuv420p", "color_space": "bt470bg" } ] }"#;
+        let format = video_stream_format_from_probe_output(json).unwrap();
+        assert_eq!(format.pixel_format.as_deref(), Some("yuv420p"));
+        assert_eq!(format.colour_space.as_deref(), Some("bt470bg"));
+        assert!(matches!(
+            video_stream_format_from_probe_output(r#"{ "streams": [ { "index": 0, "codec_type": "audio" } ] }"#),
+            Err(ProbeError::NoVideoStream)
+        ));
+        assert!(matches!(
+            video_stream_format_from_probe_output("not json"),
+            Err(ProbeError::UnreadableAnswer(_))
+        ));
+    }
+
+    #[test]
+    fn eight_bit_four_two_zero_video_is_native_and_which_matrix_and_range_follow_what_the_file_says() {
+        let native = |fields: &str| format_of(&format!(r#", "pix_fmt": "yuv420p" {fields}"#)).as_native_yuv420p();
+        assert_eq!(
+            native(""),
+            Some(NativeYuv420p {
+                matrix: NativeMatrix::Bt601,
+                full_range: false
+            }),
+            "says nothing: BT.601, limited, as ffmpeg has it"
+        );
+        for (name, matrix) in [
+            ("bt470bg", NativeMatrix::Bt601),
+            ("smpte170m", NativeMatrix::Bt601),
+            ("bt709", NativeMatrix::Bt709),
+            ("bt2020nc", NativeMatrix::Bt2020),
+        ] {
+            assert_eq!(
+                native(&format!(r#", "color_space": "{name}""#)),
+                Some(NativeYuv420p {
+                    matrix,
+                    full_range: false
+                }),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            native(r#", "color_range": "tv""#).map(|native| native.full_range),
+            Some(false)
+        );
+        assert_eq!(
+            native(r#", "color_range": "pc""#).map(|native| native.full_range),
+            Some(true)
+        );
+        assert_eq!(
+            native(r#", "color_space": "bt709", "color_range": "pc""#),
+            Some(NativeYuv420p {
+                matrix: NativeMatrix::Bt709,
+                full_range: true
+            })
+        );
+    }
+
+    #[test]
+    fn video_that_is_stored_another_way_or_uses_a_matrix_that_is_not_known_is_left_to_ffmpeg() {
+        for pixel_format in [
+            "yuv420p10le",
+            "yuv422p",
+            "yuv444p",
+            "yuvj420p",
+            "nv12",
+            "rgb24",
+            "gbrp",
+            "gray",
+            "yuva420p",
+        ] {
+            assert_eq!(
+                format_of(&format!(r#", "pix_fmt": "{pixel_format}""#)).as_native_yuv420p(),
+                None,
+                "{pixel_format}"
+            );
+        }
+        assert_eq!(
+            format_of("").as_native_yuv420p(),
+            None,
+            "a video that does not even say how it is stored"
+        );
+        for matrix in [
+            "bt2020c",
+            "smpte240m",
+            "fcc",
+            "ycgco",
+            "rgb",
+            "smpte2085",
+            "chroma-derived-nc",
+            "ictcp",
+        ] {
+            assert_eq!(
+                format_of(&format!(r#", "pix_fmt": "yuv420p", "color_space": "{matrix}""#)).as_native_yuv420p(),
+                None,
+                "{matrix}"
+            );
+        }
+        assert_eq!(
+            format_of(r#", "pix_fmt": "yuv420p", "color_range": "strange""#).as_native_yuv420p(),
+            None
+        );
+    }
 
     #[test]
     fn reads_an_ordinary_video() {

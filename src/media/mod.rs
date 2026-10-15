@@ -30,12 +30,15 @@ pub use audio_stream::{
 pub use ffmpeg_toolchain::{FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE, FfmpegToolchain, FfmpegVersion, ToolchainError};
 pub use finer_thumbnails::FinerThumbnails;
 pub use frame_stream::{
-    DecodedFrame, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, frame_stream_arguments,
+    DecodedFrame, DecodedYuvFrame, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest,
+    frame_stream_arguments,
 };
 pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
 pub use source_probe::{
-    ProbeError, probe_source_media, probe_video, properties_from_probe_output, source_properties_from_probe_output,
+    NativeMatrix, NativeYuv420p, ProbeError, VideoStreamFormat, probe_source_media, probe_video,
+    probe_video_stream_format, properties_from_probe_output, source_properties_from_probe_output,
+    video_stream_format_from_probe_output,
 };
 pub use thumbnail_library::{ThumbnailLibrary, plan_finer_thumbnails};
 pub use thumbnails::{

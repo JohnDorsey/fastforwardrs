@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(test)]
@@ -27,7 +28,7 @@ use crate::application::selection::Selection;
 use crate::application::settings_windows::SettingsWindowsOpen;
 use crate::application::textures::Textures;
 use crate::application::timeline_panel::TimelineViewState;
-use crate::media::{FfmpegToolchain, MediaLocation, UserInterfaceWakeUp};
+use crate::media::{FfmpegToolchain, MediaLocation, UserInterfaceWakeUp, VideoStreamFormat};
 use crate::playback::{
     AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter, PlaybackClock, PreviewPictures,
     SoundEffects,
@@ -77,6 +78,10 @@ pub(super) struct Playback {
     pub(super) audio_supplier: AudioSupplier<FfmpegAudioStreamStarter>,
     /// Plays the editor's own little sounds, such as the snip of a cut. It is silent until given speakers to play through.
     pub(super) sound_effects: SoundEffects,
+    /// Whether the pictures of the videos that are stored in a way the picture engine can use as it is are wanted in planes, as ffmpeg decodes them,
+    /// rather than as RGBA made by ffmpeg: it is so while the picture engine is what draws the preview. (While it is not, nobody even asks ffprobe
+    /// how the pictures of a video are stored, and the preview is made as it always was.)
+    pub(super) planes_wanted: bool,
 }
 
 impl Playback {
@@ -193,10 +198,16 @@ impl Interface {
     }
 }
 
+/// What finds out how the pictures of the video at a place are stored and what colours they say they stand for, or cannot tell (`None`). It runs
+/// on a thread of its own. (It is ffprobe; a test gives the editor another.)
+pub(super) type VideoFormatProber = Arc<dyn Fn(&MediaLocation) -> Option<VideoStreamFormat> + Send + Sync>;
+
 /// What the editor is given by the computer it runs on: ffmpeg, whoever asks which file to open, the settings that are kept in a file, the
 /// fonts, and the way to wake the window up from another thread.
 pub(super) struct Environment {
     pub(super) toolchain: Option<std::sync::Arc<FfmpegToolchain>>,
+    /// Finds out how the pictures of a video are stored (see [`Playback::planes_wanted`]).
+    pub(super) video_format_prober: VideoFormatProber,
     /// What asks the person which file to open or where to save one.
     pub(super) file_chooser: Box<dyn FileChooser>,
     pub(super) wake_up: UserInterfaceWakeUp,

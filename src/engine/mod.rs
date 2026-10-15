@@ -44,6 +44,7 @@ mod texture_pool;
 mod uniform_arena;
 mod uniform_bytes;
 mod worker;
+mod yuv;
 
 #[cfg(test)]
 mod engine_tests;
@@ -51,6 +52,8 @@ mod engine_tests;
 mod oracle_tests;
 #[cfg(test)]
 mod picture_tests;
+#[cfg(test)]
+mod yuv_tests;
 
 pub use device::{AdapterChoice, DeviceError, DeviceTrouble, EngineDevice};
 pub use frame_cache::FrameCache;
@@ -66,3 +69,4 @@ pub use scene::{
 };
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};
 pub use uniform_bytes::{SlotWriter, UniformBytes, UniformSlot};
+pub use yuv::{YuvColour, YuvConversion, YuvMatrix, YuvRange, chroma_size, reference_rgba as rgba_of_yuv420p_planes};

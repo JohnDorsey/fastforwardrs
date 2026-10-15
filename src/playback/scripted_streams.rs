@@ -9,7 +9,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use super::supplier::{PictureStream, PictureStreamStarter};
-use crate::media::{DecodedFrame, FrameStreamError, FrameStreamEvent, FrameStreamRequest};
+use crate::media::{
+    DecodedFrame, DecodedYuvFrame, FrameDelivery, FrameStreamError, FrameStreamEvent, FrameStreamRequest,
+};
 
 /// What the scripted streams do, shared between the test and the streams.
 #[derive(Default)]
@@ -76,7 +78,8 @@ impl Script {
     }
 
     /// Makes the next `count` pictures of stream number `stream_number` ready. Each picture is a
-    /// 1x1 picture whose red value is its source frame number, so a test can tell which it is.
+    /// 1x1 picture whose red value (or, for a stream that delivers planes, brightness) is its source frame number, so a test can tell which
+    /// it is.
     pub(super) fn deliver(&self, stream_number: usize, count: u64) {
         let state = self.0.borrow();
         let stream = &state.streams[stream_number];
@@ -88,14 +91,21 @@ impl Script {
                 break;
             }
             let source_frame = stream.request.first_source_frame.value() + picture_number * step;
-            stream
-                .queue
-                .borrow_mut()
-                .push_back(FrameStreamEvent::Frame(DecodedFrame {
+            let picture = match stream.request.delivery {
+                FrameDelivery::Rgba => FrameStreamEvent::Frame(DecodedFrame {
                     width_in_pixels: 1,
                     height_in_pixels: 1,
                     rgba_pixels: vec![source_frame as u8, 0, 0, 255],
-                }));
+                }),
+                FrameDelivery::Yuv420p => FrameStreamEvent::YuvFrame(DecodedYuvFrame {
+                    width_in_pixels: 1,
+                    height_in_pixels: 1,
+                    y: vec![source_frame as u8],
+                    u: vec![128],
+                    v: vec![128],
+                }),
+            };
+            stream.queue.borrow_mut().push_back(picture);
             stream.delivered.set(picture_number + 1);
         }
     }

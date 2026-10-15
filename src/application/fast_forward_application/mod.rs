@@ -146,6 +146,8 @@ mod undo_tests;
 #[cfg(test)]
 mod vertical_zoom_tests;
 #[cfg(test)]
+mod video_format_tests;
+#[cfg(test)]
 mod view_history_tests;
 #[cfg(test)]
 mod zoom_tests;
@@ -171,7 +173,7 @@ use crate::composition::{PicturePlan, plan_pictures};
 use crate::media::export::VideoExport;
 use crate::media::{
     FfmpegToolchain, FinerThumbnails, MediaLocation, ThumbnailExtraction, ThumbnailLibrary, ToolchainError,
-    UserInterfaceWakeUp, Waveform, WaveformExtraction,
+    UserInterfaceWakeUp, VideoStreamFormat, Waveform, WaveformExtraction,
 };
 use crate::playback::{
     AudioContent, AudioSupplier, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter,
@@ -184,6 +186,7 @@ use crate::rgba_picture::RgbaPicture;
 use crate::settings_file::default_settings_file_path;
 use crate::text_rendering::LazyTextRenderer;
 
+use source_media_flow::ffprobe_as_the_video_format_prober;
 use state::{BackgroundJobs, Document, Environment, Interface, Playback, SourceFiles};
 
 /// Whether a source file of the project can be used.
@@ -252,11 +255,25 @@ struct PictureState {
     picture: Option<RgbaPicture>,
 }
 
+/// How the pictures of a video are stored and what colours they say they stand for, which the preview needs to know to take them in planes, and the
+/// work of finding that out. (It is not kept in the project file: it is asked of ffprobe again each time the file is found.)
+#[derive(Default)]
+struct VideoFormatState {
+    /// Asking ffprobe, which is done once for each time the file is found, and only while the preview wants pictures in planes.
+    probe: Option<BackgroundTask<Option<VideoStreamFormat>>>,
+    /// Whether ffprobe was asked.
+    was_asked: bool,
+    /// What ffprobe said. `None` until it has, and for good if it could not say: the pictures of the video are then RGBA made by ffmpeg.
+    known: Option<VideoStreamFormat>,
+}
+
 /// What the editor knows while it runs about one source file of the project.
 struct SourceFileState {
     status: SourceStatus,
     /// The pictures for the timeline, for a video.
     thumbnails: ThumbnailState,
+    /// How the pictures are stored, for a video.
+    video_format: VideoFormatState,
     /// The waveform for the timeline, for a sound file.
     waveform: WaveformState,
     /// The picture, for an image file.
@@ -268,6 +285,7 @@ impl SourceFileState {
         Self {
             status,
             thumbnails: ThumbnailState::default(),
+            video_format: VideoFormatState::default(),
             waveform: WaveformState::default(),
             picture: PictureState::default(),
         }
@@ -363,6 +381,7 @@ impl FastForwardApplication {
         };
 
         let project = Project::empty();
+        let video_format_prober = ffprobe_as_the_video_format_prober(toolchain.clone());
         Self {
             playback: Playback {
                 preview_pictures: PreviewPictures::new(FfmpegPictureStreamStarter::new(
@@ -375,6 +394,7 @@ impl FastForwardApplication {
                 )),
                 sound_effects: SoundEffects::default(),
                 clock: PlaybackClock::new(project.frame_rate()),
+                planes_wanted: false,
             },
             document: Document::new(project),
             sources: SourceFiles::default(),
@@ -382,6 +402,7 @@ impl FastForwardApplication {
             interface: Interface::new(startup_dialog),
             environment: Environment {
                 toolchain,
+                video_format_prober,
                 file_chooser: Box::new(RefusingFileChooser),
                 text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),
                 font_families: None,
@@ -471,16 +492,13 @@ impl FastForwardApplication {
             .iter()
             .filter_map(|source| {
                 let video = source.properties.video()?;
+                let state = self.sources.files.get(&source.identifier)?;
                 Some(PreviewVideo {
                     source: source.identifier,
-                    location: self
-                        .sources
-                        .files
-                        .get(&source.identifier)?
-                        .location_if_available()?
-                        .clone(),
+                    location: state.location_if_available()?.clone(),
                     display_size_in_pixels: (video.display_width_in_pixels, video.display_height_in_pixels),
                     frame_rate: video.frame_rate,
+                    format: state.video_format.known.clone(),
                 })
             })
             .collect();
@@ -493,6 +511,7 @@ impl FastForwardApplication {
                 picture_width_in_pixels,
                 picture_height_in_pixels,
                 videos,
+                planes_wanted: self.playback.planes_wanted,
             }
         });
         if self.playback.preview_pictures.setup() != wanted_setup.as_ref() {

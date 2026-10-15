@@ -12,12 +12,13 @@ use thiserror::Error;
 use super::device::EngineDevice;
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
 use super::pictures::{PictureData, PicturePixels};
-use super::pipelines::{ACCUMULATION_FORMAT, OUTPUT_FORMAT, Pipelines, SENT_PICTURE_FORMAT};
+use super::pipelines::{ACCUMULATION_FORMAT, OUTPUT_FORMAT, PLANE_FORMAT, Pipelines, SENT_PICTURE_FORMAT};
 use super::placement::PlacementUniforms;
 use super::plan::{PassPlan, plan_frame};
 use super::readback::{ReadbackBuffers, ReadbackProblem};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
+use super::yuv::chroma_size;
 use super::{FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, UniformBytes};
 
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
@@ -58,6 +59,9 @@ pub struct FrameRenderer {
     pictures: PictureCache,
     uniforms: UniformBytes,
     arena: UniformArena,
+    /// The numbers that making a video picture red, green and blue is given (the frames have their own, in `uniforms`).
+    upload_uniforms: UniformBytes,
+    upload_arena: UniformArena,
     /// A picture of one white pixel, which a layer that is a colour is made of.
     white_pixel: wgpu::TextureView,
 }
@@ -98,8 +102,9 @@ impl FrameRenderer {
                 depth_or_array_layers: 1,
             },
         );
+        let alignment = device.uniform_alignment;
         Self {
-            uniforms: UniformBytes::new(device.uniform_alignment),
+            uniforms: UniformBytes::new(alignment),
             white_pixel: white.create_view(&wgpu::TextureViewDescriptor::default()),
             device,
             pool: TexturePool::default(),
@@ -107,6 +112,8 @@ impl FrameRenderer {
             pipelines,
             pictures: PictureCache::new(picture_budget_in_bytes),
             arena: UniformArena::default(),
+            upload_uniforms: UniformBytes::new(alignment),
+            upload_arena: UniformArena::default(),
         }
     }
 
@@ -152,14 +159,13 @@ impl FrameRenderer {
                 "a picture {width} by {height} pixels is bigger than the graphics card takes ({largest})"
             )));
         }
-        let PicturePixels::Rgba8 { straight_alpha } = &data.pixels;
-        let sent_shape = TextureShape {
-            width_in_pixels: width,
-            height_in_pixels: height,
-            format: SENT_PICTURE_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        };
-        let sent = self.pool.acquire(&self.device.device, sent_shape);
+
+        // The bytes go to textures first: one for the pixels of a picture of RGBA bytes, one for each plane of a video picture.
+        let planes = planes_of(data);
+        let staged: Vec<wgpu::Texture> = planes
+            .iter()
+            .map(|plane| self.pool.acquire(&self.device.device, plane.shape))
+            .collect();
         let converted = self.device.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("engine: a picture"),
             size: wgpu::Extent3d {
@@ -175,61 +181,104 @@ impl FrameRenderer {
             view_formats: &[],
         });
         let converted_view = converted.create_view(&wgpu::TextureViewDescriptor::default());
+        let conversion_slot = match &data.pixels {
+            PicturePixels::Rgba8 { .. } => None,
+            PicturePixels::Yuv420p8 { colour, .. } => {
+                self.upload_uniforms.clear();
+                Some(
+                    self.upload_uniforms
+                        .add_slot(|writer| colour.conversion().write(writer)),
+                )
+            }
+        };
+
         let ((), mistake) = self.device.catching_errors(|| {
-            self.device.queue.write_texture(
-                sent.as_image_copy(),
-                straight_alpha,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * width),
-                    rows_per_image: Some(height),
-                },
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
-            let bind_group = self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("engine ingest pass"),
-                layout: &self.pipelines.ingest.bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &sent.create_view(&wgpu::TextureViewDescriptor::default()),
-                    ),
-                }],
+            for (plane, texture) in planes.iter().zip(&staged) {
+                self.device.queue.write_texture(
+                    texture.as_image_copy(),
+                    plane.bytes,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(plane.bytes_per_pixel * plane.shape.width_in_pixels),
+                        rows_per_image: Some(plane.shape.height_in_pixels),
+                    },
+                    wgpu::Extent3d {
+                        width: plane.shape.width_in_pixels,
+                        height: plane.shape.height_in_pixels,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+            let views: Vec<wgpu::TextureView> = staged
+                .iter()
+                .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+                .collect();
+            let device = &self.device.device;
+            let (pipeline, bind_group, dynamic_offsets) = match (&data.pixels, conversion_slot) {
+                (PicturePixels::Yuv420p8 { .. }, Some(slot)) => {
+                    let buffer = self
+                        .upload_arena
+                        .upload(device, &self.device.queue, &self.upload_uniforms)
+                        .expect("a slot was written");
+                    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("engine yuv pass"),
+                        layout: &self.pipelines.yuv.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer,
+                                    offset: 0,
+                                    size: NonZeroU64::new(u64::from(slot.size)),
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&views[0]),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(&views[1]),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&views[2]),
+                            },
+                        ],
+                    });
+                    (&self.pipelines.yuv.pipeline, bind_group, vec![slot.offset])
+                }
+                _ => {
+                    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("engine ingest pass"),
+                        layout: &self.pipelines.ingest.bind_group_layout,
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&views[0]),
+                        }],
+                    });
+                    (&self.pipelines.ingest.pipeline, bind_group, Vec::new())
+                }
+            };
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine: take a picture"),
             });
-            let mut encoder = self
-                .device
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("engine: take a picture"),
-                });
             {
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("engine: premultiply a picture"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &converted_view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                render_pass.set_pipeline(&self.pipelines.ingest.pipeline);
-                render_pass.set_bind_group(0, &bind_group, &[]);
+                let mut render_pass = begin_pass(
+                    &mut encoder,
+                    "engine: make a picture what the frames work on",
+                    &converted_view,
+                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                );
+                render_pass.set_pipeline(pipeline);
+                render_pass.set_bind_group(0, &bind_group, &dynamic_offsets);
                 render_pass.draw(0..3, 0..1);
             }
             self.device.queue.submit([encoder.finish()]);
         });
-        self.pool.release(sent_shape, sent);
+        for (plane, texture) in planes.iter().zip(staged) {
+            self.pool.release(plane.shape, texture);
+        }
         if let Some(mistake) = mistake {
             return Err(RenderProblem::GraphicsMistake(mistake));
         }
@@ -427,6 +476,51 @@ impl FrameRenderer {
                 effects_not_run: 0,
             },
         ))
+    }
+}
+
+/// One of the textures that the bytes of a picture are put in before the picture is made what the frames work on.
+struct StagingPlane<'bytes> {
+    shape: TextureShape,
+    bytes: &'bytes [u8],
+    bytes_per_pixel: u32,
+}
+
+/// The textures that the bytes of `data` go in: the pixels of a picture of RGBA bytes, or the three planes of a video picture.
+fn planes_of(data: &PictureData) -> Vec<StagingPlane<'_>> {
+    let (width, height) = (data.width_in_pixels, data.height_in_pixels);
+    let shape = |width_in_pixels, height_in_pixels, format| TextureShape {
+        width_in_pixels,
+        height_in_pixels,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    };
+    match &data.pixels {
+        PicturePixels::Rgba8 { straight_alpha } => vec![StagingPlane {
+            shape: shape(width, height, SENT_PICTURE_FORMAT),
+            bytes: straight_alpha,
+            bytes_per_pixel: 4,
+        }],
+        PicturePixels::Yuv420p8 { y, u, v, .. } => {
+            let (chroma_width, chroma_height) = chroma_size(width, height);
+            vec![
+                StagingPlane {
+                    shape: shape(width, height, PLANE_FORMAT),
+                    bytes: y,
+                    bytes_per_pixel: 1,
+                },
+                StagingPlane {
+                    shape: shape(chroma_width, chroma_height, PLANE_FORMAT),
+                    bytes: u,
+                    bytes_per_pixel: 1,
+                },
+                StagingPlane {
+                    shape: shape(chroma_width, chroma_height, PLANE_FORMAT),
+                    bytes: v,
+                    bytes_per_pixel: 1,
+                },
+            ]
+        }
     }
 }
 

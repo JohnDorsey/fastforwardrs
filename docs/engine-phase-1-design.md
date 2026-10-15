@@ -185,12 +185,29 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 
 * `ffprobe` is asked for `pix_fmt`, `color_space`, `color_range`, `color_primaries`, `color_transfer` of the video stream (a new function next to `probe_video`, run once for each video **in the background when the file is found**,
   like the thumbnails; the result is kept with the file's state while the program runs and is **not** put into the project file, so no file format changes).
-* `PreviewVideo` gets `format: Option<VideoStreamFormat>`; `PreviewSetup` equality then restarts the streams once when the format of a video becomes known. A `FrameStreamRequest` gets `delivery: Delivery { Rgba, Yuv420p }`.
-  **`Yuv420p` only when `format` says `yuv420p` (8-bit), in the engine's mode**; everything else stays `Rgba` exactly as it is now, and so does the whole old path. A new event `FrameStreamEvent::Planes(..)` carries the three planes; the
-  supplier's `SuppliedPicture` then holds either (the type of its frame becomes an enum; the 25 mechanical edits of tests that this causes are reported).
+* `PreviewVideo` gets `format: Option<VideoStreamFormat>`; `PreviewSetup` equality then restarts the streams once when the format of a video becomes known. A `FrameStreamRequest` gets `delivery: FrameDelivery { Rgba, Yuv420p }`.
+  **`Yuv420p` only when `format` says `yuv420p` (8-bit), in the engine's mode** (`PreviewSetup::planes_wanted`, which is off until piece 1.5 turns the engine on, and while it is off nobody even asks ffprobe); everything else stays `Rgba`
+  exactly as it is now, and so does the whole old path. A new event `FrameStreamEvent::YuvFrame(DecodedYuvFrame)` carries the three planes; the supplier's `SuppliedPicture.frame` is then a `SuppliedFrame`, either `Rgba(..)` or
+  `Yuv420p { frame, colour }` with what the numbers stand for (`SuppliedFrame::rgba()` makes RGBA of either, on the processor, for the day the engine has stopped and the window draws for itself). The ffprobe question is asked by the window
+  in the background, once for each time a file is found and only while planes are wanted (`VideoFormatState` in the state of a source file; not in the project file, so no file format changes); the question is a field of `Environment` so that
+  a test can give another (`VideoFormatProber`). The mechanical edits of tests that the new types caused (all of them adding `format: None`, `planes_wanted: false`, `.into()` or `delivery: FrameDelivery::Rgba`, or an arm for the
+  new event) are in `zoomed_pictures_tests.rs`, `textures/tests.rs`, `frame_stream.rs` (3), `preview_pictures.rs`, `supplier/tests.rs`, `tests/journey/mod.rs`, `tests/media_in_place.rs` and `tests/media_frame_stream.rs` (2): none changes what
+  a test asserts.
 * **The matrix** (`YuvColour`): `Bt601`, `Bt709`, `Bt2020` (non-constant luminance), by the probe's `color_space` (`bt709` -> 709, `bt2020nc` -> 2020, `smpte170m`, `bt470bg`, `unspecified`, missing -> **601**, which is what ffmpeg does today); **limited range** unless the probe says `pc`.
   The pass converts with the published matrices in `f32` (a Rust reference with a test against published values, and a test that the WGSL gives the same numbers on a software adapter: CM-08).
-* **Chroma** is upsampled by the sampler's bilinear filter at the pixel's centre (a half-resolution texture); today's `fast_bilinear` swscale gives slightly different values at coloured edges: measured and listed (section 11).
+* **Chroma is replicated, not blended (decided by measurement in 1.3d; the design first said bilinear).** Each colour-difference pixel is read as it is for each of the (up to) four pixels it stands for (`textureLoad` at `pixel / 2`: no
+  sampler, integer reads, so every graphics card gives the same numbers). Measured against the real ffmpeg (9.0.2, Windows, 8-bit `yuv420p`, hard-edged stripes of colour that change by 160 between colour pixels): where ffmpeg makes RGBA
+  at the size of the planes or at twice it, **replicating agrees to within 3 levels (mean 0.7) and a bilinear blend is off by up to 82 (mean 10 to 23)**; at other scales and at odd heights neither is exact (ffmpeg then scales the
+  colour planes in more bits than the 8 the planes have, and at odd heights it puts them a row off by its own rule): at 4 to 3 replicating is off by 46 at most and 5.7 on average (a blend: 83 and 10.0), at 1 to 2 by 36 and 4.1 (a blend:
+  45 and 4.6), at 3 to 1 by 194 and 23 (a blend: 130 and 42), and at odd heights (64 by 49, 65 by 49, 640 by 361) by 187, 246 and 191 at most and 9.4, 16.4 and 9.6 on average (a blend: 127, 172, 127 and 12.3, 14.6, 12.4): nearer on average
+  in every case measured but one (65 by 49), though not always in the single worst pixel. All of these are for the harshest stripes there are; the colour planes of real video do not have edges like that.
+  For colours that change smoothly everything agrees to within 4 levels either way where the video is not scaled by an odd ratio, and to within 8 where it is (mean 1 to 2.3): ffmpeg's whole-number arithmetic cuts off where the engine
+  rounds, which is a bias of about a level, a little more for green (three terms), and the scaling noise of 8-bit planes comes on top.
+  Replicating is what the old preview showed *and what the export shows* (ffmpeg makes that too), so it keeps the preview true to the export. A smooth reconstruction of the colour planes is the better picture and is for phase 3, when the
+  compatibility mode is turned off (`YuvColour` would then get a way of reconstructing the colours: `Replicate` or `Smooth`).
+* **Which videos are natives:** 8-bit `yuv420p` whose matrix is `bt709`, `bt2020nc`, `smpte170m`, `bt470bg` or untagged, whose range is `tv`, `pc` or untagged. **A full-range H.264 file is reported by ffprobe 9 as `yuvj420p`, which is not
+  a native**: it is decoded as RGBA as it always was (phase 3 takes `yuvj420p`, 10-bit, 4:2:2 and 4:4:4 as natives: CM-17). A `yuv420p` file with the range tag `pc` is a native and arrives with its numbers unchanged
+  (verified with the `rawvideo` codec in Matroska, which keeps them; FFV1 cannot make such a file: it stores only the limited range of `yuv420p` and converts what says it is full range. That VP9 and AV1 files can be tagged `pc` too is believed, not tried).
 
 ## 10. How it is checked (the part that matters most)
 
@@ -212,7 +229,10 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 ## 11. Visible differences expected (to be measured and shown, each fixed or accepted by the maintainer)
 
 1. A colour effect is worked in float with no 8-bit stage: values differ from today's by up to 1 level where the old code rounded between steps.
-2. Chroma at coloured edges: bilinear half-resolution chroma against swscale's.
+2. Chroma at coloured edges: replicated like ffmpeg's, so within 3 levels of it at 1 to 1 and 2 to 1 scales; at other scales (which one it is depends on the video and on the size of the picture) ffmpeg scales the colour planes in
+   more bits and the engine has the 8-bit planes ffmpeg made: at the harshest stripes up to 36 to 194 levels in single pixels (mean 4 to 23), a few levels (mean about 2) in anything smooth. All the numbers are in section 9. **For the
+   maintainer's eye:** this is the difference most likely to be visible, at the edges of saturated colours in screen recordings and graphics, and it is shown in the before and after pictures at the end of the phase.
+2b. A bias of about a level (ffmpeg's picture a little darker, more in green) in smooth colours: its whole-number arithmetic cuts off, the engine rounds.
 3. Translucent edges (text, images with alpha): premultiplied in float, not in 8 bits (a level or two at the faintest pixels).
 4. Zoomed in far enough to see pixels: the blocks are **pixels of the finished picture** (the engine's), not the texels of each layer.
 5. The symbol is a layer of the picture: it is drawn at the render resolution, not at the screen's.
@@ -226,7 +246,7 @@ Pure, in the application layer next to the old drawing; its test is *the same `P
 |---|---|---|
 | **1.1** | `engine` skeleton: device, pools, arena, read-back, caches, the thread and its messages, `plan_frame`, the harness and the lock; the clear-and-read-back frame (no layers: black) | thread/protocol tests, a black frame of any size, the device replaced after `destroy()`, no-GPU tests of the planning and the shaders, CI green on all three systems |
 | **1.2** | pictures: ingest, **place and composite**, output; the **egui-wgpu oracle** in the tests | placement parity as in section 10 (upright, turned, off the picture, alpha, several layers) |
-| **1.3** | YUV: probe, `Delivery::Yuv420p`, the planes event, the yuv pass | against the matrix by hand, against ffmpeg's own conversion on tagged and untagged test videos, odd sizes |
+| **1.3** | YUV: probe, `FrameDelivery::Yuv420p`, the planes event, the yuv pass | against the matrix by hand, against ffmpeg's own conversion on tagged and untagged test videos, odd sizes (**done 2026-10-15; see section 9 for what was measured and the one decision it changed**) |
 | **1.4** | colour matrix pass; `describe_frame`; the fusing | against the CPU matrix; random plan parity (EN-02 gate) |
 | **1.5** | the window: `EnginePreview`, the shown texture, the aids, the symbol, text, thumbnails, the fallback, `FASTFORWARDRS_PREVIEW` | window tests with a software engine; all the old window tests unmodified |
 | **1.6** | the guard: watchdog, replacement, loop caps, `compile_effect_shader`, the child-process hang test | the gate tests of section 6 |

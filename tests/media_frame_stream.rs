@@ -8,7 +8,9 @@ mod support;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fastforwardrs::media::{DecodedFrame, FfmpegToolchain, FrameStream, FrameStreamEvent, FrameStreamRequest};
+use fastforwardrs::media::{
+    DecodedFrame, FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamEvent, FrameStreamRequest,
+};
 use fastforwardrs::project::{FrameRate, SourceFrameIndex, SpeedFactor};
 use support::{
     TestVideo, TestVideoSpecification, counter_video, frame_number_in_picture, picture_shown_in_frame,
@@ -36,6 +38,7 @@ fn request_for(
         ),
         picture_width_in_pixels: video.specification.width_in_pixels,
         picture_height_in_pixels: video.specification.height_in_pixels,
+        delivery: FrameDelivery::Rgba,
     }
 }
 
@@ -63,6 +66,7 @@ fn frame_numbers_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamReq
                     4,
                 ));
             }
+            Some(FrameStreamEvent::YuvFrame(_)) => panic!("pictures in planes were not asked for"),
             Some(FrameStreamEvent::Finished { error_output }) => return (frame_numbers, error_output),
             None => {
                 assert!(
@@ -310,6 +314,7 @@ fn first_picture_delivered(toolchain: &FfmpegToolchain, request: &FrameStreamReq
     loop {
         match stream.try_next_event() {
             Some(FrameStreamEvent::Frame(frame)) => return frame,
+            Some(FrameStreamEvent::YuvFrame(_)) => panic!("pictures in planes were not asked for"),
             Some(FrameStreamEvent::Finished { error_output }) => panic!("no picture came: {error_output:?}"),
             None => {
                 assert!(started.elapsed() < TIME_ALLOWED_FOR_A_STREAM, "no picture came in time");

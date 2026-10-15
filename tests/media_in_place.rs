@@ -18,8 +18,8 @@ use fastforwardrs::media::export::{
     ExportEvent, ExportResult, VideoExport, plan_export, sound_graph_specification, sources_of_sound,
 };
 use fastforwardrs::media::{
-    AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, DecodedFrame, FfmpegToolchain, FrameStream,
-    FrameStreamEvent, FrameStreamRequest, MediaLocation, PEAKS_PER_SECOND, PictureSize, ThumbnailEvent,
+    AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, DecodedFrame, FfmpegToolchain, FrameDelivery,
+    FrameStream, FrameStreamEvent, FrameStreamRequest, MediaLocation, PEAKS_PER_SECOND, PictureSize, ThumbnailEvent,
     ThumbnailExtraction, Waveform, WaveformEvent, WaveformExtraction, decode_picture, probe_source_media,
 };
 use fastforwardrs::project::{
@@ -72,6 +72,7 @@ fn frames_of(toolchain: &FfmpegToolchain, video: &MediaLocation, width: u32, hei
         video_display_size_in_pixels: (width, height),
         picture_width_in_pixels: width,
         picture_height_in_pixels: height,
+        delivery: FrameDelivery::Rgba,
     };
     let stream = FrameStream::start(toolchain, &request, Arc::new(|| {})).expect("the stream starts");
     let started = Instant::now();
@@ -79,6 +80,7 @@ fn frames_of(toolchain: &FfmpegToolchain, video: &MediaLocation, width: u32, hei
     loop {
         match stream.try_next_event() {
             Some(FrameStreamEvent::Frame(frame)) => frames.push(frame),
+            Some(FrameStreamEvent::YuvFrame(_)) => panic!("pictures in planes were not asked for"),
             Some(FrameStreamEvent::Finished { error_output }) => {
                 assert_eq!(error_output, None);
                 return frames;
