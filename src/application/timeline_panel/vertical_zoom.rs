@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How far the rows of the timeline are zoomed up and down.
 //!
 //! The track of a row has a height of its own, which the user sets by dragging the boundary under its title box and which is kept

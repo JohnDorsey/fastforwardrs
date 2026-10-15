@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Opening the default output device, so that something fills what it asks for.
 //!
 //! The device asks for sound in small pieces, on a thread of its own, many times a second, in whatever kind of

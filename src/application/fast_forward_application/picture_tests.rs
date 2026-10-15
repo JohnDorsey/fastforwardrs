@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of pictures (image files) on the timeline and the preview: how they are put on a track, how
 //! the clip is drawn and its box, and picking, resizing and turning one on the preview.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Effects: what is done to the picture of a clip, or of a track, on its way to the finished picture.
 //!
 //! A clip or a track has the effects that were put on it, each at most once, one after another in the order they were put on in (or

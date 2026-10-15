@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The window the interaction tests use, and the ways of using it: it shows the real editor with
 //! a project made in memory (from a video that does not exist on disk, so that the tests need
 //! neither ffmpeg nor a graphics card), and sends it the mouse and keyboard input a person would

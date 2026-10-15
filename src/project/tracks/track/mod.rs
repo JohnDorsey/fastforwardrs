@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A track: a row of clips on the timeline, with a title and a volume, a speed and a mute switch
 //! of its own.
 //!

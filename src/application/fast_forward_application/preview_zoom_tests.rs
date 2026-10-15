@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of zooming the preview: the wheel, moving the picture about with the middle button and the wheel, the limits, the button that
 //! makes the picture fit the panel again, and the mouse doing what it does to layers on a picture that is zoomed.
 

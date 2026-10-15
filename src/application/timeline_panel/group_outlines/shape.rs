@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The shape of the outline of a group: the line that goes round a set of rectangles that are put together, as a loop of yarn goes round
 //! things it is tied round, and that is rounded off where it turns.
 //!

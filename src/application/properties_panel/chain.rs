@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The chain of effects of a clip, of a track or of a group in the properties panel, under the box of the thing itself: a box for each effect,
 //! and among them the badges (see [`crate::project::Badge`]) that say where the effects of something else are applied: of a tag that the
 //! thing is in, and for a clip, of the track it is on. Under them is the plus button that puts another effect on, and last, apart, the

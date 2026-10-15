@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the grip dots, the little bumps that say that a track's box, a clip or a rack can be taken hold of and dragged,
 //! and of the box of a track that has them on it.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of holding a dragged clip to the time it started at (see [`Snap`]).
 
 use super::tests::project_of;

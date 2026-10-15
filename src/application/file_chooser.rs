@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Asking the person which file to use.
 //!
 //! A file dialog makes the program wait until someone answers it. So the program does not open

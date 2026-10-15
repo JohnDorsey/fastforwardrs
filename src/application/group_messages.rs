@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the user is told when something to do with groups cannot be done: which rule it would break, in words, naming the things that are in
 //! the way (a clip that would be inside the rectangle of a clip group, a track that is between the tracks of a track group).
 //!

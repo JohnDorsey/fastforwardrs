@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Saving and loading projects as pretty, human-readable JSON, or as the same JSON in an archive.
 //!
 //! A project file does not contain the videos or sounds themselves, unless the user chose to include some of them: it links to

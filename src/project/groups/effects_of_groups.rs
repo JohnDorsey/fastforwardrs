@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The effects of groups, and what is applied to a clip when everything it is in and on is counted.
 //!
 //! A group has a chain of effects like a clip or a track (see [`crate::project::Effects`]). What the chain of a group does depends on

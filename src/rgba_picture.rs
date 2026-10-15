@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A picture made by this program rather than by ffmpeg (the fast-forward symbol, text), as pixels.
 
 use image::codecs::png::PngEncoder;

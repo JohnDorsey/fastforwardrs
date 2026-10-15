@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 John Dorsey
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# The licence of every file that does not carry its own SPDX header (the Rust and Python sources do), for `reuse lint`.
+# See docs/plugin-system-plan-of-action.md, phase 0.2.
+version = 1
+
+[[annotations]]
+path = [
+    ".gitignore",
+    ".github/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "REUSE.toml",
+    "deny.toml",
+    "about.toml",
+    "about.hbs",
+    "rustfmt.toml",
+    "docs/**",
+    "tools/**/*.md",
+    "tools/linux/*.sh",
+    "LICENSE-PLUGIN-CLARIFICATION",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 John Dorsey"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# The font that is drawn with (see the licence file next to it): the Hack font, which is MIT, with the glyphs of Bitstream Vera and DejaVu.
+[[annotations]]
+path = "assets/fonts/**"
+precedence = "override"
+SPDX-FileCopyrightText = ["2018 Source Foundry Authors", "2003 Bitstream, Inc."]
+SPDX-License-Identifier = "MIT AND Bitstream-Vera"
+
+# The generated notices contain the texts of other people's licences, with their own SPDX lines: they do not describe this file.
+[[annotations]]
+path = "THIRD_PARTY.md"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 John Dorsey"
+SPDX-License-Identifier = "GPL-3.0-or-later"

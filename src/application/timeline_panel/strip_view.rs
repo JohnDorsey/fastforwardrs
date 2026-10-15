@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The stretch of the strips that is in view, and where on the screen it is.
 //!
 //! Along the strips, positions are measured in points from the start of the first frame (see

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The fast-forward symbol (such as `▶▶ 4x`) that appears on accelerated clips.
 //!
 //! The same picture is drawn into the live preview and into the exported video: this module draws

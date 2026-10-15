@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The racks of a project: where they all are, and what the racks of one property of a clip or a track say together.
 //!
 //! The racks of keyframes are kept in drawers (those of the clips and those of the tracks), and what a rack animates need

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the tests of the parts of the geometry have in common.
 
 use super::TimelineGeometry;

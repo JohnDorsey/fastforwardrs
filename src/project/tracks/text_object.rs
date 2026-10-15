@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Text that is shown over the picture for a while: what it says, how it looks, and where it is
 //! (an area of the picture, and how far that is turned: see [`super::placement`]).
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keeping track of whether the project has changes that are not saved, and saving them by itself
 //! when the Autosave setting is on.
 //!

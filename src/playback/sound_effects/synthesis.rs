@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pieces that the editor's sound effects are made from: noise, filters that take the high or the low parts out of it, and
 //! the shaping of the end and the loudness of a sound. (Every effect is made from nothing: the editor has no sound files of its
 //! own.) Everything here gives the same result every time, so the effects do.

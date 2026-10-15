@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pictures kept on the graphics card for drawing: the preview picture, the thumbnails that
 //! are on screen, the fast-forward symbol and the text objects.
 

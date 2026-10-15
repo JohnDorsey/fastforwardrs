@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of how far clips can be dragged where there are clip groups: a clip that is in none goes into the rectangle of one, and joins it, as
 //! far as the clips that are in the way and the rules let it (it stops where its being in the group would make the rectangle take in a clip
 //! that is not in it, and a clip that is in another group stops against the rectangle); a clip that is in one stops where its group would

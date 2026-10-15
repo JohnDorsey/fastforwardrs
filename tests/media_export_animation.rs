@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Exporting projects whose clips have keyframes with the real ffmpeg, checked picture by picture against what the keyframes say:
 //! where a video is, how big it is and how far it is turned at each frame, and what a text object is like.
 

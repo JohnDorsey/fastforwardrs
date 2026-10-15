@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Clips that are put in the rectangle of a clip group are put in the group.
 //!
 //! A clip that is not in a clip group, and is moved to where the rectangle of one is (it has some of its frames, on one of its tracks), **joins**

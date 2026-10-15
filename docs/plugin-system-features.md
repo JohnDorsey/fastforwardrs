@@ -514,7 +514,7 @@ menu item or a window opened from one is marked.*
   statement that plugins loaded through a third-party API are not derivative works** (Ardour's "Plugin Clarification"), which only the
   copyright holder can add and which is easy for a sole author now: Q-34.
 * **LG-05 [P] S** The plugin API of the program's own format (PH-21) is documented with a GPLv3-compatible example.
-* **LG-06 [P] M** The mechanics, as a task of phase 0: a root `LICENSE`; `license = "..."` in `Cargo.toml` (missing today); an SPDX line in each source
+* **LG-06 [D] M** (done 2026-10-15) The mechanics, as a task of phase 0: a root `LICENSE`; `license = "..."` in `Cargo.toml` (missing today); an SPDX line in each source
   file (checkable with `reuse lint`); a `THIRD_PARTY` notices file made by `cargo-about` or checked by `cargo-deny`; the ffmpeg source offer; the manifest
   of LG-02.
 * **LG-07 [P] S** Check the one dependency whose licence is not on the FSF's list: the **Ubuntu Font Licence** of egui's default fonts (ship those
@@ -598,6 +598,7 @@ open question). It also lists what was decided *about* the plan, and what is sti
 | 2026-10-15 | round 2 answered: my defaults for Q-01, 06, 11, 13, 14, 20, 22, 24, 25, 29, 31, 33; Q-16 confirmed; Q-23 yes (read only); Q-18, Q-28, Q-35, Q-36 later | maintainer |
 | 2026-10-15 | Q-21: preview of effects that depend on earlier frames: global settings (mode, checkpoint interval, memory budget), never project settings, never the export (EN-14) | maintainer |
 | 2026-10-15 | 256 MiB cap for an embedded plugin binary (SF-10); the plugin clarification wording is drafted by me and decided by the maintainer (Q-34); the CI workflow is created by me and committed by the maintainer; Ubuntu is registered in WSL | maintainer |
+| 2026-10-15 | copyright notices carry the maintainer's legal name, John Dorsey; the plugin clarification, variant A, is adopted (`LICENSE-PLUGIN-CLARIFICATION`, Q-34, LG-04); `reuse`, `cargo-deny` and `cargo-about` may be installed | maintainer |
 | 2026-10-15 | Q-30: no node editor yet; image-input parameters and a node editor stay possible (ID-10, EN-15) | maintainer |
 | 2026-10-15 | Q-26: size limit 64 MiB (asks when exceeded, global setting); **projects may contain plugins** (reverses "never contain"); linked plugin: warning prompt per plugin; embedded plugin: severe prompt every time, accepted by holding "Load it" for 5 s (mouse, or Enter, not Space); declining is safe; several platform builds allowed; command-line export refuses without `--allow-plugins` | maintainer |
 

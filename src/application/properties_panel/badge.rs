@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A badge in a chain of effects: a rounded bar, in the colour of a group (grey for the track of a clip), that says of what it is the badge
 //! and where in the chain the effects of that are applied.
 //!

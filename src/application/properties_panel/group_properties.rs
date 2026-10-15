@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties of a group: a box with a thick outline in the colour of the group (the colour of its outline in the timeline), which has
 //! at its head a bar in that colour that says what kind of group it is and has its name, which is typed there, and the control of its colour;
 //! and under it the list of what is in the group. Under the box is the chain of the effects of the group, as under the box of a clip.

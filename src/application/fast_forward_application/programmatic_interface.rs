@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the editor can be asked to do, and asked about, without anyone using its window: the work
 //! of the File menu without its file dialogs, and a look at the state afterwards.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties of a rack of keyframes: which property of what its keyframes are of, and how many there are and from where to
 //! where. (What the property is at a moment is changed with the controls of what it is a property of.)
 

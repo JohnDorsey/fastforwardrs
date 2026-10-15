@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pictures of the real window in several states, for looking at the interface without opening it
 //! on a desktop. These are not checks, so they do nothing unless asked:
 //!

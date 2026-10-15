@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Fitting keyframes into the frames of what holds them, when it gets shorter or its frames are counted again.
 //!
 //! Keyframes want to be where they were in relation to what holds them: as far through a clip as they were when the clip is sped

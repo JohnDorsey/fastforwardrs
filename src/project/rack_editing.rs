@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Editing racks and the keyframes in them: moving keyframes in time and from one rack to another, taking them away, moving
 //! racks to another drawer (or to another place among the racks of the drawer they are in) or onto a track, and making keyframe
 //! crates (see the `crates` module, which keeps each crate as long as its keyframes need).

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what is done to racks and to what holds them: moving keyframes, taking them away, moving a rack to another drawer
 //! or onto a track, and keyframe crates. (Copying clips and tracks with what is in their drawers is in `duplicating_tests`.)
 

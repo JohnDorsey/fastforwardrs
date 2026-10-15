@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Asking before keyframes are lost.
 //!
 //! Making something last less time (playing a clip or a track faster, asking a clip to last less, counting the project again at a

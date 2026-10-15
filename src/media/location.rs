@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where the bytes of a media file are, which is what the ffmpeg tools are told to read.
 //!
 //! A media file is usually a file of its own. But a file that is included in a project file (see

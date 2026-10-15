@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Moving a track to another place in the list by dragging its title box.
 //!
 //! While the box is dragged the whole row of the track (the box and the strip) follows the pointer up and down,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of including files in the project file and taking them out again: what the clip menu offers, the questions that are asked
 //! when the project's file is not an archive, what is written when the project is saved, and what is done to put a file back.
 //! (Loading a project that has files included takes them out of the archive and opens them with ffmpeg, which is

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The windows that appear in the middle of the screen: messages, questions, the progress of an
 //! export, and the warning that source files must be chosen again.
 

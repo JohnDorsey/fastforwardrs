@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Everything that talks to the ffmpeg tools: finding them, asking a video what it contains,
 //! decoding frames for the live preview, making the timeline thumbnails and exporting.
 //!

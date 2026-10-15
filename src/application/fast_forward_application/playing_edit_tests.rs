@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of editing something that has keyframes while the playhead moves: a gesture makes at most one keyframe of what it
 //! changes, however many frames of the window it goes on for, and an edit of what has keyframes stops the video that is playing,
 //! as the keyframe is made where the video is stopped.

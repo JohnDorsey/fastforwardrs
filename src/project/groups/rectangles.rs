@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where things are on the timeline as rectangles: so many frames across, and so many tracks down. The rectangle of a clip is the
 //! frames it lasts, on the track it is on; that of a track is every frame of the project, on that track; and that of a group is the
 //! smallest that holds everything in it. It is worked out from where things are whenever it is wanted, and never kept, so that it is

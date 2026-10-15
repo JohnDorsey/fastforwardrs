@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Edits to the project that also have to keep the current frame where the user left it.
 //!
 //! Changing the speed of a clip or a track changes how long it is, and taking a clip away closes

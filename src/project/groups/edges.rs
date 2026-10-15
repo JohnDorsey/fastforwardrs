@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Moving the left or the right edge of a clip group: what is in it is what is inside the frames it is made to have.
 //!
 //! The rectangle of a clip group is never kept, it is worked out from what is in the group (see [`super::rectangles`]): the smallest that holds

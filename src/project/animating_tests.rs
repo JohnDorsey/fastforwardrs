@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of animating the properties of clips and tracks through the project.
 
 use super::tests::{audio_source, first_clip_location, frame, project_with_a_video};

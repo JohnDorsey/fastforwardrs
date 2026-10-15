@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Frame positions in the two different "time lines" the editor deals with.
 //!
 //! The source video has its own frames; the edited timeline has frames of its own, and once a

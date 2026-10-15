@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use super::*;
 use crate::project::PropertyValue;
 use crate::project::tracks::ids::{ClipId, TrackId};

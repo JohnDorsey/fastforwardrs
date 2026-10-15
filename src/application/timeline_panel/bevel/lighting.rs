@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How lit the lines of a clip's bevel are, at each place along them. The light comes from the top left.
 //!
 //! Along the straight part of the left edge and the top edge a line is white, and along the right edge and the bottom edge it is

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of making tracks taller and shorter by dragging the boundary under their title boxes.
 
 use egui::{CursorIcon, Key, Modifiers, PointerButton, Pos2, vec2};

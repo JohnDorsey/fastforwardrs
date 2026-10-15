@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tracks and the clips on them: the part of a project that says what is shown and heard, and
 //! when.
 //!

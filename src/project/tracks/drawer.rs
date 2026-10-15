@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A drawer: the racks of keyframes that a clip, or a track, keeps with it.
 //!
 //! Every clip has a drawer and so does every track, and what is in it goes where it goes: the keyframes of a clip, which

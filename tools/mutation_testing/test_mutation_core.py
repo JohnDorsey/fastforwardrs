@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 John Dorsey
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Checks of what the mutation runner decides without starting a program. Run them with
     py -m unittest discover -s tools/mutation_testing
 (from the folder of the project)."""

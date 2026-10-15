@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of going back and forward through the views the timeline has had, with the Back and Forward buttons of a mouse.
 //!
 //! A view is how far the timeline is zoomed and scrolled, along and up and down. Each thing the user does to it (a turn of the wheel,

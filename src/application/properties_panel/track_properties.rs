@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties of a track: how fast everything on it plays, how loud it is, and whether it is
 //! muted. (They are on top of those of each clip on it.) What is shown of how loud it is and whether it is
 //! muted, when it has keyframes for them, is what they are at the playhead.

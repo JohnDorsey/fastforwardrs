@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A person's view of the editor, for the integration tests that run whole journeys: the real
 //! window drawn frame by frame (without a screen or a graphics card), used with simulated mouse
 //! input, with a real ffmpeg behind it.

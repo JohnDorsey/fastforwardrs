@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Projects for the tests of the plans, made up at random, so that a plan can be checked against
 //! a plain answer worked out one frame at a time.
 

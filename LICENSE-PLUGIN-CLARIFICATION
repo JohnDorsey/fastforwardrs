@@ -1,0 +1,21 @@
+Plugin clarification
+
+fastforwardrs is licensed under the GNU General Public License, version 3 or (at your
+option) any later version (see the file LICENSE).
+
+The copyright holder of fastforwardrs, John Dorsey, states that a program or file (a
+"plugin") which fastforwardrs loads at run time, and which works with fastforwardrs only
+through an interface that is published for plugins (at the time of writing: LADSPA, CLAP,
+ISF and .cube), is not, merely because fastforwardrs loads it and calls it, a work based on
+fastforwardrs, and need not be licensed under the GPL: its authors may license it as they
+choose, free or not.
+
+This clarification does not apply to a plugin that contains code copied from
+fastforwardrs, that is linked into fastforwardrs's own executable, or that uses
+fastforwardrs's internal (unpublished) interfaces; and it gives no permission to copy,
+modify or distribute fastforwardrs itself on any terms other than those of the GPL.
+
+A project file that contains a plugin is a collection of separate works, each under its own
+licence.
+
+Adopted 2026-10-15 (variant A of docs/licence-plugin-clarification-draft.md).

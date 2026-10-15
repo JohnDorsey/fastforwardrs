@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Making a track taller or shorter by dragging the boundary under its title box.
 //!
 //! The boundary is the gap between the title box of a track and the one under it. (Under the last

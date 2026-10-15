@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the wheel and the mouse do to how the preview is zoomed and where its picture is: the wheel zooms about the pointer (and so
 //! does a pinch, or the wheel with Ctrl held), the wheel with Shift held moves the picture across and with Alt held up and down,
 //! and the middle button, held down and dragged, takes hold of the picture and moves it. And the button that brings the picture back to

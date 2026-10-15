@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stand-in speakers for the tests: they take the sound at the speed of real time, as a sound device
 //! does, and keep everything they played, so that a test can look at what was heard and when.
 //!

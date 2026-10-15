@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Changing properties that may be animated, from what the user did to the window.
 //!
 //! A property that has keyframes is changed *at the playhead*: the change is a keyframe there (made if there was none,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The controls of the values of the effects of a clip, of a track or of a group in the properties panel: the box of each effect (see
 //! `chain`, which lays out the boxes with the badges among them and the plus button) has these in it.
 //!

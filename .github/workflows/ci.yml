@@ -90,3 +90,27 @@ jobs:
           python-version: "3.12"
       - name: Unit tests of the mutation tool (the end-to-end ones need a Rust toolchain and are run locally)
         run: python -m unittest discover -s tools/mutation_testing -p "test_mutation_core.py"
+
+  licences:
+    name: licences (REUSE, cargo-deny, third-party notices)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every file has a licence (REUSE 3.3)
+        uses: fsfe/reuse-action@v5
+
+      - name: Licences, advisories, bans and sources of the dependencies (deny.toml)
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: The notices file is up to date (made by `cargo about generate about.hbs`)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      - name: Compare THIRD_PARTY.md with what cargo-about makes now
+        run: |
+          cargo about generate about.hbs > "$RUNNER_TEMP/THIRD_PARTY.md"
+          diff -u THIRD_PARTY.md "$RUNNER_TEMP/THIRD_PARTY.md"

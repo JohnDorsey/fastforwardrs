@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of effects in the window: the plus button of the properties panel that puts them on, the box each has with the controls of
 //! its values, the menu of that box that takes it off, and what the commands for them do (as edits that are undone, and as values that
 //! are changed at the playhead like any other).

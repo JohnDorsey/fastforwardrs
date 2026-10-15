@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The small pictures that make up the video track: one frame for every second of the source
 //! video, made once in the background and kept in memory as compressed JPEGs, and finer ones (two
 //! or four or more for every second) made later for the stretch of the video that is on screen

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Saving the project to a file, and putting files in the project file: where a long copy is done in the background.
 //!
 //! Writing a project file that is an archive copies the files that are put in it, and a video is gigabytes: a project that is saved as

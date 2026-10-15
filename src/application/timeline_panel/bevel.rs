@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The raised look of a clip: a light line along its top and left edges and a dark one along its
 //! bottom and right edges, fading towards the middle, so that two clips of the same dark colour can
 //! still be told apart where they meet.

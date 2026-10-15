@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the picture plan makes of clips that have keyframes: each layer carries them, and says where it is
 //! (and what a text object says) at every frame it is seen at.
 

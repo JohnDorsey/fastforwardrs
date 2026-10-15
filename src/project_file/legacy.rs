@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Project files of versions 1 and 2, which are still read. They had one list of videos and a
 //! single video track; they become a project with one track holding all of the clips.
 //!

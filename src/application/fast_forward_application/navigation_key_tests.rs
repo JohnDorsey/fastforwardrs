@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the keys that take the playhead and the view about: Ctrl and an arrow go to the end of a clip, and F frames what is
 //! selected in the timeline or, with the pointer over the preview, makes the picture of the preview fit its panel.
 

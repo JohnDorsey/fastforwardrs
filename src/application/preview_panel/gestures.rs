@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the mouse does to the preview: a click picks a layer, dragging a layer moves it (and with Shift held it is held to
 //! the edges of the picture, where it comes near them), dragging a corner of the selected layer resizes it, dragging round
 //! from just outside a corner turns it (with Shift held by whole steps of 15 degrees), and the fast-forward symbol is moved

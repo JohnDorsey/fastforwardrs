@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Making groups, changing them, and taking them apart.
 //!
 //! Every change that can break a rule of groups (see [`super::rules`]) is made so that it is taken back, with the rule that it would

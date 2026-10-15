@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the Edit menu, the two settings windows, how the settings are kept, and autosave.
 
 use std::time::{Duration, Instant};

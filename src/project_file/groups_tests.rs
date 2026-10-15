@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of how groups, and the badges in the chains of effects, are saved in a project file and read back, and what is refused when a file
 //! says something that cannot be.
 

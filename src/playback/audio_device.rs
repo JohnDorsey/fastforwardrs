@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The speakers: playing the preview's sound through the operating system's default output device.
 //!
 //! The device asks for sound in small pieces, on a thread of its own, many times a second (see

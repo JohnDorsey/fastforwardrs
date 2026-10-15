@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What is selected: any number of clips, on any of the tracks, any number of tracks, any number of groups, any number of keyframes
 //! and any number of racks of keyframes, all at once if that is how they were chosen.
 //!

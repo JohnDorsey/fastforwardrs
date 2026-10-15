@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Working out where the clips of a track are, after an edit has changed how long some of them are.
 //!
 //! The rule (see the module documentation of [`super`]) is applied the same way for every kind of

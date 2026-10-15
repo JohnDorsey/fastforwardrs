@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Making groups, naming them, putting things in and taking them out, taking them apart, and deleting them with all that is in them.
 
 use super::*;

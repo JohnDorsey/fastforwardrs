@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 John Dorsey
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Plants one deliberate mistake at a time and checks that the tests notice ("mutation testing" by hand-written mistakes).
 
     py tools/mutation_testing/mutate.py MUTATIONS_FILE [words that the names of the mistakes to run contain] [options]

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The videos, pictures and text objects on the preview: drawn where they are in the finished picture,
 //! each turned as far as it is turned, with the outline of the selected one and the handles at its
 //! corners.

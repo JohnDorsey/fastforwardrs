@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The live preview: the finished picture for the current frame, which is every video and text
 //! object that is seen, one over another, each where it is on the picture and turned as far as it
 //! is turned, with the fast-forward symbol over the video that is in front when that is sped up.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Playing the video in the real editor, and measuring how well the preview keeps up with the clock.
 //!
 //! These tests depend on timing, so they live in their own file: cargo runs each test file one

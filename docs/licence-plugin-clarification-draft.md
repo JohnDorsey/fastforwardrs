@@ -1,6 +1,6 @@
 # Plugin clarification: a draft for the copyright holder to decide
 
-Status: **draft, not adopted.** Written 2026-10-15 for phase 0.2 of `plugin-system-plan-of-action.md` (features list, LG-04, Q-34). **This is a technical
+Status: **variant A ADOPTED 2026-10-15** by the copyright holder, John Dorsey; the text is in `LICENSE-PLUGIN-CLARIFICATION`. Written 2026-10-15 for phase 0.2 of `plugin-system-plan-of-action.md` (features list, LG-04, Q-34). **This is a technical
 draft, not legal advice.** Only the copyright holder can adopt it, and it can only be made for work that the copyright holder owns (every contribution by someone else needs that
 person's agreement). It is easy while the program has one author and hard later.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Finding, opening and replacing the project's source files (videos, sounds and pictures), and
 //! making the pictures and waveforms the timeline shows for them.
 

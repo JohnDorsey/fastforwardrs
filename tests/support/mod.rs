@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Shared helpers for the integration tests that run the real ffmpeg.
 //!
 //! The tests make their own small test videos on the fly (nothing large is stored in the

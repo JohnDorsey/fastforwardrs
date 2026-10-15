@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use super::*;
 use crate::composition::test_projects::{
     LONG_VIDEO, SHORT_SILENT_VIDEO, SOUND_FILE, media_clip, project_of, random_project,

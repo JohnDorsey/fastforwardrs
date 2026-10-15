@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the user is told when the rules of groups do not let an edit be made: a copy, a track that is moved, a clip that is made to
 //! last longer or to play slower, a new text object, a new frame rate. In each of them the project stays as it was and nothing is an unsaved
 //! change, and the message says which rule it is and names what is in the way.

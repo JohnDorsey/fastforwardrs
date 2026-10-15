@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The controls for where a video, a picture or a text object is on the picture: where its middle is, how wide and tall it is,
 //! and how far it is turned. (They can be changed on the preview, too, by dragging the thing and its corners, which is
 //! quicker; these are for the exact numbers, and for the buttons that make keyframes of them.)

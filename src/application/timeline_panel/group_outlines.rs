@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The outlines of groups on the timeline: a line in the colour of the group that goes round everything that is in it, drawn over the clips
 //! and under the playhead, 2 points thick (3 while the group is selected).
 //!

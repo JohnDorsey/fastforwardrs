@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Exporting a project as a finished video file.
 //!
 //! The export has three parts, each testable on its own:

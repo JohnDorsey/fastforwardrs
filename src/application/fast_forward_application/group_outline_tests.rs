@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the outlines of groups as they are drawn in the window: where, in what colour, how thick, over what and under what, and where they
 //! are cut off.
 

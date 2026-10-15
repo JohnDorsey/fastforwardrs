@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Finding out whether a source file can be used: trying the places it might be until one of
 //! them opens as a video or a sound.
 

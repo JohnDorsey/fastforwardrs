@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the commands about keyframes and racks do in the editor: where a keyframe that was just made is seen,
 //! and moving, taking away and selecting keyframes.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where the fast-forward symbol (">> 4x") sits on the picture and how big it is.
 
 /// The position and size of the fast-forward symbol, shared by the whole project: every

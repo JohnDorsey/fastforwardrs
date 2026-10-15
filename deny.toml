@@ -1,0 +1,53 @@
+# Policy for `cargo deny check` (see docs/plugin-system-plan-of-action.md, phase 0.2, and LG-02 to LG-07 of the features list).
+#
+# The program is GPL-3.0-or-later, so what it is built from must be licensed so that it can be part of a GPLv3 program. This lists the
+# licences that are accepted; a dependency whose licence is "A OR B" is fine when one of them is on the list.
+
+[graph]
+# The systems the program is built for (a dependency that is only used on one of them still has to pass).
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+]
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    # The program's own licence.
+    "GPL-3.0-or-later",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    # File-level copyleft that GPLv3 allows (MPL-2.0, section 3.3, lists the GPL as a licence it can be combined with).
+    "MPL-2.0",
+    # The fonts of egui (epaint_default_fonts): separate font files, not code.
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+
+[bans]
+# Two versions of one crate are common in a tree this big; they are listed, not refused.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+ignore = [
+    # `ttf-parser` is unmaintained (not vulnerable). It comes in through our own `ab_glyph` and through `cosmic-text` -> `fontdb`, and through
+    # `winit` -> `sctk-adwaita` -> `ab_glyph`; there is no upgrade to make, and the advisory names `skrifa` (already in the tree) as the way forward.
+    # Look again when `ab_glyph` and `cosmic-text` move off it.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, not vulnerable; no upgrade is available; reached through ab_glyph and cosmic-text" },
+]

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sound half of the filter graph: each clip cut out of its file and made to fit, the clips of a
 //! track joined with silence between, and the tracks mixed together.
 

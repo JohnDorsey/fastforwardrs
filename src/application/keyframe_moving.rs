@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Moving keyframes by dragging them: how far they can go.
 //!
 //! Dragging a keyframe moves it as far as the pointer goes along the timeline (as far as the drawer its rack is in has frames for,

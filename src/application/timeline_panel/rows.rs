@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The rows of the timeline: for each track, its title box and its strip, one row under another.
 //!
 //! The rows are laid out one under another, as tall as their tracks are, which is what makes the rows area as

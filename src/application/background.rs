@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Work done on another thread whose single result is collected later, so that the window never
 //! freezes while a video is being opened.
 

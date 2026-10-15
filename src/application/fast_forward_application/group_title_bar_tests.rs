@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the names of groups on the timeline, in bars that are shown while the pointer is over a group: where they are, what they are like,
 //! and what clicking and dragging them does.
 

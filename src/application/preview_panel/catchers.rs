@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The widgets that take the mouse on the preview.
 //!
 //! One of them is over all of the panel the preview is in, and takes every press on it. What a press is

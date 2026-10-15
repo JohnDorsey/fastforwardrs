@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What a press on the preview takes hold of.
 //!
 //! This is worked out from where the press was and what is on the preview, and from nothing else: not

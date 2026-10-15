@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The exact shape of a project file on disk (the current version, 10).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file

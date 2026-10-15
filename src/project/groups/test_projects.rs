@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Projects with clips at places that are known, to try groups on. (Text clips are used because they last exactly as long as they are
 //! asked to, and need no file.)
 

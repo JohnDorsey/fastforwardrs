@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of dragging keyframes, alone and with clips, and of drawing a rectangle round keyframes to select them.
 
 use egui::{Key, PointerButton, Pos2, vec2};

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the picture is at every frame: which videos and text objects are seen, one over another,
 //! and where each is on the picture.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of clips that are put in the rectangle of a clip group joining it, and of what a drag remembers so that they are out of it again
 //! when they are dragged out.
 

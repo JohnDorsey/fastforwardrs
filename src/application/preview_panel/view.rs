@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How the preview is zoomed, and which part of the picture it shows.
 //!
 //! The picture is drawn as big as it can be in the panel to begin with (it *fits*), and can be zoomed out, until it is half as big

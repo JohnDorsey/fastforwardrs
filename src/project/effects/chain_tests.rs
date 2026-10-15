@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The chain of a clip, a track or a group: its effects, with the badges that say where the effects of something else are applied, and
 //! how they are moved.
 

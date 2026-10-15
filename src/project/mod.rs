@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What a project *is*: the files it is made from, the tracks (in front-to-back order) with the
 //! clips on them, where the fast-forward symbol goes, and the settings the project has chosen for
 //! itself.

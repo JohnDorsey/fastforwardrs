@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Random commands in the window: the commands that make groups, change them and take them apart, together with the commands that edit
 //! clips and tracks, as a person gives them one after another. After each, no rule of groups is broken and everything that is selected is in
 //! the project; and what changed the project is one step of the history, which undoes to the project as it was and redoes to the project as

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What can be animated, and the values it takes: the properties of clips and of tracks that can change over
 //! time, each with the kind of value it has.
 

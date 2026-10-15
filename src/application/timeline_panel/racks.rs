@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The racks of keyframes in the drawers and the keyframe crates of the timeline: where they are on the screen, what they
 //! look like (see [`super::rack_look`]) and what the mouse does to them.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where the fast-forward symbol goes inside a picture. The live preview and the export both use
 //! this, so the symbol lands in the same place in both.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The rules that a project's groups have to keep, written once, as a check that finds every way they are broken.
 //!
 //! Nothing here changes anything. The editing of groups, and every edit of clips and tracks that could break a rule, is made so that

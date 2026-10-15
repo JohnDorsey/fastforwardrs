@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Dragging clips, keyframes and racks of keyframes: where the pointer takes them.
 //!
 //! A drag is begun by pressing a clip, a keyframe or a rack and moving the pointer a little (see the `strip` and `racks` modules,

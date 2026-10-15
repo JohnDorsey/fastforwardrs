@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Dragging racks of keyframes: where the pointer takes them.
 //!
 //! A drag is begun by pressing a rack (see the `racks` module, which notes what was taken hold of): the rack that was pressed, and

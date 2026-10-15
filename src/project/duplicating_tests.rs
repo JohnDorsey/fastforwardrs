@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of copying a clip beside itself, and a track in front of or behind itself, with what is in their drawers.
 
 use super::racks_tests::{

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of selecting racks of keyframes (by command, with the mouse, and the keys that are about what is selected), and of what the
 //! properties panel says of the racks that are selected.
 

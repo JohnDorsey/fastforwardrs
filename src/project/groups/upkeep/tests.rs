@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the edits of clips and tracks do about groups: clips that are cut, copied or deleted are in and out of the groups, and an edit that
 //! would break a rule is not made.
 

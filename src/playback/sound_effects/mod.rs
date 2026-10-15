@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The editor's own little sounds: signs that something was done (a clip was cut, say), as opposed to the sound of
 //! the project, which the preview plays ([`super::AudioSupplier`]).
 //!

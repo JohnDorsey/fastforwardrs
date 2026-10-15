@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A picture (a photograph, a logo) that is shown for a while: which file it is, for how long, and
 //! where on the picture it is.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the commands about groups do, and what the user is told when one cannot be done.
 
 use std::time::Instant;

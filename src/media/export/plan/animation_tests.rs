@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the export makes of layers that have keyframes: the section they are in is cut into the stretches over which what
 //! is exported does not change.
 

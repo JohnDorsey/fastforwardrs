@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The menus that open when a rack of keyframes, or a keyframe, is right-clicked.
 //!
 //! Each is about what is selected when the one that was clicked is one of what is selected (right-clicking one of several selected

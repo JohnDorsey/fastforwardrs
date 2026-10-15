@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Groups: things that are put together so that they can be given effects, and can be seen to belong together.
 //!
 //! There are three kinds, and each is held to different rules (the words in brackets are what the rules of the maintainer call them):

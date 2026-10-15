@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The strip of one track: its clips, and what the mouse does to them.
 //!
 //! * Clicking a clip selects it (with Ctrl held, it is added to what is selected or let go of), and

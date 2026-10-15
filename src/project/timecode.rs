@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Showing a timeline position as `hh:mm:ss.ff`, where `ff` is the frame within the second.
 
 use super::{FrameRate, TimelineFrameIndex};

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A rack: the keyframes of one property of one clip or track, which are kept together so that they can be moved as a group.
 //!
 //! A rack is in a drawer (see [`super::drawer::Drawer`]) of a clip or of a track, or in a keyframe crate, and what it

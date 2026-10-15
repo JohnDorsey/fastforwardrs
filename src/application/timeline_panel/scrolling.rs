@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where the strips are scrolled to, and how far they are zoomed, and how far the rows are zoomed up and down.
 
 use egui::{Context, Rect, Ui};

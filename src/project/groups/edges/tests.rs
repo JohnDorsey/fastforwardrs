@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of moving the edges of a clip group: what it takes in and lets go of, and the places an edge can be put at.
 
 use super::*;

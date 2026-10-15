@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The colour a group is drawn in, everywhere in the window: its outline on the timeline, the bar at the head of its box in the
 //! properties panel, and the badges that say a clip, a track or another group is in it.
 

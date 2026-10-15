@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the mouse does to racks of keyframes and to the keyframes in them: selecting racks, the menu of a rack and the menu of
 //! a keyframe (merging racks, copying keyframes, taking them away), and dragging keyframes from one rack to another.
 

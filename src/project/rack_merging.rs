@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Merging racks: the keyframes of several racks of one property of one thing become the keyframes of one rack.
 //!
 //! Racks of one property of one thing are not merged by being put in the same drawer (see [`super::tracks::Drawer`]): each keeps

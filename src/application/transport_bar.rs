@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The row along the top of the timeline panel: the stop, play and pause buttons, the current time next to them, and the
 //! slider through the whole video that fills the rest of the row.
 

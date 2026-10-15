@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 John Dorsey
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """What the mutation runner decides without starting a program: which mistakes to plant, how to plant one in a text, which tests to
 run first, and what a run of `cargo test` printed means. It is all plain functions on text, so that `test_mutation_core.py` can check
 it without cargo (and `test_mutate_end_to_end.py` checks it together with the real cargo)."""

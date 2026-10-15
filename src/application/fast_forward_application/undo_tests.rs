@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of undo and redo in the real window: the keys, the Edit menu, what one step takes back, and
 //! what is not an edit.
 

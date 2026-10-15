@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The box at the left of each track: the track's title, which can be changed by typing in it. Clicking the
 //! box (or its title) selects the track, which is not the clips on it: the settings of the track are then
 //! shown in the properties panel. Right-clicking the box (or its title) opens a menu to put a copy of the track above it or

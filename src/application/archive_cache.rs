@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where the files that are taken out of project archives are kept while the project is open.
 //!
 //! A file that is included in a `.ffrs` project file is in the archive as it is, but ffmpeg, which plays and reads every video and

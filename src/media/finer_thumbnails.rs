@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Making the finer thumbnails of one video, one run of ffmpeg at a time, for the pictures that the
 //! timeline says it wants and does not have.
 //!

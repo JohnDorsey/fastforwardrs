@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The keyframes of one property: the values it has at some frames, from which it is worked out at every other.
 //!
 //! Frames are counted from the start of whatever the keyframes belong to (a clip, or the whole timeline for a track).

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the menus that make groups (the menu of a selection of clips, and the menu of the box of a track): what they offer, what choosing
 //! an item does (the group that is made is the only thing that is selected afterwards, and it is one step of the history), and what the
 //! user is told when it cannot be done.

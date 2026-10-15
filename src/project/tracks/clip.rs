@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A clip: one thing on a track. It is a piece of a video, a piece of a sound file, a picture, a
 //! text object or a keyframe crate.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sound of a cut: the snip of scissors, made from nothing (the editor has no sound files of its own).
 //!
 //! Scissors close with a quick slide of the blades, "shh", that ends in the hard little knock of the blades

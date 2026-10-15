@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the panel shows when more than one thing is selected: their properties cannot be changed together,
 //! so they are listed, in a yellow outline like the one round a selected clip. Clicking one of them selects
 //! just that one, and its properties are shown.

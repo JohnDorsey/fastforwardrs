@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The exact shape of the settings file on disk. As with the project file, these types are kept
 //! apart from the model ([`crate::project::Settings`]) so that the file format stays readable by
 //! future versions while the model is free to change.

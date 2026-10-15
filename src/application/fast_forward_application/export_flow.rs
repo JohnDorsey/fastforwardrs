@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Exporting the finished video, and keeping track of how it is going.
 
 use std::cell::RefCell;

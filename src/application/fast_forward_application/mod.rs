@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The application itself: the state of the editor, and what happens on each frame of the window.
 //!
 //! The work is divided between files by what it is about, all adding to the one

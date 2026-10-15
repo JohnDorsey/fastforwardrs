@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The files a project is made from (videos, sound files and pictures), and how the project finds
 //! them again.
 

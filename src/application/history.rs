@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Going back and forward through the edits that were made: undo and redo.
 //!
 //! Before an edit is made to the project the editor keeps a copy of it, and undoing the edit is

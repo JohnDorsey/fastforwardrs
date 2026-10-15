@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Exporting projects of several tracks with the real ffmpeg, checked picture by picture and tone by
 //! tone against what the project says the finished video must be: empty time is black, the video in
 //! front is the one seen, the sound of every track is mixed, and the speed and volume of a track

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the question that is asked before a change that would lose keyframes is made: when it is asked, what it says, and what
 //! becomes of the change and of the keyframes whichever way it is answered.
 

@@ -1,0 +1,30 @@
+# Third-party notices
+
+fastforwardrs itself is licensed under the GNU General Public License, version 3 or (at your option) any later version (`LICENSE`, `LICENSE-PLUGIN-CLARIFICATION`).
+This file lists the libraries it is built from and the licences they come under. It is made by `cargo about generate about.hbs > THIRD_PARTY.md`
+(see `about.toml`); do not edit it by hand.
+
+**Not Rust libraries:** the font `assets/fonts/Hack-Regular.ttf` (MIT and the Bitstream Vera licence; the licence file is next to it), and the programs
+`ffmpeg` and `ffprobe`, which are run as separate programs and are not part of this program. A GPL build of ffmpeg is licensed GPLv3 or later; the
+source of the ffmpeg that is shipped with a release is to be offered with it (`docs/plugin-system-features.md`, LG-03).
+
+## Licences used
+
+| Licence | Libraries |
+|---|---|
+{{#each overview}}| [{{{name}}}](#{{id}}) | {{count}} |
+{{/each}}
+
+{{#each licenses}}
+## {{{name}}} <a id="{{id}}"></a>
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+```text
+{{{text}}}
+```
+
+{{/each}}

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The playback clock: which frame of the timeline is the current one, while playing or paused.
 
 use std::time::{Duration, Instant};

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of zooming the rows of the timeline up and down with Ctrl and Alt and the mouse wheel.
 //!
 //! The zoom is how the timeline is looked at (not an edit, and not kept with the project): every row is as many times as tall as

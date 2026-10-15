@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests that a window that is not changing puts nothing on the graphics card. A picture that is there stays there: it is not sent
 //! again and again, however it is put on the screen.
 //!

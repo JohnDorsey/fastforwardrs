@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A keyframe crate: a clip that has no picture and no sound, and holds racks of keyframes in its drawer.
 //!
 //! A crate is how racks of keyframes are put on a track on their own, where they are not in the drawer of a clip: it is a

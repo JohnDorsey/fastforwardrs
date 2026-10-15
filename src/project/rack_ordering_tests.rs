@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of where a rack goes among the racks of the drawer it is put in: moving a rack up and down in its drawer, and putting it
 //! at a place among the racks of another.
 

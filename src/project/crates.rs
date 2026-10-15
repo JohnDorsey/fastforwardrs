@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keyframe crates: making them, and keeping each exactly as long as the keyframes in it need.
 //!
 //! A crate (see [`CrateClip`]) is a stretch of a track that holds racks of keyframes, and it lasts from its first keyframe (in

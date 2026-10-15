@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Decoding a still image file (a photograph, a logo) into the pixels the preview draws.
 //!
 //! ffmpeg does it, as it does for the export, so that the preview and the finished video are made

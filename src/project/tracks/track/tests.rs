@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use super::editing::{ClipEditError, InsertError, SplitError};
 use super::*;
 use crate::project::tracks::image_clip::ImageClip;

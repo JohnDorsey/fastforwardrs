@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The playhead: a red line down through the tracks that shows the current frame, with a small red
 //! triangle in the ruler above it that points down into the start of the line.
 

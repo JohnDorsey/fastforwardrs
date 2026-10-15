@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The settings: which are in effect, changing them, and keeping the global ones in their file.
 
 use std::path::PathBuf;

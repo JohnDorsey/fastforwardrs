@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sound of the live preview in the real editor, with the real ffmpeg: the right sound must
 //! reach the speakers, at the right time.
 //!

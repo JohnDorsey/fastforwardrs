@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of moving a track to another place in the list by dragging its title box: the row follows the pointer,
 //! the other rows move out of its way, and where it is let go it is put.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the parts of the preview are known by: to screen readers, to the tests, and to egui (which tells the
 //! widgets apart by their ids).
 

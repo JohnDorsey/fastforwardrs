@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The controls that the properties of more than one kind of thing have: the sliders for speed and
 //! loudness, and the rows they are put in.
 

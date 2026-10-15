@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the chain of effects in the properties panel: the boxes of the effects with the badges among them (of the tags that a clip or a
 //! group is in, of the track of a clip, and last of the clip group or track group it is in), which are all taken hold of and put in another
 //! place by dragging, and which a double click on a badge goes from to what it stands for.

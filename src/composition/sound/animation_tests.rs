@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the sound plan makes of clips and tracks that have keyframes for how loud they are and whether they are
 //! silent.
 

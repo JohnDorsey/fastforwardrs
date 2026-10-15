@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The ruler: a strip just above the tracks with marks along its bottom edge like the marks on a
 //! ruler, the longest of them labelled with the time they are at (which marks there are depends on
 //! how far the timeline is zoomed: see the geometry). Clicking or dragging in it moves the playhead

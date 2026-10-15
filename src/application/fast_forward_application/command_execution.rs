@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What each [`Command`] does.
 //!
 //! The commands of one frame of the window are carried out together ([`FastForwardApplication::execute_all`], after the user has

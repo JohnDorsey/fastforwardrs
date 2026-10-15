@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of dragging a rack of keyframes: into another drawer, onto an empty part of a track (where it is in a keyframe crate),
 //! sideways in its drawer, and what is said when it cannot go where it is over.
 

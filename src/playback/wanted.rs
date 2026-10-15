@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Working out which source pictures the preview needs for a position on the timeline.
 //!
 //! Every video that is seen at a frame needs a picture, and each track's video has a stream of

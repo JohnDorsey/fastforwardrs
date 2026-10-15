@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the timeline remembers between frames of the window: how far it is scrolled and zoomed,
 //! what is being dragged, and the like.
 

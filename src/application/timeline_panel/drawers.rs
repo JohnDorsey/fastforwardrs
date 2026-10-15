@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Drawers on clips and on tracks: a clip has a drawer under it and so does a track, which slides open when the wide, thin
 //! button at the bottom edge of the clip (or of the box of the track) is clicked, and shut when it is clicked again. A drawer
 //! holds the racks of keyframes that are kept with what it is on, which move along with the clip when it is moved.

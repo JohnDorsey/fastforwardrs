@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reading the progress that ffmpeg reports while it exports.
 //!
 //! With `-progress pipe:1`, ffmpeg prints a block of `key=value` lines every half second or so,

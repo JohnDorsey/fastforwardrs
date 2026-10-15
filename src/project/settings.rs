@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The settings that decide how the program behaves.
 //!
 //! There are two layers. The **global settings** belong to the program and are the same for every

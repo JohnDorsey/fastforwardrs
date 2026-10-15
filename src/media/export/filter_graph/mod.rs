@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Building the ffmpeg filter graph that turns a project into the finished video.
 //!
 //! This is pure text-building with no processes involved, so every detail of it can be checked in

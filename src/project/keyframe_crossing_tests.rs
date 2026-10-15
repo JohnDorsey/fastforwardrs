@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of keyframes that go from one rack to another: which racks a keyframe can go to, what it keeps (its name, its value, its
 //! place in time), what happens to the racks and crates it leaves, and how far keyframes that are dragged to other racks can go.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of dragging racks of keyframes along the timeline together: several racks that are selected together, and racks that are
 //! selected with clips or with keyframes. (A rack that is dragged on its own goes to other drawers and other places in the drawer
 //! it is in, which is in `rack_drag_tests`.)

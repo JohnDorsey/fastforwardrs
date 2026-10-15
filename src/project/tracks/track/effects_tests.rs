@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the effects of a track and of the clips on it: which can have which, putting them on and taking them off, their values,
 //! and that they stay with a clip when it is cut, copied and moved.
 

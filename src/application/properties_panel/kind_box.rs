@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The box the properties of one thing are in: a rounded box, a little lighter than the panel, with the name
 //! of the kind of thing it is at the top. (Under it are the boxes of its effects, and the button that adds one: see `chain`.)
 

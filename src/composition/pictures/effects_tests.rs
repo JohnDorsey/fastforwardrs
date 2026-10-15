@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the picture plan makes of the effects of clips and of tracks: each layer carries those of its clip and then those of
 //! its track, with the keyframes of their values, and says what they are at every frame it is seen at.
 

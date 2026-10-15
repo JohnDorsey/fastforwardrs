@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Streams of pictures that do what a test tells them, instead of running ffmpeg: for the tests of
 //! the things that are supplied pictures by streams.
 

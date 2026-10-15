@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Random edits of projects with groups: whatever is done, in whatever order, no rule of groups is left broken, and an edit that is refused
 //! changes nothing.
 //!

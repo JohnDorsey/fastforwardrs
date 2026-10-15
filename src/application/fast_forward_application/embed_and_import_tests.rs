@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the two ways to import a file: "Embed and import", which puts the file in the project file as well as on the timeline (and
 //! first asks that the project file be a `.ffrs` file), and "Link and import", which leaves the file where it is.
 //! (What opening a file really is, with ffmpeg, is checked in `tests/application_journeys.rs`: here the file is said to have opened.)

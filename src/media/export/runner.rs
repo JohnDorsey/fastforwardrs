@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Running an export: starting ffmpeg, reporting its progress, and finishing or cancelling cleanly.
 
 use std::fs;

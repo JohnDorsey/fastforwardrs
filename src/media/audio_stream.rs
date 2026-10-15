@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Decoding the sound of the live preview.
 //!
 //! The preview's sound must be what the export will have. So a stream is told, in the editor's own

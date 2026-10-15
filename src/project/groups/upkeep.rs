@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keeping the groups right while clips and tracks are edited.
 //!
 //! Most edits of clips and tracks have nothing to do with groups, and some can break their rules: a clip that is dragged into the

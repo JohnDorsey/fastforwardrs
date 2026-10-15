@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Holding a dragged thing to the time it started at, for as long as it is on another row: a clip that is dragged from one
 //! track to another, or a keyframe that is dragged from one rack to another.
 //!

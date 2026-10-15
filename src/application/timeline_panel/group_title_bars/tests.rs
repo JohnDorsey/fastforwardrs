@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of where the name of a group is put, and of what the pointer is over.
 
 use egui::{pos2, vec2};

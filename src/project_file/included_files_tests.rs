@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of project files that have files included in them: saved as an archive, read back, and what is refused.
 
 use std::collections::HashMap;

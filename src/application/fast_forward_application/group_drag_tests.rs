@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of dragging clips in the window where there are clip groups: what is dragged stops against the rectangle of a group as it stops
 //! against another clip, follows the pointer when it comes back, and is not refused with a message when it is let go of.
 

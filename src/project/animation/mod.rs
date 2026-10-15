@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Animation: properties of clips and of tracks that change over time, by keyframes.
 //!
 //! A property is animated when it has keyframes: values at some frames, from which it is worked out at every other

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Copying keyframes: a keyframe, or a group of them, is copied to the frames after it or the frames before it, in the rack it is
 //! in, so that what was made once can be made again at another time.
 //!

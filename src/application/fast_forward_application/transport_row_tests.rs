@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the row at the top of the timeline panel: the buttons, the time, and the slider that fills the rest of the row.
 
 use egui::Rect;

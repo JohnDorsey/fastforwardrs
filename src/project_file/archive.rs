@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The archive that a project file can be: a zip file that has the project in it, as the same JSON that a plain project file is,
 //! and the files that the user chose to include in it (see [`crate::project::SourceMediaLink::included_as`]).
 //!

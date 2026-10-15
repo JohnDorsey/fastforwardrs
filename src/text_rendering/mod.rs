@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Making the picture of a text object, for the preview and the export alike.
 //!
 //! The text is laid out and drawn by the `cosmic-text` library, which knows the fonts of the

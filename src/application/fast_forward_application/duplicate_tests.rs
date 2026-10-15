@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the menus that put a copy of a clip right beside it, or a copy of a track in front of it or behind it (and delete
 //! what they are about): what they offer, what choosing does, to what, and that each is one step of the history.
 

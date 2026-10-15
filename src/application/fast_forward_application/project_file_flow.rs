@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Starting a new project, and loading and saving project files.
 //!
 //! A project file is a `.ffrs` file, which is an archive that can have files included in it, or plain JSON, which is a file that

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Drawing the clips of a track. Each clip has its own corners rounded a little, and is drawn
 //! according to what it is made of:
 //!

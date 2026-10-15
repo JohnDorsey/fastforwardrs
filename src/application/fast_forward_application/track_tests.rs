@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the tracks: their title boxes, the round button that adds one, the order they are in,
 //! and deleting one. (Selecting a track is in `track_selection_tests`, and the settings of a track, which are
 //! in the properties panel, in `properties_panel_tests`.)

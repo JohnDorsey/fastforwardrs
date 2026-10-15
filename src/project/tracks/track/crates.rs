@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Giving a keyframe crate another stretch of its track: a crate lasts exactly as long as the keyframes in it need, so
 //! its first and last frames change as they do (see [`crate::project::CrateClip`]).
 

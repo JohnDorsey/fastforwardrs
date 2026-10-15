@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of putting effects on the clips and the tracks of a project and taking them off, of their values and keyframes, and of what
 //! happens to them when a clip is cut, copied, moved or put back as it was.
 

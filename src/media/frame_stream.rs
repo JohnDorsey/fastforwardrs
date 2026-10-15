@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Decoding the frames of the live preview.
 //!
 //! The preview must show exactly the frames the export will contain. So a stream is told, in the

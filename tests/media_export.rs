@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Exporting projects with the real ffmpeg, checked picture by picture against what the project
 //! says the finished video must contain.
 

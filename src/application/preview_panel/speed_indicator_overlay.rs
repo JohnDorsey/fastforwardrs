@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The fast-forward symbol on the preview, which can be dragged to move it and resized by its corner.
 //! (What dragging does is decided with everything else on the preview, see `gestures`; this is where the
 //! symbol is on the screen and what it looks like.)

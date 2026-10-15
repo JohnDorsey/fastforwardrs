@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The effects of groups, the rows of a chain as the properties panel shows them, moving things in a chain, and which effects are applied to a
 //! clip and in what order.
 

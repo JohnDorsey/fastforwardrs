@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The picture half of the filter graph: each section is black with its layers laid over it, the
 //! one at the back first, and all of the sections are joined in order.
 //!

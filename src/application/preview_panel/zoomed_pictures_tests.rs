@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of how the pictures on the preview are put on the screen: blended, until the picture is zoomed so far that the pixels of it
 //! can be seen, and then as blocks; and with the colours that the effects of each layer make. The pictures are small ones, drawn on
 //! a picture that has a lot more pixels, so that this can be seen with a few: what is looked at is what the graphics card has been

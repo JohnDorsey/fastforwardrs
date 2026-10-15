@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Speakers for tests of the sound effects: they make no sound, and keep a log of what they were asked to play
 //! and what was done with them, which the test looks at.
 

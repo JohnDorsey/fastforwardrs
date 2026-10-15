@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Animating a property of a clip or of a track: what it is at a frame, whether and where it has keyframes, making one and
 //! taking one away, and changing the property at a frame.
 //!

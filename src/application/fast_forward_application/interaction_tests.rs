@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests that use the real window: they send it the mouse and keyboard input a person would
 //! and check what the project and the playback did. (The window and the ways of using it are in
 //! [`super::test_window`].)

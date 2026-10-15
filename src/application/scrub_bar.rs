@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The slider that spans the whole timeline, on the row of the play buttons (see [`super::transport_bar`]). Dragging it
 //! moves quickly through the video, and the current frame follows.
 

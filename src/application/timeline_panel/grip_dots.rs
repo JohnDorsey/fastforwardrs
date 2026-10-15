@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Grip dots: a few tiny bumps, like braille, that say that what they are on can be taken hold of and dragged: the
 //! top of the box of a track, the top of a clip, the left end of a rack of keyframes.
 //!

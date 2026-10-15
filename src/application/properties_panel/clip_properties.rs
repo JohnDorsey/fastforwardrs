@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties of a clip: of a video or a sound, how fast it plays and how loud; of a picture, how long
 //! it is shown; and of a text object (see `text_properties`). Of a video, a picture and a text object, where it is on the
 //! picture (see `placement_controls`).

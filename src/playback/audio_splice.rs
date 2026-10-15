@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Joining a new stretch of sound onto the sound that is waiting at the speakers.
 //!
 //! When something that is heard is edited while the video plays (a volume is changed, say), the

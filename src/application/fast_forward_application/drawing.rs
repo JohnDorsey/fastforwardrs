@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Laying out the window: the menu bar along the top, and under it the panels: the properties panel at the
 //! left, the preview at the right of it, and along the bottom the timeline with the play buttons, the time and the
 //! slider on one line over it.

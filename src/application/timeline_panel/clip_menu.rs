@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The menu that opens when a clip is right-clicked: put a copy of it right beside it, on either side, or delete it.
 //!
 //! The menu is about the clips that are selected when the clip that was clicked is one of them (right-clicking one of several

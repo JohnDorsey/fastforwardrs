@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of where the outlines of groups are, worked out from where the rows are on the screen.
 
 use egui::{Rect, pos2, vec2};

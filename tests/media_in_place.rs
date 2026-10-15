@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reading the files that are included in a project archive where they are in it, with the real ffmpeg: a stretch of an archive is
 //! given to ffmpeg as its `subfile` protocol, and what ffmpeg makes of it must be what it makes of the file that was put in the
 //! archive, for everything the editor asks of it: what a file is, its pictures, its sound, the thumbnails, the waveform and the

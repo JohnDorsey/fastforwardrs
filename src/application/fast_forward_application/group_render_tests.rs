@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests that the window can draw whatever groups there are: projects that were made by many edits in random order (with tags, clip groups and
 //! track groups, groups in groups, effects and badges in the chains) are shown, with each group, each clip and each track selected in turn, so
 //! that the outlines on the timeline and the box and the chain of effects in the properties panel are drawn for all of them.

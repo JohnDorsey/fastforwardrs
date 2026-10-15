@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The row of thumbnail pictures that a video clip is made of.
 //!
 //! A video clip on a track is a row of pictures taken from the video, laid side by side with no

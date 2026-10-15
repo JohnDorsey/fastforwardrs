@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what is done to videos and text on the preview with the mouse: picking one, moving it,
 //! resizing it by a corner and turning it by dragging just outside a corner.
 

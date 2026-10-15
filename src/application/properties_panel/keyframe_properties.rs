@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties of a keyframe: which property of what it is a keyframe of, and where it is in time. (What the property is
 //! at that moment is changed with the controls of what it is a property of, with the playhead put on the keyframe.)
 

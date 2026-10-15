@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Moving the left or the right edge of a clip group, by taking hold of it where it is drawn: the clips that are inside the frames the edge is
 //! then put at are in the group, and the group lets go of those that are not (see [`crate::project::Project::set_the_frames_of_the_clip_group`]).
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keeping the live preview supplied with the right picture.
 //!
 //! The preview shows one picture at a time: the one for the current frame of the timeline. Getting

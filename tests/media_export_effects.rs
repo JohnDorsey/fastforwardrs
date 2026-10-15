@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Exporting projects whose clips and tracks have effects with the real ffmpeg, checked colour by colour against what the effect
 //! says: a hue shift of a flat colour comes out as the colour that the arithmetic of the effect says, whether the effect is of the
 //! clip or of the track, and for a picture, a text object, and a value that has keyframes; and the hue shift of a group, of each of the three

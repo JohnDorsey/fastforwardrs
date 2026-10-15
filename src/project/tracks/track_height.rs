@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How tall a track is on the screen.
 //!
 //! This is not something a video is made of, but it is something a person arranges to suit

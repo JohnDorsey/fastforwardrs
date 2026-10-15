@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the box that the properties panel shows for a group: the outline and the bar at its head (the kind, the name that is typed, the
 //! colour, the menu that disbands the group or deletes it with what is in it), and the list of what is in the group (a member is selected by
 //! a double click, and a right click takes it out).

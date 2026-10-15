@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The shape of a sound, for drawing it on the timeline: how loud it gets, for every hundredth of a
 //! second of it.
 //!

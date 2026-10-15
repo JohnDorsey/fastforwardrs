@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Drawing the fast-forward symbol: two filled triangles and the speed factor, such as `▶▶ 4x`,
 //! in white with a dark outline so that it can be read on top of any footage.
 //!

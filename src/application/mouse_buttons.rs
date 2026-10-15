@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the extra buttons of a mouse do, which are shortcuts of the whole window, as the keys are (see [`super::keyboard`]):
 //!
 //! * **Back** (the button under the thumb of most mice that have one) goes back to the view the timeline had before the latest thing

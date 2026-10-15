@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the sounds that drawers make: one as a drawer slides open and another as it slides shut, played by the editor like the
 //! snip of a cut is. (What the sounds are like is the business of `playback::sound_effects::drawer`; these are about when they
 //! are made.)

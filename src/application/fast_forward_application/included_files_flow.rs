@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Including the files a project is made from in the project file, and taking them out again.
 //!
 //! A project file that is a `.ffrs` archive can have files in it (see [`crate::project_file::archive`]): the ones that the user

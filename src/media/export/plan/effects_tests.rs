@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of how the export is made to do what the effects of clips and tracks do: the filter that changes the colours of a picture and
 //! where it is in the filter graph, and the stretches that a value of an effect that has keyframes is cut into.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A row of the properties panel that has a control for a property that can be animated: the control, and at the right of it
 //! (while the pointer is over the row) the buttons that make keyframes and go to them.
 //!

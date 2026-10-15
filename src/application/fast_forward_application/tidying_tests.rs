@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of writing the project file again without the garbage that saving adds to it leaves in it: when the user saves (and nothing is
 //! read in place), and when the window is closed (and everything that is read in place is let go of first). Never by an autosave.
 //! (With real files read in place by ffmpeg, which is what makes it fail on Windows when something still has the file open, it is

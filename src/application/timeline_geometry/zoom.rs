@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Zooming the strips in and out: how far that can go, and what it does to where they are scrolled to.
 //!
 //! The zoom is how many points of the screen one second of the finished video takes up. Zooming

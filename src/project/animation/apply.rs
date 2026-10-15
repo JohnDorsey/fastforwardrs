@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the properties are for a clip or a track, one at a time: how each is read out of what a clip says, and
 //! written into it, and how an [`Animation`] gives the values that a clip has at a frame.
 //!

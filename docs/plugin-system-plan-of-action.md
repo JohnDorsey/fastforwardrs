@@ -62,6 +62,10 @@ and every later phase uses them.
 * **0.2 Licence mechanics** (LG-06, LG-07) [P]. `LICENSE` (GPLv3), `license = "GPL-3.0-or-later"` in `Cargo.toml`, an SPDX line in each source file (checked by `reuse lint`),
   `THIRD_PARTY` notices (`cargo-about` or `cargo-deny`), the ffmpeg source offer, the manifest of shipped content (LG-02), the Ubuntu Font Licence check, and **the plugin
   clarification text (LG-04, Q-34), which only the copyright holder can approve: I draft it, you decide the words**. *Gate:* `reuse lint` and `cargo deny` clean in CI. *Size:* S.
+  **0.2 DONE 2026-10-15 [V]:** `LICENSE`, `LICENSES/`, `LICENSE-PLUGIN-CLARIFICATION` (variant A, adopted), `Cargo.toml` (`GPL-3.0-or-later`), an SPDX line with `2026 John Dorsey` in each of the 363
+  Rust and Python files, `REUSE.toml` for the rest (`reuse lint`: compliant, REUSE 3.3), `deny.toml` (`cargo deny check`: licences, bans, sources and advisories pass; one reviewed exception, the unmaintained
+  `ttf-parser`, RUSTSEC-2026-0192, reached through `ab_glyph` and `cosmic-text`), `about.toml`/`about.hbs` and `THIRD_PARTY.md`, `docs/distribution-notices.md` (manifest, ffmpeg source offer rules; both ffmpeg
+  builds checked to be `--enable-gpl --enable-version3` and not nonfree), and a `licences` job in the CI workflow. Not done: the ffmpeg source offer itself (needs a release to exist).
 * **0.3 Split `FastForwardApplication`'s state** (agreed 2026-10-12) [D]. The application struct is still large (`fast_forward_application/mod.rs` is 702 lines [V]); it is split into
   sub-structs so that the engine, the plugin registry and the prompts have places to live that are not "yet another field". Mechanical; behind the existing tests, which must not
   change. *Gate:* all tests green and unmodified. *Size:* M.

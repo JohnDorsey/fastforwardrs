@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The two little settings windows, opened from the Edit menu.
 //!
 //! * **Global settings** has a control for each setting: a checkbox, or a drop-down list.

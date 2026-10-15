@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The windows that need an answer or a look from the user: messages, the question about throwing
 //! unsaved changes away, the progress of an export, the warning that source files must be chosen
 //! again, and the window a text object is edited in.

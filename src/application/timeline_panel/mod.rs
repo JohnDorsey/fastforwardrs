@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The timeline: a top row with the ruler, and below it a row for every track, the one in front at
 //! the top.
 //!

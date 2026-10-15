@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The slider along the bottom that spans the whole timeline: dragging it moves the current frame.
 
 use crate::project::TimelineFrameIndex;

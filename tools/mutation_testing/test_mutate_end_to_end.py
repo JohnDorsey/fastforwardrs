@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 John Dorsey
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Checks of the mutation runner against the real cargo, on a tiny project made for the purpose (it has a test that passes but is slow, so that
 the time a verdict took shows whether the run stopped early or went on through all the tests). Run them with
     py -m unittest discover -s tools/mutation_testing

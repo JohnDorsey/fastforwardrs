@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the commands about keyframes do in the editor, and of how changing a property that is animated is
 //! making a keyframe at the playhead.
 

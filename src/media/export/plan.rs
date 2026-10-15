@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Working out what an export has to do, from a project.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

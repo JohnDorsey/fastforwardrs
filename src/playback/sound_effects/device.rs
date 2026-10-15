@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The speakers for the editor's own sounds: a stream of the default output device of their own, which plays
 //! what is started on it, over one another, and is silent otherwise.
 

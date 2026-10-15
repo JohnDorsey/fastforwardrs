@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pictures of all the videos that the preview shows at once.
 //!
 //! Several videos can be seen at a frame (a small one over a big one, say), and each is a stream of

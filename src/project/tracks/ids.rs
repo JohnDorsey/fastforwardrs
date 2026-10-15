@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Names for the tracks of a project and the clips, racks and keyframes on them that do not change when the project is
 //! edited, so that something can keep pointing at a clip (the selected one, say) while other
 //! clips are cut, deleted or moved along the timeline around it, or it is moved to another track.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Picture files (PNG, JPEG...) read with the real ffprobe and ffmpeg: told apart from videos, and
 //! decoded into pixels.
 

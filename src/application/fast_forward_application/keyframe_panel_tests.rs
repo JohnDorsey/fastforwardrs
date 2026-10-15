@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the keyframe buttons in the properties panel (the arrow to the keyframe before, the stopwatch, and the arrow to the
 //! keyframe after, which float to the right of a control when the pointer is over it), of what the controls show of what has
 //! keyframes, and of the controls for where a clip is on the picture.

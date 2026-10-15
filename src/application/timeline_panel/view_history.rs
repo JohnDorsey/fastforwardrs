@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The recent views of the timeline, which the Back and Forward buttons of a mouse go through, as the buttons of a browser go
 //! through the pages it has been at.
 //!

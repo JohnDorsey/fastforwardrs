@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the racks of keyframes in the drawers: that they are there, where they are and what they look like, the diamonds
 //! of the keyframes in them, selecting the keyframes, and the label that comes to the left of a rack.
 

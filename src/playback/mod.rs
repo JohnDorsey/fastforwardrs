@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The live preview's engine: which frame of the timeline is current while playing, and which
 //! picture of the source video the preview must show for it.
 //!

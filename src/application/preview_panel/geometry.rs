@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where things on the preview are on the screen, and what a point on the screen is on.
 //!
 //! Everything about a layer's place is kept as fractions of the finished picture (see

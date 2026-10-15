@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Changing a track: cutting, changing speeds and volumes, deleting, adding and changing text.
 
 use std::collections::BTreeMap;

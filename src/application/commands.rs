@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Everything the user can ask for. The parts of the screen only describe what was asked (by
 //! pushing a [`Command`]); one place afterwards decides what to do about each, so that no drawing
 //! code ever has to change the project while it is still being drawn from.

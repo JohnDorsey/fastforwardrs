@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of saving in the background: a save that copies a great deal says how far it has got, can be stopped, and leaves the project
 //! file as it was when it is, and nothing else is done to the project while it goes on. (A copy that is made to wait, with a gate, so
 //! that what the window does while it goes on can be looked at.)

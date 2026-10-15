@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! fastforwardrs: a small video editor that does one thing well. It lets you fast-forward chosen
 //! parts of a video.
 //!

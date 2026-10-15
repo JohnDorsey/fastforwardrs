@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Cutting the sections of the picture into the stretches over which what is exported does not change, where layers have
 //! keyframes.
 //!

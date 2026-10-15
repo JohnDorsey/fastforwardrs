@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Moving clips by dragging them: how far they can go.
 //!
 //! Dragging a clip moves it as far as the pointer goes along its track (and up or down to the other tracks),

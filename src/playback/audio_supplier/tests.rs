@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the decisions of [`AudioSupplier`], with a fake decoder and fake speakers.
 //!
 //! The fake decoder's sound is its own position: moment `k` of a stream is the number `k` (and on

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The names of groups on the timeline: a bar in the colour of the group, with the name of the group in it, that is shown while the pointer is
 //! over the group, and is where the group is clicked (which selects it) and dragged (which moves it, with everything that is in it).
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Putting effects on clips and on tracks, and taking them off.
 //!
 //! The effects a clip or a track has are in the clip's entry on its track and in the track (see [`super::tracks::Track`]), and

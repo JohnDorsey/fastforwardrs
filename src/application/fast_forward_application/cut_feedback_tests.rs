@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what a cut makes known: the snip that is heard, and the flash of light that is seen where each clip
 //! was cut.
 

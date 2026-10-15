@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Asking ffprobe what a file contains: a video, a sound, or a picture.
 
 use std::io;

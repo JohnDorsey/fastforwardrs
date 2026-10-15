@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Fitting a video of one shape into a picture of another.
 //!
 //! The finished picture has the shape of the project's first video. A video of another shape is

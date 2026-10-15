@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The rules that groups keep: one test for each, with a project that breaks only that rule.
 //!
 //! The groups that break rules are put into the project as they are (the editing would refuse to make them): see [`Laid::put_in`].

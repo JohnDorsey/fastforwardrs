@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the racks of a project say together, wherever they are kept: the keyframes of a clip that are in the drawer of
 //! another clip, or of a track, and what happens to them when clips are moved, cut, shortened and deleted.
 

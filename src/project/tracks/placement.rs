@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Where something that is seen (a video, a picture, a piece of text) is on the picture, and how it
 //! is turned.
 //!

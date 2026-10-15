@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of zooming the timeline in and out with Ctrl and the mouse wheel, and of the ruler that
 //! has to follow the zoom.
 

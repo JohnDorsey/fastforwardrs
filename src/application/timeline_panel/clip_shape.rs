@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The outline of a clip: a rectangle with its corners rounded, and cutting what is drawn in a clip to it.
 //!
 //! A clip is drawn in pieces (the pictures of a video, the bars of a waveform), and every piece is cut

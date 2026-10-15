@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keeping the sound of the live preview in step with the clock.
 //!
 //! While the video plays, [`AudioSupplier`] has an [`AudioStream`] decode the sound of the

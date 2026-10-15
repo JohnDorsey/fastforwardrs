@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Whole journeys through the real editor with a real video and the real ffmpeg: importing,
 //! editing with the mouse, saving, loading into a fresh editor, losing the video, and exporting.
 //!

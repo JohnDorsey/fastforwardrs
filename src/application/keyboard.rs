@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the keys of the keyboard do. They are shortcuts of the whole window, not of any one part
 //! of it:
 //!

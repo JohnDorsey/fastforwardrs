@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The groups in a project file (version 10 and after): what a group is as the file has it, and the chains of effects with the badges of
 //! the tags in them.
 //!

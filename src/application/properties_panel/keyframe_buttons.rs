@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The three buttons that float to the right of a control of a property that can be animated when the pointer is over the
 //! control: an arrow that goes to the keyframe before the playhead, a stopwatch that makes a keyframe at the playhead (or
 //! takes the one that is there away), and an arrow that goes to the keyframe after it.

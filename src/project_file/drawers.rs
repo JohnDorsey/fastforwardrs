@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The racks of keyframes in a project file: the drawers of the tracks and of the clips, as the file has them, and what they are
 //! made into when the file is loaded.
 //!

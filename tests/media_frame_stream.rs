@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Decoding preview frames with the real ffmpeg, checked frame by frame.
 
 mod support;

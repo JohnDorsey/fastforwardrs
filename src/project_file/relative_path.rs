@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Working out the path from one folder to a file, for the "relative path" backup link.
 
 use std::path::{Component, Path, PathBuf};

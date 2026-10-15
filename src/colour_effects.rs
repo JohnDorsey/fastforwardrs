@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the effects that change the colours of a picture do to its pixels, and how ffmpeg is asked to do the same, so that the
 //! preview and the export agree.
 //!

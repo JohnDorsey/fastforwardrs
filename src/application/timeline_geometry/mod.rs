@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How the tracks are laid out on the screen: where each frame is, which thumbnail pictures and
 //! which stretches of a sound's waveform are visible, and where the view should scroll to. Plain
 //! numbers only; drawing is done elsewhere.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Asking a project about its groups: which there are, what is in them, which a thing is in, and what is inside what.
 
 use std::collections::HashMap;

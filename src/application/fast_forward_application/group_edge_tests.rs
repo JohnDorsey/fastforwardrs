@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of moving the edges of a clip group with the pointer, in the window: the pointer over an edge, the edge that goes along with the pointer
 //! where it can be put and goes quickly to the nearest place where it cannot, and the group that takes in clips and lets go of them when the edge
 //! is let go.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The frame that a gesture makes keyframes at.
 //!
 //! A gesture (a slider dragged, a value dragged, a picture moved about on the preview) asks for a change in every frame of the

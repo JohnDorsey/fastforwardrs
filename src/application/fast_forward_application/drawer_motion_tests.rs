@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what moves on the screen, frame by frame, while a drawer slides open or shut.
 //!
 //! The timeline panel is as tall as what is in it, and grows upward from the bottom of the window, so a drawer that pushes the

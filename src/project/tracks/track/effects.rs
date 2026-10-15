@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Putting effects on a track and on its clips, taking them off, and changing their values.
 //!
 //! What an effect does is [`crate::project::EffectKind`]'s. What is here is which effects a track and each of its clips have,

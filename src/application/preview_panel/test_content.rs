@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Things to make a preview from, for the tests of what is on it and what the pointer does to it.
 
 use egui::{Rect, pos2, vec2};

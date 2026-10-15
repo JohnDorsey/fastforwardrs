@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Saving and loading the global settings as pretty, human-readable JSON, in a file in the
 //! operating system's folder for programs' settings (for example `%APPDATA%` on Windows).
 //!

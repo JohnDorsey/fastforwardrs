@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the drawers on clips and on tracks: the button at the bottom edge, which is there when something says it should
 //! be, the drawer that slides open when it is clicked and pushes the rows under it down (or lies over them, when it was opened with
 //! Shift held), the rows that scroll to bring a drawer that is opening into view, and what it is that a drawer takes.

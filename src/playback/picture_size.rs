@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How big the pictures of the live preview are made.
 
 /// The largest width the preview's pictures are made at.

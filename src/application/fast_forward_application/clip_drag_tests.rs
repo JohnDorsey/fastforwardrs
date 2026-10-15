@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of dragging clips along their tracks, and of drawing a rectangle round clips to select them.
 
 use egui::{CursorIcon, Key, Modifiers, PointerButton, Pos2, Shape, vec2};

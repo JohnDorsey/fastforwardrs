@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties of a text object: what it says, its font, the size and colour of its letters, how long
 //! it is shown for, and where it is on the picture (see `placement_controls`; it can be moved and resized on the preview too, by
 //! dragging it and its corners). What is shown of what it says and how it looks, when there are keyframes for them, is what

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What a rack of keyframes and a keyframe look like.
 //!
 //! A rack is a long, shallow tray sunk into the drawer it is in: textured with a fine dark noise like grain, shaded as if it

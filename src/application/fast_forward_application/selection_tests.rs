@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of selecting clips, deselecting them, and deleting the selected one, and of how cutting
 //! with the S key follows the selection.
 

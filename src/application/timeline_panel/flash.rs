@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The flash of white light where a clip was cut in two: a bar of light across the strip at the cut, which
 //! is at its brightest, and has all the light it ever has, at once, and then spreads as it fades away in a moment.
 //!

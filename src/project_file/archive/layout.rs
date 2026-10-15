@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The layout of a zip file, as far as this program has to write it and mend it itself.
 //!
 //! A zip file is the entries one after another (each a small header and then the bytes of the file, which for the files in a project

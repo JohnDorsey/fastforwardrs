@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The round button with a plus on it: the one in the timeline that adds a track, and the one in the properties panel that adds an
 //! effect. It is drawn with shapes, so that no font is needed.
 

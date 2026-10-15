@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Everything made so far of the thumbnails of one video, and working out which finer ones to make next.
 //!
 //! The picture of every second of a video is made once, for the whole of it, when the video is

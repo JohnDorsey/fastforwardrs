@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Working out, from a project, what the finished video is: the picture at every frame, and the
 //! sound.
 //!

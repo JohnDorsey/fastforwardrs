@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the editor asks when it needs a file, checked with a chooser that gives the answers a test
 //! tells it to (a real file dialog would wait for someone to answer it).
 

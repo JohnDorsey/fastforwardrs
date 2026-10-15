@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of how long keyframe crates last and where they are, as keyframes are put in them, moved and taken out: a crate lasts from its first
 //! keyframe to its last (and so at least one frame), has some or is not there, and is only ever made longer where there is room for it, which
 //! is the empty frames round it, as far as the end of the video.

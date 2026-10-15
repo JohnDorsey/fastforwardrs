@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What is heard at every frame: for each track that has any sound, a *strip* that says, from the
 //! start (of the timeline, or of the place the sound is wanted from) to the end of its last
 //! sound, which clips are heard when. The strips are heard together, mixed.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Putting keyframes on a track's own properties and on those of its clips, in the racks of their own drawers.
 //!
 //! What a keyframe is, and what is between two, is [`crate::project::Animation`]'s. What is here is where they are

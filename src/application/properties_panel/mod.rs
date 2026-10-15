@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The properties panel, at the left above the timeline: the settings of what is selected are shown
 //! here, and changed here.
 //!

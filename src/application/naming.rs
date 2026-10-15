@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What things are called to the person editing: a clip by the kind of thing it is and what tells it from the others of its
 //! kind (the name of its file, the beginning of its words), a property of it by its name, and a rack of keyframes by what
 //! it animates.

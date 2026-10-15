@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the strips and the clips on them look like, checked from the shapes the window
 //! draws (so they need no graphics card).
 

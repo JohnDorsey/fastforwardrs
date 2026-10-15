@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of what the picture plan makes of the effects of groups: each layer carries, among its effects, those of the tags its clip is in,
 //! and (as a placeholder, see `project::groups::effects_of_groups`) those of the clip groups and track groups that the clip is inside.
 

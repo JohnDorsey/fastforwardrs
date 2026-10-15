@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How much louder or quieter than it is a sound is made, in decibels.
 
 use std::fmt;

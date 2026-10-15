@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests of the keyframes of a track and of its clips: where they are kept, and what happens to them when a clip is
 //! cut, changes its length, is deleted or moved.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Writing a file so that a failure part-way (a full disk, say) can never leave an existing file
 //! half-written. Project files, project archives and the settings file are all written this way.
 

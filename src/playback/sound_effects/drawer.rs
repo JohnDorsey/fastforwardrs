@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sounds of a drawer: wood sliding on wood, and a knock of wood when the drawer comes to the end of its way. Made from
 //! nothing, like the snip (the editor has no sound files of its own), and quiet: they are there to go with what moves on the
 //! screen, not to be noticed.
