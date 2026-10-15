@@ -15,7 +15,7 @@ mod plan;
 mod progress;
 mod runner;
 
-pub(crate) use command::filter_graph_file_option;
+pub(crate) use command::FILTER_GRAPH_FILE_OPTION;
 pub use command::{ExportFiles, VideoEncoder, export_arguments};
 pub use filter_graph::{
     AudioGraph, FilterGraph, FilterGraphSpecification, LayerContentToExport, LayerToExport, LoudnessToExport,

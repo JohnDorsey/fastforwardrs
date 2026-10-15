@@ -11,10 +11,10 @@ use super::child_process::background_command;
 /// `ffprobe` in that folder first.
 pub const FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "FASTFORWARDRS_FFMPEG_DIRECTORY";
 
-/// The first version of ffmpeg that can read a long filter graph from a file with
-/// `-/filter_complex`. Older versions use `-filter_complex_script` instead, and ffmpeg 9 no
-/// longer accepts that.
-const FIRST_VERSION_WITH_SLASH_PREFIX_OPTIONS: u32 = 7;
+/// The oldest ffmpeg the program works with. It is developed and tested against ffmpeg 9.0.2, and an older one does not give the same
+/// pictures: ffmpeg 8.0.1 moves the pictures of a file whose sound starts before its picture by one frame after `-ss` (found on Linux,
+/// 2026-10-15, with `framemd5` on one file under both). A toolchain that is older is not used, and the error says why.
+pub const OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS: u32 = 9;
 
 /// Which version of ffmpeg this is, as far as we can tell from its `-version` banner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +46,13 @@ impl FfmpegVersion {
             major_version,
         }
     }
+
+    /// Whether this is a version the program works with (see [`OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS`]): not an older release. A development
+    /// build with no version number is taken to be recent.
+    pub fn is_new_enough(&self) -> bool {
+        self.major_version
+            .is_none_or(|major| major >= OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS)
+    }
 }
 
 /// Where ffmpeg and ffprobe are, and which version they are.
@@ -59,7 +66,7 @@ pub struct FfmpegToolchain {
 #[derive(Debug, Error)]
 pub enum ToolchainError {
     #[error(
-        "ffmpeg and ffprobe could not be found. Install FFmpeg (https://ffmpeg.org/download.html) so that both programs are on your PATH, or put them in the same folder as fastforwardrs. Looked in:\n{places_searched}"
+        "ffmpeg and ffprobe, version 9 or newer, could not be found. Install FFmpeg 9 (https://ffmpeg.org/download.html) so that both programs are on your PATH, or put them in the same folder as fastforwardrs. Looked in:\n{places_searched}"
     )]
     NotFound { places_searched: String },
 }
@@ -115,14 +122,6 @@ impl FfmpegToolchain {
     pub fn version(&self) -> &FfmpegVersion {
         &self.version
     }
-
-    /// Whether a filter graph kept in a file is passed with `-/filter_complex <file>` (ffmpeg 7
-    /// and newer) instead of the older `-filter_complex_script <file>`.
-    pub fn reads_filter_graph_files_with_slash_prefix(&self) -> bool {
-        self.version
-            .major_version
-            .is_none_or(|major| major >= FIRST_VERSION_WITH_SLASH_PREFIX_OPTIONS)
-    }
 }
 
 struct Candidate {
@@ -150,14 +149,33 @@ impl Candidate {
     }
 
     fn try_out(&self) -> Result<FfmpegToolchain, String> {
-        let version = run_version_banner(&self.ffmpeg_path)?;
-        run_version_banner(&self.ffprobe_path)?;
+        self.try_out_asking_for_banners_with(run_version_banner)
+    }
+
+    /// [`Self::try_out`], where `banner_of` says what `program -version` prints (so that a test need not have an ffmpeg of each version).
+    fn try_out_asking_for_banners_with(
+        &self,
+        banner_of: impl Fn(&Path) -> Result<String, String>,
+    ) -> Result<FfmpegToolchain, String> {
+        let version = FfmpegVersion::parse(&banner_of(&self.ffmpeg_path)?);
+        if !version.is_new_enough() {
+            return Err(too_old_message(&version));
+        }
+        banner_of(&self.ffprobe_path)?;
         Ok(FfmpegToolchain {
             ffmpeg_path: self.ffmpeg_path.clone(),
             ffprobe_path: self.ffprobe_path.clone(),
-            version: FfmpegVersion::parse(&version),
+            version,
         })
     }
+}
+
+/// What is said of an ffmpeg that is too old to be used.
+fn too_old_message(version: &FfmpegVersion) -> String {
+    format!(
+        "this is not ffmpeg {OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS} or newer, which the program needs (\"{}\")",
+        version.banner
+    )
 }
 
 fn default_candidates() -> Vec<Candidate> {
@@ -250,24 +268,80 @@ mod tests {
         assert_eq!(version.banner, "ffmpeg version 9.0.2 Copyright");
     }
 
-    fn toolchain_with_major_version(major_version: Option<u32>) -> FfmpegToolchain {
-        FfmpegToolchain {
-            ffmpeg_path: PathBuf::from("ffmpeg"),
-            ffprobe_path: PathBuf::from("ffprobe"),
-            version: FfmpegVersion {
-                banner: String::new(),
-                major_version,
-            },
+    #[test]
+    fn only_ffmpeg_nine_and_newer_is_new_enough_and_a_development_build_is_taken_to_be_recent() {
+        for (banner, expected) in [
+            (
+                "ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+                true,
+            ),
+            (
+                "ffmpeg version n9.0.2-27-g7e93014c5b-20261014 Copyright (c) 2000-2026 the FFmpeg developers",
+                true,
+            ),
+            (
+                "ffmpeg version 10.1.0 Copyright (c) 2007-2027 the FFmpeg developers",
+                true,
+            ),
+            (
+                "ffmpeg version N-115823-gabcdef012 Copyright (c) 2000-2024 the FFmpeg developers",
+                true,
+            ),
+            (
+                "ffmpeg version 8.0.1-3ubuntu2 Copyright (c) 2000-2025 the FFmpeg developers",
+                false,
+            ),
+            (
+                "ffmpeg version 7.1 Copyright (c) 2000-2024 the FFmpeg developers",
+                false,
+            ),
+            (
+                "ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021 the FFmpeg developers",
+                false,
+            ),
+        ] {
+            assert_eq!(FfmpegVersion::parse(banner).is_new_enough(), expected, "{banner}");
         }
     }
 
     #[test]
-    fn filter_graph_files_use_the_slash_prefix_from_ffmpeg_seven_onwards() {
-        assert!(!toolchain_with_major_version(Some(4)).reads_filter_graph_files_with_slash_prefix());
-        assert!(!toolchain_with_major_version(Some(6)).reads_filter_graph_files_with_slash_prefix());
-        assert!(toolchain_with_major_version(Some(7)).reads_filter_graph_files_with_slash_prefix());
-        assert!(toolchain_with_major_version(Some(9)).reads_filter_graph_files_with_slash_prefix());
-        assert!(toolchain_with_major_version(None).reads_filter_graph_files_with_slash_prefix());
+    fn an_ffmpeg_that_is_too_old_is_refused_with_its_banner_and_the_version_that_is_needed() {
+        let message = too_old_message(&FfmpegVersion::parse("ffmpeg version 8.0.1-3ubuntu2 Copyright"));
+        assert!(message.contains("ffmpeg 9 or newer"), "{message}");
+        assert!(message.contains("ffmpeg version 8.0.1-3ubuntu2"), "{message}");
+    }
+
+    #[test]
+    fn a_candidate_whose_ffmpeg_is_too_old_is_not_used_and_one_that_is_new_enough_is() {
+        let candidate = Candidate::in_directory(Path::new("somewhere"));
+        let banner = |text: &'static str| move |_: &Path| Ok(text.to_owned());
+
+        let old =
+            candidate.try_out_asking_for_banners_with(banner("ffmpeg version 8.0.1-3ubuntu2 Copyright (c) 2000-2025"));
+        assert!(old.unwrap_err().contains("ffmpeg 9 or newer"));
+
+        let current = candidate
+            .try_out_asking_for_banners_with(banner("ffmpeg version 9.0.2-full_build Copyright (c) 2000-2026"))
+            .unwrap();
+        assert_eq!(current.version().major_version, Some(9));
+        assert_eq!(
+            current.ffmpeg_path(),
+            Path::new("somewhere").join(program_file_name("ffmpeg"))
+        );
+
+        // (A good ffmpeg is no use without its ffprobe.)
+        let without_ffprobe = candidate.try_out_asking_for_banners_with(|program: &Path| {
+            if program.ends_with(program_file_name("ffprobe")) {
+                Err("no ffprobe".to_owned())
+            } else {
+                Ok("ffmpeg version 9.0.2 Copyright".to_owned())
+            }
+        });
+        assert_eq!(without_ffprobe.unwrap_err(), "no ffprobe");
+
+        let missing =
+            candidate.try_out_asking_for_banners_with(|program: &Path| Err(format!("no {}", program.display())));
+        assert!(missing.unwrap_err().starts_with("no "));
     }
 
     #[test]
@@ -276,6 +350,7 @@ mod tests {
         let error = FfmpegToolchain::locate_in_directory(empty_folder.path()).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("could not be found"), "{message}");
+        assert!(message.contains("version 9 or newer"), "{message}");
         assert!(
             message.contains(&empty_folder.path().display().to_string()),
             "{message}"

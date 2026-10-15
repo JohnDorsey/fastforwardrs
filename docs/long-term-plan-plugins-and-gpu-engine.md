@@ -4,6 +4,10 @@
 OpenFX and asked for groups; the features that follow from all of it are in `plugin-system-features.md`, and the deeper answers (colour and ACES, a
 node-graph model, a render process, groups, test machines, licensing) in `plugin-system-design-notes.md`.
 
+**Update 2026-10-15:** every question of the features list is answered; **the order of work is now `plugin-system-plan-of-action.md`, which replaces section 9 of this document** (kept here for history).
+Two things in this document are overtaken: the key of an ISF shader or LUT no longer contains a content hash (the hash is the *version*), and a project file **may contain** a binary plugin, behind a severe prompt
+(features list, SF-04 to SF-10). The plugin model is file **format 11** (format 10 was taken by groups).
+
 Status: **abstract draft for discussion**, written 2026-10-12 after round 10. Nothing in it is decided or started, except the four
 preparatory steps the maintainer already agreed to (section 9, phase 0). It answers: how should the data model change to take
 ISF shaders, `.cube` LUTs, LADSPA audio plugins and eventually OpenFX plugins, and more such things later; what does the move from

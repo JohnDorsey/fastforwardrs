@@ -199,26 +199,32 @@ mod tests {
         assert_eq!(snip(48000), snip(48000));
     }
 
-    /// A fingerprint of every moment of `sound`, exactly (it changes if any one of them changes by the least bit).
+    /// A fingerprint of every moment of `sound`, to a thousandth of the loudest the speakers can make. (Not to the last bit: `sin`, `exp` and `ln`
+    /// come from the maths library of the operating system, and the same sound differs by a few parts in a hundred million between Windows and
+    /// Linux, in about one moment in a hundred. A thousandth is far finer than anything that can be heard, and a change of the sound that is
+    /// meant, even a small one, moves many moments across the lines between thousandths.)
     fn fingerprint_of(sound: &[f32]) -> u64 {
         sound.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, value| {
-            (hash ^ u64::from(value.to_bits())).wrapping_mul(0x0100_0000_01b3)
+            let thousandths = (value * 1000.0).round() as i32;
+            (hash ^ u64::from(thousandths as u32)).wrapping_mul(0x0100_0000_01b3)
         })
     }
 
-    /// The snip is not changed by changing how it is made (the parts that other effects share were taken out of it): this is what
-    /// it was, moment by moment, before they were. (If the sound is changed on purpose, these are what to change with it.)
     #[test]
-    fn the_snip_is_exactly_the_sound_it_was_when_the_parts_other_effects_share_were_taken_out_of_it() {
-        for (rate, length, fingerprint) in [
-            (8000_u32, 1120_usize, 0x9d42_3892_1eae_9c9a_u64),
-            (22050, 3087, 0x0a22_00bf_5056_532b),
-            (44100, 6174, 0x0af2_d6f9_13f8_6568),
-            (48000, 6720, 0x5101_9f86_3a98_b5c0),
-        ] {
-            let sound = snip(rate);
-            assert_eq!(sound.len(), length, "at {rate}");
-            assert_eq!(fingerprint_of(&sound), fingerprint, "at {rate}");
-        }
+    fn the_snip_is_the_sound_it_was_to_a_thousandth_when_the_parts_other_effects_share_were_taken_out_of_it() {
+        let found: Vec<(u32, usize, u64)> = RATES
+            .iter()
+            .map(|&rate| {
+                let sound = snip(rate);
+                (rate, sound.len(), fingerprint_of(&sound))
+            })
+            .collect();
+        let expected = [
+            (8000_u32, 1120_usize, 0x99a6_d9c9_2318_e04b_u64),
+            (22050, 3087, 0x4aa4_5354_2bec_c86f_u64),
+            (44100, 6174, 0x59cd_1f57_5c30_16a8_u64),
+            (48000, 6720, 0x7ea9_c977_7a57_04eb_u64),
+        ];
+        assert_eq!(found, expected);
     }
 }

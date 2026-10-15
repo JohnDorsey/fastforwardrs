@@ -3,6 +3,8 @@ name = "fastforwardrs"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/JohnDorsey/fastforwardrs"
 
 [dependencies]
 ab_glyph = "0.2.32"

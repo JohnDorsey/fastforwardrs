@@ -1,6 +1,6 @@
-# Plugin system: features list (draft 1, to be made concrete by questions)
+# Plugin system: features list (draft 2: every question of section 19 is answered)
 
-Status: **draft 1**, written 2026-10-13. It turns the long-term plan (`long-term-plan-plugins-and-gpu-engine.md`) and the maintainer's
+Status: **draft 2**. Draft 1 was written 2026-10-13; round 1 of the questions was answered 2026-10-13 and round 2 on 2026-10-15, so **no [Q] is left** (the list is finished in the sense of the next paragraph, and the plan of action is `plugin-system-plan-of-action.md`). It turns the long-term plan (`long-term-plan-plugins-and-gpu-engine.md`) and the maintainer's
 answers of 2026-10-13 into a list of features that the final plan of action can be built from. It is *not* the plan: it says **what
 the system must do**, not in what order, or how. Every line that is not yet concrete enough to plan from is marked **[Q]** and has a
 matching entry in section 19 (open questions). The list is finished when no **[Q]** is left in a line that the plan depends on.
@@ -41,14 +41,15 @@ source, an image).
 * **SC-02 [S]** OpenFX plugins are shelved (2026-10-13). Nothing in the model may *depend* on them; nothing is planned for them. (What
   the model keeps possible is in section 9 of the plan.)
 * **SC-03 [D] M** The program is licensed GPLv3 (2026-10-13). Consequences are collected in LG-01 to LG-08.
-* **SC-04 [P] M** The user-facing word is **effect** (for pictures and sound alike); **plugin** is used only for what comes from a file
-  or a library. A `.cube` table is a *resource* of a built-in effect, not a plugin. (See Q-01.)
+* **SC-04 [D] M** (2026-10-15, Q-01) The user-facing word is **effect** (for pictures and sound alike); **plugin** is used only for what comes from a file
+  or a library. A `.cube` table is a *resource* of a built-in effect, not a plugin.
 * **SC-05 [D] L** Text objects become generator effects, eventually (2026-10-13). When is Q-17.
 * **SC-06 [D] M** Clip groups and track groups, with effects of their own, are wanted (2026-10-13). Their place in the order is argued in
   the design notes, section 4; their features are in section 13.
 * **SC-07 [P]** Not in scope of this list: masks and shapes with keyframed paths, motion tracking, time remapping beyond constant speed,
   scripting or expressions for parameters, a node-editor interface, VST3 and LV2 hosting, WASM plugins. Each may be asked for later; the
-  model must not make them impossible. (See Q-30 for the node editor.)
+  model must not make them impossible. (Q-30, 2026-10-15: **no node editor yet, but both image-input parameters and a node editor must stay
+  possible**: ID-10, EN-15.)
 
 ---
 
@@ -75,6 +76,10 @@ source, an image).
 * **ID-07 [P] S** The descriptor of an effect type can say which of its parameters are **on-canvas handles** (a point on the preview that
   can be dragged). Q-20.
 * **ID-08 [P] M** An effect type that is not installed is **missing**: its instances keep everything (section 3, MD-07).
+* **ID-10 [D] M** (2026-10-15, Q-30) **Image-input parameters stay possible.** A descriptor's input slots (ID-02) can be *image inputs that are not the clip's
+  own picture* (ISF `image` inputs; a matte, a displacement map, another layer's picture). The first release need not offer an interface that
+  fills one from another layer, but the descriptor, the instance values and the engine's passes must be able to say "this input is that
+  layer's picture" without a change of the file format's shape. This is what covers most of what a node editor is wanted for.
 * **ID-09 [P] M** Each host turns what it reads (an ISF file header, a CLAP plugin's parameter list, a LADSPA port list) into
   descriptors, and reports why it could not (a parse error with a line number; a plugin that crashed while being scanned).
 
@@ -105,7 +110,8 @@ source, an image).
 * **MD-10 [P] M** The project file (format 10) saves `plugins` (descriptor snapshots), instances with values by parameter id, racks that
   point at `(instance, parameter id)`, and `resources`. Format 9 is read (hue shift becomes `builtin:hue_shift`). An unknown field is
   kept and written back (so a newer program's file survives an older one).
-* **MD-11 [Q] M** Colour parameters and any value that has a colour space: where the space is stored. Q-06.
+* **MD-11 [D] M** (2026-10-15, Q-06) The space of a colour parameter is **always the working space** (so none is stored with the value), and colours are
+  **interpolated in linear light**. A value that is in another space (an input space of a source) says so in its own field.
 * **MD-12 [P] C** An instance can have a user-given name and a colour label.
 
 ---
@@ -125,8 +131,11 @@ source, an image).
 * **RS-05 [P] M** Two instances that use one LUT use one resource (dedupe by content hash).
 * **RS-06 [P] M** A resource that is missing (a linked file that is gone) makes its instances behave as missing effects (MD-07) and is
   listed in the same warning window as missing source files, with "choose the file again".
-* **RS-07 [P] M** A resource is read into memory when the project is loaded; resources are small. (A 65-point 3D table is about 6 MB of
-  text.) A limit on the size of one resource is needed against a project that tries to exhaust memory: Q-26.
+* **RS-07 [D] M** A resource is read into memory when the project is loaded; resources are small. (A 65-point 3D table is about 6 MB of
+  text.) (2026-10-15, Q-26) **A limit on the size of one resource that is loaded into memory** (a table, a shader source, an image, a font): **64 MiB by
+  default**, a number in the **global settings**. A bigger resource is not refused: the program **asks** ("this file is 300 MB; load it anyway?").
+  The limit protects against a project that exhausts memory by accident or on purpose (a frozen load, a swollen autosave). It does not apply to
+  media included in a project (read in place, never into memory), and it is not the limit of an embedded plugin binary (SF-10).
 * **RS-08 [P] M** A resource in an embedded project is only ever found by its entry name inside the project file: an ISF shader that
   imports `texture.png` finds a resource of the project, never a path on the computer. (Safety: SF-03.)
 * **RS-09 [P] S** When the project file has an embedded copy of a shader and the library has a different version of the same shader, the
@@ -153,11 +162,12 @@ can be supported. The design notes answer that at length; here is what the syste
 * **CM-05 [P] M** An export converts the working space to the **output colour space** the user chooses (at least Rec.709 with the
   BT.1886 transfer function, which is what the encoders' YUV is tagged as), and writes the right tags (primaries, transfer, matrix, range)
   into the file.
-* **CM-06 [Q] S** ACES: **AP0 (ACES2065-1)** is supported as an **interchange** space (a source's input space; an output space) and, as I propose,
+* **CM-06 [D] S** ACES: **AP0 (ACES2065-1)** is supported as an **interchange** space (a source's input space; an output space) and, as I propose,
   **not as the working space** (it has an imaginary blue primary: verified; ACES itself recommends AP1/**ACEScg** for compositing). ACES
   **view transforms** (the "ACES look": the 2.0 output transform is an algorithm that needs small hue tables, or can be baked to a 3-D table;
-  OpenColorIO can bake it) are a **later** step that goes through the LUT host. What "support" means for the first release, and whether EXR files are
-  needed: Q-04, Q-18.
+  OpenColorIO can bake it) are a **later** step that goes through the LUT host. What "support" means for the first release: Q-04 (defaults accepted
+  2026-10-13). **EXR/DPX files are not in the first release** (Q-18, 2026-10-15: "not yet"); the working format and the input-space table are made so that
+  they can be added (an image-sequence clip kind, 16-bit float upload, colour space and alpha handling) without rework.
 * **CM-07 [P] S** Known transfer functions to start with: sRGB, BT.709, BT.1886, gamma 2.2/2.4/2.6, linear; later PQ and HLG (HDR) and
   camera log curves (Q-04).
 * **CM-08 [P] M** The conversions are **fixed-function**: a 1-D curve and a 3x3 matrix per step, written once in Rust (a reference
@@ -192,7 +202,8 @@ can be supported. The design notes answer that at length; here is what the syste
   parity with the oracle can be *proved*, EN-02); linear light is then switched on as **a separate, reviewed change** whose visible differences are listed
   (edges of scaled pictures, blends, blurs). Otherwise the port and the new look arrive together and neither can be checked.
 * **CM-19 [P] L** OpenColorIO as an **optional** tool (to read an OCIO config or to bake a view transform to a table): a C++ library with no WGSL output and no
-  established Rust binding, so it is not on the path of the first release. Q-35.
+  established Rust binding, so it is not on the path of the first release. **Later** (Q-35, 2026-10-15): the colour space table (CM-15) is data and baked
+  tables are the common output, so nothing blocks it.
 
 ---
 
@@ -209,11 +220,20 @@ can be supported. The design notes answer that at length; here is what the syste
   lost device, disables that instance and says which; the device is recreated.
 * **EN-06 [P] M** An effect that depends on earlier frames (ISF persistent buffers, feedback) is marked so in its descriptor; a seek
   re-simulates from the clip's start or a checkpoint; the export is sequential. The interface says "this effect depends on earlier
-  frames". Which limit on re-simulation: Q-21.
+  frames". **Decided 2026-10-15 (Q-21): see EN-14.**
+* **EN-14 [D] M** (2026-10-15, Q-21) **Preview of effects that depend on earlier frames** has two modes, a **global setting** (it describes the machine, not the
+  project; **the export is never affected**: it renders every frame in order and is exact):
+  *Bounded* (the default): the preview keeps **checkpoints** of the effect's state and, after a seek, simulates forward from the nearest earlier checkpoint
+  (or the clip's start) for **at most 300 frames** (fixed); if none is that near, it shows the nearest state, marked "depends on earlier frames,
+  approximate", until playback has caught up. *Warm-up only*: a seek resets the effect and it re-converges while playing (cheapest, least faithful).
+  Two more global settings tune *Bounded*: the **checkpoint interval** (default every 60 frames) and the **checkpoint memory budget** (default 1 GiB; the
+  oldest checkpoints are dropped when it is exceeded). They are not project settings and are not saved in a project.
+* **EN-15 [D] M** (2026-10-15, Q-30) The engine's **graph of passes stays the compile target** of the effect stacks (EN-04), so that a node-graph model or
+  a node editor can be built on top later without changing the engine (design notes, section 2.4). Nothing for it is built now.
 * **EN-07 [P] M** Performance goals (2026-10-13: "acceptable for now"): a typical stack (four layers, two blurs and a LUT) plays at
   **1080p60 on the integrated GPU** and at **4K on a discrete GPU**. These are measured by a benchmark that is part of the repository,
   not by feel. (What happens when the machine cannot keep up: Q-13.)
-* **EN-08 [P] S** Preview quality is adaptive: at full speed on a slow machine the engine renders at a lower resolution rather than
+* **EN-08 [D] S** (Q-13, default accepted 2026-10-15) Preview quality is adaptive: at full speed on a slow machine the engine renders at a lower resolution rather than
   dropping frames, and a still frame (paused, scrubbing stopped) is rendered at full resolution.
 * **EN-09 [P] S** Rendered frames are cached (the frame at the playhead, and frames around it) and the cache is dropped when an edit
   changes what they show.
@@ -233,7 +253,7 @@ can be supported. The design notes answer that at length; here is what the syste
 
 * **EF-01 [P] M** **Filters**: take the picture of the clip (or of the track, or of a group), give a picture.
 * **EF-02 [P] M** **Generators**: take no picture; give one (ISF source shaders; later the text generator). A generator clip has no media,
-  has a duration the user sets (like a picture clip, 5 seconds by default), and its content is an effect instance.
+  has a duration the user sets (like a picture clip, **5 seconds by default, and it can be dragged longer**: Q-11, 2026-10-15), and its content is an effect instance.
 * **EF-03 [D] M** **Transitions** are effects with a **backdrop** input on the front clip (2026-10-13: acceptable): the clip is the
   "end" picture, what is composited behind it is the "start" picture, and `progress` is a number. (Q-09: where `progress` comes from.)
 * **EF-04 [P] S** Other users of the backdrop slot: blend modes, glass and blur-behind effects, adjustment-style effects.
@@ -252,11 +272,11 @@ can be supported. The design notes answer that at length; here is what the syste
 * **AN-01 [P] M** Every parameter that can be animated can have keyframes in a rack, with the stopwatch button, in the drawers, exactly
   as today's properties.
 * **AN-02 [P] M** Interpolation follows the type: numbers, pairs and colours are interpolated linearly (colours in the working space,
-  in linear light: Q-06), choices, flags and text hold, triggers fire once at their frame.
+  in linear light: MD-11), choices, flags and text hold, triggers fire once at their frame.
 * **AN-03 [P] C** Per-keyframe interpolation (hold, linear, ease); today there is one rule per type.
 * **AN-04 [P] M** Editing an animated value pauses playback (as today).
-* **AN-05 [Q] C** Audio-reactive parameters (ISF `audio` and `audioFFT` inputs, about 8 of 327 shaders in the corpus): later, or never.
-  Q-22.
+* **AN-05 [D] L** (2026-10-15, Q-22) Audio-reactive parameters (ISF `audio` and `audioFFT` inputs, about 8 of 327 shaders in the corpus): **not in the first
+  release**; such an input reads as silence, and the shader says so.
 * **AN-06 [P] M** A transition's `progress` and similar "over the length of the effect" values: Q-09.
 * **AN-07 [P] L** Linking one parameter to another, expressions: not now (SC-07).
 
@@ -268,7 +288,7 @@ can be supported. The design notes answer that at length; here is what the syste
 menu item or a window opened from one is marked.*
 
 * **UI-01 [P] M** An effect is added with the **+ button** that exists (the menu of effect types), which gets **categories and a search
-  field** because the list will have hundreds of entries. (A new control inside an existing menu; Q-14.)
+  field** because the list will have hundreds of entries. (A new control inside an existing menu; accepted 2026-10-15, Q-14.)
 * **UI-02 [P] M** The **properties panel** shows an instance's parameters with controls made from the descriptor: sliders, number fields,
   pairs, colour pickers, choice boxes, toggles, a button for a trigger, a file chooser for a resource; grouped as the descriptor says;
   each with the stopwatch.
@@ -279,8 +299,12 @@ menu item or a window opened from one is marked.*
 * **UI-06 [D] M** The **embedding default** is a setting in the project settings window and in the global settings window (RS-03).
 * **UI-07 [P] S** The **colour settings** (working space, input space of a source, display transform, output colour space of an export)
   are in the project settings, the clip's properties and the export window: no new always-visible controls.
-* **UI-08 [P] S** On-canvas handles for point parameters (ID-07), drawn by the preview's transform-box code. Q-20.
+* **UI-08 [D] L** On-canvas handles for point parameters (ID-07), drawn by the preview's transform-box code: **later** (Q-20, 2026-10-15).
 * **UI-09 [P] C** A window that lists the effect types that were found and those that failed, with the reason (the plugin manager).
+* **UI-11 [D] M** (2026-10-15) The **global settings window** gets the controls of EN-14 (mode, checkpoint interval, checkpoint memory budget), the
+  resource size limit of RS-07, and the folders of DS-02. No project setting is added for any of them.
+* **UI-12 [D] M** (2026-10-15) **The prompts about plugins** (SF-05 to SF-09) are modal windows, shown only when a project that needs them is opened or a plugin
+  is added: no always-visible control.
 * **UI-10 [P] M** All new texts follow the long-descriptive-name and plain-wording conventions of the existing windows.
 
 ---
@@ -306,7 +330,8 @@ menu item or a window opened from one is marked.*
 ### 11.1 The `.cube` LUT host
 
 * **PH-01 [P] M** Reads Adobe `.cube` 1D and 3D tables with `TITLE`, `DOMAIN_MIN/MAX`, `LUT_1D_SIZE` (2 to 65536), `LUT_3D_SIZE` (2 to
-  256); says what is wrong with a file that it refuses (with the line). The Resolve variant with a shaper and input ranges: Q-23.
+  256); says what is wrong with a file that it refuses (with the line). **The Resolve variant** (a 1-D shaper followed by a 3-D table, with its own input-range
+  keywords) **is read, and never written** (Q-23, 2026-10-15); the shaper is applied as a first pass.
 * **PH-02 [P] M** Applies a 3-D table on the GPU with **tetrahedral** interpolation; a 1-D table with linear interpolation; the input is
   clamped to the domain and the output is not clamped to 0 to 1.
 * **PH-03 [P] M** Parameters: *intensity* (a mix with the input, 0 to 1), *input space*, *output space* (CM-11), *interpolation*
@@ -327,8 +352,9 @@ menu item or a window opened from one is marked.*
   `progress`) (EF-01 to EF-03).
 * **PH-14 [P] M** Imported images (`IMPORTED`) are resources (RS-08).
 * **PH-15 [P] M** A **golden corpus** of ISF shaders with expected pictures from a reference host guards correctness; the compile rate
-  alone is not accepted as correctness. Which reference host and which shaders: Q-24.
-* **PH-16 [Q] M** What shaders ship in the box: the licence policy of LG-02 decides, and it removes some of the collection. Q-25.
+  alone is not accepted as correctness. **The reference host is the ISF Editor on Windows, run by hand, for 10 to 20 shaders** (Q-24, 2026-10-15).
+* **PH-16 [D] M** What ships in the box (Q-25, 2026-10-15): **gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else**; the
+  licence policy of LG-02 decides anything beyond that.
 * **PH-17 [P] L** `audio` and `audioFFT` inputs (AN-05).
 
 ### 11.3 Built-in host
@@ -358,9 +384,10 @@ menu item or a window opened from one is marked.*
 * **AU-07 [P] M** Mono plugins are instantiated once per channel; channel layouts are handled and said.
 * **AU-08 [P] M** A missing sound plugin passes the sound through unchanged and keeps its settings (MD-07).
 * **AU-09 [P] M** Preview and export give the same sound on one machine (null test against each other).
-* **AU-10 [P] L** Sound generators; a master bus with effects (Q-28).
-* **AU-11 [Q] M** Time stretching (the "maintain pitch" behaviour of sped-up clips) stays ffmpeg's `atempo` until a replacement has been
-  judged by ear and the tests re-baselined. Q-29.
+* **AU-10 [D] L** Sound generators; a master bus with effects: **later** (Q-28, 2026-10-15). Adding it later is one more node at the end of the shared
+  block graph (AU-03); its place in the window would be a new control that needs the maintainer's approval first.
+* **AU-11 [D] M** (2026-10-15, Q-29) Time stretching (the "maintain pitch" behaviour of sped-up clips) stays ffmpeg's `atempo` until a replacement has been
+  judged by ear and the tests re-baselined.
 
 ---
 
@@ -389,7 +416,9 @@ menu item or a window opened from one is marked.*
   Blender, MLT, Resolve and After Effects, and it is the cheapest first use of the backdrop mechanism. Not asked for by the maintainer; accepted when proposed (2026-10-13, Q-32), to be built after the engine.
 * **GR-10 [P] M** A group is **isolated** (its children are composited together first, then the group's effects and blend mode apply) or
   **pass-through** (its children are composited straight into what is behind). The model has the flag from the start; the renderer treats a
-  group with no effects and no blend mode as pass-through (free). Whether the user sees the choice: Q-33.
+  group with no effects and no blend mode as pass-through (free). **Decided 2026-10-15 (Q-33): the choice is hidden.** A group is isolated if it has
+  effects, an opacity below 100 % or a blend mode, and is pass-through otherwise. A user-visible "isolate" property can be added later without a change
+  of the file format.
 
 ---
 
@@ -400,10 +429,27 @@ menu item or a window opened from one is marked.*
 * **SF-02 [P] M** A project from elsewhere that embeds shaders can do no more than a shader can do: draw, and waste time (EN-05). It
   cannot read files, because the resource lookup is by entry name only (RS-08).
 * **SF-03 [P] M** Names of embedded resources are checked as today's are (no path parts, no control characters, a length limit).
-* **SF-04 [P] M** A binary plugin (CLAP, LADSPA) is **trusted code** that runs with the program's rights: the first time one is added,
-  the manager says so. A project file can **name** such a plugin and can never **contain** one. Q-26 asks whether to ask before
-  loading a project that names one.
-* **SF-05 [P] S** Limits: the size of one resource, the number of instances on one object, the number of passes of one shader, the size
+* **SF-04 [D] M** A binary plugin (CLAP, LADSPA) is **trusted native code** that runs with the program's rights and is not sandboxed. *Decided 2026-10-15
+  (Q-26), replacing the earlier proposal that a project could only name such a plugin:* **a project file may name a plugin (linked) and may contain one
+  (embedded)**, and each has its own prompt (SF-05, SF-06). Data (an ISF shader, a `.cube` table, an image) is not native code and has **no prompt**: the
+  worst a shader can do is waste time on the GPU, which EN-05 guards against.
+* **SF-05 [D] M** **A linked plugin** (named by a path) gets a **warning prompt** the first time it is needed, **remembered per plugin by its path and a
+  hash of the file**: if the file changes, the program asks again.
+* **SF-06 [D] M** **An embedded plugin** is **never loaded without a concise, severe prompt**, shown **every time the project is opened** (never
+  remembered, also not after a crash recovery of an autosave), with two buttons: *Don't load* (the default) and *Load it*. *Load it* can only be accepted by
+  **holding it down for 5 seconds with the mouse, or holding Enter (never Space), while the button visibly fills up**; letting go resets it. The draft
+  text: *"This project contains a program: «name», for «operating system». It runs with all your rights and nothing checks what it does. Load it only if you
+  trust where this project came from."*
+* **SF-07 [D] M** **Declining is safe**: the instance is a missing effect (MD-07): it passes the picture or the sound through, keeps its settings, shows
+  a badge that says why, and is saved back unchanged.
+* **SF-08 [D] M** An embedded plugin can carry **several builds, one per platform** (a binary only works on one operating system and processor). The
+  prompt names the build that would be loaded; a project with no build for this platform shows the plugin as unavailable and says which platforms it has.
+* **SF-09 [D] M** **Command-line export** (EN-11) cannot show a prompt: it **refuses** a project that needs an embedded plugin, or a linked plugin that
+  is not approved, and lists them by name, unless it is given an explicit flag (`--allow-plugins`).
+* **SF-10 [D] M** (2026-10-15) A native library cannot be loaded straight out of a zip, so an embedded plugin is **extracted to a cache folder** after the prompt, checked
+  against its recorded hash, loaded, and its file removed when the program ends. (Antivirus software may complain; the manager says so.) Its size has a
+  limit of its own, **256 MiB** (confirmed 2026-10-15), separate from RS-07, because plugin binaries are larger than resources.
+* **SF-11 [P] S** Limits: the size of one resource, the number of instances on one object, the number of passes of one shader, the size
   of one intermediate texture.
 
 ---
@@ -424,8 +470,8 @@ menu item or a window opened from one is marked.*
 ## 16. Platforms (PL)
 
 * **PL-01 [D] M** Windows first (2026-10-13). The program already runs here; every feature must work here.
-* **PL-02 [D] S** Linux eventually (2026-10-13), tested in WSL or a virtual machine (design notes, section 5; **both are absent today and I
-  will not install either without being told to**). What "supported" means: Q-19.
+* **PL-02 [D] S** Linux eventually (2026-10-13), tested in WSL or a virtual machine (design notes, section 5). **WSL2 with Ubuntu is installed (2026-10-15)**,
+  and the GitHub repository is public (hosted CI is free). "Supported" means (Q-19, default accepted 2026-10-13): Linux: the tests pass; macOS: it builds in CI.
 * **PL-03 [D] L** macOS far in the future (2026-10-13): no Mac to test on, and a macOS virtual machine on other hardware is not permitted. Nothing in the
   code may assume Windows; the cheap check is a **hosted runner** (GitHub's `macos-latest`, free for a public repository) that builds and runs the headless
   tests; GPU behaviour there stays unmeasured (Q-19).
@@ -445,7 +491,7 @@ menu item or a window opened from one is marked.*
 * **QA-05 [P] M** Performance benchmarks (EN-07) are in the repository and can be run on any machine.
 * **QA-06 [P] M** The whole suite runs on **Linux** (WSL2 or a VM; Linux uses a software Vulkan adapter, which is what the tests want) and on **hosted CI
   for Windows, Ubuntu and macOS**; picture comparisons have per-system tolerances. **WSL2 and VirtualBox on one machine slow each other down**: choose one
-  (I propose WSL2). Q-19.
+  (WSL2 was chosen and is installed, 2026-10-15). Q-19.
 * **QA-07 [P] M** A **spike** (a day or two, throwaway) confirms the parameter-slot design (MD-04) against the real code before the plan
   relies on it, and another confirms one ISF shader through naga to a picture, and one deliberate hang on a software adapter.
 
@@ -481,56 +527,54 @@ menu item or a window opened from one is marked.*
 ## 19. Open questions
 
 *Round 1 (the ones the data model, the first phases and the file format depend on) was asked in the chat on 2026-10-13. **A1** = answered
-by accepting my default (2026-10-13); **R1, still open** = not answered yet; the unmarked ones are round 2 and keep the default until reviewed. Each has my default, so "defaults" is a valid answer.*
+by accepting my default (2026-10-13); **A3** = round 2, answered 2026-10-15 ("default" there means my default was accepted). **Every question is answered.***
 
-| # | Round | Question | My default |
+| # | Round | Question | My default / the answer |
 |---|---|---|---|
-| Q-01 | | Terminology: **effect** (what the user sees), **effect type**, **effect instance**, **host**, **resource**; **plugin** only for what comes from a file or library. | yes |
+| Q-01 | A3 (default accepted) | Terminology: **effect** (what the user sees), **effect type**, **effect instance**, **host**, **resource**; **plugin** only for what comes from a file or library. | yes |
 | Q-02 | A1 (default accepted) | Where do effect types come from: **library folders** scanned at start, **files added to the project**, or both? | both |
 | Q-03 | A1 (default accepted) | Embedding setting: values *embed / link / ask*; project beats global; changes only resources added later; with a **plain-JSON project file** (which cannot embed) it falls back to link with a note, or asks once to save as `.ffrs`? | embed/link/ask; project beats global; new ones only; ask once to convert |
 | Q-04 | A1 (default accepted) | Colour spaces for the **first release**: working (which), source inputs (which, including log cameras, PQ/HLG, ACES2065-1), display, export outputs; and is the ACES **view** transform (the look) wanted, or only the space conversions? | working: linear Rec.709 primaries and ACEScg; inputs: Rec.709/sRGB, Rec.2020, ACES2065-1 (as numbers; no EXR files yet); display sRGB; export Rec.709; logs and HDR later; view transform later through a baked table |
 | Q-05 | A2 | Projects made before linear light, and the untagged-video assumption | **answered 2026-10-13: option (b): old projects are CONVERTED (no legacy flag); they get the new colour handling and look slightly different; new and old alike assume untagged HD is BT.709, SD is BT.601** |
-| Q-06 | | Colour parameters: their space is always the working space, and colours are interpolated in linear light. | yes |
+| Q-06 | A3 (default accepted) | Colour parameters: their space is always the working space, and colours are interpolated in linear light. | yes |
 | Q-07 | A1 (default accepted) | The **hue shift** (and other existing effects) run in which domain: display-referred (keeps today's look) or linear? | display-referred; new effects declare their own |
 | Q-08 | A1 (default accepted) | File-based effect types: **key = the name, version = a hash of the content**; the **embedded copy wins** over a library copy of the same name, with an "update to the library version" offer. | yes |
 | Q-09 | A1 (default accepted) | Transitions: where does `progress` come from: a keyframed number only, or **derived from a start and end frame on the effect** (with a keyframed override)? | derived from a range, with an override |
 | Q-10 | A1 (default accepted) | Which **built-in effects** ship in the first release besides hue shift? | brightness/contrast, saturation, exposure, blur, crop, opacity, LUT |
-| Q-11 | | A generator clip's default length (5 s like a picture) and whether it can be dragged longer. | 5 s, extendable |
+| Q-11 | A3 (default accepted) | A generator clip's default length (5 s like a picture) and whether it can be dragged longer. | 5 s, extendable |
 | Q-12 | A1 (default accepted) | Export when an effect is missing: refuse, warn and go ahead, or ask? | refuse, listing what is missing, with an "export anyway" button |
-| Q-13 | | When the machine cannot keep up in the preview: lower resolution, drop frames, or both? | lower resolution first, then drop |
-| Q-14 | | The + menu grows to hundreds of entries: **categories and a search field** inside that menu are acceptable (a new control in an existing menu)? | yes |
+| Q-13 | A3 (default accepted) | When the machine cannot keep up in the preview: lower resolution, drop frames, or both? | lower resolution first, then drop |
+| Q-14 | A3 (default accepted) | The + menu grows to hundreds of entries: **categories and a search field** inside that menu are acceptable (a new control in an existing menu)? | yes |
 | Q-15 | A2 | Clip groups | **answered 2026-10-13 by the three-kind specification in `groups-feature-spec.md` (tag, clip group, track group)** |
-| Q-16 | | Groups as organisation only (no effects) before the engine exists: acceptable? | yes |
+| Q-16 | A3 (confirmed) | Groups as organisation only (no effects) before the engine exists: acceptable? | yes (done in round 11) |
 | Q-17 | A1 (default accepted) | Text objects become generators: in the same file-format change as the plugin model (v10) or a later one (v11)? Font as a parameter type. | later (v11), once the plugin model has settled |
-| Q-18 | | EXR/DPX image or sequence import and export in the first release? | no |
-| Q-19 | A1 (default accepted) | Platforms: install **WSL2** now (admin + restart; I can then run the Linux tests myself), or a VirtualBox VM (you create it; cannot be combined with WSL2 without slowdown), or neither yet? Is the GitHub repository public (free hosted CI for Windows/Ubuntu/macOS)? What does "supported" mean per platform? | WSL2; public repo with CI; Linux: tests pass, macOS: builds in CI |
-| Q-20 | | On-canvas handles for point parameters in the first release? | later |
-| Q-21 | | Persistent (feedback) effects: re-simulate up to how many frames on a seek before using the last cached state? | 300 frames |
-| Q-22 | | Audio-reactive shaders: ever? | not in the first release |
-| Q-23 | | The Resolve `.cube` variant (1D shaper plus 3D, non-standard input range): needed? | yes, read only |
-| Q-24 | | Reference host for the ISF golden corpus: the ISF Editor on Windows, by hand, 10 to 20 shaders? | yes |
-| Q-25 | | What ISF and LUT content ships (LG-02)? | gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else |
-| Q-26 | | Resource size limit; ask before loading a project that names a binary plugin? | 64 MiB per resource; ask once per plugin |
+| Q-18 | A3 | EXR/DPX image or sequence import and export in the first release? | **answered 2026-10-15: not yet** (not in the first release) |
+| Q-19 | A1 (default accepted); **closed 2026-10-15** | Platforms: install **WSL2** now (admin + restart; I can then run the Linux tests myself), or a VirtualBox VM (you create it; cannot be combined with WSL2 without slowdown), or neither yet? Is the GitHub repository public (free hosted CI for Windows/Ubuntu/macOS)? What does "supported" mean per platform? | WSL2 (installed); public repo with CI (it is public); Linux: tests pass, macOS: builds in CI |
+| Q-20 | A3 (default accepted) | On-canvas handles for point parameters in the first release? | later |
+| Q-21 | A3 | Persistent (feedback) effects: re-simulate up to how many frames on a seek before using the last cached state? | **answered 2026-10-15: two global modes, Bounded (300 frames, fixed) and Warm-up only, plus global checkpoint interval (60 frames) and memory budget (1 GiB); none are project settings; the export is never affected: EN-14** |
+| Q-22 | A3 (default accepted) | Audio-reactive shaders: ever? | not in the first release |
+| Q-23 | A3 | The Resolve `.cube` variant (1D shaper plus 3D, non-standard input range): needed? | **answered 2026-10-15: yes, read only** |
+| Q-24 | A3 (default accepted) | Reference host for the ISF golden corpus: the ISF Editor on Windows, by hand, 10 to 20 shaders? | yes |
+| Q-25 | A3 (default accepted) | What ISF and LUT content ships (LG-02)? | gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else |
+| Q-26 | A3 | Resource size limit; ask before loading a project that names a binary plugin? | **answered 2026-10-15: 64 MiB per memory-loaded resource, in the global settings, asking when exceeded; a project may name AND contain plugins; a linked plugin gets a warning prompt (per plugin, path and hash); an embedded one gets a severe prompt every time the project is opened, accepted by holding "Load it" for 5 s (mouse, or Enter, never Space); SF-04 to SF-10** |
 | Q-27 | A1 | Which audio plugins first? | **answered 2026-10-13: LADSPA before CLAP; the LADSPA plugins of the maintainer's LMMS 1.2.2 install are the first test set** |
-| Q-28 | | A master bus with effects? | later |
-| Q-29 | | Keep ffmpeg's `atempo` for sped-up sound for now? | yes |
-| Q-30 | | Will you ever want a **node-editor** interface (design notes, section 2)? | no, not planned |
-| Q-31 | | A render process (design notes, section 3): keep it possible only through message-shaped interfaces, or build it? | possible only; a command-line export first |
+| Q-28 | A3 | A master bus with effects? | **answered 2026-10-15: later** |
+| Q-29 | A3 (default accepted) | Keep ffmpeg's `atempo` for sped-up sound for now? | yes |
+| Q-30 | A3 | Will you ever want a **node-editor** interface (design notes, section 2)? | **answered 2026-10-15: no node editor yet, but image-input parameters and a node editor must both stay possible: ID-10, EN-15** |
+| Q-31 | A3 (default accepted) | A render process (design notes, section 3): keep it possible only through message-shaped interfaces, or build it? | possible only; a command-line export first |
 | Q-32 | A1 (default accepted) | **Adjustment clips** (an effect over everything behind a clip for its length): wanted? | yes, after the engine |
-| Q-33 | | Isolated / pass-through for groups visible to the user? | a hidden default (isolated if it has effects) |
+| Q-33 | A3 (default accepted) | Isolated / pass-through for groups visible to the user? | a hidden default (isolated if it has effects, opacity below 100 % or a blend mode) |
 | Q-34 | A1 (default accepted) | **GPL-3.0-or-later or GPL-3.0-only**, and an Ardour-style **plugin clarification** (plugins loaded through a third-party API are not derivative works)? Now, while you are the only copyright holder? | or-later; yes |
-| Q-35 | | OpenColorIO as an optional baker/reader later? | later |
-| Q-36 | | Export formats: 10-bit and other codecs now that a GPL ffmpeg may ship (x264, x265)? Hardware encoders? | later; keep today's formats |
+| Q-35 | A3 | OpenColorIO as an optional baker/reader later? | **answered 2026-10-15: later** |
+| Q-36 | A3 | Export formats: 10-bit and other codecs now that a GPL ffmpeg may ship (x264, x265)? Hardware encoders? | **answered 2026-10-15: later; keep today's formats** |
 | Q-37 | A1 (default accepted) | The plan's idea of shipping **LUTs through ffmpeg's `lut3d` before the engine exists** conflicts with the colour-space features (CM-10, CM-11): drop it (LUTs wait for the engine) or ship a limited version (display-referred in and out) first? | LUTs wait for the engine |
 
 ---
 
 ## 20. What this list does not say yet
 
-The order, the sizes and the gates: that is the plan of action, which is written when section 19 has no **[Q]** left that a phase depends
-on. A first guess of the order, to be argued about then: **the three kinds of group first** (maintainer, 2026-10-13: `groups-feature-spec.md`), then phase 0 (open up effect identity generic over the owner, the licence mechanics, the tooling), the
-engine skeleton (parity first, in a display-referred compatibility mode), linear light turned on as a reviewed
-change, the LUT host, group effects and adjustment clips, the ISF host, sound (LADSPA, then CLAP), the plugin manager.
+The order, the sizes and the gates are in the plan of action, **`plugin-system-plan-of-action.md`** (written 2026-10-15, now that section 19 has no
+open question). It also lists what was decided *about* the plan, and what is still a proposal of mine.
 
 ## 21. Decision log
 
@@ -550,6 +594,12 @@ change, the LUT host, group effects and adjustment clips, the ISF host, sound (L
 | 2026-10-13 | Q-05: old projects are converted (option b), no legacy flag | maintainer |
 | 2026-10-13 | **groups are built before the effects-system work**; three kinds specified (tag / clip group / track group): `groups-feature-spec.md` | maintainer |
 | 2026-10-13 | round 1 answered by accepting my defaults, except Q-05 and Q-15 (still open) and Q-27 (LADSPA before CLAP; LMMS plugins as the test set; `ladspa-customwave` is not part of this project) | maintainer |
+| 2026-10-15 | WSL2 (Ubuntu) is installed and the GitHub repository is public (Q-19 closed) | maintainer |
+| 2026-10-15 | round 2 answered: my defaults for Q-01, 06, 11, 13, 14, 20, 22, 24, 25, 29, 31, 33; Q-16 confirmed; Q-23 yes (read only); Q-18, Q-28, Q-35, Q-36 later | maintainer |
+| 2026-10-15 | Q-21: preview of effects that depend on earlier frames: global settings (mode, checkpoint interval, memory budget), never project settings, never the export (EN-14) | maintainer |
+| 2026-10-15 | 256 MiB cap for an embedded plugin binary (SF-10); the plugin clarification wording is drafted by me and decided by the maintainer (Q-34); the CI workflow is created by me and committed by the maintainer; Ubuntu is registered in WSL | maintainer |
+| 2026-10-15 | Q-30: no node editor yet; image-input parameters and a node editor stay possible (ID-10, EN-15) | maintainer |
+| 2026-10-15 | Q-26: size limit 64 MiB (asks when exceeded, global setting); **projects may contain plugins** (reverses "never contain"); linked plugin: warning prompt per plugin; embedded plugin: severe prompt every time, accepted by holding "Load it" for 5 s (mouse, or Enter, not Space); declining is safe; several platform builds allowed; command-line export refuses without `--allow-plugins` | maintainer |
 
 ## 22. Gaps and inconsistencies found while writing this list
 
@@ -572,4 +622,10 @@ Recorded so that they are not found twice; each points at where it was resolved 
 11. **"Support Linux" and "support macOS" were not defined** (build, tests, release files): Q-19.
 12. **Plugins and the licence**: hosting non-GPL plugins in a GPL program is a debated case that the copyright holder can settle in one
     sentence, which is easy now and hard later: LG-04, Q-34.
-
+13. **"A project file can name a plugin and can never contain one"** (SF-04 of draft 1) was **reversed by the maintainer on 2026-10-15** (Q-26): embedded
+    plugins are allowed, behind a severe prompt (SF-06). Everything that relied on the old rule is rewritten: SF-02 (shaders are data and have no prompt),
+    RS-08, DS-04, and the plan's section on risks.
+14. **A native library cannot be loaded from inside a zip**, so embedding a plugin needs an extract-and-hash step (SF-10).
+15. **A feedback effect's preview can differ from its export** after a distant seek in *Bounded* mode and always in *Warm-up only* mode; EN-03 (preview and
+    export agree on one machine) holds **for effects that do not depend on earlier frames, and for these only when the preview has caught up**. EN-14 says so
+    in the interface.

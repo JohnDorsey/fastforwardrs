@@ -1,0 +1,235 @@
+# Plugin system: plan of action
+
+Status: **draft 1 for the maintainer's review**, written 2026-10-15, after the last open question of `plugin-system-features.md` was answered. It says **in what
+order the work is done, what each phase delivers to a user, and what has to be true before the next phase starts**. It replaces section 9 of
+`long-term-plan-plugins-and-gpu-engine.md` (that section is kept for history). What the system must do is in the features list (identifiers such as `ID-10` or `SF-06` point there);
+why the design is what it is, is in the long-term plan and in `plugin-system-design-notes.md`.
+
+Tags: **[V]** verified by me in the repository or on this PC on 2026-10-15; **[D]** decided by the maintainer (date); **[P]** my proposal, which stands unless the maintainer
+objects; **[B]** my belief or estimate. Sizes are [B]: S, M, L, XL are orders of magnitude for one person who knows this code, **not a calendar**.
+
+---
+
+## 1. Where the work starts
+
+* **Round 12 is committed** (`222b3cc`) [V]. Groups (tag, clip group, track group) are built; their **effects are a placeholder** (applied to each member's picture, the same
+  picture only where members are opaque: features list, section 13) until the engine can composite a group.
+* **The model is still closed** [V]: `PropertyId` is used 1380 times in 96 files and `EffectKind` 343 times in 42 files (the long-term plan counted 1250 and 262 in 79 and 25 on
+  2026-10-12; the work of rounds 11 and 12 added to both). There is one effect (the hue shift), at most one of each kind per clip or track.
+* **The project file is format 10** [V] (`FILE_FORMAT_VERSION`; groups took it). The features list called the plugin model "v10" and text generators "v11": **the plugin model is
+  therefore format 11 and text generators format 12.**
+* **The mutation tooling is in the repository** [V] (`tools/mutation_testing/`, round 12), the `.ffrs` archive reads media in place (round 10), and the whole library suite runs in about
+  26 s.
+* **The repository has no `LICENSE` file, no `license` in `Cargo.toml`, and no CI** [V] (`.github` is absent). The remote is `github.com/JohnDorsey/fastforwardrs`, public [D, 2026-10-15].
+* **Linux:** the Ubuntu app is installed (`CanonicalGroupLimited.Ubuntu` is in the list of Windows apps) **WSL first reported "no installed distributions"** [V]; the maintainer then started Ubuntu, and `wsl -l -v` shows `Ubuntu` (26.04.1 LTS, WSL 2, 8 processors, 15 GB) [V, 2026-10-15]. It has `git` and `curl` and **no Rust toolchain or C compiler yet** (phase 0.1 installs them).
+* **Decisions that bind this plan** (all in the decision log of the features list): GPLv3-or-later with the plugin clarification; Windows first, Linux tested, macOS builds in CI;
+  `.cube` first, then ISF; LADSPA before CLAP; linear light is important; groups first (done); a node editor and image-input parameters both stay possible; embedded native plugins
+  allowed behind a severe prompt; preview of feedback effects is a global setting and never changes the export.
+
+## 2. Rules for every phase
+
+1. **Behaviour is locked by tests before it is changed** (the standing rule): the existing tests stay and pass unmodified wherever behaviour is meant to stay; a test is rewritten
+   only on purpose, and the report says which.
+2. **One visible change at a time, and each one reviewed.** The engine is first built to look exactly like today (CM-20); linear light is a separate step with its differences listed.
+3. **The old path stays as the oracle** until parity is shown (EN-02), and is deleted in the phase that says so, with its tests.
+4. **Each phase ends with** the full suite, `clippy -D warnings`, `rustdoc -D warnings`, a mutation campaign over the code it added (`tools/mutation_testing/`), the README and the
+   features list brought up to date, and a report in the usual form (done / decisions / tests rewritten on purpose / limits / mistakes / verified versus believed). I do not commit.
+5. **No always-visible control is added** unless asked for (`UI-01`, `UI-11`, `UI-12` are menus, settings and prompts only).
+6. **Shaders and plugins are never tested on the maintainer's GPU or session** (SF-01): software adapters, a machine set aside, or WSL.
+7. **Any phase after phase 2 can be cancelled** without wasting the earlier ones: each ends with something usable.
+
+## 3. The phases
+
+Dependencies at a glance: `0 -> 1 -> 2 -> 3 -> 4 -> 5`, `4 -> 6`, `0 -> 7` (sound runs beside the picture phases), `7 and 6 -> 8`, `6 or 7 -> 9`.
+
+### Phase 0 — Foundations (size M + M + S + S)
+
+Five pieces that need no GPU and no new user-visible behaviour. They can be done in any order; 0.4 gates phase 1 and 0.1 to 0.3 gate nothing but should come first because they are cheap
+and every later phase uses them.
+
+* **0.1 Linux and CI** [P]. The maintainer starts Ubuntu once (section 1). Then I build and run the suite in WSL and fix what is Windows-only (spike S5), and add GitHub Actions for
+  Windows, Ubuntu and macOS: build, `clippy`, `fmt`, and the headless tests on software adapters (WARP, lavapipe); macOS only builds and runs the headless tests (PL-03). The workflow file
+  is created in the tree and **the maintainer commits and pushes it**. *Gate:* the whole suite passes in WSL and CI is green on the three systems (macOS may be "builds" only,
+  as decided in Q-19). *Size:* M (what breaks on Linux is unknown until it is tried). *Delivers:* a second system that keeps everything honest.
+  **Progress 2026-10-15 [V]:** Rust 1.99, a C toolchain and the libraries are installed in Ubuntu; the project builds there; `tools/linux/run_in_wsl.sh` runs any command on a copy of the project in
+  the Linux file system; fmt, clippy `-D warnings` and rustdoc `-D warnings` are clean on Linux; the library suite passes (3464) after **one fix**: `snip.rs`'s test compared the sound bit for bit, and `sin`/`exp`
+  differ in the last bit between Windows and Linux (at most 4e-8, in about 1 sample in 100), so it now compares the sound to a thousandth (a change of 0.02 % in one pitch or 0.3 % in a time is still noticed).
+  **Integration tests: with Ubuntu's ffmpeg 8.0.1, 2 of 189 fail; with ffmpeg 9 (the BtbN GPL build n9.0.2, in `~/ffmpeg9` in Ubuntu, downloaded 2026-10-15 with the maintainer's
+  permission), all 189 pass and so do the 3464 library tests** [V]. The cause is ffmpeg 8 moving the pictures of a file whose sound starts before its picture by one frame after `-ss 0`
+  (README, *ffmpeg*). **Decided 2026-10-15: ffmpeg 9 or newer is required**: an older ffmpeg is not used and the error says why (`OLDEST_FFMPEG_MAJOR_VERSION_THAT_WORKS`); the code path for
+  ffmpeg older than 7 (`-filter_complex_script`) was dead and is removed, with its tests. `.github/workflows/ci.yml` is written and **not yet run**; `tools/linux/` has the helper scripts.
+  *Remaining for 0.1:* the first CI run on GitHub (the maintainer commits and pushes the workflow), and what it shows.
+* **0.2 Licence mechanics** (LG-06, LG-07) [P]. `LICENSE` (GPLv3), `license = "GPL-3.0-or-later"` in `Cargo.toml`, an SPDX line in each source file (checked by `reuse lint`),
+  `THIRD_PARTY` notices (`cargo-about` or `cargo-deny`), the ffmpeg source offer, the manifest of shipped content (LG-02), the Ubuntu Font Licence check, and **the plugin
+  clarification text (LG-04, Q-34), which only the copyright holder can approve: I draft it, you decide the words**. *Gate:* `reuse lint` and `cargo deny` clean in CI. *Size:* S.
+* **0.3 Split `FastForwardApplication`'s state** (agreed 2026-10-12) [D]. The application struct is still large (`fast_forward_application/mod.rs` is 702 lines [V]); it is split into
+  sub-structs so that the engine, the plugin registry and the prompts have places to live that are not "yet another field". Mechanical; behind the existing tests, which must not
+  change. *Gate:* all tests green and unmodified. *Size:* M.
+* **0.4 Open up effect identity** (the refactor of the long-term plan, section 3) [D agreed 2026-10-12]. Descriptors in the project, effect instances with ids (several of one type allowed),
+  parameter values by string id, `PropertyId::EffectParam { instance, slot }` so that the key stays `Copy + Ord`, the hue shift as `builtin:hue_shift`, **format 11** (reads 10 and older,
+  keeps unknown fields: MG-03), the missing-effect behaviour (MD-07) with a badge, and copying/undo/racks working as today. The effects of groups use the same model (the placeholder of
+  section 13 is unchanged). **First a spike (QA-07, two days, throwaway)** confirms the slot scheme against the real code; if it is awkward the fallback is `Arc<str>` ids behind a type alias
+  (more touching, nothing structural). *Gate:* every existing behaviour test passes unmodified except those that assert "at most one effect of each kind" and the file-format tests; a
+  format-10 file round-trips to format 11 and back to the same project; a test file of each format version is in the tests (MG-03). *Size:* M-L (about 100 files, almost all mechanical).
+  *Delivers to a user:* nothing visible, except that two hue shifts on one clip are now allowed.
+* **0.5 Spikes** (QA-07, S1-S3) [P], throwaway code, each ends with a written finding: **S1** one ISF shader through the rewriting step and naga to a picture; **S2** a deliberate hang and a
+  lost device on a software adapter / WSL (never the maintainer's GPU), to decide how plugin passes are guarded (EN-05); **S3** one `.cube` in a shader against ffmpeg's `lut3d`.
+  (The old S4, the seek latency of a linked libav, is dropped: libav linking is not on this plan, section 5.)
+
+### Phase 1 — The engine skeleton, in compatibility mode (size L)
+
+EN-01, EN-04, EN-12, EN-02, EN-08, EN-09, CM-09, CM-17 (in part), CM-20.
+
+One renderer on wgpu draws the preview from the plan: decode (ffmpeg children, now giving raw frames in their native pixel format) -> upload -> **YUV to RGB on the GPU** -> placement ->
+effect stack (the hue shift as a WGSL pass) -> composite -> track effects -> an output pass into an 8-bit texture that egui shows (CM-04). The working format is `Rgba16Float`, but the
+mode is **display-referred and reproduces today's pictures**, **including today's accident that untagged video is converted as BT.601** (so that parity with the oracle can be *proved*;
+phase 3 corrects it). Textures come from a pool; the engine runs on a thread of its own behind channels, and its interface is **message-shaped** (an immutable serialisable scene value in,
+a frame out; EN-12), so that a command-line export and a render process stay possible (Q-31). The old egui layers stay as the oracle.
+*Gate (from the long-term plan):* random projects (the existing generators) rendered by the engine and by the oracle agree within a stated tolerance and a pixel-count budget; a typical stack
+(four layers, two blurs and a LUT) plays at **1080p60 on the integrated GPU**, measured by a benchmark in the repository (EN-07); a deliberately bad shader gives an error and never a hang
+(EN-05); CI is green on software adapters. *Delivers:* nothing visibly new except adaptive preview quality (EN-08: lower resolution before dropped frames, full resolution when still) and
+a preview that no longer converts colours in ffmpeg. *Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
+and each is listed and either fixed or accepted by the maintainer.
+
+### Phase 2 — Export through the engine (size M)
+
+EN-03, EN-10, EN-11.
+
+Frames are rendered by the same engine, converted to the encoder's YUV layout on the GPU, read back through a ring of buffers and piped to ffmpeg as raw video; audio is still the old
+ffmpeg path until phase 7. A **command-line export** (no window) is the first user of the message-shaped interface and gives the engine tests a way to run. Then the old export code
+is deleted: `filter_graph/pictures.rs`, `animated_sections.rs`, `EffectKind::as_exported`, and their tests (the tests that compared with plain evaluation are kept as the engine's oracle
+tests). *Gate:* **preview and export are bit-identical on one machine** and within a stated tolerance across machines (EN-03); the real-ffmpeg journeys pass unchanged; the exported files'
+tags are the same as before. *Delivers:* animated values are no longer quantised into stretches (the reason `animated_sections.rs` existed), and exports no longer depend on ffmpeg's filter graph.
+
+### Phase 3 — Linear light and colour management (size M-L)
+
+CM-01 to CM-05, CM-07 to CM-12, CM-14 to CM-16, CM-17 (complete), MD-11, MG-01. **A separate, reviewed change** (CM-20).
+
+The compatibility mode is turned off: compositing in linear light, a working colour space per project (linear Rec.709 primaries by default; ACEScg offered), an input space per source (read
+from the file's tags; the assumption for untagged video is **BT.709 for HD and BT.601 for SD**, Q-05), a display transform in the global settings, an output space and correct tags
+on export. **Old projects are converted** (Q-05: no legacy flag): they look slightly different at scaled edges, in blends and for untagged HD video, and the release notes say so. Effects
+declare their colour domain (CM-10); the hue shift stays display-referred (Q-07). *Gate:* the round-trip tests and the tests against published numbers (CM-16, including "50 % white over
+black is 0.5 in linear light, 0.735 in sRGB code"); **a written list of every visible difference with before/after pictures, reviewed by the maintainer** before the phase is called done.
+*Delivers:* the colour handling that was asked for as "important".
+
+### Phase 4 — The effect surface, built-in effects and the `.cube` host (size L)
+
+SC-04, ID-01 to ID-09, MD-01 to MD-10, RS-01 to RS-09, EF-01, EF-07, UI-01 to UI-07, UI-11, DS-01 to DS-03 (folders; binary scanning waits for phase 7), PH-01 to PH-05, PH-20,
+MG-02, LG-02 (manifest), SF-02, SF-03, SF-11, Q-12.
+
+What a user sees for the first time: the **+ menu with categories and a search field** listing effect types; the **properties panel built from descriptors** (sliders, pairs, colours,
+choices, toggles, a file chooser), each parameter with the stopwatch and keyframes in racks; **several instances of an effect on one object**, reorderable, bypassable, duplicable; **missing effects** with a badge
+and an **export that refuses and lists them, with an "export anyway" button** (Q-12); the **built-in effects** (brightness/contrast, saturation, exposure, blur, crop, opacity, and the LUT effect,
+Q-10); **"Add effect from file..."** for a `.cube`; **resources embedded or linked** by a setting in the project settings and in the global settings (embedding is the default; a plain-JSON
+project falls back to link with a note, and the program asks once whether to save as `.ffrs`: Q-03), with the 64 MiB limit and its prompt (RS-07). The `.cube` host reads 1-D and 3-D tables **and the
+Resolve variant (read only)** and applies them with tetrahedral interpolation on the GPU. Our own sample LUTs ship (LG-08). *Gate:* a table through the shader equals ffmpeg's `lut3d=interp=tetrahedral`
+within a tolerance (PH-04); conformance tests for each built-in; a project with a missing effect survives a round trip unchanged and renders as pass-through; mutation campaign.
+*Delivers:* **the first plugin family the maintainer asked for.** This is the first phase after which the program is visibly a different program.
+
+### Phase 5 — Group effects, adjustment clips and generator clips (size M)
+
+GR-02, GR-06 to GR-10, EF-02, EF-03 (the backdrop slot, first use), EF-04, Q-33.
+
+The engine composites a group, so the **placeholder of section 13 is replaced by the real thing**: a group's effects apply to the composite of what is in it. A group is isolated if it has
+effects, an opacity below 100 % or a blend mode, and pass-through otherwise (hidden from the user; Q-33). **Adjustment clips** (an effect over everything behind a clip for its length) are
+the cheapest use of the backdrop mechanism. **Generator clips** (no media, 5 s by default, extendable: Q-11) exist as a clip kind, with the built-in effects that generate. The groups
+specification's rules (what may be inside a rectangle, what a message says) are unchanged. *Gate:* **"ungroup gives the same render"** (GR-07) and "group with no effects equals no group"
+as tests; the on-composite effect table's restriction (`on_a_composite`) is lifted and its tests are rewritten on purpose; preview equals export. *Delivers:* effects on groups that are exact.
+
+### Phase 6 — The ISF host (size L)
+
+PH-10 to PH-15, PH-16, EF-03 (transitions), EN-05, EN-06, EN-14, ID-10, AN-05 (silence), SF-01.
+
+ISF 2.0: the header becomes a descriptor, the source goes through the rewriting step and naga into WGSL **in a worker thread that survives a panic**, with errors shown with line and column;
+multi-pass shaders, persistent buffers, `TIME` as clip-local time, imported images as resources (found only by entry name: RS-08); **filters, generators and transitions** told apart by their inputs;
+**image inputs** are in the descriptor (ID-10; the interface to fill one from another layer can come later). Every plugin pass runs under a **watchdog**; a pass that takes too long or a lost device disables
+that instance, says which, and recreates the device. **Feedback effects:** the preview offers the two global modes of EN-14 (*Bounded*, 300 frames, with a checkpoint interval and a memory budget; *Warm-up only*), the export is always sequential and
+exact, and the interface says "depends on earlier frames". The shaders that ship are **gl-transitions and the clearly MIT original Vidvox shaders** with notices (Q-25). *Gate:* the **golden corpus** (10 to 20 shaders compared by
+hand with the ISF Editor on Windows, then frozen as expected pictures: Q-24) passes on the shipped shaders; the deliberate-hang test passes on a software adapter and in WSL; a feedback effect behaves as EN-14 says on seek.
+*Delivers:* the second plugin family, including **transitions**.
+
+### Phase 7 — The sound engine and LADSPA (size L + M), runs beside phases 1 to 6
+
+AU-01, AU-03 to AU-09, AU-12, DS-04, DS-05, SF-04 to SF-10, UI-12, PL-04.
+
+A **block graph in the program** that the speakers and the export both call replaces the two ffmpeg sound graphs; the old graphs stay as the oracle until a **null test** shows the mixes match (AU-09). `atempo`
+stays for sped-up clips (Q-29). Plugins are changed sample-accurately, reset on a seek with a pre-roll, and a missing plugin passes the sound through. **LADSPA** comes first, with the **LMMS 1.2.2 plugins** as the
+test set (119 DLLs, 64-bit [V in the features list]); scanning happens in a **child process** so that a crashing plugin is listed as failed and never takes the editor down. **This is also where native code
+first loads, so the whole safety design of section 14 of the features list is built here, before any binary is loaded:** the warning prompt for a linked plugin (per plugin, by path and hash), the severe prompt for an
+embedded one (every time a project is opened; accepted by holding "Load it" or Enter for 5 seconds while it fills; never Space), declining as a safe state, several platform builds per embedded plugin,
+extraction to a cache folder with a hash check, the 256 MiB cap [D], and the command-line refusal without `--allow-plugins`. *Gate:* the null test; the LMMS set loads, plays and exports in a
+test project; a zero-byte or damaged DLL is "failed", never fatal; the prompt tests (including the hold, the key, the reset on release, and "declined renders as pass-through"). **CLAP follows** as a second
+step inside this phase (a different host, the same graph). *Delivers:* the sound plugins of the original request.
+
+### Phase 8 — The plugin manager (size S-M)
+
+UI-09, DS-05, DS-06, PH-21 (if wanted), LG-05, QA-03 (corpus tooling).
+
+A window, opened from a menu, listing the effect types found and those that failed with the reason, folders to scan, disabling a type, and which of two same-named types won (user folder over program folder).
+Optionally the program's own plugin format (a descriptor plus WGSL, no ISF shim) with a documented example (LG-05). *Gate:* the manager's data comes from the same registry the menu uses (no second list). *Delivers:* a
+way to understand why an effect is missing.
+
+### Phase 9 — Text objects become generators (format 12) (size M-L)
+
+EF-06, ID-05 (the font parameter type), SC-05, Q-17.
+
+Text becomes a generator effect with the parameters it has today (text, font, size, colour), drawn on the CPU and uploaded (a second kind of host, "CPU image producer"). One migration from format 11. Done **last** because it
+changes a lot for no new capability and benefits from a settled model. *Gate:* every text test passes unmodified except the file-format ones; old projects look the same.
+
+## 4. Order: what I considered
+
+* **Sound earlier or later.** Sound needs nothing from the GPU phases, only phase 0.4, so it could run first or in parallel. I put it as phase 7 because you asked for `.cube` and ISF first, and because it carries the
+  heaviest safety work. **If you would rather have LADSPA sooner (it was in your original request), it can move to straight after phase 4 with no cost to the others; say so.** [P]
+* **LUTs before the engine** (the long-term plan's 3a) is dropped: it would build a second, colour-unaware LUT path (Q-37, decided).
+* **Linear light together with the engine port** is rejected (CM-20): neither could be checked.
+* **A node editor, a render process, libav linking, OpenFX** are not scheduled. They are kept possible by rules already in the features list (EN-12, EN-15, ID-10). Libav linking (option B of the long-term plan) is a
+  separate decision, to be taken **only if phase 1's measurements show the decode path is the bottleneck**; the GPL licence no longer forces any choice.
+* **A shortcut I rejected:** shipping `.cube` LUTs sooner by running them through ffmpeg's `lut3d` before the engine exists. It would be the only colour-unaware, display-referred LUT path in
+  a program that is about to become colour-managed, and would have to be thrown away (Q-37).
+* **If you want something sooner than phase 4:** phases 0.1 (Linux and CI) and 0.2 (licence files) are cheap and independent of everything else, and the sound engine can move earlier (first bullet).
+
+## 5. Not in this plan (and not impossible)
+
+HDR and PQ/HLG (the working format holds it; CM-13), EXR/DPX and image sequences (Q-18), a master bus (Q-28), on-canvas handles for point parameters (Q-20), 10-bit and other codecs and hardware encoders (Q-36), OpenColorIO (Q-35),
+audio-reactive shaders (Q-22), a node-editor interface (Q-30), a render process (Q-31), presets (EF-08), per-keyframe interpolation (AN-03), linking one parameter to another and expressions (AN-07), masks and tracking, VST3 and LV2,
+WASM plugins, OpenFX (shelved). Each can be asked for later; the features list says what keeps each possible.
+
+## 6. Risks, and what would change the plan
+
+* **Parity is the risky phase (1).** If the oracle comparison keeps finding small differences in text, rotation or filtering, the right response is to list them and let the maintainer accept each, not to loosen the tolerance silently.
+* **The identity refactor touches about 100 files.** The spike (0.4) exists to find out early; the fallback is stated.
+* **Shader hangs and driver bugs** are real. The watchdog and "disable the instance" behaviour are built in phase 1/6 *before* user shaders are accepted, and are tested only on software adapters or in WSL.
+* **Cross-vendor drift** (at most 1/255 in measurements): "equal" means equal on one machine and within a tolerance across machines (EN-03); this is written in the documentation.
+* **ISF correctness** is not the compile rate: the golden corpus is a gate (phase 6).
+* **A native plugin that is embedded is code that runs with your rights.** The prompt is honest about it; the design cannot make it safe, only deliberate.
+* **Solo-maintainer load.** Nine phases are a lot; each ends with something usable, and phases 6 to 9 can be dropped without harming 0 to 5.
+* **What would change the plan:** a hard requirement for 4K scrubbing on integrated GPUs (favours libav linking early); evidence that WSL cannot run the engine tests (favours a VM or only CI); a decision to close the source (the
+  GPL ffmpeg and several shipped shaders would have to go); a user base asking for a specific OpenFX plugin.
+
+## 7. What I need from the maintainer, and when
+
+| When | What |
+|---|---|
+| ~~now~~ done 2026-10-15 | ~~Start Ubuntu once~~ |
+| before phase 0.2 ends | **the words of the plugin clarification** (Q-34): I draft, you decide (accepted 2026-10-15) |
+| before phase 0.1 ends | **commit and push** the GitHub Actions workflow I create (accepted 2026-10-15; I do not commit) |
+| whenever | say if **sound should move earlier** (section 4) |
+| during phase 3 | review of the **list of visible colour differences** |
+| during phase 6 | **run the ISF Editor by hand** on the 10 to 20 shaders of the golden corpus (or tell me to use another reference) |
+
+## 8. Feature list to phase map
+
+| Features | Phase |
+|---|---|
+| LG-01 to LG-07 (the licence mechanics), PL-02 to PL-04, QA-06 | 0.1, 0.2 |
+| ID-01 to ID-06, ID-08, ID-09, MD-01 to MD-10, MD-12, MG-03, MG-04, QA-07 | 0.4 (descriptors and instances), 4 (what the user sees) |
+| EN-01, EN-02, EN-04, EN-08, EN-09, EN-12, CM-04, CM-09, CM-20 | 1 |
+| EN-03, EN-10, EN-11 | 2 |
+| CM-01 to CM-03, CM-05, CM-07, CM-08, CM-10 to CM-12, CM-14 to CM-17, MD-11, MG-01 | 3 |
+| UI-01 to UI-07, UI-11, RS-01 to RS-09, PH-01 to PH-05, PH-20, EF-01, EF-07, DS-01 to DS-03, DS-06, SC-04, Q-12 | 4 |
+| GR-02, GR-06 to GR-10, EF-02, EF-03, EF-04 | 5 |
+| PH-10 to PH-16, EN-05, EN-06, EN-14, EN-15, ID-10, AN-05 | 6 |
+| AU-01 to AU-09, AU-12, DS-04, DS-05, SF-04 to SF-10, UI-12 | 7 |
+| UI-09, PH-21, LG-05 | 8 |
+| EF-06, SC-05 | 9 |
+| ID-07, UI-08, AU-10, AU-11, CM-06, CM-13, CM-18, CM-19, EF-08, AN-03, AN-07, PL-03, SC-02, SC-07 | not scheduled (later or shelved) |

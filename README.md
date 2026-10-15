@@ -21,11 +21,11 @@ in until the pixels of the picture can be seen. Every edit can be undone.
 
 | | |
 |---|---|
-| Tested on | **Windows 10** (the first version is only tested there) |
-| Written for | Windows, macOS and Linux. The only platform-specific code is the `.exe` suffix when looking for ffmpeg and hiding the console windows of the ffmpeg child processes (both `cfg(windows)`); a couple of unit tests have a Unix and a Windows variant, and only the Windows ones have been run. It has **not** been built or run on macOS or Linux yet. On Linux the window system libraries that `eframe`/`wgpu` need may have to be installed, and so may ALSA's development files (`libasound2-dev` on Debian and Ubuntu), which the sound output (`cpal`) is built with. Text is drawn with the computer's own fonts, which `cosmic-text` finds on each system. |
+| Tested on | **Windows 10**, and **Ubuntu 26.04 in WSL 2** (since 2026-10-15: the library's tests all pass there, and the integration tests, with ffmpeg 9: see the *ffmpeg* row). macOS: never. |
+| Written for | Windows, macOS and Linux. The only platform-specific code is the `.exe` suffix when looking for ffmpeg and hiding the console windows of the ffmpeg child processes (both `cfg(windows)`); a couple of unit tests have a Unix and a Windows variant, and only the Windows ones have been run. It has **not** been built or run on macOS yet; on Linux it builds and runs the tests (`tools/linux/run_in_wsl.sh` runs a command on a copy of the project in WSL, and `.github/workflows/ci.yml` is the CI that is to do it for Windows, Ubuntu and macOS, written but not yet run on GitHub). On Linux the window system libraries that `eframe`/`wgpu` need may have to be installed, and so may ALSA's development files (`libasound2-dev` on Debian and Ubuntu), which the sound output (`cpal`) is built with. Text is drawn with the computer's own fonts, which `cosmic-text` finds on each system. |
 | Sound | The preview's sound goes to the computer's default output device. On the development machine the device opens and takes sound at the speed of real time (checked by a test that plays silence), and the right sound reaches recording stand-ins for the speakers at the right time (see *Testing*). That the sound is **audible** has not been judged by ear. |
 | Rust | edition 2024 (Rust 1.88 or newer, which is when `let` chains and `as_chunks_mut`, that the code uses, became stable); developed with 1.99 |
-| ffmpeg | developed and tested against ffmpeg/ffprobe **9.0.2**. The code also handles ffmpeg older than 7 (it reads the filter graph from a file with the older option name), but that path is only covered by unit tests of the command line, not by a real old ffmpeg. |
+| ffmpeg | **ffmpeg and ffprobe 9 or newer are required** (developed and tested against **9.0.2** on Windows and on Linux, with the GPL build of n9.0.2 from BtbN). An older one is not used, and the message that says so is shown with the places that were searched. The reason: **ffmpeg 8.0.1 (Ubuntu 26.04's) does not give the same pictures**: for a file whose sound starts before its picture (an `mkv` made by ffmpeg has the sound at -0.021 s), `-ss 0` there moves the picture's timestamps by that much, so the preview would show the first picture twice and every picture one frame late; ffmpeg 9.0.2 does not (checked with `framemd5` on the same file with both). Two integration tests fail with ffmpeg 8 for that reason. |
 
 ## Running it
 
@@ -821,3 +821,11 @@ final run of the tests that noticed; `py -m unittest discover -s tools/mutation_
 * **The zoom of the preview** shows the pictures the preview has, which are made at no more than 1280 by 720 pixels (a video's, and a
   picture file's): in a project whose picture is bigger the pixels that are seen when it is zoomed in are those of the preview's
   pictures, not of the exported ones. (Text is drawn at the size of the finished picture.) The zoom is not saved with the project.
+
+## Licence
+
+fastforwardrs is free software, licensed under the **GNU General Public License, version 3 or (at your option) any later version** (`GPL-3.0-or-later`); the text is in
+[`LICENSE`](LICENSE). The libraries it is built from are under MIT, Apache-2.0, Zlib, BSD, ISC, MPL-2.0 and similar licences, all of which can be used in a GPLv3 program (the list
+is made from `Cargo.lock` by `cargo metadata`; the egui fonts also carry the SIL Open Font Licence and the Ubuntu Font Licence, and are separate files in that crate). It
+runs the programs `ffmpeg` and `ffprobe` as separate processes. Whether plugins that the program loads (sound plugins, shaders, colour tables) have to be GPL themselves is
+a question that the copyright holder is to settle in a written clarification: `docs/licence-plugin-clarification-draft.md` is the draft, **not yet adopted**.

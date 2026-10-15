@@ -18,7 +18,7 @@ use thiserror::Error;
 
 use super::UserInterfaceWakeUp;
 use super::child_process::{StreamingTool, background_command};
-use super::export::{AudioGraph, SoundGraphSpecification, build_audio_graph, filter_graph_file_option};
+use super::export::{AudioGraph, FILTER_GRAPH_FILE_OPTION, SoundGraphSpecification, build_audio_graph};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::location::MediaLocation;
 
@@ -101,7 +101,7 @@ impl AudioStream {
         fs::write(&graph_file, &graph.text).map_err(AudioStreamError::CouldNotWriteGraph)?;
 
         let mut command = background_command(toolchain.ffmpeg_path());
-        command.args(audio_stream_arguments(toolchain, request, &graph, &graph_file));
+        command.args(audio_stream_arguments(request, &graph, &graph_file));
         let channel_count = usize::from(request.format.channel_count);
         let tool = StreamingTool::start(
             command,
@@ -189,12 +189,7 @@ fn read_as_much_as_possible(reader: &mut impl Read, buffer: &mut [u8]) -> usize 
 
 /// The ffmpeg command line that decodes `request`, whose sound graph is `graph` and has been
 /// written to `graph_file`.
-pub fn audio_stream_arguments(
-    toolchain: &FfmpegToolchain,
-    request: &AudioStreamRequest,
-    graph: &AudioGraph,
-    graph_file: &Path,
-) -> Vec<OsString> {
+pub fn audio_stream_arguments(request: &AudioStreamRequest, graph: &AudioGraph, graph_file: &Path) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
         .map(OsString::from)
         .to_vec();
@@ -202,7 +197,7 @@ pub fn audio_stream_arguments(
         arguments.push("-i".into());
         arguments.push(source_file.ffmpeg_input());
     }
-    arguments.push(filter_graph_file_option(toolchain).into());
+    arguments.push(FILTER_GRAPH_FILE_OPTION.into());
     arguments.push(graph_file.into());
     arguments.push("-map".into());
     arguments.push(format!("[{}]", graph.output_label).into());
@@ -378,19 +373,12 @@ mod tests {
 
     #[test]
     fn the_command_line_reads_the_graph_from_a_file_and_writes_raw_samples_at_the_wanted_format() {
-        let toolchain =
-            FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), Some(9));
         let graph = AudioGraph {
             text: String::new(),
             output_label: "finished_audio",
         };
         assert_eq!(
-            as_text(audio_stream_arguments(
-                &toolchain,
-                &request(),
-                &graph,
-                Path::new("graph.txt")
-            )),
+            as_text(audio_stream_arguments(&request(), &graph, Path::new("graph.txt"))),
             [
                 "-hide_banner",
                 "-loglevel",
@@ -414,41 +402,14 @@ mod tests {
     }
 
     #[test]
-    fn an_older_ffmpeg_gets_the_older_name_of_the_graph_file_option() {
-        let toolchain =
-            FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), Some(6));
-        let graph = AudioGraph {
-            text: String::new(),
-            output_label: "finished_audio",
-        };
-        let arguments = as_text(audio_stream_arguments(
-            &toolchain,
-            &request(),
-            &graph,
-            Path::new("graph.txt"),
-        ));
-        assert!(
-            arguments.contains(&"-filter_complex_script".to_owned()),
-            "{arguments:?}"
-        );
-    }
-
-    #[test]
     fn every_source_file_is_an_input_in_order() {
-        let toolchain =
-            FfmpegToolchain::unchecked_for_tests(PathBuf::from("ffmpeg"), PathBuf::from("ffprobe"), Some(9));
         let mut several = request();
         several.source_files = ["a.mp4", "b.mp3"].map(MediaLocation::from).to_vec();
         let graph = AudioGraph {
             text: String::new(),
             output_label: "finished_audio",
         };
-        let arguments = as_text(audio_stream_arguments(
-            &toolchain,
-            &several,
-            &graph,
-            Path::new("graph.txt"),
-        ));
+        let arguments = as_text(audio_stream_arguments(&several, &graph, Path::new("graph.txt")));
         let inputs: Vec<&String> = arguments
             .windows(2)
             .filter(|pair| pair[0] == "-i")

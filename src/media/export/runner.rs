@@ -105,7 +105,7 @@ impl VideoExport {
             .map_err(ExportError::CouldNotPrepare)?;
         let temporary_output = temporary_output_path(destination);
         let files = write_working_files(&working_directory, plan, source_file_locations, &temporary_output)?;
-        let arguments = export_arguments(toolchain, &files, &plan.filter_graph, VideoEncoder::choose(toolchain));
+        let arguments = export_arguments(&files, &plan.filter_graph, VideoEncoder::choose(toolchain));
 
         let mut child = background_command(toolchain.ffmpeg_path())
             .args(arguments)
