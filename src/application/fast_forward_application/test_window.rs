@@ -22,8 +22,8 @@ use crate::application::file_chooser::ScriptedFileChooser;
 use crate::application::preview_panel::EnginePreview;
 use crate::application::theme;
 use crate::application::timeline_panel::{GripDotArrangement, VERTICES_IN_A_GRIP_DOT, strip_label};
-use crate::engine::AdapterChoice;
 use crate::engine::testing::{SoftwareGraphics, software_graphics};
+use crate::engine::{AdapterChoice, Engine, EngineSettings};
 use crate::media::ToolchainError;
 use crate::playback::{SpeakersLog, speakers_that_only_keep_a_log};
 use crate::project::{
@@ -195,9 +195,15 @@ impl Window {
     /// Like [`Self::showing`], but the preview is made by the picture engine, on the software graphics adapter, which a computer may not have (a Mac has none: then
     /// there is no window, and the test is to stop at once).
     pub(super) fn showing_with_the_engine(project: Project) -> Option<Self> {
+        Self::showing_with_the_engine_set_up(project, EngineSettings::new(AdapterChoice::SoftwareOnly))
+    }
+
+    /// Like [`Self::showing_with_the_engine`], with an engine that is set up as `settings` say (the adapter should be the software one: see
+    /// [`software_graphics`]).
+    pub(super) fn showing_with_the_engine_set_up(project: Project, settings: EngineSettings) -> Option<Self> {
         let graphics = software_graphics()?;
         let mut window = Self::showing_after(project, |application| {
-            application.use_the_picture_engine(EnginePreview::start(AdapterChoice::SoftwareOnly, Arc::new(|| {})));
+            application.use_the_picture_engine(EnginePreview::with_engine(Engine::start(settings, Arc::new(|| {}))));
         });
         window._graphics = Some(graphics);
         Some(window)

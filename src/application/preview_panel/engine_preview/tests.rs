@@ -535,6 +535,13 @@ fn when_the_graphics_device_is_replaced_the_preview_sends_its_pictures_again_wit
         None,
         "a device that is replaced is not an engine that stopped"
     );
+    let to_tell = setup.preview.take_what_the_user_is_to_be_told();
+    assert_eq!(to_tell.len(), 1, "the user is to be told once: {to_tell:?}");
+    assert!(to_tell[0].contains("lost"), "and why: {}", to_tell[0]);
+    assert!(
+        setup.preview.take_what_the_user_is_to_be_told().is_empty(),
+        "taking what there is to tell empties it"
+    );
 
     // The red picture was on the card that was lost. The preview was told, so it does not think the engine has it: it sends it when a frame uses it, and the
     // frame is made at once (and not first said to be missing a picture that the preview thought the engine had, which would be a frame asked for twice).
@@ -1107,4 +1114,43 @@ fn with_a_real_engine_frames_that_come_late_are_made_smaller_and_frames_that_com
         "and they never went down: {sizes:?}"
     );
     assert!(sizes.contains(&(32, 18)), "by way of half: {sizes:?}");
+}
+
+#[test]
+fn every_replacement_of_the_device_is_to_be_told_not_only_the_last_and_in_the_order_they_came() {
+    // (An engine that cannot start still has a preview to tell things to: no card is used.)
+    let mut preview = EnginePreview::start(AdapterChoice::NoAdapterAtAll, Arc::new(|| {}));
+    preview.note_that_the_device_was_replaced("the first card was reset".to_owned(), &[]);
+    preview.note_that_the_device_was_replaced("the second card was reset".to_owned(), &["file:one".to_owned()]);
+
+    let to_tell = preview.take_what_the_user_is_to_be_told();
+
+    assert_eq!(to_tell.len(), 2, "{to_tell:?}");
+    assert!(to_tell[0].contains("the first card was reset"), "{to_tell:?}");
+    assert!(to_tell[1].contains("the second card was reset"), "{to_tell:?}");
+    assert!(to_tell[1].contains("file:one"), "{to_tell:?}");
+    assert_eq!(preview.last_problem(), Some("the second card was reset"));
+}
+
+#[test]
+fn the_words_about_a_replaced_device_say_why_that_the_engine_goes_on_and_which_effects_are_not_drawn_any_more() {
+    let without_effects = super::the_words_about_a_replaced_device("the card was reset", &[]);
+    assert!(without_effects.contains("the card was reset"), "{without_effects}");
+    assert!(without_effects.contains("goes on"), "{without_effects}");
+    assert!(
+        without_effects.contains("Nothing of the project is changed"),
+        "{without_effects}"
+    );
+    assert!(
+        !without_effects.contains("not drawn again"),
+        "no effect is switched off: {without_effects}"
+    );
+
+    let with_effects = super::the_words_about_a_replaced_device(
+        "a frame did not finish",
+        &["file:one".to_owned(), "file:two".to_owned()],
+    );
+    assert!(with_effects.contains("a frame did not finish"), "{with_effects}");
+    assert!(with_effects.contains("not drawn again"), "{with_effects}");
+    assert!(with_effects.contains("file:one, file:two"), "{with_effects}");
 }

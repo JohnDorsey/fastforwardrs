@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Measures the picture engine on a graphics adapter of this computer, and says how many frames to the second it makes of four layers with two blurs and a
-//! colour grade on them, and what each kind of pass costs. The gate of phase 1 is that the whole stack makes 60 frames to the second at 1080p on the integrated
-//! graphics; this is how to find out.
+//! colour grade on them, and what each kind of pass costs. The gate of phase 1 is that the whole stack makes 60 frames to the second at 720p on the integrated
+//! graphics (it was 1080p until 2026-10-16); this is how to find out.
 //!
 //! ```text
-//! cargo run --release --example engine_benchmark                    (the integrated graphics, if there is one, at 1080p)
+//! cargo run --release --example engine_benchmark                    (the integrated graphics, if there is one, at 720p: the gate)
 //! cargo run --release --example engine_benchmark -- --list          (which graphics adapters there are, with numbers)
 //! cargo run --release --example engine_benchmark -- --adapter 1     (that one)
 //! cargo run --release --example engine_benchmark -- --software      (a processor does it: slow, and not the gate)
-//! cargo run --release --example engine_benchmark -- --size 1280x720 --frames 300
+//! cargo run --release --example engine_benchmark -- --size 1920x1080 --frames 300   (what 1080p makes: not the gate)
 //! cargo run --release --example engine_benchmark -- --in-flight 1  (only the frames one at a time; the default is that and then two overlapping)
 //! ```
 //!
@@ -27,7 +27,7 @@ const HELP: &str = "Measures the picture engine on a graphics adapter of this co
 \n  --list             say which graphics adapters there are, with numbers, and stop
 \n  --adapter NUMBER   use that adapter (the default is the integrated graphics, if there is any, and otherwise the first that is not a processor)
 \n  --software         use the software adapter (a processor does the drawing: slow, and not the gate)
-\n  --size WxH         the size of the frames, 1920x1080 unless it is said
+\n  --size WxH         the size of the frames, 1280x720 (the gate) unless it is said
 \n  --frames N         how many frames of each scene are timed, 120 unless it is said
 \n  --in-flight N      how many frames are on their way at once in the second table (2 unless it is said; 1 makes only the first table)
 \n  --help             this";
@@ -57,7 +57,7 @@ fn main() -> ExitCode {
                 settings.frame_size = (width.parse().unwrap(), height.parse().unwrap());
             }
             _ => {
-                eprintln!("--size is a width and a height like 1920x1080, not {size:?}");
+                eprintln!("--size is a width and a height like 1280x720, not {size:?}");
                 return ExitCode::FAILURE;
             }
         }

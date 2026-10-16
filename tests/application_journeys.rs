@@ -107,6 +107,43 @@ fn assert_exports_exactly_what_the_project_describes(
 }
 
 #[test]
+fn an_export_in_the_window_of_a_video_that_has_fewer_pictures_than_the_project_was_told_says_how_many_pictures_were_held()
+ {
+    let toolchain = toolchain_or_skip!();
+    // The project was made when the file had 300 pictures; it has 90 now (see `support`).
+    let short = test_video(
+        &toolchain,
+        &TestVideoSpecification {
+            name: "counter_3_seconds",
+            duration_in_seconds: 3,
+            ..TestVideoSpecification::COUNTER
+        },
+    );
+    let project =
+        support::project_for_a_video_that_has_fewer_pictures_than_the_project_was_told(&toolchain, &short, 300);
+    let scratch = scratch_directory();
+    let project_path = scratch.path().join("shortened.fastforwardrs.json");
+    fastforwardrs::project_file::write_project_file(&project, &project_path).unwrap();
+    let mut journey = Journey::start(&toolchain);
+    journey.application_mut().load_project_from(project_path);
+    journey.wait_until_idle();
+    assert_eq!(journey.application().message_showing(), None, "the file is there");
+
+    export_to(&mut journey, &scratch.path().join("held.mp4"));
+
+    let (title, text) = journey
+        .application()
+        .message_showing()
+        .expect("the end of the export is told");
+    assert_eq!(title, "Export finished");
+    assert!(text.contains("210 pictures of videos were not there"), "{text}");
+    assert!(
+        !text.contains("are missing the picture of a video"),
+        "that is told of what the plan knew beforehand: {text}"
+    );
+}
+
+#[test]
 fn importing_a_video_makes_one_clip_and_a_picture_for_every_second() {
     let toolchain = toolchain_or_skip!();
     let video = counter_video(&toolchain);

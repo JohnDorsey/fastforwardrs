@@ -39,6 +39,8 @@ macro_rules! ready_or_skip {
 struct Outcome {
     result: ExportResult,
     progress: Vec<u64>,
+    /// How many pictures of videos the export had to make by holding the last picture that a video gave (see `VideoExport::pictures_held`).
+    pictures_held: u64,
 }
 
 const TIME_ALLOWED: Duration = Duration::from_secs(300);
@@ -75,7 +77,13 @@ fn wait_for(export: &VideoExport) -> Outcome {
     loop {
         match export.try_next_event() {
             Some(ExportEvent::Progress { frames_written }) => progress.push(frames_written),
-            Some(ExportEvent::Finished(result)) => return Outcome { result, progress },
+            Some(ExportEvent::Finished(result)) => {
+                return Outcome {
+                    result,
+                    progress,
+                    pictures_held: export.pictures_held(),
+                };
+            }
             None => {
                 assert!(started.elapsed() < TIME_ALLOWED, "the export did not finish in time");
                 std::thread::sleep(Duration::from_millis(5));
@@ -103,6 +111,37 @@ fn a_video_exported_unedited_has_every_frame_of_the_video_in_order() {
     let exported = decode_video(&toolchain, &destination, 320, 180);
     assert_eq!(exported.frame_numbers(), expected_source_frames(&project));
     assert_eq!(outcome.progress.last(), Some(&90), "{:?}", outcome.progress);
+    assert_eq!(
+        outcome.pictures_held, 0,
+        "every picture of the video was the video's own"
+    );
+}
+
+#[test]
+fn a_file_with_fewer_pictures_than_the_project_was_told_is_exported_with_its_last_picture_held_and_the_export_says_how_many_it_held()
+ {
+    let toolchain = ready_or_skip!();
+    let short = test_video(&toolchain, &COUNTER_3_SECONDS);
+    // The project was made when the file had 300 pictures; it has 90 now.
+    let project =
+        support::project_for_a_video_that_has_fewer_pictures_than_the_project_was_told(&toolchain, &short, 300);
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("held.mp4");
+
+    let outcome = export(&toolchain, &project, &destination);
+
+    assert_eq!(outcome.result, ExportResult::Completed);
+    assert_eq!(
+        outcome.pictures_held, 210,
+        "300 frames were asked for and the file has 90 pictures"
+    );
+    let exported = decode_video(&toolchain, &destination, 320, 180);
+    let expected: Vec<u64> = (0..90).chain(std::iter::repeat_n(89, 210)).collect();
+    assert_eq!(
+        exported.frame_numbers(),
+        expected,
+        "the last picture stands in for the ones that were not there"
+    );
 }
 
 #[test]

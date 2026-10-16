@@ -798,7 +798,8 @@ fn the_bytes_of_the_included_files_are_those_of_the_files_and_not_those_of_the_p
 }
 
 #[test]
-fn garbage_is_worth_taking_away_when_it_is_some_megabytes_and_at_least_half_of_what_is_in_use() {
+fn garbage_is_worth_taking_away_when_there_is_any_and_little_is_in_use_and_when_it_is_half_of_what_is_in_use_if_more_is()
+ {
     let state = |bytes_in_use: u64, bytes_of_garbage: u64| ArchiveState {
         entries: HashMap::new(),
         bytes_in_use,
@@ -806,22 +807,28 @@ fn garbage_is_worth_taking_away_when_it_is_some_megabytes_and_at_least_half_of_w
     };
     let megabyte = 1_u64 << 20;
 
-    // Of a small file, some megabytes of garbage are worth it, and not much less.
+    // Of a file that has little in use (8 MiB at most), any garbage is worth it (it was some megabytes before: a project that is only text grew by
+    // its text at every save, for ever), and no garbage is not.
     assert!(!state(0, 0).is_worth_compacting());
-    assert!(!state(10_000, 4 * megabyte - 1).is_worth_compacting());
-    assert!(state(10_000, 4 * megabyte).is_worth_compacting());
+    assert!(!state(10_000, 0).is_worth_compacting());
+    assert!(state(10_000, 1).is_worth_compacting());
     assert!(
-        !state(10_000, 100_000).is_worth_compacting(),
-        "a hundred kilobytes of it are not"
+        state(35_000, 35_000).is_worth_compacting(),
+        "a save of a project that is only text"
     );
-    // Of a big file, it must also be at least half of what is in use.
+    assert!(state(8 * megabyte, 1).is_worth_compacting(), "8 MiB is still little");
+    assert!(!state(8 * megabyte, 0).is_worth_compacting());
+    // Of a bigger file, it must be at least half of what is in use.
+    assert!(!state(8 * megabyte + 1, 1).is_worth_compacting());
+    assert!(
+        !state(8 * megabyte + 2, 4 * megabyte).is_worth_compacting(),
+        "half of it is 4 MiB and 1 byte"
+    );
+    assert!(state(8 * megabyte + 2, 4 * megabyte + 1).is_worth_compacting());
     assert!(!state(100 * megabyte, 20 * megabyte).is_worth_compacting());
     assert!(!state(100 * megabyte, 50 * megabyte - 1).is_worth_compacting());
     assert!(state(100 * megabyte, 50 * megabyte).is_worth_compacting());
     assert!(state(100 * megabyte, 500 * megabyte).is_worth_compacting());
-    // Half of a file that is under 8 MiB is less than 4 MiB: the 4 MiB is what counts.
-    assert!(!state(6 * megabyte, 3 * megabyte).is_worth_compacting());
-    assert!(state(6 * megabyte, 4 * megabyte).is_worth_compacting());
 }
 
 // --- adding to an archive ---

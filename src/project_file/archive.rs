@@ -56,6 +56,10 @@ const MOST_BYTES_OF_PROJECT_TEXT: u64 = 256 << 20;
 /// How many bytes of a file are copied at a time.
 const COPY_BUFFER_BYTES: usize = 1 << 20;
 
+/// How many bytes an archive may have in use for writing it again to be a moment's work (a few seconds of a video is as much), which is
+/// worth doing for any garbage (see [`ArchiveState::is_worth_compacting`]).
+const A_LITTLE_TO_WRITE_AGAIN: u64 = 8 << 20;
+
 /// The first four bytes of a zip file that has something in it.
 const MARK_OF_A_ZIP_FILE: [u8; 4] = *b"PK\x03\x04";
 
@@ -164,10 +168,15 @@ impl ArchiveState {
     }
 
     /// Whether the garbage is enough to be worth taking away by writing the archive again, which takes as long as copying what is in
-    /// use: some megabytes of it, and at least as many as half of that (so that a project of a few gigabytes of video is not written
-    /// again to take away a few hundred kilobytes of text that saves left).
+    /// use. **An archive that has little in use (8 MiB at most: a project that has no file included in it is only the text
+    /// of the project) is written again for any garbage at all**, for that takes a moment, and a file that grew by the text of the
+    /// project at every save would never stop. A bigger archive is written again when the garbage is at least half of what is in use
+    /// (so that a project of a few gigabytes of video is not written again to take away a few hundred kilobytes of text that saves left).
     pub fn is_worth_compacting(&self) -> bool {
-        self.bytes_of_garbage >= (4 << 20).max(self.bytes_in_use / 2)
+        if self.bytes_in_use <= A_LITTLE_TO_WRITE_AGAIN {
+            return self.bytes_of_garbage > 0;
+        }
+        self.bytes_of_garbage >= self.bytes_in_use / 2
     }
 }
 

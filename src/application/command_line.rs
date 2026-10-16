@@ -23,7 +23,9 @@ use crate::project::{Project, Settings, SourceMedia};
 use crate::project_file::archive::entry_place;
 use crate::project_file::read_project_file;
 use crate::settings_file::{default_settings_file_path, read_settings_file};
-use crate::video_export::{ExportEvent, ExportOptions, ExportPlan, ExportResult, VideoExport, plan_export};
+use crate::video_export::{
+    ExportEvent, ExportOptions, ExportPlan, ExportResult, VideoExport, plan_export, words_about_held_pictures,
+};
 
 /// What the program says when it is not given what it needs.
 pub const USAGE: &str = "\
@@ -227,7 +229,13 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
                 frames_written,
                 total_frames: plan.total_frame_count,
             }),
-            Some(ExportEvent::Finished(ExportResult::Completed)) => return Ok(()),
+            Some(ExportEvent::Finished(ExportResult::Completed)) => {
+                // (The video is made, all of its frames: what is told is that some pictures in it are not the video's own.)
+                if let Some(words) = words_about_held_pictures(export.pictures_held()) {
+                    report(Report::Warning(words));
+                }
+                return Ok(());
+            }
             Some(ExportEvent::Finished(ExportResult::Cancelled)) => return Err("the export was cancelled".to_owned()),
             Some(ExportEvent::Finished(ExportResult::Failed { reason })) => return Err(reason),
             None => std::thread::sleep(Duration::from_millis(20)),

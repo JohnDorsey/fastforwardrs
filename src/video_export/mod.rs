@@ -31,5 +31,5 @@ pub use frames::{DescribedFrame, FrameDescriber, FrameProblem};
 pub use output_colour::{OutputColour, OutputTags, output_colour_for};
 pub use pictures::{FfmpegRunStreamStarter, PicturesOfTheRuns, RunPictureProblem, RunStream, RunStreamStarter};
 pub use plan::{ExportPlan, ExportPlanError, ImageToExport, VideoToExport, plan_export};
-pub use runner::{ExportError, ExportEvent, ExportOptions, ExportResult, VideoExport};
+pub use runner::{ExportError, ExportEvent, ExportOptions, ExportResult, VideoExport, words_about_held_pictures};
 pub use runs::{VideoRun, find_the_runs};

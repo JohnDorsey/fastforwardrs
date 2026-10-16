@@ -305,6 +305,47 @@ impl SourceFileState {
     }
 }
 
+/// Which drawing of the preview the environment asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhichDrawing {
+    /// Nothing was said about it: the engine, which is what the preview is made by.
+    EngineByDefault,
+    /// `FASTFORWARDRS_PREVIEW=engine`: the engine, and a message if it cannot be had.
+    EngineByName,
+    /// `FASTFORWARDRS_PREVIEW=old`: the window's own drawing, which the preview was made by before the engine, and is made by if the engine cannot start or stops.
+    OldDrawing,
+}
+
+/// What is to be done about the picture engine when the program starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhatToDoAboutTheEngine {
+    Start,
+    /// The preview is made the old way, and nothing is said.
+    LeaveItAlone,
+    /// The preview is made the old way, and a message says that the engine was asked for and cannot be had.
+    LeaveItAloneAndSayWhy,
+}
+
+/// What is to be done about the engine, when `asked_for` is what the environment asks for and `window_is_drawn_by_wgpu` says whether the window is drawn by wgpu, which
+/// the engine's device is made from the adapter of. Only someone who asked for the engine by name is told that it cannot be had: the others have not asked for anything.
+fn what_to_do_about_the_engine(asked_for: WhichDrawing, window_is_drawn_by_wgpu: bool) -> WhatToDoAboutTheEngine {
+    match (asked_for, window_is_drawn_by_wgpu) {
+        (WhichDrawing::OldDrawing, _) | (WhichDrawing::EngineByDefault, false) => WhatToDoAboutTheEngine::LeaveItAlone,
+        (WhichDrawing::EngineByName, false) => WhatToDoAboutTheEngine::LeaveItAloneAndSayWhy,
+        (WhichDrawing::EngineByDefault | WhichDrawing::EngineByName, true) => WhatToDoAboutTheEngine::Start,
+    }
+}
+
+/// What `FASTFORWARDRS_PREVIEW` (its value, if it is set) asks for. **The engine is the default** since 2026-10-16 (the maintainer looked at it on their graphics
+/// cards and said so); until then it was started only by `engine`.
+fn which_drawing_is_asked_for(value: Option<&str>) -> WhichDrawing {
+    match value {
+        Some("old") => WhichDrawing::OldDrawing,
+        Some("engine") => WhichDrawing::EngineByName,
+        _ => WhichDrawing::EngineByDefault,
+    }
+}
+
 /// What was worked out at the start of a frame, which the drawing then uses.
 struct FrameState {
     current_frame: TimelineFrameIndex,
@@ -348,7 +389,7 @@ impl FastForwardApplication {
             .wgpu_render_state
             .as_ref()
             .map(|render_state| AdapterChoice::Window(Arc::new(render_state.adapter.clone())));
-        application.start_the_picture_engine_if_it_is_asked_for(creation_context);
+        application.start_the_picture_engine_unless_the_old_drawing_is_asked_for(creation_context);
         application.document.archive_cache = ArchiveCache::in_the_usual_place();
         if let Some(path) = project_to_open {
             application.load_project(path);
@@ -356,25 +397,29 @@ impl FastForwardApplication {
         application
     }
 
-    /// Makes the preview with the picture engine instead of with the window's own drawing, if `FASTFORWARDRS_PREVIEW` is `engine` (the engine is new and has not
-    /// been tried on every graphics card: until it has been, the preview is made the old way unless it is asked for) and the window is drawn by wgpu, which the
-    /// engine's device is made from the adapter of. If the engine stops, the preview is made the old way from then on (see
-    /// [`Self::go_back_to_the_old_drawing_if_the_engine_has_stopped`]).
-    fn start_the_picture_engine_if_it_is_asked_for(&mut self, creation_context: &eframe::CreationContext<'_>) {
-        if std::env::var("FASTFORWARDRS_PREVIEW").as_deref() != Ok("engine") {
-            return;
-        }
-        let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
-            self.show_message(
+    /// Makes the preview with the picture engine, which is how it is made unless `FASTFORWARDRS_PREVIEW` is `old` (see [`which_drawing_is_asked_for`]), and
+    /// when the window is drawn by wgpu, which the engine's device is made from the adapter of. If the engine cannot start or stops, the preview is made the old
+    /// way from then on (see [`Self::go_back_to_the_old_drawing_if_the_engine_has_stopped`]).
+    fn start_the_picture_engine_unless_the_old_drawing_is_asked_for(
+        &mut self,
+        creation_context: &eframe::CreationContext<'_>,
+    ) {
+        let asked_for = which_drawing_is_asked_for(std::env::var("FASTFORWARDRS_PREVIEW").ok().as_deref());
+        let render_state = creation_context.wgpu_render_state.as_ref();
+        match what_to_do_about_the_engine(asked_for, render_state.is_some()) {
+            WhatToDoAboutTheEngine::LeaveItAlone => {}
+            WhatToDoAboutTheEngine::LeaveItAloneAndSayWhy => self.show_message(
                 "The picture engine cannot be used",
                 "FASTFORWARDRS_PREVIEW=engine asks for the preview to be made by the picture engine, but the window is not drawn by wgpu, which the engine needs. The preview is made the old way.",
-            );
-            return;
-        };
-        self.use_the_picture_engine(EnginePreview::start(
-            AdapterChoice::Window(Arc::new(render_state.adapter.clone())),
-            Arc::clone(&self.environment.wake_up),
-        ));
+            ),
+            WhatToDoAboutTheEngine::Start => {
+                let render_state = render_state.expect("the engine is started only when the window is drawn by wgpu");
+                self.use_the_picture_engine(EnginePreview::start(
+                    AdapterChoice::Window(Arc::new(render_state.adapter.clone())),
+                    Arc::clone(&self.environment.wake_up),
+                ));
+            }
+        }
     }
 
     /// Makes the preview with this engine from now on. (The pictures of videos that are stored in a way that the engine can use as it is are then given to
@@ -399,8 +444,22 @@ impl FastForwardApplication {
         self.playback.planes_wanted = false;
         self.add_to_message(
             "The picture engine stopped",
-            format!("{why}\n\nThe preview is made the old way from now on. (Nothing of the project is changed, and the export does not use the picture engine.)"),
+            format!("{why}\n\nThe preview is made the old way from now on. Nothing of the project is changed, and an export starts a picture engine of its own."),
         );
+    }
+
+    /// Tells the user what the picture engine has done and gone on after (it replaced its graphics device), now if no question is being asked, and otherwise when
+    /// it is not: a message does not take the place of a question, and is put under a message that is showing.
+    fn say_what_the_picture_engine_has_done_and_gone_on_after(&mut self) {
+        if !matches!(self.interface.dialog, None | Some(Dialog::Message { .. })) {
+            return;
+        }
+        let Some(engine_preview) = self.interface.engine_preview.as_mut() else {
+            return;
+        };
+        for words in engine_preview.take_what_the_user_is_to_be_told() {
+            self.add_to_message("The graphics device was replaced", words);
+        }
     }
 
     /// Has the editor play the sound of the preview, and its own little sounds, through the computer's default speakers
@@ -487,6 +546,7 @@ impl FastForwardApplication {
     /// finished, moving the clock on, and getting the preview picture.
     fn prepare_frame(&mut self, context: &Context, now: Instant) -> FrameState {
         self.go_back_to_the_old_drawing_if_the_engine_has_stopped();
+        self.say_what_the_picture_engine_has_done_and_gone_on_after();
         self.collect_finished_background_work();
         self.forget_what_is_gone_from_the_project();
         self.synchronise_the_preview_with_the_project();

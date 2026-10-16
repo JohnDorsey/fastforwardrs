@@ -9,7 +9,8 @@
 //! for, so a window that changes faster than the engine makes frames shows the latest frame that is done, a moment behind. Nothing here waits for the engine.
 //!
 //! **If the engine stops** (it could not make a device, or lost it, or its thread ended) the preview says so ([`EnginePreview::why_it_stopped`]) and the
-//! window draws the preview the old way from then on.
+//! window draws the preview the old way from then on. **If the engine replaces its graphics device** (it was lost, or a frame did not finish in time) it goes on,
+//! and the preview keeps what the user is to be told ([`EnginePreview::take_what_the_user_is_to_be_told`]).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -26,6 +27,24 @@ use crate::engine::{
 };
 use crate::project::FrameRate;
 use crate::text_rendering::LazyTextRenderer;
+
+/// What the user is told when the engine replaced its graphics device and went on.
+fn the_words_about_a_replaced_device(why: &str, effects_switched_off: &[String]) -> String {
+    let mut words = format!(
+        "The picture engine's graphics device had to be replaced: {why}.
+
+The engine made itself a new one and goes on; a picture may have been late. Nothing of the project is changed."
+    );
+    if !effects_switched_off.is_empty() {
+        words.push_str(&format!(
+            "
+
+The effects that were being drawn when it happened are not drawn again as long as the program runs, and the pictures are made without them: {}.",
+            effects_switched_off.join(", ")
+        ));
+    }
+    words
+}
 
 /// How many pictures are kept in the engine, at the most, before the ones that the last frames did not use are let go of. (A picture of a video is a new
 /// one for every picture of the video that is shown, so without this they would pile up in the engine, and in the list of what it has been sent.)
@@ -122,6 +141,8 @@ pub struct EnginePreview {
     stopped: Option<String>,
     /// The last frame that the engine could not make, and why, or the last picture that it could not use.
     last_problem: Option<String>,
+    /// What the user is to be told that the engine has done and gone on after (a graphics device that it replaced), which the window takes when it can say it.
+    to_tell_the_user: Vec<String>,
 }
 
 impl EnginePreview {
@@ -149,12 +170,19 @@ impl EnginePreview {
             shown: None,
             stopped: None,
             last_problem: None,
+            to_tell_the_user: Vec::new(),
         }
     }
 
     /// Why the engine has stopped, if it has: the preview is then to be drawn the old way.
     pub fn why_it_stopped(&self) -> Option<&str> {
         self.stopped.as_deref()
+    }
+
+    /// What the user is to be told that has not been told yet (the window says it when no question is being asked), oldest first: the engine replaced its
+    /// graphics device and went on. Taking it empties it.
+    pub fn take_what_the_user_is_to_be_told(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.to_tell_the_user)
     }
 
     /// The last problem the engine had that did not stop it: a frame it could not make, a picture it could not use.
@@ -352,17 +380,26 @@ impl EnginePreview {
                     self.asked_for = None;
                 }
                 EngineEvent::EffectRejected { problem, .. } => self.last_problem = Some(problem),
-                EngineEvent::DeviceReplaced { why, .. } => {
-                    // (The new device has none of the pictures: they are all sent again, and the frame is asked for again, which the engine may now make
-                    // without an effect that it does not trust any more.)
-                    self.sent.clear();
-                    self.last_used_in.clear();
-                    self.asked_for = None;
-                    self.last_problem = Some(why);
-                }
+                EngineEvent::DeviceReplaced {
+                    why,
+                    effects_switched_off,
+                } => self.note_that_the_device_was_replaced(why, &effects_switched_off),
                 EngineEvent::Stopped { problem } => self.stopped = Some(problem),
             }
         }
+    }
+
+    /// The engine replaced its graphics device (`why`), and does not run the effects `effects_switched_off` any more: the user is to be told (each time, in order),
+    /// and the pictures are to be sent again.
+    fn note_that_the_device_was_replaced(&mut self, why: String, effects_switched_off: &[String]) {
+        // (The new device has none of the pictures: they are all sent again, and the frame is asked for again, which the engine may now make
+        // without an effect that it does not trust any more.)
+        self.sent.clear();
+        self.last_used_in.clear();
+        self.asked_for = None;
+        self.to_tell_the_user
+            .push(the_words_about_a_replaced_device(&why, effects_switched_off));
+        self.last_problem = Some(why);
     }
 
     /// Tells the quality of the preview how long the frame with this serial number took from being asked for to coming, if it is one that the card made. (A frame

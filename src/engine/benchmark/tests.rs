@@ -348,7 +348,7 @@ fn pictures_that_are_sent_before_every_frame_reuse_the_textures_of_the_ones_befo
 }
 
 #[test]
-#[ignore = "takes minutes: the benchmark of the gate at 1080p on the software adapter, with its numbers printed (the example does the same on a graphics card)"]
+#[ignore = "takes a while: the benchmark of the gate (720p) on the software adapter, with its numbers printed (the example does the same on a graphics card)"]
 fn the_benchmark_of_the_gate_on_the_software_adapter_with_its_numbers_printed() {
     let Some(_graphics) = software_graphics() else { return };
     let mut settings = BenchmarkSettings::for_the_gate();
@@ -411,27 +411,32 @@ fn the_report_gives_the_numbers_of_every_scene_in_milliseconds_and_says_what_it_
 }
 
 #[test]
-fn the_gate_is_made_or_not_only_at_1080p_on_a_card_and_is_not_said_to_be_when_it_is_not_the_gate() {
-    let gate = "the gate is 60 at 1080p on the integrated graphics: ";
+fn the_gate_is_made_or_not_only_at_720p_on_a_card_and_is_not_said_to_be_when_it_is_not_the_gate() {
+    // (The gate was 1080p until 2026-10-16, when the maintainer's measurements on the integrated graphics, 44 to 50 frames to the second at 1080p, led them to
+    // make it 720p, the size that the preview is made at: see `FRAME_SIZE_OF_THE_GATE`.)
+    assert_eq!(FRAME_SIZE_OF_THE_GATE, (1280, 720));
+    assert_eq!(BenchmarkSettings::for_the_gate().frame_size, FRAME_SIZE_OF_THE_GATE);
+    let gate = "the gate is 60 at 720p on the integrated graphics: ";
     assert!(
-        report_of((1920, 1080), false, 16)
+        report_of((1280, 720), false, 16)
             .describe()
             .contains(&format!("{gate}MADE"))
     );
     assert!(
-        report_of((1920, 1080), false, 17)
+        report_of((1280, 720), false, 17)
             .describe()
             .contains(&format!("{gate}NOT MADE")),
         "58.8 to the second is not 60"
     );
     assert!(
-        report_of((1920, 1080), true, 16)
+        report_of((1280, 720), true, 16)
             .describe()
             .contains(&format!("{gate}a software adapter is not the gate"))
     );
     assert!(
-        report_of((1280, 720), false, 16)
+        report_of((1920, 1080), false, 16)
             .describe()
-            .contains(&format!("{gate}not at that size, so not the gate"))
+            .contains(&format!("{gate}not at that size, so not the gate")),
+        "1080p is measured with --size, and says what it makes, and is not the gate"
     );
 }

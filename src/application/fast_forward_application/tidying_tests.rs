@@ -79,19 +79,92 @@ fn saving_writes_the_project_file_again_when_files_that_were_taken_out_of_it_are
     );
 }
 
+/// How long the file is, in bytes.
+fn length_of(path: &std::path::Path) -> u64 {
+    fs::metadata(path).unwrap().len()
+}
+
 #[test]
-fn saving_leaves_alone_garbage_that_is_not_worth_taking_away() {
+fn saving_again_and_again_a_project_that_has_no_file_included_in_it_does_not_make_its_project_file_longer() {
+    // Regression test: every save added the text of the project to the file again (a project of 35 KB was 35 KB longer after each save), because
+    // the garbage that saves leave was taken away only when it was some megabytes, which is no use for a file that is only text.
+    let mut fixture = Fixture::new();
+    let archive_path = fixture.save_as("trip.ffrs");
+    let length_after_the_first_save = length_of(&archive_path);
+
+    for _ in 0..5 {
+        fixture.window.do_this(Command::SaveProject);
+    }
+
+    assert_eq!(length_of(&archive_path), length_after_the_first_save);
+    assert_eq!(garbage_in(&archive_path), 0);
+}
+
+#[test]
+fn loading_a_project_file_and_saving_it_without_a_change_does_not_make_it_longer_however_many_times() {
+    // Regression test: the steps of the maintainer's report (load, save, with nothing changed in between) made the file 35 KB longer each time.
+    let mut fixture = Fixture::new();
+    let archive_path = fixture.save_as("trip.ffrs");
+    let length_when_it_was_made = length_of(&archive_path);
+
+    for _ in 0..3 {
+        fixture.window.application_mut().load_project(archive_path.clone());
+        fixture.window.do_this(Command::SaveProject);
+    }
+
+    assert_eq!(length_of(&archive_path), length_when_it_was_made);
+    assert!(
+        read_project_file(&archive_path).is_ok(),
+        "and it is still a project file"
+    );
+}
+
+#[test]
+fn the_garbage_that_autosaves_leave_in_a_small_project_file_is_taken_away_when_the_user_saves_and_when_the_window_is_closed()
+ {
+    let mut fixture = Fixture::new();
+    let archive_path = fixture.save_as("trip.ffrs");
+    fixture.window.application_mut().environment.global_settings.autosave = true;
+    let context = egui::Context::default();
+    for _ in 0..3 {
+        fixture.window.do_this(Command::AddTrack);
+        fixture
+            .window
+            .application_mut()
+            .autosave_when_quiet_for_long_enough(&context, Instant::now() + Duration::from_secs(5));
+    }
+    assert!(garbage_in(&archive_path) > 0, "the autosaves added to the file");
+
+    fixture.window.do_this(Command::SaveProject);
+    assert_eq!(garbage_in(&archive_path), 0, "the save of the user took it away");
+
+    fixture.window.do_this(Command::AddTrack);
+    fixture
+        .window
+        .application_mut()
+        .autosave_when_quiet_for_long_enough(&context, Instant::now() + Duration::from_secs(5));
+    assert!(garbage_in(&archive_path) > 0);
+    let commands = fixture.window.ask_to_close();
+    assert!(!commands.contains(&ViewportCommand::CancelClose));
+    assert_eq!(garbage_in(&archive_path), 0, "and so did the closing of the window");
+}
+
+#[test]
+fn saving_writes_the_project_file_again_for_any_garbage_when_it_has_little_in_use() {
+    // (This was the opposite once: "a few dozen bytes are not worth writing the file again for". They are, when writing it again takes a moment:
+    // see the tests above, and `is_worth_compacting`.)
     let mut fixture = Fixture::new();
     let archive_path = fixture.save_as("trip.ffrs");
     include(&mut fixture, vec![VIDEO]);
     take_out(&mut fixture, vec![VIDEO]);
+    assert!(
+        garbage_in(&archive_path) >= THE_VIDEO.len() as u64,
+        "the video that was taken out is garbage until then"
+    );
 
     fixture.window.do_this(Command::SaveProject);
 
-    assert!(
-        garbage_in(&archive_path) >= THE_VIDEO.len() as u64,
-        "a few dozen bytes are not worth writing the file again for"
-    );
+    assert_eq!(garbage_in(&archive_path), 0);
     assert!(!fixture.window.application().has_unsaved_changes());
 }
 
@@ -265,11 +338,16 @@ fn closing_writes_the_project_file_again_after_letting_go_of_the_files_that_are_
 
 #[test]
 fn closing_writes_the_project_file_again_only_if_it_is_worth_it() {
-    let mut fixture = Fixture::new();
-    let archive_path = fixture.save_as("trip.ffrs");
-    include(&mut fixture, vec![VIDEO]);
-    take_out(&mut fixture, vec![VIDEO]);
+    // More than a little is in use (two files of 5 MiB are included in it), and the garbage is the text of the project that the saves left.
+    let (mut fixture, archive_path) = fixture_with_big_files();
+    include(&mut fixture, vec![VIDEO, the_sound()]);
     fixture.window.do_this(Command::SaveProject);
+    let state = archive::state_of_archive(&archive_path).unwrap();
+    assert!(state.bytes_of_garbage > 0, "the saves left text");
+    assert!(
+        !state.is_worth_compacting(),
+        "but it is a few kilobytes beside the files that are in it"
+    );
     let bytes = fs::read(&archive_path).unwrap();
 
     let commands = fixture.window.ask_to_close();

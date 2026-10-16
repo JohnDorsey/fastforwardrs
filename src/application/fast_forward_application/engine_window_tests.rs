@@ -19,6 +19,8 @@ use crate::application::selection::SelectionChange;
 use crate::application::textures::PictureFilter;
 use crate::application::theme;
 use crate::colour_effects::ColourMatrix;
+use crate::engine::testing::DevicesMade;
+use crate::engine::{AdapterChoice, EngineSettings};
 use crate::media::{CompressedPicture, PictureSize, ThumbnailKey, ThumbnailLibrary};
 use crate::project::{
     AnimationTarget, ClipId, Corner, Project, PropertyValue, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
@@ -450,6 +452,9 @@ fn when_the_engine_stops_the_window_says_so_and_makes_the_preview_the_old_way_fr
         Some(Dialog::Message { title, text }) => {
             assert_eq!(title, "The picture engine stopped");
             assert!(text.contains("old way"), "{text}");
+            // (Since phase 2 of the plugin plan the export is made by a picture engine too: it was said that it was not.)
+            assert!(!text.contains("does not use the picture engine"), "{text}");
+            assert!(text.contains("an export starts a picture engine of its own"), "{text}");
         }
         other => panic!("a message was expected: {other:?}"),
     }
@@ -463,6 +468,158 @@ fn when_the_engine_stops_the_window_says_so_and_makes_the_preview_the_old_way_fr
             .colours_of_the_picture_of_the_file(source),
         Some(ColourMatrix::hue_rotation(60.0))
     );
+}
+
+#[test]
+fn the_preview_is_made_by_the_engine_unless_the_old_drawing_is_asked_for() {
+    use super::{WhichDrawing, which_drawing_is_asked_for};
+    // (It was the other way round until 2026-10-16: the engine was started by `FASTFORWARDRS_PREVIEW=engine` and by nothing else, until the maintainer had
+    // looked at it on their graphics cards and said that it is to be the default.)
+    assert_eq!(which_drawing_is_asked_for(None), WhichDrawing::EngineByDefault);
+    assert_eq!(which_drawing_is_asked_for(Some("engine")), WhichDrawing::EngineByName);
+    assert_eq!(which_drawing_is_asked_for(Some("old")), WhichDrawing::OldDrawing);
+    assert_eq!(
+        which_drawing_is_asked_for(Some("")),
+        WhichDrawing::EngineByDefault,
+        "a variable that says nothing says nothing"
+    );
+    assert_eq!(
+        which_drawing_is_asked_for(Some("something that is not a name")),
+        WhichDrawing::EngineByDefault,
+        "a name that is not one is not the old drawing"
+    );
+}
+
+#[test]
+fn what_is_done_about_the_engine_follows_what_is_asked_for_and_whether_the_window_is_drawn_by_wgpu() {
+    use super::{
+        WhatToDoAboutTheEngine::{LeaveItAlone, LeaveItAloneAndSayWhy, Start},
+        WhichDrawing, what_to_do_about_the_engine,
+    };
+    // The engine is started whenever the window can have one, unless the old drawing is asked for.
+    assert_eq!(what_to_do_about_the_engine(WhichDrawing::EngineByDefault, true), Start);
+    assert_eq!(what_to_do_about_the_engine(WhichDrawing::EngineByName, true), Start);
+    assert_eq!(
+        what_to_do_about_the_engine(WhichDrawing::OldDrawing, true),
+        LeaveItAlone
+    );
+    assert_eq!(
+        what_to_do_about_the_engine(WhichDrawing::OldDrawing, false),
+        LeaveItAlone
+    );
+    // A window that is not drawn by wgpu cannot have it; only someone who asked for it by name is told so.
+    assert_eq!(
+        what_to_do_about_the_engine(WhichDrawing::EngineByDefault, false),
+        LeaveItAlone
+    );
+    assert_eq!(
+        what_to_do_about_the_engine(WhichDrawing::EngineByName, false),
+        LeaveItAloneAndSayWhy
+    );
+}
+
+/// Whether the window is showing the message that says that the graphics device was replaced.
+fn is_announcing_a_replaced_device(window: &Window) -> bool {
+    matches!(
+        &window.application().interface.dialog,
+        Some(Dialog::Message { title, .. }) if title == "The graphics device was replaced"
+    )
+}
+
+#[test]
+fn when_the_graphics_device_is_replaced_the_window_says_so_and_goes_on_with_the_engine() {
+    let devices = DevicesMade::default();
+    let mut settings = EngineSettings::new(AdapterChoice::SoftwareOnly);
+    settings.watch_the_devices = Some(devices.watcher());
+    let (project, source, _) = project_with_a_picture_file(None);
+    let Some(mut window) = Window::showing_with_the_engine_set_up(project, settings) else {
+        return;
+    };
+    decode_the_picture_file(&mut window, source, [255, 0, 0, 255]);
+    window.wait_for_the_engine();
+    assert_eq!(window.application().interface.dialog, None, "nothing has gone wrong");
+
+    // The card is reset. The window does not know until it asks for another frame, and the engine finds out.
+    devices.nth(1, std::time::Duration::from_secs(30)).destroy();
+    window.show_another_project(project_of(100));
+    window.draw_frames_until("the replaced device is announced", is_announcing_a_replaced_device);
+
+    let Some(Dialog::Message { text, .. }) = &window.application().interface.dialog else {
+        panic!("a message was expected");
+    };
+    assert!(text.contains("lost"), "it says why: {text}");
+    assert!(text.contains("goes on"), "it says that the engine goes on: {text}");
+    assert!(text.contains("Nothing of the project is changed"), "{text}");
+    assert_eq!(devices.count(), 2);
+    assert!(window.engine_preview().is_some(), "the engine is not given up");
+    assert_eq!(window.engine_preview().unwrap().why_it_stopped(), None);
+    window.wait_for_the_engine();
+    assert!(window.application().playback.planes_wanted, "and it still draws");
+}
+
+#[test]
+fn the_announcement_of_a_replaced_device_waits_for_a_question_that_is_being_asked_and_does_not_take_its_place() {
+    let devices = DevicesMade::default();
+    let mut settings = EngineSettings::new(AdapterChoice::SoftwareOnly);
+    settings.watch_the_devices = Some(devices.watcher());
+    let (project, source, _) = project_with_a_picture_file(None);
+    let Some(mut window) = Window::showing_with_the_engine_set_up(project, settings) else {
+        return;
+    };
+    decode_the_picture_file(&mut window, source, [255, 0, 0, 255]);
+    window.wait_for_the_engine();
+    let question = Dialog::ConfirmExportWithMissingEffects {
+        effects: vec!["an effect that is not here".to_owned()],
+    };
+    window.application_mut().interface.dialog = Some(question.clone());
+
+    devices.nth(1, std::time::Duration::from_secs(30)).destroy();
+    window.show_another_project(project_of(100));
+    window.draw_frames_until("the engine has replaced its device", |_| devices.count() == 2);
+    for _ in 0..20 {
+        window.harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        window.application().interface.dialog,
+        Some(question),
+        "the question is still the one that is asked"
+    );
+
+    window.application_mut().interface.dialog = None;
+    window.draw_frames_until(
+        "the replaced device is announced when nothing is asked",
+        is_announcing_a_replaced_device,
+    );
+}
+
+#[test]
+fn a_replaced_device_is_announced_under_a_message_that_is_showing_and_not_in_place_of_it() {
+    let devices = DevicesMade::default();
+    let mut settings = EngineSettings::new(AdapterChoice::SoftwareOnly);
+    settings.watch_the_devices = Some(devices.watcher());
+    let (project, source, _) = project_with_a_picture_file(None);
+    let Some(mut window) = Window::showing_with_the_engine_set_up(project, settings) else {
+        return;
+    };
+    decode_the_picture_file(&mut window, source, [255, 0, 0, 255]);
+    window.wait_for_the_engine();
+    window.application_mut().interface.dialog = Some(Dialog::Message {
+        title: "Something else".to_owned(),
+        text: "that was said before".to_owned(),
+    });
+
+    devices.nth(1, std::time::Duration::from_secs(30)).destroy();
+    window.show_another_project(project_of(100));
+    window.draw_frames_until("the replaced device is announced", |window| {
+        matches!(&window.application().interface.dialog, Some(Dialog::Message { text, .. }) if text.contains("lost"))
+    });
+
+    let Some(Dialog::Message { title, text }) = &window.application().interface.dialog else {
+        panic!("a message was expected");
+    };
+    assert!(title.starts_with("Something else"), "{title}");
+    assert!(text.starts_with("that was said before"), "{text}");
 }
 
 #[test]

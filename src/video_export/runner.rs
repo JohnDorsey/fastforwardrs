@@ -13,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -69,6 +69,18 @@ pub enum ExportResult {
     Failed { reason: String },
 }
 
+/// What the user is told when an export made pictures of videos by holding the last picture that a video gave: `None` if it made none.
+pub fn words_about_held_pictures(pictures_held: u64) -> Option<String> {
+    let (how_many, were) = match pictures_held {
+        0 => return None,
+        1 => ("1 picture of a video was".to_owned(), "it"),
+        many => (format!("{many} pictures of videos were"), "each of them"),
+    };
+    Some(format!(
+        "{how_many} not there: ffmpeg gave fewer pictures of a video file than the project was told it has (the file is not the one the project was made from, or it is damaged), so the last picture it gave stands in for {were}."
+    ))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportEvent {
     /// How many frames of the finished video have been written so far.
@@ -106,6 +118,8 @@ impl ExportOptions {
 /// What the thread of the export and the one that asked for it both reach.
 struct Shared {
     cancel_requested: AtomicBool,
+    /// How many pictures of videos were made by holding the last picture that a video gave, so far (see [`VideoExport::pictures_held`]).
+    pictures_held: AtomicU64,
     /// What stops the encoder, once there is one: a write to an encoder that is busy waits, and cancelling must end the wait.
     encoder: Mutex<Option<EncoderKiller>>,
 }
@@ -160,6 +174,7 @@ impl VideoExport {
 
         let shared = Arc::new(Shared {
             cancel_requested: AtomicBool::new(false),
+            pictures_held: AtomicU64::new(0),
             encoder: Mutex::new(None),
         });
         let (sender, events) = mpsc::channel();
@@ -193,6 +208,13 @@ impl VideoExport {
     /// The next event, if one is ready. Never waits.
     pub fn try_next_event(&self) -> Option<ExportEvent> {
         self.events.try_recv().ok()
+    }
+
+    /// How many pictures of videos the export has had to make so far by holding the last picture that a video gave, because ffmpeg gave fewer pictures of a file than
+    /// the project was told it has (the file was replaced by a shorter one, or is damaged). After the end of the export it is the number for the whole video. Every
+    /// frame is still made, with the last picture the video gave in the place of the ones it did not (see [`words_about_held_pictures`]).
+    pub fn pictures_held(&self) -> u64 {
+        self.shared.pictures_held.load(Ordering::SeqCst)
     }
 
     /// Stops the export. An [`ExportResult::Cancelled`] event follows once everything has stopped and the temporary file has been removed.
@@ -476,6 +498,7 @@ fn produce(job: Job) -> Result<(), Ending> {
                 Ok(described) => described,
                 Err(problem) => return Err(stop_the_encoder(encoder, &shared, problem.into())),
             };
+            shared.pictures_held.store(describer.pictures_held(), Ordering::SeqCst);
             if !described.forget.is_empty() {
                 engine.forget_pictures(described.forget);
             }

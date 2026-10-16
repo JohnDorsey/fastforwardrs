@@ -40,7 +40,7 @@ objects; **[B]** my belief or estimate. Sizes are [B]: S, M, L, XL are orders of
 
 ## 3. The phases
 
-Dependencies at a glance: `0 -> 1 -> 2 -> 3 -> 4 -> 5`, `4 -> 6`, `0 -> 7` (sound runs beside the picture phases), `7 and 6 -> 8`, `6 or 7 -> 9`.
+Dependencies at a glance: `0 -> 1 -> 2 -> 3 -> 4 -> 5`, `4 -> 6`, `0 -> 7` (sound runs beside the picture phases), `7 and 6 -> 8`, `6 or 7 -> 9`. **Order of work since 2026-10-16: 3, 4, 7, 5, 6, 8, 9** (the maintainer moved LADSPA earlier).
 
 ### Phase 0 — Foundations (size M + M + S + S)
 
@@ -147,7 +147,7 @@ mode is **display-referred and reproduces today's pictures**, **including today'
 phase 3 corrects it). Textures come from a pool; the engine runs on a thread of its own behind channels, and its interface is **message-shaped** (an immutable serialisable scene value in,
 a frame out; EN-12), so that a command-line export and a render process stay possible (Q-31). The old egui layers stay as the oracle.
 *Gate (from the long-term plan):* random projects (the existing generators) rendered by the engine and by the oracle agree within a stated tolerance and a pixel-count budget; a typical stack
-(four layers, two blurs and a LUT) plays at **1080p60 on the integrated GPU**, measured by a benchmark in the repository (EN-07); a deliberately bad shader gives an error and never a hang
+(four layers, two blurs and a LUT) plays at **720p60 on the integrated GPU** (**1080p60 until 2026-10-16**: see the answers after phase 2), measured by a benchmark in the repository (EN-07); a deliberately bad shader gives an error and never a hang
 (EN-05); CI is green on software adapters. *Delivers:* nothing visibly new except adaptive preview quality (EN-08: lower resolution before dropped frames, full resolution when still) and
 a preview that no longer converts colours in ffmpeg. **Rules from the spikes (see plugin-system-spike-findings.md):** the uniforms of every pass of a frame live in **one arena buffer bound
 with dynamic offsets** (WARP gets static ones wrong), bind groups come from **explicit layouts** (an automatic layout drops unused bindings), pictures inside the engine are in **GL orientation**
@@ -186,6 +186,18 @@ draw the same scenes within 4 levels, 98.5 % of the values exactly; that the 8-b
 (the hue shift nearer to the arithmetic); the edge pixels of what is turned or scaled differ; the old export put a half-size video one row too high. **A planted-mistakes campaign over the new code** (274 mistakes; 12 not noticed, each with its reason: design section 11.3) found gaps in the tests and dead code, and a panic in the export's thread that would have left
 the window waiting for an end for ever: all mended. **The 1080p60 gate on the integrated graphics is still open:** the benchmark has the scene with a new video picture in every frame and a table with two frames on their way (on the software adapter (WARP) at 640 by 360, 30 frames of each scene, the whole stack makes **8.7 frames to the second** with its pictures already on the card and **5.8** when every frame is given new pictures of video (5.9 with two frames on their way: a processor does not do two things better than one), which says nothing of the gate); the maintainer is asked to run it again, and to try `fastforwardrs-export --adapter best`, which has
 never been run by anyone (SF-01). The CI has a step that runs the tests of the engine and of the export on the Metal device of the Mac that it runs on, with failures as warnings: **Its result [V, the notices of the run of `c8bdab8`]:** on `Apple Paravirtual device (Metal, IntegratedGpu)` (the virtual graphics of a GitHub runner, which is a virtual machine: not the graphics of a real Mac) **the 365 library tests of the engine and the export that were run passed, and all 35 tests of the export's integration programs passed, none skipped** (`command_line_export` 6, `video_export_encoder` 5, `video_export_pictures` 9, `video_export_runs` 15: the export is made on Metal, end to end, with the real ffmpeg, and cancelling works when ffmpeg is stuck). Three more library tests skipped themselves, being about software adapters. (The first run of the step, at `b42fb86`, had 4 library failures, each with a software adapter as its premise: they skip there now.)
+
+**The maintainer's answers of 2026-10-16, after phase 2 [D]**, and what was done with them (the benchmark was run on the integrated AMD Radeon at 1080p: 50.3 frames to the second one frame at a time, 44.1 with a new video picture in every frame, 43.6 with two frames on their way; the RTX 3090 459.1):
+
+* **The gate is 720p at 60 frames to the second on the integrated graphics, not 1080p.** The benchmark's default size, its report ("the gate is 60 at 720p on the integrated graphics") and its tests say so (`FRAME_SIZE_OF_THE_GATE`); `--size 1920x1080` still measures 1080p, as a figure that is not the gate. **Whether 720p makes it is not measured [B]:** the work per frame is nearly all per pixel, and 720p has 44 % of the pixels of 1080p, so about 9 to 10 ms a frame, 100 frames to the second, would follow from the figures above; the maintainer is asked to run `cargo run --release --example engine_benchmark` once more, which measures it by default now. (The preview is never made bigger than 1280 by 720: `playback::preview_picture_size`.)
+* **The edges of saturated colours, the chroma-edge difference: accepted** (phase 1), **and the pictures of the differences of the export: acceptable** (phase 2, question 3).
+* **X10: yes, the export says when it held a picture.** The window's message at the end and the command line's warning say how many pictures of videos were held (`VideoExport::pictures_held`, `words_about_held_pictures`).
+* **A separate `fastforwardrs-export` program is acceptable.**
+* **E8: the engine preview is the default.** `FASTFORWARDRS_PREVIEW=old` asks for the old drawing, which stays as the oracle and as the fallback when the engine cannot start or stops.
+* **The window announces a replaced graphics device** (a message that waits for a question that is being asked and is put under a message that is showing).
+* **LADSPA moves earlier:** the order of work is now **3, 4, 7, 5, 6, 8, 9**: the sound engine and LADSPA (phase 7) are built straight after phase 4, as the first plan offered (section 4). The phases keep their numbers.
+* **"7. continue":** phase 3 follows.
+* **A bug the maintainer found while testing:** every load and save of a project file, with nothing changed, made it about 35 KB longer (the saves append the text of the project, and the garbage that they leave was taken away only when it was at least 4 MiB). Mended: a project file that has little in use (8 MiB or less: every project that has no file included in it) is written again without its garbage whenever there is any, when the user saves and when the window is closed; the maintainer's file of 242 149 bytes comes out at 35 349 and reads the same [V]. The text that looked like invalid JSON was the file around the JSON: a `.ffrs` file is a zip, uncompressed, and held the text of the project once for every save (7 times in the file looked at); the JSON entry itself is valid [V].
 
 ### Phase 3 — Linear light and colour management (size M-L)
 
@@ -266,7 +278,7 @@ changes a lot for no new capability and benefits from a settled model. *Gate:* e
 ## 4. Order: what I considered
 
 * **Sound earlier or later.** Sound needs nothing from the GPU phases, only phase 0.4, so it could run first or in parallel. I put it as phase 7 because you asked for `.cube` and ISF first, and because it carries the
-  heaviest safety work. **If you would rather have LADSPA sooner (it was in your original request), it can move to straight after phase 4 with no cost to the others; say so.** [P]
+  heaviest safety work. **If you would rather have LADSPA sooner (it was in your original request), it can move to straight after phase 4 with no cost to the others; say so.** [P] **Said so, 2026-10-16 [D]: phase 7 is built straight after phase 4.**
 * **LUTs before the engine** (the long-term plan's 3a) is dropped: it would build a second, colour-unaware LUT path (Q-37, decided).
 * **Linear light together with the engine port** is rejected (CM-20): neither could be checked.
 * **A node editor, a render process, libav linking, OpenFX** are not scheduled. They are kept possible by rules already in the features list (EN-12, EN-15, ID-10). Libav linking (option B of the long-term plan) is a

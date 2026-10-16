@@ -90,6 +90,48 @@ fn a_plain_project_is_exported_with_its_progress_told_a_line_for_each_per_cent_a
     );
     assert_eq!(per_cents.last(), Some(&100), "{words}");
     assert!(words.contains("(90 of 90 frames)"), "{words}");
+    assert!(
+        !words.contains("warning"),
+        "nothing was held, so nothing is warned of: {words}"
+    );
+}
+
+#[test]
+fn an_export_that_held_pictures_says_so_in_a_warning_before_it_says_that_the_video_was_saved_and_the_status_is_still_0()
+{
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let short = test_video(&toolchain, &COUNTER_3_SECONDS);
+    // The project was made when the file had 300 pictures; it has 90 now.
+    let project =
+        support::project_for_a_video_that_has_fewer_pictures_than_the_project_was_told(&toolchain, &short, 300);
+    let scratch = scratch_directory();
+    let project_file = scratch.path().join("trip.fastforwardrs.json");
+    write_project_file(&project, &project_file).unwrap();
+    let destination = scratch.path().join("trip.mp4");
+
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let output = run_on_a_software_adapter(&project_file, &destination);
+
+    let words = said(&output);
+    assert_eq!(output.status.code(), Some(0), "{words}");
+    let lines: Vec<&str> = words.lines().collect();
+    let warning = lines
+        .iter()
+        .position(|line| line.starts_with("warning: ") && line.contains("210 pictures"))
+        .unwrap_or_else(|| panic!("the held pictures are told, as a warning: {words}"));
+    let saved = lines
+        .iter()
+        .position(|line| line.starts_with("The video was saved to "))
+        .unwrap_or_else(|| panic!("{words}"));
+    assert!(
+        warning < saved,
+        "the warning comes before the line that says it is saved: {words}"
+    );
+    assert_eq!(
+        decode_video(&toolchain, &destination, 320, 180).frame_numbers().len(),
+        300,
+        "and the video is there, all of it"
+    );
 }
 
 #[test]

@@ -13,11 +13,12 @@
 //! and the time of a frame is then the time between two frames that are finished (what the card makes in a second, and not how long one frame is on its way).
 //! With one on its way, a frame is made all the way before the next is begun.
 //!
-//! **What it is for.** The gate of phase 1 (EN-07) is that the whole stack plays at **1080p and 60 frames to the second on the integrated graphics** of the
-//! maintainer's computer. That is for the maintainer to measure, with the example (`cargo run --release --example engine_benchmark`), which uses the graphics
-//! card; the tests use the software adapter, at a size that a processor can make, only to see that the benchmark works. (The numbers of the software adapter
-//! say what a processor takes, not what a card does.) The maintainer's first run (2026-10-16, frames one at a time, no pictures sent) made 49.8 frames to the
-//! second on the integrated graphics; the scene of a project that plays and the overlap of frames were added to find out what a project that plays makes.
+//! **What it is for.** The gate of phase 1 (EN-07) is that the whole stack plays at **720p and 60 frames to the second on the integrated graphics** of the
+//! maintainer's computer ([`FRAME_SIZE_OF_THE_GATE`]). That is for the maintainer to measure, with the example (`cargo run --release --example engine_benchmark`),
+//! which uses the graphics card; the tests use the software adapter, at a size that a processor can make, only to see that the benchmark works. (The numbers of the
+//! software adapter say what a processor takes, not what a card does.) **The gate was 1080p until the maintainer's measurements** (2026-10-16: 49.8 frames to the
+//! second with the frames one at a time, and 44.1 with a new picture of each video in every frame, with two frames on their way: 43.6) **led them to make it 720p**,
+//! which is the size that the preview is made at (`playback::preview_picture_size`); 1080p is measured with `--size 1920x1080`, and is not the gate.
 //!
 //! **What stands in for what.** The two blurs are effects that are shaders (one along the rows and one down the columns, 17 reads each, so a blur is two passes);
 //! the lookup table of a colour grade is **not** here: a 3-D table is a resource that an effect of this first form does not have, and the pass that stands in for
@@ -105,10 +106,10 @@ pub struct BenchmarkSettings {
 }
 
 impl BenchmarkSettings {
-    /// What the gate of the phase is measured with: 1080p, 120 frames of each scene, the frames overlapping as they do for the export.
+    /// What the gate of the phase is measured with: [`FRAME_SIZE_OF_THE_GATE`], 120 frames of each scene, the frames overlapping as they do for the export.
     pub fn for_the_gate() -> Self {
         Self {
-            frame_size: (1920, 1080),
+            frame_size: FRAME_SIZE_OF_THE_GATE,
             frames_of_each_scene: 120,
             frames_to_leave_out_first: 10,
             frame_timeout: Duration::from_secs(60),
@@ -153,8 +154,11 @@ pub struct BenchmarkReport {
     pub scenes: Vec<SceneTimes>,
 }
 
-/// The frames to the second that the whole stack has to make at 1080p, for the gate of phase 1 (EN-07).
+/// The frames to the second that the whole stack has to make at [`FRAME_SIZE_OF_THE_GATE`], for the gate of phase 1 (EN-07).
 pub const FRAMES_TO_THE_SECOND_OF_THE_GATE: f64 = 60.0;
+
+/// The size of the frames of the gate: 720p, which is the size that the preview is made at. (1080p until 2026-10-16: see the top of this file.)
+pub const FRAME_SIZE_OF_THE_GATE: (u32, u32) = (1280, 720);
 
 impl BenchmarkReport {
     /// The scene that is the whole stack: the last.
@@ -222,11 +226,16 @@ impl BenchmarkReport {
             let makes_it = whole.frames_per_second() >= FRAMES_TO_THE_SECOND_OF_THE_GATE;
             let _ = writeln!(
                 text,
-                "  {}: {:.1} frames to the second; the gate is {:.0} at 1080p on the integrated graphics: {}",
+                "  {}: {:.1} frames to the second; the gate is {:.0} at {}p on the integrated graphics: {}",
                 whole.name,
                 whole.frames_per_second(),
                 FRAMES_TO_THE_SECOND_OF_THE_GATE,
-                match (self.frame_size == (1920, 1080), self.is_a_software_adapter, makes_it) {
+                FRAME_SIZE_OF_THE_GATE.1,
+                match (
+                    self.frame_size == FRAME_SIZE_OF_THE_GATE,
+                    self.is_a_software_adapter,
+                    makes_it
+                ) {
                     (false, _, _) => "not at that size, so not the gate",
                     (true, true, _) => "a software adapter is not the gate",
                     (true, false, true) => "MADE",

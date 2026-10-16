@@ -11,7 +11,9 @@ use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::media::MediaLocation;
 use crate::project::{EffectKind, Project, SourceMediaIdentifier};
-use crate::video_export::{ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export};
+use crate::video_export::{
+    ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export, words_about_held_pictures,
+};
 
 /// The file types the finished video can be saved as. All of them hold the same H.264 and AAC.
 const EXPORT_FILE_EXTENSIONS: [&str; 3] = ["mp4", "mkv", "mov"];
@@ -19,17 +21,21 @@ const EXPORT_FILE_EXTENSIONS: [&str; 3] = ["mp4", "mkv", "mov"];
 const DEFAULT_EXPORT_EXTENSION: &str = "mp4";
 
 /// What the message at the end of an export says. It says where the video went and, if a file the
-/// project is made from is shorter than the one it was edited on, what that cost.
-fn export_finished_text(destination: &std::path::Path, frames_missing_a_picture: u64) -> String {
-    let saved = format!("The video was saved to {}", destination.display());
-    if frames_missing_a_picture == 0 {
-        saved
-    } else {
-        format!(
-            "{saved}\n\n{frames_missing_a_picture} frames of the project are missing the picture of a video, because a video file \
+/// project is made from is shorter than the one it was edited on, what that cost, and if a video gave fewer pictures than the project was told it has, how many
+/// pictures were held in their place.
+fn export_finished_text(destination: &std::path::Path, frames_missing_a_picture: u64, pictures_held: u64) -> String {
+    let mut text = format!("The video was saved to {}", destination.display());
+    if frames_missing_a_picture != 0 {
+        text.push_str(&format!(
+            "\n\n{frames_missing_a_picture} frames of the project are missing the picture of a video, because a video file \
              the project is made from is not long enough for the clips that reach past its end."
-        )
+        ));
     }
+    if let Some(words) = words_about_held_pictures(pictures_held) {
+        text.push_str("\n\n");
+        text.push_str(&words);
+    }
+    text
 }
 
 /// The effects that the program does not have (a project file brought them) that are applied to the clips of `project`, so that the video would not have what
@@ -192,12 +198,13 @@ impl FastForwardApplication {
         let Some(result) = result else { return };
         let destination = running.destination.clone();
         let frames_missing_a_picture = running.frames_missing_a_picture;
+        let pictures_held = running.export.pictures_held();
         self.jobs.export = None;
         match result {
             ExportResult::Completed => {
                 self.show_message(
                     "Export finished",
-                    export_finished_text(&destination, frames_missing_a_picture),
+                    export_finished_text(&destination, frames_missing_a_picture, pictures_held),
                 );
             }
             ExportResult::Cancelled => {}
@@ -214,7 +221,7 @@ mod tests {
 
     #[test]
     fn the_message_says_where_the_video_went() {
-        let text = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 0);
+        let text = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 0, 0);
         assert!(text.starts_with("The video was saved to "), "{text}");
         assert!(text.contains("holiday_fastforward.mp4"), "{text}");
         assert!(!text.contains("missing"), "nothing was left out: {text}");
@@ -222,11 +229,30 @@ mod tests {
 
     #[test]
     fn the_message_says_how_many_frames_are_missing_the_picture_of_a_video_when_there_are_some() {
-        let text = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 417);
+        let text = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 417, 0);
         assert!(text.contains("holiday_fastforward.mp4"), "{text}");
         assert!(
             text.contains("417 frames of the project are missing the picture of a video"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_message_says_how_many_pictures_were_held_when_some_were_and_nothing_of_it_when_none_were() {
+        let none = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 0, 0);
+        assert!(!none.contains("not there"), "{none}");
+        let some = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 0, 210);
+        assert!(some.starts_with("The video was saved to "), "{some}");
+        assert!(some.contains("210 pictures of videos were not there"), "{some}");
+    }
+
+    #[test]
+    fn the_message_says_both_when_frames_are_missing_a_picture_and_pictures_were_held() {
+        let both = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 417, 3);
+        assert!(
+            both.contains("417 frames of the project are missing the picture of a video"),
+            "{both}"
+        );
+        assert!(both.contains("3 pictures of videos were not there"), "{both}");
     }
 }

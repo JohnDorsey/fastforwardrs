@@ -51,12 +51,13 @@ with no graphics card); the global settings are the editor's own unless `--setti
 failed (the reason is said) and 2 when the command line was not understood. It is a program of its own, and not an option of the editor, because the editor is a windowed
 program on Windows, which has no console to write to. Anything that begins with a dash is taken for an option (a file whose name begins with one can be given as `./-name`).
 
-**The picture engine (experimental).** The preview is drawn by the window itself, one texture for each layer. A new way of making it, by a picture engine on the
-graphics card (design: `docs/engine-phase-1-design.md`), is tried by setting `FASTFORWARDRS_PREVIEW=engine` before the program is started: the preview is then one
+**The picture engine.** The preview is made by a picture engine on the graphics card (design: `docs/engine-phase-1-design.md`), which is how it is made unless
+`FASTFORWARDRS_PREVIEW=old` is set before the program is started (**the engine has been the default since 2026-10-16**; before that it was started by
+`FASTFORWARDRS_PREVIEW=engine`, which still works, and says so in a message if the window is not drawn by wgpu): the preview is one
 picture that the engine made of all the layers, and the window still draws the outlines, the handles and the places the mouse can take hold of itself. While a project plays and the card cannot keep up, the engine makes its frames smaller (a half, then a quarter) instead of late, and makes them whole again when the picture has been still for a moment. If the engine
-cannot start, or stops, the program says so and makes the preview the old way from then on. If the graphics card is reset, or does not finish a frame in two seconds, the engine makes itself a new graphics device and goes on (a picture may be late); if that is needed again within a minute and again, it stops, as above. The old way (`FASTFORWARDRS_PREVIEW=simple`, or no setting) is what the preview is
-made by until the engine has been tried on more graphics cards. The export is made by a picture engine of its own, whatever this setting says (see *Exported video*). How fast the engine is on this computer's graphics card is measured by `cargo run --release --example engine_benchmark` (it says which adapters there are with `-- --list`);
-it makes frames of four layers with two blurs, a colour matrix and a lookup on them, and says the frames to the second and what each kind of pass costs.
+cannot start, or stops, the program says so and makes the preview the old way from then on. If the graphics card is reset, or does not finish a frame in two seconds, the engine makes itself a new graphics device and goes on (a picture may be late), **and a message says so** (it waits for a question that is being asked, and is put under a message that is showing); if that is needed again within a minute and again, it stops, as above. The old way (the window's own drawing, one texture for each layer) is what the preview falls back to,
+and is what `FASTFORWARDRS_PREVIEW=old` asks for. The export is made by a picture engine of its own, whatever this setting says (see *Exported video*). How fast the engine is on this computer's graphics card is measured by `cargo run --release --example engine_benchmark` (it says which adapters there are with `-- --list`);
+it makes frames of four layers with two blurs, a colour matrix and a lookup on them, and says the frames to the second and what each kind of pass costs. **The gate is 60 frames to the second at 720p** (the size that the preview is made at) on the integrated graphics; it was 1080p until 2026-10-16, and `-- --size 1920x1080` measures that, as a figure and not as the gate.
 
 ## Using it
 
@@ -297,7 +298,7 @@ cut off (the power goes) leaves the file as it was: the end record that was last
 begun after it is ignored, and cut off the next time the file is added to. What a save leaves behind (the text it replaces, and the
 bytes of a file that was taken out of the file) is **garbage** that the file keeps, which is counted. An autosave does no more than
 this, so it takes as long for a project with ten gigabytes of video in it as for a small one. **The file is written again without
-its garbage** only when that is worth doing (the garbage is at least 4 MiB and at least half of what is in use), and only at a
+its garbage** only when that is worth doing (**any garbage at all, when what is in use is 8 MiB or less, which is every project that has no file included in it: the file is then only the text of the project, and a save does not make it longer**; otherwise when the garbage is at least half of what is in use), and only at a
 moment when nothing has the file open: after the user saves it (*Save project*) when no file that is included is read in place (the
 file then has little in it, so that takes no time), and when the window is closed, after everything that is reading the project
 file has been let go of: if that is a great deal to copy the window stays open, with a window that says how far it has got and a
@@ -616,7 +617,8 @@ old yes-or-no setting *mute sped-up clips* is read as *Mute* or *Maintain pitch*
   not there or is lost, ffmpeg that stops, a mistake of the program itself) ends it with a message that says what it was; a frame that is made of more
   pictures than the picture memory of the engine (512 MiB on the card) has room for ends it too.
 * A video file that has **fewer pictures than the project was told** (it was changed behind the project's back) does not fail the export at the end of it: the
-  last picture it has is held for the rest of the clip.
+  last picture it has is held for the rest of the clip, **and the message at the end says how many pictures were held** (the command line says it as a warning, before
+  it says that the video was saved).
 * The picture is not exactly what the old way of exporting (ffmpeg's filters) made: the same pictures are there, in the same places, to within a pixel and a
   few levels at the edges of things that are turned or scaled (the new way is the one that is exact: see `docs/engine-phase-2-design.md`, section 9).
 

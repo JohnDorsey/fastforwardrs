@@ -337,3 +337,24 @@ fn a_destination_is_the_same_file_as_a_source_however_it_is_spelled() {
 fn a_file_is_called_by_its_name_in_a_message() {
     assert_eq!(name_of(&MediaLocation::from("some/folder/holiday.mp4")), "holiday.mp4");
 }
+
+#[test]
+fn nothing_is_said_when_no_picture_was_held() {
+    assert_eq!(super::words_about_held_pictures(0), None);
+}
+
+#[test]
+fn the_words_about_held_pictures_give_the_number_and_say_what_stood_in_for_them_and_why_it_may_be() {
+    let one = super::words_about_held_pictures(1).expect("one picture held is told");
+    assert!(one.starts_with("1 picture of a video was not there"), "{one}");
+    let many = super::words_about_held_pictures(210).expect("210 pictures held are told");
+    assert!(many.starts_with("210 pictures of videos were not there"), "{many}");
+    for words in [&one, &many] {
+        assert!(
+            words.contains("last picture"),
+            "it says what stands in for them: {words}"
+        );
+        assert!(words.contains("fewer pictures"), "it says what was found: {words}");
+        assert!(words.contains("damaged"), "it says what may be the reason: {words}");
+    }
+}

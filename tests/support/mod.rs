@@ -397,6 +397,33 @@ pub struct ClipOfTheVideo {
     pub speed: u32,
 }
 
+/// A project of the whole of `video` that was told that the video has `told_total_frame_count` pictures, as it was when the project was made: the file has been
+/// replaced since by one that has fewer, so that a decoder gives fewer pictures than the project asks for.
+pub fn project_for_a_video_that_has_fewer_pictures_than_the_project_was_told(
+    toolchain: &FfmpegToolchain,
+    video: &TestVideo,
+    told_total_frame_count: u64,
+) -> Project {
+    let mut told = probe_video(toolchain, &video.path).expect("the test video can be probed");
+    assert!(
+        told.total_frame_count < told_total_frame_count,
+        "a premise: the file is shorter than it was said to be"
+    );
+    told.total_frame_count = told_total_frame_count;
+    let mut project = Project::empty();
+    project
+        .import_source(
+            SourceMedia::video(
+                SourceMediaIdentifier::new(1),
+                SourceMediaLink::from_absolute_path(video.path.clone()),
+                told,
+            ),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    project
+}
+
 /// A project that has the given test videos as its source files 1, 2, ... (the first of them is
 /// the one that gives the finished picture its size and shape) and the given tracks, the one in
 /// front first. Each track is the number of the video it uses (counting from 0) and its clips.
