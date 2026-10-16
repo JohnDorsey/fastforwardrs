@@ -9,12 +9,19 @@
 # without a gap, a picture on time), which a shared machine with a few slow processors cannot be asked to pass.
 #
 # Whatever the outcome it also writes what ran as a NOTICE: the "test result" line of each program of tests, and how many lines say SKIPPED. (A test that is skipped passes,
-# and the only way to tell it from one that ran is that it says so; the tests print `SKIPPED: why`, which is in the log when they are run with `-- --nocapture`.)
+# and the only way to tell it from one that ran is that it says so; the tests print `SKIPPED: why`, which cargo shows only when they are run with `-- --nocapture`. Without
+# it the lines are not there to be counted, and the notice says so instead of a count of nought.)
 level=$1
 title=$2
 shift 2
 log="${RUNNER_TEMP:-/tmp}/report_$$.log"
 set -o pipefail
+
+# Whether the command keeps the output of the tests that pass (cargo shows it only with one of these two).
+case " $* " in
+    *" --nocapture "* | *" --show-output "*) output_of_passing_tests_is_kept=yes ;;
+    *) output_of_passing_tests_is_kept=no ;;
+esac
 
 # Writes the message $1 as an annotation of the kind $2 with the title $3.
 annotate() {
@@ -28,7 +35,11 @@ annotate() {
 what_ran() {
     local summary skipped
     summary=$(grep -E '^test result:' "$log" | sed -E 's/; 0 measured; 0 filtered out//' | head -n 30)
-    skipped=$(grep -c 'SKIPPED' "$log")
+    if [ "$output_of_passing_tests_is_kept" = yes ]; then
+        skipped=$(grep -c 'SKIPPED' "$log")
+    else
+        skipped="not counted, because cargo does not show what the tests that pass print (--nocapture does)"
+    fi
     annotate "$(printf '%s\nlines that say SKIPPED: %s' "$summary" "$skipped" | head -c 3000)" notice "$title (what ran)"
 }
 

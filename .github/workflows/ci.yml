@@ -177,6 +177,10 @@ jobs:
       - name: Unit tests of the mutation tool (the end-to-end ones need a Rust toolchain and are run locally)
         run: python -m unittest discover -s tools/mutation_testing -p "test_mutation_core.py"
 
+      # The helper that every test step goes through (it writes the results as annotations, which is how they are read without signing in to GitHub) has checks of its own.
+      - name: Tests of the helper that writes the results of the test steps (tools/ci)
+        run: python -m unittest discover -s tools/ci -p "test_*.py"
+
   licences:
     name: licences (REUSE, cargo-deny, third-party notices)
     runs-on: ubuntu-latest
