@@ -239,8 +239,7 @@ can be supported. The design notes answer that at length; here is what the syste
 * **EN-07 [P] M** Performance goals (2026-10-13: "acceptable for now"): a typical stack (four layers, two blurs and a LUT) plays at
   **1080p60 on the integrated GPU** and at **4K on a discrete GPU**. These are measured by a benchmark that is part of the repository,
   not by feel. (What happens when the machine cannot keep up: Q-13.)
-  *(Phase 1.7 [V]: the benchmark is in the repository (`cargo run --release --example engine_benchmark`, QA-05). Measured on the software adapter only (WARP, this computer): 1.0 frame to the second for the whole stack at 1080p; **the goal itself is
-  the maintainer's to measure on the integrated graphics**, which the program has not been run on.)*
+  *(Phase 1.7 [V]: the benchmark is in the repository (`cargo run --release --example engine_benchmark`, QA-05). Measured by the maintainer on 2026-10-16 at 1080p: **integrated graphics (AMD Radeon, Vulkan): 49.8 frames to the second for the whole stack, so the goal is NOT yet made** (20.09 ms against 16.67; the estimates of what closes it are in `engine-phase-1-design.md`, section 10); RTX 3090 (Vulkan): 459.1. The 4K goal has not been run.)*
 * **EN-08 [D] S** (Q-13, default accepted 2026-10-15) Preview quality is adaptive: at full speed on a slow machine the engine renders at a lower resolution rather than
   dropping frames, and a still frame (paused, scrubbing stopped) is rendered at full resolution. *(Phase 1.7 [V]: built (`engine/quality.rs`, used by the preview): whole, half and a quarter of the size; the numbers
   are the design's first guesses, to be tuned with the benchmark on a real card.)*
