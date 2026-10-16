@@ -11,13 +11,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::media::export::{ExportError, ExportEvent, ExportResult, VideoExport, plan_export};
 use fastforwardrs::project::{Project, Settings, SpedUpClipSound, SpeedFactor, SpeedIndicatorLayout};
 use fastforwardrs::speed_indicator::indicator_for_frame;
+use fastforwardrs::video_export::{
+    ExportError, ExportEvent, ExportResult, VideoExport, plan_export, sound_graph_for_the_encoder,
+};
 use support::{
     RandomNumbers, TestVideo, TestVideoSpecification, counter_video, decode_video, decoded_sound, edited,
     expected_source_frames, loudness, pitch_in_hertz, project_for, scratch_directory, stream_durations, test_video,
-    transparent_text_picture,
 };
 
 const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(180);
@@ -38,9 +39,17 @@ fn export_and_wait_with(
     source: &Path,
     destination: &Path,
 ) -> ExportOutcome {
-    let plan = plan_export(project, settings, &transparent_text_picture).expect("the project can be exported");
-    let export = VideoExport::start(toolchain, &plan, &[source.into()], destination, Arc::new(|| {}))
-        .expect("the export starts");
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let plan = plan_export(project, settings).expect("the project can be exported");
+    let export = VideoExport::start(
+        toolchain,
+        &plan,
+        &[source.into()],
+        destination,
+        support::export_options(),
+        Arc::new(|| {}),
+    )
+    .expect("the export starts");
     wait_for_export(&export)
 }
 
@@ -69,7 +78,7 @@ fn wait_for_export(export: &VideoExport) -> ExportOutcome {
 
 #[test]
 fn an_unedited_project_exports_every_frame_of_the_video_with_its_sound() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
     let scratch = scratch_directory();
@@ -87,7 +96,7 @@ fn an_unedited_project_exports_every_frame_of_the_video_with_its_sound() {
 
 #[test]
 fn an_edited_project_exports_exactly_the_frames_its_clips_describe() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // Clips: 0..150 at 1x, 150..330 at 3x, 330..375 at 1x, 375..600 at 5x.
     // All the splits are made before any speed is changed, so the timeline frames are source frames.
@@ -114,7 +123,7 @@ fn an_edited_project_exports_exactly_the_frames_its_clips_describe() {
 
 #[test]
 fn random_edits_always_export_exactly_the_frames_the_project_describes() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     for seed in 1..=6u64 {
@@ -136,12 +145,9 @@ fn random_edits_always_export_exactly_the_frames_the_project_describes() {
         assert_eq!(
             outcome.result,
             ExportResult::Completed,
-            "seed {seed}: clips {:?}\ngraph: {}",
+            "seed {seed}: clips {:?}\nruns: {:?}",
             project.tracks(),
-            plan_export(&project, Settings::DEFAULT, &transparent_text_picture)
-                .unwrap()
-                .filter_graph
-                .text
+            plan_export(&project, Settings::DEFAULT).unwrap().runs
         );
         let frame_numbers = decode_video(&toolchain, &destination, 320, 180).frame_numbers();
         assert_eq!(
@@ -158,7 +164,7 @@ fn random_edits_always_export_exactly_the_frames_the_project_describes() {
 /// file (timestamps rounded to milliseconds) exported duplicated and skipped pictures.
 #[test]
 fn files_whose_timestamps_are_rounded_to_milliseconds_export_exactly_too() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     for specification in [
         TestVideoSpecification {
@@ -208,7 +214,7 @@ fn kept_frames_nearest_to(seconds: f64) -> Vec<u64> {
 
 #[test]
 fn a_variable_frame_rate_source_exports_the_picture_nearest_in_time_to_every_slot_and_keeps_its_length() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(
         &toolchain,
         &TestVideoSpecification {
@@ -255,7 +261,7 @@ fn a_variable_frame_rate_source_exports_the_picture_nearest_in_time_to_every_slo
 
 #[test]
 fn the_sound_stays_as_long_as_the_picture_however_the_clips_are_sped_up() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in [100, 190, 260, 300] {
@@ -284,7 +290,7 @@ fn the_sound_stays_as_long_as_the_picture_however_the_clips_are_sped_up() {
 
 #[test]
 fn the_sound_of_every_clip_is_really_there_not_silence() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     support::split(&mut project, 300);
@@ -313,7 +319,7 @@ fn the_sound_of_every_clip_is_really_there_not_silence() {
 
 #[test]
 fn with_sped_up_clips_muted_those_clips_are_silent_and_the_others_still_have_their_sound() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // Clips: 0..300 at 1x (10 s), 300..600 at 4x (2.5 s).
     let project = edited(project_for(&toolchain, &video), &[300], &[1, 4]);
@@ -351,7 +357,7 @@ fn with_sped_up_clips_muted_those_clips_are_silent_and_the_others_still_have_the
 
 #[test]
 fn a_sped_up_clip_keeps_its_pitch_or_has_it_raised_as_the_setting_says_and_is_as_long_as_its_pictures() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // Clips: 0..300 at 1x (10 s), 300..600 at 4x (2.5 s). The sound is a steady 440 Hz tone.
     let project = edited(project_for(&toolchain, &video), &[300], &[1, 4]);
@@ -409,7 +415,7 @@ fn symbol_is_visible(picture: &[u8], picture_width: u32, left: u32, top: u32, wi
 
 #[test]
 fn only_accelerated_clips_show_the_fast_forward_symbol() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in [150, 330] {
@@ -458,7 +464,7 @@ fn only_accelerated_clips_show_the_fast_forward_symbol() {
 
 #[test]
 fn the_symbol_is_drawn_where_the_layout_says_and_nowhere_else() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     support::set_clip_speed(&mut project, 0, 2);
@@ -489,7 +495,7 @@ fn the_symbol_is_drawn_where_the_layout_says_and_nowhere_else() {
 
 #[test]
 fn a_source_without_sound_exports_a_video_without_sound() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(
         &toolchain,
         &TestVideoSpecification {
@@ -517,7 +523,7 @@ fn a_source_without_sound_exports_a_video_without_sound() {
 
 #[test]
 fn a_project_with_a_hundred_and_fifty_clips_exports_even_though_its_graph_cannot_fit_on_a_command_line() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in 1..150u64 {
@@ -527,11 +533,13 @@ fn a_project_with_a_hundred_and_fifty_clips_exports_even_though_its_graph_cannot
     for clip_index in 0..150 {
         support::set_clip_speed(&mut project, clip_index, 1 + (clip_index as u32 % 4));
     }
-    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    // (The picture has no graph any more: it is made by the engine. The graph of the sound is the one that is left, and it is what is too long.)
+    let sound_graph = sound_graph_for_the_encoder(plan.sound.as_ref().expect("the video has sound"));
     assert!(
-        plan.filter_graph.text.len() > 32_768,
+        sound_graph.text.len() > 32_768,
         "the graph must be too long for a Windows command line: {} characters",
-        plan.filter_graph.text.len()
+        sound_graph.text.len()
     );
     let expected = expected_source_frames(&project);
     let scratch = scratch_directory();
@@ -550,7 +558,7 @@ fn a_project_with_a_hundred_and_fifty_clips_exports_even_though_its_graph_cannot
 /// clip after it start at the same instant, and the encoder dropped that clip's first frame.
 #[test]
 fn clips_that_are_a_single_picture_long_never_cost_the_next_clip_its_first_frame() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in 1..40u64 {
@@ -576,7 +584,7 @@ fn clips_that_are_a_single_picture_long_never_cost_the_next_clip_its_first_frame
 
 #[test]
 fn the_finished_video_has_the_exact_constant_frame_rate_whatever_the_clips() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     for frame in [3, 10, 50, 51, 200] {
@@ -622,7 +630,7 @@ fn the_finished_video_has_the_exact_constant_frame_rate_whatever_the_clips() {
 
 #[test]
 fn a_file_name_with_unusual_characters_is_fine_for_source_and_destination() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let oddly_named_source = scratch.path().join("holiday #1 (final) - café & friends [2026].mp4");
@@ -640,7 +648,7 @@ fn a_file_name_with_unusual_characters_is_fine_for_source_and_destination() {
 
 #[test]
 fn the_container_follows_the_destination_extension() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     support::set_clip_speed(&mut project, 0, 10);
@@ -659,7 +667,7 @@ fn the_container_follows_the_destination_extension() {
 
 #[test]
 fn a_rotated_source_exports_upright_at_its_displayed_size() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let rotated = scratch.path().join("rotated.mp4");
@@ -711,7 +719,7 @@ fn a_rotated_source_exports_upright_at_its_displayed_size() {
 
 #[test]
 fn non_square_pixels_are_exported_as_the_square_pixel_picture_they_are_shown_as() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(
         &toolchain,
         &TestVideoSpecification {
@@ -735,13 +743,13 @@ fn non_square_pixels_are_exported_as_the_square_pixel_picture_they_are_shown_as(
 
 #[test]
 fn exporting_over_the_source_video_is_refused_before_anything_is_touched() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let source_copy = scratch.path().join("source.mp4");
     std::fs::copy(&video.path, &source_copy).unwrap();
     let project = project_for(&toolchain, &video);
-    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let original_bytes = std::fs::read(&source_copy).unwrap();
 
     for destination in [source_copy.clone(), scratch.path().join(".").join("source.mp4")] {
@@ -750,6 +758,7 @@ fn exporting_over_the_source_video_is_refused_before_anything_is_touched() {
             &plan,
             &[source_copy.clone().into()],
             &destination,
+            support::export_options(),
             Arc::new(|| {}),
         );
         assert!(
@@ -767,7 +776,7 @@ fn exporting_over_the_source_video_is_refused_before_anything_is_touched() {
 
 #[test]
 fn a_failed_export_reports_why_and_leaves_an_existing_file_untouched() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let project = project_for(&toolchain, &video);
     let scratch = scratch_directory();
@@ -795,7 +804,7 @@ fn a_failed_export_reports_why_and_leaves_an_existing_file_untouched() {
 
 #[test]
 fn a_successful_export_replaces_an_existing_file() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     support::set_clip_speed(&mut project, 0, 50);
@@ -819,7 +828,7 @@ fn a_successful_export_replaces_an_existing_file() {
 
 #[test]
 fn cancelling_stops_the_export_and_leaves_no_file_and_an_existing_file_untouched() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     // A long, large video so that the export is still running when it is cancelled.
     let video = test_video(
         &toolchain,
@@ -836,12 +845,14 @@ fn cancelling_stops_the_export_and_leaves_no_file_and_an_existing_file_untouched
     let scratch = scratch_directory();
     let destination = scratch.path().join("cancelled.mp4");
     std::fs::write(&destination, b"the user's earlier export").unwrap();
-    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let export = VideoExport::start(
         &toolchain,
         &plan,
         &[video.path.clone().into()],
         &destination,
+        support::export_options(),
         Arc::new(|| {}),
     )
     .unwrap();
@@ -865,7 +876,7 @@ fn cancelling_stops_the_export_and_leaves_no_file_and_an_existing_file_untouched
 
 #[test]
 fn dropping_a_running_export_cancels_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(
         &toolchain,
         &TestVideoSpecification {
@@ -880,12 +891,14 @@ fn dropping_a_running_export_cancels_it() {
     let project = project_for(&toolchain, &video);
     let scratch = scratch_directory();
     let destination = scratch.path().join("dropped.mp4");
-    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let export = VideoExport::start(
         &toolchain,
         &plan,
         &[video.path.clone().into()],
         &destination,
+        support::export_options(),
         Arc::new(|| {}),
     )
     .unwrap();

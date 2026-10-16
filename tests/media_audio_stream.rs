@@ -10,18 +10,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fastforwardrs::composition::plan_sound;
-use fastforwardrs::media::export::{
-    ExportResult, VideoExport, plan_export, sound_graph_specification, sources_of_sound,
-};
+use fastforwardrs::media::export::{sound_graph_specification, sources_of_sound};
 use fastforwardrs::media::{
     AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain, MediaLocation,
 };
 use fastforwardrs::project::{
     AnimationTarget, Project, PropertyId, PropertyValue, Settings, SpedUpClipSound, TimelineFrameIndex,
 };
+use fastforwardrs::video_export::{ExportResult, VideoExport, plan_export};
 use support::{
     TestVideoSpecification, clip_number, counter_video, decoded_sound, edited, loudness, pitch_in_hertz, project_for,
-    project_with_a_video_and_a_tone_file, scratch_directory, test_video, tone_strength, transparent_text_picture,
+    project_with_a_video_and_a_tone_file, scratch_directory, test_video, tone_strength,
 };
 
 const TIME_ALLOWED: Duration = Duration::from_secs(60);
@@ -240,16 +239,25 @@ fn from_the_middle_of_a_sped_up_clip_the_rest_of_the_clip_and_what_follows_is_th
 fn sound_of_the_export_of(toolchain: &FfmpegToolchain, project: &Project) -> Vec<f32> {
     let scratch = scratch_directory();
     let exported_path = scratch.path().join("exported.mp4");
-    let plan = plan_export(project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let plan = plan_export(project, Settings::DEFAULT).unwrap();
     let source_paths: Vec<MediaLocation> = plan
         .source_files
         .iter()
         .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone().into())
         .collect();
-    let export = VideoExport::start(toolchain, &plan, &source_paths, &exported_path, Arc::new(|| {})).unwrap();
+    let export = VideoExport::start(
+        toolchain,
+        &plan,
+        &source_paths,
+        &exported_path,
+        support::export_options(),
+        Arc::new(|| {}),
+    )
+    .unwrap();
     let started = Instant::now();
     loop {
-        if let Some(fastforwardrs::media::export::ExportEvent::Finished(result)) = export.try_next_event() {
+        if let Some(fastforwardrs::video_export::ExportEvent::Finished(result)) = export.try_next_event() {
             assert_eq!(result, ExportResult::Completed);
             break;
         }
@@ -261,7 +269,7 @@ fn sound_of_the_export_of(toolchain: &FfmpegToolchain, project: &Project) -> Vec
 
 #[test]
 fn the_preview_sound_is_the_sound_the_export_has_clip_for_clip() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let project = edited(
         project_for(&toolchain, &video),
@@ -403,7 +411,7 @@ fn the_preview_sound_of_a_video_and_a_sound_file_on_two_tracks_is_both_mixed_fro
 
 #[test]
 fn the_preview_sound_of_two_tracks_is_the_sound_the_export_has_second_by_second() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let project = project_with_a_video_and_a_tone_file(&toolchain);
     let exported = sound_of_the_export_of(&toolchain, &project);
     let (previewed, error_output) =
@@ -538,7 +546,7 @@ fn a_clip_muted_by_keyframes_is_silent_for_that_stretch_and_the_sound_after_it_i
 
 #[test]
 fn the_preview_sound_is_the_sound_the_export_has_when_clips_and_tracks_have_keyframes_for_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_for(&toolchain, &video);
     make_a_keyframe(&mut project, PropertyId::Gain, 0, PropertyValue::Number(0.0));

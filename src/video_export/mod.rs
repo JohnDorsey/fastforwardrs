@@ -11,12 +11,25 @@
 //! * [`plan_export`] works out what has to happen, from a project (pure logic, using what [`crate::composition`] says the picture and the sound are);
 //! * [`find_the_runs`] cuts the video of the plan into the stretches that a decode process each is run for.
 
+mod encoder;
+mod frames;
+mod output_colour;
 mod pictures;
 mod plan;
+mod runner;
 mod runs;
 #[cfg(test)]
 mod test_projects;
+#[cfg(test)]
+mod test_streams;
 
+pub use encoder::{
+    Encoder, EncoderEnd, EncoderKiller, EncoderSpecification, SoundForTheEncoder, encoder_arguments,
+    sound_graph_for_the_encoder,
+};
+pub use frames::{DescribedFrame, FrameDescriber, FrameProblem};
+pub use output_colour::{OutputColour, OutputTags, output_colour_for};
 pub use pictures::{FfmpegRunStreamStarter, PicturesOfTheRuns, RunPictureProblem, RunStream, RunStreamStarter};
 pub use plan::{ExportPlan, ExportPlanError, ImageToExport, VideoToExport, plan_export};
+pub use runner::{ExportError, ExportEvent, ExportOptions, ExportResult, VideoExport};
 pub use runs::{VideoRun, find_the_runs};

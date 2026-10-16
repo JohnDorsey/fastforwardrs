@@ -142,6 +142,12 @@ impl EngineDevice {
     }
 }
 
+/// Whether this computer has a software adapter, for the tests that must not run on a real graphics card (see [`AdapterChoice::SoftwareOnly`]) to say that they are
+/// skipped where there is none.
+pub fn there_is_a_software_adapter() -> bool {
+    software_adapter().is_some()
+}
+
 /// The software adapter, if there is one: of device type `Cpu`, and of the backend that is liked best if several are (Vulkan before Direct3D
 /// before Metal). OpenGL is not looked at, so that no OpenGL context is made on a computer that has no screen (a machine that runs tests).
 fn software_adapter() -> Option<wgpu::Adapter> {

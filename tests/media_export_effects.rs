@@ -121,7 +121,7 @@ fn assert_every_picture_is(decoded: &DecodedVideo, wanted: (u8, u8, u8), what: &
 
 #[test]
 fn a_video_with_no_effect_comes_out_the_colour_it_is_which_is_what_the_other_tests_here_are_measured_against() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
 
@@ -132,7 +132,7 @@ fn a_video_with_no_effect_comes_out_the_colour_it_is_which_is_what_the_other_tes
 
 #[test]
 fn the_hue_shift_of_a_clip_turns_the_colours_of_its_video_as_the_arithmetic_of_the_effect_says() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     for degrees in [120.0, -90.0, 200.0] {
         let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
@@ -151,7 +151,7 @@ fn the_hue_shift_of_a_clip_turns_the_colours_of_its_video_as_the_arithmetic_of_t
 
 #[test]
 fn a_whole_turn_leaves_the_colours_as_they_were() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     put_a_hue_shift_on(&mut project, AnimationTarget::Clip(clip), 360.0);
@@ -163,7 +163,7 @@ fn a_whole_turn_leaves_the_colours_as_they_were() {
 
 #[test]
 fn the_hue_shift_of_a_track_turns_the_colours_of_the_videos_on_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let track = project.tracks()[0].id();
@@ -176,7 +176,7 @@ fn the_hue_shift_of_a_track_turns_the_colours_of_the_videos_on_it() {
 
 #[test]
 fn the_hue_shifts_of_a_clip_and_of_its_track_are_both_done() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let track = project.tracks()[0].id();
@@ -190,7 +190,7 @@ fn the_hue_shifts_of_a_clip_and_of_its_track_are_both_done() {
 
 #[test]
 fn two_hue_shifts_of_one_clip_are_both_done_and_turn_the_colours_by_both_turns() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let first = put_a_hue_shift_on(&mut project, AnimationTarget::Clip(clip), 70.0);
@@ -204,7 +204,7 @@ fn two_hue_shifts_of_one_clip_are_both_done_and_turn_the_colours_by_both_turns()
 
 #[test]
 fn the_keyframes_of_the_second_of_two_hue_shifts_turn_the_colours_by_what_the_second_says_on_top_of_the_first() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let target = AnimationTarget::Clip(clip);
@@ -229,7 +229,7 @@ fn the_keyframes_of_the_second_of_two_hue_shifts_turn_the_colours_by_what_the_se
 
 #[test]
 fn only_the_clip_that_has_the_effect_has_its_colours_turned() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, first) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     // Cut the video in two at frame 30: the first half has the effect, the second does not.
@@ -253,7 +253,7 @@ fn only_the_clip_that_has_the_effect_has_its_colours_turned() {
 
 #[test]
 fn a_hue_shift_with_keyframes_turns_the_colours_a_little_more_at_each_frame() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
     let target = AnimationTarget::Clip(clip);
@@ -279,7 +279,7 @@ fn a_hue_shift_with_keyframes_turns_the_colours_a_little_more_at_each_frame() {
 
 #[test]
 fn a_picture_file_with_a_hue_shift_has_each_of_its_colours_turned_and_the_video_behind_it_is_not() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 0, 60);
     put_a_hue_shift_on(&mut project, AnimationTarget::Clip(picture), 120.0);
@@ -304,7 +304,7 @@ fn a_picture_file_with_a_hue_shift_has_each_of_its_colours_turned_and_the_video_
 
 #[test]
 fn a_text_object_with_a_hue_shift_has_its_colour_turned() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), (20, 20, 20));
     let front = project.add_track_in_front();
@@ -322,7 +322,7 @@ fn a_text_object_with_a_hue_shift_has_its_colour_turned() {
     );
     let destination = scratch.path().join("text_hue.mp4");
 
-    export_with_text_pictures(&toolchain, &project, &destination, &solid_text_picture);
+    export_with_text_pictures(&toolchain, &project, &destination, solid_text_picture);
     let decoded = decode_video(&toolchain, &destination, WIDTH as u32, HEIGHT as u32);
 
     assert_eq!(decoded.pictures.len(), 60);
@@ -359,7 +359,7 @@ fn half_clear_text_picture(
 
 #[test]
 fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), (20, 20, 20));
     let front = project.add_track_in_front();
@@ -377,7 +377,7 @@ fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
     );
     let destination = scratch.path().join("half_clear_text_hue.mp4");
 
-    export_with_text_pictures(&toolchain, &project, &destination, &half_clear_text_picture);
+    export_with_text_pictures(&toolchain, &project, &destination, half_clear_text_picture);
     let decoded = decode_video(&toolchain, &destination, WIDTH as u32, HEIGHT as u32);
 
     // Half the turned colour (18, 151, 80) over the video behind it (20, 20, 20).
@@ -410,7 +410,7 @@ fn project_of_a_flat_colour_video_cut_in_two(toolchain: &FfmpegToolchain, folder
 
 #[test]
 fn the_hue_shift_of_a_tag_turns_the_colours_of_the_clips_in_it_and_of_no_other() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, first, _) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
     let tag = project.create_group(GroupKind::Tag, &[Member::Clip(first)]).unwrap();
@@ -431,7 +431,7 @@ fn the_hue_shift_of_a_tag_turns_the_colours_of_the_clips_in_it_and_of_no_other()
 
 #[test]
 fn the_hue_shift_of_a_clip_group_turns_the_colours_of_the_clips_in_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, first, second) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
     let group = project
@@ -446,7 +446,7 @@ fn the_hue_shift_of_a_clip_group_turns_the_colours_of_the_clips_in_it() {
 
 #[test]
 fn the_hue_shift_of_a_track_group_turns_the_colours_of_the_clips_on_its_tracks() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, _, _) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
     let track = project.tracks()[0].id();
@@ -462,7 +462,7 @@ fn the_hue_shift_of_a_track_group_turns_the_colours_of_the_clips_on_its_tracks()
 
 #[test]
 fn the_effects_of_a_clip_its_track_a_tag_a_clip_group_and_a_track_group_are_all_done() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, first, second) = project_of_a_flat_colour_video_cut_in_two(&toolchain, scratch.path());
     let track = project.tracks()[0].id();

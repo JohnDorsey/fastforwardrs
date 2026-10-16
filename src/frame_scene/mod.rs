@@ -13,7 +13,7 @@
 
 mod describe;
 
-pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, describe_frame};
+pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, TextPictures, describe_frame};
 
 use std::borrow::Cow;
 

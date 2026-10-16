@@ -93,6 +93,10 @@ jobs:
       - name: Integration tests
         if: ${{ steps.ffmpeg.outputs.major >= 9 }}
         shell: bash
+        env:
+          # The export is made by the picture engine, which the tests run on a software graphics adapter (see the step above). Where there is one, the tests of the
+          # export must run: a missing adapter is a failure there and not a quiet skip.
+          FASTFORWARDRS_REQUIRE_SOFTWARE_ADAPTER: ${{ runner.os == 'macOS' && '0' || '1' }}
         run: |
           # All of them but the ones that measure real time and the ones about what ffmpeg itself does, which have steps of their own.
           separate="application_playback application_sound media_ffmpeg_quirks"

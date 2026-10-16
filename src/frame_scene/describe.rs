@@ -55,7 +55,7 @@ pub struct PictureWanted<'c> {
 
 impl HowToMakeIt<'_> {
     /// The pixels of the picture, or `None` if they cannot be made now (the fonts of a text are not loaded, a thumbnail does not unpack).
-    pub fn make(&self, text_renderer: &mut LazyTextRenderer) -> Option<PictureData> {
+    pub fn make(&self, text_pictures: &mut dyn TextPictures) -> Option<PictureData> {
         let rgba = |width: u32, height: u32, pixels: &[u8]| PictureData::rgba8(width, height, pixels.to_vec()).ok();
         match self {
             Self::VideoPicture(supplied) => match &supplied.frame {
@@ -76,9 +76,7 @@ impl HowToMakeIt<'_> {
             }
             Self::Image(picture) => rgba(picture.width_in_pixels, picture.height_in_pixels, &picture.rgba_pixels),
             Self::Text { object, picture_size } => {
-                let picture = text_renderer
-                    .get_if_ready()?
-                    .render(object, picture_size.0, picture_size.1);
+                let picture = text_pictures.text_picture(object, picture_size.0, picture_size.1)?;
                 rgba(picture.width_in_pixels, picture.height_in_pixels, &picture.rgba_pixels)
             }
             Self::Symbol {
@@ -89,6 +87,45 @@ impl HowToMakeIt<'_> {
                 rgba(picture.width_in_pixels, picture.height_in_pixels, &picture.rgba_pixels)
             }
         }
+    }
+}
+
+/// What makes the picture of a text object when a frame is described: the computer's fonts (the preview's, and the export's), or, for a test that must not depend on
+/// the fonts a computer has, a function of its own.
+pub trait TextPictures {
+    /// The picture of `object` on a finished picture that is `picture_width_in_pixels` by `picture_height_in_pixels` (the picture of the object's own area, text on
+    /// transparent: see `TextRenderer::render`), or `None` if it cannot be made now (the fonts are not loaded yet).
+    fn text_picture(
+        &mut self,
+        object: &TextObject,
+        picture_width_in_pixels: u32,
+        picture_height_in_pixels: u32,
+    ) -> Option<RgbaPicture>;
+}
+
+impl TextPictures for LazyTextRenderer {
+    fn text_picture(
+        &mut self,
+        object: &TextObject,
+        picture_width_in_pixels: u32,
+        picture_height_in_pixels: u32,
+    ) -> Option<RgbaPicture> {
+        Some(
+            self.get_if_ready()?
+                .render(object, picture_width_in_pixels, picture_height_in_pixels),
+        )
+    }
+}
+
+/// A function that draws a text object is a source of text pictures that is always ready.
+impl<F: FnMut(&TextObject, u32, u32) -> RgbaPicture> TextPictures for F {
+    fn text_picture(
+        &mut self,
+        object: &TextObject,
+        picture_width_in_pixels: u32,
+        picture_height_in_pixels: u32,
+    ) -> Option<RgbaPicture> {
+        Some(self(object, picture_width_in_pixels, picture_height_in_pixels))
     }
 }
 
@@ -103,7 +140,7 @@ pub trait PictureSupply {
 pub struct SentPictures<'a, Send: FnMut(PictureId, PictureData)> {
     /// The pictures the engine has. (Whoever owns it takes an id out when the engine says it let go of the picture, or has lost it.)
     pub sent: &'a mut HashSet<PictureId>,
-    pub text_renderer: &'a mut LazyTextRenderer,
+    pub text_renderer: &'a mut dyn TextPictures,
     pub send: Send,
 }
 

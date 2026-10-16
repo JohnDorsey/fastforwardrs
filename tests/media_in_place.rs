@@ -14,9 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fastforwardrs::composition::plan_sound;
-use fastforwardrs::media::export::{
-    ExportEvent, ExportResult, VideoExport, plan_export, sound_graph_specification, sources_of_sound,
-};
+use fastforwardrs::media::export::{sound_graph_specification, sources_of_sound};
 use fastforwardrs::media::{
     AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, DecodedFrame, FfmpegToolchain, FrameDelivery,
     FrameStream, FrameStreamEvent, FrameStreamRequest, MediaLocation, PEAKS_PER_SECOND, PictureSize, ThumbnailEvent,
@@ -28,9 +26,8 @@ use fastforwardrs::project::{
 use fastforwardrs::project_file::archive::{
     EntryPlace, FileToInclude, append_to_archive, entry_place, resource_entry_name, write_archive,
 };
-use support::{
-    counter_video, project_for, red_and_blue_picture, scratch_directory, tone_file, transparent_text_picture,
-};
+use fastforwardrs::video_export::{ExportEvent, ExportResult, VideoExport, plan_export};
+use support::{counter_video, project_for, red_and_blue_picture, scratch_directory, tone_file};
 
 const TIME_ALLOWED: Duration = Duration::from_secs(60);
 
@@ -260,16 +257,24 @@ fn a_picture_in_an_archive_is_decoded_as_the_picture_that_was_put_in() {
 
 #[test]
 fn a_video_in_an_archive_is_exported_as_the_video_that_was_put_in_is() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let (_, locations) = archive_of(scratch.path(), "trip.ffrs", &[&video.path]);
     let project = project_for(&toolchain, &video);
-    let plan = plan_export(&project, Settings::DEFAULT, &transparent_text_picture).unwrap();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
     let export_from = |source: MediaLocation, name: &str| {
+        let _one_export_at_a_time = support::one_export_at_a_time();
         let destination = scratch.path().join(name);
-        let export =
-            VideoExport::start(&toolchain, &plan, &[source], &destination, Arc::new(|| {})).expect("it starts");
+        let export = VideoExport::start(
+            &toolchain,
+            &plan,
+            &[source],
+            &destination,
+            support::export_options(),
+            Arc::new(|| {}),
+        )
+        .expect("it starts");
         let started = Instant::now();
         loop {
             match export.try_next_event() {

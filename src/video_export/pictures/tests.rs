@@ -4,115 +4,15 @@
 //! The pictures of the runs, with streams that are made up (no ffmpeg): when each run is started, what it is asked for, what is made of what comes, and what is done
 //! when it comes late, too soon, or not at all. (With the real ffmpeg: `tests/video_export_pictures.rs`.)
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::rc::Rc;
-
 use super::*;
-use crate::media::{DecodedFrame, DecodedYuvFrame, NativeMatrix};
+use crate::media::NativeMatrix;
 use crate::project::{CanvasArea, FrameRate, Placement, Project, Settings};
 use crate::video_export::plan_export;
 use crate::video_export::test_projects::{
     clip_location, frame, project_with_video, speed, video_source, video_source_at,
 };
-
-/// What the made-up streams were asked and what they are to say, shared between a test and the starter it gave.
-#[derive(Default)]
-struct ScriptState {
-    /// What each stream that was started was asked for, in the order they were started.
-    started: Vec<(FrameStreamRequest, (u32, u32))>,
-    /// What the next streams that are started say, one list for each, and then that their end is reached.
-    to_say: VecDeque<Vec<FrameStreamEvent>>,
-    /// Whether a stream that has said all it has to say waits for ever (and does not end).
-    never_ends: bool,
-    /// How many streams that were started have not been let go of.
-    alive: usize,
-    fail_to_start: bool,
-}
-
-#[derive(Clone, Default)]
-struct Script(Rc<RefCell<ScriptState>>);
-
-struct MadeUpStream {
-    events: VecDeque<FrameStreamEvent>,
-    script: Script,
-    never_ends: bool,
-}
-
-impl RunStream for MadeUpStream {
-    fn wait_for_an_event(&mut self, how_long: Duration) -> WaitedFor<FrameStreamEvent> {
-        match self.events.pop_front() {
-            Some(event) => WaitedFor::Event(event),
-            None if self.never_ends => {
-                // A little of the wait, so that a test that waits for the limit does not use a processor for it.
-                std::thread::sleep(how_long.min(Duration::from_millis(2)));
-                WaitedFor::NothingYet
-            }
-            None => WaitedFor::Ended,
-        }
-    }
-}
-
-impl Drop for MadeUpStream {
-    fn drop(&mut self) {
-        self.script.0.borrow_mut().alive -= 1;
-    }
-}
-
-impl RunStreamStarter for Script {
-    type Stream = MadeUpStream;
-
-    fn start(
-        &self,
-        request: &FrameStreamRequest,
-        delivered_size: (u32, u32),
-    ) -> Result<MadeUpStream, FrameStreamError> {
-        let mut state = self.0.borrow_mut();
-        if state.fail_to_start {
-            return Err(FrameStreamError::EmptyPicture);
-        }
-        state.started.push((request.clone(), delivered_size));
-        state.alive += 1;
-        let events = state.to_say.pop_front().unwrap_or_default();
-        Ok(MadeUpStream {
-            events: events.into(),
-            script: self.clone(),
-            never_ends: state.never_ends,
-        })
-    }
-}
-
-fn rgba(value: u8) -> FrameStreamEvent {
-    FrameStreamEvent::Frame(DecodedFrame {
-        width_in_pixels: 2,
-        height_in_pixels: 2,
-        rgba_pixels: vec![value; 16],
-    })
-}
-
-fn planes(value: u8) -> FrameStreamEvent {
-    FrameStreamEvent::YuvFrame(DecodedYuvFrame {
-        width_in_pixels: 2,
-        height_in_pixels: 2,
-        y: vec![value; 4],
-        u: vec![128],
-        v: vec![128],
-    })
-}
-
-fn the_first_byte_of(picture: &SuppliedPicture) -> u8 {
-    match &picture.frame {
-        SuppliedFrame::Rgba(frame) => frame.rgba_pixels[0],
-        SuppliedFrame::Yuv420p { frame, .. } => frame.y[0],
-    }
-}
-
-fn locations() -> HashMap<SourceMediaIdentifier, MediaLocation> {
-    HashMap::from([
-        (SourceMediaIdentifier::new(1), MediaLocation::from("holiday.mp4")),
-        (SourceMediaIdentifier::new(2), MediaLocation::from("birthday.mp4")),
-    ])
-}
+use crate::video_export::test_streams::{Script, locations, planes, rgba, the_first_byte_of};
+use std::collections::VecDeque;
 
 fn plan_of(project: &Project) -> ExportPlan {
     plan_export(project, Settings::DEFAULT).unwrap()
@@ -181,29 +81,29 @@ fn a_run_is_started_a_little_before_its_first_frame_and_only_once() {
     let (plan, script) = two_videos();
     let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
     assert_eq!(
-        script.0.borrow().started.len(),
+        script.state().started.len(),
         0,
         "nothing is started before it is asked for"
     );
     pictures.start_the_runs_that_begin_soon(0).unwrap();
     assert_eq!(
-        script.0.borrow().started.len(),
+        script.state().started.len(),
         1,
         "the first video; the second is 200 frames away"
     );
     pictures.start_the_runs_that_begin_soon(0).unwrap();
     pictures.start_the_runs_that_begin_soon(10).unwrap();
-    assert_eq!(script.0.borrow().started.len(), 1, "and it is not started again");
+    assert_eq!(script.state().started.len(), 1, "and it is not started again");
     // The second run begins at frame 200: it is started when it is FRAMES_AHEAD_THAT_A_RUN_IS_STARTED frames away.
     pictures
         .start_the_runs_that_begin_soon(200 - FRAMES_AHEAD_THAT_A_RUN_IS_STARTED - 1)
         .unwrap();
-    assert_eq!(script.0.borrow().started.len(), 1);
+    assert_eq!(script.state().started.len(), 1);
     pictures
         .start_the_runs_that_begin_soon(200 - FRAMES_AHEAD_THAT_A_RUN_IS_STARTED)
         .unwrap();
-    assert_eq!(script.0.borrow().started.len(), 2);
-    let started = script.0.borrow().started.clone();
+    assert_eq!(script.state().started.len(), 2);
+    let started = script.state().started.clone();
     assert_eq!(started[0].0.video, MediaLocation::from("holiday.mp4"));
     assert_eq!(started[1].0.video, MediaLocation::from("birthday.mp4"));
 }
@@ -218,7 +118,7 @@ fn a_run_that_has_ended_is_not_started() {
         let script = Script::default();
         let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
         pictures.start_the_runs_that_begin_soon(timeline_frame).unwrap();
-        let started = script.0.borrow().started.clone();
+        let started = script.state().started.clone();
         assert_eq!(started.len(), 1, "at frame {timeline_frame}");
         assert_eq!(
             started[0].0.first_source_frame.value(),
@@ -228,7 +128,7 @@ fn a_run_that_has_ended_is_not_started() {
     }
     // And the run that is over at frame 150 (the end of the project) is not started at all, nor are the ones after the end.
     pictures.start_the_runs_that_begin_soon(150).unwrap();
-    assert_eq!(script.0.borrow().started.len(), 0);
+    assert_eq!(script.state().started.len(), 0);
 }
 
 #[test]
@@ -237,7 +137,7 @@ fn the_request_of_a_run_says_which_source_frames_at_what_speed_and_how_big_the_p
     let script = Script::default();
     let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
     pictures.start_the_runs_that_begin_soon(99).unwrap();
-    let started = script.0.borrow().started.clone();
+    let started = script.state().started.clone();
     assert_eq!(
         started.len(),
         2,
@@ -278,7 +178,7 @@ fn the_request_has_the_frame_rate_of_the_video_and_the_frame_rate_of_the_project
     let script = Script::default();
     let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
     pictures.start_the_runs_that_begin_soon(0).unwrap();
-    let started = script.0.borrow().started.clone();
+    let started = script.state().started.clone();
     assert_eq!(started[0].0.video_frame_rate, FrameRate::new(25, 1).unwrap());
     assert_eq!(started[0].0.project_frame_rate, FrameRate::new(30, 1).unwrap());
 }
@@ -297,7 +197,7 @@ fn a_video_in_a_smaller_place_is_asked_for_as_big_as_the_place_while_the_request
     let script = Script::default();
     let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
     pictures.start_the_runs_that_begin_soon(0).unwrap();
-    let started = script.0.borrow().started.clone();
+    let started = script.state().started.clone();
     let (request, delivered_size) = &started[0];
     assert_eq!(*delivered_size, (160, 90));
     assert_eq!(request.video_display_size_in_pixels, (640, 360));
@@ -312,7 +212,7 @@ fn a_video_in_a_smaller_place_is_asked_for_as_big_as_the_place_while_the_request
 fn a_video_that_can_be_had_in_planes_is_asked_for_in_planes_and_the_pictures_say_what_they_stand_for() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().to_say.push_back(vec![planes(10), planes(20)]);
+    script.state().to_say.push_back(vec![planes(10), planes(20)]);
     let native = NativeYuv420p {
         matrix: NativeMatrix::Bt709,
         full_range: false,
@@ -325,7 +225,7 @@ fn a_video_that_can_be_had_in_planes_is_asked_for_in_planes_and_the_pictures_say
     )
     .unwrap();
     let picture = pictures.picture(0, 0, &nobody_cancels()).unwrap();
-    assert_eq!(script.0.borrow().started[0].0.delivery, FrameDelivery::Yuv420p);
+    assert_eq!(script.state().started[0].0.delivery, FrameDelivery::Yuv420p);
     let SuppliedFrame::Yuv420p { colour, .. } = &picture.frame else {
         panic!("{picture:?}")
     };
@@ -336,7 +236,7 @@ fn a_video_that_can_be_had_in_planes_is_asked_for_in_planes_and_the_pictures_say
 fn the_pictures_of_a_run_come_in_order_with_the_source_frames_of_the_run_and_a_serial_number_each_that_no_other_has() {
     let plan = one_video_cut_where_it_speeds_up();
     let script = Script::default();
-    script.0.borrow_mut().to_say = VecDeque::from([
+    script.state().to_say = VecDeque::from([
         (0..100).map(rgba).collect(),
         (0..50).map(|number| rgba(number as u8 + 100)).collect(),
     ]);
@@ -368,11 +268,7 @@ fn the_pictures_of_a_run_come_in_order_with_the_source_frames_of_the_run_and_a_s
 fn the_same_frame_asked_for_again_is_the_very_same_picture_also_after_the_last() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script
-        .0
-        .borrow_mut()
-        .to_say
-        .push_back((0..=255).map(rgba).collect::<Vec<_>>());
+    script.state().to_say.push_back((0..=255).map(rgba).collect::<Vec<_>>());
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     let cancel = nobody_cancels();
     let first = pictures.picture(0, 0, &cancel).unwrap();
@@ -393,7 +289,7 @@ fn the_same_frame_asked_for_again_is_the_very_same_picture_also_after_the_last()
 fn a_frame_that_is_not_asked_for_is_passed_over_and_the_run_goes_on_with_the_frame_after() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().to_say.push_back((0..20).map(rgba).collect());
+    script.state().to_say.push_back((0..20).map(rgba).collect());
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     let cancel = nobody_cancels();
     assert_eq!(the_first_byte_of(&pictures.picture(0, 0, &cancel).unwrap()), 0);
@@ -408,7 +304,7 @@ fn a_frame_that_is_not_asked_for_is_passed_over_and_the_run_goes_on_with_the_fra
 fn frames_that_are_not_asked_for_after_the_last_picture_of_a_stream_are_counted_as_held_too() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().to_say.push_back((0..3).map(rgba).collect());
+    script.state().to_say.push_back((0..3).map(rgba).collect());
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     let cancel = nobody_cancels();
     assert_eq!(the_first_byte_of(&pictures.picture(0, 0, &cancel).unwrap()), 0);
@@ -421,7 +317,7 @@ fn frames_that_are_not_asked_for_after_the_last_picture_of_a_stream_are_counted_
 fn a_stream_that_ends_before_its_run_does_has_its_last_picture_held_for_the_rest_and_the_holding_is_counted() {
     let plan = one_video_cut_at(10);
     let script = Script::default();
-    script.0.borrow_mut().to_say = VecDeque::from([vec![rgba(1), rgba(2), rgba(3)], vec![rgba(9)]]);
+    script.state().to_say = VecDeque::from([vec![rgba(1), rgba(2), rgba(3)], vec![rgba(9)]]);
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     let cancel = nobody_cancels();
     let bytes: Vec<u8> = (0..10)
@@ -439,7 +335,7 @@ fn a_stream_that_ends_before_its_run_does_has_its_last_picture_held_for_the_rest
 fn a_stream_with_no_picture_at_all_is_a_mistake_and_says_what_ffmpeg_said() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().to_say.push_back(vec![FrameStreamEvent::Finished {
+    script.state().to_say.push_back(vec![FrameStreamEvent::Finished {
         error_output: Some("Invalid data found when processing input".to_owned()),
     }]);
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
@@ -461,8 +357,7 @@ fn a_stream_that_ends_with_nothing_said_and_no_picture_is_still_a_mistake() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
     script
-        .0
-        .borrow_mut()
+        .state()
         .to_say
         .push_back(vec![FrameStreamEvent::Finished { error_output: None }]);
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
@@ -490,7 +385,7 @@ fn a_stream_that_vanishes_without_saying_it_has_ended_is_a_mistake_too() {
 fn a_stream_that_vanishes_after_some_pictures_holds_the_last_like_one_that_says_it_has_ended() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().to_say.push_back(vec![rgba(5)]);
+    script.state().to_say.push_back(vec![rgba(5)]);
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     let cancel = nobody_cancels();
     assert_eq!(the_first_byte_of(&pictures.picture(0, 0, &cancel).unwrap()), 5);
@@ -502,7 +397,7 @@ fn a_stream_that_vanishes_after_some_pictures_holds_the_last_like_one_that_says_
 fn a_run_that_cannot_be_started_is_a_mistake_that_says_which_video() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().fail_to_start = true;
+    script.state().fail_to_start = true;
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     let problem = pictures.start_the_runs_that_begin_soon(0).unwrap_err();
     assert!(
@@ -532,7 +427,7 @@ fn a_video_with_no_known_place_or_no_details_cannot_be_read_and_the_words_say_so
 fn a_picture_that_does_not_come_in_time_is_a_mistake() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().never_ends = true;
+    script.state().never_ends = true;
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     pictures.wait_for_a_picture_no_longer_than(Duration::from_millis(30));
     let started = Instant::now();
@@ -553,7 +448,7 @@ fn a_picture_that_does_not_come_in_time_is_a_mistake() {
 fn cancelling_ends_the_wait_for_a_picture_at_once() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().never_ends = true;
+    script.state().never_ends = true;
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     // A short limit, so that a wait that did not look at the cancel would be seen to end the other way (and a test of the code that does not look would not
     // take two minutes).
@@ -567,7 +462,7 @@ fn cancelling_ends_the_wait_for_a_picture_at_once() {
 fn a_cancel_that_comes_while_a_picture_is_awaited_ends_the_wait() {
     let plan = plan_of(&project_with_video(320, 180, false));
     let script = Script::default();
-    script.0.borrow_mut().never_ends = true;
+    script.state().never_ends = true;
     let mut pictures = PicturesOfTheRuns::new(script, &plan, &locations(), &HashMap::new()).unwrap();
     pictures.wait_for_a_picture_no_longer_than(Duration::from_secs(60));
     let cancelled = AtomicBool::new(false);
@@ -591,17 +486,17 @@ fn a_cancel_that_comes_while_a_picture_is_awaited_ends_the_wait() {
 fn the_stream_of_a_run_is_let_go_of_with_its_last_picture_and_not_before() {
     let plan = one_video_cut_at(3);
     let script = Script::default();
-    script.0.borrow_mut().to_say = VecDeque::from([(0..3).map(rgba).collect(), (0..3).map(rgba).collect()]);
-    script.0.borrow_mut().never_ends = true;
+    script.state().to_say = VecDeque::from([(0..3).map(rgba).collect(), (0..3).map(rgba).collect()]);
+    script.state().never_ends = true;
     let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
     let cancel = nobody_cancels();
     pictures.start_the_runs_that_begin_soon(0).unwrap();
-    assert_eq!(script.0.borrow().alive, 2);
+    assert_eq!(script.state().alive, 2);
     pictures.picture(0, 0, &cancel).unwrap();
     pictures.picture(0, 1, &cancel).unwrap();
-    assert_eq!(script.0.borrow().alive, 2, "the run has a picture left");
+    assert_eq!(script.state().alive, 2, "the run has a picture left");
     pictures.picture(0, 2, &cancel).unwrap();
-    assert_eq!(script.0.borrow().alive, 1, "its last was taken");
+    assert_eq!(script.state().alive, 1, "its last was taken");
     drop(pictures);
-    assert_eq!(script.0.borrow().alive, 0, "and the rest go with the pictures");
+    assert_eq!(script.state().alive, 0, "and the rest go with the pictures");
 }

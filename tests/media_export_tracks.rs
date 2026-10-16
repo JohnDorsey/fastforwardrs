@@ -37,7 +37,7 @@ fn clip(gap_before_frames: u64, first_source_frame: u64, end_source_frame: u64, 
 
 #[test]
 fn empty_time_on_a_track_is_black_for_exactly_as_many_frames_as_it_lasts() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // Frames 0..60 of the video, then 30 empty frames, then frames 60..120; with 20 empty frames first.
     let project = project_with_tracks_of_videos(
@@ -78,7 +78,7 @@ fn empty_time_on_a_track_is_black_for_exactly_as_many_frames_as_it_lasts() {
 
 #[test]
 fn of_two_videos_at_the_same_time_the_one_in_front_is_seen_and_the_one_behind_picks_up_where_it_would_have_been() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // In front: source frames 300..330, from timeline frame 40. Behind: source frames 0..120 from the start.
     let project = project_with_tracks_of_videos(
@@ -123,7 +123,7 @@ fn is_black_at(picture: &[u8], x: usize, y: usize) -> bool {
 
 #[test]
 fn a_video_of_another_shape_than_the_first_is_fitted_inside_the_picture_with_black_beside_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let landscape = counter_video(&toolchain); // 320x180: the shape of the finished picture
     let portrait = portrait_video(&toolchain);
     // The landscape video is the first source, so it gives the picture its shape. The portrait video
@@ -162,7 +162,7 @@ fn a_video_of_another_shape_than_the_first_is_fitted_inside_the_picture_with_bla
 /// another shape are no longer black over it.
 #[test]
 fn a_video_behind_one_of_another_shape_shows_through_the_bars_beside_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let landscape = counter_video(&toolchain);
     let portrait = portrait_video(&toolchain);
     // The portrait video is in front for 30 frames, over the landscape one, which is there for 60.
@@ -235,7 +235,7 @@ fn something_in(picture: &[u8], columns: std::ops::Range<usize>, rows: std::ops:
 
 #[test]
 fn a_video_put_in_the_middle_at_half_the_size_is_exported_there_with_black_round_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     project
@@ -262,7 +262,7 @@ fn a_video_put_in_the_middle_at_half_the_size_is_exported_there_with_black_round
 
 #[test]
 fn a_video_that_is_turned_a_quarter_is_exported_standing_up_where_its_middle_was() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     project
@@ -294,7 +294,7 @@ fn a_video_that_is_turned_a_quarter_is_exported_standing_up_where_its_middle_was
 
 #[test]
 fn text_turned_a_quarter_clockwise_has_what_was_its_left_at_the_top() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     let front = project.add_track_in_front();
@@ -312,7 +312,7 @@ fn text_turned_a_quarter_clockwise_has_what_was_its_left_at_the_top() {
         .unwrap();
     let scratch = scratch_directory();
     let destination = scratch.path().join("turned_text.mp4");
-    export_with_text_pictures(&toolchain, &project, &destination, &red_then_blue_text_picture);
+    export_with_text_pictures(&toolchain, &project, &destination, red_then_blue_text_picture);
 
     let decoded = decode_video(&toolchain, &destination, 320, 180);
     let picture = &decoded.pictures[10];
@@ -335,7 +335,7 @@ fn text_turned_a_quarter_clockwise_has_what_was_its_left_at_the_top() {
 
 #[test]
 fn something_turned_at_the_edge_of_the_picture_is_cut_off_there_and_the_picture_stays_its_size() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // The video fills the whole picture and is turned a quarter: its corners reach out of the picture.
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 30, 1)])]);
@@ -372,7 +372,7 @@ fn size_of_the_exported_picture(toolchain: &FfmpegToolchain, path: &Path) -> Opt
 
 #[test]
 fn a_video_that_is_the_only_thing_and_reaches_past_the_right_edge_is_cut_off_there_and_black_is_all_round_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     // As wide as the picture (320), from halfway across, and half as tall (90, from 45 down to 135).
@@ -405,7 +405,7 @@ fn a_video_that_is_the_only_thing_and_reaches_past_the_right_edge_is_cut_off_the
 
 #[test]
 fn a_picture_from_a_file_that_reaches_past_the_left_edge_is_cut_off_there_and_shows_the_rest_of_it() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 0, 60);
     // Made 160 by 90, from 45 down to 135, with its left half (the red half) before the picture.
@@ -438,7 +438,7 @@ fn a_picture_from_a_file_that_reaches_past_the_left_edge_is_cut_off_there_and_sh
 
 #[test]
 fn text_that_reaches_past_the_right_and_bottom_edges_is_cut_off_there_and_shows_its_left_and_top() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     let front = project.add_track_in_front();
@@ -457,7 +457,7 @@ fn text_that_reaches_past_the_right_and_bottom_edges_is_cut_off_there_and_shows_
         .unwrap();
     let scratch = scratch_directory();
     let destination = scratch.path().join("text_past_the_corner.mp4");
-    export_with_text_pictures(&toolchain, &project, &destination, &red_then_blue_text_picture);
+    export_with_text_pictures(&toolchain, &project, &destination, red_then_blue_text_picture);
 
     assert_eq!(size_of_the_exported_picture(&toolchain, &destination), Some((320, 180)));
     let decoded = decode_video(&toolchain, &destination, 320, 180);
@@ -474,7 +474,7 @@ fn text_that_reaches_past_the_right_and_bottom_edges_is_cut_off_there_and_shows_
 
 #[test]
 fn a_video_that_is_turned_and_reaches_past_the_left_edge_is_cut_off_there() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     // 160 by 90 with its middle on the left edge at (0, 90), turned a quarter: 90 across and 160 down, so
@@ -526,7 +526,7 @@ fn the_picture_file_is_not_over(picture: &[u8]) -> bool {
 
 #[test]
 fn a_picture_over_a_video_that_is_cut_into_pieces_is_over_each_of_them() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, _picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 0, 60);
     // Cut the video (and not the picture) in two places: three pieces, the one picture over all of them.
@@ -555,7 +555,7 @@ fn a_picture_over_a_video_that_is_cut_into_pieces_is_over_each_of_them() {
 
 #[test]
 fn a_picture_that_begins_later_is_over_the_video_only_for_as_long_as_it_is_shown() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (project, _picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 20, 20);
     let destination = scratch.path().join("picture_in_the_middle.mp4");
@@ -584,7 +584,7 @@ fn a_picture_that_begins_later_is_over_the_video_only_for_as_long_as_it_is_shown
 
 #[test]
 fn a_picture_from_a_file_that_is_moved_and_turned_a_quarter_is_scaled_to_its_place_and_has_its_left_at_the_top() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let (mut project, picture) = project_with_a_picture_over_a_video(&toolchain, scratch.path(), 0, 60);
     project
@@ -617,7 +617,7 @@ fn a_picture_from_a_file_that_is_moved_and_turned_a_quarter_is_scaled_to_its_pla
 
 #[test]
 fn the_speed_of_the_track_and_of_the_clip_multiply_for_the_pictures() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 360, 3)])]);
     let track = project.tracks()[0].id();
@@ -636,7 +636,7 @@ fn the_speed_of_the_track_and_of_the_clip_multiply_for_the_pictures() {
 
 #[test]
 fn a_sound_file_is_mixed_with_the_sound_of_the_video_and_both_are_there_at_their_full_size() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let project = project_with_a_video_and_a_tone_file(&toolchain);
     let scratch = scratch_directory();
     let destination = scratch.path().join("mixed.mp4");
@@ -671,7 +671,7 @@ fn a_sound_file_is_mixed_with_the_sound_of_the_video_and_both_are_there_at_their
 
 #[test]
 fn the_volume_of_a_clip_and_of_its_track_both_count_and_a_muted_track_is_silent() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let mut project = project_with_a_video_and_a_tone_file(&toolchain);
     let scratch = scratch_directory();
     let measure = |project: &Project, name: &str| {
@@ -726,7 +726,7 @@ fn the_volume_of_a_clip_and_of_its_track_both_count_and_a_muted_track_is_silent(
 
 #[test]
 fn the_sound_of_a_track_that_is_muted_everywhere_leaves_no_sound_at_all_in_the_video() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[clip(0, 0, 60, 1)])]);
     let track = project.tracks()[0].id();
@@ -745,7 +745,7 @@ fn the_sound_of_a_track_that_is_muted_everywhere_leaves_no_sound_at_all_in_the_v
 /// began (4.5 seconds into a video of 17.8), with everything after it lost.
 #[test]
 fn a_clip_wholly_past_the_end_of_a_shorter_file_is_silent_and_the_sound_after_it_is_where_it_belongs() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let short_video = test_video(
         &toolchain,
         &TestVideoSpecification {
@@ -793,7 +793,7 @@ fn a_clip_wholly_past_the_end_of_a_shorter_file_is_silent_and_the_sound_after_it
 
 #[test]
 fn a_video_that_runs_slower_than_the_project_has_a_picture_in_every_frame_and_lasts_as_long_in_time() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(&toolchain, &TestVideoSpecification::PAL_20_SECONDS); // 500 pictures at 25 a second
     let mut project = project_for(&toolchain, &video);
     assert_eq!(
@@ -823,7 +823,7 @@ fn a_video_that_runs_slower_than_the_project_has_a_picture_in_every_frame_and_la
 
 #[test]
 fn a_video_that_runs_faster_than_the_project_skips_pictures_and_lasts_as_long_in_time() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain); // 600 pictures at 30 a second
     let mut project = project_for(&toolchain, &video);
     project.set_frame_rate(FrameRate::new(24, 1).unwrap());
@@ -847,7 +847,7 @@ fn a_video_that_runs_faster_than_the_project_skips_pictures_and_lasts_as_long_in
 
 #[test]
 fn videos_of_two_frame_rates_on_two_tracks_are_each_made_to_run_at_the_rate_of_the_project() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let behind = counter_video(&toolchain); // 30 a second: the first video, so the project runs at 30
     let in_front = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS); // 75 pictures at 25 a second
     // In front, after 60 empty frames, all the 3 seconds of the video (90 frames of the project); behind, the
@@ -874,7 +874,7 @@ fn videos_of_two_frame_rates_on_two_tracks_are_each_made_to_run_at_the_rate_of_t
 
 #[test]
 fn a_video_of_twelve_pictures_a_second_in_a_project_of_thirty_shows_each_for_two_or_three_frames() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let behind = counter_video(&toolchain);
     let in_front = test_video(&toolchain, &TestVideoSpecification::SLOW_3_SECONDS); // 36 pictures at 12 a second
     let project = project_with_tracks_of_videos(
@@ -907,7 +907,7 @@ fn a_video_of_twelve_pictures_a_second_in_a_project_of_thirty_shows_each_for_two
 #[test]
 fn a_picture_that_is_exactly_half_way_between_two_frames_goes_to_the_later_one_in_the_export_as_it_does_in_the_preview()
 {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(&toolchain, &TestVideoSpecification::FILM_3_SECONDS); // 72 pictures at 24 a second
     let mut project = project_for(&toolchain, &video);
     project.set_frame_rate(FrameRate::new(30, 1).unwrap());

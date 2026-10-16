@@ -22,7 +22,7 @@ const ERROR_OUTPUT_CHUNK_IN_BYTES: usize = 4096;
 /// A command that runs `program` quietly in the background: it never reads from the keyboard and
 /// (on Windows) never flashes up a console window, which would otherwise happen every time the
 /// editor started ffmpeg.
-pub(super) fn background_command(program: &Path) -> Command {
+pub(crate) fn background_command(program: &Path) -> Command {
     let mut command = Command::new(program);
     command.stdin(Stdio::null());
     #[cfg(windows)]
@@ -112,7 +112,7 @@ impl<Event> Drop for StreamingTool<Event> {
 /// A tool's error output has to be read while the tool is running. If nobody reads it, a tool that
 /// prints a lot (say, one complaining about every frame of a damaged file) fills the pipe's small
 /// buffer and then stops dead, waiting for someone to read, which would hang the editor.
-pub(super) fn collect_error_output_in_background(mut error_stream: impl Read + Send + 'static) -> JoinHandle<String> {
+pub(crate) fn collect_error_output_in_background(mut error_stream: impl Read + Send + 'static) -> JoinHandle<String> {
     thread::spawn(move || {
         let mut recent_output: Vec<u8> = Vec::new();
         let mut chunk = [0u8; ERROR_OUTPUT_CHUNK_IN_BYTES];

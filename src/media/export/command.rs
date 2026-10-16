@@ -42,7 +42,7 @@ impl VideoEncoder {
         }
     }
 
-    fn arguments(self) -> &'static [&'static str] {
+    pub(crate) fn arguments(self) -> &'static [&'static str] {
         match self {
             // Visually lossless quality, at a sensible size.
             Self::Libx264 => &["-c:v", "libx264", "-preset", "medium", "-crf", "18"],
@@ -105,7 +105,7 @@ pub fn export_arguments(files: &ExportFiles, graph: &FilterGraph, encoder: Video
 
 /// MP4 and MOV files can have their index put at the start, so that they can be played while
 /// they are still downloading.
-fn prefers_index_at_start(output: &Path) -> bool {
+pub(crate) fn prefers_index_at_start(output: &Path) -> bool {
     matches!(
         output
             .extension()

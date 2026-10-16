@@ -13,10 +13,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
-use fastforwardrs::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
+use fastforwardrs::engine::{AdapterChoice, there_is_a_software_adapter};
 use fastforwardrs::media::{FfmpegToolchain, MediaLocation, probe_source_media, probe_video};
 use fastforwardrs::project::{
     AnimationTarget, Clip, ClipId, MediaClip, Project, PropertyId, PropertyValue, Settings, SourceAudioProperties,
@@ -24,6 +24,7 @@ use fastforwardrs::project::{
     TextObject, TimelineFrameIndex, Track, TrackId,
 };
 use fastforwardrs::rgba_picture::RgbaPicture;
+use fastforwardrs::video_export::{ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export};
 
 pub mod yuv_videos;
 
@@ -61,6 +62,39 @@ macro_rules! toolchain_or_skip {
             None => return,
         }
     };
+}
+
+/// Whether the tests that export can run: the export is made by the picture engine, which the tests run on a **software** graphics adapter and nothing else (WARP on
+/// Windows, lavapipe on Linux), so that nothing of it is done on a real graphics card. Where there is none the test says so and is skipped, unless
+/// `FASTFORWARDRS_REQUIRE_SOFTWARE_ADAPTER` is `1`, in which case it fails (as in the CI of Windows and Ubuntu, where there is one and must be).
+pub fn there_is_graphics_to_export_with() -> bool {
+    // (Asked once, and with the right to use the graphics: looking for the adapters is what makes a graphics instance, and a software driver (lavapipe, on Linux) has
+    // been seen to crash the program when that is done on one thread while another thread draws.)
+    static THERE_IS_ONE: OnceLock<bool> = OnceLock::new();
+    let there_is_one = *THERE_IS_ONE.get_or_init(|| {
+        let _one_at_a_time = one_export_at_a_time();
+        there_is_a_software_adapter()
+    });
+    if there_is_one {
+        return true;
+    }
+    if std::env::var("FASTFORWARDRS_REQUIRE_SOFTWARE_ADAPTER").as_deref() == Ok("1") {
+        panic!("there is no software adapter, and FASTFORWARDRS_REQUIRE_SOFTWARE_ADAPTER=1 says there must be one");
+    }
+    eprintln!("SKIPPED: there is no software graphics adapter on this computer");
+    false
+}
+
+/// Starts a test that exports with the toolchain, or returns from it (skipping it) when ffmpeg or a software graphics adapter is missing.
+#[macro_export]
+macro_rules! toolchain_and_graphics_or_skip {
+    () => {{
+        let toolchain = $crate::toolchain_or_skip!();
+        if !$crate::support::there_is_graphics_to_export_with() {
+            return;
+        }
+        toolchain
+    }};
 }
 
 /// The settings of a test video.
@@ -686,11 +720,31 @@ pub fn solid_text_picture(
 }
 
 /// How long an export of a test project may take before the test gives up.
-pub const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(180);
+pub const TIME_ALLOWED_FOR_AN_EXPORT: Duration = Duration::from_secs(300);
+
+/// Two exports drawing on the software adapter at once have crashed programs before (see the notes on the tests of the picture engine): in a test program, one export
+/// is made at a time. Whoever starts an export holds this until it has ended.
+pub fn one_export_at_a_time() -> MutexGuard<'static, ()> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// What an export in a test is run with: the picture engine on a software graphics adapter, and the text objects drawn by `render_text` (the fonts of a computer are not
+/// what a test can count on).
+pub fn export_options_with_text_pictures(
+    render_text: impl Fn(&TextObject, u32, u32) -> RgbaPicture + Send + 'static,
+) -> ExportOptions {
+    ExportOptions::new(AdapterChoice::SoftwareOnly).with_text_pictures(render_text)
+}
+
+/// What an export in a test is run with when it has no text: see [`export_options_with_text_pictures`].
+pub fn export_options() -> ExportOptions {
+    export_options_with_text_pictures(transparent_text_picture)
+}
 
 /// Exports `project` to `destination` (reading its files from where its links say they are) and waits for it to finish.
 pub fn export(toolchain: &FfmpegToolchain, project: &Project, destination: &Path) {
-    export_with_text_pictures(toolchain, project, destination, &transparent_text_picture);
+    export_with_text_pictures(toolchain, project, destination, transparent_text_picture);
 }
 
 /// Like [`export`], with `render_text` making the pictures of the text objects.
@@ -698,15 +752,24 @@ pub fn export_with_text_pictures(
     toolchain: &FfmpegToolchain,
     project: &Project,
     destination: &Path,
-    render_text: &dyn Fn(&TextObject, u32, u32) -> RgbaPicture,
+    render_text: impl Fn(&TextObject, u32, u32) -> RgbaPicture + Send + 'static,
 ) {
-    let plan = plan_export(project, Settings::DEFAULT, render_text).expect("the project can be exported");
+    let _one_at_a_time = one_export_at_a_time();
+    let plan = plan_export(project, Settings::DEFAULT).expect("the project can be exported");
     let source_paths: Vec<MediaLocation> = plan
         .source_files
         .iter()
         .map(|identifier| project.source(*identifier).unwrap().link.absolute_path.clone().into())
         .collect();
-    let export = VideoExport::start(toolchain, &plan, &source_paths, destination, Arc::new(|| {})).expect("it starts");
+    let export = VideoExport::start(
+        toolchain,
+        &plan,
+        &source_paths,
+        destination,
+        export_options_with_text_pictures(render_text),
+        Arc::new(|| {}),
+    )
+    .expect("it starts");
     let started = Instant::now();
     loop {
         match export.try_next_event() {

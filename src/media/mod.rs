@@ -27,6 +27,7 @@ use std::sync::Arc;
 pub use audio_stream::{
     AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, audio_stream_arguments,
 };
+pub(crate) use child_process::{background_command, collect_error_output_in_background};
 pub use ffmpeg_toolchain::{FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE, FfmpegToolchain, FfmpegVersion, ToolchainError};
 pub use finer_thumbnails::FinerThumbnails;
 pub use frame_stream::{

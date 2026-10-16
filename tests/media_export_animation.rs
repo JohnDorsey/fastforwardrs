@@ -137,7 +137,7 @@ fn assert_close(actual: usize, expected: f64, tolerance: f64, what: &str) {
 
 #[test]
 fn a_video_that_moves_is_exported_where_its_keyframes_say_at_every_frame() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     // 160x90 pixels at the top left of the 320x180 picture, whose middle goes across to the top right by frame 59.
     let (mut project, clip) = project_with_a_video_at(&toolchain, CanvasArea::new(0.0, 0.0, 0.5, 0.5));
     keyframe(
@@ -183,7 +183,7 @@ fn a_video_that_moves_is_exported_where_its_keyframes_say_at_every_frame() {
 
 #[test]
 fn a_video_that_is_turned_by_keyframes_is_exported_as_far_turned_as_they_say() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     // 160x90 pixels in the middle of the picture, turned a quarter of a turn by frame 59.
     let (mut project, clip) = project_with_a_video_at(&toolchain, CanvasArea::new(0.25, 0.25, 0.5, 0.5));
     keyframe(&mut project, clip, PropertyId::Rotation, 0, PropertyValue::Number(0.0));
@@ -224,7 +224,7 @@ fn a_video_that_is_turned_by_keyframes_is_exported_as_far_turned_as_they_say() {
 /// way to the first of them, and turned in between.
 #[test]
 fn a_video_that_is_turned_round_twice_by_keyframes_is_upright_at_each_whole_turn_and_upside_down_half_way() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let area = CanvasArea::new(0.25, 0.25, 0.5, 0.5);
     let (mut project, clip) = project_with_a_video_at(&toolchain, area);
     for (frame, degrees) in [(0, 0.0), (30, 360.0), (59, 720.0)] {
@@ -273,7 +273,7 @@ fn a_video_that_is_turned_round_twice_by_keyframes_is_upright_at_each_whole_turn
 
 #[test]
 fn a_video_that_is_sped_up_and_moves_shows_the_pictures_a_sped_up_clip_shows_where_the_keyframes_say() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     // 180 pictures of the video at 3x are 60 frames, and the video is in the top left corner at a quarter of the picture.
     let mut project = project_with_tracks_of_videos(
@@ -335,7 +335,7 @@ fn a_video_that_is_sped_up_and_moves_shows_the_pictures_a_sped_up_clip_shows_whe
 
 #[test]
 fn a_video_whose_size_is_animated_is_exported_as_big_as_its_keyframes_say() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     // 160x90 pixels in the middle of the picture, getting to 80x45 by frame 59 and staying round the same middle.
     let (mut project, clip) = project_with_a_video_at(&toolchain, CanvasArea::new(0.25, 0.25, 0.5, 0.5));
     keyframe(&mut project, clip, PropertyId::Size, 0, PropertyValue::Pair(0.5, 0.5));
@@ -380,7 +380,7 @@ fn a_video_whose_size_is_animated_is_exported_as_big_as_its_keyframes_say() {
 
 #[test]
 fn text_that_moves_and_changes_colour_is_exported_as_it_is_at_each_frame_over_a_video_that_goes_on_unbroken() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let mut project = project_with_tracks_of_videos(
         &toolchain,
@@ -426,7 +426,7 @@ fn text_that_moves_and_changes_colour_is_exported_as_it_is_at_each_frame_over_a_
     let scratch = scratch_directory();
     let destination = scratch.path().join("text.mp4");
 
-    export_with_text_pictures(&toolchain, &project, &destination, &solid_text_picture);
+    export_with_text_pictures(&toolchain, &project, &destination, solid_text_picture);
 
     let decoded = decode_video(&toolchain, &destination, WIDTH as u32, HEIGHT as u32);
     assert_eq!(decoded.pictures.len(), 90);
