@@ -9,9 +9,10 @@
 //! nothing of the project, the timeline or the window, and nothing in a message points into the program's data, so the same messages could go to another
 //! process one day (EN-12). The design, with the reasons for it, is in `docs/engine-phase-1-design.md`.
 //!
-//! This is the **compatibility mode** (CM-20): it makes the pictures that the window drew before it had an engine, so that the two can be compared
-//! and the engine proved; colours are mixed in gamma-encoded numbers, as they always were, and layers are blended premultiplied, as the window's own
-//! renderer blends them. Linear light is a later, separate step.
+//! **Two working spaces** (`colour`, CM-20): the **compatibility mode** (`WorkingSpace::DisplayReferred`) makes the pictures that the window drew before it had an engine,
+//! so that the two can be compared and the engine proved: colours are mixed in gamma-encoded numbers, as they always were, and layers are blended premultiplied, as the
+//! window's own renderer blends them. **Linear light** (`WorkingSpace::Linear`, phase 3) is the one that the program uses: the numbers are light in the primaries of the
+//! project's working space, pictures are decoded to it when they are sent, and the finished frame is encoded for the display or the file at the end.
 //!
 //! How the files divide the work:
 //!
@@ -24,6 +25,7 @@
 
 pub mod benchmark;
 mod byte_lru;
+mod colour;
 mod device;
 mod effect_shaders;
 mod frame_cache;
@@ -52,6 +54,8 @@ mod worker;
 mod yuv;
 
 #[cfg(test)]
+mod colour_tests;
+#[cfg(test)]
 mod effect_tests;
 #[cfg(test)]
 mod engine_tests;
@@ -64,6 +68,8 @@ mod guard_tests;
 #[cfg(test)]
 mod hang_tests;
 #[cfg(test)]
+mod linear_light_tests;
+#[cfg(test)]
 pub(crate) mod oracle_tests;
 #[cfg(test)]
 mod picture_tests;
@@ -72,6 +78,10 @@ mod planes_out_tests;
 #[cfg(test)]
 mod yuv_tests;
 
+pub use colour::{
+    ColourDomain, DisplayDomainConversion, FrameColour, IngestConversion, OutputConversion, OutputEncoding,
+    PictureColour, WorkingSpace,
+};
 pub use device::{
     AdapterChoice, DeviceError, DeviceTrouble, EngineDevice, TESTS_MAY_USE_ANY_ADAPTER_VARIABLE,
     there_is_a_software_adapter,

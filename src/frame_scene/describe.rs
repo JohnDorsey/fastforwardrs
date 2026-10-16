@@ -20,7 +20,10 @@ use std::hash::{Hash, Hasher};
 use egui::{Rect, pos2, vec2};
 
 use super::{PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
-use crate::engine::{EffectCall, FrameDescription, LayerDescription, LayerSource, PictureData, PictureId};
+use crate::engine::{
+    EffectCall, FrameColour, FrameDescription, LayerDescription, LayerSource, PictureColour, PictureData, PictureId,
+    WorkingSpace,
+};
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
 use crate::project::{Corner, SpeedFactor, SpeedIndicatorLayout, TextObject};
@@ -51,6 +54,19 @@ pub enum HowToMakeIt<'c> {
 pub struct PictureWanted<'c> {
     pub id: PictureId,
     pub how: HowToMakeIt<'c>,
+    /// How the numbers of the picture are to be read (what its codes mean), which its id says too.
+    pub colour: PictureColour,
+    /// The working space the engine is to make it for, which its id says too.
+    pub working: WorkingSpace,
+}
+
+impl PictureWanted<'_> {
+    /// The pixels of the picture, with the colour it is made in, or `None` if they cannot be made now (see [`HowToMakeIt::make`]).
+    pub fn make(&self, text_pictures: &mut dyn TextPictures) -> Option<PictureData> {
+        self.how
+            .make(text_pictures)
+            .map(|data| data.in_colour(self.colour, self.working))
+    }
 }
 
 impl HowToMakeIt<'_> {
@@ -149,7 +165,7 @@ impl<Send: FnMut(PictureId, PictureData)> PictureSupply for SentPictures<'_, Sen
         if self.sent.contains(&wanted.id) {
             return true;
         }
-        let Some(data) = wanted.how.make(self.text_renderer) else {
+        let Some(data) = wanted.make(self.text_renderer) else {
             return false;
         };
         (self.send)(wanted.id, data);
@@ -168,21 +184,40 @@ enum KindOfPicture {
     Symbol = 4,
 }
 
-/// The id of a picture of `kind` that is told from the others of its kind by `what`.
-fn id_of(kind: KindOfPicture, what: impl Hash) -> PictureId {
+/// What an id says of the colour its picture is made in: **nothing** in the compatibility mode with a picture that is sRGB (the id is what it always was), and otherwise a
+/// number made of the working space and the colour, never 0, so that a picture that is made in another colour is another picture to the engine, and a setting that is
+/// changed does not make a frame use a picture that was made for the one before.
+fn colour_tag_of(colour: PictureColour, working: WorkingSpace) -> u64 {
+    if working == WorkingSpace::DisplayReferred && colour == PictureColour::SRGB {
+        return 0;
+    }
+    let mut hasher = DefaultHasher::new();
+    (colour, working).hash(&mut hasher);
+    (hasher.finish() & 0xFFFF) | 1
+}
+
+/// The id of a picture of `kind` that is told from the others of its kind by `what`, made in the colour `colour_tag` says (see [`colour_tag_of`]).
+fn id_of(kind: KindOfPicture, what: impl Hash, colour_tag: u64) -> PictureId {
     let mut hasher = DefaultHasher::new();
     kind.hash(&mut hasher);
     what.hash(&mut hasher);
+    if colour_tag != 0 {
+        colour_tag.hash(&mut hasher);
+    }
     PictureId((hasher.finish() >> 4) | ((kind as u64) << 60))
 }
 
-/// The id of the picture of a video that has this serial number.
-fn id_of_a_video_picture(serial_number: u64) -> PictureId {
+/// How many of the bits of the id of a video picture are the serial number of the picture: the ones above them (up to the four that say what kind of picture it is) are
+/// the tag of its colour.
+const BITS_OF_THE_SERIAL_NUMBER_IN_AN_ID: u32 = 44;
+
+/// The id of the picture of a video that has this serial number, made in the colour `colour_tag` says.
+fn id_of_a_video_picture(serial_number: u64, colour_tag: u64) -> PictureId {
     debug_assert!(
-        serial_number < 1 << 60,
-        "{serial_number} has no room for the kind of picture it is"
+        serial_number < 1 << BITS_OF_THE_SERIAL_NUMBER_IN_AN_ID,
+        "{serial_number} has no room for the colour of the picture"
     );
-    PictureId(serial_number)
+    PictureId(serial_number | (colour_tag << BITS_OF_THE_SERIAL_NUMBER_IN_AN_ID))
 }
 
 /// Where a layer is on the picture, as the four corners (top left, top right, bottom right, bottom left) in fractions of the picture: turned as it is, and worked
@@ -201,15 +236,18 @@ fn corners_of(layer: &PreviewLayer<'_>, picture_size: (u32, u32)) -> [(f32, f32)
 /// What the engine is to draw for `content` on a frame `render_size` big, the layers at the back first. `generation` is a number that the window changes
 /// whenever it lets go of what it knows of the files it shows (when another project is opened or a file is replaced), so that the ids of pictures that come
 /// from files are not those of the pictures that were there before. `colour_of_a_layer_without_a_picture` is what a layer is that has none yet (red, green, blue
-/// and how opaque, not premultiplied).
+/// and how opaque, not premultiplied). **`colour` is what the frame is put together in and encoded as** (phase 3): the pictures that are asked of the supply are made for
+/// its working space, and the ids say so.
 pub fn describe_frame(
     content: &PreviewContent<'_>,
     render_size: (u32, u32),
     generation: u64,
     colour_of_a_layer_without_a_picture: [u8; 4],
+    colour: FrameColour,
     supply: &mut impl PictureSupply,
 ) -> FrameDescription {
     let mut description = FrameDescription::black(render_size);
+    description.colour = colour;
     let Some(picture_size) = content.picture_size else {
         return description;
     };
@@ -219,6 +257,7 @@ pub fn describe_frame(
             picture_size,
             generation,
             colour_of_a_layer_without_a_picture,
+            colour.working,
             supply,
         ));
         if let Some(symbol) = content.symbol
@@ -226,7 +265,7 @@ pub fn describe_frame(
         {
             description
                 .layers
-                .extend(describe_symbol(content, symbol, render_size, supply));
+                .extend(describe_symbol(content, symbol, render_size, colour.working, supply));
         }
     }
     description
@@ -238,13 +277,19 @@ fn describe_layer(
     picture_size: (u32, u32),
     generation: u64,
     colour_of_a_layer_without_a_picture: [u8; 4],
+    working: WorkingSpace,
     supply: &mut impl PictureSupply,
 ) -> Option<LayerDescription> {
     let corners = corners_of(layer, picture_size);
+    // (What a file's tags say about its colours is read in phase 3's piece 3.4; until then a video picture is sRGB, as a picture file is.)
+    let colour = PictureColour::SRGB;
+    let tag = colour_tag_of(colour, working);
     let wanted = match &layer.content {
         PreviewLayerContent::Video(VideoInThePicture::Picture(supplied)) => PictureWanted {
-            id: id_of_a_video_picture(supplied.serial_number),
+            id: id_of_a_video_picture(supplied.serial_number, tag),
             how: HowToMakeIt::VideoPicture(supplied),
+            colour,
+            working,
         },
         PreviewLayerContent::Video(VideoInThePicture::Thumbnail {
             source,
@@ -259,8 +304,10 @@ fn describe_layer(
             // better than none. What is drawn is nothing if there is not even that.)
             let (made_key, compressed) = library.nearest_made(key)?;
             PictureWanted {
-                id: id_of(KindOfPicture::Thumbnail, (generation, source, made_key)),
+                id: id_of(KindOfPicture::Thumbnail, (generation, source, made_key), tag),
                 how: HowToMakeIt::Thumbnail(compressed),
+                colour,
+                working,
             }
         }
         PreviewLayerContent::Image {
@@ -270,15 +317,21 @@ fn describe_layer(
             id: id_of(
                 KindOfPicture::Image,
                 (generation, source, decoded.width_in_pixels, decoded.height_in_pixels),
+                tag,
             ),
             how: HowToMakeIt::Image(decoded),
+            colour,
+            working,
         },
         PreviewLayerContent::Text(object) => PictureWanted {
             id: id_of(
                 KindOfPicture::Text,
                 TextAppearance::of(object, picture_size.0, picture_size.1),
+                tag,
             ),
             how: HowToMakeIt::Text { object, picture_size },
+            colour,
+            working,
         },
         PreviewLayerContent::Video(VideoInThePicture::Waiting) | PreviewLayerContent::Image { picture: None, .. } => {
             return Some(LayerDescription {
@@ -322,17 +375,25 @@ fn describe_symbol(
     content: &PreviewContent<'_>,
     symbol: SymbolOnThePreview,
     render_size: (u32, u32),
+    working: WorkingSpace,
     supply: &mut impl PictureSupply,
 ) -> Option<LayerDescription> {
     let (width, height) = (render_size.0.max(1) as f32, render_size.1.max(1) as f32);
     let on_the_frame = the_symbol_on_a_frame(content.indicator_layout, symbol.speed, width, height);
     let height_in_pixels = (on_the_frame.height().round() as u32).max(SMALLEST_HEIGHT_IN_PIXELS);
+    let colour = PictureColour::SRGB;
     let wanted = PictureWanted {
-        id: id_of(KindOfPicture::Symbol, (symbol.speed.value(), height_in_pixels)),
+        id: id_of(
+            KindOfPicture::Symbol,
+            (symbol.speed.value(), height_in_pixels),
+            colour_tag_of(colour, working),
+        ),
         how: HowToMakeIt::Symbol {
             speed: symbol.speed,
             height_in_pixels,
         },
+        colour,
+        working,
     };
     if !supply.make_sure_the_engine_has(&wanted) {
         return None;

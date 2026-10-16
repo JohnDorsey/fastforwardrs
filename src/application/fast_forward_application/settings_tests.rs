@@ -250,6 +250,7 @@ fn unticking_use_global_setting_frees_the_control_starting_at_the_global_value()
         ProjectSettings {
             autosave: None,
             sped_up_clip_sound: Some(SpedUpClipSound::Mute),
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         },
         "the project now has its own setting, which starts as what the global one was"
     );
@@ -306,6 +307,7 @@ fn a_global_change_reaches_a_project_that_follows_and_not_one_that_has_its_own_v
     window.application_mut().document.project.set_settings(ProjectSettings {
         autosave: Some(false),
         sped_up_clip_sound: None,
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     });
     window.open_from_the_edit_menu("Global settings");
     window.harness.get_by_label(AUTOSAVE).click();
@@ -326,6 +328,7 @@ fn a_new_project_follows_the_global_settings_again_whatever_the_old_one_had_set(
     window.application_mut().document.project.set_settings(ProjectSettings {
         autosave: Some(true),
         sped_up_clip_sound: Some(SpedUpClipSound::Mute),
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     });
 
     window.application_mut().start_empty_project();
@@ -362,7 +365,8 @@ fn the_global_settings_are_saved_to_their_file_as_soon_as_they_change() {
         read_settings_file(&path).unwrap(),
         Settings {
             autosave: false,
-            sped_up_clip_sound: SpedUpClipSound::IncreasePitch
+            sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
+            ..Settings::DEFAULT
         }
     );
 }
@@ -375,6 +379,7 @@ fn the_global_settings_are_loaded_from_their_file_when_the_program_starts() {
         Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::Mute,
+            ..Settings::DEFAULT
         },
         &path,
     )
@@ -499,6 +504,7 @@ fn a_project_that_sets_autosave_for_itself_is_autosaved_even_though_the_global_o
     window.application_mut().document.project.set_settings(ProjectSettings {
         autosave: Some(true),
         sped_up_clip_sound: None,
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     });
 
     window.cut_at_frame(100);

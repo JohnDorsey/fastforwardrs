@@ -4,7 +4,8 @@
 //! The numbers that the pass that puts a layer in its place is given (`shaders/place.wgsl`), made from the layer's description and written in the
 //! order and at the places the shader's struct has them.
 
-use super::{LayerDescription, LayerSource, SlotWriter};
+use super::{LayerDescription, LayerSource, SlotWriter, WorkingSpace};
+use crate::colour_space::{StandardPrimaries, TransferFunction, matrix};
 
 /// Where a layer is on a frame and what its picture is multiplied by.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,6 +32,17 @@ impl PlacementUniforms {
         }
     }
 
+    /// Like [`Self::of_layer`], for a frame that is put together in `working`: **the colour of a layer that is one colour is made the numbers of the working space**
+    /// (its sRGB codes are decoded to light, in the primaries of the working space, and then multiplied by how opaque the layer is), as a picture's are when it is sent.
+    /// In the compatibility mode it is [`Self::of_layer`].
+    pub fn of_layer_in(layer: &LayerDescription, frame_size_in_pixels: (u32, u32), working: WorkingSpace) -> Self {
+        let mut uniforms = Self::of_layer(layer, frame_size_in_pixels);
+        if let (LayerSource::Solid(rgba), WorkingSpace::Linear(primaries)) = (layer.source, working) {
+            uniforms.tint = premultiplied_tint_in_light(rgba, primaries);
+        }
+        uniforms
+    }
+
     /// Writes the numbers as the shader's struct has them: the first two corners, the last two, the tint, the size of the frame.
     pub fn write(&self, writer: &mut SlotWriter) {
         let [top_left, top_right, bottom_right, bottom_left] = self.corners_in_pixels;
@@ -50,6 +62,20 @@ pub fn premultiplied_tint([red, green, blue, opacity]: [u8; 4]) -> [f32; 4] {
         f32::from(green) / 255.0 * opacity,
         f32::from(blue) / 255.0 * opacity,
         opacity,
+    ]
+}
+
+/// What a layer that is one colour multiplies its one white pixel by in a linear working space: the sRGB codes of the colour made light, in the primaries of the working
+/// space, and premultiplied by how opaque it is. (Worked out in `f64` with the reference curve and matrices.)
+pub fn premultiplied_tint_in_light([red, green, blue, opacity]: [u8; 4], working: StandardPrimaries) -> [f32; 4] {
+    let opacity = f64::from(opacity) / 255.0;
+    let light = [red, green, blue].map(|code| TransferFunction::Srgb.decode_to_light(f64::from(code) / 255.0));
+    let in_working_space = matrix::apply(&StandardPrimaries::Rec709.conversion_to(working), light);
+    [
+        (in_working_space[0] * opacity) as f32,
+        (in_working_space[1] * opacity) as f32,
+        (in_working_space[2] * opacity) as f32,
+        opacity as f32,
     ]
 }
 

@@ -1244,6 +1244,7 @@ fn what_a_project_has_set_for_itself_is_kept_when_it_is_changed() {
     let settings = ProjectSettings {
         autosave: Some(true),
         sped_up_clip_sound: None,
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     };
     let mut project = Project::empty().with_settings(settings);
     assert_eq!(project.settings(), settings);

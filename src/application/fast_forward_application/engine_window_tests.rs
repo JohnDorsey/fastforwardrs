@@ -149,6 +149,80 @@ fn the_preview_of_a_window_with_the_engine_is_the_picture_the_engine_made_where_
     );
 }
 
+/// The code that a colour of this sRGB code comes out as on a screen that does `display` (what the arithmetic of the standards says), rounded.
+fn as_shown_on(display: crate::project::DisplayTransform, code: u8) -> u8 {
+    use crate::colour_space::TransferFunction;
+    let light = TransferFunction::Srgb.decode_to_light(f64::from(code) / 255.0);
+    (display.transfer_function().encode_from_light(light) * 255.0).round() as u8
+}
+
+#[test]
+fn the_preview_is_made_in_linear_light_and_a_colour_comes_out_as_the_screen_shows_it_which_depends_on_the_display_setting()
+ {
+    use crate::project::DisplayTransform;
+    let (project, source, picture) = project_with_a_picture_file(None);
+    let Some(mut window) = Window::showing_with_the_engine(project) else {
+        return;
+    };
+    decode_the_picture_file(&mut window, source, [200, 100, 50, 255]);
+    window.wait_for_the_engine();
+    let middle = middle_of_the_layer(&window, &picture_label(picture));
+
+    // The default display is sRGB, which a picture file already is: a colour that is only shown comes out the same (the pipeline is the identity for it).
+    let shown = the_pixel_at(&window, middle.0, middle.1);
+    assert!(differ_by_at_most(shown, [200, 100, 50, 255], 1), "{shown:?}");
+
+    // A screen that does the power 2.4 shows the same light with other codes: the preview is made of light, and the screen's curve is what it ends with.
+    window.application_mut().environment.global_settings.display_transform = DisplayTransform::Gamma24;
+    // (The window is drawn once, so that it asks for the frame of the new colour, and then the engine is waited for.)
+    window.harness.step();
+    window.wait_for_the_engine();
+    let shown = the_pixel_at(&window, middle.0, middle.1);
+    let expected = [200, 100, 50].map(|code| as_shown_on(DisplayTransform::Gamma24, code));
+    assert!(
+        differ_by_at_most(shown, [expected[0], expected[1], expected[2], 255], 1),
+        "{shown:?} where the light of [200, 100, 50] on a 2.4 screen is {expected:?}"
+    );
+    assert_ne!(
+        expected,
+        [200, 100, 50],
+        "a premise: the two screens differ for this colour"
+    );
+}
+
+#[test]
+fn the_preview_is_the_same_picture_when_the_project_is_put_together_in_another_working_space_and_the_pictures_are_made_again_for_it()
+ {
+    use crate::project::{ProjectSettings, WorkingColourSpace};
+    let (project, source, picture) = project_with_a_picture_file(Some(40.0));
+    let Some(mut window) = Window::showing_with_the_engine(project) else {
+        return;
+    };
+    decode_the_picture_file(&mut window, source, [180, 60, 20, 255]);
+    window.wait_for_the_engine();
+    let middle = middle_of_the_layer(&window, &picture_label(picture));
+    let in_rec709 = the_pixel_at(&window, middle.0, middle.1);
+    let asked_before = window.engine_preview().unwrap().frames_asked_for();
+
+    window.application_mut().document.project.set_settings(ProjectSettings {
+        working_colour_space: Some(WorkingColourSpace::AcesCg),
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
+    });
+    window.harness.step();
+    window.wait_for_the_engine();
+
+    assert!(
+        window.engine_preview().unwrap().frames_asked_for() > asked_before,
+        "a frame of another colour is asked for"
+    );
+    assert_eq!(window.engine_preview().unwrap().why_it_stopped(), None);
+    let in_acescg = the_pixel_at(&window, middle.0, middle.1);
+    assert!(
+        differ_by_at_most(in_acescg, in_rec709, 1),
+        "{in_acescg:?} in ACEScg and {in_rec709:?} in Rec.709: the same picture, put together in other primaries"
+    );
+}
+
 #[test]
 fn what_the_window_draws_to_show_where_things_are_and_what_the_mouse_takes_hold_of_is_where_it_was() {
     let (project, source, picture) = project_with_a_picture_file(None);

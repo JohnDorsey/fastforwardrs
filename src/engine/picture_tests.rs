@@ -27,6 +27,7 @@ fn layer_of(picture: u64) -> LayerDescription {
 
 fn frame_of(size: (u32, u32), pictures: &[u64]) -> FrameDescription {
     FrameDescription {
+        colour: Default::default(),
         render_size: size,
         layers: pictures.iter().map(|&picture| layer_of(picture)).collect(),
     }
@@ -196,6 +197,8 @@ fn a_picture_that_cannot_be_used_is_refused_and_not_kept() {
     with_software_graphics!(graphics, {
         let mut renderer = FrameRenderer::new(graphics.device.clone());
         let wrong_number_of_bytes = PictureData {
+            colour: Default::default(),
+            working: Default::default(),
             width_in_pixels: 4,
             height_in_pixels: 4,
             pixels: PicturePixels::Rgba8 {
@@ -203,12 +206,16 @@ fn a_picture_that_cannot_be_used_is_refused_and_not_kept() {
             },
         };
         let empty = PictureData {
+            colour: Default::default(),
+            working: Default::default(),
             width_in_pixels: 0,
             height_in_pixels: 4,
             pixels: PicturePixels::Rgba8 { straight_alpha: vec![] },
         };
         let largest = graphics.device.largest_texture_side;
         let wider_than_the_card_takes = PictureData {
+            colour: Default::default(),
+            working: Default::default(),
             width_in_pixels: largest + 1,
             height_in_pixels: 1,
             pixels: PicturePixels::Rgba8 {
@@ -397,6 +404,8 @@ fn a_picture_that_cannot_be_used_is_reported_by_its_id() {
     engine.upload_picture(
         PictureId(3),
         Arc::new(PictureData {
+            colour: Default::default(),
+            working: Default::default(),
             width_in_pixels: 5,
             height_in_pixels: 5,
             pixels: PicturePixels::Rgba8 {

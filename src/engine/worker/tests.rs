@@ -756,6 +756,7 @@ fn a_shader_that_is_given_under_a_key_again_replaces_the_first_and_the_frame_tha
 /// A frame of 8 by 8 that is one flat grey of this level.
 fn grey(level: u8) -> FrameDescription {
     FrameDescription {
+        colour: Default::default(),
         render_size: (8, 8),
         layers: vec![LayerDescription {
             source: LayerSource::Solid([level, level, level, 255]),

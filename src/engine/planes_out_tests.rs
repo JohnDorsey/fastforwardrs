@@ -186,6 +186,7 @@ fn flat_colours_are_the_numbers_that_the_standards_give() {
     with_software_graphics!(graphics, {
         let mut renderer = FrameRenderer::new(graphics.device.clone());
         let flat = |colour: [u8; 4]| FrameDescription {
+            colour: Default::default(),
             render_size: (8, 8),
             layers: vec![LayerDescription {
                 source: LayerSource::Solid(colour),

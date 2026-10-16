@@ -4,8 +4,8 @@
 //! The pictures that the engine has been sent, as they are kept on the graphics card: each one is a premultiplied half-float texture, ready to be
 //! put in its place on a frame. Which are kept is decided by how recently each was used and how much room they take (see [`super::byte_lru`]).
 
-use super::PictureId;
 use super::byte_lru::ByteLru;
+use super::{PictureId, WorkingSpace};
 
 /// How many bytes of pictures are kept on the card.
 pub const DEFAULT_BUDGET_IN_BYTES: usize = 512 * 1024 * 1024;
@@ -18,6 +18,8 @@ pub struct GpuPicture {
     pub view: wgpu::TextureView,
     pub width_in_pixels: u32,
     pub height_in_pixels: u32,
+    /// The working space that the numbers of the texture are in: a frame that is put together in another one cannot use the picture.
+    pub working: WorkingSpace,
 }
 
 /// See the module documentation.

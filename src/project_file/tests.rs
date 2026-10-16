@@ -146,6 +146,7 @@ fn only_the_settings_a_project_has_set_for_itself_are_saved() {
     project.set_settings(ProjectSettings {
         autosave: Some(true),
         sped_up_clip_sound: None,
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     });
     let text = saved(&project);
     assert!(
@@ -161,6 +162,7 @@ fn only_the_settings_a_project_has_set_for_itself_are_saved() {
     project.set_settings(ProjectSettings {
         autosave: Some(false),
         sped_up_clip_sound: Some(SpedUpClipSound::IncreasePitch),
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     });
     let text = saved(&project);
     assert!(text.contains("\"autosave\": false"), "{text}");
@@ -229,7 +231,8 @@ fn the_old_yes_or_no_mute_setting_still_means_mute_or_the_sound_at_its_own_pitch
             project.settings(),
             ProjectSettings {
                 autosave: None,
-                sped_up_clip_sound: Some(expected)
+                sped_up_clip_sound: Some(expected),
+                ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
             },
             "mute_sped_up_clips: {old_value}"
         );
@@ -326,7 +329,8 @@ fn an_earlier_file_with_settings_keeps_them_including_the_old_yes_or_no_one() {
         project.settings(),
         ProjectSettings {
             autosave: Some(true),
-            sped_up_clip_sound: Some(SpedUpClipSound::Mute)
+            sped_up_clip_sound: Some(SpedUpClipSound::Mute),
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         }
     );
 }

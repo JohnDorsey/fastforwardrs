@@ -633,9 +633,18 @@ fn the_engines_own_colour_matrix_shader_given_to_the_engine_as_an_effect_makes_t
             for (matrix_name, matrix) in matrices() {
                 // The shader's matrix is three columns of three numbers, each in four numbers' room (the last is room): that is where the numbers of a call go.
                 let rows = matrix.rows();
-                let columns: Vec<f32> = (0..3)
+                let mut columns: Vec<f32> = (0..3)
                     .flat_map(|column| [rows[0][column], rows[1][column], rows[2][column], 0.0])
                     .collect();
+                // (After the matrix that mixes come the two that take the light of the working space to the display-referred domain and back, which in the compatibility
+                // mode are the identity, and the number of the curve of the domain, which is none there: an integer, which is given as the bits of the number that stands
+                // in its place. Rewritten on purpose in phase 3, when the struct got them.)
+                let identity_columns = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+                columns.extend(identity_columns);
+                columns.extend(identity_columns);
+                columns.push(f32::from_bits(
+                    crate::colour_space::TransferFunction::Linear.number_for_the_shaders(),
+                ));
                 let (built_in, _) = frame_of(
                     &mut renderer,
                     size,

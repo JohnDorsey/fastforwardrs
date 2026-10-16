@@ -22,11 +22,20 @@ pub const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// How many bytes the uniforms of the pass that puts a layer in its place take up (see `place.wgsl`).
 pub const PLACEMENT_UNIFORM_BYTES: u64 = 64;
 
-/// How many bytes the uniforms of the pass that makes a video picture red, green and blue take up (see `yuv.wgsl`).
-pub const YUV_UNIFORM_BYTES: u64 = 64;
+/// How many bytes the uniforms of the pass that makes a video picture red, green and blue (and the numbers of the working space) take up (see `yuv.wgsl`): the matrix, the
+/// offsets with the number of the curve in the last four of their sixteen bytes, and the matrix to the working space.
+pub const YUV_UNIFORM_BYTES: u64 = 112;
 
-/// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): a 3 by 3 matrix, three columns of 16 bytes.
-pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 48;
+/// How many bytes the uniforms of the pass that makes a picture of bytes the numbers of the working space take up (see `ingest.wgsl`): a 3 by 3 matrix, three columns of 16
+/// bytes, and the number of the curve, in a struct that is a multiple of 16.
+pub const INGEST_UNIFORM_BYTES: u64 = 64;
+
+/// How many bytes the uniforms of the last pass take up (see `output.wgsl`): the same as the pass before it.
+pub const OUTPUT_UNIFORM_BYTES: u64 = 64;
+
+/// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): three 3 by 3 matrices, three columns of 16 bytes each, and the number
+/// of the curve, in a struct that is a multiple of 16.
+pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 160;
 
 /// The format of the planes of a video picture, which are sent as they are.
 pub const PLANE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
@@ -113,6 +122,20 @@ pub(super) fn shader_module(device: &wgpu::Device, label: &str, source: &str) ->
     })
 }
 
+/// A bind group layout entry for the uniforms of a pass (`bytes` of them at a dynamic offset: see `uniform_bytes`), which only the fragment stage reads.
+fn dynamic_uniform_entry(binding: u32, bytes: u64) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: true,
+            min_binding_size: NonZeroU64::new(bytes),
+        },
+        count: None,
+    }
+}
+
 /// A bind group layout entry for a texture that is read with `textureLoad` only.
 fn loaded_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
@@ -180,7 +203,7 @@ fn output_pass(device: &wgpu::Device) -> OutputPass {
     let module = shader_module(device, "engine output pass", shaders::OUTPUT);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("engine output pass bindings"),
-        entries: &[loaded_texture_entry(0)],
+        entries: &[dynamic_uniform_entry(0, OUTPUT_UNIFORM_BYTES), loaded_texture_entry(1)],
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("engine output pass layout"),
@@ -197,7 +220,7 @@ fn ingest_pass(device: &wgpu::Device) -> IngestPass {
     let module = shader_module(device, "engine ingest pass", shaders::INGEST);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("engine ingest pass bindings"),
-        entries: &[loaded_texture_entry(0)],
+        entries: &[dynamic_uniform_entry(0, INGEST_UNIFORM_BYTES), loaded_texture_entry(1)],
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("engine ingest pass layout"),

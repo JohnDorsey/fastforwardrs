@@ -4,7 +4,7 @@
 //! The picture engine as the preview uses it: the engine, what it has been sent, and the frame it made last, which is what the preview shows.
 //!
 //! Each time the window is drawn, [`EnginePreview::update`] takes what the engine has said since (a finished frame becomes the picture that is shown; a
-//! picture that the engine does not have is sent again), describes the frame that the content of the preview makes ([`describe_frame`]), sends the pictures
+//! picture that the engine does not have is sent again), describes the frame that the content of the preview makes ([`describe_frame_in_colour`]), sends the pictures
 //! that the engine has not been sent, and, if the frame is not the one that was asked for last, asks for it. The engine makes only the newest frame it is asked
 //! for, so a window that changes faster than the engine makes frames shows the latest frame that is done, a moment behind. Nothing here waits for the engine.
 //!
@@ -19,11 +19,11 @@ use std::time::{Duration, Instant};
 use egui::{Color32, ColorImage, Context, Painter, Rect, TextureHandle, pos2};
 
 use super::PreviewContent;
-use super::engine_view::{PictureSupply, PictureWanted, SentPictures, describe_frame};
+use super::engine_view::{PictureSupply, PictureWanted, SentPictures, describe_frame_in_colour};
 use crate::application::textures::PictureFilter;
 use crate::engine::{
-    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameDescription, LayerSource, PictureId, QualityGovernor,
-    QualityRules, RenderedFrame, WakeUp,
+    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameColour, FrameDescription, LayerSource, PictureId,
+    QualityGovernor, QualityRules, RenderedFrame, WakeUp,
 };
 use crate::project::FrameRate;
 use crate::text_rendering::LazyTextRenderer;
@@ -118,7 +118,7 @@ pub struct EnginePreview {
     rejected: HashSet<PictureId>,
     /// For each picture sent, the number of the last frame that was asked for that used it.
     last_used_in: HashMap<PictureId, u64>,
-    /// A number the window changes when it lets go of what it knows of its files (see [`describe_frame`]).
+    /// A number the window changes when it lets go of what it knows of its files (see [`describe_frame_in_colour`]).
     generation: u64,
     /// The fingerprint of the frame that was asked for last and the serial number of its request, so that the same frame is not asked for again.
     asked_for: Option<(u64, u64)>,
@@ -143,6 +143,9 @@ pub struct EnginePreview {
     last_problem: Option<String>,
     /// What the user is to be told that the engine has done and gone on after (a graphics device that it replaced), which the window takes when it can say it.
     to_tell_the_user: Vec<String>,
+    /// What the frames are put together in and encoded as (from the settings, which the window gives before it draws: [`Self::set_the_colour`]). The compatibility mode
+    /// until it is given.
+    colour: FrameColour,
 }
 
 impl EnginePreview {
@@ -171,7 +174,14 @@ impl EnginePreview {
             stopped: None,
             last_problem: None,
             to_tell_the_user: Vec::new(),
+            colour: FrameColour::default(),
         }
+    }
+
+    /// What the frames from now on are put together in and encoded as. (A frame of another colour is another frame: the pictures are made for the working space, and
+    /// their ids say which, so that the ones that were sent for the colour before are not used.)
+    pub fn set_the_colour(&mut self, colour: FrameColour) {
+        self.colour = colour;
     }
 
     /// Why the engine has stopped, if it has: the preview is then to be drawn the old way.
@@ -318,6 +328,7 @@ impl EnginePreview {
             sent,
             rejected,
             generation,
+            colour,
             ..
         } = self;
         let mut supply = SuppliesWhatIsNotRejected {
@@ -328,7 +339,7 @@ impl EnginePreview {
             },
             rejected,
         };
-        describe_frame(content, render_size, *generation, &mut supply)
+        describe_frame_in_colour(content, render_size, *generation, *colour, &mut supply)
     }
 
     /// Paints the frame that is shown over `rectangle` (all of the picture, wherever it is on the screen, which may reach past what `painter` is clipped to).

@@ -1,14 +1,19 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// A video picture in planes (brightness at every pixel, and two colour differences at half the width and half the height) becomes red, green and blue,
-// premultiplied (it is opaque, so that is the same), in half-float numbers. Done once, when the picture is uploaded. The same arithmetic as
-// `YuvConversion::rgb_of` in Rust, which the tests hold this to.
+// A video picture in planes (brightness at every pixel, and two colour differences at half the width and half the height) becomes red, green and blue (the codes
+// that the matrix and the range make), then the numbers of the working space (decoded to light with the picture's curve and converted to the working space's primaries;
+// in the compatibility mode the codes as they are), premultiplied (it is opaque, so that is the same), in half-float numbers. Done once, when the picture is uploaded.
+// The same arithmetic as `YuvConversion::rgb_of` in Rust, which the tests hold this to. (The curves are in `colour.wgsl`, which is in front of this text.)
 
 struct Conversion {
     // rows of the matrix (red, green, blue), each as the numbers for (y, u, v) after what is taken off them is taken off
     to_rgb: mat3x3<f32>,
     offsets: vec3<f32>,
+    // the number of the curve that the picture's codes are decoded with (`TransferFunction::number_for_the_shaders`): in the four bytes that the offsets leave over
+    curve: u32,
+    // the light of the picture's primaries to the working space's
+    to_working: mat3x3<f32>,
 }
 
 @group(0) @binding(0) var<uniform> conversion: Conversion;
@@ -34,5 +39,6 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let blue_difference = textureLoad(blue_difference_plane, chroma_pixel, 0).r;
     let red_difference = textureLoad(red_difference_plane, chroma_pixel, 0).r;
     let rgb = conversion.to_rgb * (vec3<f32>(brightness, blue_difference, red_difference) - conversion.offsets);
-    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    let codes = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    return vec4<f32>(conversion.to_working * decode_to_light(conversion.curve, codes), 1.0);
 }

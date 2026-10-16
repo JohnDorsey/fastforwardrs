@@ -59,7 +59,8 @@ pub use racks::{
     DrawerExtent, FrameRoom, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations,
 };
 pub use settings::{
-    AnySetting, ProjectSettings, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
+    AnySetting, DisplayTransform, OutputColourSpace, ProjectSettings, SETTINGS, Setting, SettingControlKind,
+    SettingValue, Settings, SpedUpClipSound, WorkingColourSpace,
 };
 pub use source_media::{
     SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaKind, SourceMediaLink,

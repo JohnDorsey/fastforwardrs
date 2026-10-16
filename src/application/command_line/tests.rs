@@ -167,6 +167,7 @@ fn the_export_is_made_with_the_settings_of_the_file_that_was_named_and_the_proje
         Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::Mute,
+            ..Settings::DEFAULT
         },
         &file,
     )
@@ -181,7 +182,8 @@ fn the_export_is_made_with_the_settings_of_the_file_that_was_named_and_the_proje
         settings_of_the_export(&request(Some(file.clone())), &project),
         Ok(Settings {
             autosave: true,
-            sped_up_clip_sound: SpedUpClipSound::Mute
+            sped_up_clip_sound: SpedUpClipSound::Mute,
+            ..Settings::DEFAULT
         }),
         "the file that was named"
     );
@@ -198,12 +200,14 @@ fn the_export_is_made_with_the_settings_of_the_file_that_was_named_and_the_proje
     project.set_settings(ProjectSettings {
         autosave: None,
         sped_up_clip_sound: Some(SpedUpClipSound::IncreasePitch),
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
     });
     assert_eq!(
         settings_of_the_export(&request(Some(file.clone())), &project),
         Ok(Settings {
             autosave: true,
-            sped_up_clip_sound: SpedUpClipSound::IncreasePitch
+            sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
+            ..Settings::DEFAULT
         }),
         "what the project says of itself is on top of the file's, and the rest is the file's"
     );

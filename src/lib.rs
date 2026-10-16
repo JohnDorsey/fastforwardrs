@@ -17,6 +17,7 @@
 //!   thumbnails and exporting.
 //! * [`colour_effects`] is the arithmetic of the effects that change the colours of a picture, and
 //!   what asks ffmpeg to do the same, for the preview and the export alike.
+//! * [`colour_space`] has the colour spaces as numbers: the sets of primaries, the curves between codes and light, and the matrices between them (phase 3).
 //! * [`speed_indicator`] draws and positions the fast-forward symbol, for the preview and the
 //!   export alike.
 //! * [`playback`] runs the live preview: the clock, and getting the right picture for each frame.
@@ -30,6 +31,7 @@
 pub mod application;
 mod atomic_file;
 pub mod colour_effects;
+pub mod colour_space;
 pub mod composition;
 pub mod engine;
 pub mod frame_scene;

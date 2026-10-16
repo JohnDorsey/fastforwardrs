@@ -17,6 +17,7 @@ const A_LONG_TIME: Duration = Duration::from_secs(60);
 
 pub(super) fn whole_frame_of(picture: u64, size: (u32, u32)) -> FrameDescription {
     FrameDescription {
+        colour: Default::default(),
         render_size: size,
         layers: vec![LayerDescription {
             source: LayerSource::Picture(PictureId(picture)),

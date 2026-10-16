@@ -98,6 +98,13 @@ pub fn settings_from_json_text(text: &str) -> Result<Settings, String> {
                 .mute_sped_up_clips
                 .map(SpedUpClipSound::from_the_old_mute_setting))
             .unwrap_or(Settings::DEFAULT.sped_up_clip_sound),
+        display_transform: values.display_transform.unwrap_or(Settings::DEFAULT.display_transform),
+        working_colour_space: values
+            .working_colour_space
+            .unwrap_or(Settings::DEFAULT.working_colour_space),
+        output_colour_space: values
+            .output_colour_space
+            .unwrap_or(Settings::DEFAULT.output_colour_space),
     })
 }
 
@@ -110,6 +117,9 @@ pub fn settings_to_json_text(settings: Settings) -> String {
             autosave: Some(settings.autosave),
             sped_up_clip_sound: Some(settings.sped_up_clip_sound),
             mute_sped_up_clips: None,
+            display_transform: Some(settings.display_transform),
+            working_colour_space: Some(settings.working_colour_space),
+            output_colour_space: Some(settings.output_colour_space),
         },
     };
     let mut text = serde_json::to_string_pretty(&document).expect("settings can always be written as JSON");
@@ -126,6 +136,9 @@ mod tests {
         Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
+            display_transform: crate::project::DisplayTransform::Gamma24,
+            working_colour_space: crate::project::WorkingColourSpace::AcesCg,
+            output_colour_space: crate::project::OutputColourSpace::Srgb,
         }
     }
 
@@ -134,6 +147,7 @@ mod tests {
         let text = settings_to_json_text(Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+            ..Settings::DEFAULT
         });
         assert_eq!(
             text,
@@ -142,7 +156,10 @@ mod tests {
   "file_format_version": 1,
   "settings": {
     "autosave": true,
-    "sped_up_clip_sound": "maintain_pitch"
+    "sped_up_clip_sound": "maintain_pitch",
+    "display_transform": "srgb",
+    "working_colour_space": "linear_rec709",
+    "output_colour_space": "rec709_as_previewed"
   }
 }
 "#
@@ -181,7 +198,8 @@ mod tests {
             settings_from_json_text(text).unwrap(),
             Settings {
                 autosave: Settings::DEFAULT.autosave,
-                sped_up_clip_sound: SpedUpClipSound::Mute
+                sped_up_clip_sound: SpedUpClipSound::Mute,
+                ..Settings::DEFAULT
             }
         );
         let no_settings_at_all = r#"{ "file_format": "fastforwardrs-settings", "file_format_version": 1 }"#;
@@ -204,7 +222,8 @@ mod tests {
                 settings_from_json_text(&text).unwrap(),
                 Settings {
                     autosave: true,
-                    sped_up_clip_sound: expected
+                    sped_up_clip_sound: expected,
+                    ..Settings::DEFAULT
                 },
                 "mute_sped_up_clips: {old_value}"
             );
@@ -229,7 +248,8 @@ mod tests {
             settings_from_json_text(text).unwrap(),
             Settings {
                 autosave: true,
-                sped_up_clip_sound: Settings::DEFAULT.sped_up_clip_sound
+                sped_up_clip_sound: Settings::DEFAULT.sped_up_clip_sound,
+                ..Settings::DEFAULT
             }
         );
     }

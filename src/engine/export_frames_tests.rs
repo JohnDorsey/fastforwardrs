@@ -21,6 +21,7 @@ const WHOLE: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 /// A frame that is one flat grey of this level, 8 by 8 pixels.
 fn grey_frame(level: u8) -> FrameDescription {
     FrameDescription {
+        colour: Default::default(),
         render_size: (8, 8),
         layers: vec![LayerDescription {
             source: LayerSource::Solid([level, level, level, 255]),
@@ -55,6 +56,7 @@ fn frames_that_are_begun_one_after_another_and_finished_afterwards_are_what_they
             .map(|number| {
                 let shift = number as f32 * 0.1;
                 FrameDescription {
+                    colour: Default::default(),
                     render_size: (48, 27),
                     layers: vec![
                         LayerDescription {

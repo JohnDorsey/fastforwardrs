@@ -149,6 +149,7 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
             plan.picture_size(),
             GENERATION_OF_THE_PICTURES_OF_FILES,
             COLOUR_OF_A_LAYER_WITHOUT_A_PICTURE,
+            plan.colour,
             &mut supply,
         );
 

@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::SpedUpClipSound;
+use crate::project::{DisplayTransform, OutputColourSpace, SpedUpClipSound, WorkingColourSpace};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct SettingsDocument {
@@ -32,4 +32,11 @@ pub(super) struct SettingsValuesDocument {
     /// read (when `sped_up_clip_sound` is not there) and never written.
     #[serde(default, skip_serializing)]
     pub mute_sped_up_clips: Option<bool>,
+    /// The colour settings (phase 3): not there in the files of earlier versions, which get the defaults.
+    #[serde(default)]
+    pub display_transform: Option<DisplayTransform>,
+    #[serde(default)]
+    pub working_colour_space: Option<WorkingColourSpace>,
+    #[serde(default)]
+    pub output_colour_space: Option<OutputColourSpace>,
 }

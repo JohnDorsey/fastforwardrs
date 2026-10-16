@@ -15,6 +15,8 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
+use super::colour::FrameColour;
+
 /// The key of the effect that mixes colours with a 3 by 3 matrix: the nine numbers are the rows, one after the other (how much of the red, green
 /// and blue the new red is made of, then the new green, then the new blue). The mixed colour is cut off at 0 and 1.
 pub const COLOUR_MATRIX_KEY: &str = "engine:colour_matrix";
@@ -71,6 +73,10 @@ pub struct FrameDescription {
     pub render_size: (u32, u32),
     /// The layers, the one at the back first.
     pub layers: Vec<LayerDescription>,
+    /// What the layers are put together in, and what the finished frame is encoded as. **The compatibility mode (codes, nothing converted) when it is not said**, which is
+    /// what every description made before phase 3 has, and what the tests of the engine against the old drawing run in.
+    #[serde(default)]
+    pub colour: FrameColour,
 }
 
 impl FrameDescription {
@@ -79,6 +85,7 @@ impl FrameDescription {
         Self {
             render_size,
             layers: Vec::new(),
+            colour: FrameColour::default(),
         }
     }
 
@@ -101,6 +108,8 @@ impl FrameDescription {
     }
 
     fn hash_the_layers(&self, hasher: &mut DefaultHasher) {
+        // (The colour is a part of what is shown: a frame that is put together in another space or encoded as another is another picture.)
+        self.colour.hash(hasher);
         self.layers.len().hash(hasher);
         for layer in &self.layers {
             layer.source.hash(hasher);
@@ -134,6 +143,7 @@ mod tests {
 
     fn description() -> FrameDescription {
         FrameDescription {
+            colour: Default::default(),
             render_size: (640, 360),
             layers: vec![
                 layer(1),

@@ -555,12 +555,28 @@ fn the_shader_has_its_matrix_where_the_writer_puts_the_numbers_and_the_struct_is
         .iter()
         .map(|member| (member.name.clone().unwrap(), member.offset))
         .collect();
-    assert_eq!(members, vec![("to_new".to_owned(), 0)]);
+    // (Rewritten on purpose in phase 3: after the matrix that mixes there are the two that take the light of the working space to the display-referred domain and back, and
+    // the number of the curve of the domain.)
+    assert_eq!(
+        members,
+        vec![
+            ("to_new".to_owned(), 0),
+            ("into_domain".to_owned(), 48),
+            ("out_of_domain".to_owned(), 96),
+            ("curve".to_owned(), 144)
+        ]
+    );
     assert_eq!(u64::from(*span), COLOUR_MATRIX_UNIFORM_BYTES);
 
+    let domain = super::DisplayDomainConversion {
+        into_domain: [[10.0, 11.0, 12.0], [13.0, 14.0, 15.0], [16.0, 17.0, 18.0]],
+        out_of_domain: [[20.0, 21.0, 22.0], [23.0, 24.0, 25.0], [26.0, 27.0, 28.0]],
+        curve: 5,
+    };
     let mut bytes = UniformBytes::new(256);
     let slot = bytes.add_slot(|writer| {
         writer.mat3x3_from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
+        domain.write(writer);
     });
     assert_eq!(u64::from(slot.size), COLOUR_MATRIX_UNIFORM_BYTES);
     let number = |offset: usize| f32::from_le_bytes(bytes.as_bytes()[offset..offset + 4].try_into().unwrap());
@@ -568,4 +584,19 @@ fn the_shader_has_its_matrix_where_the_writer_puts_the_numbers_and_the_struct_is
     assert_eq!([number(0), number(4), number(8)], [1.0, 4.0, 7.0]);
     assert_eq!([number(16), number(20), number(24)], [2.0, 5.0, 8.0]);
     assert_eq!([number(32), number(36), number(40)], [3.0, 6.0, 9.0]);
+    assert_eq!(
+        [number(48), number(52), number(56)],
+        [10.0, 13.0, 16.0],
+        "the matrix into the domain"
+    );
+    assert_eq!(
+        [number(96), number(100), number(104)],
+        [20.0, 23.0, 26.0],
+        "and out of it"
+    );
+    assert_eq!(
+        u32::from_le_bytes(bytes.as_bytes()[144..148].try_into().unwrap()),
+        5,
+        "the curve of the domain, after them"
+    );
 }

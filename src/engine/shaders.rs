@@ -3,17 +3,42 @@
 
 //! The engine's own shaders, which are in files of their own (`shaders/*.wgsl`) and are part of the program.
 
+#[cfg(test)]
+/// The curves between codes and light, with no entry points: the passes that need them (the four that follow) have them **in front of their own text**, so that what
+/// each of them is, to the card, is one text (`concat!` makes it when the program is built, and the tests that read a shader read the same text).
+pub const COLOUR_CURVES: &str = include_str!("shaders/colour.wgsl");
+
 /// The last pass of a frame: the finished picture as 8-bit.
-pub const OUTPUT: &str = include_str!("shaders/output.wgsl");
+pub const OUTPUT: &str = concat!(
+    include_str!("shaders/colour.wgsl"),
+    "
+",
+    include_str!("shaders/output.wgsl")
+);
 
-/// What is done once to a picture that was sent as bytes: it is premultiplied and made half-float.
-pub const INGEST: &str = include_str!("shaders/ingest.wgsl");
+/// What is done once to a picture that was sent as bytes: it is made light, premultiplied and half-float.
+pub const INGEST: &str = concat!(
+    include_str!("shaders/colour.wgsl"),
+    "
+",
+    include_str!("shaders/ingest.wgsl")
+);
 
-/// What is done once to a video picture that was sent in planes: it is made red, green and blue.
-pub const YUV: &str = include_str!("shaders/yuv.wgsl");
+/// What is done once to a video picture that was sent in planes: it is made red, green and blue, and light.
+pub const YUV: &str = concat!(
+    include_str!("shaders/colour.wgsl"),
+    "
+",
+    include_str!("shaders/yuv.wgsl")
+);
 
 /// The effect that mixes the colours of a layer's picture with a matrix.
-pub const COLOUR_MATRIX: &str = include_str!("shaders/colour_matrix.wgsl");
+pub const COLOUR_MATRIX: &str = concat!(
+    include_str!("shaders/colour.wgsl"),
+    "
+",
+    include_str!("shaders/colour_matrix.wgsl")
+);
 
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");

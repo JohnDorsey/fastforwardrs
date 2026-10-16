@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use super::runs::{VideoRun, find_the_runs};
 use crate::composition::{LayerContent, PicturePlan, plan_pictures, plan_sound};
+use crate::engine::FrameColour;
+use crate::frame_scene::colour_of_the_export;
 use crate::media::export::{SoundGraphSpecification, sound_graph_specification, sources_of_sound};
 use crate::project::{FrameRate, Project, Settings, SourceMediaIdentifier, SpeedIndicatorLayout, TimelineFrameIndex};
 
@@ -82,6 +84,8 @@ pub struct ExportPlan {
     pub has_audio: bool,
     /// Where the fast-forward symbol goes (the same symbol in every sped-up stretch).
     pub symbol_layout: SpeedIndicatorLayout,
+    /// What every frame is put together in, and what it is encoded as (from the settings: the working colour space and the output colour space).
+    pub colour: FrameColour,
 }
 
 impl ExportPlan {
@@ -185,6 +189,7 @@ pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, 
         sound,
         has_audio,
         symbol_layout: project.speed_indicator_layout(),
+        colour: colour_of_the_export(settings),
         pictures,
     })
 }

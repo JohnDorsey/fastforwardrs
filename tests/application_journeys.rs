@@ -109,7 +109,7 @@ fn assert_exports_exactly_what_the_project_describes(
 #[test]
 fn an_export_in_the_window_of_a_video_that_has_fewer_pictures_than_the_project_was_told_says_how_many_pictures_were_held()
  {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     // The project was made when the file had 300 pictures; it has 90 now (see `support`).
     let short = test_video(
         &toolchain,

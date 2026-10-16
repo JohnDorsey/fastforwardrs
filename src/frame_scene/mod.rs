@@ -12,9 +12,11 @@
 //! plan becomes these (for the window and for the export alike), and [`describe_frame`] **sends nothing itself**: for each picture that a layer is made of it asks a
 //! [`PictureSupply`] to make sure the engine has it.
 
+mod colour;
 mod describe;
 mod section;
 
+pub use colour::{colour_of_the_export, colour_of_the_preview, working_space_of};
 pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, TextPictures, describe_frame};
 pub use section::{layers_of_a_section, symbol_of_a_section};
 

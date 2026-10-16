@@ -380,8 +380,11 @@ fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
     export_with_text_pictures(&toolchain, &project, &destination, half_clear_text_picture);
     let decoded = decode_video(&toolchain, &destination, WIDTH as u32, HEIGHT as u32);
 
-    // Half the turned colour (18, 151, 80) over the video behind it (20, 20, 20).
-    let wanted = (19, 85, 50);
+    // Half the turned colour (18, 151, 80) over the video behind it (20, 20, 20), **mixed as light is mixed** (rewritten on purpose in phase 3, when the layers began to be
+    // put together in linear light: mixed as codes the same pixel was (19, 85, 50); the half of the light that the text makes is a brighter picture, and the green of the
+    // text is what lifts it). The text is 128 of 255 clear.
+    let wanted = mixed_in_light((18, 151, 80), (20, 20, 20), 128.0 / 255.0);
+    assert_eq!(wanted, (19, 111, 59), "a premise: the arithmetic of the standards");
     for number in [0, 30, 59] {
         assert_near(
             colour_at(&decoded.pictures[number], middle_of_the_text.0, middle_of_the_text.1),
@@ -389,6 +392,18 @@ fn text_that_is_half_clear_has_its_colour_turned_and_is_still_half_clear() {
             &format!("the text, frame {number}"),
         );
     }
+}
+
+/// The colour (as sRGB codes) that `over` is when it is laid over `under` with `opacity`, if the mixing is of light and not of codes: each is made light with the curve of
+/// sRGB, the lights are mixed, and the mean is made codes again.
+fn mixed_in_light(over: (u8, u8, u8), under: (u8, u8, u8), opacity: f64) -> (u8, u8, u8) {
+    use fastforwardrs::colour_space::TransferFunction::Srgb;
+    let mixed = |over: u8, under: u8| {
+        let light = opacity * Srgb.decode_to_light(f64::from(over) / 255.0)
+            + (1.0 - opacity) * Srgb.decode_to_light(f64::from(under) / 255.0);
+        (Srgb.encode_from_light(light) * 255.0).round() as u8
+    };
+    (mixed(over.0, under.0), mixed(over.1, under.1), mixed(over.2, under.2))
 }
 
 // --- groups ---

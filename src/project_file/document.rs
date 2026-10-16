@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use super::effects::{EffectDocument, PluginDocument};
 use crate::project::{
-    FrameRate, Gain, GroupColour, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
-    TrackHeight,
+    DisplayTransform, FrameRate, Gain, GroupColour, OutputColourSpace, SourceFrameIndex, SourceMediaIdentifier,
+    SpedUpClipSound, SpeedFactor, TextColour, TrackHeight, WorkingColourSpace,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,6 +58,14 @@ pub(super) struct ProjectSettingsDocument {
     /// read (when `sped_up_clip_sound` is not there) and never written.
     #[serde(default, skip_serializing)]
     pub mute_sped_up_clips: Option<bool>,
+    /// The colour settings (format 12 and after): what the screen does with the numbers, what the pictures are put together in, and what the exported video's numbers are.
+    /// Not there in the files of earlier versions, and not there for a setting that follows the global one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_transform: Option<DisplayTransform>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_colour_space: Option<WorkingColourSpace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_colour_space: Option<OutputColourSpace>,
 }
 
 /// A file the project is made from.

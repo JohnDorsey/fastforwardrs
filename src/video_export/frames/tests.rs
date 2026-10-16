@@ -46,8 +46,12 @@ impl TextPictures for NoFontsYet {
     }
 }
 
+/// The plan of `project`, **in the compatibility colour** (the numbers are codes, and a video picture's id is its serial number): these tests are about how the pictures are
+/// sent and let go of, and not about their colour, which has tests of its own below. (They were written before phase 3 and are as they were: only this line is new.)
 fn plan_of(project: &Project) -> ExportPlan {
-    plan_export(project, Settings::DEFAULT).unwrap()
+    let mut plan = plan_export(project, Settings::DEFAULT).unwrap();
+    plan.colour = crate::engine::FrameColour::default();
+    plan
 }
 
 /// A script that gives `pictures` pictures to each stream that is started, the picture number `n` all `n`.
@@ -693,4 +697,97 @@ fn two_videos_at_once_are_two_layers_with_a_picture_each_from_their_own_run() {
         }
     }
     assert_eq!(seen_with_two_layers, 100);
+}
+
+// ---- the colour of the frames (phase 3)
+
+/// The plan of `project` with the colour that the settings give it, which with the default settings is linear light in the primaries of Rec.709.
+fn plan_in_linear_light_of(project: &Project) -> ExportPlan {
+    plan_export(project, Settings::DEFAULT).unwrap()
+}
+
+#[test]
+fn a_frame_of_the_export_has_the_colour_of_the_plan_and_the_pictures_it_sends_are_made_for_its_working_space() {
+    use crate::engine::WorkingSpace;
+    let project = project_with_video(320, 180, false);
+    let plan = plan_in_linear_light_of(&project);
+    assert!(
+        matches!(plan.colour.working, WorkingSpace::Linear(_)),
+        "{:?}",
+        plan.colour
+    );
+    let script = script_of_pictures(255);
+    let mut describer = describer_of(&plan, &script, HashMap::new(), Box::new(NoFontsYet));
+
+    let (described, sent) = describe(&mut describer, 0);
+
+    assert_eq!(described.description.colour, plan.colour);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0].1.working, plan.colour.working,
+        "what is sent is made for the working space of the frame"
+    );
+    assert_eq!(sent[0].1.colour, crate::engine::PictureColour::SRGB);
+}
+
+#[test]
+fn the_id_of_a_picture_says_the_colour_it_is_made_in_so_that_a_changed_setting_does_not_use_the_pictures_of_the_one_before()
+ {
+    use crate::project::{ProjectSettings, WorkingColourSpace};
+    let project = project_with_video(320, 180, false);
+    let in_rec709 = plan_in_linear_light_of(&project);
+    let in_acescg = plan_export(
+        &project,
+        ProjectSettings {
+            working_colour_space: Some(WorkingColourSpace::AcesCg),
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
+        }
+        .resolve(Settings::DEFAULT),
+    )
+    .unwrap();
+    let compatibility = plan_of(&project);
+    let id_in = |plan: &ExportPlan| {
+        let script = script_of_pictures(255);
+        let mut describer = describer_of(plan, &script, HashMap::new(), Box::new(NoFontsYet));
+        let (described, _) = describe(&mut describer, 0);
+        let LayerSource::Picture(id) = described.description.layers[0].source else {
+            panic!("a picture")
+        };
+        id
+    };
+    let ids = [id_in(&compatibility), id_in(&in_rec709), id_in(&in_acescg)];
+    assert_eq!(
+        ids[0],
+        PictureId(1),
+        "in the compatibility mode the id is the serial number of the picture, as it was"
+    );
+    assert_ne!(ids[1], ids[0]);
+    assert_ne!(ids[2], ids[0]);
+    assert_ne!(
+        ids[1], ids[2],
+        "the same picture made for another working space is another picture to the engine"
+    );
+}
+
+#[test]
+fn a_picture_file_and_a_text_are_made_for_the_working_space_too() {
+    use crate::engine::WorkingSpace;
+    let (project, (first, _)) = video_with_a_text_and_a_picture_over_it(100);
+    let plan = plan_in_linear_light_of(&project);
+    let script = script_of_pictures(255);
+    let image_source = SourceMediaIdentifier::new(2);
+    let images = HashMap::from([(image_source, a_picture_file(100, 50))]);
+    let calls = TextCalls::default();
+    let mut describer = describer_of(&plan, &script, images, text_pictures_that_are_recorded(&calls));
+    let mut every_picture_sent = Vec::new();
+    for timeline_frame in 0..=first {
+        every_picture_sent.extend(describe(&mut describer, timeline_frame).1);
+    }
+    assert!(
+        every_picture_sent.len() >= 3,
+        "a video picture, a text and a picture file were sent"
+    );
+    for (_, data) in &every_picture_sent {
+        assert!(matches!(data.working, WorkingSpace::Linear(_)), "{:?}", data.working);
+    }
 }

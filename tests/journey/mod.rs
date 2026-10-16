@@ -32,6 +32,9 @@ use crate::support::frame_number_in_picture;
 const WINDOW_WIDTH: f32 = 1280.0;
 const WINDOW_HEIGHT: f32 = 820.0;
 
+/// How many frames at the most a window that has been opened is waited for to stop moving and changing its size.
+const MOST_FRAMES_A_WINDOW_TAKES_TO_FIND_ITS_PLACE: usize = 12;
+
 /// How long the editor may take over opening a video, making its pictures or exporting it.
 pub const TIME_ALLOWED_FOR_BACKGROUND_WORK: Duration = Duration::from_secs(180);
 
@@ -411,6 +414,15 @@ impl Journey {
         self.settle();
         self.harness.get_by_label(menu_item).click();
         self.settle();
+        // (A window that opens takes some frames to find its size and its place, and a click on a control that is still on its way misses it: more of the frames are
+        // waited for as the window has more in it. It stays where it is when a frame has not moved it.)
+        for _ in 0..MOST_FRAMES_A_WINDOW_TAKES_TO_FIND_ITS_PLACE {
+            let before = self.harness.get_by_value(shown).rect();
+            self.harness.step();
+            if self.harness.get_by_value(shown).rect() == before {
+                break;
+            }
+        }
         self.harness.get_by_value(shown).click();
         self.settle();
         self.harness.get_by_label(option).click();

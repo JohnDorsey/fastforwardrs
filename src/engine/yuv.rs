@@ -18,6 +18,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::SlotWriter;
+use super::colour::IngestConversion;
 
 /// Which matrix turns the colour differences into red, green and blue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -161,9 +162,15 @@ impl RgbToYuvConversion {
 }
 
 impl YuvConversion {
-    /// Writes the numbers as the shader's struct has them: the matrix, and then what is taken off before it is used.
-    pub fn write(&self, writer: &mut SlotWriter) {
-        writer.mat3x3_from_rows(self.rows).vec3(self.offsets);
+    /// Writes the numbers as the shader's struct has them: the matrix, what is taken off before it is used, and then, in the four bytes that the offsets leave over of
+    /// their sixteen, the number of the curve of the codes, and the matrix that makes the light of the picture's primaries that of the working space (`ingest`: the
+    /// same numbers as a picture of bytes is given).
+    pub fn write(&self, writer: &mut SlotWriter, ingest: &IngestConversion) {
+        writer
+            .mat3x3_from_rows(self.rows)
+            .vec3(self.offsets)
+            .u32(ingest.curve)
+            .mat3x3_from_rows(ingest.to_working);
     }
 
     /// The red, green and blue (0 to 1, cut off) of one pixel's 8-bit brightness and colour differences. This is the arithmetic the shader does, in the
@@ -394,20 +401,48 @@ mod tests {
             .iter()
             .map(|member| (member.name.clone().unwrap(), member.offset))
             .collect();
-        assert_eq!(members, vec![("to_rgb".to_owned(), 0), ("offsets".to_owned(), 48)]);
+        // (Rewritten on purpose in phase 3: the struct has the number of the curve, in the four bytes that the offsets leave over, and the matrix to the working space.)
+        assert_eq!(
+            members,
+            vec![
+                ("to_rgb".to_owned(), 0),
+                ("offsets".to_owned(), 48),
+                ("curve".to_owned(), 60),
+                ("to_working".to_owned(), 64)
+            ]
+        );
         assert_eq!(u64::from(*span), YUV_UNIFORM_BYTES);
 
         let conversion = YuvConversion {
             rows: [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
             offsets: [10.0, 11.0, 12.0],
         };
+        let ingest = IngestConversion {
+            to_working: [[13.0, 14.0, 15.0], [16.0, 17.0, 18.0], [19.0, 20.0, 21.0]],
+            curve: 4,
+        };
         let mut bytes = UniformBytes::new(256);
-        let slot = bytes.add_slot(|writer| conversion.write(writer));
+        let slot = bytes.add_slot(|writer| conversion.write(writer, &ingest));
         assert_eq!(u64::from(slot.size), YUV_UNIFORM_BYTES);
         let number = |offset: usize| f32::from_le_bytes(bytes.as_bytes()[offset..offset + 4].try_into().unwrap());
         // Column by column, 16 bytes each: the first column is the first number of each row.
         assert_eq!([number(0), number(4), number(8)], [1.0, 4.0, 7.0]);
         assert_eq!([number(48), number(52), number(56)], [10.0, 11.0, 12.0]);
+        assert_eq!(
+            u32::from_le_bytes(bytes.as_bytes()[60..64].try_into().unwrap()),
+            4,
+            "the curve, after the offsets"
+        );
+        assert_eq!(
+            [number(64), number(68), number(72)],
+            [13.0, 16.0, 19.0],
+            "the first column of the matrix to the working space"
+        );
+        assert_eq!(
+            [number(96), number(100), number(104)],
+            [15.0, 18.0, 21.0],
+            "and the last"
+        );
     }
 
     /// The four numbers of each standard's matrix for the full range, as the standards give them (ITU-R BT.601, BT.709 and BT.2020, the colour differences

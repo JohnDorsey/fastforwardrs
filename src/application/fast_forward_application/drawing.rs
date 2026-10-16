@@ -20,7 +20,7 @@ use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
 use crate::composition::{Layer, PictureSection, VisibleVideo};
-use crate::frame_scene::{layers_of_a_section, symbol_of_a_section};
+use crate::frame_scene::{colour_of_the_preview, layers_of_a_section, symbol_of_a_section};
 use crate::media::thumbnail_second_for_source_frame;
 use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
 use crate::project::{ClipId, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
@@ -110,18 +110,23 @@ impl FastForwardApplication {
             frame_state,
             &source_looks,
         );
+        // (What the frames of the engine are put together in and encoded as comes from the settings, which are read each time: a changed setting is another frame.)
+        let colour_of_the_frames = colour_of_the_preview(self.effective_settings());
         let preview = egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| match &mut self.interface.engine_preview {
-                Some(engine_preview) => preview_panel::show_drawn_by_the_engine(
-                    ui,
-                    &content,
-                    &mut self.interface.preview_view,
-                    engine_preview,
-                    &mut self.environment.text_renderer,
-                    HowTheClockGoes::new(frame_state.is_playing, frame_state.frame_rate, Instant::now()),
-                    commands,
-                ),
+                Some(engine_preview) => {
+                    engine_preview.set_the_colour(colour_of_the_frames);
+                    preview_panel::show_drawn_by_the_engine(
+                        ui,
+                        &content,
+                        &mut self.interface.preview_view,
+                        engine_preview,
+                        &mut self.environment.text_renderer,
+                        HowTheClockGoes::new(frame_state.is_playing, frame_state.frame_rate, Instant::now()),
+                        commands,
+                    )
+                }
                 None => preview_panel::show(
                     ui,
                     &content,

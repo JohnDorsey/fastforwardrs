@@ -516,6 +516,9 @@ fn settings_from_document(document: Option<ProjectSettingsDocument>) -> ProjectS
             sped_up_clip_sound: settings.sped_up_clip_sound.or(settings
                 .mute_sped_up_clips
                 .map(SpedUpClipSound::from_the_old_mute_setting)),
+            display_transform: settings.display_transform,
+            working_colour_space: settings.working_colour_space,
+            output_colour_space: settings.output_colour_space,
         }
     })
 }
@@ -1073,6 +1076,9 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
             autosave: settings.autosave,
             sped_up_clip_sound: settings.sped_up_clip_sound,
             mute_sped_up_clips: None,
+            display_transform: settings.display_transform,
+            working_colour_space: settings.working_colour_space,
+            output_colour_space: settings.output_colour_space,
         }),
         frame_rate: project.chosen_frame_rate(),
     })

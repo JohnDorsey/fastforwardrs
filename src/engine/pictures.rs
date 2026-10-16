@@ -5,6 +5,7 @@
 
 use thiserror::Error;
 
+use super::colour::{PictureColour, WorkingSpace};
 use super::yuv::{YuvColour, chroma_size};
 
 /// How the pixels of a picture are laid out.
@@ -24,12 +25,17 @@ pub enum PicturePixels {
     },
 }
 
-/// A picture the engine is sent: how big, and its pixels.
+/// A picture the engine is sent: how big, its pixels, how its numbers are to be read, and what the engine is to make it for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PictureData {
     pub width_in_pixels: u32,
     pub height_in_pixels: u32,
     pub pixels: PicturePixels,
+    /// What the numbers of the pixels mean (for a video picture, the red, green and blue that its matrix makes of the planes): sRGB unless the sender says otherwise.
+    pub colour: PictureColour,
+    /// The working space that the engine is to make the picture for (it is converted when it is uploaded, once). **The frames that use the picture say the same one**; the
+    /// engine refuses a frame whose layers are not made for its working space. The compatibility mode unless the sender says otherwise.
+    pub working: WorkingSpace,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -54,9 +60,19 @@ impl PictureData {
             width_in_pixels,
             height_in_pixels,
             pixels: PicturePixels::Rgba8 { straight_alpha },
+            colour: PictureColour::default(),
+            working: WorkingSpace::default(),
         };
         data.check()?;
         Ok(data)
+    }
+
+    /// The same picture, its numbers read as `colour` says and made for `working`.
+    #[must_use]
+    pub fn in_colour(mut self, colour: PictureColour, working: WorkingSpace) -> Self {
+        self.colour = colour;
+        self.working = working;
+        self
     }
 
     /// A video picture in planes (see [`PicturePixels::Yuv420p8`]).
@@ -72,6 +88,8 @@ impl PictureData {
             width_in_pixels,
             height_in_pixels,
             pixels: PicturePixels::Yuv420p8 { y, u, v, colour },
+            colour: PictureColour::default(),
+            working: WorkingSpace::default(),
         };
         data.check()?;
         Ok(data)

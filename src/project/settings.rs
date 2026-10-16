@@ -18,6 +18,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::colour_space::{StandardPrimaries, TransferFunction};
+
 /// What the sound of a clip that plays faster than normal is like.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +53,123 @@ impl SpedUpClipSound {
     }
 }
 
+/// What the screen that shows the preview does with the numbers it is given (CM-04, CM-14): the curve between the codes of the picture and the light of the screen. **The
+/// primaries of the screen are taken to be Rec.709/sRGB's** (a wide-gamut screen shows them as they are, as a program that assumes sRGB does).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayTransform {
+    /// The curve of sRGB: what computer screens do, and what pictures are made for.
+    #[default]
+    Srgb,
+    /// A power of 2.2.
+    Gamma22,
+    /// A power of 2.4: the display of BT.1886, which a studio monitor shows video with.
+    Gamma24,
+}
+
+impl DisplayTransform {
+    pub const ALL: [Self; 3] = [Self::Srgb, Self::Gamma22, Self::Gamma24];
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Srgb => "sRGB",
+            Self::Gamma22 => "Gamma 2.2",
+            Self::Gamma24 => "Gamma 2.4 (BT.1886)",
+        }
+    }
+
+    /// The curve that the numbers of the picture shown are made with.
+    pub fn transfer_function(self) -> TransferFunction {
+        match self {
+            Self::Srgb => TransferFunction::Srgb,
+            Self::Gamma22 => TransferFunction::Gamma22,
+            Self::Gamma24 => TransferFunction::Gamma24,
+        }
+    }
+}
+
+/// What the pictures of a project are put together in (CM-02): light, in the primaries of one of the sets that are good to composite in. (Mixing is linear, so the choice does
+/// not change a picture that has nothing but mixing in it; it is what effects that are not linear see.)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkingColourSpace {
+    /// Linear light in the primaries of Rec.709 and sRGB.
+    #[default]
+    LinearRec709,
+    /// ACEScg: linear light in the AP1 primaries of ACES, which hold more colours than the screen shows.
+    AcesCg,
+}
+
+impl WorkingColourSpace {
+    pub const ALL: [Self; 2] = [Self::LinearRec709, Self::AcesCg];
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::LinearRec709 => "Rec.709 (linear)",
+            Self::AcesCg => "ACEScg",
+        }
+    }
+
+    /// The primaries of the light.
+    pub fn primaries(self) -> StandardPrimaries {
+        match self {
+            Self::LinearRec709 => StandardPrimaries::Rec709,
+            Self::AcesCg => StandardPrimaries::AcesCg,
+        }
+    }
+}
+
+/// What the exported video's numbers are (CM-05): the primaries and the curve that the finished picture is encoded with, which the file's tags then say.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputColourSpace {
+    /// Rec.709 primaries, **encoded as the display transform encodes** the preview, so that the file's numbers are the preview's; tagged `bt709`.
+    #[default]
+    Rec709AsPreviewed,
+    /// Rec.709 primaries, encoded with the power 2.4 of BT.1886; tagged `bt709`.
+    Rec709Bt1886,
+    /// sRGB: Rec.709 primaries and the sRGB curve; the transfer tagged `iec61966-2-1`.
+    Srgb,
+}
+
+impl OutputColourSpace {
+    pub const ALL: [Self; 3] = [Self::Rec709AsPreviewed, Self::Rec709Bt1886, Self::Srgb];
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rec709AsPreviewed => "Rec.709, as the preview shows it",
+            Self::Rec709Bt1886 => "Rec.709, BT.1886 (gamma 2.4)",
+            Self::Srgb => "sRGB",
+        }
+    }
+
+    /// The primaries of the numbers of the file.
+    pub fn primaries(self) -> StandardPrimaries {
+        StandardPrimaries::Rec709
+    }
+
+    /// The curve the numbers of the file are made with, when the display transform is `display` (which only the first of the three follows).
+    pub fn transfer_function(self, display: DisplayTransform) -> TransferFunction {
+        match self {
+            Self::Rec709AsPreviewed => display.transfer_function(),
+            Self::Rec709Bt1886 => TransferFunction::Gamma24,
+            Self::Srgb => TransferFunction::Srgb,
+        }
+    }
+
+    /// What the file says its transfer characteristics are (ffmpeg's `color_trc` name). `bt709` for the two that are Rec.709 video, whose numbers a player shows as it shows
+    /// any such video; `iec61966-2-1` for the one that says that it is sRGB.
+    pub fn transfer_tag(self) -> &'static str {
+        match self {
+            Self::Rec709AsPreviewed | Self::Rec709Bt1886 => "bt709",
+            Self::Srgb => "iec61966-2-1",
+        }
+    }
+}
+
 /// A value for every setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -60,6 +179,12 @@ pub struct Settings {
     /// What the sound of clips that play faster than normal is like, in the preview and in the
     /// exported video.
     pub sped_up_clip_sound: SpedUpClipSound,
+    /// What the screen that shows the preview does with the numbers it is given.
+    pub display_transform: DisplayTransform,
+    /// What the pictures of the project are put together in.
+    pub working_colour_space: WorkingColourSpace,
+    /// What the numbers of the exported video are.
+    pub output_colour_space: OutputColourSpace,
 }
 
 impl Settings {
@@ -67,6 +192,9 @@ impl Settings {
     pub const DEFAULT: Self = Self {
         autosave: false,
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        display_transform: DisplayTransform::Srgb,
+        working_colour_space: WorkingColourSpace::LinearRec709,
+        output_colour_space: OutputColourSpace::Rec709AsPreviewed,
     };
 }
 
@@ -81,6 +209,9 @@ impl Default for Settings {
 pub struct ProjectSettings {
     pub autosave: Option<bool>,
     pub sped_up_clip_sound: Option<SpedUpClipSound>,
+    pub display_transform: Option<DisplayTransform>,
+    pub working_colour_space: Option<WorkingColourSpace>,
+    pub output_colour_space: Option<OutputColourSpace>,
 }
 
 impl ProjectSettings {
@@ -88,6 +219,9 @@ impl ProjectSettings {
     pub const FOLLOW_ALL_GLOBAL_SETTINGS: Self = Self {
         autosave: None,
         sped_up_clip_sound: None,
+        display_transform: None,
+        working_colour_space: None,
+        output_colour_space: None,
     };
 
     /// The settings in effect for the project: its own where it has set them, the global ones
@@ -96,6 +230,9 @@ impl ProjectSettings {
         Settings {
             autosave: self.autosave.unwrap_or(global.autosave),
             sped_up_clip_sound: self.sped_up_clip_sound.unwrap_or(global.sped_up_clip_sound),
+            display_transform: self.display_transform.unwrap_or(global.display_transform),
+            working_colour_space: self.working_colour_space.unwrap_or(global.working_colour_space),
+            output_colour_space: self.output_colour_space.unwrap_or(global.output_colour_space),
         }
     }
 }
@@ -133,6 +270,33 @@ impl SettingValue for SpedUpClipSound {
 
     fn label(self) -> &'static str {
         SpedUpClipSound::label(self)
+    }
+}
+
+impl SettingValue for DisplayTransform {
+    const ALL: &'static [Self] = &DisplayTransform::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        DisplayTransform::label(self)
+    }
+}
+
+impl SettingValue for WorkingColourSpace {
+    const ALL: &'static [Self] = &WorkingColourSpace::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        WorkingColourSpace::label(self)
+    }
+}
+
+impl SettingValue for OutputColourSpace {
+    const ALL: &'static [Self] = &OutputColourSpace::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        OutputColourSpace::label(self)
     }
 }
 
@@ -213,8 +377,32 @@ const SPED_UP_CLIP_SOUND: Setting<SpedUpClipSound> = Setting {
     project: |settings| &mut settings.sped_up_clip_sound,
 };
 
+const DISPLAY_TRANSFORM: Setting<DisplayTransform> = Setting {
+    label: "Display (how the screen shows colours)",
+    global: |settings| &mut settings.display_transform,
+    project: |settings| &mut settings.display_transform,
+};
+
+const WORKING_COLOUR_SPACE: Setting<WorkingColourSpace> = Setting {
+    label: "Working colour space",
+    global: |settings| &mut settings.working_colour_space,
+    project: |settings| &mut settings.working_colour_space,
+};
+
+const OUTPUT_COLOUR_SPACE: Setting<OutputColourSpace> = Setting {
+    label: "Colour space of exported videos",
+    global: |settings| &mut settings.output_colour_space,
+    project: |settings| &mut settings.output_colour_space,
+};
+
 /// Every setting, in the order the settings windows show them.
-pub static SETTINGS: [&dyn AnySetting; 2] = [&AUTOSAVE, &SPED_UP_CLIP_SOUND];
+pub static SETTINGS: [&dyn AnySetting; 5] = [
+    &AUTOSAVE,
+    &SPED_UP_CLIP_SOUND,
+    &DISPLAY_TRANSFORM,
+    &WORKING_COLOUR_SPACE,
+    &OUTPUT_COLOUR_SPACE,
+];
 
 #[cfg(test)]
 mod tests {
@@ -225,6 +413,9 @@ mod tests {
         Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
+            display_transform: DisplayTransform::Gamma24,
+            working_colour_space: WorkingColourSpace::AcesCg,
+            output_colour_space: OutputColourSpace::Srgb,
         }
     }
 
@@ -234,7 +425,8 @@ mod tests {
             Settings::DEFAULT,
             Settings {
                 autosave: false,
-                sped_up_clip_sound: SpedUpClipSound::MaintainPitch
+                sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+                ..Settings::DEFAULT
             },
             "in particular, no autosave, and the sound of fast clips is not muted"
         );
@@ -261,24 +453,29 @@ mod tests {
         let project = ProjectSettings {
             autosave: Some(true),
             sped_up_clip_sound: None,
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         };
         assert_eq!(
             project.resolve(Settings::DEFAULT),
             Settings {
                 autosave: true,
-                sped_up_clip_sound: SpedUpClipSound::MaintainPitch
+                sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+                ..Settings::DEFAULT
             }
         );
 
         let project = ProjectSettings {
             autosave: Some(false),
             sped_up_clip_sound: Some(SpedUpClipSound::Mute),
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         };
         assert_eq!(
             project.resolve(everything_at_its_last_value()),
             Settings {
                 autosave: false,
-                sped_up_clip_sound: SpedUpClipSound::Mute
+                sped_up_clip_sound: SpedUpClipSound::Mute,
+                // (What the project does not set follows the global setting: the colour settings are at their last values there.)
+                ..everything_at_its_last_value()
             },
             "the project's own choices beat the global ones"
         );
@@ -286,6 +483,7 @@ mod tests {
         let project = ProjectSettings {
             autosave: Some(false),
             sped_up_clip_sound: None,
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         };
         assert_eq!(
             project.resolve(everything_at_its_last_value()).sped_up_clip_sound,
@@ -403,9 +601,69 @@ mod tests {
             controls,
             [
                 ("Autosave", SettingControlKind::Checkbox),
-                ("Sound of sped-up clips", SettingControlKind::Dropdown)
+                ("Sound of sped-up clips", SettingControlKind::Dropdown),
+                ("Display (how the screen shows colours)", SettingControlKind::Dropdown),
+                ("Working colour space", SettingControlKind::Dropdown),
+                ("Colour space of exported videos", SettingControlKind::Dropdown),
             ]
         );
+    }
+
+    #[test]
+    fn the_colour_settings_default_to_what_the_program_did_before_them_and_each_value_has_its_label() {
+        assert_eq!(Settings::DEFAULT.display_transform, DisplayTransform::Srgb);
+        assert_eq!(Settings::DEFAULT.working_colour_space, WorkingColourSpace::LinearRec709);
+        assert_eq!(
+            Settings::DEFAULT.output_colour_space,
+            OutputColourSpace::Rec709AsPreviewed
+        );
+        assert_eq!(
+            DisplayTransform::ALL.map(DisplayTransform::label),
+            ["sRGB", "Gamma 2.2", "Gamma 2.4 (BT.1886)"]
+        );
+        assert_eq!(
+            WorkingColourSpace::ALL.map(WorkingColourSpace::label),
+            ["Rec.709 (linear)", "ACEScg"]
+        );
+        assert_eq!(
+            OutputColourSpace::ALL.map(OutputColourSpace::label),
+            [
+                "Rec.709, as the preview shows it",
+                "Rec.709, BT.1886 (gamma 2.4)",
+                "sRGB"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_colour_settings_mean_the_curves_and_primaries_of_the_colour_module() {
+        assert_eq!(DisplayTransform::Srgb.transfer_function(), TransferFunction::Srgb);
+        assert_eq!(DisplayTransform::Gamma22.transfer_function(), TransferFunction::Gamma22);
+        assert_eq!(DisplayTransform::Gamma24.transfer_function(), TransferFunction::Gamma24);
+        assert_eq!(WorkingColourSpace::LinearRec709.primaries(), StandardPrimaries::Rec709);
+        assert_eq!(WorkingColourSpace::AcesCg.primaries(), StandardPrimaries::AcesCg);
+        // "As the preview shows it" follows the display; the other two do not.
+        for display in DisplayTransform::ALL {
+            assert_eq!(
+                OutputColourSpace::Rec709AsPreviewed.transfer_function(display),
+                display.transfer_function()
+            );
+            assert_eq!(
+                OutputColourSpace::Rec709Bt1886.transfer_function(display),
+                TransferFunction::Gamma24
+            );
+            assert_eq!(
+                OutputColourSpace::Srgb.transfer_function(display),
+                TransferFunction::Srgb
+            );
+        }
+        for output in OutputColourSpace::ALL {
+            assert_eq!(output.primaries(), StandardPrimaries::Rec709, "{output:?}");
+        }
+        // What the file says: the two that are Rec.709 video say bt709, and the one that is sRGB says so.
+        assert_eq!(OutputColourSpace::Rec709AsPreviewed.transfer_tag(), "bt709");
+        assert_eq!(OutputColourSpace::Rec709Bt1886.transfer_tag(), "bt709");
+        assert_eq!(OutputColourSpace::Srgb.transfer_tag(), "iec61966-2-1");
     }
 
     #[test]

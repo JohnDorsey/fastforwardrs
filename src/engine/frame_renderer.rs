@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+use super::colour::{DisplayDomainConversion, IngestConversion, OutputConversion};
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_call};
 use super::guard::GuardedShader;
@@ -56,6 +57,10 @@ pub enum RenderProblem {
     /// Pictures that the frame uses are not on the card (they were never sent, or were let go of to make room, or the device was replaced).
     #[error("{} of the pictures the frame uses are not on the graphics card", .0.len())]
     PicturesMissing(Vec<PictureId>),
+    /// Pictures that the frame uses were made for another working space than the one the frame is put together in: whoever sends the pictures and whoever describes the
+    /// frame do not agree (they are made from the same setting, and a picture's id says which colours it was made with).
+    #[error("{} of the pictures the frame uses were made for another working space than the frame is put together in", .0.len())]
+    PicturesOfAnotherWorkingSpace(Vec<PictureId>),
     #[error("a picture that was sent cannot be used: {0}")]
     BadPicture(String),
     #[error("the shader of an effect cannot be used: {0}")]
@@ -283,6 +288,7 @@ impl FrameRenderer {
             view,
             width_in_pixels,
             height_in_pixels,
+            working: _,
         } in pictures
         {
             drop(view);
@@ -312,15 +318,14 @@ impl FrameRenderer {
         let converted_shape = shape_of_a_picture(width, height);
         let converted = self.pool.acquire(&self.device.device, converted_shape);
         let converted_view = converted.create_view(&wgpu::TextureViewDescriptor::default());
+        // What the picture's numbers are turned into (nothing, in the compatibility mode), as the numbers of the pass that does it.
+        let ingest = IngestConversion::of(data.colour, data.working);
+        self.upload_uniforms.clear();
         let conversion_slot = match &data.pixels {
-            PicturePixels::Rgba8 { .. } => None,
-            PicturePixels::Yuv420p8 { colour, .. } => {
-                self.upload_uniforms.clear();
-                Some(
-                    self.upload_uniforms
-                        .add_slot(|writer| colour.conversion().write(writer)),
-                )
-            }
+            PicturePixels::Rgba8 { .. } => self.upload_uniforms.add_slot(|writer| ingest.write(writer)),
+            PicturePixels::Yuv420p8 { colour, .. } => self
+                .upload_uniforms
+                .add_slot(|writer| colour.conversion().write(writer, &ingest)),
         };
 
         let ((), mistake) = self.device.catching_errors(|| {
@@ -345,12 +350,13 @@ impl FrameRenderer {
                 .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
                 .collect();
             let device = &self.device.device;
-            let (pipeline, bind_group, dynamic_offsets) = match (&data.pixels, conversion_slot) {
-                (PicturePixels::Yuv420p8 { .. }, Some(slot)) => {
-                    let buffer = self
-                        .upload_arena
-                        .upload(device, &self.device.queue, &self.upload_uniforms)
-                        .expect("a slot was written");
+            let slot = conversion_slot;
+            let buffer = self
+                .upload_arena
+                .upload(device, &self.device.queue, &self.upload_uniforms)
+                .expect("a slot was written");
+            let (pipeline, bind_group, dynamic_offsets) = match &data.pixels {
+                PicturePixels::Yuv420p8 { .. } => {
                     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("engine yuv pass"),
                         layout: &self.pipelines.yuv.bind_group_layout,
@@ -379,16 +385,26 @@ impl FrameRenderer {
                     });
                     (&self.pipelines.yuv.pipeline, bind_group, vec![slot.offset])
                 }
-                _ => {
+                PicturePixels::Rgba8 { .. } => {
                     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("engine ingest pass"),
                         layout: &self.pipelines.ingest.bind_group_layout,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&views[0]),
-                        }],
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer,
+                                    offset: 0,
+                                    size: NonZeroU64::new(u64::from(slot.size)),
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&views[0]),
+                            },
+                        ],
                     });
-                    (&self.pipelines.ingest.pipeline, bind_group, Vec::new())
+                    (&self.pipelines.ingest.pipeline, bind_group, vec![slot.offset])
                 }
             };
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -422,6 +438,7 @@ impl FrameRenderer {
                 view: converted_view,
                 width_in_pixels: width,
                 height_in_pixels: height,
+                working: data.working,
             },
             width as usize * height as usize * BYTES_PER_PIXEL_ON_THE_CARD,
         );
@@ -476,6 +493,18 @@ impl FrameRenderer {
         let missing = self.pictures.missing(pictures_used());
         if !missing.is_empty() {
             return Err(RenderProblem::PicturesMissing(missing));
+        }
+        let made_for_another_working_space: Vec<PictureId> = pictures_used()
+            .filter(|id| {
+                self.pictures
+                    .get(*id)
+                    .is_some_and(|picture| picture.working != description.colour.working)
+            })
+            .collect();
+        if !made_for_another_working_space.is_empty() {
+            return Err(RenderProblem::PicturesOfAnotherWorkingSpace(
+                made_for_another_working_space,
+            ));
         }
         self.pictures.touch(pictures_used());
 
@@ -579,8 +608,10 @@ impl FrameRenderer {
                                         }),
                                         _ => {
                                             let rows = colour_matrix_rows(&effect.values);
+                                            let domain = DisplayDomainConversion::of(description.colour.working);
                                             self.uniforms.add_slot(|writer| {
                                                 writer.mat3x3_from_rows(rows);
+                                                domain.write(writer);
                                             })
                                         }
                                     }
@@ -591,14 +622,20 @@ impl FrameRenderer {
                     PassPlan::PlaceLayers { layers } => {
                         effect_slots.push(Vec::new());
                         for &number in layers {
-                            let uniforms = PlacementUniforms::of_layer(&description.layers[number], (width, height));
+                            let uniforms = PlacementUniforms::of_layer_in(
+                                &description.layers[number],
+                                (width, height),
+                                description.colour.working,
+                            );
                             slots.push((number, self.uniforms.add_slot(|writer| uniforms.write(writer))));
                         }
                     }
                     PassPlan::ClearAccumulation | PassPlan::Output => effect_slots.push(Vec::new()),
                 }
             }
-            // The numbers that make the planes of the export are the last slot.
+            // The numbers of the last pass (the display transform, or what the output is encoded as), and then, for the export, those that make its planes.
+            let output_conversion = OutputConversion::of(description.colour);
+            let output_slot = self.uniforms.add_slot(|writer| output_conversion.write(writer));
             let planes_slot = match output_kind {
                 FrameOutput::Planes(colour) => Some(
                     self.uniforms
@@ -753,13 +790,24 @@ impl FrameRenderer {
                         }
                     }
                     PassPlan::Output => {
+                        let uniform_buffer = uniform_buffer.expect("a frame with an output has uniforms");
                         let bind_group = self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("engine output pass"),
                             layout: &self.pipelines.output.bind_group_layout,
-                            entries: &[wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&accumulation_view),
-                            }],
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                        buffer: uniform_buffer,
+                                        offset: 0,
+                                        size: NonZeroU64::new(u64::from(output_slot.size)),
+                                    }),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&accumulation_view),
+                                },
+                            ],
                         });
                         let mut render_pass = begin_pass(
                             &mut encoder,
@@ -768,7 +816,7 @@ impl FrameRenderer {
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         );
                         render_pass.set_pipeline(&self.pipelines.output.pipeline);
-                        render_pass.set_bind_group(0, &bind_group, &[]);
+                        render_pass.set_bind_group(0, &bind_group, &[output_slot.offset]);
                         render_pass.draw(0..3, 0..1);
                     }
                 }

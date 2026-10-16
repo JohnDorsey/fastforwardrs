@@ -93,6 +93,7 @@ pub fn what_to_do_after_a_failed_frame(
         | RenderProblem::GraphicsMistake(_)
         | RenderProblem::ReadbackFailed(_)
         | RenderProblem::PicturesMissing(_)
+        | RenderProblem::PicturesOfAnotherWorkingSpace(_)
         | RenderProblem::BadPicture(_)
         | RenderProblem::BadEffectShader(_) => AfterAFailedFrame::GoOn,
     }
