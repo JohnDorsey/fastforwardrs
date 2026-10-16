@@ -132,11 +132,13 @@ impl Setup {
         self.update_until(content, "a frame is shown", EnginePreview::has_a_frame_to_show);
     }
 
-    /// Updates with `content` until the frame that is shown is not the one that was before (by its serial number), and gives it.
+    /// Updates with `content` until the frame that is shown is not the one that was before (by its serial number) and is the answer to the last frame that was
+    /// asked for, and gives it. (The last one: the preview may have asked for a frame more than once, for instance when the engine says the device was replaced,
+    /// and an answer to an earlier request that comes late is not the answer to what is asked for now.)
     fn show_a_new_frame_of(&mut self, content: &PreviewContent<'_>) -> RenderedFrame {
         let before = self.preview.shown.as_ref().map(|shown| shown.serial);
         self.update_until(content, "a new frame is shown", |preview| {
-            preview.shown.as_ref().map(|shown| shown.serial) != before
+            preview.shown.as_ref().map(|shown| shown.serial) != before && preview.has_shown_the_last_frame_asked_for()
         });
         self.preview.the_frame_shown().unwrap().clone()
     }
