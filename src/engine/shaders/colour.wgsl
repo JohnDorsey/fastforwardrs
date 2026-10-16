@@ -22,21 +22,21 @@ const REC709_BETA: f32 = 0.018053968510807;
 fn decode_to_light(curve: u32, codes: vec3<f32>) -> vec3<f32> {
     let code = clamp(codes, vec3<f32>(0.0), vec3<f32>(1.0));
     switch curve {
-        case 0u: {
+        case CURVE_SRGB: {
             let straight = code / 12.92;
             let powered = pow((code + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
             return select(powered, straight, code <= vec3<f32>(0.04045));
         }
-        case 1u: {
+        case CURVE_GAMMA_22: {
             return pow(code, vec3<f32>(2.2));
         }
-        case 2u: {
+        case CURVE_GAMMA_24: {
             return pow(code, vec3<f32>(2.4));
         }
-        case 3u: {
+        case CURVE_GAMMA_26: {
             return pow(code, vec3<f32>(2.6));
         }
-        case 4u: {
+        case CURVE_REC709: {
             let straight = code / 4.5;
             let powered = pow((code + vec3<f32>(REC709_ALPHA - 1.0)) / REC709_ALPHA, vec3<f32>(1.0 / 0.45));
             return select(powered, straight, code < vec3<f32>(4.5 * REC709_BETA));
@@ -51,21 +51,21 @@ fn decode_to_light(curve: u32, codes: vec3<f32>) -> vec3<f32> {
 fn encode_from_light(curve: u32, lights: vec3<f32>) -> vec3<f32> {
     let light = max(lights, vec3<f32>(0.0));
     switch curve {
-        case 0u: {
+        case CURVE_SRGB: {
             let straight = 12.92 * light;
             let powered = 1.055 * pow(light, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055);
             return select(powered, straight, light <= vec3<f32>(0.0031308));
         }
-        case 1u: {
+        case CURVE_GAMMA_22: {
             return pow(light, vec3<f32>(1.0 / 2.2));
         }
-        case 2u: {
+        case CURVE_GAMMA_24: {
             return pow(light, vec3<f32>(1.0 / 2.4));
         }
-        case 3u: {
+        case CURVE_GAMMA_26: {
             return pow(light, vec3<f32>(1.0 / 2.6));
         }
-        case 4u: {
+        case CURVE_REC709: {
             let straight = 4.5 * light;
             let powered = REC709_ALPHA * pow(light, vec3<f32>(0.45)) - vec3<f32>(REC709_ALPHA - 1.0);
             return select(powered, straight, light < vec3<f32>(REC709_BETA));

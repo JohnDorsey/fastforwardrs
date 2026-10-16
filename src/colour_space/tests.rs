@@ -468,3 +468,30 @@ fn the_matrix_functions_multiply_apply_and_undo() {
         [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
     );
 }
+
+#[test]
+fn the_straight_piece_of_the_srgb_curve_is_used_up_to_and_at_its_knee_and_the_power_above_it() {
+    // (IEC 61966-2-1: the straight piece for a code of 0.04045 or less and for a light of 0.0031308 or less. The two pieces meet there to within 3e-8, so only the exact
+    // arithmetic of each piece can tell which of them is used: the pieces are written out here as the standard writes them.)
+    let srgb = TransferFunction::Srgb;
+    for code in [0.0, 0.01, 0.0402, 0.04045] {
+        assert_eq!(srgb.decode_to_light(code), code / 12.92, "code {code}");
+    }
+    for code in [0.04046, 0.1, 0.5, 1.0] {
+        assert_eq!(
+            srgb.decode_to_light(code),
+            ((code + 0.055) / 1.055).powf(2.4),
+            "code {code}"
+        );
+    }
+    for light in [0.0, 0.001, 0.0031, 0.0031308] {
+        assert_eq!(srgb.encode_from_light(light), 12.92 * light, "light {light}");
+    }
+    for light in [0.0031309, 0.1, 0.5, 1.0] {
+        assert_eq!(
+            srgb.encode_from_light(light),
+            1.055 * light.powf(1.0 / 2.4) - 0.055,
+            "light {light}"
+        );
+    }
+}

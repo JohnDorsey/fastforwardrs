@@ -201,6 +201,16 @@ can be supported. The design notes answer that at length; here is what the syste
 * **CM-20 [P] M** **Parity before linear light.** The engine is first run in a **display-referred compatibility mode** that reproduces today's pipeline (so that
   parity with the oracle can be *proved*, EN-02); linear light is then switched on as **a separate, reviewed change** whose visible differences are listed
   (edges of scaled pictures, blends, blurs). Otherwise the port and the new look arrive together and neither can be checked.
+  *(Phase 3, 2026-10-16: **status of the colour entries** [V on software adapters, WARP and lavapipe; the report has the tests]. **Built:** CM-01 (half-float premultiplied linear light, the working format
+  of the engine), CM-02 and CM-14 (the working colour space, the display transform and the output colour space are rows of the settings table, global with a project override; Rec.709 linear and
+  ACEScg), CM-03 (a file's tags and what is assumed where it says nothing, in one function; said in words in the window of the file, and changeable there), CM-04 (the display transform: sRGB,
+  gamma 2.2, gamma 2.4), CM-05 (the output space and the tags of the file: matrix, primaries, transfer and range, always), CM-07 (sRGB, gammas, the Rec.709 camera curve, linear), CM-08 and CM-15 (a
+  table of primaries and the conversions made from it, in Rust and in WGSL, the one held to the other), CM-09 (no 8-bit stage between the sources and the output: the export's planes are made from
+  the half-float frame), CM-12 (old projects are converted: format 12, a fixture of format 11), CM-16 (round trips; published numbers: IEC 61966-2-1, BT.709, BT.2087, the ACES matrices), CM-17
+  (the planes of 4:2:0 are turned into colours on the card, smoothly in linear light; **4:2:2, 4:4:4 and 10-bit are made into colours by ffmpeg, told the matrix and the range, not by the card**:
+  the part of CM-17 not done), CM-20 (the compatibility mode is the "before" of the pictures in `docs/engine-comparison-phase-3`; the review is the gate). **Partly:** CM-10 (the hue shift is
+  display-referred and runs in the right domain; a foreign effect would be given working-space numbers, and the conversion around it waits for phase 4). **Not built:** CM-06 (AP0 as an input or
+  output space: the primaries are in the table, but there is no way to choose them yet), CM-11 (`.cube`: phase 4), CM-13 (HDR), CM-18 (camera logs), CM-19.)*
 * **CM-19 [P] L** OpenColorIO as an **optional** tool (to read an OCIO config or to bake a view transform to a table): a C++ library with no WGSL output and no
   established Rust binding, so it is not on the path of the first release. **Later** (Q-35, 2026-10-15): the colour space table (CM-15) is data and baked
   tables are the common output, so nothing blocks it.

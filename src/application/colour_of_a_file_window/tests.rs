@@ -253,3 +253,26 @@ fn a_file_that_is_not_in_the_project_any_more_closes_its_window() {
 
     assert_eq!(harness.state().open_for, None);
 }
+
+#[test]
+fn a_choice_in_the_window_of_a_picture_file_is_about_that_file_and_not_the_video() {
+    let mut harness = harness_of(Shown::of(Some(PICTURE), None));
+
+    harness.get_by_value("Automatic (sRGB)").click();
+    harness.run();
+    harness.get_by_label("Gamma 2.2").click();
+    harness.run();
+
+    assert_eq!(
+        harness.state().project.source_colour(PICTURE),
+        Some(InputColourOverride {
+            curve: Some(TransferFunction::Gamma22),
+            ..InputColourOverride::AUTOMATIC
+        })
+    );
+    assert_eq!(
+        harness.state().project.source_colour(VIDEO),
+        Some(InputColourOverride::AUTOMATIC),
+        "the video is as it was"
+    );
+}

@@ -358,3 +358,94 @@ fn the_words_about_held_pictures_give_the_number_and_say_what_stood_in_for_them_
         assert!(words.contains("damaged"), "it says what may be the reason: {words}");
     }
 }
+
+// --- how the colours of the videos are read ---
+
+fn a_plan_of_two_videos(colour_of_the_second: crate::project::InputColourOverride) -> ExportPlan {
+    use crate::project::{Settings, TimelineFrameIndex};
+    use crate::video_export::plan_export;
+    use crate::video_export::test_projects::{project_with_video, video_source};
+    let mut project = project_with_video(1920, 1080, false);
+    project
+        .import_source(video_source(2, 320, 180, 100, false), TimelineFrameIndex::new(300))
+        .unwrap();
+    project.set_source_colour(SourceMediaIdentifier::new(2), colour_of_the_second);
+    plan_export(&project, Settings::DEFAULT).unwrap()
+}
+
+fn formats_of_both(
+    first: VideoStreamFormat,
+    second: VideoStreamFormat,
+) -> HashMap<SourceMediaIdentifier, VideoStreamFormat> {
+    HashMap::from([
+        (SourceMediaIdentifier::new(1), first),
+        (SourceMediaIdentifier::new(2), second),
+    ])
+}
+
+fn eight_bit_four_two_zero() -> VideoStreamFormat {
+    VideoStreamFormat {
+        pixel_format: Some("yuv420p".to_owned()),
+        ..VideoStreamFormat::default()
+    }
+}
+
+#[test]
+fn the_export_wants_the_planes_of_a_video_that_is_stored_as_the_engine_can_take_them_and_not_of_one_that_is_not() {
+    let plan = a_plan_of_two_videos(crate::project::InputColourOverride::AUTOMATIC);
+    let other_way = VideoStreamFormat {
+        pixel_format: Some("yuv444p".to_owned()),
+        ..VideoStreamFormat::default()
+    };
+
+    let readings = readings_of_the_videos(&plan, &formats_of_both(eight_bit_four_two_zero(), other_way));
+
+    assert!(
+        readings[&SourceMediaIdentifier::new(1)].planes.is_some(),
+        "the video that is 8 bits, 4:2:0, is given to the engine as ffmpeg decodes it"
+    );
+    assert_eq!(readings[&SourceMediaIdentifier::new(1)].ffmpeg_is_told, None);
+    assert_eq!(readings[&SourceMediaIdentifier::new(2)].planes, None);
+    assert!(
+        readings[&SourceMediaIdentifier::new(2)].ffmpeg_is_told.is_some(),
+        "the other is made into colours by ffmpeg, which is told how"
+    );
+}
+
+#[test]
+fn each_video_of_the_export_is_read_with_the_size_of_its_own_picture_and_what_the_user_says_of_it() {
+    use crate::colour_space::{StandardPrimaries, VideoMatrix};
+    let said = crate::project::InputColourOverride {
+        matrix: Some(VideoMatrix::Bt2020),
+        primaries: Some(StandardPrimaries::DisplayP3),
+        ..crate::project::InputColourOverride::AUTOMATIC
+    };
+    let plan = a_plan_of_two_videos(said);
+
+    let readings = readings_of_the_videos(
+        &plan,
+        &formats_of_both(eight_bit_four_two_zero(), eight_bit_four_two_zero()),
+    );
+
+    // The first is 1920 by 1080 and the user said nothing of it: BT.709 by its size. The second is 320 by 180 and the user said BT.2020 and the primaries of P3.
+    assert_eq!(
+        readings[&SourceMediaIdentifier::new(1)]
+            .planes
+            .map(|planes| planes.matrix),
+        Some(VideoMatrix::Bt709)
+    );
+    assert_eq!(
+        readings[&SourceMediaIdentifier::new(2)]
+            .planes
+            .map(|planes| planes.matrix),
+        Some(VideoMatrix::Bt2020)
+    );
+    assert_eq!(
+        readings[&SourceMediaIdentifier::new(2)].picture_colour.primaries,
+        StandardPrimaries::DisplayP3
+    );
+    assert_eq!(
+        readings[&SourceMediaIdentifier::new(1)].picture_colour,
+        crate::engine::PictureColour::SRGB
+    );
+}

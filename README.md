@@ -15,7 +15,9 @@ timeline. A clip or a track can have **effects** (so far, a **hue shift** that t
 colours), which are put on with a **+** button in the properties panel and are animated with keyframes like any other
 property. Clips, tracks and other groups can be put together in **groups** (**tags**, **clip groups** and **track groups**),
 which are drawn on the timeline as outlines in a colour of their own and can have effects too. The preview can be **zoomed**,
-in until the pixels of the picture can be seen. Every edit can be undone.
+in until the pixels of the picture can be seen. Every edit can be undone. **Pictures are put together in linear light**, as light is mixed (a layer that is half see-through,
+turned or made smaller takes its share of the light of what is behind it), and **what the colours of each file are** is read from what the file says of them and can be said
+by hand (see *Colours*).
 
 ## Status
 
@@ -266,6 +268,9 @@ replacement is made to run at its rate).
 |---|---|---|
 | Autosave | Saves the project to its file by itself two seconds after the last change. Only for a project that already has a file: the first save always asks where. With it on, closing the window or loading another project do not ask about unsaved changes: they save. | off |
 | Sound of sped-up clips | A drop-down list for what the sound of a clip that plays faster than normal is like, in the preview and in the exported video: **Mute** (silence of the same length), **Maintain pitch** (faster, but not higher) or **Increase pitch** (like a tape wound on: higher, the more the faster; a clip faster than 1000x is silent) | Maintain pitch |
+| Display (how the screen shows colours) | The curve that the numbers of the preview are made with, for the screen: **sRGB**, **Gamma 2.2** or **Gamma 2.4 (BT.1886)**. Only the preview follows it; the exported video follows *Colour space of exported videos*. (The primaries of the screen are taken to be Rec.709's; the program does not read the computer's colour profile.) | sRGB |
+| Working colour space | What the pictures of the project are put together in, as light: **Rec.709 (linear)** or **ACEScg** (the wide primaries of ACES, which keep the mixing of strongly coloured light truer). The preview and the export both follow it. | Rec.709 (linear) |
+| Colour space of exported videos | What the numbers of the exported video are: **Rec.709, as the preview shows it** (the picture is encoded as the display setting encodes the preview, so that the file's numbers are the preview's), **Rec.709, BT.1886 (gamma 2.4)** or **sRGB**. The file says which (see *Exported video*). | Rec.709, as the preview shows it |
 
 The **global settings** (*Edit > Global settings*) are the same for every project. They are kept in a file in
 the operating system's folder for programs' settings (`%APPDATA%\fastforwardrs\settings.json` on Windows), which
@@ -364,7 +369,7 @@ is in a tag and has no badge of it) is refused with the group named.
 ```json
 {
   "file_format": "fastforwardrs-project",
-  "file_format_version": 11,
+  "file_format_version": 12,
   "sources": [
     {
       "kind": "video",
@@ -559,8 +564,9 @@ and it is never bigger than the picture: what is further out than that is moved 
 itself, and is left out altogether when the project follows them all. `frame_rate` is the frame rate chosen for
 the project, and is left out while the project follows its first video. A source that is included in the project file
 (which is an archive then) has `included_as`, the name of its entry, besides the two paths it had when it was included, which
-are kept as they were (they are where it is put back); it is left out for a source that is not included. **Older files are still
-read**: version 9 files have no groups and no badges (nothing in them is in a group), and what the program writes is always version 11; version 10 files (and version 11 as it was while the effects were being given names) call an effect by the name that the program had for it, `hue shift`, have their values in a list, have no `plugins`, and have no `instance` in their effects and no `effect` in their racks (they have at most one effect of each kind: the effects are named in the order they are in, and a rack of the keyframes of the values of an effect is of the effect that has a value of that name);
+are kept as they were (they are where it is put back); it is left out for a source that is not included. A video or a picture file that the user has said
+the colours of (see *Colours*) has `colour`: an object with the parts that were said and no others, `matrix` (`bt601`, `bt709` or `bt2020`), `range` (`limited` or `full`), `primaries` (`rec709`, `bt601_ntsc`, `bt601_pal`, `rec2020`, `display_p3`, `aces_cg`, `aces2065`) and `curve` (`srgb`, `gamma22`, `gamma24`, `gamma26`, `rec709` or `linear`); it is left out when nothing was said (and a sound has none). The project's own `settings` may also have `display_transform`, `working_colour_space` and `output_colour_space` (left out while the project follows the global ones). **Older files are still
+read**: version 11 files have no `colour` and no colour settings (the user said nothing, and the project follows the global colour settings: they load as they were); version 9 files have no groups and no badges (nothing in them is in a group), and what the program writes is always version 12; version 10 files (and version 11 as it was while the effects were being given names) call an effect by the name that the program had for it, `hue shift`, have their values in a list, have no `plugins`, and have no `instance` in their effects and no `effect` in their racks (they have at most one effect of each kind: the effects are named in the order they are in, and a rack of the keyframes of the values of an effect is of the effect that has a value of that name);
 version 8 files have no `included_as` (nothing in them is included); version 7
 files have no effects (nothing in them has one); version 6
 files have an `animation` object in a clip or a track where version 7 has a rack in its drawer (it is read as a rack of
@@ -571,6 +577,36 @@ version 3 files have no heights, pictures, places or turns (every track is of th
 fitted inside the picture and every text is upright); version 2 files (one video and its clips) become a project with
 one track called `track 0`, and version 1 files (from before there were settings) follow all the settings. The
 old yes-or-no setting *mute sped-up clips* is read as *Mute* or *Maintain pitch*.
+
+## Colours
+
+**What a picture is made of is light, and the program mixes light.** Every picture that is put on the frame (a video, a picture file, a text, the fast-forward symbol) is first
+turned from the numbers of its file into **linear light** (by the curve that goes with the file), in the primaries of the **working colour space** (Rec.709 or ACEScg: see *Settings*).
+Scaling, turning, a layer that is half see-through, and the soft edge of a letter all mix light, as a lens and a screen do: **a white line on black that is made thinner than a
+pixel is brighter, not darker; half of white over black is the number 0.735 of an sRGB picture, not 0.5**. At the end the light is turned into the numbers of the screen (the
+*display* setting) for the preview, or of the file (the *colour space of exported videos*) for the export, in half-float numbers, and only the last step rounds them to bytes. **What
+is not mixed does not change**: a picture shown at its own size and opaque comes out with the numbers it had (all 256 codes are held to it by a test), and so does a clip that is
+only cut or moved. The hue shift is done on the numbers of the screen (sRGB codes, Rec.709 primaries) wherever the colours are put together, so that it looks as it always did.
+
+**What the colours of a file are.** A video says what its colours are (ffprobe's `color_space`, `color_range`, `color_primaries`, `color_transfer` and `chroma_location`), and the program
+reads it as a player does: the **matrix** (BT.601, BT.709 or BT.2020) and the **range** (limited, 16 to 235, or full) as the file says; where the file **says nothing** of the matrix, it is
+**BT.709 for a picture of more than 1024 across or 576 down and BT.601 for a smaller one** (it was BT.601 for every size until version 12), and the range is limited (full for a `yuvj` file);
+the **primaries** as the file says (Rec.709 where it says nothing); and the **curve**: a file that says `bt709` (or any other curve of the video standards of standard dynamic range) or
+says nothing is read as **the curve that a screen shows it with, sRGB's** (nearly every such file is a recording of a screen, or made to be seen on one, and every player shows it so; the
+camera curve of BT.709 would lift every shadow, and is never chosen from a tag: only by hand). **High dynamic range** (PQ, HLG) is **not converted**: such a file is read as sRGB, and says so.
+A picture file, a text and the symbol are sRGB. How a video's pictures are made into colours is one function for the preview and the export (the matrix and range are given to ffmpeg for the
+forms that it makes colours of, so that it does not guess BT.601), and where the colour differences of a 4:2:0 video sit among the pixels (`left`, `center`, `topleft`; left where the file does
+not say) decides how they are blended back into one for every pixel: **in linear light the edge between two colours of a video is smooth, where it was a block of four pixels**.
+
+**Saying it by hand.** Right-click a clip made from a video or a picture file and choose **Colour space of this file...**: a window with a drop-down list for the *matrix*, the *range*, the
+*primaries* and the *transfer function* of a video (a picture file has the primaries and the transfer function). Each starts at **Automatic**, with what that is for this file written in it, and
+under the lists is **everything that was assumed, in words**. A choice is applied at once and is an edit that can be undone (choices in a row on one file are one step); the preview and the
+export read the file as chosen, and the project file keeps it (see *Project files*). (The old drawing of the preview, which is only used when it is asked for, ignores all of this, as it always did.)
+
+**What can be seen to be different** from before colours were made like this (the pictures and numbers are in `docs/engine-comparison-phase-3`, and the list in `docs/engine-phase-3-report.md`):
+what is scaled, turned or made see-through is mixed as light (edges and fine detail are brighter; soft text edges are the coverage of light); an untagged high-definition video has other reds and
+greens (BT.709 instead of BT.601); the edge between two colours of a video is smooth; the exported file says its matrix, primaries and transfer where it used to say nothing for a video that
+said nothing. Nothing else changes.
 
 ## Exported video
 
@@ -596,11 +632,13 @@ old yes-or-no setting *mute sped-up clips* is read as *Mute* or *Maintain pitch*
 * What has **effects** is made as they say: the colours of a layer are changed on the card by the matrix of its effects at that frame, before the layer is put in
   its place; the effects of a clip are done and then those of its track, and those of its groups (see *Groups*). The picture of a text object is changed the same
   way. An effect that changes nothing (a hue shift of no turn, or of whole turns) is not asked for at all.
-* The **colours of the file** follow the **first video** of the project (the one at the back of the first stretch that has a video): the finished picture is made as
-  red, green and blue, and turned into planes with the matrix that video states (BT.601 for one that states nothing, and then the file states nothing either, as
-  before; BT.709, BT.601 or BT.2020 where it states them, and then the file states the same name, and the primaries and the transfer if the video states them), in the
-  limited range (a video of the full range is squeezed into it, and the file says so). So a video of one matrix that fills the picture comes out as its own planes
-  to within a level, and the file says what it said.
+* The **colours of the file** are those of the **colour space of exported videos** of the project (see *Settings*), and nothing else (until version 12 of the
+  program they followed the first video of the project): the finished picture is put together in linear light, **encoded** with the curve that the space says into
+  half-float numbers, and **only then** turned into the planes of `yuv420p` (BT.709, the limited range, rounded to 8 bits once, at the end: it is not rounded to 8 bits
+  first, as the preview's picture is), so that the file's numbers are the preview's when the space is the first one. **The file always says what its colours are**: its
+  matrix and its primaries (`bt709`), its transfer (`bt709` for the two spaces that are Rec.709 video, `iec61966-2-1` for sRGB) and its range (`tv`), where it used to say
+  nothing when the first video said nothing. A video of another matrix (a standard-definition one, say) is converted, in light, to what the file says, so its colours
+  are its own and the file is not tagged with the matrix of another.
 * The sound is every track's sound mixed, each clip sped up with its picture (see *Settings*), and it is as long as
   the picture. Where a sped-up clip is so short that its sound would be under a tenth of a second, that stretch is
   silent instead.
@@ -637,8 +675,9 @@ The code is a library plus a thin `main`. It is layered, and each layer only dep
 | `rgba_picture`, `text_rendering` | A picture made by the program (as pixels), and the drawing of a text object into one, with `cosmic-text` (fonts, wrapping, fallback fonts for other alphabets and emoji). The fonts of the computer take a moment to load, which is done once on another thread. The text is drawn upright in its area: turning it is done when it is laid over. |
 | `speed_indicator` | Draws the fast-forward symbol and decides where it goes, for the preview **and** the export, so they cannot disagree. |
 | `frame_scene` | What a frame of the finished picture shows, and what the picture engine is asked to draw for it: `PreviewContent` (the layers that are seen, each with where it is, its colours and what its picture is made of) `layers_of_a_section` and `symbol_of_a_section` (a section of the picture plan as the layers and the symbol of a frame, as they are at that frame), and `describe_frame`, which turns it into the engine's `FrameDescription`. **The window and the export both use all of it**, which is what makes them the same picture. |
-| `engine` | The picture engine: a thread of its own with its own graphics device (`wgpu`) that draws a frame from a description (layers of pictures with effects), keeps the pictures that it is sent on the card, and for the export makes the planes of a `yuv420p` picture of the frame and reads them back, frame after frame in order with the next recorded while the one before is read. It guards against a card that does not answer (see *The picture engine*). |
-| `video_export` | The export of the finished video: `plan_export` (what has to happen: the runs of video, the files, the sound, the size), `PicturesOfTheRuns` (one ffmpeg decode for each run, in order), `FrameDescriber` (each frame as the preview describes it), `output_colour` (the matrix and the tags the file gets from the first video), the `Encoder` (ffmpeg given raw frames on its standard input) and `VideoExport`, which runs it all on a thread and reports progress. |
+| `engine` | The picture engine: a thread of its own with its own graphics device (`wgpu`) that draws a frame from a description (layers of pictures with effects), keeps the pictures that it is sent on the card (made into **linear light**, premultiplied, in half floats, when they are sent), and for the export makes the planes of a `yuv420p` picture of the frame (from the finished frame in half floats, rounding once) and reads them back, frame after frame in order with the next recorded while the one before is read. It guards against a card that does not answer (see *The picture engine*). |
+| `video_export` | The export of the finished video: `plan_export` (what has to happen: the runs of video, the files, the sound, the size, and the output colour space), `PicturesOfTheRuns` (one ffmpeg decode for each run, in order), `FrameDescriber` (each frame as the preview describes it), `output_colour` (the matrix and the tags the file gets from the output colour space), the `Encoder` (ffmpeg given raw frames on its standard input) and `VideoExport`, which runs it all on a thread and reports progress. |
+| `colour_space` | Colours as numbers (phase 3): the table of **primaries** (Rec.709/sRGB, the two of BT.601, Rec.2020, Display P3, ACEScg and ACES2065-1: their chromaticities and whites), the **curves** between codes and light (sRGB, gammas 2.2, 2.4 and 2.6, the camera curve of Rec.709, linear), the matrices between sets of primaries (through X, Y and Z, with the Bradford adaptation where the whites differ), the **matrices** and **ranges** of video, and where the colour differences of a video sit. It is the reference: written in `f64`, held to published numbers (IEC 61966-2-1, BT.709, BT.2087, the ACES matrices) and by round trips, and the graphics card's version of it (`engine/shaders/colour.wgsl`) is held to it. |
 | `playback` | The clock, which pictures the preview needs for a frame (one for each video that is seen), the `PreviewPictures` that keeps a `PictureSupplier` for each track (decoders running ahead of the clock), and the `AudioSupplier` that keeps the sound in step with it and feeds the speakers (through `cpal`, opened by `output_stream`, which the **sound effects** use too: the snip of a cut and the sounds of drawers are made by the program (`sound_effects`: `snip` and `drawer` are the sounds, and `synthesis` is what they are made from, noise and filters and the shaping of an end) and play through a stream of their own, so that they are heard while paused and never disturb the sound of the preview). |
 | `application` | The egui window. Decisions (where tiles and waveform bars go, how far a clip may be moved, what a slider position means, how an edit moves the current frame, which keys do what (`keyboard`: a table of rows, key and modifiers and where the pointer is, with a test that checks the order of the rows, because egui matches a key that has more modifiers held than a row asks for), at which frame an edit of what has keyframes is made (`gesture_frame`: a gesture keeps to the frame it began at), where a layer's handles are and what a point on the preview is on, which settings the windows show) are plain functions or small tables with tests; the drawing code is thin. The timeline is a directory of small files (ruler, a track's header, its strip, the clips, the playhead, dragging clips about, resizing a track, the rows (where each track is drawn, and `track_reordering`, which moves them out of the way of a track whose title box is being dragged), the drawers and what is in them (`drawers`: their buttons, their height and how a crate is laid out; `racks` and `rack_look`: the racks and their diamonds, and the labels of them; `grip_dots`: the shaded bumps that say that something can be dragged), `item_dragging` and `rack_dragging` (where the pointer takes clips and keyframes, and racks: what is dragged together is chosen in `what_is_dragged` and `drag_of`), `clip_menu` (the menu of a clip), the flash of a cut, `rows` (`RowsLayout`, which says how tall the rows are going to be, so that the timeline panel can be made that tall before it is drawn: see `prepare`), scrolling and zooming, and the `StripView` that turns a place along the strips into a place on the screen and back, so that no drawing code writes that formula out for itself), the preview too (the layers, the widgets that take the mouse, what is under a point, the symbol, and how it is zoomed: `view.rs` is the arithmetic of the zoom and `zooming.rs` the wheel and the *Fit* button), and the properties panel (a file for each kind of thing it shows, `effects.rs` for the boxes of the effects and the **+** button that puts one on, which is the round `plus_button` the timeline has for tracks too), the history of edits and the selection are modules of their own, and the application itself is a set of files by what they are about (flows for source files, the project file, the files that are included in it and taken out again, export, dialogs, and one place that carries out every command), and `archive_cache` (where the files that are taken out of project archives are kept). |
 
@@ -789,6 +828,7 @@ tests, and how many tests said that they were skipped, where the run shows that)
 
 ## Known limits
 
+* **Colours** (see *Colours*): **high dynamic range** (PQ, HLG) is not converted (read as sRGB, with a note in the window of the file), and nor are camera logs; the program does not read the **computer's colour profile** (the display is sRGB, 2.2 or 2.4 by the setting) and does not dither (a smooth dark gradient can show steps); ffmpeg **scales a video before the program sees it**, in the numbers of the file and not in light (a video made much smaller has its edges averaged in codes); the matrix and range chosen for a video that is stored as 4:2:2, 4:4:4 or in 10 bits are given to ffmpeg, which makes its colours itself and blends their colour differences its own way (**native planes for those forms are not made**); and **effects of other people's** (shaders loaded from files, which the program does not yet have a way to ask for) would get the numbers of the working space and not the numbers of the screen (when they exist, phase 4 gives them the domain they declare).
 * **The effects of a clip group or a track group are a placeholder for now**: they are done to the picture of each member by itself, which makes the same picture as doing them to the whole only where the members are not see-through (see *Groups*); at the see-through edges of layers that are over others it can be quite different. A tag is not affected. Groups have no effect on sound, are not clicked or dragged on the timeline, and have no name written on it.
 * Cut clips cannot be joined again. There is no way to trim a clip by dragging its edge (cut it and delete the
   part instead). A clip dragged to another track is never put on a new track: the track has to be there.

@@ -605,6 +605,31 @@ mod tests {
         ClipId::new(TrackId::new(0), number)
     }
 
+    #[test]
+    fn choices_about_the_colours_of_one_file_are_one_gesture_and_choices_about_two_files_are_two() {
+        let choice = |file: u32, said: InputColourOverride| Command::SetTheColoursOfAFile {
+            source: SourceMediaIdentifier::new(file),
+            colour: said,
+        };
+        let another_choice = InputColourOverride {
+            curve: Some(crate::colour_space::TransferFunction::Gamma24),
+            ..InputColourOverride::AUTOMATIC
+        };
+        assert_eq!(
+            choice(1, InputColourOverride::AUTOMATIC).gesture_key(),
+            choice(1, another_choice).gesture_key(),
+            "the same file, whatever is chosen"
+        );
+        assert!(choice(1, another_choice).gesture_key().is_some());
+        assert_ne!(
+            choice(1, another_choice).gesture_key(),
+            choice(2, another_choice).gesture_key(),
+            "another file is another step of the history"
+        );
+        assert!(choice(1, another_choice).may_change_the_project());
+        assert!(!Command::ShowTheColoursOfAFile(SourceMediaIdentifier::new(1)).may_change_the_project());
+    }
+
     fn speed_of(clip_number: u32, factor: u32) -> Command {
         Command::SetClipSpeed {
             clip: clip(clip_number),

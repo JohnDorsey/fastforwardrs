@@ -59,8 +59,18 @@ fn options() -> ExportOptions {
 
 /// Exports `project` to `destination` and waits for the end.
 fn export(toolchain: &FfmpegToolchain, project: &Project, destination: &Path) -> Outcome {
+    export_with_settings(toolchain, project, Settings::DEFAULT, destination)
+}
+
+/// [`export`], with the settings that are in effect (the colour ones, say) being `settings`.
+fn export_with_settings(
+    toolchain: &FfmpegToolchain,
+    project: &Project,
+    settings: Settings,
+    destination: &Path,
+) -> Outcome {
     let _one_at_a_time = one_export_at_a_time();
-    let plan = plan_export(project, Settings::DEFAULT).expect("the project can be exported");
+    let plan = plan_export(project, settings).expect("the project can be exported");
     let locations: Vec<_> = plan
         .source_files
         .iter()
@@ -861,5 +871,57 @@ fn a_high_definition_video_that_says_nothing_is_read_as_bt709_in_the_export_whic
             mean < 2.0,
             "{pixel_format}: the mean difference between the colours is {mean}"
         );
+    }
+}
+
+#[test]
+fn the_file_has_the_numbers_and_the_tags_of_the_output_colour_space_of_the_project() {
+    // (Phase 3, piece 3.5.) A grey of 128 is a light of 0.216; the numbers of the file are that light encoded with the curve of the space, and the file says which curve it
+    // is, so a player reads them back as the light they were made of. The three spaces make three files that are told apart by what they say and by their numbers.
+    use fastforwardrs::colour_space::TransferFunction;
+    use fastforwardrs::project::OutputColourSpace;
+    let toolchain = ready_or_skip!();
+    let scratch = scratch_directory();
+    let video = support::flat_colour_video(&toolchain, scratch.path(), (128, 128, 128));
+    let project = project_of_the_video(&toolchain, &video);
+    let light = TransferFunction::Srgb.decode_to_light(128.0 / 255.0);
+    for (space, curve, transfer_tag) in [
+        (OutputColourSpace::Rec709AsPreviewed, TransferFunction::Srgb, "bt709"),
+        (OutputColourSpace::Rec709Bt1886, TransferFunction::Gamma24, "bt709"),
+        (OutputColourSpace::Srgb, TransferFunction::Srgb, "iec61966-2-1"),
+    ] {
+        let destination = scratch.path().join(format!("{space:?}.mp4"));
+        let settings = Settings {
+            output_colour_space: space,
+            ..Settings::DEFAULT
+        };
+
+        let outcome = export_with_settings(&toolchain, &project, settings, &destination);
+
+        assert_eq!(outcome.result, ExportResult::Completed, "{space:?}");
+        let json = support::probe_json(&toolchain, &destination, &["-show_streams"]);
+        let video = &json["streams"][0];
+        if fastforwardrs::media::export::VideoEncoder::choose(&toolchain)
+            == fastforwardrs::media::export::VideoEncoder::Libx264
+        {
+            assert_eq!(video["color_space"].as_str(), Some("bt709"), "{space:?}: matrix");
+            assert_eq!(video["color_primaries"].as_str(), Some("bt709"), "{space:?}: primaries");
+            assert_eq!(
+                video["color_transfer"].as_str(),
+                Some(transfer_tag),
+                "{space:?}: transfer"
+            );
+            assert_eq!(video["color_range"].as_str(), Some("tv"), "{space:?}: range");
+        }
+        let numbers = decode_video(&toolchain, &destination, 320, 180);
+        let middle = &numbers.pictures[0][(90 * 320 + 160) * 3..(90 * 320 + 160) * 3 + 3];
+        let wanted = (curve.encode_from_light(light) * 255.0).round();
+        eprintln!("{space:?}: the file's grey is {middle:?} and the arithmetic says {wanted}");
+        for channel in middle {
+            assert!(
+                (f64::from(*channel) - wanted).abs() <= 4.0,
+                "{space:?}: the file's numbers are {middle:?}, and the light of a grey of 128 encoded as the space says is {wanted}"
+            );
+        }
     }
 }

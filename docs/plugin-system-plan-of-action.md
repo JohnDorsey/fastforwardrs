@@ -211,6 +211,15 @@ declare their colour domain (CM-10); the hue shift stays display-referred (Q-07)
 black is 0.5 in linear light, 0.735 in sRGB code"); **a written list of every visible difference with before/after pictures, reviewed by the maintainer** before the phase is called done.
 *Delivers:* the colour handling that was asked for as "important".
 
+**Progress (2026-10-16).** Built, in pieces (design `engine-phase-3-design.md`, section 12; report `engine-phase-3-report.md`): the colour spaces as numbers and their curves (`colour_space`);
+the engine in linear light (`WorkingSpace::Linear`; the compatibility mode stays inside the engine as the oracle's mode and is not a setting); the three colour settings (display, working
+space, output space); what a file's tags mean, one function for the preview and the export (untagged HD is BT.709); the export made from the encoded half-float frame, with the file saying
+its matrix, primaries, transfer and range; the per-source colour dialog (*Colour space of this file...*) and **project file format 12** with a fixture of format 11; ffmpeg told the matrix
+and the range for every form it makes colours of; smooth reconstruction of the colour differences of 4:2:0 video in linear light. **Not done:** native planes for 4:2:2, 4:4:4 and
+10-bit video (see the design, section 12: ffmpeg's conversion, told the matrix, is right in the colours; what native planes would add is in how colour differences are blended, and it is a large
+change for a kind of file that screen recordings are not), and the conversion of the colour domain around **foreign** effects (C10; the first foreign effect that cares is phase 4's).
+**The gate is the maintainer's review of the list of visible differences** (`docs/engine-comparison-phase-3`, with the report): the phase is not called done before it.
+
 ### Phase 4 — The effect surface, built-in effects and the `.cube` host (size L)
 
 SC-04, ID-01 to ID-09, MD-01 to MD-10, RS-01 to RS-09, EF-01, EF-07, UI-01 to UI-07, UI-11, DS-01 to DS-03 (folders; binary scanning waits for phase 7), PH-01 to PH-05, PH-20,

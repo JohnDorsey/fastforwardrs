@@ -188,3 +188,56 @@ fn the_planes_of_a_frame_that_is_mixed_in_light_are_what_the_plain_arithmetic_ma
         }
     });
 }
+
+#[test]
+fn what_is_out_of_range_when_the_frame_is_encoded_is_cut_off_before_the_planes_are_made_of_it() {
+    // A green that a wide-gamut screen has and an ordinary one has not: the full green of Display P3 is, in the light of Rec.709, a green above 1 and a red and a blue below 0.
+    // The 8 bits that the preview shows cut that off by being 8 bits; the half floats that the planes are made of do not, so the pass that writes them has to.
+    use super::{PictureColour, PictureData};
+    use crate::colour_space::StandardPrimaries;
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let working = WorkingSpace::Linear(StandardPrimaries::Rec709);
+        let p3_green = PictureColour {
+            primaries: StandardPrimaries::DisplayP3,
+            curve: TransferFunction::Srgb,
+        };
+        let pixels: Vec<u8> = [0_u8, 255, 0, 255].repeat(24);
+        let data = PictureData::rgba8(6, 4, pixels).unwrap().in_colour(p3_green, working);
+        renderer.upload_picture(super::PictureId(1), &data).unwrap();
+        let mut description = FrameDescription::black((6, 4));
+        description.colour = colour_of(working);
+        description.layers = vec![the_whole_frame(1)];
+
+        let light = crate::colour_space::matrix::apply(
+            &StandardPrimaries::DisplayP3.conversion_to(StandardPrimaries::Rec709),
+            [0.0, 1.0, 0.0],
+        );
+        let uncut = light.map(|light| TransferFunction::Srgb.encode_from_light(light.max(0.0)));
+        assert!(
+            uncut[1] > 1.01,
+            "a premise: the green is past what an ordinary screen has ({uncut:?})"
+        );
+        assert!(
+            light[0] < 0.0 && light[2] < 0.0,
+            "a premise: the red and the blue are below 0 ({light:?})"
+        );
+        let wanted = rounded(levels_of_bt709_limited(uncut.map(|code| code.clamp(0.0, 1.0))));
+
+        let (planes, _) = renderer
+            .render_planes(&description, BT709_LIMITED, A_LONG_TIME)
+            .unwrap();
+
+        for (name, made, wanted) in [
+            ("brightness", planes.luma(), wanted[0]),
+            ("blue colour difference", planes.blue_difference(), wanted[1]),
+            ("red colour difference", planes.red_difference(), wanted[2]),
+        ] {
+            assert!(
+                made.iter().all(|&level| level.abs_diff(wanted) <= 1),
+                "the {name} is {:?} and the arithmetic of a green that is cut off says {wanted}",
+                &made[..made.len().min(3)]
+            );
+        }
+    });
+}

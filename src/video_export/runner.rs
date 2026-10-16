@@ -40,6 +40,25 @@ use crate::project::{SourceMediaIdentifier, TextObject};
 use crate::rgba_picture::RgbaPicture;
 use crate::text_rendering::LazyTextRenderer;
 
+/// How the colours of each video of the export are read: by the very function that the preview asks (`reading_of_a_video`), from the format of the file, the size of its
+/// picture and what the user says of it. **The export always wants planes** where the file is stored in a way that the engine can take, which is what makes the colour
+/// differences of its pictures the preview's.
+fn readings_of_the_videos(
+    plan: &ExportPlan,
+    formats: &HashMap<SourceMediaIdentifier, VideoStreamFormat>,
+) -> HashMap<SourceMediaIdentifier, VideoReading> {
+    formats
+        .iter()
+        .map(|(source, format)| {
+            let video = &plan.videos[source];
+            (
+                *source,
+                reading_of_a_video(Some(format), video.display_size_in_pixels, &video.colour, true),
+            )
+        })
+        .collect()
+}
+
 /// How many frames are asked of the engine and not yet written to the encoder, at most. The engine works on two at once (`EngineSettings::export_frames_in_flight`);
 /// the others wait their turn, and are the room that the decoders and the encoder are given to be a little late and a little early without stopping the engine.
 const MOST_FRAMES_ASKED_AHEAD: usize = 4;
@@ -369,17 +388,7 @@ fn produce(job: Job) -> Result<(), Ending> {
             .map_err(|error| Ending::failed(format!("{} cannot be read: {error}", name_of(location))))?;
         formats.insert(source, format);
     }
-    // (How the colours of each video are read is decided by the very function that the preview asks, from the file's format, the size of its picture and what the user says.)
-    let readings: HashMap<SourceMediaIdentifier, VideoReading> = formats
-        .iter()
-        .map(|(source, format)| {
-            let video = &plan.videos[source];
-            (
-                *source,
-                reading_of_a_video(Some(format), video.display_size_in_pixels, &video.colour, true),
-            )
-        })
-        .collect();
+    let readings = readings_of_the_videos(&plan, &formats);
     let planes: HashMap<SourceMediaIdentifier, NativeYuv420p> = readings
         .iter()
         .filter_map(|(source, reading)| Some((*source, reading.planes?)))

@@ -111,6 +111,10 @@ A frame whose description is the same as the one before it (a title card, a stil
   is reused. (Measured in the benchmark's new scene, section 8.)
 * **No frame cache for the export** (`most_cached_frames` is 0 in its engine): the export asks for a frame once.
 
+> **Superseded in phase 3 (2026-10-16).** What this section says of the colours of the finished video (the matrix and the tags following the *first video*, a first video that says nothing leaving
+> the file saying nothing) is **no longer so**: the planes are BT.709, limited, and the file always says `bt709` matrix and primaries, the transfer of the output space and `tv`, whatever the first
+> video was (`docs/engine-phase-3-design.md`, decisions C9, C13 and C14). The section is kept as it was for what it says of why the first rule was made.
+
 ## 5. Colour, tags and the encoder
 
 The encoder is given `-f rawvideo -pixel_format yuv420p -video_size WxH -framerate N/D -i pipe:0`, then the source files that the sound is made from as further inputs, the sound graph as before
