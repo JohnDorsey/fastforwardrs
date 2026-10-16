@@ -297,11 +297,14 @@ fn the_device_says_what_it_can_do_in_numbers_that_make_sense() {
             device.uniform_alignment
         );
         assert!(device.largest_texture_side >= 2048, "{}", device.largest_texture_side);
-        assert_eq!(
-            device.adapter_information.device_type,
-            wgpu::DeviceType::Cpu,
-            "the tests only use a software adapter"
-        );
+        // A net under all the tests, which only use a software adapter: unless the environment lets them use the adapter that a Mac has (one step of its CI does).
+        if std::env::var_os(super::TESTS_MAY_USE_ANY_ADAPTER_VARIABLE).is_none() {
+            assert_eq!(
+                device.adapter_information.device_type,
+                wgpu::DeviceType::Cpu,
+                "the tests only use a software adapter"
+            );
+        }
     });
 }
 

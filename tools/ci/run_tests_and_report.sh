@@ -7,21 +7,39 @@
 #
 # With `error` the script fails like the command did. With `warning` it reports the failures as a warning and succeeds: for the tests that measure real time (sound
 # without a gap, a picture on time), which a shared machine with a few slow processors cannot be asked to pass.
+#
+# Whatever the outcome it also writes what ran as a NOTICE: the "test result" line of each program of tests, and how many lines say SKIPPED. (A test that is skipped passes,
+# and the only way to tell it from one that ran is that it says so; the tests print `SKIPPED: why`, which is in the log when they are run with `-- --nocapture`.)
 level=$1
 title=$2
 shift 2
 log="${RUNNER_TEMP:-/tmp}/report_$$.log"
 set -o pipefail
+
+# Writes the message $1 as an annotation of the kind $2 with the title $3.
+annotate() {
+    local message="$1"
+    message="${message//'%'/'%25'}"
+    message="${message//$'\r'/}"
+    message="${message//$'\n'/'%0A'}"
+    echo "::$2 title=$3::$message"
+}
+
+what_ran() {
+    local summary skipped
+    summary=$(grep -E '^test result:' "$log" | sed -E 's/; 0 measured; 0 filtered out//' | head -n 30)
+    skipped=$(grep -c 'SKIPPED' "$log")
+    annotate "$(printf '%s\nlines that say SKIPPED: %s' "$summary" "$skipped" | head -c 3000)" notice "$title (what ran)"
+}
+
 if "$@" 2>&1 | tee "$log"; then
+    what_ran
     exit 0
 fi
+what_ran
 failed=$(grep -E '^test .* FAILED$' "$log" | head -n 40)
 said=$(grep -A8 -E '^---- .* stdout ----$' "$log" | cut -c1-300 | head -n 60)
-message=$(printf '%s\n\n%s' "$failed" "$said" | head -c 3500)
-message="${message//'%'/'%25'}"
-message="${message//$'\r'/}"
-message="${message//$'\n'/'%0A'}"
-echo "::$level title=$title::$message"
+annotate "$(printf '%s\n\n%s' "$failed" "$said" | head -c 3500)" "$level" "$title"
 if [ "$level" = "warning" ]; then
     exit 0
 fi

@@ -142,8 +142,9 @@ jobs:
           FASTFORWARDRS_TESTS_MAY_USE_ANY_ADAPTER: "1"
           FASTFORWARDRS_REQUIRE_FFMPEG: "1"
         run: |
-          bash tools/ci/run_tests_and_report.sh warning "Library tests of the engine and the export that failed on Metal" cargo test --lib --no-fail-fast -- engine:: video_export::
-          bash tools/ci/run_tests_and_report.sh warning "Integration tests of the export that failed on Metal" cargo test --no-fail-fast --test video_export_pictures --test video_export_runs --test video_export_encoder --test command_line_export
+          # (`--nocapture`, so that the tests that skip say so, and the notice that the helper writes says how many lines say SKIPPED: a skipped test passes.)
+          bash tools/ci/run_tests_and_report.sh warning "Library tests of the engine and the export that failed on Metal" cargo test --lib --no-fail-fast -- engine:: video_export:: --nocapture
+          bash tools/ci/run_tests_and_report.sh warning "Integration tests of the export that failed on Metal" cargo test --no-fail-fast --test video_export_pictures --test video_export_runs --test video_export_encoder --test command_line_export -- --nocapture
 
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
       # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.

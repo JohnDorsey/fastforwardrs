@@ -23,7 +23,7 @@ use crate::engine::foreign_effect_tests::{
     guarded, inverted, the_passes_it_says,
 };
 use crate::engine::oracle_tests::{TestPicture, compare};
-use crate::engine::testing::{DevicesMade, Gate, software_graphics};
+use crate::engine::testing::{DevicesMade, Gate, really_software_graphics, software_graphics};
 use crate::engine::{
     AdapterChoice, CORNERS_OF_THE_WHOLE_PICTURE, DEFAULT_MOST_PASSES_OF_A_LOOP, EffectCall, Engine, LayerDescription,
     LayerSource, RenderedFrame,
@@ -210,7 +210,9 @@ fn a_frame_that_fails_on_a_lost_device_is_told_to_have_failed_and_then_the_devic
 #[test]
 fn a_frame_that_the_card_did_not_finish_is_told_to_have_failed_and_the_device_is_replaced_and_what_was_made_before_is_not_given_again()
  {
-    let Some(_graphics) = software_graphics() else { return };
+    let Some(_graphics) = really_software_graphics() else {
+        return;
+    };
     with_a_worker(software_settings(), |worker, told| {
         give_the_effect(worker, "test:invert", INVERT);
         give_the_effect(worker, "test:numbers", SHOW_THE_NUMBERS);

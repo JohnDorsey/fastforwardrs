@@ -5,7 +5,7 @@
 //! can make, and its report says what it found and whether the gate was made only when it is the gate.
 
 use super::*;
-use crate::engine::testing::software_graphics;
+use crate::engine::testing::{really_software_graphics, software_graphics};
 
 fn small() -> BenchmarkSettings {
     BenchmarkSettings {
@@ -231,7 +231,9 @@ fn the_pictures_are_what_they_are_said_to_be_and_not_all_one_colour() {
 
 #[test]
 fn the_benchmark_runs_every_scene_on_the_software_adapter_and_says_what_it_found() {
-    let Some(_graphics) = software_graphics() else { return };
+    let Some(_graphics) = really_software_graphics() else {
+        return;
+    };
     for frames_in_flight in [1, 2, 3] {
         let mut settings = small();
         settings.frames_in_flight = frames_in_flight;

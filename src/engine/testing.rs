@@ -55,6 +55,21 @@ pub fn software_graphics() -> Option<SoftwareGraphics> {
     }
 }
 
+/// Like [`software_graphics`], for a test that is about what a **software** adapter does (the words it says, its numbers, a draw that goes on using the processor, a
+/// shader that is made to take long): where the device is not a software one (a Mac, when the environment lets the tests use the adapter it has:
+/// [`crate::engine::TESTS_MAY_USE_ANY_ADAPTER_VARIABLE`]) it says so and gives `None`, and the test returns.
+pub fn really_software_graphics() -> Option<SoftwareGraphics> {
+    let graphics = software_graphics()?;
+    if graphics.device.adapter_information.device_type == wgpu::DeviceType::Cpu {
+        return Some(graphics);
+    }
+    eprintln!(
+        "SKIPPED: this test is about software adapters, and the adapter is {}",
+        graphics.device.adapter_information.name
+    );
+    None
+}
+
 /// Like [`software_graphics`], but with a device of its own that the test may destroy.
 pub fn software_graphics_with_a_device_of_its_own() -> Option<SoftwareGraphics> {
     let guard = taking_the_lock();

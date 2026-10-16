@@ -20,7 +20,7 @@ The old export (ffmpeg's filter graph for the picture, the cutting of animation 
 | 2.5 | the runner, the frame describer, the encoder, the colours of the file | `d478f82` |
 | 2.6 | the window's export on the engine, the command line `fastforwardrs-export` | `4e3331a` |
 | 2.7 | the comparison with the old export on 13 projects, and the old export deleted | `1280da6` |
-| 2.8 | what planting mistakes found, one function for what a frame shows, a panic ends an export with a message, the macOS step of the CI, the documents | the commit of this report |
+| 2.8 | what planting mistakes found, one function for what a frame shows, a panic ends an export with a message, the macOS step of the CI, the documents | `b42fb86`, and what the first run of the macOS step led to (the commit after it) |
 
 ### The gate of the plan, line by line
 
@@ -40,7 +40,7 @@ The old export (ffmpeg's filter graph for the picture, the cutting of animation 
 * **The mutation campaign:** 57 planted mistakes in 2.2 to 2.4 (the engine's planes and ordered frames, and `pictures.rs`; all noticed in the end, one being no mistake) and **274 in 2.8** over the rest of the new code: **201 noticed at once by the unit tests, 61 more by the programs with the real ffmpeg or after tests were written for them, 12 not noticed**: 2 are code that was removed, 3 can only be noticed on Linux (and fail there, checked by hand), 7 change nothing that a test could see. The list, with the reason for each, is in design section 11.3.
 * **The comparison with the old export** (13 projects, every frame of both decoded and compared): frames the same, a video that fills the picture within 3 levels, differences at edge pixels; reproduced from a copy of the old commit [V]. **WARP and lavapipe on the same 40 scenes: within 4 levels, 98.5 % of the values exactly; the planes within 2.**
 * **The benchmark** (release build): on the software adapter (WARP) at 640 by 360, 30 frames of each scene, the whole stack makes **8.7 frames to the second** with its pictures already on the card and **5.8** when every frame is given new pictures of video (5.9 with two frames on their way: a processor does not do two things better than one). The new rows are the ones that matter for the gate and are for you to run (section 8).
-* **CI:** green on all five jobs at 2.7 (`1280da6`, 1416 s: about twice the 777 s of before the phase, because the export tests run on software rendering). The commit of this report is read when it has run.
+* **CI** [V]: green on all five jobs at 2.7 (`1280da6`, 1416 s) and at 2.8 (`b42fb86`, 1691 s: about twice the 777 s of before the phase, because the export tests run on software rendering), with the warnings that are there by design on the Mac (and the new ones of the Metal step, section 3).
 
 ## 2. What can be seen (the list of visible differences)
 
@@ -67,7 +67,7 @@ The old export and the new one were compared once on **13 projects**, every fram
 * **A destination that is not there yet is not "the same file as a source"** (the old check had a branch for that, which could never be true).
 * **X10 only half:** the last picture is held when a file has fewer than the project was told, and counted, **but nothing tells the user** yet. **Question 4.**
 * **Not built, on purpose:** not making a frame again when it is the same as the one before (a title card of ten seconds is made 300 times). It is an optimisation that nothing needed to be correct; it waits for a measurement on a real card.
-* **A step in the CI that runs the tests of the engine and of the export on the Mac's Metal device**, with `FASTFORWARDRS_TESTS_MAY_USE_ANY_ADAPTER=1` set in that step and nowhere else, and failures as warnings (it is a virtual machine that is set aside for tests, which is what SF-01 allows). **Its first result is not known** (it needs a push to run).
+* **A step in the CI that runs the tests of the engine and of the export on the Mac's Metal device**, with `FASTFORWARDRS_TESTS_MAY_USE_ANY_ADAPTER=1` set in that step and nowhere else, and failures as warnings (it is a virtual machine that is set aside for tests, which is what SF-01 allows). **Its first result [V, the annotations of the run of `b42fb86`]:** the step ran on `Apple Paravirtual device (Metal, IntegratedGpu)` in 99 seconds; **4 of the library tests of the engine and the export failed, each because its premise is a software adapter** (the benchmark's check that the adapter is a software one, the device's check of its type, the watchdog's test of a shader that does not finish, which is made to take long, and the test that the message of a lost device says `processor`); they skip where the adapter is not a software one now. **No integration test of the export failed on Metal**; whether they ran or only skipped (a skipped test passes) could not be told from that run, so the step counts the lines that say SKIPPED now, and the next run says.
 
 **Yours, as before:** the shape of the export (decode and encode in ffmpeg, compose in the engine); the old export deleted with its tests at the end of the phase.
 
@@ -120,7 +120,7 @@ that a panic in the export's thread ends the export with a message (and that the
 stuck, on Linux); that the window and the export call one function for what a frame shows; that the planes are the preview's frame converted; that nothing of this ran on a real graphics card.
 
 **Believed [B]:** that the 8-bit frame is **byte for byte** the same in the two (it is one render with a different read-back; no test reads it back in planes mode); that a real card behaves as the software adapters do (speed, a lost device, edge pixels of turned pictures); that `--adapter best` picks the card you expect (the ranking is a tested function of a list; making a device on a real card is not tested);
-what the Metal step of the CI will say; that the colour siting of 4:2:0 is not visible; that a video of the full range or one that is not in planes comes out right end to end (the rule is a tested table; no such file was exported in a test); that the 7 mistakes that nothing noticed change nothing a test could see (my reading, with the reason for each); that `fastforwardrs-export` leaves the half-written file when it is stopped with Ctrl+C (from the code).
+that the engine and the export work on Metal (the first run of the step: no integration test of the export failed, but whether they ran is not told yet); that the colour siting of 4:2:0 is not visible; that a video of the full range or one that is not in planes comes out right end to end (the rule is a tested table; no such file was exported in a test); that the 7 mistakes that nothing noticed change nothing a test could see (my reading, with the reason for each); that `fastforwardrs-export` leaves the half-written file when it is stopped with Ctrl+C (from the code).
 
 ## 8. What I need from you
 

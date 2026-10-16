@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use super::engine_tests::{events_of, software_engine_with};
 use super::foreign_effect_tests::{call, effect_source};
 use super::oracle_tests::TestPicture;
-use super::testing::software_graphics;
+use super::testing::really_software_graphics;
 use super::{
     AdapterChoice, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, EngineEvent, EngineSettings, FrameDescription,
     LayerDescription, LayerSource, PictureId,
@@ -142,7 +142,9 @@ fn has_the_lines_in_order(said: &str, lines_in_order: &[&str]) -> bool {
 fn a_shader_that_does_not_finish_in_a_frame_is_caught_by_the_watchdog_the_device_is_replaced_and_the_engine_makes_the_next_frame()
  {
     // (The right to use the graphics device is held while the child runs, as it is for any test that draws, so that nothing else uses the processor with it.)
-    let Some(_graphics) = software_graphics() else { return };
+    let Some(_graphics) = really_software_graphics() else {
+        return;
+    };
     let outcome = run_in_a_process_of_its_own(THE_CHILD, THE_PARENT_WAITS_FOR_THE_CHILD);
     assert_eq!(outcome.ended_well, Some(true), "{}", outcome.report());
     assert!(
@@ -196,7 +198,7 @@ fn the_child_that_waits_for_ever() {
 #[test]
 #[ignore = "is run by the test that starts it, in a process of its own: the work of the shader it gives the engine is not stopped by anything but the end of the process"]
 fn the_child_that_gives_the_engine_a_shader_that_does_not_finish() {
-    let Some(_graphics) = software_graphics() else {
+    let Some(_graphics) = really_software_graphics() else {
         println!("CHILD: no software adapter");
         return;
     };
