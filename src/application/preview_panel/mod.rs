@@ -50,6 +50,11 @@ mod zooming;
 pub use engine_preview::render_size_for;
 pub use engine_preview::{EnginePreview, HowTheClockGoes};
 pub use view::PreviewView;
+
+// (The content of the preview is described by `frame_scene`, which the export uses too: what the preview shows and what the export shows are the same picture.)
+pub use crate::frame_scene::{
+    PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
+};
 #[cfg(test)]
 pub use zooming::FIT_BUTTON_LABEL;
 
@@ -60,62 +65,14 @@ pub use names::{
     turn_place_id, video_label,
 };
 
-use std::borrow::Cow;
-
 use egui::{Rect, Ui, vec2};
 
 use super::commands::Command;
 use super::textures::Textures;
-use crate::colour_effects::ColourMatrix;
-use crate::media::ThumbnailLibrary;
-use crate::playback::SuppliedPicture;
-use crate::project::{
-    ClipId, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId,
-};
-use crate::rgba_picture::RgbaPicture;
+use crate::project::ClipId;
 use crate::text_rendering::LazyTextRenderer;
 use geometry::PictureOnScreen;
 use speed_indicator_overlay::SymbolOnScreen;
-
-/// What shows where a video is in the picture.
-pub enum VideoInThePicture<'a> {
-    /// The picture of the video for the current frame.
-    Picture(&'a SuppliedPicture),
-    /// A thumbnail of the video, enlarged, stands in until the picture arrives.
-    Thumbnail {
-        source: SourceMediaIdentifier,
-        second: usize,
-        library: &'a ThumbnailLibrary,
-    },
-    /// There is a video, and nothing of it to show yet.
-    Waiting,
-}
-
-/// What a layer of the picture is made of.
-pub enum PreviewLayerContent<'a> {
-    Video(VideoInThePicture<'a>),
-    /// A picture from an image file, which is not decoded yet (`None`) for a moment after it is opened.
-    Image {
-        source: SourceMediaIdentifier,
-        picture: Option<&'a RgbaPicture>,
-    },
-    /// A text object as it is at the current frame: what the clip says, or, if it has keyframes, as they change it.
-    Text(Cow<'a, TextObject>),
-}
-
-/// A video, a picture or a text object that is seen, and where it is on the picture.
-pub struct PreviewLayer<'a> {
-    pub clip: ClipId,
-    /// The track the clip is on.
-    pub track: TrackId,
-    /// Where the layer is at the current frame: where the clip says, or, if it has keyframes, as they change that.
-    pub placement: Placement,
-    /// How the effects of the layer change the colours of its picture at the current frame, all of them together. (The picture that
-    /// stands in for a video until its own arrives, a blurry thumbnail, has them changed too, so that the colours do not jump when
-    /// the sharp picture comes.)
-    pub colour: ColourMatrix,
-    pub content: PreviewLayerContent<'a>,
-}
 
 impl PreviewLayer<'_> {
     fn is_text(&self) -> bool {
@@ -137,25 +94,6 @@ impl PreviewLayer<'_> {
             PreviewLayerContent::Image { .. } => names::picture_label(self.clip),
         }
     }
-}
-
-/// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.
-#[derive(Clone, Copy)]
-pub struct SymbolOnThePreview {
-    pub over: ClipId,
-    pub speed: SpeedFactor,
-}
-
-/// What the preview shows.
-pub struct PreviewContent<'a> {
-    /// The size of the finished picture, in pixels, or `None` while there is nothing to show.
-    pub picture_size: Option<(u32, u32)>,
-    /// What is over the black picture now, the layer at the back first.
-    pub layers: Vec<PreviewLayer<'a>>,
-    /// The symbol of the video that is in front, if that is sped up.
-    pub symbol: Option<SymbolOnThePreview>,
-    pub indicator_layout: SpeedIndicatorLayout,
-    pub selected_clip: Option<ClipId>,
 }
 
 impl<'a> PreviewContent<'a> {

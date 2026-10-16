@@ -491,6 +491,47 @@ fn the_symbol_is_a_layer_of_its_own_right_after_the_layer_it_is_over_so_that_wha
 }
 
 #[test]
+fn the_symbol_is_exactly_where_the_window_says_it_is_on_a_frame_of_any_size_with_any_layout_and_speed() {
+    // (The window works out where the symbol is with `SymbolOnScreen::of`; the engine's description does not use it, so that the export can describe a frame without
+    // the window, and this says that the two sums give the same numbers.)
+    use super::speed_indicator_overlay::SymbolOnScreen;
+    let picture = video_picture(1);
+    for render_size in [(800, 450), (1920, 1080), (321, 177), (64, 36), (3840, 2160)] {
+        for layout in [
+            SpeedIndicatorLayout::DEFAULT,
+            SpeedIndicatorLayout::new(0.1, 0.2, 0.15),
+            SpeedIndicatorLayout::new(0.9, 0.9, 0.5),
+            SpeedIndicatorLayout::new(0.0, 0.0, 0.05),
+        ] {
+            for speed in [2, 3, 4, 8, 16, 33] {
+                let mut shown = content(vec![showing(0, &picture, whole_picture())], None);
+                shown.symbol = Some(the_symbol_over(0, speed));
+                shown.indicator_layout = layout;
+                let mut supply = WritesItDown::default();
+                let description = super::engine_view::describe_frame(&shown, render_size, 0, &mut supply);
+                let (width, height) = (render_size.0 as f32, render_size.1 as f32);
+                let on_the_screen = SymbolOnScreen::of(
+                    layout,
+                    SpeedFactor::new(speed).unwrap(),
+                    Rect::from_min_size(pos2(0.0, 0.0), vec2(width, height)),
+                )
+                .body;
+                let expected = [
+                    (on_the_screen.left() / width, on_the_screen.top() / height),
+                    (on_the_screen.right() / width, on_the_screen.top() / height),
+                    (on_the_screen.right() / width, on_the_screen.bottom() / height),
+                    (on_the_screen.left() / width, on_the_screen.bottom() / height),
+                ];
+                assert_eq!(
+                    description.layers[1].corners, expected,
+                    "{render_size:?}, {layout:?}, speed {speed}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn the_symbol_is_a_picture_of_its_speed_and_its_height_in_pixels_and_nothing_else_makes_it_another() {
     let picture = video_picture(1);
     let the_symbol_id = |speed: u32, layout: SpeedIndicatorLayout, generation: u64| {

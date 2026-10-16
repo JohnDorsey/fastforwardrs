@@ -122,6 +122,15 @@ jobs:
         shell: bash
         run: FASTFORWARDRS_REQUIRE_FFMPEG=1 bash tools/ci/run_tests_and_report.sh warning "ffmpeg's own behaviour found" cargo test --no-fail-fast --test media_ffmpeg_quirks
 
+      # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
+      # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.
+      - name: Show the graphics adapters
+        shell: bash
+        continue-on-error: true
+        run: |
+          list=$(cargo run --example engine_benchmark -- --list 2>&1 | grep -E '^[0-9]+:|adapter|no ' | tr '\n' ';')
+          echo "::notice title=Graphics adapters of the runner ($RUNNER_OS)::${list:-none listed}"
+
       - name: Integration tests were not run
         if: ${{ steps.ffmpeg.outputs.major < 9 }}
         run: |
