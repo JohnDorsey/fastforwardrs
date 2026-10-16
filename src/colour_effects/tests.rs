@@ -169,38 +169,3 @@ fn a_picture_that_a_matrix_that_changes_nothing_is_applied_to_is_the_same_pictur
     ColourMatrix::NOTHING_CHANGES.apply_to_rgba_pixels(&mut pixels);
     assert_eq!(pixels, before);
 }
-
-#[test]
-fn ffmpeg_is_asked_for_the_matrix_with_the_numbers_as_short_as_they_can_be_written() {
-    assert_eq!(
-        ColourMatrix::NOTHING_CHANGES.ffmpeg_filter(),
-        "colorchannelmixer=rr=1:rg=0:rb=0:gr=0:gg=1:gb=0:br=0:bg=0:bb=1"
-    );
-    assert_eq!(
-        ColourMatrix::hue_rotation(180.0).ffmpeg_filter(),
-        "colorchannelmixer=rr=-0.574:rg=1.43:rb=0.144:gr=0.426:gg=0.43:gb=0.144:br=0.426:bg=1.43:bb=-0.856"
-    );
-}
-
-#[test]
-fn the_filter_has_no_exponents_and_no_minus_zero_whatever_the_turn_is() {
-    for degrees in [0.0, 30.0, 90.0, 180.0, 270.0, 359.9, -45.0, 1e-3, 123.456] {
-        let filter = ColourMatrix::hue_rotation(degrees).ffmpeg_filter();
-        assert!(
-            !filter.contains('e') || filter.starts_with("colorchannelmixer"),
-            "{filter}"
-        );
-        assert!(
-            !filter.contains("=-0:") && !filter.ends_with("=-0"),
-            "{degrees}: {filter}"
-        );
-        assert!(!filter.contains("e-") && !filter.contains("e+"), "{degrees}: {filter}");
-        let settings: Vec<&str> = filter.trim_start_matches("colorchannelmixer=").split(':').collect();
-        assert_eq!(settings.len(), 9, "{filter}");
-        for setting in settings {
-            let (name, number) = setting.split_once('=').expect("name=number");
-            assert_eq!(name.len(), 2, "{setting}");
-            assert!(number.parse::<f64>().is_ok(), "{setting}");
-        }
-    }
-}

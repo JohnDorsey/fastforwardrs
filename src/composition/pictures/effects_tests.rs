@@ -288,32 +288,6 @@ fn a_clip_cut_into_sections_by_what_is_over_it_has_the_same_effects_in_each_of_t
     assert_eq!(effects_of_the_clip(sections_of_the_video[2]), first);
 }
 
-// --- a layer at one frame ---
-
-#[test]
-fn a_layer_as_it_is_at_a_frame_has_its_effects_as_they_are_there_and_no_keyframes() {
-    let (project, _) = a_video_whose_colours_turn();
-    let plan = plan(&project);
-    let layer = &plan.section_at(frame(50)).unwrap().layers[0];
-
-    let at_50 = layer.as_it_is_at(frame(50));
-
-    assert_eq!(at_50.effects.len(), 1);
-    assert_eq!(at_50.effects[0].kind, EffectKind::HUE_SHIFT);
-    assert_eq!(at_50.effects[0].values, vec![turn(60.0)]);
-    assert!(!at_50.effects[0].is_animated());
-    assert!(!at_50.has_keyframes());
-    assert!(layer.has_keyframes(), "the layer it was made from still has them");
-    assert_eq!(at_50.colour_matrix(), layer.colour_matrix_at(frame(50)));
-    for timeline_frame in [20, 70, 119] {
-        assert_eq!(
-            at_50.colour_matrix_at(frame(timeline_frame)),
-            at_50.colour_matrix(),
-            "the same at frame {timeline_frame}"
-        );
-    }
-}
-
 // --- checked against the project ---
 
 /// What the effects of the layer `layer` are at `timeline_frame` by looking at the project, one frame at a time: those of the clip
@@ -367,10 +341,14 @@ fn every_layer_has_the_effects_and_values_the_project_says_at_every_frame_it_is_
                     layer.clip
                 );
 
-                let as_it_is = layer.as_it_is_at(frame(timeline_frame));
+                // The colours at the frame are what the effects, with the values they have there by the plain looking, do one after another.
+                let by_looking = expected
+                    .iter()
+                    .filter_map(|(kind, values)| kind.colour_matrix(values))
+                    .fold(ColourMatrix::NOTHING_CHANGES, ColourMatrix::then);
                 assert_eq!(
-                    as_it_is.colour_matrix(),
                     layer.colour_matrix_at(frame(timeline_frame)),
+                    by_looking,
                     "seed {seed}, frame {timeline_frame}, clip {}",
                     layer.clip
                 );
@@ -489,7 +467,7 @@ fn an_effect_that_the_program_does_not_have_is_not_in_the_layer_and_its_keyframe
     assert_eq!(
         plan.sections.len(),
         super::tests::plan(&without_it).sections.len(),
-        "and the picture is not made in more stretches because of it"
+        "and the picture is not made in more sections because of it"
     );
 }
 
@@ -517,8 +495,4 @@ fn what_an_effect_with_several_values_has_at_a_frame_is_what_the_keyframes_of_ea
         "only the third moves"
     );
     assert_eq!(effect.values_at(5), vec![turn(1.0), turn(2.0), turn(30.0)]);
-    assert_eq!(
-        effect.as_it_is_at(frame(15)).values,
-        vec![turn(1.0), turn(2.0), turn(40.0)]
-    );
 }

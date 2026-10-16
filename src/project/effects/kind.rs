@@ -154,13 +154,6 @@ impl EffectKind {
         }
     }
 
-    /// The values that are exported when the values of the effect at a frame are `values` (the same values of the same kinds): the values as
-    /// near as is worth telling apart, which is `values` themselves for an effect whose values are all that there is to see of them. What
-    /// is the same when it is exported is exported as one thing, which makes the export quicker to get ready.
-    pub fn as_exported(self, values: &[PropertyValue]) -> Vec<PropertyValue> {
-        built_in::as_exported(self, values)
-    }
-
     /// How the effect changes the colours of a picture when its values are `values` (one for each of its values, in order), if it changes
     /// colours at all. (`None` for an effect that is not installed, which changes nothing.)
     pub fn colour_matrix(self, values: &[PropertyValue]) -> Option<ColourMatrix> {

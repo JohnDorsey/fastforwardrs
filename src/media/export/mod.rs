@@ -1,33 +1,19 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Exporting a project as a finished video file.
-//!
-//! The export has three parts, each testable on its own:
-//!
-//! * [`plan_export`] works out what has to happen, from a project (pure logic, using what
-//!   [`crate::composition`] says the picture and the sound are);
-//! * [`build_filter_graph`] and [`export_arguments`] turn that into the text ffmpeg is given (pure
-//!   text building);
-//! * [`VideoExport`] runs ffmpeg, reports its progress and can cancel it.
+//! What is left of the export in the media module: the filter graph of the **sound** (the finished video's and the live preview's alike), how the video is
+//! compressed, and reading what ffmpeg says of its progress. The export itself, the picture of it above all, is made by the picture engine: see `video_export`.
 
-mod animated_sections;
-mod command;
 mod filter_graph;
-mod plan;
 mod progress;
-mod runner;
+mod sound_plan;
+mod video_encoder;
 
-pub(crate) use command::FILTER_GRAPH_FILE_OPTION;
-pub use command::{ExportFiles, VideoEncoder, export_arguments};
+pub(crate) use filter_graph::FILTER_GRAPH_FILE_OPTION;
 pub use filter_graph::{
-    AudioGraph, FilterGraph, FilterGraphSpecification, LayerContentToExport, LayerToExport, LoudnessToExport,
-    PictureGraphSpecification, PlaceToExport, SectionToExport, SoundClipToExport, SoundGraphSpecification,
-    SoundItemToExport, SoundStripToExport, VideoToExport, build_audio_graph, build_filter_graph,
-};
-pub use plan::{
-    ExportPlan, ExportPlanError, StillPictureInput, StillPictureKind, plan_export, sound_graph_specification,
-    sources_of_sound,
+    AudioGraph, LoudnessToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
+    build_audio_graph,
 };
 pub use progress::frames_written_in_progress_line;
-pub use runner::{ExportError, ExportEvent, ExportResult, VideoExport};
+pub use sound_plan::{sound_graph_specification, sources_of_sound};
+pub use video_encoder::VideoEncoder;

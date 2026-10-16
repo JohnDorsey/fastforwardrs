@@ -302,7 +302,7 @@ fn what_a_kind_that_a_file_brought_says_of_its_values_is_what_the_values_are_and
 }
 
 #[test]
-fn a_kind_that_the_program_does_not_have_changes_no_colour_and_is_exported_as_it_is() {
+fn a_kind_that_the_program_does_not_have_changes_no_colour() {
     let kind = a_kind_of_effect_the_program_does_not_have("isf:does_nothing_here", &[("amount", degrees(0.5))]);
     let values = vec![degrees(123.456)];
 
@@ -311,13 +311,6 @@ fn a_kind_that_the_program_does_not_have_changes_no_colour_and_is_exported_as_it
         None,
         "it changes no colour: it is not there"
     );
-    assert_eq!(
-        kind.as_exported(&values),
-        values,
-        "and exports what it has, as it has it"
-    );
-    // (The hue shift rounds to whole degrees for the export, which is the effect of the program's.)
-    assert_eq!(EffectKind::HUE_SHIFT.as_exported(&values), vec![degrees(123.0)]);
 }
 
 #[test]

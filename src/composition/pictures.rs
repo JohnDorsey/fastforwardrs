@@ -68,7 +68,9 @@ pub struct LayerEffect {
 }
 
 impl LayerEffect {
-    /// Whether any of the values of the effect has keyframes, so that it is not the same at every frame.
+    /// Whether any of the values of the effect has keyframes, so that it is not the same at every frame. (What the tests ask of a plan; the export asks for the
+    /// values at each frame and does not care.)
+    #[cfg(test)]
     pub fn is_animated(&self) -> bool {
         !self.animation.is_empty()
     }
@@ -90,18 +92,6 @@ impl LayerEffect {
                     .unwrap_or_else(|| value.clone())
             })
             .collect()
-    }
-
-    /// The effect as it is at `timeline_frame`, with what its keyframes say worked out: it has no keyframes, being the same at
-    /// every frame.
-    #[must_use]
-    pub fn as_it_is_at(&self, timeline_frame: TimelineFrameIndex) -> LayerEffect {
-        LayerEffect {
-            instance: self.instance,
-            kind: self.kind,
-            values: self.values_at(timeline_frame.value()),
-            animation: Animation::default(),
-        }
     }
 }
 
@@ -141,30 +131,10 @@ impl Layer {
     }
 
     /// Whether the layer has keyframes for where it is, how it looks or what its effects do, so that it is not the same at every
-    /// frame.
+    /// frame. (What the tests ask of a plan.)
+    #[cfg(test)]
     pub fn has_keyframes(&self) -> bool {
         !self.animation.is_empty() || self.effects.iter().any(LayerEffect::is_animated)
-    }
-
-    /// The layer as it is at `timeline_frame` (a frame it is seen at), with what its keyframes say worked out: where it is, and
-    /// what a text object says and how it looks, there. It has no keyframes, being the same at every frame.
-    #[must_use]
-    pub fn as_it_is_at(&self, timeline_frame: TimelineFrameIndex) -> Layer {
-        Layer {
-            clip: self.clip,
-            track: self.track,
-            content: match self.text_at(timeline_frame) {
-                Some(object) => LayerContent::Text(object.into_owned()),
-                None => self.content.clone(),
-            },
-            placement: self.placement_at(timeline_frame),
-            animation: Animation::default(),
-            effects: self
-                .effects
-                .iter()
-                .map(|effect| effect.as_it_is_at(timeline_frame))
-                .collect(),
-        }
     }
 
     /// How the effects of the layer change the colours of its picture at `timeline_frame` (a frame it is seen at), all of them
@@ -177,7 +147,8 @@ impl Layer {
     }
 
     /// How the effects of the layer change the colours of its picture, all of them together, with the values they have when they
-    /// are not animated. (For a layer that is as it is at a frame, which has no keyframes: see [`Self::as_it_is_at`].)
+    /// are not animated. (What the tests ask of a plan that has no keyframes; the export asks [`Self::colour_matrix_at`].)
+    #[cfg(test)]
     pub fn colour_matrix(&self) -> ColourMatrix {
         self.effects
             .iter()
@@ -248,42 +219,6 @@ impl PictureSection {
             return None;
         }
         Some(video.first_source_frame + (frame - self.first_timeline_frame) * u64::from(video.speed.value()))
-    }
-
-    /// The part of the section from `first` up to `end` (frames of the timeline inside the section, with at least one frame):
-    /// the same layers, where each video shows the pictures that come in those frames.
-    #[must_use]
-    pub fn slice(&self, first: u64, end: u64) -> PictureSection {
-        debug_assert!(
-            self.first_timeline_frame <= first && first < end && end <= self.end_timeline_frame,
-            "{first}..{end} is not inside {}..{}",
-            self.first_timeline_frame,
-            self.end_timeline_frame
-        );
-        let layers = self
-            .layers
-            .iter()
-            .map(|layer| match &layer.content {
-                LayerContent::Video(video) => {
-                    let speed = u64::from(video.speed.value());
-                    let first_source_frame = video.first_source_frame + (first - self.first_timeline_frame) * speed;
-                    Layer {
-                        content: LayerContent::Video(VisibleVideo {
-                            first_source_frame,
-                            end_source_frame: (first_source_frame + (end - first) * speed).min(video.end_source_frame),
-                            ..*video
-                        }),
-                        ..layer.clone()
-                    }
-                }
-                LayerContent::Image { .. } | LayerContent::Text(_) => layer.clone(),
-            })
-            .collect();
-        PictureSection {
-            first_timeline_frame: first,
-            end_timeline_frame: end,
-            layers,
-        }
     }
 
     /// The layers that are videos, the one at the back first.

@@ -266,3 +266,72 @@ fn the_destination_cannot_be_a_file_the_project_is_made_from_and_the_number_of_f
         result.err()
     );
 }
+
+// --- the colours of the file ---
+
+#[test]
+fn the_file_says_what_the_first_video_said_about_its_colours_and_has_its_colours_within_a_few_levels_of_it() {
+    use support::yuv_videos::{BT709_LIMITED, FOUR_COLOURS, SMPTE170M_LIMITED, UNTAGGED, video_made_by_geq};
+    let toolchain = ready_or_skip!();
+    let scratch = scratch_directory();
+    // (what the video says, what the file is to say: matrix, range)
+    let cases = [
+        ("untagged", UNTAGGED, (None, None)),
+        ("bt709", BT709_LIMITED, (Some("bt709"), Some("tv"))),
+        ("smpte170m", SMPTE170M_LIMITED, (Some("smpte170m"), Some("tv"))),
+    ];
+    for (name, tags, (matrix, range)) in cases {
+        let source = video_made_by_geq(
+            &toolchain,
+            scratch.path(),
+            name,
+            (320, 180),
+            FOUR_COLOURS,
+            "yuv420p",
+            tags,
+        );
+        let mut project = Project::empty();
+        project
+            .import_source(
+                fastforwardrs::project::SourceMedia {
+                    identifier: fastforwardrs::project::SourceMediaIdentifier::new(1),
+                    link: fastforwardrs::project::SourceMediaLink::from_absolute_path(source.clone()),
+                    properties: fastforwardrs::media::probe_source_media(&toolchain, &source).unwrap(),
+                },
+                fastforwardrs::project::TimelineFrameIndex::new(0),
+            )
+            .unwrap();
+        let destination = scratch.path().join(format!("{name}.mp4"));
+
+        let outcome = export(&toolchain, &project, &destination);
+
+        assert_eq!(outcome.result, ExportResult::Completed, "{name}");
+        let json = support::probe_json(&toolchain, &destination, &["-show_streams"]);
+        let video = &json["streams"][0];
+        let said = |key: &str| video[key].as_str().map(str::to_owned);
+        if fastforwardrs::media::export::VideoEncoder::choose(&toolchain)
+            == fastforwardrs::media::export::VideoEncoder::Libx264
+        {
+            assert_eq!(said("color_space").as_deref(), matrix, "{name}: matrix");
+            assert_eq!(said("color_range").as_deref(), range, "{name}: range");
+        }
+        // The colours: decoded by ffmpeg with the matrix each file says, the picture of the file is the picture of the video.
+        let before = decode_video(&toolchain, &source, 320, 180);
+        let after = decode_video(&toolchain, &destination, 320, 180);
+        assert_eq!(before.pictures.len(), 1);
+        assert_eq!(after.pictures.len(), 1, "{name}");
+        let (largest, sum) = before.pictures[0]
+            .iter()
+            .zip(&after.pictures[0])
+            .fold((0u8, 0u64), |(largest, sum), (a, b)| {
+                (largest.max(a.abs_diff(*b)), sum + u64::from(a.abs_diff(*b)))
+            });
+        let mean = sum as f64 / before.pictures[0].len() as f64;
+        eprintln!("{name}: the largest difference is {largest}, the mean is {mean:.3}");
+        assert!(
+            largest <= 6,
+            "{name}: the largest difference between the colours is {largest}"
+        );
+        assert!(mean < 1.0, "{name}: the mean difference between the colours is {mean}");
+    }
+}

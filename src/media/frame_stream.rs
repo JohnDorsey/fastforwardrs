@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Decoding the frames of the live preview.
+//! Decoding the frames of the live preview, and of the export.
 //!
 //! The preview must show exactly the frames the export will contain. So a stream is told, in the
 //! editor's own terms, which source frame to start at, how many source frames to read and at what
-//! speed, and it runs the very same trimming, retiming and frame-rate steps that the export uses
-//! (see [`crate::media::export`]). Frame number `k` that comes out of a stream is the clip's frame
+//! speed, and **the export reads its video through the very same streams** (one for each run of a
+//! clip's video: see `video_export`), asking for the pictures at the size the layer needs and with ffmpeg's
+//! own scaling. Frame number `k` that comes out of a stream is the clip's frame
 //! number `k`: for a video that does not run at the frame rate of the project too, which then has,
 //! in each frame, the picture that is nearest in time (see [`frame_stream_arguments`]).
 
@@ -355,7 +356,7 @@ fn microseconds_as_seconds(microseconds: u64) -> String {
 
 /// The ffmpeg command line that decodes `request`.
 ///
-/// The pictures are chosen the way the export chooses them (see `crate::media::export`): resample
+/// The pictures are chosen the way the export chooses them (it reads its pictures through this very command line, see `video_export`): resample
 /// to the project's constant frame rate with `round=near` so that there is one picture for every
 /// frame, whatever the file's frame rate and timestamps look like, then keep every `speed_factor`th
 /// picture of the clip, starting with its first.

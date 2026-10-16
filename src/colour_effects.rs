@@ -20,9 +20,6 @@ pub struct ColourMatrix {
 /// the one that changes nothing: a change that is less than a hundredth of a step of the 256 steps of a colour changes no pixel.
 const NEAR_ENOUGH_TO_CHANGE_NOTHING: f32 = 1.0 / 256.0 / 100.0;
 
-/// How many decimals the numbers of a matrix have when ffmpeg is asked to use it.
-const DECIMALS_FOR_FFMPEG: usize = 6;
-
 impl ColourMatrix {
     /// The matrix that changes nothing.
     pub const NOTHING_CHANGES: Self = Self {
@@ -121,34 +118,6 @@ impl ColourMatrix {
             pixel[1] = channel(gr * red + gg * green + gb * blue);
             pixel[2] = channel(br * red + bg * green + bb * blue);
         }
-    }
-
-    /// The filter that asks ffmpeg to do what this matrix does (`colorchannelmixer`: each of its settings is how much of one
-    /// colour a colour of the new pixel is made of, named by the two: `rg` is how much of the green makes the new red).
-    pub fn ffmpeg_filter(&self) -> String {
-        let [[rr, rg, rb], [gr, gg, gb], [br, bg, bb]] = self.rows;
-        let number = |number: f32| {
-            let text = format!("{number:.DECIMALS_FOR_FFMPEG$}");
-            let trimmed = text.trim_end_matches('0').trim_end_matches('.');
-            // (Not `-0`, which a number that rounds to nothing from below would be.)
-            if trimmed == "-0" || trimmed.is_empty() {
-                "0".to_owned()
-            } else {
-                trimmed.to_owned()
-            }
-        };
-        format!(
-            "colorchannelmixer=rr={}:rg={}:rb={}:gr={}:gg={}:gb={}:br={}:bg={}:bb={}",
-            number(rr),
-            number(rg),
-            number(rb),
-            number(gr),
-            number(gg),
-            number(gb),
-            number(br),
-            number(bg),
-            number(bb)
-        )
     }
 }
 

@@ -47,15 +47,11 @@ struct Behaviour {
     kind: EffectKind,
     /// How it changes the colours of a picture, if it does, from its values.
     colour_matrix: Option<fn(&[PropertyValue]) -> ColourMatrix>,
-    /// Which values the export uses in place of the values the effect has at a frame: what it has, as near as is worth telling apart (a change
-    /// that nobody can see is not a stretch of its own in the export, which is slow to make).
-    as_exported: fn(&[PropertyValue]) -> Vec<PropertyValue>,
 }
 
 const BEHAVIOURS: [Behaviour; 1] = [Behaviour {
     kind: EffectKind::HUE_SHIFT,
     colour_matrix: Some(hue_shift_matrix),
-    as_exported: hue_shift_as_exported,
 }];
 
 /// How the effect `kind` changes the colours of a picture when its values are `values`, if it is an effect of the program and changes
@@ -66,31 +62,6 @@ pub(super) fn colour_matrix(kind: EffectKind, values: &[PropertyValue]) -> Optio
         .find(|behaviour| behaviour.kind == kind)?
         .colour_matrix?;
     Some(matrix(values))
-}
-
-/// What the export uses in place of `values`, which are the values of an effect of the kind `kind` at a frame: `values` themselves if the
-/// effect is not one of the program, which has nothing to say of what is worth telling apart.
-pub(super) fn as_exported(kind: EffectKind, values: &[PropertyValue]) -> Vec<PropertyValue> {
-    match BEHAVIOURS.iter().find(|behaviour| behaviour.kind == kind) {
-        Some(behaviour) => (behaviour.as_exported)(values),
-        None => values.to_vec(),
-    }
-}
-
-/// The steps, in degrees, that the hue shift is exported in: a turn of the colours that is a degree off is not seen.
-const HUE_STEP_IN_DEGREES: f32 = 1.0;
-
-/// The hue shift is exported in whole steps of [`HUE_STEP_IN_DEGREES`]. (An animated hue shift that is slow then makes a stretch
-/// of the export of its own for every few frames, and not for every frame.)
-fn hue_shift_as_exported(values: &[PropertyValue]) -> Vec<PropertyValue> {
-    match values {
-        [PropertyValue::Number(degrees)] => {
-            vec![PropertyValue::Number(
-                (degrees / HUE_STEP_IN_DEGREES).round() * HUE_STEP_IN_DEGREES,
-            )]
-        }
-        other => other.to_vec(),
-    }
 }
 
 /// How the hue shift changes colours: it turns them by the degrees that its one value says.

@@ -178,17 +178,6 @@ fn the_keyframes_of_a_clips_effect_stay_with_the_clips_effect_and_the_effect_of_
         layer.colour_matrix_at(frame(25)),
         ColourMatrix::hue_rotation(50.0).then(ColourMatrix::hue_rotation(20.0))
     );
-
-    let at_a_frame = layer.as_it_is_at(frame(25));
-    assert_eq!(
-        at_a_frame
-            .effects
-            .iter()
-            .map(|effect| effect.values.clone())
-            .collect::<Vec<_>>(),
-        [vec![turn(50.0)], vec![turn(20.0)]]
-    );
-    assert!(!at_a_frame.has_keyframes());
 }
 
 #[test]
