@@ -96,7 +96,8 @@ fn planes_of(
         .keys()
         .filter_map(|&source| {
             let format = probe_video_stream_format(toolchain, locations[&source].clone()).unwrap();
-            format.as_native_yuv420p().map(|native| (source, native))
+            let (width, height) = plan.videos[&source].display_size_in_pixels;
+            format.as_native_yuv420p(width, height).map(|native| (source, native))
         })
         .collect()
 }

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The export's first pass over a finished frame: the brightness plane of the `yuv420p` picture that the encoder is given. The frame is the 8-bit one that the
-// preview shows (the `output` pass made it), read pixel by pixel; the brightness of a pixel is a row of the matrix of its standard and range, and the
-// 8-bit texture it is written to rounds it. The same arithmetic as `RgbToYuvConversion` in Rust, which the tests hold this to.
+// The export's first pass over a finished frame: the brightness plane of the `yuv420p` picture that the encoder is given. The frame is the one that the `output` pass
+// made in half floats for the export (the same numbers as the 8-bit one that the preview shows, not yet rounded), read pixel by pixel; the brightness of a pixel is a row of
+// the matrix of its standard and range, and the 8-bit texture it is written to rounds it: the picture is rounded once. The same arithmetic as `RgbToYuvConversion` in Rust,
+// which the tests hold this to.
 
 struct Conversion {
     // for brightness, the blue and the red colour difference: the numbers that multiply red, green and blue, and what is added after

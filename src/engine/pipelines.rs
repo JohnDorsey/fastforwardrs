@@ -16,8 +16,12 @@ pub const ACCUMULATION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16
 /// The format a picture is sent in, before it is made premultiplied half-float.
 pub const SENT_PICTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// The format of a finished frame.
+/// The format of a finished frame that is given back as a picture: the 8 bits that the preview shows.
 pub const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// The format of a finished frame that the export makes the planes of: the same numbers, in half floats, so that the brightness and the colour differences are made of
+/// the picture as it is and are rounded to 8 bits once, at the end, and not twice (decision C13 of `docs/engine-phase-3-design.md`).
+pub const ENCODED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// How many bytes the uniforms of the pass that puts a layer in its place take up (see `place.wgsl`).
 pub const PLACEMENT_UNIFORM_BYTES: u64 = 64;
@@ -49,9 +53,11 @@ pub const CHROMA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg8Unorm;
 /// How many bytes the uniforms of the passes that make the planes of a finished frame take up (see `rgb_to_luma.wgsl`): three rows of a `vec4<f32>`.
 pub const RGB_TO_YUV_UNIFORM_BYTES: u64 = 48;
 
-/// The last pass: the accumulation picture to the 8-bit frame.
+/// The last pass: the accumulation picture to the finished frame, as 8 bits (for the preview) or as half floats (for the export's planes): the same shader, the same
+/// bindings, two targets.
 pub struct OutputPass {
     pub pipeline: wgpu::RenderPipeline,
+    pub encoded_pipeline: wgpu::RenderPipeline,
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -67,8 +73,8 @@ pub struct YuvPass {
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
-/// The two passes that make the planes of `yuv420p` of a finished frame, for the export: they read the same things (the numbers of the conversion, and the 8-bit
-/// frame) and write other textures.
+/// The two passes that make the planes of `yuv420p` of a finished frame, for the export: they read the same things (the numbers of the conversion, and the frame in
+/// half floats) and write other textures.
 pub struct PlanesPass {
     pub luma_pipeline: wgpu::RenderPipeline,
     pub chroma_pipeline: wgpu::RenderPipeline,
@@ -212,6 +218,7 @@ fn output_pass(device: &wgpu::Device) -> OutputPass {
     });
     OutputPass {
         pipeline: pipeline(device, "engine output pass", &module, &layout, OUTPUT_FORMAT, None),
+        encoded_pipeline: pipeline(device, "engine encode pass", &module, &layout, ENCODED_FORMAT, None),
         bind_group_layout,
     }
 }

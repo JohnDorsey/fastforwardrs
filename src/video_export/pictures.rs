@@ -17,6 +17,7 @@ use thiserror::Error;
 
 use super::plan::ExportPlan;
 use super::runs::VideoRun;
+use crate::engine::PictureColour;
 use crate::media::{
     FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, MediaLocation,
     NativeYuv420p, WaitedFor,
@@ -86,6 +87,9 @@ struct RunToRead {
     request: FrameStreamRequest,
     /// What the planes stand for, if the pictures are delivered as planes.
     colour: Option<NativeYuv420p>,
+    /// What the codes of the red, green and blue of the pictures stand for (the primaries and the curve the file says, or the ones assumed): sRGB until the export says
+    /// otherwise ([`PicturesOfTheRuns::with_picture_colours`]).
+    picture_colour: PictureColour,
     /// What the video is called in a message.
     name: String,
 }
@@ -162,6 +166,7 @@ impl<Starter: RunStreamStarter> PicturesOfTheRuns<Starter> {
                     },
                 },
                 colour,
+                picture_colour: PictureColour::SRGB,
                 name: location.file().file_name().map_or_else(
                     || format!("the video {}", run.source),
                     |name| name.to_string_lossy().into_owned(),
@@ -178,6 +183,17 @@ impl<Starter: RunStreamStarter> PicturesOfTheRuns<Starter> {
             how_long_a_picture_may_take: HOW_LONG_A_PICTURE_MAY_TAKE,
             pictures_held: 0,
         })
+    }
+
+    /// Says what the codes of the pictures of each video stand for (the primaries and the curve): the others stay sRGB.
+    #[must_use]
+    pub fn with_picture_colours(mut self, colours: &HashMap<SourceMediaIdentifier, PictureColour>) -> Self {
+        for run in &mut self.runs {
+            if let Some(colour) = colours.get(&run.run.source) {
+                run.picture_colour = *colour;
+            }
+        }
+        self
     }
 
     /// For the tests: the time that a picture is waited for.
@@ -304,6 +320,7 @@ impl<Starter: RunStreamStarter> PicturesOfTheRuns<Starter> {
                 source: to_read.run.source,
                 source_frame: SourceFrameIndex::new(to_read.run.source_frame_of_picture(reading.delivered)),
                 frame,
+                colour: to_read.picture_colour,
                 serial_number,
             }));
             reading.delivered += 1;

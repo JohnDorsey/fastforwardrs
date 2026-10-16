@@ -12,7 +12,7 @@
 //! A file that does not say gets BT.601, because that is what ffmpeg has always done with it, and the pictures of this program must not change by
 //! the move to the graphics card: that is the compatibility mode (CM-20). What a better guess for HD video would be is for phase 3.
 //!
-//! The export goes the other way: the finished 8-bit frame is made into the planes of `yuv420p` for the encoder, with the same matrix and range
+//! The export goes the other way: the finished frame (in half floats, not yet rounded to 8 bits) is made into the planes of `yuv420p` for the encoder, with the same matrix and range
 //! ([`YuvColour::forward_conversion`], [`reference_yuv420p`]). The colour differences of a square of four pixels are the average of those of its four pixels.
 
 use serde::{Deserialize, Serialize};

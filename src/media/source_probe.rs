@@ -122,29 +122,21 @@ pub struct NativeYuv420p {
 }
 
 impl VideoStreamFormat {
-    /// Whether the pictures of the video can be had as planes and turned into colours by the preview, and how. `None` for every video that is stored
-    /// another way (10 bits to a number, 4:2:2 or 4:4:4, RGB, a pixel format that is only for full range, and so on) or that says it uses a matrix that
-    /// is not known: those are decoded by ffmpeg into RGBA, as they always were.
+    /// Whether the pictures of the video, whose picture is `width` by `height` pixels, can be had as planes and turned into colours by the preview, and how. `None` for
+    /// every video that is stored another way (10 bits to a number, 4:2:2 or 4:4:4, RGB, a pixel format that is only for full range, and so on) or that says it uses a
+    /// matrix that is not known: those are decoded by ffmpeg into RGBA, as they always were.
     ///
-    /// **A file that does not say which matrix it uses is BT.601**, and one that does not say its range is limited, because that is what ffmpeg does with
-    /// it when it makes the RGBA itself (verified: untagged video is converted with the BT.601 limited-range matrix at every size, 4K included), and the
-    /// preview must not change by the move to the graphics card. Whether that is a good choice for high-definition video is for phase 3.
-    pub fn as_native_yuv420p(&self) -> Option<NativeYuv420p> {
+    /// **Which matrix and which range is what [`VideoStreamFormat::colour_of_a_picture_of_size`] says**: what the file says, and where it says nothing the matrix that
+    /// goes with the size of the picture (BT.709 for high definition, BT.601 for standard definition; it was BT.601 for every size until phase 3) and the limited range.
+    pub fn as_native_yuv420p(&self, width: u32, height: u32) -> Option<NativeYuv420p> {
         if self.pixel_format.as_deref() != Some("yuv420p") {
             return None;
         }
-        let matrix = match self.colour_space.as_deref() {
-            None | Some("bt470bg" | "smpte170m") => NativeMatrix::Bt601,
-            Some("bt709") => NativeMatrix::Bt709,
-            Some("bt2020nc") => NativeMatrix::Bt2020,
-            Some(_) => return None,
-        };
-        let full_range = match self.colour_range.as_deref() {
-            None | Some("tv" | "mpeg") => false,
-            Some("pc" | "jpeg") => true,
-            Some(_) => return None,
-        };
-        Some(NativeYuv420p { matrix, full_range })
+        let colour = self.colour_of_a_picture_of_size(width, height);
+        Some(NativeYuv420p {
+            matrix: colour.matrix?,
+            full_range: colour.full_range?,
+        })
     }
 }
 
@@ -597,14 +589,23 @@ mod tests {
 
     #[test]
     fn eight_bit_four_two_zero_video_is_native_and_which_matrix_and_range_follow_what_the_file_says() {
-        let native = |fields: &str| format_of(&format!(r#", "pix_fmt": "yuv420p" {fields}"#)).as_native_yuv420p();
+        let native = |fields: &str| format_of(&format!(r#", "pix_fmt": "yuv420p" {fields}"#)).as_native_yuv420p(64, 48);
         assert_eq!(
             native(""),
             Some(NativeYuv420p {
                 matrix: NativeMatrix::Bt601,
                 full_range: false
             }),
-            "says nothing: BT.601, limited, as ffmpeg has it"
+            "says nothing, and is small: BT.601, limited"
+        );
+        // (Rewritten on purpose in phase 3: a file that says nothing is BT.709 when its picture is high definition: see `source_colour`.)
+        assert_eq!(
+            format_of(r#", "pix_fmt": "yuv420p""#).as_native_yuv420p(1920, 1080),
+            Some(NativeYuv420p {
+                matrix: NativeMatrix::Bt709,
+                full_range: false
+            }),
+            "says nothing, and is high definition: BT.709, limited"
         );
         for (name, matrix) in [
             ("bt470bg", NativeMatrix::Bt601),
@@ -652,13 +653,13 @@ mod tests {
             "yuva420p",
         ] {
             assert_eq!(
-                format_of(&format!(r#", "pix_fmt": "{pixel_format}""#)).as_native_yuv420p(),
+                format_of(&format!(r#", "pix_fmt": "{pixel_format}""#)).as_native_yuv420p(64, 48),
                 None,
                 "{pixel_format}"
             );
         }
         assert_eq!(
-            format_of("").as_native_yuv420p(),
+            format_of("").as_native_yuv420p(64, 48),
             None,
             "a video that does not even say how it is stored"
         );
@@ -673,13 +674,13 @@ mod tests {
             "ictcp",
         ] {
             assert_eq!(
-                format_of(&format!(r#", "pix_fmt": "yuv420p", "color_space": "{matrix}""#)).as_native_yuv420p(),
+                format_of(&format!(r#", "pix_fmt": "yuv420p", "color_space": "{matrix}""#)).as_native_yuv420p(64, 48),
                 None,
                 "{matrix}"
             );
         }
         assert_eq!(
-            format_of(r#", "pix_fmt": "yuv420p", "color_range": "strange""#).as_native_yuv420p(),
+            format_of(r#", "pix_fmt": "yuv420p", "color_range": "strange""#).as_native_yuv420p(64, 48),
             None
         );
     }

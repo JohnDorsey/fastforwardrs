@@ -44,9 +44,10 @@ fn folder() -> PathBuf {
 /// What the preview makes of a video it decodes in planes: the colour comes from what ffprobe says of the video, as in the program.
 fn colour_the_preview_gives(toolchain: &FfmpegToolchain, video: &Path) -> YuvColour {
     let format = probe_video_stream_format(toolchain, video.to_path_buf()).expect("the video can be probed");
+    // (The pictures of this test are small: standard definition, whatever their matrix.)
     colour_for_the_engine(
         format
-            .as_native_yuv420p()
+            .as_native_yuv420p(64, 48)
             .expect("the preview can use the planes of this video"),
     )
 }

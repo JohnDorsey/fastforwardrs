@@ -58,6 +58,8 @@ mod colour_tests;
 #[cfg(test)]
 mod effect_tests;
 #[cfg(test)]
+mod encoded_planes_tests;
+#[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
 mod export_frames_tests;

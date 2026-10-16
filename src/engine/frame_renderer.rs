@@ -17,8 +17,8 @@ use super::guard::GuardedShader;
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
 use super::pictures::{PictureData, PicturePixels};
 use super::pipelines::{
-    ACCUMULATION_FORMAT, CHROMA_FORMAT, LUMA_FORMAT, OUTPUT_FORMAT, PLANE_FORMAT, Pipelines, RGB_TO_YUV_UNIFORM_BYTES,
-    SENT_PICTURE_FORMAT,
+    ACCUMULATION_FORMAT, CHROMA_FORMAT, ENCODED_FORMAT, LUMA_FORMAT, OUTPUT_FORMAT, PLANE_FORMAT, Pipelines,
+    RGB_TO_YUV_UNIFORM_BYTES, SENT_PICTURE_FORMAT,
 };
 use super::placement::PlacementUniforms;
 use super::plan::{EffectsThatRun, KindOfEffect, PassPlan, plan_frame};
@@ -72,7 +72,8 @@ pub enum RenderProblem {
 pub enum FrameOutput {
     /// The 8-bit frame that the preview shows: four bytes to the pixel.
     Rgba8,
-    /// The planes of a `yuv420p` picture, made of that same 8-bit frame the way the colour says (matrix and range): what the export hands to the encoder.
+    /// The planes of a `yuv420p` picture, made of the same finished frame the way the colour says (matrix and range): what the export hands to the encoder. The frame
+    /// is read in half floats, as the card has it, and not as the 8 bits that the preview shows: the planes are rounded to 8 bits once.
     Planes(YuvColour),
 }
 
@@ -457,7 +458,8 @@ impl FrameRenderer {
         Ok((frame.into_rgba8(), statistics))
     }
 
-    /// The frame that `description` describes, made within `timeout`, as the planes of a `yuv420p` picture made of the same 8-bit frame the way `colour` says.
+    /// The frame that `description` describes, made within `timeout`, as the planes of a `yuv420p` picture made of the finished frame (as the card has it, in half floats)
+    /// the way `colour` says.
     pub fn render_planes(
         &mut self,
         description: &FrameDescription,
@@ -515,16 +517,16 @@ impl FrameRenderer {
             format: ACCUMULATION_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         };
-        // The 8-bit frame is copied out for the preview, and read by the passes that make the planes for the export.
+        // The 8-bit frame is copied out for the preview; the export's passes that make the planes read the same numbers in half floats, as they are.
+        let (output_format, output_usage) = match output_kind {
+            FrameOutput::Rgba8 => (OUTPUT_FORMAT, wgpu::TextureUsages::COPY_SRC),
+            FrameOutput::Planes(_) => (ENCODED_FORMAT, wgpu::TextureUsages::TEXTURE_BINDING),
+        };
         let output_shape = TextureShape {
             width_in_pixels: width,
             height_in_pixels: height,
-            format: OUTPUT_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | match output_kind {
-                    FrameOutput::Rgba8 => wgpu::TextureUsages::COPY_SRC,
-                    FrameOutput::Planes(_) => wgpu::TextureUsages::TEXTURE_BINDING,
-                },
+            format: output_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | output_usage,
         };
         let (chroma_width, chroma_height) = chroma_size(width, height);
         let luma_shape = TextureShape {
@@ -809,13 +811,20 @@ impl FrameRenderer {
                                 },
                             ],
                         });
+                        let (label, pipeline) = match output_kind {
+                            FrameOutput::Rgba8 => ("engine: the 8-bit frame", &self.pipelines.output.pipeline),
+                            FrameOutput::Planes(_) => (
+                                "engine: the frame, encoded, in half floats",
+                                &self.pipelines.output.encoded_pipeline,
+                            ),
+                        };
                         let mut render_pass = begin_pass(
                             &mut encoder,
-                            "engine: the 8-bit frame",
+                            label,
                             &output_view,
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         );
-                        render_pass.set_pipeline(&self.pipelines.output.pipeline);
+                        render_pass.set_pipeline(pipeline);
                         render_pass.set_bind_group(0, &bind_group, &[output_slot.offset]);
                         render_pass.draw(0..3, 0..1);
                     }

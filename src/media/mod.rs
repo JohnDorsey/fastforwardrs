@@ -17,6 +17,7 @@ mod finer_thumbnails;
 mod frame_stream;
 mod location;
 mod picture_decoder;
+mod source_colour;
 mod source_probe;
 mod thumbnail_library;
 mod thumbnails;
@@ -36,6 +37,7 @@ pub use frame_stream::{
 };
 pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
+pub use source_colour::{Assumption, VideoColour, matrix_assumed_for, matrix_name};
 pub use source_probe::{
     NativeMatrix, NativeYuv420p, ProbeError, VideoStreamFormat, probe_source_media, probe_video,
     probe_video_stream_format, properties_from_probe_output, source_properties_from_probe_output,

@@ -28,7 +28,9 @@ use super::frames::{FrameDescriber, FrameProblem};
 use super::output_colour::output_colour_for;
 use super::pictures::{FfmpegRunStreamStarter, PicturesOfTheRuns, RunPictureProblem};
 use super::plan::ExportPlan;
-use crate::engine::{AdapterChoice, Engine, EngineEvent, EngineSettings, PictureData, PictureId, RenderedPlanes};
+use crate::engine::{
+    AdapterChoice, Engine, EngineEvent, EngineSettings, PictureColour, PictureData, PictureId, RenderedPlanes,
+};
 use crate::frame_scene::TextPictures;
 use crate::media::export::VideoEncoder;
 use crate::media::{
@@ -368,11 +370,30 @@ fn produce(job: Job) -> Result<(), Ending> {
             .map_err(|error| Ending::failed(format!("{} cannot be read: {error}", name_of(location))))?;
         formats.insert(source, format);
     }
+    // (What a file says of its colours, and what is assumed where it says nothing, is read by the very function that the preview uses, from the size of the picture.)
+    let size_of = |source: &SourceMediaIdentifier| plan.videos[source].display_size_in_pixels;
     let planes: HashMap<SourceMediaIdentifier, NativeYuv420p> = formats
         .iter()
-        .filter_map(|(&source, format)| Some((source, format.as_native_yuv420p()?)))
+        .filter_map(|(source, format)| {
+            let (width, height) = size_of(source);
+            Some((*source, format.as_native_yuv420p(width, height)?))
+        })
         .collect();
-    let colour = output_colour_for(plan.first_video().and_then(|source| formats.get(&source)));
+    let picture_colours: HashMap<SourceMediaIdentifier, PictureColour> = formats
+        .iter()
+        .map(|(source, format)| {
+            let (width, height) = size_of(source);
+            let colour = format.colour_of_a_picture_of_size(width, height);
+            (
+                *source,
+                PictureColour {
+                    primaries: colour.primaries,
+                    curve: colour.curve,
+                },
+            )
+        })
+        .collect();
+    let colour = output_colour_for(plan.output_colour_space);
 
     // The picture files, decoded once.
     let mut images = HashMap::new();
@@ -414,7 +435,8 @@ fn produce(job: Job) -> Result<(), Ending> {
     let streams = FfmpegRunStreamStarter {
         toolchain: Arc::new(toolchain.clone()),
     };
-    let pictures_of_the_runs = PicturesOfTheRuns::new(streams, &plan, &locations, &planes)?;
+    let pictures_of_the_runs =
+        PicturesOfTheRuns::new(streams, &plan, &locations, &planes)?.with_picture_colours(&picture_colours);
     let text: Box<dyn TextPictures> = match text_pictures {
         Some(text_pictures) => text_pictures,
         None => Box::new(FontsOfTheComputer(LazyTextRenderer::new(Arc::new(|| {})))),

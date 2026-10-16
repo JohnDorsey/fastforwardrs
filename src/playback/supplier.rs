@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::wanted::{UpcomingVideo, WantedPicture};
-use crate::engine::{YuvColour, YuvMatrix, YuvRange, rgba_of_yuv420p_planes};
+use crate::engine::{PictureColour, YuvColour, YuvMatrix, YuvRange, rgba_of_yuv420p_planes};
 use crate::media::{
     DecodedFrame, DecodedYuvFrame, FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent,
     FrameStreamRequest, MediaLocation, NativeMatrix, NativeYuv420p, UserInterfaceWakeUp, VideoStreamFormat,
@@ -196,6 +196,9 @@ pub struct SuppliedPicture {
     /// Which source frame this is a picture of.
     pub source_frame: SourceFrameIndex,
     pub frame: SuppliedFrame,
+    /// What the codes of its red, green and blue stand for (for a picture in planes, the ones that the matrix makes of them): the primaries and the curve that the
+    /// file says, or the ones assumed for it (see `VideoStreamFormat::colour_of_a_picture_of_size`). sRGB where nothing is known of the file.
+    pub colour: PictureColour,
     /// Different for every picture ever supplied (by any supplier), so the screen code can tell
     /// cheaply whether there is a new picture to upload.
     pub serial_number: u64,
@@ -221,6 +224,8 @@ struct RunningStream<Stream> {
     source_frame_count: u64,
     /// What the numbers of the pictures stand for, for a stream that delivers planes.
     native_colour: Option<NativeYuv420p>,
+    /// What the codes of the red, green and blue of the pictures stand for.
+    picture_colour: PictureColour,
     /// How many pictures have been taken from the stream so far.
     pictures_taken: u64,
     /// Set once the stream has reported its end. A stream that has ended delivers nothing more.
@@ -233,6 +238,7 @@ impl<Stream> RunningStream<Stream> {
         source: SourceMediaIdentifier,
         request: &FrameStreamRequest,
         native_colour: Option<NativeYuv420p>,
+        picture_colour: PictureColour,
     ) -> Self {
         Self {
             stream,
@@ -241,6 +247,7 @@ impl<Stream> RunningStream<Stream> {
             first_source_frame: request.first_source_frame.value(),
             source_frame_count: request.source_frame_count,
             native_colour,
+            picture_colour,
             pictures_taken: 0,
             ended: false,
         }
@@ -464,6 +471,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 source: stream.source,
                 source_frame: stream.source_frame_of_picture(taken_number),
                 frame,
+                colour: stream.picture_colour,
                 serial_number: NEXT_SERIAL_NUMBER.fetch_add(1, Ordering::Relaxed),
             });
         }
@@ -478,7 +486,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 return Some(MINIMUM_TIME_BETWEEN_STREAM_STARTS - since);
             }
         }
-        let (request, native_colour) = self.request_for(
+        let (request, native_colour, picture_colour) = self.request_for(
             wanted.source,
             wanted.source_frame,
             wanted.range_end_source_frame,
@@ -488,7 +496,13 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         self.upcoming_stream = None;
         match self.starter.start(&request) {
             Ok(stream) => {
-                self.current_stream = Some(RunningStream::new(stream, wanted.source, &request, native_colour));
+                self.current_stream = Some(RunningStream::new(
+                    stream,
+                    wanted.source,
+                    &request,
+                    native_colour,
+                    picture_colour,
+                ));
                 if let Some(picture_number) = self.picture_number_in_current_stream(wanted) {
                     self.take_pictures_up_to(picture_number, wanted);
                 }
@@ -525,7 +539,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
     }
 
     fn start_upcoming_stream(&mut self, next_video: &UpcomingVideo) {
-        let Some((request, native_colour)) = self.request_for(
+        let Some((request, native_colour, picture_colour)) = self.request_for(
             next_video.source,
             next_video.first_source_frame,
             next_video.end_source_frame,
@@ -534,7 +548,13 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
             return;
         };
         if let Ok(stream) = self.starter.start(&request) {
-            self.upcoming_stream = Some(RunningStream::new(stream, next_video.source, &request, native_colour));
+            self.upcoming_stream = Some(RunningStream::new(
+                stream,
+                next_video.source,
+                &request,
+                native_colour,
+                picture_colour,
+            ));
         }
     }
 
@@ -547,14 +567,23 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         first_source_frame: SourceFrameIndex,
         range_end_source_frame: SourceFrameIndex,
         speed_factor: SpeedFactor,
-    ) -> Option<(FrameStreamRequest, Option<NativeYuv420p>)> {
+    ) -> Option<(FrameStreamRequest, Option<NativeYuv420p>, PictureColour)> {
         let setup = self.setup.as_ref()?;
         let video = setup.videos.iter().find(|video| video.source == source)?;
+        let (width, height) = video.display_size_in_pixels;
         let native_colour = video
             .format
             .as_ref()
-            .and_then(VideoStreamFormat::as_native_yuv420p)
+            .and_then(|format| format.as_native_yuv420p(width, height))
             .filter(|_| setup.planes_wanted);
+        // What the codes stand for is what the file says of its primaries and its curve, or what is assumed (sRGB where the file's format is not known yet).
+        let picture_colour = video.format.as_ref().map_or(PictureColour::SRGB, |format| {
+            let colour = format.colour_of_a_picture_of_size(width, height);
+            PictureColour {
+                primaries: colour.primaries,
+                curve: colour.curve,
+            }
+        });
         let request = FrameStreamRequest {
             video: video.location.clone(),
             project_frame_rate: setup.frame_rate,
@@ -573,7 +602,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 FrameDelivery::Rgba
             },
         };
-        Some((request, native_colour))
+        Some((request, native_colour, picture_colour))
     }
 }
 

@@ -3,25 +3,23 @@
 
 //! The colours of the finished video: which matrix the engine makes the planes with, and what the file says its colours are.
 //!
-//! **The rule** (`docs/engine-phase-2-design.md`, section 5): the matrix and the tags follow the *first video* of the project. A video that says its matrix is turned
-//! into red, green and blue by the engine with that matrix and back into planes with the same one, so the planes of a video that fills the picture are the planes it
-//! had (to within a level), and the file says what the video said, as the old export (which kept the planes) left a file. A first video that says nothing is BT.601
-//! and **left untagged**, as it was (the engine's compatibility rule is that a video that says nothing is BT.601, limited, because that is what ffmpeg does with it
-//! when it makes colours itself). A project without a video is the same. The range of the finished video is always the limited one (a video of full range is
-//! squeezed into it, and the file says `tv`: the picture is the same).
+//! **The rule** (`docs/engine-phase-3-design.md`, decisions C9 and C14): both follow the **output colour space** of the project, and nothing else. The planes are made with
+//! the matrix of BT.709 in the limited range, and the file always says so: its matrix, its primaries, its transfer (`bt709` for the two spaces that are Rec.709 video, and
+//! `iec61966-2-1` for the one that is sRGB) and its range. Until phase 3 they followed the *first video* of the project, and a first video that said nothing left a file that
+//! said nothing; a video of another matrix is converted now, in the light of the working space, and the file says what the numbers are.
 
 use crate::engine::{YuvColour, YuvMatrix, YuvRange};
-use crate::media::VideoStreamFormat;
+use crate::project::OutputColourSpace;
 
 /// What a file says about the colours of its picture, as the filter that writes it is told: the names that ffprobe prints and the filters of ffmpeg take. What is
 /// `None` is not said.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OutputTags {
-    /// The matrix (`colorspace`), only one of those that the engine can make planes with: `bt709`, `bt470bg`, `smpte170m` or `bt2020nc`.
+    /// The matrix (`colorspace`), one of those that the engine can make planes with: `bt709`, `bt470bg`, `smpte170m` or `bt2020nc`.
     pub matrix: Option<String>,
-    /// The primaries (`color_primaries`) the first video states, passed on as they are.
+    /// The primaries (`color_primaries`).
     pub primaries: Option<String>,
-    /// The transfer (`color_trc`) the first video states, passed on as they are.
+    /// The transfer (`color_trc`).
     pub transfer: Option<String>,
 }
 
@@ -60,46 +58,20 @@ pub struct OutputColour {
     pub tags: OutputTags,
 }
 
-/// The colours of the finished video of a project whose first video is stored the way `first_video` says (`None` if the project has no video).
-pub fn output_colour_for(first_video: Option<&VideoStreamFormat>) -> OutputColour {
-    let Some(format) = first_video else {
-        return OutputColour {
-            planes: YuvColour::UNSPECIFIED,
-            tags: OutputTags::default(),
-        };
-    };
-    // (Only the names that are matched below are put in the filter, so that the matrix needs no check of its name: anything else is a matrix that cannot be made.)
-    let matrix_stated = format.colour_space.as_deref();
-    let (matrix, matrix_tag) = match matrix_stated {
-        None => (YuvMatrix::Bt601, None),
-        Some(name @ ("bt470bg" | "smpte170m")) => (YuvMatrix::Bt601, Some(name)),
-        Some(name @ "bt709") => (YuvMatrix::Bt709, Some(name)),
-        Some(name @ "bt2020nc") => (YuvMatrix::Bt2020, Some(name)),
-        // A matrix that the engine cannot make planes with (ffmpeg made the colours of such a video itself): the planes are BT.601, and the file does not claim
-        // another matrix than that.
-        Some(_) => (YuvMatrix::Bt601, None),
-    };
+/// The colours of the finished video of a project whose output colour space is `space`.
+pub fn output_colour_for(space: OutputColourSpace) -> OutputColour {
     OutputColour {
         planes: YuvColour {
-            matrix,
+            matrix: YuvMatrix::Bt709,
             range: YuvRange::Limited,
         },
         tags: OutputTags {
-            matrix: matrix_tag.map(str::to_owned),
-            primaries: format.colour_primaries.clone().filter(|name| is_a_name(name)),
-            transfer: format.colour_transfer.clone().filter(|name| is_a_name(name)),
+            matrix: Some("bt709".to_owned()),
+            // (Every output space is Rec.709's primaries; `tests` says so, so that a space with other primaries makes this fail instead of making a file that lies.)
+            primaries: Some("bt709".to_owned()),
+            transfer: Some(space.transfer_tag().to_owned()),
         },
     }
-}
-
-/// Whether `text` is the kind of name that ffprobe prints for a colour tag (letters, digits, hyphens, underscores), which can be put in a filter as it is: none of the
-/// characters that mean something in the text of a filter (a colon, an equals sign, a comma, a quote...) is in it. (Whatever a file says is passed through ffprobe's
-/// tables of names, so this is a second lock on the door and not the first.) The primaries and the transfer of a video are passed on as they are, and are checked by this.
-fn is_a_name(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
 }
 
 #[cfg(test)]

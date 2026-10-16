@@ -281,14 +281,14 @@ fn describe_layer(
     supply: &mut impl PictureSupply,
 ) -> Option<LayerDescription> {
     let corners = corners_of(layer, picture_size);
-    // (What a file's tags say about its colours is read in phase 3's piece 3.4; until then a video picture is sRGB, as a picture file is.)
+    // (A picture file, a text, a symbol and a thumbnail are sRGB. The picture of a video is what its file says, or what is assumed of it: it comes with its colour.)
     let colour = PictureColour::SRGB;
     let tag = colour_tag_of(colour, working);
     let wanted = match &layer.content {
         PreviewLayerContent::Video(VideoInThePicture::Picture(supplied)) => PictureWanted {
-            id: id_of_a_video_picture(supplied.serial_number, tag),
+            id: id_of_a_video_picture(supplied.serial_number, colour_tag_of(supplied.colour, working)),
             how: HowToMakeIt::VideoPicture(supplied),
-            colour,
+            colour: supplied.colour,
             working,
         },
         PreviewLayerContent::Video(VideoInThePicture::Thumbnail {

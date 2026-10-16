@@ -49,6 +49,26 @@ fn the_plan_reports_the_length_of_the_finished_video_in_frames_and_its_frame_rat
 }
 
 #[test]
+fn the_plan_carries_the_output_colour_space_of_the_settings_and_what_the_frames_are_encoded_as() {
+    use crate::project::OutputColourSpace;
+    let project = project_with_video(320, 180, false);
+    for output in OutputColourSpace::ALL {
+        let settings = Settings {
+            output_colour_space: output,
+            ..Settings::DEFAULT
+        };
+        let plan = plan_export(&project, settings).unwrap();
+        assert_eq!(plan.output_colour_space, output);
+        assert_eq!(plan.colour, colour_of_the_export(settings), "{output:?}");
+    }
+    assert_eq!(
+        plan(&project).unwrap().output_colour_space,
+        OutputColourSpace::Rec709AsPreviewed,
+        "the default"
+    );
+}
+
+#[test]
 fn a_project_of_a_single_frame_is_planned_as_a_video_of_a_single_frame() {
     let mut project = Project::empty();
     project
@@ -104,7 +124,6 @@ fn a_project_with_no_video_at_all_exports_black_the_standard_size_and_has_no_run
     assert!(plan.runs.is_empty());
     assert!(plan.videos.is_empty() && plan.images.is_empty());
     assert!(!plan.has_audio && plan.sound.is_none());
-    assert_eq!(plan.first_video(), None);
 }
 
 // --- files that are shorter than the clips ---
@@ -359,7 +378,6 @@ fn one_clip_is_one_run_and_the_run_has_the_clips_frames_and_speed() {
     assert_eq!(plan.run_of(second, 149), Some(1));
     assert_eq!(plan.run_of(second, 150), None);
     assert_eq!(plan.run_of(second, 99), None);
-    assert_eq!(plan.first_video(), Some(SourceMediaIdentifier::new(1)));
 }
 
 #[test]
@@ -430,57 +448,6 @@ fn a_video_that_is_hidden_for_a_while_by_another_in_front_of_it_is_a_run_before_
     );
     assert_eq!(plan.runs.len(), 3);
     assert_eq!(plan.run_of(behind, 150), None);
-}
-
-#[test]
-fn the_first_video_is_the_one_of_the_first_stretch_that_has_a_video_and_at_the_back_of_that_stretch() {
-    // A video of 300 frames from the file 1, and from frame 300 on one of 100 frames from the file 2: the first is the first video, whatever comes after it.
-    let mut one_after_the_other = project_with_video(320, 180, false);
-    one_after_the_other
-        .import_source(video_source(2, 320, 180, 100, false), frame(300))
-        .unwrap();
-    assert_eq!(
-        plan(&one_after_the_other).unwrap().runs.len(),
-        2,
-        "a premise: both are seen"
-    );
-    assert_eq!(
-        plan(&one_after_the_other).unwrap().first_video(),
-        Some(SourceMediaIdentifier::new(1))
-    );
-
-    // Two at once, the one in front small, so that both are seen: the one at the back is the first video.
-    let mut one_over_the_other = project_with_video(320, 180, false);
-    one_over_the_other
-        .import_source(video_source(2, 320, 180, 100, false), frame(50))
-        .unwrap();
-    let in_front = clip_location(&one_over_the_other, 0, 0);
-    one_over_the_other
-        .set_clip_placement(in_front, Placement::upright(CanvasArea::new(0.5, 0.5, 0.25, 0.25)))
-        .unwrap();
-    assert_eq!(
-        plan(&one_over_the_other).unwrap().runs.len(),
-        2,
-        "a premise: both are seen"
-    );
-    assert_eq!(
-        plan(&one_over_the_other).unwrap().first_video(),
-        Some(SourceMediaIdentifier::new(1))
-    );
-
-    // A stretch with no video comes first, and then a video: the first video is that one.
-    let mut after_a_title = Project::empty();
-    let track = after_a_title.tracks()[0].id();
-    after_a_title
-        .insert_text(track, frame(0), TextObject::default(), 30)
-        .unwrap();
-    after_a_title
-        .import_source(video_source(3, 320, 180, 100, false), frame(30))
-        .unwrap();
-    assert_eq!(
-        plan(&after_a_title).unwrap().first_video(),
-        Some(SourceMediaIdentifier::new(3))
-    );
 }
 
 #[test]

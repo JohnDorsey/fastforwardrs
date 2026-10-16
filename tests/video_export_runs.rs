@@ -566,18 +566,38 @@ fn cancelling_an_export_ends_it_though_ffmpeg_is_stuck_and_not_reading_the_frame
 
 // --- the colours of the file ---
 
+/// A project of one video, the whole of it on the timeline.
+fn project_of_the_video(toolchain: &FfmpegToolchain, source: &Path) -> Project {
+    let mut project = Project::empty();
+    project
+        .import_source(
+            fastforwardrs::project::SourceMedia {
+                identifier: fastforwardrs::project::SourceMediaIdentifier::new(1),
+                link: fastforwardrs::project::SourceMediaLink::from_absolute_path(source.to_owned()),
+                properties: fastforwardrs::media::probe_source_media(toolchain, source).unwrap(),
+            },
+            fastforwardrs::project::TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    project
+}
+
 #[test]
-fn the_file_says_what_the_first_video_said_about_its_colours_and_has_its_colours_within_a_few_levels_of_it() {
+fn the_file_says_bt709_in_the_limited_range_whatever_the_first_video_said_and_has_its_colours_within_a_few_levels_of_it()
+ {
+    // (Rewritten on purpose in phase 3: the file used to say what the first video said, and nothing at all when that said nothing. It says what the output colour space
+    // is now, and the colours of a video that is not BT.709 are converted, so that the picture of the file is still the picture of the video.)
     use support::yuv_videos::{BT709_LIMITED, FOUR_COLOURS, SMPTE170M_LIMITED, UNTAGGED, video_made_by_geq};
     let toolchain = ready_or_skip!();
     let scratch = scratch_directory();
-    // (what the video says, what the file is to say: matrix, range)
+    // (what the video says; what the file is to say is the same for all)
+    let (matrix, range) = (Some("bt709"), Some("tv"));
     let cases = [
-        ("untagged", UNTAGGED, (None, None)),
-        ("bt709", BT709_LIMITED, (Some("bt709"), Some("tv"))),
-        ("smpte170m", SMPTE170M_LIMITED, (Some("smpte170m"), Some("tv"))),
+        ("untagged", UNTAGGED),
+        ("bt709", BT709_LIMITED),
+        ("smpte170m", SMPTE170M_LIMITED),
     ];
-    for (name, tags, (matrix, range)) in cases {
+    for (name, tags) in cases {
         let source = video_made_by_geq(
             &toolchain,
             scratch.path(),
@@ -587,17 +607,7 @@ fn the_file_says_what_the_first_video_said_about_its_colours_and_has_its_colours
             "yuv420p",
             tags,
         );
-        let mut project = Project::empty();
-        project
-            .import_source(
-                fastforwardrs::project::SourceMedia {
-                    identifier: fastforwardrs::project::SourceMediaIdentifier::new(1),
-                    link: fastforwardrs::project::SourceMediaLink::from_absolute_path(source.clone()),
-                    properties: fastforwardrs::media::probe_source_media(&toolchain, &source).unwrap(),
-                },
-                fastforwardrs::project::TimelineFrameIndex::new(0),
-            )
-            .unwrap();
+        let project = project_of_the_video(&toolchain, &source);
         let destination = scratch.path().join(format!("{name}.mp4"));
 
         let outcome = export(&toolchain, &project, &destination);
@@ -611,6 +621,8 @@ fn the_file_says_what_the_first_video_said_about_its_colours_and_has_its_colours
         {
             assert_eq!(said("color_space").as_deref(), matrix, "{name}: matrix");
             assert_eq!(said("color_range").as_deref(), range, "{name}: range");
+            assert_eq!(said("color_primaries").as_deref(), Some("bt709"), "{name}: primaries");
+            assert_eq!(said("color_transfer").as_deref(), Some("bt709"), "{name}: transfer");
         }
         // The colours: decoded by ffmpeg with the matrix each file says, the picture of the file is the picture of the video.
         let before = decode_video(&toolchain, &source, 320, 180);
@@ -631,4 +643,83 @@ fn the_file_says_what_the_first_video_said_about_its_colours_and_has_its_colours
         );
         assert!(mean < 1.0, "{name}: the mean difference between the colours is {mean}");
     }
+}
+
+#[test]
+fn a_high_definition_video_that_says_nothing_of_its_colours_is_read_as_bt709_so_it_comes_out_as_the_same_planes_that_say_so()
+ {
+    // (Phase 3, decision C7: it was BT.601 at every size, because that is what ffmpeg does with the colours of a file that says nothing; players use BT.709 for a picture
+    // of more than 1024 across or 576 down, and so does the program now.) The same planes are made twice, once saying nothing and once saying `bt709`; ffmpeg's own
+    // decoding of the second is the truth, and the export of the first has to come out as that.
+    use support::yuv_videos::{BT709_LIMITED, FOUR_COLOURS, UNTAGGED, video_made_by_geq};
+    let toolchain = ready_or_skip!();
+    let scratch = scratch_directory();
+    let size = (1280, 720);
+    let says_nothing = video_made_by_geq(
+        &toolchain,
+        scratch.path(),
+        "says_nothing",
+        size,
+        FOUR_COLOURS,
+        "yuv420p",
+        UNTAGGED,
+    );
+    let says_bt709 = video_made_by_geq(
+        &toolchain,
+        scratch.path(),
+        "says_bt709",
+        size,
+        FOUR_COLOURS,
+        "yuv420p",
+        BT709_LIMITED,
+    );
+    let destination = scratch.path().join("high_definition.mp4");
+
+    let outcome = export(
+        &toolchain,
+        &project_of_the_video(&toolchain, &says_nothing),
+        &destination,
+    );
+
+    assert_eq!(outcome.result, ExportResult::Completed);
+    let truth = decode_video(&toolchain, &says_bt709, size.0, size.1);
+    let made = decode_video(&toolchain, &destination, size.0, size.1);
+    assert_eq!((truth.pictures.len(), made.pictures.len()), (1, 1));
+    let differences: Vec<u8> = truth.pictures[0]
+        .iter()
+        .zip(&made.pictures[0])
+        .map(|(a, b)| a.abs_diff(*b))
+        .collect();
+    let largest = *differences.iter().max().unwrap();
+    let mean = differences.iter().map(|&difference| f64::from(difference)).sum::<f64>() / differences.len() as f64;
+    eprintln!("high definition, says nothing: the largest difference is {largest}, the mean is {mean:.3}");
+    assert!(largest <= 6, "the largest difference between the colours is {largest}");
+    assert!(mean < 1.0, "the mean difference between the colours is {mean}");
+    // And the colours are not those that BT.601 would make of the same planes (the premise that the test can tell the two apart: the mean difference of the export
+    // is a third of what BT.601 would be from the truth, or less).
+    let wrongly_tagged = video_made_by_geq(
+        &toolchain,
+        scratch.path(),
+        "says_bt601",
+        size,
+        FOUR_COLOURS,
+        "yuv420p",
+        support::yuv_videos::SMPTE170M_LIMITED,
+    );
+    let as_bt601 = decode_video(&toolchain, &wrongly_tagged, size.0, size.1);
+    let differences_if_bt601: Vec<u8> = truth.pictures[0]
+        .iter()
+        .zip(&as_bt601.pictures[0])
+        .map(|(a, b)| a.abs_diff(*b))
+        .collect();
+    let mean_if_bt601 = differences_if_bt601
+        .iter()
+        .map(|&difference| f64::from(difference))
+        .sum::<f64>()
+        / differences_if_bt601.len() as f64;
+    eprintln!("a premise: read as BT.601 the mean difference would be {mean_if_bt601:.3}");
+    assert!(
+        mean_if_bt601 > 3.0 * mean,
+        "a premise: BT.601 and BT.709 make colours of these planes that are {mean_if_bt601:.3} apart on average, and the export is {mean:.3} from the truth"
+    );
 }

@@ -131,6 +131,7 @@ fn the_same_coarse_picture_is_one_texture_however_many_finer_ones_stand_in_for_i
 
 fn supplied_picture(serial_number: u64, shade: u8) -> SuppliedPicture {
     SuppliedPicture {
+        colour: crate::engine::PictureColour::SRGB,
         source: VIDEO,
         source_frame: crate::project::SourceFrameIndex::new(0),
         frame: DecodedFrame {

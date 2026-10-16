@@ -579,7 +579,8 @@ fn pictures_are_asked_for_in_planes_only_for_a_video_that_is_stored_that_way_and
 #[test]
 fn a_picture_in_planes_is_supplied_with_the_colour_its_video_says_it_has() {
     for (colour_space, colour_range, matrix, full_range) in [
-        (None, None, NativeMatrix::Bt601, false),
+        // (Rewritten on purpose in phase 3: this video is 1280 by 720, and a file that says nothing is BT.709 when its picture is high definition. It was BT.601.)
+        (None, None, NativeMatrix::Bt709, false),
         (Some("bt709"), Some("tv"), NativeMatrix::Bt709, false),
         (Some("bt709"), Some("pc"), NativeMatrix::Bt709, true),
         (Some("bt2020nc"), None, NativeMatrix::Bt2020, false),
@@ -611,6 +612,78 @@ fn a_picture_in_planes_is_supplied_with_the_colour_its_video_says_it_has() {
         }
         assert_eq!(picture.source_frame, SourceFrameIndex::new(50));
     }
+}
+
+/// What ffprobe says of a video that says what the arguments say of its primaries and its transfer function (and nothing of its matrix).
+fn eight_bit_four_two_zero_with(primaries: Option<&str>, transfer: Option<&str>) -> VideoStreamFormat {
+    VideoStreamFormat {
+        colour_primaries: primaries.map(str::to_owned),
+        colour_transfer: transfer.map(str::to_owned),
+        ..eight_bit_four_two_zero(Some("bt709"), None)
+    }
+}
+
+#[test]
+fn every_picture_comes_with_the_primaries_and_the_curve_its_video_says_or_the_ones_that_are_assumed_for_it() {
+    use crate::colour_space::{StandardPrimaries, TransferFunction};
+    use crate::engine::PictureColour;
+    for (format, planes_wanted, expected) in [
+        (
+            eight_bit_four_two_zero_with(Some("bt709"), Some("bt709")),
+            true,
+            PictureColour::SRGB,
+        ),
+        (
+            eight_bit_four_two_zero_with(Some("bt2020"), Some("bt2020-10")),
+            true,
+            PictureColour {
+                primaries: StandardPrimaries::Rec2020,
+                curve: TransferFunction::Srgb,
+            },
+        ),
+        (
+            eight_bit_four_two_zero_with(Some("smpte432"), Some("linear")),
+            true,
+            PictureColour {
+                primaries: StandardPrimaries::DisplayP3,
+                curve: TransferFunction::Linear,
+            },
+        ),
+        // (A picture that ffmpeg made RGBA of is the colour its file says as well: ffmpeg does not change primaries or curves.)
+        (
+            eight_bit_four_two_zero_with(Some("smpte170m"), Some("smpte170m")),
+            false,
+            PictureColour {
+                primaries: StandardPrimaries::Bt601Ntsc,
+                curve: TransferFunction::Srgb,
+            },
+        ),
+        (eight_bit_four_two_zero_with(None, None), true, PictureColour::SRGB),
+    ] {
+        let (mut supplier, script) = supplier_of_a_video_that_is(Some(format.clone()), planes_wanted);
+        let now = Instant::now();
+        supplier.supply(Some(wanted(50)), false, now);
+        script.deliver(0, 1);
+        supplier.supply(Some(wanted(50)), false, now);
+        assert_eq!(
+            supplier.picture().expect("the picture arrived").colour,
+            expected,
+            "{format:?}, planes wanted: {planes_wanted}"
+        );
+    }
+}
+
+#[test]
+fn a_picture_of_a_video_whose_format_is_not_known_yet_is_srgb() {
+    let (mut supplier, script) = supplier_of_a_video_that_is(None, true);
+    let now = Instant::now();
+    supplier.supply(Some(wanted(50)), false, now);
+    script.deliver(0, 1);
+    supplier.supply(Some(wanted(50)), false, now);
+    assert_eq!(
+        supplier.picture().expect("the picture arrived").colour,
+        crate::engine::PictureColour::SRGB
+    );
 }
 
 #[test]

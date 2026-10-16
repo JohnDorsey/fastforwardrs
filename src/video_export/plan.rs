@@ -12,7 +12,9 @@ use crate::composition::{LayerContent, PicturePlan, plan_pictures, plan_sound};
 use crate::engine::FrameColour;
 use crate::frame_scene::colour_of_the_export;
 use crate::media::export::{SoundGraphSpecification, sound_graph_specification, sources_of_sound};
-use crate::project::{FrameRate, Project, Settings, SourceMediaIdentifier, SpeedIndicatorLayout, TimelineFrameIndex};
+use crate::project::{
+    FrameRate, OutputColourSpace, Project, Settings, SourceMediaIdentifier, SpeedIndicatorLayout, TimelineFrameIndex,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 pub enum ExportPlanError {
@@ -86,6 +88,8 @@ pub struct ExportPlan {
     pub symbol_layout: SpeedIndicatorLayout,
     /// What every frame is put together in, and what it is encoded as (from the settings: the working colour space and the output colour space).
     pub colour: FrameColour,
+    /// What the numbers of the finished video are: it says what the matrix, the primaries and the transfer of the file are (see `output_colour_for`).
+    pub output_colour_space: OutputColourSpace,
 }
 
 impl ExportPlan {
@@ -99,17 +103,6 @@ impl ExportPlan {
         self.runs.iter().position(|run| {
             run.clip == clip && run.first_timeline_frame <= timeline_frame && timeline_frame < run.end_timeline_frame
         })
-    }
-
-    /// The first video of the picture: the one at the back of the first section that has a video. It tells what the colours of the finished video are (see
-    /// `docs/engine-phase-2-design.md`, section 5).
-    pub fn first_video(&self) -> Option<SourceMediaIdentifier> {
-        self.pictures
-            .sections
-            .iter()
-            .flat_map(|section| section.video_layers())
-            .map(|(_, video)| video.source)
-            .next()
     }
 }
 
@@ -190,6 +183,7 @@ pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, 
         has_audio,
         symbol_layout: project.speed_indicator_layout(),
         colour: colour_of_the_export(settings),
+        output_colour_space: settings.output_colour_space,
         pictures,
     })
 }

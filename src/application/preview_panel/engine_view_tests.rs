@@ -17,8 +17,8 @@ use super::{PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePrevie
 use crate::application::theme;
 use crate::colour_effects::ColourMatrix;
 use crate::engine::{
-    COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameDescription, LayerSource, PictureData, PictureId,
-    PicturePixels,
+    COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameColour, FrameDescription, LayerSource,
+    PictureColour, PictureData, PictureId, PicturePixels, WorkingSpace,
 };
 use crate::media::{
     CompressedPicture, DecodedFrame, DecodedYuvFrame, NativeMatrix, NativeYuv420p, PictureSize, ThumbnailKey,
@@ -53,11 +53,14 @@ struct WritesItDown {
     asked: Vec<PictureId>,
     refuses: HashSet<PictureId>,
     kinds: Vec<&'static str>,
+    /// What each picture asked for is to be made in: how its numbers are read, and the working space it is made for.
+    colours: Vec<(PictureColour, WorkingSpace)>,
 }
 
 impl PictureSupply for WritesItDown {
     fn make_sure_the_engine_has(&mut self, wanted: &PictureWanted<'_>) -> bool {
         self.asked.push(wanted.id);
+        self.colours.push((wanted.colour, wanted.working));
         self.kinds.push(match wanted.how {
             HowToMakeIt::VideoPicture(_) => "video picture",
             HowToMakeIt::Thumbnail(_) => "thumbnail",
@@ -84,6 +87,7 @@ fn describe_with(
 
 fn video_picture(serial_number: u64) -> SuppliedPicture {
     SuppliedPicture {
+        colour: crate::engine::PictureColour::SRGB,
         source: SourceMediaIdentifier::new(1),
         source_frame: SourceFrameIndex::new(0),
         frame: SuppliedFrame::Rgba(DecodedFrame {
@@ -769,4 +773,37 @@ fn what_a_picture_is_made_of_is_what_the_engine_is_sent() {
     .make(&mut text_renderer)
     .unwrap();
     assert!(data.width_in_pixels > 0 && data.height_in_pixels > 0);
+}
+
+#[test]
+fn the_picture_of_a_video_is_made_in_the_colour_it_comes_with_and_a_picture_of_another_colour_is_another_picture_to_the_engine()
+ {
+    use crate::colour_space::{StandardPrimaries, TransferFunction};
+    let in_rec709 = video_picture(7);
+    let mut in_rec2020 = video_picture(7);
+    in_rec2020.colour = PictureColour {
+        primaries: StandardPrimaries::Rec2020,
+        curve: TransferFunction::Srgb,
+    };
+    let working = WorkingSpace::Linear(StandardPrimaries::Rec709);
+    let colour = FrameColour {
+        working,
+        ..FrameColour::default()
+    };
+    let mut ids = Vec::new();
+    for picture in [&in_rec709, &in_rec2020] {
+        let shown = content(vec![showing(0, picture, whole_picture())], None);
+        let mut supply = WritesItDown::default();
+        super::engine_view::describe_frame_in_colour(&shown, RENDER_SIZE, 0, colour, &mut supply);
+        assert_eq!(
+            supply.colours,
+            vec![(picture.colour, working)],
+            "what the picture is made in"
+        );
+        ids.push(supply.asked[0]);
+    }
+    assert_ne!(
+        ids[0], ids[1],
+        "the same decoded picture, read as another colour, is not the picture that the engine has"
+    );
 }

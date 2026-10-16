@@ -48,6 +48,7 @@ fn content<'a>(layers: Vec<PreviewLayer<'a>>) -> PreviewContent<'a> {
 /// A picture of one flat colour, as the supplier has it, with this serial number.
 fn flat_picture(serial_number: u64, colour: [u8; 4]) -> SuppliedPicture {
     SuppliedPicture {
+        colour: crate::engine::PictureColour::SRGB,
         source: SourceMediaIdentifier::new(1),
         source_frame: SourceFrameIndex::new(0),
         frame: SuppliedFrame::Rgba(DecodedFrame {

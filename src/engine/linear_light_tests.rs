@@ -24,14 +24,14 @@ const LINEAR_REC709: WorkingSpace = WorkingSpace::Linear(StandardPrimaries::Rec7
 const LINEAR_ACESCG: WorkingSpace = WorkingSpace::Linear(StandardPrimaries::AcesCg);
 
 /// A frame that is put together in `working` and shown on an sRGB display.
-fn colour_of(working: WorkingSpace) -> FrameColour {
+pub(super) fn colour_of(working: WorkingSpace) -> FrameColour {
     FrameColour {
         working,
         output: OutputEncoding::SRGB,
     }
 }
 
-fn the_whole_frame(picture: u64) -> LayerDescription {
+pub(super) fn the_whole_frame(picture: u64) -> LayerDescription {
     LayerDescription {
         source: LayerSource::Picture(PictureId(picture)),
         corners: CORNERS_OF_THE_WHOLE_PICTURE,
@@ -39,7 +39,7 @@ fn the_whole_frame(picture: u64) -> LayerDescription {
     }
 }
 
-fn a_colour(rgba: [u8; 4]) -> LayerDescription {
+pub(super) fn a_colour(rgba: [u8; 4]) -> LayerDescription {
     LayerDescription {
         source: LayerSource::Solid(rgba),
         corners: CORNERS_OF_THE_WHOLE_PICTURE,
@@ -48,13 +48,13 @@ fn a_colour(rgba: [u8; 4]) -> LayerDescription {
 }
 
 /// The sRGB picture `rgba` (4 bytes a pixel, `width` by `height`), made for `working`.
-fn picture_for(working: WorkingSpace, width: u32, height: u32, rgba: Vec<u8>) -> PictureData {
+pub(super) fn picture_for(working: WorkingSpace, width: u32, height: u32, rgba: Vec<u8>) -> PictureData {
     PictureData::rgba8(width, height, rgba)
         .unwrap()
         .in_colour(PictureColour::SRGB, working)
 }
 
-fn upload(renderer: &mut FrameRenderer, id: u64, picture: &PictureData) {
+pub(super) fn upload(renderer: &mut FrameRenderer, id: u64, picture: &PictureData) {
     renderer.upload_picture(PictureId(id), picture).unwrap();
 }
 
@@ -82,7 +82,7 @@ fn the_largest_difference(a: &RenderedFrame, b: &RenderedFrame) -> u8 {
 }
 
 /// Numbers that look random and are the same every time.
-fn noise(count: usize, seed: u64) -> Vec<u8> {
+pub(super) fn noise(count: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
     (0..count)
         .map(|_| {

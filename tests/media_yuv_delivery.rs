@@ -94,7 +94,7 @@ fn colour_the_preview_gives(toolchain: &FfmpegToolchain, video: &Path) -> YuvCol
     let format = probe_video_stream_format(toolchain, video.to_path_buf()).expect("the video can be probed");
     colour_for_the_engine(
         format
-            .as_native_yuv420p()
+            .as_native_yuv420p(64, 48)
             .expect("the preview can use the planes of this video"),
     )
 }
@@ -129,7 +129,7 @@ fn what_ffprobe_says_of_a_video_is_read_and_decides_whether_the_preview_can_use_
         );
         let format = probe_video_stream_format(&toolchain, video).expect("the video can be probed");
         assert_eq!(format.pixel_format.as_deref(), Some("yuv420p"), "{name}");
-        assert_eq!(format.as_native_yuv420p(), expected, "{name}: {format:?}");
+        assert_eq!(format.as_native_yuv420p(64, 48), expected, "{name}: {format:?}");
     }
 
     // What the words of a tagged video are, as ffprobe prints them.
@@ -159,7 +159,7 @@ fn what_ffprobe_says_of_a_video_is_read_and_decides_whether_the_preview_can_use_
         );
         let format = probe_video_stream_format(&toolchain, video).expect("the video can be probed");
         assert_eq!(format.pixel_format.as_deref(), Some(pixel_format));
-        assert_eq!(format.as_native_yuv420p(), None, "{pixel_format}");
+        assert_eq!(format.as_native_yuv420p(64, 48), None, "{pixel_format}");
     }
 }
 
@@ -199,7 +199,7 @@ fn an_ordinary_h264_file_is_probed_too_tagged_or_not() {
             .arg(&path);
         run(command);
         let format = probe_video_stream_format(&toolchain, path).expect("the video can be probed");
-        assert_eq!(format.as_native_yuv420p(), Some(expected), "{name}: {format:?}");
+        assert_eq!(format.as_native_yuv420p(64, 48), Some(expected), "{name}: {format:?}");
     }
 }
 
