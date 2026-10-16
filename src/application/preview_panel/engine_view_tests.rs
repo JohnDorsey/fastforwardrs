@@ -130,6 +130,33 @@ fn the_corners_on(frame: (u32, u32), corners: [(f32, f32); 4]) -> [(f32, f32); 4
 }
 
 #[test]
+fn a_picture_or_a_frame_of_no_size_does_not_make_the_corners_of_a_layer_or_of_the_symbol_numbers_that_are_not() {
+    let picture = video_picture(1);
+    let turned = Placement::new(CanvasArea::new(0.1, 0.1, 0.5, 0.5), Angle::from_degrees(30.0));
+    let mut shown = content(vec![showing(0, &picture, turned)], None);
+    shown.picture_size = Some((0, 0));
+    shown.symbol = Some(the_symbol_over(0, 8));
+    for render_size in [RENDER_SIZE, (0, 0)] {
+        let mut supply = WritesItDown::default();
+        let description = super::engine_view::describe_frame(&shown, render_size, 0, &mut supply);
+        assert_eq!(
+            description.layers.len(),
+            2,
+            "the layer and the symbol over it: {description:?}"
+        );
+        for layer in &description.layers {
+            for (across, down) in layer.corners {
+                assert!(
+                    across.is_finite() && down.is_finite(),
+                    "a picture of no size, a frame of {render_size:?}: {:?}",
+                    layer.corners
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn a_preview_with_no_picture_to_show_is_a_black_frame_and_nothing_is_asked_for() {
     let mut nothing = content(vec![layer(0, whole_picture())], None);
     nothing.picture_size = None;

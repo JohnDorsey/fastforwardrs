@@ -160,7 +160,10 @@ maintainer's objection: a clip's effects run **before** placement, in the clip's
 on CI). 1.3 is described in section 9 of the design, with the one decision that measuring it changed: **chroma is replicated like ffmpeg does, not blended** (within 3 levels of ffmpeg at 1 to 1 and 2 to 1; a blend was off by up to 82).
 **Progress, 2026-10-16 [V]:** 1.5 (the window can make its preview with the engine: `FASTFORWARDRS_PREVIEW=engine`, off by default until the maintainer has looked at it on a real card, and the old drawing is the fallback if the engine stops) and 1.6 (the guard:
 loop caps in every shader that is given to the engine, `Engine::compile_effect_shader`, the watchdog that replaces the device when a frame does not finish or the device is lost, effects of strangers switched off for the run, three replacements within a minute stop the engine; the gate tests, one of
-them in a process of its own that is killed by its id) are built and verified on Windows (WARP) and Linux (lavapipe). **1.7** (the quality governor, frame-cache hits in the window, the benchmark, the mutation campaign, the list of visible differences) is what is left of the phase.
+them in a process of its own that is killed by its id) are built and verified on Windows (WARP) and Linux (lavapipe).
+**Progress, 2026-10-16, the end of the phase [V]:** 1.7 (the quality governor and its use by the preview, the benchmark, the pictures of what differs from the old drawing, the mutation campaign, the README) is built and verified on the same two systems, and CI was green (Windows, Ubuntu, macOS, licences, tools) at the last commit
+before this paragraph. **Two things of the gate are the maintainer's**, by rule SF-01: the benchmark on the integrated graphics (`cargo run --release --example engine_benchmark`: 60 frames to the second of the whole stack at 1080p; on this computer's software adapter it is 1.0), and looking at the preview with
+`FASTFORWARDRS_PREVIEW=engine` on a real card, which is also how the engine becomes the default (one line). The report of the phase, with what was decided and what is asked, is [engine-phase-1-report.md](engine-phase-1-report.md).
 *Risk:* parity of text, rotation and edge filtering; this is the phase where a long list of small visible differences is most likely,
 and each is listed and either fixed or accepted by the maintainer.
 

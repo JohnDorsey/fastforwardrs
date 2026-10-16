@@ -219,6 +219,40 @@ mod tests {
             "h: f32 in the room that the vec3 leaves, at 76"
         );
         assert_eq!(slot.size, 80);
+        for (from, to, where_it_is) in [(4, 8, "before b"), (20, 32, "before d"), (56, 64, "before g")] {
+            assert!(
+                bytes[from..to].iter().all(|byte| *byte == 0),
+                "the room {where_it_is}, bytes {from} to {to}, is zeros: {:?}",
+                &bytes[from..to]
+            );
+        }
+    }
+
+    #[test]
+    fn the_room_that_the_slots_and_the_ends_of_slots_leave_is_zeros_whatever_was_in_the_buffer_before() {
+        let mut uniforms = UniformBytes::new(64);
+        let first = uniforms.add_slot(|writer| {
+            writer.f32(1.0).f32(2.0).f32(3.0);
+        });
+        let second = uniforms.add_slot(|writer| {
+            writer.vec4([4.0, 5.0, 6.0, 7.0]);
+        });
+        assert_eq!((first.offset, first.size, second.offset, second.size), (0, 16, 64, 16));
+        let bytes = uniforms.as_bytes();
+        assert_eq!(bytes.len(), 80);
+        assert_eq!(
+            &bytes[12..16],
+            &[0; 4],
+            "the room at the end of the first slot, up to a multiple of 16"
+        );
+        assert_eq!(&bytes[16..64], &[0; 48], "the room up to where the next slot begins");
+        // A buffer that is used again is as it was the first time.
+        uniforms.clear();
+        let again = uniforms.add_slot(|writer| {
+            writer.f32(9.0);
+        });
+        assert_eq!((again.offset, again.size), (0, 16));
+        assert_eq!(&uniforms.as_bytes()[4..16], &[0; 12]);
     }
 
     #[test]

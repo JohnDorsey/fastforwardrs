@@ -246,6 +246,34 @@ fn the_buffer_of_numbers_is_made_bigger_when_a_frame_needs_more_and_keeps_its_ro
         assert!(arena.upload(&device.device, &device.queue, &slots(2)).is_some());
         let small = arena.capacity_in_bytes();
         assert_eq!(small, 4096);
+        // A frame that needs exactly the room there is fits in the buffer there is (the same buffer, not a new one of the same size), and one that needs a
+        // vector's worth more does not.
+        let numbers_in_one_slot = |count: usize| {
+            let mut bytes = UniformBytes::new(device.uniform_alignment);
+            bytes.add_slot(|writer| {
+                for _ in 0..count {
+                    writer.f32(1.0);
+                }
+            });
+            bytes
+        };
+        let buffer = arena.upload(&device.device, &device.queue, &slots(2)).unwrap().clone();
+        let exactly_the_room = numbers_in_one_slot(4096 / 4);
+        assert_eq!(exactly_the_room.len(), 4096);
+        assert_eq!(
+            arena.upload(&device.device, &device.queue, &exactly_the_room).unwrap(),
+            &buffer,
+            "a frame that needs 4096 bytes of a buffer of 4096"
+        );
+        assert_eq!(arena.capacity_in_bytes(), 4096);
+        let one_vector_more = numbers_in_one_slot(4096 / 4 + 4);
+        assert_eq!(one_vector_more.len(), 4096 + 16);
+        assert_ne!(
+            arena.upload(&device.device, &device.queue, &one_vector_more).unwrap(),
+            &buffer,
+            "a frame that needs 4112 bytes does not fit in a buffer of 4096"
+        );
+        assert_eq!(arena.capacity_in_bytes(), 8192);
         arena.upload(&device.device, &device.queue, &slots(40));
         let big = arena.capacity_in_bytes();
         assert!(

@@ -98,6 +98,27 @@ mod tests {
     }
 
     #[test]
+    fn a_kind_that_has_nothing_idle_has_none_to_count_and_one_that_has_something_has_that_many() {
+        let mut recycler = Recycler::default();
+        assert_eq!(recycler.idle_count_of(&7), 0, "nothing was ever given back");
+        recycler.give(1, "one");
+        recycler.give(1, "another one");
+        assert_eq!(
+            recycler.idle_count_of(&7),
+            0,
+            "and a kind that was never given back still has none"
+        );
+        assert_eq!(recycler.idle_count_of(&1), 2);
+        recycler.take(&1);
+        recycler.take(&1);
+        assert_eq!(
+            recycler.idle_count_of(&1),
+            0,
+            "a kind that has had them all taken has none"
+        );
+    }
+
+    #[test]
     fn a_thing_given_back_is_taken_by_its_own_kind_only_and_only_once() {
         let mut recycler = Recycler::default();
         recycler.give(1, "one");

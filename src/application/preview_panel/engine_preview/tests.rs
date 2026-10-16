@@ -197,6 +197,11 @@ fn the_size_of_the_frame_is_the_size_the_picture_is_shown_at_but_not_more_than_t
     assert_eq!(render_size_for(vec2(100.0, 9999.0), 1.0, (1000, 500)), (100, 50));
     assert_eq!(render_size_for(vec2(0.0, 0.0), 1.0, (1600, 900)), (2, 2));
     assert_eq!(
+        render_size_for(vec2(0.0, 0.0), 1.0, (100, 1000)),
+        (2, 10),
+        "a shown width of nothing counts as one pixel, which is a hundredth of this picture, and its height is a hundredth too"
+    );
+    assert_eq!(
         render_size_for(vec2(10.0, 10.0), 1.0, (0, 0)),
         (2, 2),
         "a picture of no size does not break it"
@@ -574,15 +579,25 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 /// What the preview asked a scripted engine for since this was last looked at: the ids of the pictures it sent, and the frames it asked for with their serial
 /// numbers.
 fn what_was_asked(requests: &Receiver<EngineRequest>) -> (Vec<PictureId>, Vec<(u64, FrameDescription)>) {
-    let (mut pictures, mut frames) = (Vec::new(), Vec::new());
+    let (pictures, frames, forgotten) = what_was_asked_and_what_was_forgotten(requests);
+    assert_eq!(forgotten, Vec::new(), "the engine was told to let go of pictures");
+    (pictures, frames)
+}
+
+/// Like [`what_was_asked`], and also the ids of the pictures that the engine was told to let go of.
+fn what_was_asked_and_what_was_forgotten(
+    requests: &Receiver<EngineRequest>,
+) -> (Vec<PictureId>, Vec<(u64, FrameDescription)>, Vec<PictureId>) {
+    let (mut pictures, mut frames, mut forgotten) = (Vec::new(), Vec::new(), Vec::new());
     while let Ok(request) = requests.try_recv() {
         match request {
             EngineRequest::Upload { id, .. } => pictures.push(id),
             EngineRequest::Render { serial, description } => frames.push((serial, description)),
+            EngineRequest::Forget(ids) => forgotten.extend(ids),
             other => panic!("it asked for something else: {other:?}"),
         }
     }
-    (pictures, frames)
+    (pictures, frames, forgotten)
 }
 
 #[test]
@@ -698,6 +713,8 @@ struct Drawn {
     asked_for_a_frame_of: Option<(u32, u32)>,
     /// How long from now the window was asked to be drawn again, each time it was asked to.
     asked_to_be_drawn_again_after: Vec<Duration>,
+    /// The pictures that the engine was told to let go of.
+    told_to_let_go_of: Vec<PictureId>,
 }
 
 /// A preview and a scripted engine, and what it takes to draw it: a picture for each number (each is another picture, so that the content changes), and a way
@@ -706,6 +723,8 @@ struct Scripted {
     preview: EnginePreview,
     events: std::sync::mpsc::Sender<EngineEvent>,
     requests: Receiver<EngineRequest>,
+    /// The window's own context, the same for every drawing (the textures of the frames are made in it and have numbers that go on from one drawing to the next).
+    context: Context,
     text_renderer: LazyTextRenderer,
     pictures: Vec<SuppliedPicture>,
     start: Instant,
@@ -718,9 +737,10 @@ impl Scripted {
             preview: EnginePreview::with_engine(engine),
             events,
             requests,
+            context: Context::default(),
             text_renderer: LazyTextRenderer::new(Arc::new(|| {})),
-            pictures: (1..=40)
-                .map(|serial| flat_picture(serial, [serial as u8 * 5, 0, 0, 255]))
+            pictures: (1..=80)
+                .map(|serial| flat_picture(serial, [(serial % 40) as u8 * 5, 0, 0, 255]))
                 .collect(),
             start: Instant::now(),
         }
@@ -729,15 +749,15 @@ impl Scripted {
     /// Draws the preview of picture `number` `milliseconds` after the start, with the clock going or not, in a window that has not been asked to be drawn
     /// again. A frame of the project lasts 100 milliseconds.
     fn draw(&mut self, number: usize, is_playing: bool, milliseconds: u64) -> Drawn {
-        let context = Context::default();
         let delays = Arc::new(std::sync::Mutex::new(Vec::new()));
         {
             let delays = Arc::clone(&delays);
-            context.set_request_repaint_callback(move |information| delays.lock().unwrap().push(information.delay));
+            self.context
+                .set_request_repaint_callback(move |information| delays.lock().unwrap().push(information.delay));
         }
         let shown = content(vec![showing(1, &self.pictures[number])]);
         self.preview.update(
-            &context,
+            &self.context,
             &shown,
             RENDER_SIZE,
             PictureFilter::Smooth,
@@ -748,12 +768,14 @@ impl Scripted {
                 now: self.start + Duration::from_millis(milliseconds),
             },
         );
-        let (_, frames) = what_was_asked(&self.requests);
+        let (_, frames, mut told_to_let_go_of) = what_was_asked_and_what_was_forgotten(&self.requests);
+        told_to_let_go_of.sort();
         assert!(frames.len() <= 1, "{frames:?}");
         let asked_to_be_drawn_again_after = delays.lock().unwrap().clone();
         Drawn {
             asked_for_a_frame_of: frames.first().map(|(_, description)| description.render_size),
             asked_to_be_drawn_again_after,
+            told_to_let_go_of,
         }
     }
 
@@ -834,6 +856,75 @@ fn frames_that_came_comfortably_make_the_size_go_up_again_ten_of_them_for_each_s
     expected.extend([HALF; 9]);
     expected.push(WHOLE);
     assert_eq!(sizes_asked, expected);
+}
+
+#[test]
+fn only_the_last_sixty_four_frames_that_were_asked_for_and_have_not_come_are_remembered_for_their_timing() {
+    let mut scripted = Scripted::new();
+    for number in 0..70 {
+        scripted.draw(number, false, number as u64);
+    }
+    assert_eq!(scripted.preview.frames_asked_for(), 70);
+    let remembered: Vec<u64> = scripted.preview.asked_at.iter().map(|(serial, _)| *serial).collect();
+    assert_eq!(
+        remembered,
+        (7..=70).collect::<Vec<u64>>(),
+        "the oldest six are forgotten"
+    );
+}
+
+#[test]
+fn pictures_that_the_last_frames_did_not_use_are_let_go_of_when_there_are_more_than_forty_eight_and_not_before() {
+    let mut scripted = Scripted::new();
+    // Each frame is of a picture of its own: the first of them is picture 1, and so on.
+    for number in 0..48 {
+        let drawn = scripted.draw(number, false, number as u64);
+        assert_eq!(
+            drawn.told_to_let_go_of,
+            Vec::<PictureId>::new(),
+            "with {} pictures sent, nothing is let go of",
+            number + 1
+        );
+    }
+    // With the 49th picture there are more than forty-eight: those that none of the last four frames used (and this is the 49th frame, so the pictures of the
+    // 45th, 46th, 47th and 48th and this one are in use) are let go of: the first forty-four.
+    let drawn = scripted.draw(48, false, 48);
+    assert_eq!(drawn.told_to_let_go_of, (1..=44).map(PictureId).collect::<Vec<_>>());
+    // Five pictures are left, and a sixth comes with the next frame: nothing more is let go of until there are more than forty-eight again.
+    let drawn = scripted.draw(49, false, 49);
+    assert_eq!(
+        drawn.told_to_let_go_of,
+        Vec::<PictureId>::new(),
+        "there are only six pictures sent now"
+    );
+}
+
+#[test]
+fn the_texture_of_the_shown_frame_is_kept_for_a_frame_of_the_same_size_and_made_again_when_either_side_is_another() {
+    let mut scripted = Scripted::new();
+    scripted.draw(0, false, 0);
+    scripted.the_frame_comes(1, WHOLE, false);
+    scripted.draw(1, false, 10);
+    let texture = |scripted: &Scripted| scripted.preview.shown.as_ref().unwrap().texture.id();
+    let first = texture(&scripted);
+    scripted.the_frame_comes(2, WHOLE, false);
+    scripted.draw(2, false, 20);
+    assert_eq!(
+        texture(&scripted),
+        first,
+        "the same size: the texture is set again, and is the same"
+    );
+    scripted.the_frame_comes(3, (64, 18), false);
+    scripted.draw(3, false, 30);
+    let third = texture(&scripted);
+    assert_ne!(third, first, "the same width and another height is another texture");
+    scripted.the_frame_comes(4, (32, 18), false);
+    scripted.draw(4, false, 40);
+    let fourth = texture(&scripted);
+    assert_ne!(fourth, third, "another width and the same height is another texture");
+    scripted.the_frame_comes(5, (32, 18), false);
+    scripted.draw(5, false, 50);
+    assert_eq!(texture(&scripted), fourth);
 }
 
 #[test]

@@ -210,9 +210,11 @@ can be supported. The design notes answer that at length; here is what the syste
 ## 6. The engine (EN)
 
 * **EN-01 [P] M** One renderer for the picture, on wgpu, used for **both the preview and the export** (the long-term plan's option A).
-  ffmpeg stays as the decode and encode pipe.
+  ffmpeg stays as the decode and encode pipe. *(Phase 1, 2026-10-16 [V]: the **preview** can be made by the engine, as an option for now (`FASTFORWARDRS_PREVIEW=engine`); the export is phase 2.)*
 * **EN-02 [P] M** Until parity is shown, the old path (the egui layers and the ffmpeg filter graph) stays as the **oracle**. Parity
   means: random projects compared frame by frame within a tolerance (one level on one machine, a stated larger one across vendors).
+  *(Phase 1 [V], on the software adapters: the real old drawing against the engine on 400 random scenes, 2 levels at most everywhere but on the edges of layers; the one difference that can be seen, the hard
+  edges of colours at some scales of a video, and the pictures that show them, are in `engine-phase-1-design.md`, sections 9 and 11, and `docs/engine-comparison/`.)*
 * **EN-03 [P] M** Preview and export are **bit-identical on one machine** and within a tolerance across machines (documented).
 * **EN-04 [P] M** A render of a frame is a **graph of passes** built from the plan: decode -> upload -> colour conversion -> placement ->
   effect stack -> composite -> (group effects) -> track effects -> output transform. Textures come from a pool.
@@ -237,10 +239,14 @@ can be supported. The design notes answer that at length; here is what the syste
 * **EN-07 [P] M** Performance goals (2026-10-13: "acceptable for now"): a typical stack (four layers, two blurs and a LUT) plays at
   **1080p60 on the integrated GPU** and at **4K on a discrete GPU**. These are measured by a benchmark that is part of the repository,
   not by feel. (What happens when the machine cannot keep up: Q-13.)
+  *(Phase 1.7 [V]: the benchmark is in the repository (`cargo run --release --example engine_benchmark`, QA-05). Measured on the software adapter only (WARP, this computer): 1.0 frame to the second for the whole stack at 1080p; **the goal itself is
+  the maintainer's to measure on the integrated graphics**, which the program has not been run on.)*
 * **EN-08 [D] S** (Q-13, default accepted 2026-10-15) Preview quality is adaptive: at full speed on a slow machine the engine renders at a lower resolution rather than
-  dropping frames, and a still frame (paused, scrubbing stopped) is rendered at full resolution.
+  dropping frames, and a still frame (paused, scrubbing stopped) is rendered at full resolution. *(Phase 1.7 [V]: built (`engine/quality.rs`, used by the preview): whole, half and a quarter of the size; the numbers
+  are the design's first guesses, to be tuned with the benchmark on a real card.)*
 * **EN-09 [P] S** Rendered frames are cached (the frame at the playhead, and frames around it) and the cache is dropped when an edit
-  changes what they show.
+  changes what they show. *(Phase 1 [V]: the engine keeps the frames it made, by what the description of a frame is made of (32 frames or 256 MiB), and clears them when a picture or an effect that they depend on is replaced or the graphics
+  device is; the preview counts the frames that came from it.)*
 * **EN-10 [P] M** Export reads frames back from the GPU in a pipelined way and converts to the encoder's YUV on the GPU first.
 * **EN-11 [P] C** A render of a project can be started with no window (a command-line export), which also gives the engine tests a way
   to run. (It is what option D, a render process, would also need: Q-31.)

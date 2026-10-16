@@ -150,10 +150,15 @@ fn software_adapter() -> Option<wgpu::Adapter> {
         .into_iter()
         .filter(|adapter| adapter.get_info().device_type == wgpu::DeviceType::Cpu)
         .collect();
-    software.sort_by_key(|adapter| match adapter.get_info().backend {
+    software.sort_by_key(|adapter| how_far_down_the_list_a_backend_is(adapter.get_info().backend));
+    software.into_iter().next()
+}
+
+/// Where a backend is in the list of the ones that are liked, when there is a software adapter of more than one: the lower the number, the better liked.
+pub(super) fn how_far_down_the_list_a_backend_is(backend: wgpu::Backend) -> u8 {
+    match backend {
         wgpu::Backend::Vulkan => 0,
         wgpu::Backend::Dx12 => 1,
         _ => 2,
-    });
-    software.into_iter().next()
+    }
 }

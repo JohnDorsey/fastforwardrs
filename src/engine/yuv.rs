@@ -313,6 +313,33 @@ mod tests {
         assert_eq!([number(48), number(52), number(56)], [10.0, 11.0, 12.0]);
     }
 
+    /// The four numbers of each standard's matrix for the full range, as the standards give them (ITU-R BT.601, BT.709 and BT.2020, the colour differences
+    /// that do not keep the brightness apart): how much of V makes red, of U makes blue, of U takes off green and of V takes off green.
+    #[test]
+    fn the_matrix_of_each_standard_has_the_numbers_that_the_standard_gives_for_the_full_range() {
+        for (matrix, red_from_v, blue_from_u, green_from_u, green_from_v) in [
+            (YuvMatrix::Bt601, 1.402, 1.772, -0.344_136, -0.714_136),
+            (YuvMatrix::Bt709, 1.5748, 1.8556, -0.187_324, -0.468_124),
+            (YuvMatrix::Bt2020, 1.4746, 1.8814, -0.164_553, -0.571_353),
+        ] {
+            let conversion = YuvColour {
+                matrix,
+                range: YuvRange::Full,
+            }
+            .conversion();
+            close(conversion.rows[0][2], red_from_v);
+            close(conversion.rows[2][1], blue_from_u);
+            close(conversion.rows[1][1], green_from_u);
+            close(conversion.rows[1][2], green_from_v);
+            // (And the brightness is the brightness: each of red, green and blue has all of it, and no colour difference of its own in the red and the blue.)
+            for row in conversion.rows {
+                close(row[0], 1.0);
+            }
+            close(conversion.rows[0][1], 0.0);
+            close(conversion.rows[2][2], 0.0);
+        }
+    }
+
     #[test]
     fn what_comes_out_is_cut_off_at_the_ends_of_the_range() {
         // A middling brightness with the least possible blue colour difference and the most possible red one makes more red than there is room for

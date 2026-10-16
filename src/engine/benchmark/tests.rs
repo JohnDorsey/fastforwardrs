@@ -44,6 +44,149 @@ fn the_scenes_are_a_ladder_and_each_takes_the_passes_that_it_is_made_of() {
 }
 
 #[test]
+fn a_rectangle_that_is_not_turned_has_its_corners_in_the_order_the_engine_takes_them() {
+    // (Numbers that are exact in binary, so that the corners are exact too.)
+    assert_eq!(
+        upright(0.25, 0.5, 0.125, 0.25),
+        [(0.25, 0.5), (0.375, 0.5), (0.375, 0.75), (0.25, 0.75)],
+        "top left, top right, bottom right, bottom left"
+    );
+}
+
+#[test]
+fn the_four_layers_of_the_whole_stack_are_the_four_pictures_each_in_a_place_of_its_own() {
+    let scenes = the_scenes();
+    let whole = scenes.last().unwrap();
+    assert_eq!(
+        whole.layers.iter().map(|layer| layer.picture).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+    let corners: Vec<_> = whole.layers.iter().map(|layer| layer.corners).collect();
+    for (number, one) in corners.iter().enumerate() {
+        for other in &corners[number + 1..] {
+            assert_ne!(one, other, "two layers in the same place");
+        }
+    }
+    // The ladder never takes a picture away: each scene that has layers has the ones that the one before it had, from the back.
+    for scene in &scenes {
+        let pictures: Vec<u64> = scene.layers.iter().map(|layer| layer.picture).collect();
+        assert!(
+            pictures.iter().zip(1..).all(|(picture, expected)| *picture == expected),
+            "{}: {pictures:?}",
+            scene.name
+        );
+    }
+}
+
+/// The frame that the engine makes of a picture of `picture_rgba` (`size` pixels) with `calls` done to it, on the software adapter, with the two shaders of the
+/// benchmark given to the engine as they are given in `run`.
+fn frame_of_the_picture_after(
+    graphics: &crate::engine::testing::SoftwareGraphics,
+    size: (u32, u32),
+    picture_rgba: Vec<u8>,
+    calls: Vec<EffectCall>,
+) -> crate::engine::RenderedFrame {
+    let mut renderer = FrameRenderer::new(graphics.device.clone());
+    for (key, stage) in [(BLUR_KEY, BLUR), (LOOKUP_KEY, LOOKUP)] {
+        let shader = guard_wgsl(&format!("{THE_BINDINGS}\n{stage}"), DEFAULT_MOST_PASSES_OF_A_LOOP).unwrap();
+        renderer.install_effect(key, &shader).unwrap();
+    }
+    renderer
+        .upload_picture(PictureId(1), &PictureData::rgba8(size.0, size.1, picture_rgba).unwrap())
+        .unwrap();
+    let mut description = FrameDescription::black(size);
+    description.layers.push(LayerDescription {
+        source: LayerSource::Picture(PictureId(1)),
+        corners: upright(0.0, 0.0, 1.0, 1.0),
+        effects: calls,
+    });
+    let (frame, statistics) = renderer.render(&description, Duration::from_secs(60)).unwrap();
+    assert_eq!(statistics.effects_not_run, 0);
+    frame
+}
+
+#[test]
+fn the_blur_of_the_benchmark_leaves_a_picture_of_one_colour_as_it_is_and_smooths_an_edge_and_only_near_it() {
+    let Some(graphics) = software_graphics() else { return };
+    let size = (48, 8);
+    let flat = [100, 150, 200, 255].repeat((size.0 * size.1) as usize);
+    let blurred_both_ways = calls_of(Effect::Blur);
+    assert_eq!(blurred_both_ways.len(), 2, "along the rows and down the columns");
+    // Each pass is tried alone as well as both together: a pass that made the opposite of every colour would be undone by the other one (the engine keeps
+    // colours below nothing as they are between passes).
+    for (which, calls) in [
+        ("along the rows alone", &blurred_both_ways[..1]),
+        ("down the columns alone", &blurred_both_ways[1..]),
+        ("both", &blurred_both_ways[..]),
+    ] {
+        let frame = frame_of_the_picture_after(&graphics, size, flat.clone(), calls.to_vec());
+        for pixel in frame.rgba_pixels.as_chunks::<4>().0 {
+            assert!(
+                pixel[..3]
+                    .iter()
+                    .zip([100u8, 150, 200])
+                    .all(|(made, wanted)| made.abs_diff(wanted) <= 1),
+                "weights that add up to what they are divided by, {which}: {pixel:?}"
+            );
+        }
+    }
+    // Black on the left half, white on the right half.
+    let mut edge = Vec::new();
+    for _down in 0..size.1 {
+        for across in 0..size.0 {
+            let value = if across < size.0 / 2 { 0 } else { 255 };
+            edge.extend([value, value, value, 255]);
+        }
+    }
+    let frame = frame_of_the_picture_after(&graphics, size, edge, blurred_both_ways);
+    let at = |across: u32| frame.pixel(across, 4)[0];
+    assert!(
+        at(size.0 / 2 - 1) > 40 && at(size.0 / 2 - 1) < 120,
+        "just left of the edge it is part way: {}",
+        at(size.0 / 2 - 1)
+    );
+    assert!(
+        at(size.0 / 2) > 135 && at(size.0 / 2) < 215,
+        "just right of it too: {}",
+        at(size.0 / 2)
+    );
+    assert!(at(size.0 / 2 - 1) < at(size.0 / 2), "and it goes from dark to light");
+    assert_eq!(
+        at(size.0 / 2 - 14),
+        0,
+        "fourteen pixels from the edge nothing of the other side is in it (the blur reaches eight)"
+    );
+    assert_eq!(at(size.0 / 2 + 13), 255);
+}
+
+#[test]
+fn the_lookup_stand_in_of_the_benchmark_leaves_a_picture_of_one_colour_as_it_is_whatever_it_mixes() {
+    let Some(graphics) = software_graphics() else { return };
+    let size = (24, 12);
+    let flat = [200, 50, 120, 255].repeat((size.0 * size.1) as usize);
+    for amount in [0.0, 0.5, 1.0] {
+        let frame = frame_of_the_picture_after(
+            &graphics,
+            size,
+            flat.clone(),
+            vec![EffectCall {
+                key: LOOKUP_KEY.to_owned(),
+                values: vec![amount],
+            }],
+        );
+        for pixel in frame.rgba_pixels.as_chunks::<4>().0 {
+            assert!(
+                pixel[..3]
+                    .iter()
+                    .zip([200u8, 50, 120])
+                    .all(|(made, wanted)| made.abs_diff(wanted) <= 1),
+                "eight reads of the same colour, mixed by {amount}: {pixel:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_pictures_are_what_they_are_said_to_be_and_not_all_one_colour() {
     let pictures = pictures_of(64, 36).unwrap();
     assert_eq!(pictures.len(), 4);

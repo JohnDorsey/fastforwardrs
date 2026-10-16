@@ -4,12 +4,15 @@
 //! The tests of the engine that use a graphics device: always a software one (see `testing`).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use super::device::how_far_down_the_list_a_backend_is;
+use super::picture_cache::DEFAULT_BUDGET_IN_BYTES;
 use super::testing::{Gate, software_graphics, software_graphics_with_a_device_of_its_own, with_software_graphics};
 use super::{
-    AdapterChoice, DeviceTrouble, Engine, EngineEvent, EngineSettings, FrameDescription, FrameRenderer, RenderProblem,
+    AdapterChoice, DeviceTrouble, Engine, EngineEvent, EngineSettings, FrameDescription, FrameRenderer, PictureData,
+    PictureId, RenderProblem,
 };
 
 const A_LONG_TIME: Duration = Duration::from_secs(60);
@@ -153,6 +156,47 @@ fn a_frame_that_is_empty_or_too_big_is_refused_and_the_words_give_its_size() {
         // The renderer goes on after a refusal.
         assert!(renderer.render(&FrameDescription::black((4, 4)), A_LONG_TIME).is_ok());
     });
+}
+
+#[test]
+fn a_frame_and_a_picture_that_are_as_wide_or_as_tall_as_the_card_takes_are_taken_and_one_more_is_not() {
+    with_software_graphics!(graphics, {
+        let mut renderer = renderer(&graphics);
+        let largest = graphics.device.largest_texture_side;
+        for size in [(largest, 1), (1, largest)] {
+            let (frame, _) = renderer.render(&FrameDescription::black(size), A_LONG_TIME).unwrap();
+            assert_eq!((frame.width_in_pixels, frame.height_in_pixels), size);
+        }
+        for (width, height) in [(largest, 1), (1, largest)] {
+            let picture = PictureData::rgba8(width, height, vec![0; width as usize * height as usize * 4]).unwrap();
+            assert!(
+                renderer.upload_picture(PictureId(1), &picture).is_ok(),
+                "{width} by {height}"
+            );
+        }
+        for (width, height) in [(largest + 1, 1), (1, largest + 1)] {
+            let picture = PictureData::rgba8(width, height, vec![0; width as usize * height as usize * 4]).unwrap();
+            let problem = renderer.upload_picture(PictureId(2), &picture).unwrap_err();
+            assert!(
+                matches!(problem, RenderProblem::BadPicture(_)),
+                "{width} by {height}: {problem:?}"
+            );
+        }
+    });
+}
+
+#[test]
+fn of_several_software_adapters_the_one_of_vulkan_is_liked_before_direct3d_and_that_before_any_other() {
+    use wgpu::Backend::{Dx12, Gl, Metal, Vulkan};
+    let place = how_far_down_the_list_a_backend_is;
+    assert!(place(Vulkan) < place(Dx12));
+    assert!(place(Dx12) < place(Metal));
+    assert_eq!(place(Metal), place(Gl), "the others are liked alike");
+}
+
+#[test]
+fn the_engine_keeps_512_mebibytes_of_pictures_on_the_card_unless_it_is_told_another_number() {
+    assert_eq!(DEFAULT_BUDGET_IN_BYTES, 512 * 1024 * 1024);
 }
 
 #[test]
@@ -360,6 +404,43 @@ fn an_engine_that_cannot_make_its_device_says_so_and_stops() {
     // Asking a stopped engine for a frame does no harm.
     engine.request_frame(FrameDescription::black((4, 4)));
     assert!(engine.try_next_event().is_none());
+}
+
+#[test]
+fn dropping_the_engine_waits_for_a_thread_that_is_ending_to_say_so_before_it_comes_back() {
+    let Some(_graphics) = software_graphics() else { return };
+    // The window is slow to be woken once the engine is being let go of, so that the thread cannot say that it stopped before `drop` has got back unless `drop`
+    // does not wait for it: how fast the thread is does not matter.
+    let being_let_go_of = Arc::new(AtomicBool::new(false));
+    let wakings_done = Arc::new(AtomicUsize::new(0));
+    let (slow, done) = (Arc::clone(&being_let_go_of), Arc::clone(&wakings_done));
+    let mut engine = Engine::start(
+        EngineSettings::new(AdapterChoice::SoftwareOnly),
+        Arc::new(move || {
+            if slow.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            done.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    engine.request_frame(FrameDescription::black((8, 8)));
+    events_of(&engine, 1);
+    // (The thread wakes the window after it has sent the frame, so the window can have the frame before the waking is over.)
+    let started = Instant::now();
+    while wakings_done.load(Ordering::SeqCst) < 1 {
+        assert!(
+            started.elapsed() < A_LONG_TIME,
+            "the thread never woke the window for the frame"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    being_let_go_of.store(true, Ordering::SeqCst);
+    drop(engine);
+    assert_eq!(
+        wakings_done.load(Ordering::SeqCst),
+        2,
+        "the thread told the window that it stopped, and that was done by the time the engine was let go of"
+    );
 }
 
 #[test]

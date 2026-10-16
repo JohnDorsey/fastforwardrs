@@ -140,6 +140,20 @@ mod tests {
     }
 
     #[test]
+    fn a_thing_that_takes_up_exactly_the_bytes_that_are_wanted_is_kept_and_one_byte_more_is_too_big() {
+        let mut lru = ByteLru::new(None, 100);
+        lru.insert(1, "small", 40);
+        assert_eq!(lru.insert(2, "as big as it can be", 100), Kept::Yes);
+        assert!(lru.contains(&2));
+        assert!(!lru.contains(&1), "and what was there is let go of to make room for it");
+        assert_eq!((lru.len(), lru.byte_count()), (1, 100));
+        assert_eq!(lru.insert(3, "one byte too big", 101), Kept::TooBig);
+        assert!(!lru.contains(&3));
+        assert!(lru.contains(&2), "and a thing that is too big lets go of nothing");
+        assert_eq!((lru.len(), lru.byte_count()), (1, 100));
+    }
+
+    #[test]
     fn the_thing_used_least_recently_goes_first_when_there_are_too_many_things() {
         let mut lru = ByteLru::new(Some(2), 1000);
         lru.insert(1, "one", 1);
