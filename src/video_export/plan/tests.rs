@@ -12,7 +12,7 @@ use super::super::test_projects::{
 use super::*;
 use crate::project::{
     Angle, AnimationTarget, CanvasArea, ClipId, Placement, PropertyId, PropertyValue, SourceMediaLink,
-    SourceMediaProperties, SpedUpClipSound, TextObject,
+    SourceMediaProperties, SpedUpClipSound, SpeedIndicatorLayout, TextObject,
 };
 use crate::test_support::make_a_keyframe;
 
@@ -46,6 +46,36 @@ fn the_plan_reports_the_length_of_the_finished_video_in_frames_and_its_frame_rat
     assert_eq!(plan.frame_rate, FrameRate::new(30, 1).unwrap());
     assert_eq!(plan.frames_missing_a_picture, 0);
     assert_eq!(plan.pictures.total_frame_count, plan.total_frame_count);
+}
+
+#[test]
+fn a_project_of_a_single_frame_is_planned_as_a_video_of_a_single_frame() {
+    let mut project = Project::empty();
+    project
+        .import_source(video_source(1, 320, 180, 1, false), frame(0))
+        .unwrap();
+
+    let plan = plan(&project).unwrap();
+
+    assert_eq!(plan.total_frame_count, 1);
+    assert_eq!(plan.pictures.sections.len(), 1);
+    assert_eq!(plan.runs.len(), 1);
+    assert_eq!(
+        (plan.runs[0].first_timeline_frame, plan.runs[0].end_timeline_frame),
+        (0, 1)
+    );
+    assert_eq!(plan.runs[0].picture_count(), 1);
+}
+
+#[test]
+fn the_symbol_is_where_the_project_says_it_goes() {
+    let mut project = project_with_video(320, 180, false);
+    assert_eq!(plan(&project).unwrap().symbol_layout, SpeedIndicatorLayout::DEFAULT);
+    let elsewhere = SpeedIndicatorLayout::new(0.5, 0.25, 0.2);
+    assert_ne!(elsewhere, SpeedIndicatorLayout::DEFAULT);
+    project.set_speed_indicator_layout(elsewhere);
+
+    assert_eq!(plan(&project).unwrap().symbol_layout, elsewhere);
 }
 
 #[test]
@@ -403,6 +433,57 @@ fn a_video_that_is_hidden_for_a_while_by_another_in_front_of_it_is_a_run_before_
 }
 
 #[test]
+fn the_first_video_is_the_one_of_the_first_stretch_that_has_a_video_and_at_the_back_of_that_stretch() {
+    // A video of 300 frames from the file 1, and from frame 300 on one of 100 frames from the file 2: the first is the first video, whatever comes after it.
+    let mut one_after_the_other = project_with_video(320, 180, false);
+    one_after_the_other
+        .import_source(video_source(2, 320, 180, 100, false), frame(300))
+        .unwrap();
+    assert_eq!(
+        plan(&one_after_the_other).unwrap().runs.len(),
+        2,
+        "a premise: both are seen"
+    );
+    assert_eq!(
+        plan(&one_after_the_other).unwrap().first_video(),
+        Some(SourceMediaIdentifier::new(1))
+    );
+
+    // Two at once, the one in front small, so that both are seen: the one at the back is the first video.
+    let mut one_over_the_other = project_with_video(320, 180, false);
+    one_over_the_other
+        .import_source(video_source(2, 320, 180, 100, false), frame(50))
+        .unwrap();
+    let in_front = clip_location(&one_over_the_other, 0, 0);
+    one_over_the_other
+        .set_clip_placement(in_front, Placement::upright(CanvasArea::new(0.5, 0.5, 0.25, 0.25)))
+        .unwrap();
+    assert_eq!(
+        plan(&one_over_the_other).unwrap().runs.len(),
+        2,
+        "a premise: both are seen"
+    );
+    assert_eq!(
+        plan(&one_over_the_other).unwrap().first_video(),
+        Some(SourceMediaIdentifier::new(1))
+    );
+
+    // A stretch with no video comes first, and then a video: the first video is that one.
+    let mut after_a_title = Project::empty();
+    let track = after_a_title.tracks()[0].id();
+    after_a_title
+        .insert_text(track, frame(0), TextObject::default(), 30)
+        .unwrap();
+    after_a_title
+        .import_source(video_source(3, 320, 180, 100, false), frame(30))
+        .unwrap();
+    assert_eq!(
+        plan(&after_a_title).unwrap().first_video(),
+        Some(SourceMediaIdentifier::new(3))
+    );
+}
+
+#[test]
 fn runs_are_in_the_order_they_begin() {
     let mut project = project_with_video(320, 180, false);
     project
@@ -486,4 +567,53 @@ fn a_picture_file_is_decoded_as_big_as_the_biggest_place_it_has_and_a_text_has_n
         (320, 180)
     );
     assert_eq!(plan.images.len(), 1);
+}
+
+#[test]
+fn each_picture_file_is_decoded_as_big_as_the_biggest_place_that_it_has_itself_and_not_one_of_another_file() {
+    let mut project = project_with_video(640, 360, false);
+    project.import_source(picture_source(2, 1000, 500), frame(0)).unwrap();
+    let big = clip_location(&project, 0, 0);
+    project
+        .set_clip_placement(big, Placement::upright(CanvasArea::new(0.1, 0.1, 0.5, 0.5)))
+        .unwrap();
+    project.import_source(picture_source(3, 400, 400), frame(0)).unwrap();
+    let small = clip_location(&project, 0, 0);
+    project
+        .set_clip_placement(small, Placement::upright(CanvasArea::new(0.0, 0.0, 0.25, 0.25)))
+        .unwrap();
+
+    let plan = plan(&project).unwrap();
+
+    assert_eq!(
+        plan.images[&SourceMediaIdentifier::new(2)].largest_box_in_pixels,
+        (320, 180)
+    );
+    assert_eq!(
+        plan.images[&SourceMediaIdentifier::new(3)].largest_box_in_pixels,
+        (160, 90)
+    );
+}
+
+#[test]
+fn a_picture_file_that_is_in_two_places_is_decoded_as_big_as_the_bigger_of_them_whichever_comes_first() {
+    for (first, second) in [(0.75, 0.25), (0.25, 0.75)] {
+        let mut project = project_with_video(640, 360, false);
+        project.import_source(picture_source(2, 1000, 500), frame(0)).unwrap();
+        project.split_at(frame(100), None);
+        let (before, after) = (clip_location(&project, 0, 0), clip_location(&project, 0, 1));
+        for (clip, size) in [(before, first), (after, second)] {
+            project
+                .set_clip_placement(clip, Placement::upright(CanvasArea::new(0.0, 0.0, size, size)))
+                .unwrap();
+        }
+
+        let plan = plan(&project).unwrap();
+
+        assert_eq!(
+            plan.images[&SourceMediaIdentifier::new(2)].largest_box_in_pixels,
+            (480, 270),
+            "{first} and then {second} of the picture"
+        );
+    }
 }

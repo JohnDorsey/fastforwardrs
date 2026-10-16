@@ -9,9 +9,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::*;
+use crate::composition::LayerContent;
 use crate::engine::{COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, PicturePixels};
 use crate::project::{
-    AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, Settings, TextObject,
+    AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, Settings, SpeedIndicatorLayout,
+    TextObject,
 };
 use crate::test_support::{make_a_keyframe, put_a_hue_shift_on};
 use crate::video_export::plan_export;
@@ -269,6 +271,94 @@ fn a_text_is_drawn_once_for_the_size_of_the_picture_and_kept_for_as_long_as_it_i
 }
 
 #[test]
+fn the_pictures_that_are_let_go_of_are_listed_in_order_whatever_order_they_were_sent_in() {
+    // At frame 80 the text ends: the video's picture of frame 79 and the text are let go of together. (A set has an order of its own, which is another for each; so
+    // many describers are tried.)
+    for _ in 0..24 {
+        let (project, _) = video_with_a_text_and_a_picture_over_it(150);
+        let plan = plan_of(&project);
+        let script = script_of_pictures(255);
+        let mut describer = describer_of(
+            &plan,
+            &script,
+            HashMap::new(),
+            Box::new(|_: &TextObject, _: u32, _: u32| a_picture_file(4, 2)),
+        );
+        for timeline_frame in 0..80 {
+            describe(&mut describer, timeline_frame);
+        }
+        let (described, _) = describe(&mut describer, 80);
+        assert!(described.forget.len() >= 2, "a premise: {:?}", described.forget);
+        assert!(
+            described.forget.windows(2).all(|pair| pair[0] < pair[1]),
+            "{:?}",
+            described.forget
+        );
+    }
+}
+
+#[test]
+fn a_run_is_started_by_the_frames_before_it_as_soon_as_it_is_near_and_not_before() {
+    use crate::video_export::pictures::FRAMES_AHEAD_THAT_A_RUN_IS_STARTED;
+    // The video is cut at frame 100: two clips, two runs.
+    let mut project = project_with_video(320, 180, false);
+    project.split_at(frame(100), None);
+    let plan = plan_of(&project);
+    assert_eq!(plan.runs.len(), 2, "a premise");
+    let script = script_of_pictures(255);
+    let mut describer = describer_of(&plan, &script, HashMap::new(), Box::new(NoFontsYet));
+
+    describe(&mut describer, 0);
+    assert_eq!(script.state().started.len(), 1, "only the run that is seen");
+    for timeline_frame in 1..(100 - FRAMES_AHEAD_THAT_A_RUN_IS_STARTED) {
+        describe(&mut describer, timeline_frame);
+    }
+    assert_eq!(
+        script.state().started.len(),
+        1,
+        "the second run is not started while it is further than {FRAMES_AHEAD_THAT_A_RUN_IS_STARTED} frames away"
+    );
+    describe(&mut describer, 100 - FRAMES_AHEAD_THAT_A_RUN_IS_STARTED);
+    assert_eq!(
+        script.state().started.len(),
+        2,
+        "and it is started when it is that near, long before its first frame is wanted"
+    );
+}
+
+#[test]
+fn a_video_that_is_seen_where_the_plan_has_no_run_of_it_is_a_mistake_of_the_program_and_says_so() {
+    let mut plan = plan_of(&project_with_video(320, 180, false));
+    plan.runs.clear();
+    let script = Script::default();
+    let mut describer = describer_of(&plan, &script, HashMap::new(), Box::new(NoFontsYet));
+
+    let problem = describer
+        .describe(5, &AtomicBool::new(false), &mut |_, _| {})
+        .unwrap_err();
+
+    assert!(matches!(problem, FrameProblem::NoRunForAVideo(5)), "{problem:?}");
+}
+
+#[test]
+fn the_pictures_that_stand_in_for_those_that_a_file_does_not_have_are_counted() {
+    // The first run is of 100 frames, and its file has pictures for 60 of them.
+    let mut project = project_with_video(320, 180, false);
+    project.split_at(frame(100), None);
+    let plan = plan_of(&project);
+    let script = Script::default();
+    script.state().to_say.push_back((0..60).map(rgba).collect());
+    let mut describer = describer_of(&plan, &script, HashMap::new(), Box::new(NoFontsYet));
+    assert_eq!(describer.pictures_held(), 0);
+
+    for timeline_frame in 0..100 {
+        describe(&mut describer, timeline_frame);
+    }
+
+    assert_eq!(describer.pictures_held(), 40);
+}
+
+#[test]
 fn a_picture_file_is_sent_once_and_kept_for_as_long_as_it_is_seen() {
     let (project, (first, last)) = video_with_a_text_and_a_picture_over_it(100);
     let plan = plan_of(&project);
@@ -350,6 +440,35 @@ fn a_video_that_plays_faster_has_the_symbol_over_it_and_one_that_does_not_has_no
         symbol_ids.windows(2).all(|pair| pair[0] == pair[1]),
         "the same symbol all the time"
     );
+}
+
+#[test]
+fn the_symbol_is_put_where_the_layout_of_the_project_says_and_not_where_the_default_layout_puts_it() {
+    let corners_of_the_symbol_with = |layout: SpeedIndicatorLayout| {
+        let mut project = project_with_video(320, 180, false);
+        let clip = clip_location(&project, 0, 0);
+        project.set_clip_speed(clip, speed(4)).unwrap();
+        project.set_speed_indicator_layout(layout);
+        let plan = plan_of(&project);
+        let script = script_of_pictures(255);
+        let mut describer = describer_of(&plan, &script, HashMap::new(), Box::new(NoFontsYet));
+        let (described, _) = describe(&mut describer, 0);
+        assert_eq!(
+            described.description.layers.len(),
+            2,
+            "a premise: the video and the symbol"
+        );
+        described.description.layers[1].corners
+    };
+
+    let by_default = corners_of_the_symbol_with(SpeedIndicatorLayout::DEFAULT);
+    let elsewhere = corners_of_the_symbol_with(SpeedIndicatorLayout::new(0.5, 0.25, 0.2));
+
+    assert_ne!(by_default, elsewhere);
+    // Its left edge is half way across the picture, its top a quarter of the way down, and it is a fifth of the picture's height tall.
+    assert!((elsewhere[0].0 - 0.5).abs() < 1e-3, "{elsewhere:?}");
+    assert!((elsewhere[0].1 - 0.25).abs() < 1e-3, "{elsewhere:?}");
+    assert!((elsewhere[3].1 - elsewhere[0].1 - 0.2).abs() < 1e-3, "{elsewhere:?}");
 }
 
 #[test]

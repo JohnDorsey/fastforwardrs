@@ -93,6 +93,77 @@ fn a_video_that_states_only_its_primaries_is_still_bt601_and_the_file_says_what_
 }
 
 #[test]
+fn a_video_that_states_only_its_transfer_is_still_bt601_and_the_file_says_what_was_stated_and_no_matrix() {
+    let colour = output_colour_for(Some(&format_with(None, None, Some("smpte2084"), None)));
+    assert_eq!(colour.planes, limited(YuvMatrix::Bt601));
+    assert_eq!(colour.tags.matrix, None);
+    assert_eq!(colour.tags.primaries, None);
+    assert_eq!(
+        colour.tags.setparams_filter(),
+        Some("setparams=range=tv:color_trc=smpte2084".to_owned())
+    );
+}
+
+#[test]
+fn tags_that_say_any_one_thing_are_not_empty_and_make_a_filter_and_tags_that_say_nothing_make_none() {
+    assert!(OutputTags::default().is_empty());
+    assert_eq!(OutputTags::default().setparams_filter(), None);
+    for (tags, filter) in [
+        (
+            OutputTags {
+                matrix: Some("bt709".to_owned()),
+                ..OutputTags::default()
+            },
+            "setparams=colorspace=bt709:range=tv",
+        ),
+        (
+            OutputTags {
+                primaries: Some("bt709".to_owned()),
+                ..OutputTags::default()
+            },
+            "setparams=range=tv:color_primaries=bt709",
+        ),
+        (
+            OutputTags {
+                transfer: Some("bt709".to_owned()),
+                ..OutputTags::default()
+            },
+            "setparams=range=tv:color_trc=bt709",
+        ),
+    ] {
+        assert!(!tags.is_empty(), "{tags:?}");
+        assert_eq!(tags.setparams_filter().as_deref(), Some(filter));
+    }
+}
+
+#[test]
+fn the_names_that_ffprobe_prints_are_passed_on_whole_with_their_hyphens_underscores_and_digits() {
+    for name in [
+        "iec61966-2-1",
+        "arib-std-b67",
+        "smpte2084",
+        "bt2020_10",
+        "bt470m",
+        "film",
+        "SMPTE428-1",
+    ] {
+        let colour = output_colour_for(Some(&format_with(None, Some(name), Some(name), None)));
+        assert_eq!(colour.tags.primaries.as_deref(), Some(name), "{name} as primaries");
+        assert_eq!(colour.tags.transfer.as_deref(), Some(name), "{name} as transfer");
+    }
+}
+
+#[test]
+fn a_name_with_a_character_that_means_something_in_the_text_of_a_filter_is_not_passed_on() {
+    for name in [
+        "a:b", "a=b", "a,b", "a;b", "a b", "a/b", "a'b", "a\\b", "a[b]", "a\nb", "a.b", "a\u{e9}b", "$a", "a%b",
+    ] {
+        let colour = output_colour_for(Some(&format_with(None, Some(name), Some(name), None)));
+        assert_eq!(colour.tags, OutputTags::default(), "{name:?}");
+    }
+}
+
+#[test]
 fn a_matrix_the_engine_cannot_make_planes_with_is_not_claimed_by_the_file() {
     for stated in ["smpte240m", "fcc", "bt2020c", "ycgco", "gbr"] {
         let colour = output_colour_for(Some(&format_with(Some(stated), Some("bt709"), None, None)));

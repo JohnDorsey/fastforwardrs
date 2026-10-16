@@ -21,7 +21,8 @@ pub enum AdapterChoice {
     /// The adapter that the window's own device came from (`eframe`'s `wgpu_render_state.adapter`): what the program uses.
     Window(Arc<wgpu::Adapter>),
     /// A software adapter and nothing else (the one of device type `Cpu`: WARP on Windows, lavapipe on Linux), which the tests use so that nothing they
-    /// do is done on a real graphics card.
+    /// do is done on a real graphics card. (The one exception is a computer that has no software adapter and whose environment says that the tests may use
+    /// the adapter it has: [`TESTS_MAY_USE_ANY_ADAPTER_VARIABLE`], which one step of the CI sets on a Mac that is set aside for it.)
     SoftwareOnly,
     /// The best graphics adapter the computer has (a card of its own before the graphics of the processor, and so on: `how_far_down_the_list_an_adapter_is`): for a
     /// program that has no window to take one from, such as the command-line export. **Not for the tests**, which use a software adapter and nothing else.
@@ -80,7 +81,7 @@ impl EngineDevice {
     pub fn create(choice: &AdapterChoice) -> Result<Self, DeviceError> {
         let adapter = match choice {
             AdapterChoice::Window(adapter) => adapter.as_ref().clone(),
-            AdapterChoice::SoftwareOnly => software_adapter().ok_or(DeviceError::NoSoftwareAdapter)?,
+            AdapterChoice::SoftwareOnly => adapter_for_the_tests().ok_or(DeviceError::NoSoftwareAdapter)?,
             AdapterChoice::BestAvailable => best_adapter().ok_or(DeviceError::NoGraphicsAdapter)?,
             #[cfg(test)]
             AdapterChoice::NoAdapterAtAll => return Err(DeviceError::NoSoftwareAdapter),
@@ -149,10 +150,30 @@ impl EngineDevice {
     }
 }
 
-/// Whether this computer has a software adapter, for the tests that must not run on a real graphics card (see [`AdapterChoice::SoftwareOnly`]) to say that they are
-/// skipped where there is none.
+/// Whether this computer has an adapter for the tests that must not run on a real graphics card (a software adapter, or what [`TESTS_MAY_USE_ANY_ADAPTER_VARIABLE`]
+/// lets stand in for one: see [`AdapterChoice::SoftwareOnly`]), for them to say that they are skipped where there is none.
 pub fn there_is_a_software_adapter() -> bool {
-    software_adapter().is_some()
+    adapter_for_the_tests().is_some()
+}
+
+/// The variable of the environment that lets the tests use **the graphics adapter that a computer has when it has no software one**. One step of the CI sets it on
+/// the Mac of the runner, a virtual machine that has only a paravirtual Metal device and is set aside for the tests; **it is set nowhere else**, because the tests must not
+/// run on the graphics card of a developer's computer (SF-01). Where there is a software adapter it changes nothing.
+pub const TESTS_MAY_USE_ANY_ADAPTER_VARIABLE: &str = "FASTFORWARDRS_TESTS_MAY_USE_ANY_ADAPTER";
+
+/// Whether the value of [`TESTS_MAY_USE_ANY_ADAPTER_VARIABLE`] says that any adapter will do (it has to say `1`).
+pub(super) fn says_that_any_adapter_will_do(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| value == "1")
+}
+
+/// The adapter that "a software adapter" is asked for: a software one, or, where the computer has none and its environment says that the tests may use any, the best
+/// adapter there is.
+fn adapter_for_the_tests() -> Option<wgpu::Adapter> {
+    software_adapter().or_else(|| {
+        says_that_any_adapter_will_do(std::env::var_os(TESTS_MAY_USE_ANY_ADAPTER_VARIABLE).as_deref())
+            .then(best_adapter)
+            .flatten()
+    })
 }
 
 /// The software adapter, if there is one: of device type `Cpu`, and of the backend that is liked best if several are (Vulkan before Direct3D
@@ -172,11 +193,22 @@ fn software_adapter() -> Option<wgpu::Adapter> {
 fn best_adapter() -> Option<wgpu::Adapter> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let mut adapters: Vec<wgpu::Adapter> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::PRIMARY));
-    adapters.sort_by_key(|adapter| {
-        let information = adapter.get_info();
-        how_far_down_the_list_an_adapter_is(information.device_type, information.backend)
-    });
-    adapters.into_iter().next()
+    let kinds_and_backends: Vec<(wgpu::DeviceType, wgpu::Backend)> = adapters
+        .iter()
+        .map(|adapter| {
+            let information = adapter.get_info();
+            (information.device_type, information.backend)
+        })
+        .collect();
+    let best = the_best_of(&kinds_and_backends)?;
+    Some(adapters.swap_remove(best))
+}
+
+/// Which of the adapters of a computer, as the computer lists them (their kinds and backends), is the best: the number of the first of those that are liked best
+/// ([`how_far_down_the_list_an_adapter_is`]), or `None` if the computer has none.
+pub(super) fn the_best_of(adapters: &[(wgpu::DeviceType, wgpu::Backend)]) -> Option<usize> {
+    (0..adapters.len())
+        .min_by_key(|&number| how_far_down_the_list_an_adapter_is(adapters[number].0, adapters[number].1))
 }
 
 /// Where an adapter is in the list of the ones that are liked, the lower the better: a card of its own before the graphics of the processor, before a virtual card,

@@ -155,6 +155,11 @@ impl EncoderKiller {
     pub fn kill(&self) {
         let _ = lock(&self.child).kill();
     }
+
+    /// Whether ffmpeg is still running (it is not once it has ended, or was stopped and waited for).
+    pub fn is_running(&self) -> bool {
+        matches!(lock(&self.child).try_wait(), Ok(None))
+    }
 }
 
 /// How the encoder ended.

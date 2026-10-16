@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use super::device::{how_far_down_the_list_a_backend_is, how_far_down_the_list_an_adapter_is};
+use super::device::{
+    how_far_down_the_list_a_backend_is, how_far_down_the_list_an_adapter_is, says_that_any_adapter_will_do, the_best_of,
+};
 use super::picture_cache::DEFAULT_BUDGET_IN_BYTES;
 use super::testing::{Gate, software_graphics, software_graphics_with_a_device_of_its_own, with_software_graphics};
 use super::{
@@ -224,6 +226,59 @@ fn of_the_adapters_a_computer_has_the_best_is_a_card_of_its_own_then_the_graphic
     adapters.sort_by_key(|&(kind, backend)| place(kind, backend));
     assert_eq!(adapters[0], (DiscreteGpu, Vulkan));
     assert_eq!(adapters[3], (Cpu, Vulkan));
+}
+
+#[test]
+fn the_best_of_the_adapters_in_a_list_is_the_first_of_those_that_are_liked_best_and_a_computer_with_none_has_no_best() {
+    use wgpu::Backend::{Dx12, Metal, Vulkan};
+    use wgpu::DeviceType::{Cpu, DiscreteGpu, IntegratedGpu, VirtualGpu};
+    assert_eq!(the_best_of(&[]), None);
+    assert_eq!(
+        the_best_of(&[(Cpu, Vulkan)]),
+        Some(0),
+        "a software adapter is the one that is used if there is no other"
+    );
+    assert_eq!(
+        the_best_of(&[
+            (Cpu, Vulkan),
+            (IntegratedGpu, Dx12),
+            (DiscreteGpu, Dx12),
+            (IntegratedGpu, Vulkan)
+        ]),
+        Some(2),
+        "a card of its own, though it is on the backend that is liked less, is liked before the graphics of the processor"
+    );
+    assert_eq!(
+        the_best_of(&[(VirtualGpu, Metal), (IntegratedGpu, Dx12), (IntegratedGpu, Vulkan)]),
+        Some(2),
+        "of two of one kind, the better backend"
+    );
+    assert_eq!(
+        the_best_of(&[(VirtualGpu, Metal), (Cpu, Vulkan)]),
+        Some(0),
+        "a virtual card (the paravirtual one of a Mac that is a virtual machine) before a software adapter"
+    );
+    assert_eq!(
+        the_best_of(&[(DiscreteGpu, Vulkan), (DiscreteGpu, Vulkan)]),
+        Some(0),
+        "of adapters that are liked alike, the first that the computer lists"
+    );
+}
+
+#[test]
+fn the_tests_may_use_the_adapter_a_computer_has_only_when_the_environment_says_one_and_nothing_else_does() {
+    use std::ffi::OsStr;
+    assert!(says_that_any_adapter_will_do(Some(OsStr::new("1"))));
+    for not_said in [
+        None,
+        Some(OsStr::new("")),
+        Some(OsStr::new("0")),
+        Some(OsStr::new("yes")),
+        Some(OsStr::new("true")),
+        Some(OsStr::new("11")),
+    ] {
+        assert!(!says_that_any_adapter_will_do(not_said), "{not_said:?}");
+    }
 }
 
 #[test]

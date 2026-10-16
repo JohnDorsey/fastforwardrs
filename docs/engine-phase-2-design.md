@@ -1,7 +1,7 @@
 # Phase 2: export through the engine (design)
 
-Written 2026-10-16, before any code of the phase, from reading the code that is there (section 1) and from three experiments (section 1, marked **[V]**). It says **what is built, in which pieces,
-how each piece is checked, and what is decided**. The plan it carries out is [phase 2 of the plan of action](plugin-system-plan-of-action.md) (EN-03, EN-10, EN-11); the engine it builds on is
+Sections 0 to 8 were written 2026-10-16, before any code of the phase, from reading the code that is there (section 1) and from three experiments (section 1, marked **[V]**): they say **what is to be built, in which pieces,
+how each piece is checked, and what is decided**. **Sections 9 to 11 were written at the end of the phase**: what was measured when the old export and the new one were compared, what was not known and now is, and **what was built, decision by decision, with what differs from sections 2 to 8** (section 11.2). The plan it carries out is [phase 2 of the plan of action](plugin-system-plan-of-action.md) (EN-03, EN-10, EN-11); the engine it builds on is
 [phase 1](engine-phase-1-design.md) and its [report](engine-phase-1-report.md).
 
 Tags as in phase 1: **[V]** verified by me by reading the code or running something; **[D]** decided by the maintainer; **[P]** my decision, which stands unless the maintainer objects; **[B]** my belief or
@@ -172,26 +172,140 @@ The benchmark (`engine::benchmark`, `examples/engine_benchmark.rs`) gets, in thi
 The maintainer is asked to run it again on the integrated graphics when the phase is done (the report says so). The stand-in blur and lookup are not changed (changing them after seeing the figure would be
 choosing the question by the answer); the estimates of what a blur with bilinear reads and a real 3-D table would take off are in the design of phase 1, section 10, and are phase 4's to prove.
 
-## 9. Differences expected, to be measured in 2.7 and shown
+## 9. Differences: expected, and measured in 2.7 [V]
 
-The old export and the new one are compared on a corpus of projects (unedited, edited, tracks, overlays, rotation, scale, colour, text, symbol, animation) with the old code still present. Expected, **[B]**:
+Before the old export was deleted, the old export (ffmpeg's filter graph) and the new one (the engine) were run **once on 13 projects** (the counter video of 90 frames, 320 by 180, 30 to the second, which says its own frame
+number in a strip at the top; flat colours; four-colour pictures with hard edges, tagged three ways; a text; a picture file; keyframes), and **every frame of both finished videos was decoded to red, green and blue and compared value by value**.
+The new export ran on the software adapter (WARP); the old one is ffmpeg alone. The test that did it needed both exports, so it is not in the tree: it is kept as text in
+[`engine-comparison-phase-2/export_comparison_test.rs.txt`](engine-comparison-phase-2/export_comparison_test.rs.txt): to be put as `tests/export_comparison.rs` in a copy of commit `4e3331a` (the last that has the old export; `git archive 4e3331a` makes the copy without
+touching the repository) and run with `cargo test --test export_comparison -- --ignored --nocapture` (`FASTFORWARDRS_COMPARISON_FOLDER` names a folder for the pictures of the frames that differ most). **Reproduced from such a copy on 2026-10-16 [V]: every number below came out the same again**, which also says that the
+comparison is deterministic (only the seconds differ).
 
-1. **Colours** of a video that fills the picture: within a level of the old export (section 5). Of layers composed with others: the engine blends premultiplied in half floats and rounds once; the old export blended 8-bit YUV
-   with ffmpeg's `overlay`. Up to 2 levels, more at translucent edges **[B]**.
-2. **Edges of turned and scaled layers**: bilinear in the engine against bicubic scaling and the `rotate` filter's interpolation in ffmpeg: a difference at edges and fine detail, **[B]** a few levels at most.
-3. **Chroma** of a video not at its own size: the accepted difference of phase 1 (the planes are the ones ffmpeg made at the delivery size), and, since the delivery size is the layer's box (X6), mostly the same
-   ffmpeg scaling the old export did.
-4. **Animation** is exact at every frame (the old export snapped a position to a whole pixel and a turn to a tenth of a degree per stretch).
-5. **Tags** as in section 5.
-6. **Bigger changes of behaviour, on purpose**: no "too much animation" refusal; a video that ends early holds its last picture (X10).
+| project | frames (old/new) | largest difference of any value | mean | values over 4 levels | over 16 | over 48 | worst frame |
+|---|---|---|---|---|---|---|---|
+| the video as it is | 90/90 | **3** | 0.009 | 0 % | 0 % | 0 % | 10 |
+| cut in three, played at 1x, 3x and 2x | 55/55 | 88 | 0.148 | 0.63 % | 0.27 % | 0.08 % | 30 |
+| flat orange, untagged | 60/60 | **0** | 0 | 0 % | 0 % | 0 % | 0 |
+| flat orange, hue turned 120 degrees | 60/60 | **3** | 1.637 | 0 % | 0 % | 0 % | 0 |
+| four colours, untagged | 1/1 | **3** | 0.444 | 0 % | 0 % | 0 % | 0 |
+| four colours, bt709 limited | 1/1 | **3** | 0.510 | 0 % | 0 % | 0 % | 0 |
+| four colours, smpte170m limited | 1/1 | **3** | 0.444 | 0 % | 0 % | 0 % | 0 |
+| the video at half the size in the middle | 90/90 | 255 | 0.674 | 0.89 % | 0.62 % | 0.61 % | 9 |
+| the video turned 30 degrees at 0.6 of the size | 90/90 | 255 | 1.074 | 1.24 % | 0.81 % | 0.79 % | 2 |
+| a small video in front of another | 90/90 | 255 | 0.343 | 0.49 % | 0.28 % | 0.27 % | 1 |
+| a text over a video, and the symbol of a clip at 4x | 70/70 | 91 | 0.174 | 1.17 % | 0.08 % | 0.03 % | 45 |
+| a picture file turned 15 degrees over a video | 60/60 | 203 | 0.632 | 1.56 % | 0.80 % | 0.48 % | 32 |
+| a video that moves and grows and shrinks | 90/90 | 255 | 0.915 | 1.27 % | 1.01 % | 0.79 % | 1 |
 
-## 10. What I do not know yet [B]
+(Seconds, old/new, on this computer, in the second run: 0.1 to 1.3 (the animated project, which the old export cut into stretches, was the slowest) against 0.6 to 2.3 for the new one, whose start-up on a software adapter is a second or two (the first run had the same, and one outlier of 4.4 for the old export of the turned video, which the second run did not repeat: 0.4). They say nothing about a real card: SF-01.)
 
-* Whether the macOS runners of GitHub have a graphics adapter the engine can use (Metal on a virtual GPU). The engine tests there are skipped today because they ask for a *software* adapter. If there is one, the
-  export tests run there on it (a runner's, not the maintainer's: SF-01 allows it) with an environment variable that CI sets; if not, the export tests are skipped on macOS with a reason and the coverage of the
-  export there is lost. A CI step will list the adapters (as an annotation) with the first push of the phase.
-* How fast the decode, the engine and the encoder together are on the maintainer's machine; the figure that matters is frames to the second of an export of a typical project, which the report asks for.
-* Whether an export that loses its graphics device should go on (the frames in flight are asked for again, the pictures sent again) instead of ending. Phase 1 made the engine able to replace the device; the export
-  driver does not use it yet (X7). A long export on a flaky driver would want it.
-* Whether the `fps=round=near` resample on the whole source (the old export) and on a stretch read from the middle (the stream) always agree for variable-frame-rate sources; the preview's tests say so for the
-  sources they use, and 2.4 repeats them against the export's frame numbers for the cases of the existing tests (25, 24 and 12 frames to the second sources in a project of 30).
+What the numbers say, and what the pictures show (each picture is three panels: the old export, the new one, and the difference made eight times as strong):
+
+1. **The frames are the same frames [V].** Every project has the same number of frames in both. The counter video's strip would differ by 255 levels over a block of the picture if a frame were another frame; the unedited video differs by 3 at most, and the video cut in three
+   and played at 1x, 3x and 2x (the one that would show a wrong frame of a speed change) differs by 88 in 0.08 % of the values, which the picture under item 4 shows to be the edges of the letters of the symbol, not a block.
+2. **A video that fills the picture, and the colours [V].** At most 3 levels; flat orange agrees to the level. The hue shift of 120 degrees on the orange the video decodes to, (199, 99, 49): the arithmetic of the CSS matrix gives (16.9, 150.2, 79.3); the new export gives (16, 150, 80) and the old one (15, 149, 77), so
+   **the new one is nearer to the arithmetic** (within 1 level against 2), and they differ from each other by a level or two over the whole picture (the mean of 1.6). The four-colour pictures are within 3 levels, whichever matrix they say.
+3. **Edges [V].** Everything that is turned, scaled or put in a smaller place has a difference at its edge, where a pixel is in the layer or not: up to 255 at those pixels, in 0.5 to 1.6 % of the values over 4 levels and 0.3 to 0.8 % over 48 (the outline in the third panel of each picture). Inside the layer and everywhere else the pictures agree. The old export scaled with ffmpeg's `scale` and turned with
+   `rotate`; the engine samples with a bilinear filter. **Which of the two is nearer to the arithmetic is not the question here** (neither is "right" at the edge pixels); what matters is that they are the same picture to within the pixels of an edge. (In the middle of the turned video, which is a flat grey of (86, 86, 86), the new export has (86, 86, 86) and the old one (86, 84, 85): inside the layer the new one is the video's own colour, and the old one's `rotate` leaves a tint of a level or two.)
+   ![the video turned 30 degrees at 0.6 of the size: old, new, difference](engine-comparison-phase-2/turned_30_degrees_edges.png)
+   ![a picture file turned 15 degrees over a video: old, new, difference](engine-comparison-phase-2/picture_file_turned_edges.png)
+4. **The symbol [V].** Its edges differ (88 and 91 levels at the edge pixels of the letters). The old export laid a picture of it with `overlay` at a whole pixel; the engine draws it as a layer at the corners that `speed_indicator` says (a test of 2.1 says that the two sums give the very same corners).
+   ![the symbol of a clip at 3x: old, new, difference](engine-comparison-phase-2/symbol_edges.png)
+5. **A row of pixels [V, from the picture].** In the video at half the size in the middle, the box of the old export is **one row higher** than the one of the new export, whose bottom edge is where the arithmetic puts it (a box from 0.25 to 0.75 of 180 rows ends at row 135). It is the old export that is off, by one row.
+   ![the video at half the size: old, new, difference](engine-comparison-phase-2/half_size_the_old_export_is_one_row_higher.png)
+6. **Animation [V].** The old export cut the animation into stretches over which everything was in one place in whole pixels, and snapped each to the nearest pixel and the turn to a tenth of a degree; the new export works out each frame as it is. The difference is the outline of the box (1 pixel) and nothing inside it.
+   ![the video that moves and grows: old, new, difference](engine-comparison-phase-2/animation_exact_at_every_frame.png)
+7. **Tags [V, for these three]**: an untagged video stays untagged, `bt709` and `smpte170m` stay what they were (the tests `tests/video_export_runs.rs` and `tests/video_export_encoder.rs` check the file with ffprobe). The other rows of section 5 (a video of the full range, one that is not in planes, one whose matrix cannot be made) are tested as a rule, in `src/video_export/output_colour/tests.rs`, and **not end to end with a file**.
+8. **Bigger changes of behaviour, on purpose**: no "too much animation" refusal (a journey now exports 1560 frames that are each in another place); a video that ends early holds its last picture (X10).
+
+The differences I expected in 2.7's list before measuring (section 9 as first written) were: colours within a level or two; edges of turned and scaled layers "a few levels at most"; chroma of a video not at its own size; exact animation; tags as in section 5. **One was wrong:** the edges are not "a few levels": at the edge pixels
+the largest difference is the whole range (255), because a pixel is either in the layer or not; what is a few levels is everything else.
+
+## 10. What I did not know in the design, and what is known now
+
+* **Whether the macOS runners of GitHub have a graphics adapter the engine can use [V, CI annotation of 2026-10-16]:** they have one, `Apple Paravirtual device (Metal, IntegratedGpu)`, and **no software adapter** (the Ubuntu runner has llvmpipe, the Windows one WARP). The export tests ask for a software adapter, so **on macOS they are skipped with a reason** and the export is
+  not run there by CI. Whether the engine and the export work on the paravirtual Metal device has not been tried; the CI now has a step that tries it, with failures as warnings (11.5).
+* **How fast decode, engine and encoder are together on the maintainer's machine: still unknown.** I may not run shaders on a real card (SF-01). On the software adapter the figures are above (section 9) and in section 11; the command `fastforwardrs-export --adapter best project.ffrs video.mp4` and the benchmark are for the maintainer to run (the report says what is asked).
+* **Whether an export that loses its graphics device should go on:** it still ends with a message (X7). The engine can replace its device (phase 1), and the export does not use that yet.
+* **Whether `fps=round=near` on the whole source (the old export) and on a stretch read from the middle (the stream) agree for variable-frame-rate sources [V]:** the tests of the old export that carry variable frame rates (`a_variable_frame_rate_source_exports_the_picture_nearest_in_time_to_every_slot_and_keeps_its_length` and the others of `media_export*`) pass unchanged on the new export, and `tests/video_export_pictures.rs` checks the pictures of a run against the frame numbers of sources at 25, 24 and 12
+  frames to the second in a project of 30.
+
+## 11. As built (2026-10-16)
+
+### 11.1 The pieces, and the commits they are in
+
+| Piece | Commit | What it is |
+|---|---|---|
+| 2.1 | `b072888` | this document; `frame_scene` (the content types of the preview and `describe_frame` moved from the application, below it; the preview re-exports them; its 1190 tests, and those of the window, pass unmodified); a test that the symbol's corners are the very corners of `speed_indicator`'s sum; the CI lists the runners' graphics adapters |
+| 2.2 | `aec5d5a` | the YUV pass: the planes of `yuv420p` made on the card from the 8-bit frame (`YuvColour::forward_conversion`, `reference_yuv420p`, `FrameRenderer::render_planes`) |
+| 2.3 | `aec5d5a` | `begin_frame`/`finish_frame` (the preview's `render` is the two), `RenderForExport`/`ExportFrame`, `EngineSettings::export_frames_in_flight` (2), the pool takes back the textures of pictures that are let go of; the benchmark: the scene with a new video picture in every frame, and `--in-flight` |
+| 2.4 | `ca12705` | `video_export::plan_export`, the runs, `PicturesOfTheRuns` (one ffmpeg for each run, in order); `FrameStream` can be asked for another size and another scaling |
+| 2.5 | `d478f82` | `VideoExport` (the thread), `FrameDescriber`, `Encoder`, `output_colour`; the 96 export tests of the old suite pass on it with their assertions as they were |
+| 2.6 | `4e3331a` | the window's export and `fastforwardrs-export`, `AdapterChoice::BestAvailable`, test videos named by their whole specification, and the bug of `LazyTextRenderer::is_loading` |
+| 2.7 | `1280da6` | the comparison (section 9), and the old export deleted with what only it used |
+| 2.8 | the commit of this section | what planting mistakes found (11.3); the one function for what a frame shows; a mistake of the program ends an export with a message; the macOS step of the CI; the documents |
+
+### 11.2 The decisions of section 2, one by one
+
+| # | As built |
+|---|---|
+| X1 | As designed. One decode process for each run, one encoder. |
+| X2 | **Done in two steps.** In 2.1 `describe_frame` and the types moved to `frame_scene`; but the window and the export still each turned a section of the plan into a `PreviewContent` with about twenty lines of their own. **2.8 made that one function too** (`layers_of_a_section` and `symbol_of_a_section`, which the window and the export both call, each passing in only what really differs: what a video shows, and the decoded picture of a picture file). Until then "the same picture by construction" was true of the second half only. |
+| X3 | As designed: the planes are made of the 8-bit frame by a pass over its texture. |
+| X4 | As designed (2 by 2 box average; the colour siting is the centre, H.264's default is the left: **[B]** not visible, not looked for). |
+| X5 | As designed (table of section 5); the matrices that the engine cannot make are BT.601 and the file does not claim them (tested). |
+| X6 | As designed (the size the layer needs, ffmpeg's bicubic scaling). |
+| X7 | As designed, with **four frames asked ahead** (`MOST_FRAMES_ASKED_AHEAD`) and two in flight in the engine. A frame that fails, a device that is replaced, a picture the engine rejects or does not have, and an engine that stops each end the export with a message. |
+| X8 | As designed (test: ten pictures of one size, each let go of before the next, make four textures in all). |
+| X9 | As designed, with a `TextPictures` trait so that the tests need no fonts. |
+| X10 | **Half.** The last picture is held when a file has fewer than the project was told, and the held pictures are counted (`FrameDescriber::pictures_held`, tested); **nothing says so to the user yet** (the end message of the window names only the frames that the plan knew would have no picture). |
+| X11 | Done: `TooMuchAnimation`, `animated_sections.rs` and the quantising are gone. |
+| X12 | Done, with `AdapterChoice::BestAvailable`. **It has never been run by me** (SF-01): the choice itself is a function of a list (`the_best_of`, tested); making a device on a real card is the maintainer's to try. |
+| X13 | **Changed.** The command line is a program of its own, `fastforwardrs-export`, and not `fastforwardrs --export`: the release build of the editor is a windowed program on Windows, which has no console to write to. |
+| 3.2, last paragraph | **Not built:** "a frame whose description is the same as the one before it is not made again". A title card of ten seconds is made 300 times. It is an optimisation that nothing needed to be correct; it waits for a measurement on a real card. |
+| new in 2.8 | A **mistake of the program (a panic) in the export's thread ends the export with a message** (without it the window would wait for an end that never comes). Anything that begins with a dash on the command line is an option. The CI has a step that runs the engine's and the export's tests on the Mac's Metal device (`FASTFORWARDRS_TESTS_MAY_USE_ANY_ADAPTER=1`, set in that step and nowhere else), failures as warnings. |
+
+### 11.3 What planting mistakes found [V]
+
+Before 2.8, the new code of the engine (2.2 and 2.3) and `pictures.rs` (2.4) had been tried with planted mistakes: 57, all noticed in the end (one of the 16 of 2.2 is no mistake at all). **2.8 tried the rest of what phase 2 added or changed with 274 more** (the one function for what a frame shows 15; the plan and the runs 45; the colours of the file and the encoder's command line 66; the runner and the
+command line 103; frames, the sound plan, the choice of the video encoder, the choice of the adapter, the frame stream's size and the text renderer 45), one at a time, in copies of the project (`tools/mutation_testing/`): **201 were noticed by the unit tests at once, 61 more after the tests were written that the first try showed to be missing or by the programs that run the real ffmpeg, and 12 were not noticed.** Those 12:
+
+| not noticed | why |
+|---|---|
+| a run of earlier sections stays open (`runs.rs`); a matrix with a strange name is believed (`output_colour.rs`) | **the code was removed**: each was a condition that another made unnecessary, or one that nothing could make false |
+| the encoder is not stopped by a cancel; it is not made killable; a write that fails after a cancel is a failure | **only a Linux or Mac can notice**: the test needs a named pipe to keep ffmpeg waiting (`cancelling_an_export_ends_it_though_ffmpeg_is_stuck_and_not_reading_the_frames`, `cfg(unix)`). **Planted on the Linux copy by hand, each of the three makes that test fail, and it passes without them [V]** |
+| a cancel before the first frame is not noticed; one at the very end; one is not looked at before each round | a cancel is noticed in other places too (a write to a killed ffmpeg fails, the checks after it), so each of these changes only *when* it is noticed, by an instant |
+| pictures that no frame uses are not let go of | the engine's memory then fills and pushes out the oldest pictures by itself: it is slower and uses more of the card, and the export is the same |
+| a frame of another size than the video is written | a defensive check of the engine's answer; nothing can make it wrong while the engine is right |
+| a cancelled export is a success (the command line) | the command line never cancels: the arm is there because the type has the case |
+| a solid layer is a picture that is used (`frames.rs`) | an export has no layer without a picture: the colour of one is passed because the function asks for it |
+
+**What the mistakes that were noticed late showed**, each closed with a test that notices the mistake when it is planted again (the second tries of the campaigns say so):
+
+* **The plan and the runs.** A project of **one frame** was never planned or exported in any test (now: the plan, and an export of one frame to a file of one frame). The **symbol's layout** of a project reached neither the plan nor a frame in any test (two tests). `first_video` was never asked of a project with two videos. A picture file with **two places**, or two picture files with different places, was never tried. `find_the_runs` was tested only by projects, which can never make three of its conditions false, and two of its conditions made each other unnecessary: **one condition now, and eight tests of hand-made plans** that say what each of the others is for.
+* **The colours of the file.** A video that states only its **transfer**; the names of tags **with hyphens and underscores** are passed on (`iec61966-2-1`) and names with a **colon, equals sign, comma** and the like are not; and the **test of a dropped encoder passed without the code it was written for** (ffmpeg ends by itself when its input closes): it gives ffmpeg an hour of silence to make now, so that only the drop can end it.
+* **The runner.** `Ending::EncoderGone` was changed into a failure before anything looked at it, and `run` had an arm for it that could never be reached: gone. **The check that a destination is not a source** had a branch for a destination that does not exist, which could never be the same file: gone. **How an export ends from what ffmpeg said** (three decisions) was inline in code that needs a running ffmpeg to be reached: three functions of the words now, with tests. Not shown before by any test, now each by one: a list of files longer than the plan's; **two different files for two sources** (the tests had used one file for several sources, so a list of files in the wrong order could not be seen); the window is woken up for every progress and at the end; a finished video **that cannot be moved into place** is a failure that says so; and cancelling when ffmpeg is stuck.
+* **A mistake of the program in the export's thread**, found while reading the code to plant mistakes in it, and not by one: a panic there ended the thread without an end for the window to see. **Mended, with a test that makes the text drawing panic in the middle of an export** (and that fails by hanging when the mending is taken out).
+* **The command line.** Which settings, which adapter and which warnings are three small functions now and tested (the settings of the file named, the project's own on top; `best` and `software`; each missing effect once), a warning is said on the error stream before the failure it comes with, an export that **fails after it has started** says why with status 1, and an argument that begins with a dash is an option.
+* **The rest.** The describer: runs are started 45 frames before they are seen (it was never looked at), a video with no run is a mistake, pictures held are counted, and what is let go of is listed in order. The sound plan: the length of a silence, a number or a list for the loudness, and the setting for sped-up sound. The choice of the video encoder is made from a list now (**x264 when `ffmpeg -encoders` lists it, by its name and not by a word in what is said of another encoder**). A stream asked for a picture of no width or no height is refused.
+
+### 11.4 Verification at the end of the phase
+
+* **Library tests** [V]: Windows **3907 passed, 0 failed, 7 ignored**; Ubuntu in WSL (ffmpeg 9, lavapipe) **3906 passed, 0 failed, 7 ignored** (one test is for Windows only). Phase 2 added 189 library tests and 34 integration tests and deleted 128 (2.7): **+95 net**.
+* **Every program of integration tests passes on both** [V]: the 29 journeys (and one that is ignored), the old export suite (`media_export` 24, `media_export_tracks` 25, `media_export_animation` 6, `media_export_effects` 16, `media_in_place` 9, `media_audio_stream` 16) with its
+  assertions as they were, and the new `video_export_pictures` 9, `video_export_encoder` 5, `video_export_runs` 14 (15 on Linux: the test of an export whose ffmpeg is stuck is for Unix) and `command_line_export` 6.
+* `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items`: clean [V]. `reuse lint`: compliant, 530 of 530 files [V].
+* **CI** [V]: all five jobs green at 2.7 (`1280da6`: Windows, Ubuntu, macOS, licences, tools: 1416 s); the commit of 2.8 is read when it has run (the report says what it said).
+* **The comparison with the old export reproduces** [V]: from a copy of commit `4e3331a` (the last that has it) with the test file in `docs/engine-comparison-phase-2/`, every number of section 9 came out the same.
+* **The planes of the export are the preview's frame converted** [V]: 40 scenes made up from numbers, in three matrices and ranges, within one level of the plain arithmetic. **WARP and lavapipe draw the same 40 scenes** within 4 levels [V]: of 670 288 values 660 318 (98.5 %) are the same, 9 886 differ by 1 level, 80 by 2, 3 by 3 and 1 by 4; the planes differ by 2 at most. (A throwaway test wrote the 8-bit frames and the planes of the 40 scenes of `oracle_tests` to a file on each system and a script compared the two files; it is not in the tree. A real card of another maker is not measured: SF-01.)
+* **The benchmark** [V, on the software adapter]: on the software adapter (WARP) at 640 by 360, 30 frames of each scene, the whole stack makes **8.7 frames to the second** with its pictures already on the card and **5.8** when every frame is given new pictures of video (5.9 with two frames on their way: a processor does not do two things better than one); the gate is judged on a real card and is **not** made on the one that was measured (49.8 frames to the second on 2026-10-16, before this phase).
+
+### 11.5 What is not done, and what I do not know
+
+* **How fast an export is on a real graphics card**, and whether `fastforwardrs-export --adapter best` works on one: not run (SF-01). The maintainer is asked to run it (the report says how).
+* **The gate of 1080p at 60 frames to the second on the integrated graphics** is still open (49.8 on 2026-10-16, before this phase). This phase built what bears on it (frames that overlap, pictures that reuse the card's textures) and the benchmark has a scene and a table for them; on the software adapter (WARP) at 640 by 360, 30 frames of each scene, the whole stack makes **8.7 frames to the second** with its pictures already on the card and **5.8** when every frame is given new pictures of video (5.9 with two frames on their way: a processor does not do two things better than one), which says nothing of the gate. The maintainer is asked to run the benchmark again.
+* The export does not go on after a lost graphics device (X7): it says so and ends.
+* The colours of a video of full range, and of one that is not in planes, are decided by a rule that is tested (`output_colour/tests.rs`) and **not exported end to end with a file** [B].
+* A frame is never skipped when it is the same as the one before (see above).
+* **That the 8-bit frame is the same byte for byte in the preview and in the export** is not read back in planes mode, so no test says it; the planes of the export are the preview's frame converted, within a level, on 40 scenes of every kind. It follows from the structure (one render, a different read-back) [B].
+* **macOS:** the export and the engine tests skip on the CI's Mac (no software adapter). A step now runs them on the Mac's paravirtual Metal device, with failures as warnings; **its first result is not known yet** (it needs a push to run).

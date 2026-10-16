@@ -128,6 +128,23 @@ jobs:
         shell: bash
         run: FASTFORWARDRS_REQUIRE_FFMPEG=1 bash tools/ci/run_tests_and_report.sh warning "ffmpeg's own behaviour found" cargo test --no-fail-fast --test media_ffmpeg_quirks
 
+      # The Mac of the runner has no software graphics adapter, only a paravirtual Metal device (a virtual machine's, which is set aside for the tests), so the tests of the picture
+      # engine and of the export skip there. This step runs them on that device, to find out whether the engine and the export work on Metal; a failure is a WARNING that
+      # says which tests failed, and does not make the build red. The variable is set here and nowhere else: the tests never run on the graphics card of a developer's computer
+      # (SF-01), and where there is a software adapter it changes nothing.
+      - name: Engine and export tests on the Metal device of the runner (macOS; failures are warnings)
+        if: ${{ runner.os == 'macOS' && steps.ffmpeg.outputs.major >= 9 }}
+        # (A graphics device that does not answer must not hold the build for hours.)
+        timeout-minutes: 20
+        continue-on-error: true
+        shell: bash
+        env:
+          FASTFORWARDRS_TESTS_MAY_USE_ANY_ADAPTER: "1"
+          FASTFORWARDRS_REQUIRE_FFMPEG: "1"
+        run: |
+          bash tools/ci/run_tests_and_report.sh warning "Library tests of the engine and the export that failed on Metal" cargo test --lib --no-fail-fast -- engine:: video_export::
+          bash tools/ci/run_tests_and_report.sh warning "Integration tests of the export that failed on Metal" cargo test --no-fail-fast --test video_export_pictures --test video_export_runs --test video_export_encoder --test command_line_export
+
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
       # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.
       - name: Show the graphics adapters

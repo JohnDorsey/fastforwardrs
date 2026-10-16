@@ -52,9 +52,10 @@ pub use engine_preview::{EnginePreview, HowTheClockGoes};
 pub use view::PreviewView;
 
 // (The content of the preview is described by `frame_scene`, which the export uses too: what the preview shows and what the export shows are the same picture.)
-pub use crate::frame_scene::{
-    PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
-};
+pub use crate::frame_scene::{PreviewContent, PreviewLayer, PreviewLayerContent, VideoInThePicture};
+// (Only the tests of the preview make a symbol by hand: the window and the export both get it from `frame_scene::symbol_of_a_section`.)
+#[cfg(test)]
+pub use crate::frame_scene::SymbolOnThePreview;
 #[cfg(test)]
 pub use zooming::FIT_BUTTON_LABEL;
 

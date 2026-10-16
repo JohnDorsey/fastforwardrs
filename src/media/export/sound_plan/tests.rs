@@ -75,6 +75,104 @@ fn each_clip_of_the_graph_names_the_input_that_its_file_is_and_has_the_frames_th
 }
 
 #[test]
+fn a_silence_of_the_plan_is_as_long_in_the_graph() {
+    // A sound file that begins at frame 400, on a track of its own: that track is silent until then.
+    let mut project = project_with_video(320, 180, false);
+    project.import_source(audio_source(2, 4), frame(400)).unwrap();
+    let plan = sound_of(&project);
+    let files = [SourceMediaIdentifier::new(2)];
+
+    let specification = sound_graph_specification(&plan, &files, SpedUpClipSound::MaintainPitch);
+
+    let silences: Vec<u64> = specification
+        .strips
+        .iter()
+        .flat_map(|strip| &strip.items)
+        .filter_map(|item| match item {
+            SoundItemToExport::Silence { frame_count } => Some(*frame_count),
+            SoundItemToExport::Clip(_) => None,
+        })
+        .collect();
+    assert_eq!(silences, vec![400], "{specification:?}");
+}
+
+#[test]
+fn the_setting_for_the_sound_of_clips_that_play_faster_is_passed_on_whatever_it_is() {
+    let project = project_with_video(320, 180, true);
+    let plan = sound_of(&project);
+    let files = [SourceMediaIdentifier::new(1)];
+    for setting in SpedUpClipSound::ALL {
+        assert_eq!(
+            sound_graph_specification(&plan, &files, setting).sped_up_clip_sound,
+            setting
+        );
+    }
+}
+
+#[test]
+fn how_loud_a_clip_is_is_as_the_plan_says_a_number_for_a_clip_with_a_gain_and_a_list_for_one_with_keyframes() {
+    use crate::composition::Loudness;
+    use crate::project::{AnimationTarget, Gain, PropertyId, PropertyValue};
+    use crate::test_support::make_a_keyframe;
+    let loudness_of_the_clip = |project: &crate::project::Project| {
+        let plan = sound_of(project);
+        let planned = plan
+            .strips
+            .iter()
+            .flat_map(|strip| &strip.items)
+            .find_map(|item| match item {
+                crate::composition::SoundItem::Clip(clip) => Some(clip.loudness.clone()),
+                crate::composition::SoundItem::Silence { .. } => None,
+            })
+            .expect("a clip with sound");
+        let specification = sound_graph_specification(&plan, &[SourceMediaIdentifier::new(1)], SpedUpClipSound::Mute);
+        let made = specification
+            .strips
+            .iter()
+            .flat_map(|strip| &strip.items)
+            .find_map(|item| match item {
+                SoundItemToExport::Clip(clip) => Some(clip.loudness.clone()),
+                SoundItemToExport::Silence { .. } => None,
+            })
+            .expect("a clip with sound");
+        (planned, made)
+    };
+
+    // A gain of -6 decibels: a number, which is not 1.
+    let mut project = project_with_video(320, 180, true);
+    let clip = clip_location(&project, 0, 0);
+    project.set_clip_gain(clip, Gain::from_decibels(-6.0)).unwrap();
+    let (planned, made) = loudness_of_the_clip(&project);
+    let Loudness::Constant(factor) = planned else {
+        panic!("a premise: a gain that does not change is a number: {planned:?}");
+    };
+    assert!((factor - 1.0).abs() > 0.1, "a premise: the number is not 1: {factor}");
+    assert_eq!(made, LoudnessToExport::Constant(factor));
+
+    // Keyframes for the gain: a list of the decibels at some frames.
+    let mut project = project_with_video(320, 180, true);
+    let clip = clip_location(&project, 0, 0);
+    for (at, decibels) in [(0, 0.0), (100, -12.0)] {
+        make_a_keyframe(
+            &mut project,
+            AnimationTarget::Clip(clip),
+            PropertyId::Gain,
+            at,
+            PropertyValue::Number(decibels),
+        );
+    }
+    let (planned, made) = loudness_of_the_clip(&project);
+    let Loudness::Changing(points) = planned else {
+        panic!("a premise: keyframes make it change: {planned:?}");
+    };
+    assert!(points.len() >= 2, "a premise");
+    assert_eq!(
+        made,
+        LoudnessToExport::Changing(points.iter().map(|point| (point.frame, point.decibels)).collect())
+    );
+}
+
+#[test]
 #[should_panic(expected = "every file the sound is made from is one of the inputs")]
 fn a_file_that_is_not_one_of_the_inputs_is_a_mistake_of_the_program() {
     let project = project_with_video(320, 180, true);

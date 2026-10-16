@@ -72,7 +72,10 @@ mod planes_out_tests;
 #[cfg(test)]
 mod yuv_tests;
 
-pub use device::{AdapterChoice, DeviceError, DeviceTrouble, EngineDevice, there_is_a_software_adapter};
+pub use device::{
+    AdapterChoice, DeviceError, DeviceTrouble, EngineDevice, TESTS_MAY_USE_ANY_ADAPTER_VARIABLE,
+    there_is_a_software_adapter,
+};
 pub use effect_shaders::{FOREIGN_EFFECT_UNIFORM_BYTES, MOST_NUMBERS_OF_A_FOREIGN_EFFECT};
 pub use frame_cache::FrameCache;
 pub use frame_renderer::{FinishedFrame, FrameOutput, FrameRenderer, PendingFrame, RenderProblem};

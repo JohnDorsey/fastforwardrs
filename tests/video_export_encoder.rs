@@ -258,17 +258,36 @@ fn an_encoder_that_is_stopped_makes_the_writes_fail_and_leaves_nothing_running()
 fn an_encoder_that_is_dropped_without_being_finished_does_not_stay_running() {
     let toolchain = toolchain_or_skip!();
     let scratch = scratch_directory();
+    // ffmpeg is given a sound that the graph makes by itself and that lasts an hour, so that it does not end when the picture does (which it would, within a moment, for a
+    // picture of one frame): only the drop can end it, and it is still at work when the encoder is dropped.
+    let graph_file = scratch.path().join("an_hour_of_silence.txt");
+    std::fs::write(
+        &graph_file,
+        "anullsrc=r=48000:cl=stereo,atrim=duration=3600[finished_audio]",
+    )
+    .unwrap();
     let output = scratch.path().join("dropped.mp4");
     let tags = OutputTags::default();
+    let sound = SoundForTheEncoder {
+        files: Vec::new(),
+        graph_file,
+        output_label: "finished_audio",
+    };
     let (mut encoder, _) = start(
         &toolchain,
-        &specification(&output, &tags, None, libx264_or_mpeg4(&toolchain)),
+        &specification(&output, &tags, Some(sound), libx264_or_mpeg4(&toolchain)),
     );
     encoder.write_frame(&grey_planes(100)).unwrap();
     let killer = encoder.killer();
+    assert!(killer.is_running(), "a premise: ffmpeg is at work");
+
     drop(encoder);
-    // Killing what is already gone does nothing, and the file can be removed (on Windows a file that a program still has open cannot).
-    killer.kill();
+
+    assert!(
+        !killer.is_running(),
+        "the drop stopped ffmpeg, and waited until it was gone"
+    );
+    // (So the file can be removed on Windows too, where a file that a program still has open cannot.)
     let _ = std::fs::remove_file(&output);
     assert!(!output.exists(), "nothing holds the file");
 }

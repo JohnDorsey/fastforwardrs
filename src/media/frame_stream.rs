@@ -765,6 +765,29 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_to_be_delivered_with_no_width_or_no_height_is_refused_before_ffmpeg_is_started() {
+        let toolchain = FfmpegToolchain::unchecked_for_tests(
+            PathBuf::from("no-such-ffmpeg"),
+            PathBuf::from("no-such-ffprobe"),
+            Some(9),
+        );
+        for delivered in [(0, 360), (640, 0), (0, 0)] {
+            let result = FrameStream::start_delivering(
+                &toolchain,
+                &request(0, 10, 1),
+                delivered,
+                "bicubic",
+                do_nothing_when_woken(),
+            );
+            assert!(
+                matches!(result, Err(FrameStreamError::EmptyPicture)),
+                "{delivered:?}: {:?}",
+                result.err()
+            );
+        }
+    }
+
+    #[test]
     fn a_missing_ffmpeg_is_reported_as_not_startable() {
         let toolchain = FfmpegToolchain::unchecked_for_tests(
             PathBuf::from("no-such-ffmpeg"),

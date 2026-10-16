@@ -210,12 +210,16 @@ can be supported. The design notes answer that at length; here is what the syste
 ## 6. The engine (EN)
 
 * **EN-01 [P] M** One renderer for the picture, on wgpu, used for **both the preview and the export** (the long-term plan's option A).
-  ffmpeg stays as the decode and encode pipe. *(Phase 1, 2026-10-16 [V]: the **preview** can be made by the engine, as an option for now (`FASTFORWARDRS_PREVIEW=engine`); the export is phase 2.)*
+  ffmpeg stays as the decode and encode pipe. *(Phase 1, 2026-10-16 [V]: the **preview** can be made by the engine, as an option for now (`FASTFORWARDRS_PREVIEW=engine`). Phase 2, 2026-10-16 [V]: the **export** is made by the engine, always, from the same description of a frame
+  (`frame_scene`: `layers_of_a_section`, `symbol_of_a_section`, `describe_frame`); ffmpeg only decodes the files and encodes the finished frames, and the old export (ffmpeg's filter graph for the picture) is deleted. Report: `engine-phase-2-report.md`.)*
 * **EN-02 [P] M** Until parity is shown, the old path (the egui layers and the ffmpeg filter graph) stays as the **oracle**. Parity
   means: random projects compared frame by frame within a tolerance (one level on one machine, a stated larger one across vendors).
   *(Phase 1 [V], on the software adapters: the real old drawing against the engine on 400 random scenes, 2 levels at most everywhere but on the edges of layers; the one difference that can be seen, the hard
   edges of colours at some scales of a video, and the pictures that show them, are in `engine-phase-1-design.md`, sections 9 and 11, and `docs/engine-comparison/`.)*
 * **EN-03 [P] M** Preview and export are **bit-identical on one machine** and within a tolerance across machines (documented).
+  *(Phase 2, 2026-10-16: the window and the export make what a frame shows with the same functions and the engine draws it with the same passes, whichever of them asked. **[V]** The planes that the export is given are the preview's 8-bit frame converted, to within one level of the plain
+  arithmetic, on 40 scenes made up from numbers (turned, translucent, solid, partly off the frame) in three of the six matrices and ranges. **[B]** That the 8-bit frame is byte for byte the same in the two modes follows from its being one render with a different read-back, and no test reads it back in planes mode. **Across machines, [V] for two
+  software rasterisers only:** the same 40 scenes on WARP (Windows) and lavapipe (Linux): 98.5 % of the values are identical, the rest differ by one level except 84 of 670 288 values (80 by two levels, 3 by three, 1 by four), and the planes by two at most. A real card of another maker has not been measured (SF-01).)*
 * **EN-04 [P] M** A render of a frame is a **graph of passes** built from the plan: decode -> upload -> colour conversion -> placement ->
   effect stack -> composite -> (group effects) -> track effects -> output transform. Textures come from a pool.
 * **EN-05 [P] M** A **bad shader never hangs the program**: compile errors give a message with a line; a pass that takes too long, or a
@@ -240,6 +244,7 @@ can be supported. The design notes answer that at length; here is what the syste
   **1080p60 on the integrated GPU** and at **4K on a discrete GPU**. These are measured by a benchmark that is part of the repository,
   not by feel. (What happens when the machine cannot keep up: Q-13.)
   *(Phase 1.7 [V]: the benchmark is in the repository (`cargo run --release --example engine_benchmark`, QA-05). Measured by the maintainer on 2026-10-16 at 1080p: **integrated graphics (AMD Radeon, Vulkan): 49.8 frames to the second for the whole stack, so the goal is NOT yet made** (20.09 ms against 16.67; the estimates of what closes it are in `engine-phase-1-design.md`, section 10); RTX 3090 (Vulkan): 459.1. The 4K goal has not been run.)*
+  *(Phase 2 [V]: the benchmark has a scene in which every frame is given new pictures of video, and a second table with two frames on their way; on the software adapter (WARP) at 640 by 360, 30 frames of each scene, the whole stack makes **8.7 frames to the second** with its pictures already on the card and **5.8** when every frame is given new pictures of video (5.9 with two frames on their way: a processor does not do two things better than one), which says nothing of the gate. The maintainer is asked to run it again on the integrated graphics.)*
 * **EN-08 [D] S** (Q-13, default accepted 2026-10-15) Preview quality is adaptive: at full speed on a slow machine the engine renders at a lower resolution rather than
   dropping frames, and a still frame (paused, scrubbing stopped) is rendered at full resolution. *(Phase 1.7 [V]: built (`engine/quality.rs`, used by the preview): whole, half and a quarter of the size; the numbers
   are the design's first guesses, to be tuned with the benchmark on a real card.)*
@@ -247,8 +252,11 @@ can be supported. The design notes answer that at length; here is what the syste
   changes what they show. *(Phase 1 [V]: the engine keeps the frames it made, by what the description of a frame is made of (32 frames or 256 MiB), and clears them when a picture or an effect that they depend on is replaced or the graphics
   device is; the preview counts the frames that came from it.)*
 * **EN-10 [P] M** Export reads frames back from the GPU in a pipelined way and converts to the encoder's YUV on the GPU first.
+  *(Phase 2, 2026-10-16 [V] on the software adapters: the frame is converted to the planes of `yuv420p` on the card (a 2 by 2 average for the colour, limited range, the matrix of the first video) and read back with two frames in flight in the engine and up to four asked ahead, so that the decoders, the card and the encoder all work at once.
+  Not measured on a real card (SF-01).)*
 * **EN-11 [P] C** A render of a project can be started with no window (a command-line export), which also gives the engine tests a way
   to run. (It is what option D, a render process, would also need: Q-31.)
+  *(Phase 2, 2026-10-16 [V]: `fastforwardrs-export [--adapter best|software] [--settings FILE] PROJECT VIDEO`, a program of its own because the editor is a windowed program on Windows; exit status 0, 1 or 2; the progress on the error stream. It reads `.json` and `.ffrs` projects, including a video that is inside the project file. **`--adapter best` has never been run by me** (SF-01); the tests use `--adapter software`.)*
 * **EN-12 [P] M** The engine's interface is **message-shaped**, so that a render process stays possible later (the design notes, section 3): the
   scene is an **immutable, serialisable value** (what to render, parameter values, times, sizes; resources referred to by content hash; no
   UI types, no pointers into the program's data); the entry is `request a frame(scene snapshot, time) -> frame`; GPU resources are addressed by

@@ -13,15 +13,14 @@ use egui::{Frame, Margin, Ui};
 use super::{FastForwardApplication, FrameState, SourceFileState};
 use crate::application::commands::Command;
 use crate::application::menu_bar::{self, MenuAvailability};
-use crate::application::preview_panel::{
-    self, HowTheClockGoes, PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
-};
+use crate::application::preview_panel::{self, HowTheClockGoes, PreviewContent, VideoInThePicture};
 use crate::application::properties_panel::{self, PropertiesContent};
 use crate::application::theme;
 use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
-use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
+use crate::composition::{Layer, PictureSection, VisibleVideo};
+use crate::frame_scene::{layers_of_a_section, symbol_of_a_section};
 use crate::media::thumbnail_second_for_source_frame;
 use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
 use crate::project::{ClipId, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
@@ -195,47 +194,19 @@ fn preview_content<'a>(
     source_looks: &HashMap<SourceMediaIdentifier, SourceLook<'a>>,
 ) -> PreviewContent<'a> {
     let section = frame_state.picture_plan.section_at(frame_state.current_frame);
+    // (The layers and the symbol are made from the section by the very functions that the export makes them with.)
     let layers = section.map_or_else(Vec::new, |section| {
-        section
-            .layers
-            .iter()
-            .map(|layer| PreviewLayer {
-                clip: layer.clip,
-                track: layer.track,
-                placement: layer.placement_at(frame_state.current_frame),
-                colour: layer.colour_matrix_at(frame_state.current_frame),
-                content: match &layer.content {
-                    LayerContent::Text(_) => PreviewLayerContent::Text(
-                        layer
-                            .text_at(frame_state.current_frame)
-                            .expect("a text layer has a text object"),
-                    ),
-                    LayerContent::Image { source } => PreviewLayerContent::Image {
-                        source: *source,
-                        picture: source_looks.get(source).and_then(|look| look.picture),
-                    },
-                    LayerContent::Video(video) => PreviewLayerContent::Video(video_in_the_picture(
-                        section,
-                        layer,
-                        video,
-                        preview_pictures,
-                        frame_state,
-                        source_looks,
-                    )),
-                },
-            })
-            .collect()
+        layers_of_a_section(
+            section,
+            frame_state.current_frame,
+            |layer, video| video_in_the_picture(section, layer, video, preview_pictures, frame_state, source_looks),
+            |source| source_looks.get(&source).and_then(|look| look.picture),
+        )
     });
     PreviewContent {
         picture_size: (frame_state.total_frames > 0).then(|| project.picture_size()),
         layers,
-        symbol: section
-            .and_then(PictureSection::front_video)
-            .filter(|(_, video)| video.speed.is_accelerated())
-            .map(|(layer, video)| SymbolOnThePreview {
-                over: layer.clip,
-                speed: video.speed,
-            }),
+        symbol: section.and_then(symbol_of_a_section),
         indicator_layout: project.speed_indicator_layout(),
         selected_clip,
     }

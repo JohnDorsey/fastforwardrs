@@ -10,15 +10,17 @@ mod support;
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use fastforwardrs::engine::AdapterChoice;
 use fastforwardrs::media::FfmpegToolchain;
-use fastforwardrs::project::{Project, Settings, TextObject};
+use fastforwardrs::project::{Project, Settings, TextObject, TimelineFrameIndex};
 use fastforwardrs::rgba_picture::RgbaPicture;
 use fastforwardrs::video_export::{ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export};
 use support::{
-    TestVideoSpecification, decode_video, expected_source_frames, project_for, scratch_directory, test_video,
+    ClipOfTheVideo, TestVideoSpecification, decode_video, expected_source_frames, project_for,
+    project_with_tracks_of_videos, scratch_directory, test_video,
 };
 
 use support::{one_export_at_a_time, there_is_graphics_to_export_with};
@@ -101,6 +103,29 @@ fn a_video_exported_unedited_has_every_frame_of_the_video_in_order() {
     let exported = decode_video(&toolchain, &destination, 320, 180);
     assert_eq!(exported.frame_numbers(), expected_source_frames(&project));
     assert_eq!(outcome.progress.last(), Some(&90), "{:?}", outcome.progress);
+}
+
+#[test]
+fn a_project_of_a_single_frame_is_exported_as_a_video_of_a_single_frame() {
+    let toolchain = ready_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let one_frame = ClipOfTheVideo {
+        gap_before_frames: 0,
+        first_source_frame: 7,
+        end_source_frame: 8,
+        speed: 1,
+    };
+    let project = project_with_tracks_of_videos(&toolchain, &[&video], &[(0, &[one_frame])]);
+    assert_eq!(project.total_frame_count(), 1, "a premise");
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("one_frame.mp4");
+
+    let outcome = export(&toolchain, &project, &destination);
+
+    assert_eq!(outcome.result, ExportResult::Completed);
+    let exported = decode_video(&toolchain, &destination, 320, 180);
+    assert_eq!(exported.frame_numbers(), vec![7]);
+    assert_eq!(outcome.progress.last(), Some(&1), "{:?}", outcome.progress);
 }
 
 // --- how an export ends ---
@@ -214,8 +239,53 @@ fn a_file_that_cannot_be_read_fails_the_export_with_its_name_and_leaves_nothing(
     let ExportResult::Failed { reason } = outcome.result else {
         panic!("expected a failure, got {:?}", outcome.result);
     };
-    assert!(reason.contains("holiday.mp4"), "{reason}");
+    assert!(
+        reason.starts_with("holiday.mp4 cannot be read"),
+        "the first words say which file: {reason}"
+    );
     assert_eq!(files_in(scratch.path()), Vec::<String>::new());
+}
+
+#[test]
+fn a_mistake_of_the_program_in_the_middle_of_an_export_ends_it_with_a_message_and_leaves_nothing() {
+    let toolchain = ready_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let mut project = project_for(&toolchain, &video);
+    let front = project.add_track_in_front();
+    project
+        .insert_text(front, TimelineFrameIndex::new(10), TextObject::default(), 30)
+        .unwrap();
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("never_made.mp4");
+    let _one_at_a_time = one_export_at_a_time();
+    let plan = plan_export(&project, Settings::DEFAULT).expect("the project can be exported");
+    let locations: Vec<_> = plan
+        .source_files
+        .iter()
+        .map(|source| project.source(*source).unwrap().link.absolute_path.clone().into())
+        .collect();
+    // The text is drawn by something that panics when it is asked: a mistake of the program, made up for the test, in the middle of the export (frame 10).
+    let options = ExportOptions::new(AdapterChoice::SoftwareOnly).with_text_pictures(
+        |_: &TextObject, _: u32, _: u32| -> RgbaPicture { panic!("a mistake made up by the test") },
+    );
+    let export =
+        VideoExport::start(&toolchain, &plan, &locations, &destination, options, Arc::new(|| {})).expect("it starts");
+
+    let outcome = wait_for(&export);
+
+    let ExportResult::Failed { reason } = outcome.result else {
+        panic!("the export did not fail: {:?}", outcome.result);
+    };
+    assert!(
+        reason.contains("mistake in the program") && reason.contains("a mistake made up by the test"),
+        "{reason}"
+    );
+    drop(export);
+    assert_eq!(
+        files_in(scratch.path()),
+        Vec::<String>::new(),
+        "neither the video nor the temporary file is left"
+    );
 }
 
 #[test]
@@ -265,6 +335,194 @@ fn the_destination_cannot_be_a_file_the_project_is_made_from_and_the_number_of_f
         "{:?}",
         result.err()
     );
+}
+
+#[test]
+fn a_list_of_files_that_is_longer_than_the_plans_is_refused_as_one_that_is_shorter_is() {
+    let toolchain = ready_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let project = project_for(&toolchain, &video);
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let source: fastforwardrs::media::MediaLocation = video.path.clone().into();
+    let scratch = scratch_directory();
+
+    let result = VideoExport::start(
+        &toolchain,
+        &plan,
+        &[source.clone(), source],
+        &scratch.path().join("never.mp4"),
+        options(),
+        Arc::new(|| {}),
+    );
+
+    assert!(
+        matches!(
+            result,
+            Err(fastforwardrs::video_export::ExportError::WrongNumberOfSourceFiles { needed: 1, given: 2 })
+        ),
+        "{:?}",
+        result.err()
+    );
+    assert_eq!(files_in(scratch.path()), Vec::<String>::new());
+}
+
+#[test]
+fn each_source_file_of_the_plan_is_read_from_its_own_file_when_the_files_are_not_the_same() {
+    let toolchain = ready_or_skip!();
+    let short = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let long = support::counter_video(&toolchain);
+    // At the back the first 30 frames of the short video (the file 1); in front, after a gap of 30 frames, 30 frames of the long video (the file 2) from its frame 300
+    // on, which the short one does not have: each picture says which file it is from.
+    let project = project_with_tracks_of_videos(
+        &toolchain,
+        &[&short, &long],
+        &[
+            (
+                1,
+                &[ClipOfTheVideo {
+                    gap_before_frames: 30,
+                    first_source_frame: 300,
+                    end_source_frame: 330,
+                    speed: 1,
+                }],
+            ),
+            (
+                0,
+                &[ClipOfTheVideo {
+                    gap_before_frames: 0,
+                    first_source_frame: 0,
+                    end_source_frame: 30,
+                    speed: 1,
+                }],
+            ),
+        ],
+    );
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("two_files.mp4");
+
+    let outcome = export(&toolchain, &project, &destination);
+
+    assert_eq!(outcome.result, ExportResult::Completed);
+    let exported = decode_video(&toolchain, &destination, 320, 180);
+    let expected: Vec<u64> = (0..30).chain(300..330).collect();
+    assert_eq!(exported.frame_numbers(), expected);
+}
+
+#[test]
+fn the_window_is_woken_up_for_every_progress_that_is_told_and_once_more_at_the_end() {
+    let toolchain = ready_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let project = project_for(&toolchain, &video);
+    let scratch = scratch_directory();
+    let destination = scratch.path().join("woken.mp4");
+    let _one_at_a_time = one_export_at_a_time();
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let locations: Vec<_> = plan
+        .source_files
+        .iter()
+        .map(|source| project.source(*source).unwrap().link.absolute_path.clone().into())
+        .collect();
+    let woken = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&woken);
+    let export = VideoExport::start(
+        &toolchain,
+        &plan,
+        &locations,
+        &destination,
+        options(),
+        Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }),
+    )
+    .expect("it starts");
+
+    let outcome = wait_for(&export);
+    drop(export); // (waits for the thread, which wakes the window as the last thing it does)
+
+    assert_eq!(outcome.result, ExportResult::Completed);
+    assert!(!outcome.progress.is_empty(), "a premise: progress was told");
+    assert_eq!(woken.load(Ordering::SeqCst), outcome.progress.len() + 1);
+}
+
+#[test]
+fn a_finished_video_that_cannot_be_moved_into_place_is_a_failure_that_says_so_and_leaves_what_was_there() {
+    let toolchain = ready_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let project = project_for(&toolchain, &video);
+    let scratch = scratch_directory();
+    // The destination is a folder that has something in it, which nothing can be moved over.
+    let destination = scratch.path().join("video.mp4");
+    std::fs::create_dir(&destination).unwrap();
+    std::fs::write(destination.join("keep.txt"), b"mine").unwrap();
+
+    let outcome = export(&toolchain, &project, &destination);
+
+    let ExportResult::Failed { reason } = outcome.result else {
+        panic!("expected a failure, got {:?}", outcome.result);
+    };
+    assert!(reason.contains("could not be moved"), "{reason}");
+    assert_eq!(
+        files_in(scratch.path()),
+        ["video.mp4"],
+        "the finished video is not left beside it"
+    );
+    assert_eq!(std::fs::read(destination.join("keep.txt")).unwrap(), b"mine");
+}
+
+/// A sound file that nothing ever writes to: a named pipe, which ffmpeg waits for for ever when it opens it. (Where there are named pipes.)
+#[cfg(unix)]
+#[test]
+fn cancelling_an_export_ends_it_though_ffmpeg_is_stuck_and_not_reading_the_frames() {
+    let toolchain = ready_or_skip!();
+    let project = support::project_with_a_video_and_a_tone_file(&toolchain);
+    let scratch = scratch_directory();
+    let stuck = scratch.path().join("stuck.wav");
+    let made = std::process::Command::new("mkfifo").arg(&stuck).status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("SKIPPED: there is no mkfifo");
+        return;
+    }
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    // The file of the sound (the source 2) is the one nothing writes to.
+    let locations: Vec<fastforwardrs::media::MediaLocation> = plan
+        .source_files
+        .iter()
+        .map(|source| {
+            if source.value() == 2 {
+                stuck.clone().into()
+            } else {
+                project.source(*source).unwrap().link.absolute_path.clone().into()
+            }
+        })
+        .collect();
+    let destination = scratch.path().join("video.mp4");
+    let _one_at_a_time = one_export_at_a_time();
+    let export =
+        VideoExport::start(&toolchain, &plan, &locations, &destination, options(), Arc::new(|| {})).expect("it starts");
+    // ffmpeg waits at the sound, the frames pile up in the pipe and the export waits to write the next: it has to be given time to get there.
+    std::thread::sleep(Duration::from_secs(3));
+
+    export.cancel();
+    let cancelled_at = Instant::now();
+    let mut result = None;
+    while cancelled_at.elapsed() < Duration::from_secs(30) {
+        if let Some(ExportEvent::Finished(finished)) = export.try_next_event() {
+            result = Some(finished);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // Whatever happened, ffmpeg is let go of (the pipe is opened for reading and writing at once, which does not wait for anyone, and shut again: ffmpeg's wait for
+    // it ends), so that a failure of this test is a failure and not an export that never ends, which dropping it would wait for.
+    drop(std::fs::OpenOptions::new().read(true).write(true).open(&stuck));
+    assert_eq!(
+        result,
+        Some(ExportResult::Cancelled),
+        "the export ended as cancelled within 30 seconds"
+    );
+    drop(export);
+    assert_eq!(files_in(scratch.path()), ["stuck.wav"], "nothing is left but the pipe");
 }
 
 // --- the colours of the file ---

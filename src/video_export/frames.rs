@@ -20,11 +20,10 @@ use thiserror::Error;
 
 use super::pictures::{PicturesOfTheRuns, RunPictureProblem, RunStreamStarter};
 use super::plan::ExportPlan;
-use crate::composition::LayerContent;
 use crate::engine::{FrameDescription, LayerSource, PictureData, PictureId};
 use crate::frame_scene::{
-    PreviewContent, PreviewLayer, PreviewLayerContent, SentPictures, SymbolOnThePreview, TextPictures,
-    VideoInThePicture, describe_frame,
+    PreviewContent, SentPictures, TextPictures, VideoInThePicture, describe_frame, layers_of_a_section,
+    symbol_of_a_section,
 };
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
@@ -112,54 +111,30 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
         self.pictures.start_the_runs_that_begin_soon(timeline_frame)?;
 
         // The picture of each video of the frame, taken before anything is built from them: they are what the content borrows.
-        let mut pictures_of_the_videos = Vec::with_capacity(section.layers.len());
-        for layer in &section.layers {
-            pictures_of_the_videos.push(match &layer.content {
-                LayerContent::Video(_) => {
-                    let run = plan
-                        .run_of(layer.clip, timeline_frame)
-                        .ok_or(FrameProblem::NoRunForAVideo(timeline_frame))?;
-                    Some(self.pictures.picture(run, timeline_frame, cancelled)?)
-                }
-                LayerContent::Image { .. } | LayerContent::Text(_) => None,
-            });
+        let mut pictures_of_the_videos = HashMap::new();
+        for (layer, _) in section.video_layers() {
+            let run = plan
+                .run_of(layer.clip, timeline_frame)
+                .ok_or(FrameProblem::NoRunForAVideo(timeline_frame))?;
+            pictures_of_the_videos.insert(layer.clip, self.pictures.picture(run, timeline_frame, cancelled)?);
         }
 
-        let layers = section
-            .layers
-            .iter()
-            .zip(&pictures_of_the_videos)
-            .map(|(layer, picture_of_the_video)| PreviewLayer {
-                clip: layer.clip,
-                track: layer.track,
-                placement: layer.placement_at(frame),
-                colour: layer.colour_matrix_at(frame),
-                content: match &layer.content {
-                    LayerContent::Video(_) => PreviewLayerContent::Video(VideoInThePicture::Picture(
-                        picture_of_the_video
-                            .as_deref()
-                            .expect("a picture was taken for every video"),
-                    )),
-                    LayerContent::Image { source } => PreviewLayerContent::Image {
-                        source: *source,
-                        picture: self.images.get(source),
-                    },
-                    LayerContent::Text(_) => {
-                        PreviewLayerContent::Text(layer.text_at(frame).expect("a text layer has a text object"))
-                    }
-                },
-            })
-            .collect();
+        // (The layers and the symbol are made from the section by the very functions that the window makes them with.)
         let content = PreviewContent {
             picture_size: Some(plan.picture_size()),
-            layers,
-            symbol: section
-                .front_video()
-                .filter(|(_, video)| video.speed.is_accelerated())
-                .map(|(layer, video)| SymbolOnThePreview {
-                    over: layer.clip,
-                    speed: video.speed,
-                }),
+            layers: layers_of_a_section(
+                section,
+                frame,
+                |layer, _| {
+                    VideoInThePicture::Picture(
+                        pictures_of_the_videos
+                            .get(&layer.clip)
+                            .expect("a picture was taken for every video"),
+                    )
+                },
+                |source| self.images.get(&source),
+            ),
+            symbol: symbol_of_a_section(section),
             indicator_layout: plan.symbol_layout,
             selected_clip: None,
         };

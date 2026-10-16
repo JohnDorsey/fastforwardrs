@@ -55,16 +55,17 @@ struct RunSoFar<'a> {
 /// The runs of the video of `pictures`, in the order they begin. `picture_size` is the size of the finished picture in pixels.
 pub fn find_the_runs(pictures: &PicturePlan, picture_size: (u32, u32)) -> Vec<VideoRun> {
     let mut found: Vec<RunSoFar<'_>> = Vec::new();
-    // The run that is open for each clip, which a clip's video in the next section may go on.
-    let mut open: HashMap<ClipId, usize> = HashMap::new();
+    // The latest run of each clip, which the clip's video in a later section may go on.
+    let mut latest_of_each_clip: HashMap<ClipId, usize> = HashMap::new();
     for section in &pictures.sections {
-        let mut open_after_this_section = HashMap::new();
         for layer in &section.layers {
             let LayerContent::Video(video) = &layer.content else {
                 continue;
             };
-            let goes_on = open.get(&layer.clip).copied().filter(|&index| {
+            let goes_on = latest_of_each_clip.get(&layer.clip).copied().filter(|&index| {
                 let so_far = &found[index];
+                // (It was seen in the section before this one: the run ends where this section begins. A clip that was hidden for a while is not read on from where it
+                // was: the process that reads it has no pictures to give for the frames in between.)
                 so_far.run.end_timeline_frame == section.first_timeline_frame
                     && so_far.run.source == video.source
                     && so_far.run.speed == video.speed
@@ -95,9 +96,8 @@ pub fn find_the_runs(pictures: &PicturePlan, picture_size: (u32, u32)) -> Vec<Vi
                     found.len() - 1
                 }
             };
-            open_after_this_section.insert(layer.clip, index);
+            latest_of_each_clip.insert(layer.clip, index);
         }
-        open = open_after_this_section;
     }
     found
         .into_iter()
@@ -164,3 +164,6 @@ pub(super) fn largest_box_of_an_image(
             (widest.max(width), tallest.max(height))
         })
 }
+
+#[cfg(test)]
+mod tests;

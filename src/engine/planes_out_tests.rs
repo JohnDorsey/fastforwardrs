@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use super::oracle_tests::{describe_the_scene, scene_made_up_from_a_seed};
 use super::testing::with_software_graphics;
 use super::yuv::{chroma_size, reference_yuv420p};
 use super::yuv_tests::{noise, whole_frame_of};
@@ -218,6 +219,36 @@ fn flat_colours_are_the_numbers_that_the_standards_give() {
                     made[channel].abs_diff(expected[channel]) <= 1,
                     "{colour:?} {rgba:?}: {made:?} is not {expected:?}"
                 );
+            }
+        }
+    });
+}
+
+/// **The export is the preview** (EN-03), on scenes of every kind: the planes that the engine makes of a frame for the export are the 8-bit frame that it makes of
+/// the very same description for the preview, converted, in every matrix and range. (A frame made for the export is made by the passes that make the frame of the
+/// preview, and then converted; this is what says that nothing between the two differs: turned layers, translucent ones, solid colours, layers partly off the frame.)
+#[test]
+fn scenes_made_up_from_numbers_make_for_the_export_the_planes_of_the_frame_the_preview_shows() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        for seed in 1..=40_u64 {
+            let (size, layers) = scene_made_up_from_a_seed(seed);
+            let description = describe_the_scene(&mut renderer, size, &layers);
+            let (preview, _) = renderer.render(&description, A_LONG_TIME).unwrap();
+            for colour in [EVERY_COLOUR[0], EVERY_COLOUR[3], EVERY_COLOUR[4]] {
+                let (export, _) = renderer.render_planes(&description, colour, A_LONG_TIME).unwrap();
+                let (y, u, v) = reference_yuv420p(size.0, size.1, &preview.rgba_pixels, colour);
+                for (name, made, reference) in [
+                    ("brightness", export.luma(), &y),
+                    ("blue colour difference", export.blue_difference(), &u),
+                    ("red colour difference", export.red_difference(), &v),
+                ] {
+                    assert!(
+                        largest_difference(made, reference) <= 1,
+                        "seed {seed}, {size:?}, {colour:?}: the {name} of the export is off by {} from the frame of the preview",
+                        largest_difference(made, reference)
+                    );
+                }
             }
         }
     });

@@ -197,6 +197,96 @@ fn a_cancel_is_an_ending_of_its_own_and_every_other_problem_is_a_failure_with_wo
     assert!(reason.contains('9'), "{reason}");
 }
 
+// --- how it ends, from what ffmpeg said ---
+
+/// The status that a program that has ended with `code` has.
+fn an_exit_status(code: i32) -> std::process::ExitStatus {
+    let mut program = if cfg!(windows) {
+        let mut program = std::process::Command::new("cmd");
+        program.args(["/C", &format!("exit {code}")]);
+        program
+    } else {
+        let mut program = std::process::Command::new("sh");
+        program.args(["-c", &format!("exit {code}")]);
+        program
+    };
+    program.status().expect("a program that ends with a status can be run")
+}
+
+#[test]
+fn when_the_encoder_is_stopped_a_failure_has_what_ffmpeg_said_added_and_a_cancel_stays_a_cancel() {
+    assert_eq!(
+        the_ending_with_what_ffmpeg_said(Ending::Cancelled, "ffmpeg complained about being killed"),
+        Ending::Cancelled
+    );
+    assert_eq!(
+        the_ending_with_what_ffmpeg_said(Ending::failed("the frame 7 could not be made"), ""),
+        Ending::failed("the frame 7 could not be made")
+    );
+    assert_eq!(
+        the_ending_with_what_ffmpeg_said(Ending::failed("the frame 7 could not be made"), "Error opening output"),
+        Ending::failed("the frame 7 could not be made: Error opening output")
+    );
+}
+
+#[test]
+fn when_a_frame_could_not_be_given_to_the_encoder_ffmpegs_words_are_the_reason_and_the_broken_pipe_only_when_it_said_nothing()
+ {
+    let broken = io::Error::new(io::ErrorKind::BrokenPipe, "the pipe is broken");
+    assert_eq!(
+        the_ending_when_a_frame_could_not_be_given(&broken, "Unable to open the output".to_owned()),
+        Ending::failed("Unable to open the output"),
+        "(and not a word of the pipe)"
+    );
+    assert_eq!(
+        the_ending_when_a_frame_could_not_be_given(&broken, String::new()),
+        Ending::failed("the video could not be written: the pipe is broken")
+    );
+}
+
+#[test]
+fn an_export_is_well_ended_when_ffmpeg_says_it_finished_and_otherwise_ffmpegs_words_are_the_reason() {
+    let said = |status: io::Result<std::process::ExitStatus>, words: &str| {
+        the_ending_of_the_file(EncoderEnd {
+            status,
+            error_output: words.to_owned(),
+        })
+    };
+    assert_eq!(said(Ok(an_exit_status(0)), ""), Ok(()));
+    assert_eq!(
+        said(Ok(an_exit_status(0)), "a warning"),
+        Ok(()),
+        "what it says is not the reason when it finished"
+    );
+    assert_eq!(
+        said(Ok(an_exit_status(1)), "Conversion failed!"),
+        Err(Ending::failed("Conversion failed!"))
+    );
+    let Err(Ending::Failed(reason)) = said(Ok(an_exit_status(3)), "") else {
+        panic!("a failure that said nothing is still a failure");
+    };
+    assert!(reason.starts_with("ffmpeg stopped with"), "{reason}");
+    let Err(Ending::Failed(reason)) = said(Err(io::Error::other("no such process")), "") else {
+        panic!("a process that cannot be waited for is a failure");
+    };
+    assert_eq!(reason, "ffmpeg could not be waited for: no such process");
+}
+
+// --- a mistake of the program ---
+
+#[test]
+fn what_a_panic_said_is_told_in_its_words_whether_it_was_a_text_a_formatted_text_or_not_words_at_all() {
+    let said = |payload: Box<dyn std::any::Any + Send>| what_a_panic_said(payload.as_ref());
+    assert_eq!(said(Box::new("a text")), "a text");
+    assert_eq!(said(Box::new(format!("a formatted {}", 7))), "a formatted 7");
+    assert_eq!(said(Box::new(7_u32)), "it did not say what");
+    // (What `panic!` makes of its arguments: a literal is a `&str` and a formatted message is a `String`.)
+    let literal = std::panic::catch_unwind(|| panic!("a literal")).unwrap_err();
+    let formatted = std::panic::catch_unwind(|| panic!("a formatted {}", 7)).unwrap_err();
+    assert_eq!(said(literal), "a literal");
+    assert_eq!(said(formatted), "a formatted 7");
+}
+
 // --- the files ---
 
 #[test]

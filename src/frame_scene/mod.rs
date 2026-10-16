@@ -8,12 +8,15 @@
 //! (The types are called after the preview because that is where they began; a frame of the export is the picture that the preview shows.)
 //!
 //! A [`PreviewContent`] is the layers that are seen at a frame, the one at the back first, each with where it is, how its colours are changed and what its picture
-//! is made of, and the fast-forward symbol over the front-most video when that is sped up. [`describe_frame`] **sends nothing itself**: for each picture that a layer is
-//! made of it asks a [`PictureSupply`] to make sure the engine has it.
+//! is made of, and the fast-forward symbol over the front-most video when that is sped up. [`layers_of_a_section`] and [`symbol_of_a_section`] are where the picture
+//! plan becomes these (for the window and for the export alike), and [`describe_frame`] **sends nothing itself**: for each picture that a layer is made of it asks a
+//! [`PictureSupply`] to make sure the engine has it.
 
 mod describe;
+mod section;
 
 pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, TextPictures, describe_frame};
+pub use section::{layers_of_a_section, symbol_of_a_section};
 
 use std::borrow::Cow;
 

@@ -110,7 +110,9 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
                         .ok_or("--settings has to be followed by the name of a file")?,
                 );
             }
-            Some(option) if option.starts_with("--") => {
+            // (Anything that begins with a dash is an option, and not a file name: a mistyped `-adapter` is told so, and not taken for the project file. A file whose name
+            // begins with a dash can be given as `./-name`.)
+            Some(option) if option.starts_with('-') => {
                 return Err(format!("{option} is not an option of this program"));
             }
             _ => files.push(PathBuf::from(argument)),
@@ -201,15 +203,9 @@ impl ProgressTold {
 pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -> Result<(), String> {
     let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
     let project = read_project_file(&request.project_file).map_err(|error| error.to_string())?;
-    let global_settings = match &request.global_settings_file {
-        Some(path) => read_settings_file(path).map_err(|error| error.to_string())?,
-        None => Settings::DEFAULT,
-    };
-    let plan = plan_export(&project, project.settings().resolve(global_settings)).map_err(|error| error.to_string())?;
-    for effect in super::fast_forward_application::effects_the_export_would_leave_out(&project) {
-        report(Report::Warning(format!(
-            "the effect {effect} is not in this program, so the video does not have what it does"
-        )));
+    let plan = plan_export(&project, settings_of_the_export(request, &project)?).map_err(|error| error.to_string())?;
+    for words in warnings_about(&project) {
+        report(Report::Warning(words));
     }
     let cache = match &request.archive_cache_folder {
         Some(folder) => Some(ArchiveCache::at(folder.clone())),
@@ -221,7 +217,7 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
         &plan,
         &locations,
         &request.video_file,
-        ExportOptions::new(request.adapter.as_a_choice()),
+        export_options_of(request),
         Arc::new(|| {}),
     )
     .map_err(|error| error.to_string())?;
@@ -237,6 +233,30 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
             None => std::thread::sleep(Duration::from_millis(20)),
         }
     }
+}
+
+/// The settings that the export of `project` is made with: the global ones, from the file that the request names (the defaults where it names none, and where the file is
+/// not there, because then the settings were never changed), with the project's own on top.
+fn settings_of_the_export(request: &ExportRequest, project: &Project) -> Result<Settings, String> {
+    let global_settings = match &request.global_settings_file {
+        Some(path) => read_settings_file(path).map_err(|error| error.to_string())?,
+        None => Settings::DEFAULT,
+    };
+    Ok(project.settings().resolve(global_settings))
+}
+
+/// What the export is started with other than the project: the graphics adapter that the request asks for.
+fn export_options_of(request: &ExportRequest) -> ExportOptions {
+    ExportOptions::new(request.adapter.as_a_choice())
+}
+
+/// What the export says before it begins: that the video will not have what an effect does that the program does not have (a project file brought it), for each such
+/// effect, once.
+fn warnings_about(project: &Project) -> Vec<String> {
+    super::fast_forward_application::effects_the_export_would_leave_out(project)
+        .into_iter()
+        .map(|effect| format!("the effect {effect} is not in this program, so the video does not have what it does"))
+        .collect()
 }
 
 /// Where the files the export is made from are, in the order the plan lists them: where the project says each is, then next to the project file; a file that is

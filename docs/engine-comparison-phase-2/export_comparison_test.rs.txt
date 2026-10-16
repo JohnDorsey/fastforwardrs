@@ -1,0 +1,365 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! The old export (ffmpeg's filter graph) and the new one (the picture engine) on a corpus of projects, once: both exports are decoded and compared pixel by pixel.
+//! **Made for the end of phase 2 (`docs/engine-phase-2-design.md`, section 9) and deleted with the old export**: it needs both. It does not run with the other tests
+//! (`cargo test --test export_comparison -- --ignored --nocapture`); it prints a table, and with `FASTFORWARDRS_COMPARISON_FOLDER` set it writes the pictures of the
+//! frames that differ most (the old one, the new one, and the difference made eight times as strong) into that folder.
+
+mod support;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use fastforwardrs::media::FfmpegToolchain;
+use fastforwardrs::media::export as old;
+use fastforwardrs::project::{
+    Angle, AnimationTarget, CanvasArea, EffectKind, Placement, Project, PropertyId, PropertyValue, Settings,
+    TextObject, TimelineFrameIndex,
+};
+use fastforwardrs::rgba_picture::RgbaPicture;
+use support::yuv_videos::{BT709_LIMITED, FOUR_COLOURS, SMPTE170M_LIMITED, UNTAGGED, video_made_by_geq};
+use support::{
+    ClipOfTheVideo, DecodedVideo, TestVideoSpecification, decode_video, edited, export_with_text_pictures,
+    flat_colour_video, make_a_keyframe, project_for, project_with_a_picture_over_a_video,
+    project_with_tracks_of_videos, red_then_blue_text_picture, scratch_directory, test_video,
+};
+
+const WIDTH: u32 = 320;
+const HEIGHT: u32 = 180;
+
+/// A video of 3 seconds at 30 a second (90 pictures), 320 by 180.
+const COUNTER_3_SECONDS: TestVideoSpecification = TestVideoSpecification {
+    name: "counter_3_seconds",
+    duration_in_seconds: 3,
+    ..TestVideoSpecification::COUNTER
+};
+
+/// The text pictures of the corpus: the left half red and the right half blue, in the area of the text.
+type TextPicture = fn(&TextObject, u32, u32) -> RgbaPicture;
+
+struct Case {
+    name: &'static str,
+    project: Project,
+    text: TextPicture,
+}
+
+fn clip(first_source_frame: u64, end_source_frame: u64) -> ClipOfTheVideo {
+    ClipOfTheVideo {
+        gap_before_frames: 0,
+        first_source_frame,
+        end_source_frame,
+        speed: 1,
+    }
+}
+
+fn the_first_clip(project: &Project) -> fastforwardrs::project::ClipId {
+    project.tracks()[0].entries()[0].id()
+}
+
+fn corpus(toolchain: &FfmpegToolchain, folder: &Path) -> Vec<Case> {
+    let counter = test_video(toolchain, &COUNTER_3_SECONDS);
+    let case = |name, project| Case {
+        name,
+        project,
+        text: red_then_blue_text_picture,
+    };
+    let mut cases = vec![
+        case("the video as it is", project_for(toolchain, &counter)),
+        case(
+            "cut in three, played at 1x, 3x and 2x",
+            edited(project_for(toolchain, &counter), &[30, 60], &[1, 3, 2]),
+        ),
+    ];
+
+    // Colours: flat and exact, then four colours with hard edges, each tagged differently.
+    let orange = flat_colour_video(toolchain, folder, (200, 100, 50));
+    let mut flat = Project::empty();
+    flat.import_source(
+        fastforwardrs::project::SourceMedia {
+            identifier: fastforwardrs::project::SourceMediaIdentifier::new(1),
+            link: fastforwardrs::project::SourceMediaLink::from_absolute_path(orange.clone()),
+            properties: fastforwardrs::media::probe_source_media(toolchain, &orange).unwrap(),
+        },
+        TimelineFrameIndex::new(0),
+    )
+    .unwrap();
+    let flat_clip = the_first_clip(&flat);
+    cases.push(case("flat orange, untagged", flat.clone()));
+    let mut turned = flat;
+    let instance = turned
+        .add_effect(AnimationTarget::Clip(flat_clip), EffectKind::HUE_SHIFT)
+        .unwrap();
+    turned
+        .set_property_at(
+            AnimationTarget::Clip(flat_clip),
+            PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0),
+            PropertyValue::Number(120.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    cases.push(case("flat orange, hue turned 120 degrees", turned));
+    for (name, tags) in [
+        ("four colours, untagged", UNTAGGED),
+        ("four colours, bt709 limited", BT709_LIMITED),
+        ("four colours, smpte170m limited", SMPTE170M_LIMITED),
+    ] {
+        let path = video_made_by_geq(toolchain, folder, name, (WIDTH, HEIGHT), FOUR_COLOURS, "yuv420p", tags);
+        let mut project = Project::empty();
+        project
+            .import_source(
+                fastforwardrs::project::SourceMedia {
+                    identifier: fastforwardrs::project::SourceMediaIdentifier::new(1),
+                    link: fastforwardrs::project::SourceMediaLink::from_absolute_path(path.clone()),
+                    properties: fastforwardrs::media::probe_source_media(toolchain, &path).unwrap(),
+                },
+                TimelineFrameIndex::new(0),
+            )
+            .unwrap();
+        cases.push(case(name, project));
+    }
+
+    // Layers: smaller, turned, and in front of one another.
+    let mut half = project_with_tracks_of_videos(toolchain, &[&counter], &[(0, &[clip(0, 90)])]);
+    half.set_clip_placement(
+        the_first_clip(&half),
+        Placement::upright(CanvasArea::new(0.25, 0.25, 0.5, 0.5)),
+    )
+    .unwrap();
+    cases.push(case("the video at half the size in the middle", half));
+
+    let mut turned_video = project_with_tracks_of_videos(toolchain, &[&counter], &[(0, &[clip(0, 90)])]);
+    turned_video
+        .set_clip_placement(
+            the_first_clip(&turned_video),
+            Placement::new(CanvasArea::new(0.2, 0.2, 0.6, 0.6), Angle::from_degrees(30.0)),
+        )
+        .unwrap();
+    cases.push(case("the video turned 30 degrees at 0.6 of the size", turned_video));
+
+    let mut two = project_with_tracks_of_videos(
+        toolchain,
+        &[&counter, &counter],
+        &[(1, &[clip(0, 90)]), (0, &[clip(0, 90)])],
+    );
+    two.set_clip_placement(
+        the_first_clip(&two),
+        Placement::upright(CanvasArea::new(0.55, 0.05, 0.4, 0.4)),
+    )
+    .unwrap();
+    cases.push(case("a small video in front of another", two));
+
+    // Text, the symbol of a sped up clip, and a picture file.
+    let mut with_text = edited(project_for(toolchain, &counter), &[45], &[1, 4]);
+    let front = with_text.add_track_in_front();
+    with_text
+        .insert_text(front, TimelineFrameIndex::new(20), TextObject::default(), 50)
+        .unwrap();
+    cases.push(case("a text over a video, and the symbol of a clip at 4x", with_text));
+
+    let (mut with_picture, picture) = project_with_a_picture_over_a_video(toolchain, folder, 10, 40);
+    with_picture
+        .set_clip_placement(
+            picture,
+            Placement::new(CanvasArea::new(0.3, 0.3, 0.4, 0.4), Angle::from_degrees(15.0)),
+        )
+        .unwrap();
+    cases.push(case("a picture file turned 15 degrees over a video", with_picture));
+
+    // Animation.
+    let mut animated = project_with_tracks_of_videos(toolchain, &[&counter], &[(0, &[clip(0, 90)])]);
+    animated
+        .set_clip_placement(
+            the_first_clip(&animated),
+            Placement::upright(CanvasArea::new(0.0, 0.0, 0.4, 0.4)),
+        )
+        .unwrap();
+    let target = AnimationTarget::Clip(the_first_clip(&animated));
+    for (frame, size, across) in [(0, 0.4, 0.25), (45, 0.7, 0.5), (89, 0.4, 0.75)] {
+        make_a_keyframe(
+            &mut animated,
+            target,
+            PropertyId::Size,
+            frame,
+            PropertyValue::Pair(size, size),
+        );
+        make_a_keyframe(
+            &mut animated,
+            target,
+            PropertyId::Position,
+            frame,
+            PropertyValue::Pair(across, 0.5),
+        );
+    }
+    cases.push(case("a video that moves and grows and shrinks", animated));
+    cases
+}
+
+// --- exporting with the old code ---
+
+fn old_export(toolchain: &FfmpegToolchain, project: &Project, text: TextPicture, destination: &Path) {
+    let plan = old::plan_export(project, Settings::DEFAULT, &text).expect("the project can be exported");
+    let locations: Vec<fastforwardrs::media::MediaLocation> = plan
+        .source_files
+        .iter()
+        .map(|source| project.source(*source).unwrap().link.absolute_path.clone().into())
+        .collect();
+    let export =
+        old::VideoExport::start(toolchain, &plan, &locations, destination, Arc::new(|| {})).expect("it starts");
+    let started = Instant::now();
+    loop {
+        match export.try_next_event() {
+            Some(old::ExportEvent::Finished(result)) => {
+                assert_eq!(result, old::ExportResult::Completed);
+                return;
+            }
+            Some(old::ExportEvent::Progress { .. }) => {}
+            None => {
+                assert!(
+                    started.elapsed() < Duration::from_secs(300),
+                    "the export did not finish"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+}
+
+// --- comparing ---
+
+#[derive(Debug)]
+struct Difference {
+    frames: (usize, usize),
+    largest: u32,
+    mean: f64,
+    over_4: f64,
+    over_16: f64,
+    over_48: f64,
+    worst_frame: usize,
+}
+
+fn compare(old: &DecodedVideo, new: &DecodedVideo) -> Difference {
+    let frames = old.pictures.len().min(new.pictures.len());
+    let (mut largest, mut sum, mut count) = (0u32, 0u64, 0u64);
+    let (mut over_4, mut over_16, mut over_48) = (0u64, 0u64, 0u64);
+    let (mut worst_frame, mut worst_of_a_frame) = (0, 0u32);
+    for number in 0..frames {
+        let mut largest_of_the_frame = 0;
+        for (a, b) in old.pictures[number].iter().zip(&new.pictures[number]) {
+            let difference = u32::from(a.abs_diff(*b));
+            largest = largest.max(difference);
+            largest_of_the_frame = largest_of_the_frame.max(difference);
+            sum += u64::from(difference);
+            count += 1;
+            over_4 += u64::from(difference > 4);
+            over_16 += u64::from(difference > 16);
+            over_48 += u64::from(difference > 48);
+        }
+        if largest_of_the_frame > worst_of_a_frame {
+            worst_of_a_frame = largest_of_the_frame;
+            worst_frame = number;
+        }
+    }
+    let per_cent = |part: u64| 100.0 * part as f64 / count.max(1) as f64;
+    Difference {
+        frames: (old.pictures.len(), new.pictures.len()),
+        largest,
+        mean: sum as f64 / count.max(1) as f64,
+        over_4: per_cent(over_4),
+        over_16: per_cent(over_16),
+        over_48: per_cent(over_48),
+        worst_frame,
+    }
+}
+
+/// The old picture, the new one, and the difference made eight times as strong, side by side.
+fn side_by_side(old: &[u8], new: &[u8]) -> RgbaPicture {
+    let (width, height) = (WIDTH as usize, HEIGHT as usize);
+    let mut rgba_pixels = vec![255u8; 3 * width * height * 4];
+    for y in 0..height {
+        for x in 0..width {
+            for channel in 0..3 {
+                let a = old[(y * width + x) * 3 + channel];
+                let b = new[(y * width + x) * 3 + channel];
+                let strong = (u32::from(a.abs_diff(b)) * 8).min(255) as u8;
+                for (panel, value) in [a, b, strong].into_iter().enumerate() {
+                    rgba_pixels[(y * 3 * width + panel * width + x) * 4 + channel] = value;
+                }
+            }
+        }
+    }
+    RgbaPicture {
+        width_in_pixels: 3 * WIDTH,
+        height_in_pixels: HEIGHT,
+        rgba_pixels,
+    }
+}
+
+#[test]
+#[ignore = "made for the end of phase 2; run it by hand: cargo test --test export_comparison -- --ignored --nocapture"]
+fn the_old_export_and_the_new_one_on_a_corpus_of_projects() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let pictures_folder = std::env::var_os("FASTFORWARDRS_COMPARISON_FOLDER").map(PathBuf::from);
+    let mut rows = Vec::new();
+    for case in corpus(&toolchain, scratch.path()) {
+        let name = case.name.replace([' ', ','], "_");
+        let old_destination = scratch.path().join(format!("{name}_old.mp4"));
+        let new_destination = scratch.path().join(format!("{name}_new.mp4"));
+        let started = Instant::now();
+        old_export(&toolchain, &case.project, case.text, &old_destination);
+        let old_time = started.elapsed();
+        let started = Instant::now();
+        export_with_text_pictures(&toolchain, &case.project, &new_destination, case.text);
+        let new_time = started.elapsed();
+        let old_pictures = decode_video(&toolchain, &old_destination, WIDTH, HEIGHT);
+        let new_pictures = decode_video(&toolchain, &new_destination, WIDTH, HEIGHT);
+        let difference = compare(&old_pictures, &new_pictures);
+        if let Some(folder) = &pictures_folder
+            && difference.largest > 8
+            && difference.frames.0 == difference.frames.1
+        {
+            std::fs::create_dir_all(folder).unwrap();
+            let picture = side_by_side(
+                &old_pictures.pictures[difference.worst_frame],
+                &new_pictures.pictures[difference.worst_frame],
+            );
+            std::fs::write(folder.join(format!("{name}.png")), picture.to_png_bytes().unwrap()).unwrap();
+        }
+        let centre = |video: &DecodedVideo| {
+            let picture = &video.pictures[0];
+            let start = ((HEIGHT as usize / 2) * WIDTH as usize + WIDTH as usize / 2) * 3;
+            (picture[start], picture[start + 1], picture[start + 2])
+        };
+        println!(
+            "{}: the middle of the first picture is {:?} in the old one and {:?} in the new one",
+            case.name,
+            centre(&old_pictures),
+            centre(&new_pictures)
+        );
+        let row = format!(
+            "| {} | {}/{} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {} | {:.1}/{:.1} |",
+            case.name,
+            difference.frames.0,
+            difference.frames.1,
+            difference.largest,
+            difference.mean,
+            difference.over_4,
+            difference.over_16,
+            difference.over_48,
+            difference.worst_frame,
+            old_time.as_secs_f64(),
+            new_time.as_secs_f64(),
+        );
+        println!("{row}");
+        rows.push(row);
+    }
+    println!(
+        "\n| case | frames old/new | largest | mean | % over 4 | % over 16 | % over 48 | worst frame | seconds old/new |"
+    );
+    println!("|---|---|---|---|---|---|---|---|---|");
+    for row in rows {
+        println!("{row}");
+    }
+}

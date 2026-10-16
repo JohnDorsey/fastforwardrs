@@ -137,9 +137,8 @@ fn checkers(width: u32, height: u32, square: u32) -> TestSource {
     TestSource::Picture(TestPicture::checkers(width, height, square))
 }
 
-/// The pixels of the frame that the engine makes of `layers` on a frame `size` big.
-pub fn engine_frame(graphics: &SoftwareGraphics, size: (u32, u32), layers: &[TestLayer]) -> Vec<u8> {
-    let mut renderer = FrameRenderer::new(graphics.device.clone());
+/// The description of the frame of `layers` on a frame `size` big, with the pictures of the layers uploaded to `renderer` (the layer number `n` has the picture `n + 1`).
+pub fn describe_the_scene(renderer: &mut FrameRenderer, size: (u32, u32), layers: &[TestLayer]) -> FrameDescription {
     let mut description = FrameDescription::black(size);
     for (number, layer) in layers.iter().enumerate() {
         let source = match &layer.source {
@@ -156,6 +155,13 @@ pub fn engine_frame(graphics: &SoftwareGraphics, size: (u32, u32), layers: &[Tes
             effects: Vec::new(),
         });
     }
+    description
+}
+
+/// The pixels of the frame that the engine makes of `layers` on a frame `size` big.
+pub fn engine_frame(graphics: &SoftwareGraphics, size: (u32, u32), layers: &[TestLayer]) -> Vec<u8> {
+    let mut renderer = FrameRenderer::new(graphics.device.clone());
+    let description = describe_the_scene(&mut renderer, size, layers);
     renderer.render(&description, A_LONG_TIME).unwrap().0.rgba_pixels
 }
 
@@ -590,6 +596,41 @@ impl Randomness {
     }
 }
 
+/// The frame size and the layers that the number `seed` makes up: all kinds, all sizes, turned, small and big, partly off the frame.
+pub fn scene_made_up_from_a_seed(seed: u64) -> ((u32, u32), Vec<TestLayer>) {
+    let mut random = Randomness(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let size = (random.whole_between(17, 130), random.whole_between(17, 100));
+    let mut layers = Vec::new();
+    for _ in 0..random.whole_between(1, 5) {
+        let (width, height) = (random.whole_between(4, 90), random.whole_between(4, 90));
+        let source = match random.next() % 5 {
+            0 => TestSource::Solid([
+                random.whole_between(0, 255) as u8,
+                random.whole_between(0, 255) as u8,
+                random.whole_between(0, 255) as u8,
+                random.whole_between(1, 255) as u8,
+            ]),
+            1 => TestSource::Picture(TestPicture::soft_disc(
+                width,
+                height,
+                [random.whole_between(0, 255) as u8, 90, 200],
+            )),
+            2 => checkers(width, height, random.whole_between(1, 7)),
+            _ => gradient(width, height),
+        };
+        let middle = (random.between(-0.1, 1.1), random.between(-0.1, 1.1));
+        let corners = turned(
+            middle,
+            random.between(3.0, size.0 as f32 * 1.2),
+            random.between(3.0, size.1 as f32 * 1.2),
+            random.between(-400.0, 400.0),
+            size,
+        );
+        layers.push(TestLayer { source, corners });
+    }
+    (size, layers)
+}
+
 /// Layers made up from a number, all kinds, all sizes, turned, small and big, partly off the frame: the engine and the oracle agree on every one.
 ///
 /// **How closely: one level for the layers that are opaque, and one more for every layer that is not.** The oracle (the window's renderer) works in 8
@@ -602,36 +643,7 @@ impl Randomness {
 fn scenes_made_up_from_numbers_agree_with_the_oracle() {
     with_software_graphics!(graphics, {
         for seed in 1..=40_u64 {
-            let mut random = Randomness(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-            let size = (random.whole_between(17, 130), random.whole_between(17, 100));
-            let mut layers = Vec::new();
-            for _ in 0..random.whole_between(1, 5) {
-                let (width, height) = (random.whole_between(4, 90), random.whole_between(4, 90));
-                let source = match random.next() % 5 {
-                    0 => TestSource::Solid([
-                        random.whole_between(0, 255) as u8,
-                        random.whole_between(0, 255) as u8,
-                        random.whole_between(0, 255) as u8,
-                        random.whole_between(1, 255) as u8,
-                    ]),
-                    1 => TestSource::Picture(TestPicture::soft_disc(
-                        width,
-                        height,
-                        [random.whole_between(0, 255) as u8, 90, 200],
-                    )),
-                    2 => checkers(width, height, random.whole_between(1, 7)),
-                    _ => gradient(width, height),
-                };
-                let middle = (random.between(-0.1, 1.1), random.between(-0.1, 1.1));
-                let corners = turned(
-                    middle,
-                    random.between(3.0, size.0 as f32 * 1.2),
-                    random.between(3.0, size.1 as f32 * 1.2),
-                    random.between(-400.0, 400.0),
-                    size,
-                );
-                layers.push(TestLayer { source, corners });
-            }
+            let (size, layers) = scene_made_up_from_a_seed(seed);
             let description: Vec<String> = layers
                 .iter()
                 .map(|layer| match &layer.source {

@@ -21,7 +21,9 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use super::encoder::{Encoder, EncoderKiller, EncoderSpecification, SoundForTheEncoder, sound_graph_for_the_encoder};
+use super::encoder::{
+    Encoder, EncoderEnd, EncoderKiller, EncoderSpecification, SoundForTheEncoder, sound_graph_for_the_encoder,
+};
 use super::frames::{FrameDescriber, FrameProblem};
 use super::output_colour::output_colour_for;
 use super::pictures::{FfmpegRunStreamStarter, PicturesOfTheRuns, RunPictureProblem};
@@ -229,9 +231,6 @@ struct Job {
 enum Ending {
     Cancelled,
     Failed(String),
-    /// A frame could not be given to the encoder, which means that ffmpeg has stopped. What it said when it did is the reason; this is what the program found out
-    /// when it tried to write to it, for when it said nothing.
-    EncoderGone(String),
 }
 
 impl Ending {
@@ -264,7 +263,15 @@ fn run(job: Job) {
     let wake_up = Arc::clone(&job.wake_up);
     let temporary_output = job.temporary_output.clone();
     let destination = job.destination.clone();
-    let result = match produce(job) {
+    // (A mistake of the program, a panic, ends the export with a message like any other ending: the window is waiting for the end, and would wait for ever. What the
+    // export holds is let go of as the panic goes up: ffmpeg is stopped by the drop of its encoder and of its decoders.)
+    let produced = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| produce(job))).unwrap_or_else(|panic| {
+        Err(Ending::Failed(format!(
+            "the export stopped because of a mistake in the program: {}",
+            what_a_panic_said(panic.as_ref())
+        )))
+    });
+    let result = match produced {
         Ok(()) => match fs::rename(&temporary_output, &destination) {
             Ok(()) => ExportResult::Completed,
             Err(error) => ExportResult::Failed {
@@ -276,15 +283,23 @@ fn run(job: Job) {
         },
         Err(Ending::Cancelled) => ExportResult::Cancelled,
         Err(Ending::Failed(reason)) => ExportResult::Failed { reason },
-        Err(Ending::EncoderGone(why)) => ExportResult::Failed {
-            reason: format!("the video could not be written: {why}"),
-        },
     };
     if result != ExportResult::Completed {
         let _ = fs::remove_file(&temporary_output);
     }
     let _ = sender.send(ExportEvent::Finished(result));
     wake_up();
+}
+
+/// What a panic said, if it said it in words.
+fn what_a_panic_said(panic: &(dyn std::any::Any + Send)) -> String {
+    if let Some(words) = panic.downcast_ref::<&str>() {
+        (*words).to_owned()
+    } else if let Some(words) = panic.downcast_ref::<String>() {
+        words.clone()
+    } else {
+        "it did not say what".to_owned()
+    }
 }
 
 /// Makes the video, in the temporary file.
@@ -436,12 +451,9 @@ fn produce(job: Job) -> Result<(), Ending> {
                         return Err(stop_the_encoder(encoder, &shared, ending));
                     }
                     if let Err(error) = encoder.write_frame(&planes.planes) {
-                        let ending = if shared.is_cancelled() {
-                            Ending::Cancelled
-                        } else {
-                            Ending::EncoderGone(error.to_string())
-                        };
-                        return Err(stop_the_encoder(encoder, &shared, ending));
+                        return Err(stop_the_encoder_that_a_frame_could_not_be_given_to(
+                            encoder, &shared, &error,
+                        ));
                     }
                     written += 1;
                 }
@@ -492,6 +504,11 @@ fn produce(job: Job) -> Result<(), Ending> {
     if shared.is_cancelled() {
         return Err(Ending::Cancelled);
     }
+    the_ending_of_the_file(end)
+}
+
+/// How an export ends when ffmpeg has finished the file, or has not: well if it says it did, and otherwise with its own words, which are the reason.
+fn the_ending_of_the_file(end: EncoderEnd) -> Result<(), Ending> {
     match end.status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(Ending::failed(if end.error_output.is_empty() {
@@ -508,16 +525,37 @@ fn produce(job: Job) -> Result<(), Ending> {
 fn stop_the_encoder(encoder: Encoder, shared: &Shared, ending: Ending) -> Ending {
     let end = encoder.stop();
     *shared.encoder() = None;
+    the_ending_with_what_ffmpeg_said(ending, &end.error_output)
+}
+
+/// `ending`, with what ffmpeg said added to the reason if it failed.
+fn the_ending_with_what_ffmpeg_said(ending: Ending, ffmpeg_said: &str) -> Ending {
     match ending {
         // An export that was asked to stop ends as cancelled, whatever went wrong while it was stopping.
         Ending::Cancelled => Ending::Cancelled,
-        Ending::Failed(reason) if end.error_output.is_empty() => Ending::Failed(reason),
-        Ending::Failed(reason) => Ending::Failed(format!("{reason}: {}", end.error_output)),
-        // (ffmpeg's words are the reason, and the broken pipe was only the way the program found out.)
-        Ending::EncoderGone(why) if end.error_output.is_empty() => {
-            Ending::Failed(format!("the video could not be written: {why}"))
-        }
-        Ending::EncoderGone(_) => Ending::Failed(end.error_output),
+        Ending::Failed(reason) if ffmpeg_said.is_empty() => Ending::Failed(reason),
+        Ending::Failed(reason) => Ending::Failed(format!("{reason}: {ffmpeg_said}")),
+    }
+}
+
+/// Stops the encoder that a frame could not be given to, which means that ffmpeg has stopped (or was stopped by a cancel), and gives the ending of the export: cancelled if
+/// it was asked to stop, and otherwise a failure whose reason is what ffmpeg said (its own complaint is the reason, and the broken pipe was only the way the program found
+/// out) or, if it said nothing, the words of the broken pipe.
+fn stop_the_encoder_that_a_frame_could_not_be_given_to(encoder: Encoder, shared: &Shared, error: &io::Error) -> Ending {
+    if shared.is_cancelled() {
+        return stop_the_encoder(encoder, shared, Ending::Cancelled);
+    }
+    let end = encoder.stop();
+    *shared.encoder() = None;
+    the_ending_when_a_frame_could_not_be_given(error, end.error_output)
+}
+
+/// The ending of an export whose encoder had stopped when a frame was given to it: what ffmpeg said, if it said anything, and otherwise the words of the broken pipe.
+fn the_ending_when_a_frame_could_not_be_given(error: &io::Error, ffmpeg_said: String) -> Ending {
+    if ffmpeg_said.is_empty() {
+        Ending::Failed(format!("the video could not be written: {error}"))
+    } else {
+        Ending::Failed(ffmpeg_said)
     }
 }
 
@@ -596,20 +634,14 @@ fn name_of(location: &MediaLocation) -> String {
         .map_or_else(|| location.to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-/// Whether `destination` is the very file `source_file_path` (so that exporting would destroy the original).
+/// Whether `destination` is the very file `source_file_path` (so that exporting would destroy the original). A destination that is not there yet is no file
+/// that is there, and a source that is not there is not destroyed by anything. (The operating system makes the paths whole, from the folder the program is in if they
+/// are relative, and follows links.)
 fn is_the_same_file(source_file_path: &Path, destination: &Path) -> bool {
-    let Ok(canonical_source) = fs::canonicalize(source_file_path) else {
-        return false;
-    };
-    let canonical_destination = fs::canonicalize(destination).ok().or_else(|| {
-        // The destination does not exist yet, so find where it would be.
-        let folder = destination
-            .parent()
-            .filter(|folder| !folder.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        Some(fs::canonicalize(folder).ok()?.join(destination.file_name()?))
-    });
-    canonical_destination == Some(canonical_source)
+    match (fs::canonicalize(source_file_path), fs::canonicalize(destination)) {
+        (Ok(source), Ok(destination)) => source == destination,
+        _ => false,
+    }
 }
 
 /// Where the video is written until it is complete: beside the destination, with `.exporting` before the extension so that ffmpeg still recognises the file type.

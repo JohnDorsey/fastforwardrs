@@ -93,6 +93,31 @@ fn a_plain_project_is_exported_with_its_progress_told_a_line_for_each_per_cent_a
 }
 
 #[test]
+fn an_export_that_fails_after_it_has_started_says_why_and_the_status_is_1() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let project = project_for(&toolchain, &video);
+    let scratch = scratch_directory();
+    let project_file = scratch.path().join("trip.fastforwardrs.json");
+    write_project_file(&project, &project_file).unwrap();
+    // The folder that the video is to be in is not there: ffmpeg is started, and cannot make the file.
+    let destination = scratch.path().join("no_such_folder").join("trip.mp4");
+
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let output = run_on_a_software_adapter(&project_file, &destination);
+
+    let words = said(&output);
+    assert_eq!(output.status.code(), Some(1), "{words}");
+    let reason = words
+        .split_once("The export failed: ")
+        .map(|(_, reason)| reason.trim())
+        .unwrap_or_else(|| panic!("the failure is told: {words}"));
+    assert!(!reason.is_empty(), "the reason is told: {words}");
+    assert!(!reason.contains("pipe"), "ffmpeg's words are the reason: {words}");
+    assert!(!destination.exists());
+}
+
+#[test]
 fn a_project_file_with_the_video_in_it_is_exported_when_the_video_is_not_where_it_was() {
     let toolchain = toolchain_and_graphics_or_skip!();
     let video = test_video(&toolchain, &COUNTER_3_SECONDS);

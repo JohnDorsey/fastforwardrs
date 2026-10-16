@@ -68,7 +68,8 @@ pub fn output_colour_for(first_video: Option<&VideoStreamFormat>) -> OutputColou
             tags: OutputTags::default(),
         };
     };
-    let matrix_stated = format.colour_space.as_deref().filter(|name| is_a_name(name));
+    // (Only the names that are matched below are put in the filter, so that the matrix needs no check of its name: anything else is a matrix that cannot be made.)
+    let matrix_stated = format.colour_space.as_deref();
     let (matrix, matrix_tag) = match matrix_stated {
         None => (YuvMatrix::Bt601, None),
         Some(name @ ("bt470bg" | "smpte170m")) => (YuvMatrix::Bt601, Some(name)),
@@ -91,8 +92,9 @@ pub fn output_colour_for(first_video: Option<&VideoStreamFormat>) -> OutputColou
     }
 }
 
-/// Whether `text` is the kind of name that ffprobe prints for a colour tag (letters, digits, hyphens, underscores), which can be put in a filter as it is. (Whatever
-/// a file says is passed through ffprobe's tables of names, so this is a second lock on the door and not the first.)
+/// Whether `text` is the kind of name that ffprobe prints for a colour tag (letters, digits, hyphens, underscores), which can be put in a filter as it is: none of the
+/// characters that mean something in the text of a filter (a colon, an equals sign, a comma, a quote...) is in it. (Whatever a file says is passed through ffprobe's
+/// tables of names, so this is a second lock on the door and not the first.) The primaries and the transfer of a video are passed on as they are, and are checked by this.
 fn is_a_name(text: &str) -> bool {
     !text.is_empty()
         && text
