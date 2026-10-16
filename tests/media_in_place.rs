@@ -70,6 +70,7 @@ fn frames_of(toolchain: &FfmpegToolchain, video: &MediaLocation, width: u32, hei
         picture_width_in_pixels: width,
         picture_height_in_pixels: height,
         delivery: FrameDelivery::Rgba,
+        ffmpeg_reads_planes_as: None,
     };
     let stream = FrameStream::start(toolchain, &request, Arc::new(|| {})).expect("the stream starts");
     let started = Instant::now();

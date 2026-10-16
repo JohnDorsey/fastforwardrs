@@ -39,6 +39,7 @@ fn request_for(
         picture_width_in_pixels: video.specification.width_in_pixels,
         picture_height_in_pixels: video.specification.height_in_pixels,
         delivery: FrameDelivery::Rgba,
+        ffmpeg_reads_planes_as: None,
     }
 }
 

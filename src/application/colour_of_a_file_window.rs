@@ -178,7 +178,7 @@ pub fn what_is_assumed_in_words(source: &SourceMedia, format: Option<&VideoStrea
                 .collect();
             if format.as_native_yuv420p_with(width, height, &source.colour).is_none() {
                 lines.push(format!(
-                    "The pictures of this video are stored as {}, which ffmpeg turns into colours itself: the matrix and the range are its own, whatever is chosen here.",
+                    "The pictures of this video are stored as {}, which ffmpeg turns into colours itself; it is told the matrix and the range above, where they are known.",
                     format.pixel_format.as_deref().unwrap_or("something the program cannot tell")
                 ));
             }

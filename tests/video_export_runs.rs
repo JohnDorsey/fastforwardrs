@@ -810,3 +810,56 @@ fn what_the_user_says_of_the_matrix_of_a_video_is_the_matrix_its_colours_are_mad
         "left alone, BT.709: {alone_601} and {alone_709}"
     );
 }
+
+#[test]
+fn a_high_definition_video_that_says_nothing_is_read_as_bt709_in_the_export_whichever_way_it_is_stored() {
+    // (Phase 3, piece 3.7: the forms that ffmpeg turns into colours itself are told the matrix and the range, where they used to be left to its guess of BT.601.)
+    use support::yuv_videos::{BT709_LIMITED, FOUR_COLOURS, UNTAGGED, video_made_by_geq};
+    let toolchain = ready_or_skip!();
+    let scratch = scratch_directory();
+    let size = (1280, 720);
+    for pixel_format in ["yuv444p", "yuv422p", "yuv420p10le"] {
+        let says_nothing = video_made_by_geq(
+            &toolchain,
+            scratch.path(),
+            &format!("says_nothing_{pixel_format}"),
+            size,
+            FOUR_COLOURS,
+            pixel_format,
+            UNTAGGED,
+        );
+        let says_bt709 = video_made_by_geq(
+            &toolchain,
+            scratch.path(),
+            &format!("says_bt709_{pixel_format}"),
+            size,
+            FOUR_COLOURS,
+            pixel_format,
+            BT709_LIMITED,
+        );
+        let destination = scratch.path().join(format!("hd_{pixel_format}.mp4"));
+
+        let outcome = export(
+            &toolchain,
+            &project_of_the_video(&toolchain, &says_nothing),
+            &destination,
+        );
+
+        assert_eq!(outcome.result, ExportResult::Completed, "{pixel_format}");
+        let truth = decode_video(&toolchain, &says_bt709, size.0, size.1);
+        let made = decode_video(&toolchain, &destination, size.0, size.1);
+        let differences: Vec<u8> = truth.pictures[0]
+            .iter()
+            .zip(&made.pictures[0])
+            .map(|(a, b)| a.abs_diff(*b))
+            .collect();
+        let mean = differences.iter().map(|&difference| f64::from(difference)).sum::<f64>() / differences.len() as f64;
+        eprintln!("{pixel_format}: the mean difference from the BT.709 reading is {mean:.3}");
+        // (Below 2: the finished video has one colour difference for every square of four pixels, so the hard edges between the four colours of the picture, which a 4:4:4
+        // or 4:2:2 original keeps, are blurred; the wrong matrix would be 5.8 and more on average, as the test above this one measures.)
+        assert!(
+            mean < 2.0,
+            "{pixel_format}: the mean difference between the colours is {mean}"
+        );
+    }
+}

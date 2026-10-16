@@ -58,6 +58,7 @@ fn a_video_picture_from(
         [red, green, blue, 255]
     });
     SuppliedPicture {
+        chroma_siting: crate::colour_space::ChromaSiting::Left,
         colour: crate::engine::PictureColour::SRGB,
         source: SourceMediaIdentifier::new(1),
         source_frame: SourceFrameIndex::new(0),
@@ -180,6 +181,7 @@ fn the_scenes() -> Vec<(&'static str, Scene)> {
     let (width, height) = (64u32, 36u32);
     let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
     let planes = SuppliedPicture {
+        chroma_siting: crate::colour_space::ChromaSiting::Left,
         colour: crate::engine::PictureColour::SRGB,
         source: SourceMediaIdentifier::new(1),
         source_frame: SourceFrameIndex::new(0),

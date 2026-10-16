@@ -54,6 +54,8 @@ mod worker;
 mod yuv;
 
 #[cfg(test)]
+mod chroma_tests;
+#[cfg(test)]
 mod colour_tests;
 #[cfg(test)]
 mod effect_tests;
@@ -105,6 +107,7 @@ pub use scene::{
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};
 pub use uniform_bytes::{SlotWriter, UniformBytes, UniformSlot};
 pub use yuv::{
-    RgbToYuvConversion, YuvColour, YuvConversion, YuvMatrix, YuvRange, chroma_size,
-    reference_rgba as rgba_of_yuv420p_planes, reference_yuv420p as yuv420p_planes_of_rgba,
+    ChromaReconstruction, RgbToYuvConversion, YuvColour, YuvConversion, YuvMatrix, YuvRange, chroma_size,
+    reference_rgba as rgba_of_yuv420p_planes, reference_rgba_smooth as smooth_rgba_of_yuv420p_planes,
+    reference_yuv420p as yuv420p_planes_of_rgba,
 };

@@ -58,6 +58,8 @@ pub enum Assumption {
     RangeNotSaid,
     /// The file says a range that is neither of the two.
     RangeNotKnown { said: String },
+    /// The file does not say its range, and its pixel format (`yuvj420p`, the JPEG form) is of the full one by its name.
+    RangeIsFullBecauseOfThePixelFormat { pixel_format: String },
     /// The file does not say its primaries: they are Rec.709's.
     PrimariesNotSaid,
     /// The file says primaries that the program has not got: they are read as Rec.709's.
@@ -91,6 +93,9 @@ impl Assumption {
             }
             Self::RangeNotSaid => "The file does not say its range: the limited one (16 to 235) is assumed.".to_owned(),
             Self::RangeNotKnown { said } => format!("The file says that its range is {said}: the limited one (16 to 235) is assumed."),
+            Self::RangeIsFullBecauseOfThePixelFormat { pixel_format } => format!(
+                "The file does not say its range, and it is stored as {pixel_format}, which is of the full range (0 to 255) by its name: the full range is assumed."
+            ),
             Self::PrimariesNotSaid => "The file does not say its primaries: Rec.709's are assumed.".to_owned(),
             Self::PrimariesNotKnown { said } => {
                 format!("The file says that its primaries are {said}, which this version does not have: Rec.709's are assumed.")
@@ -162,10 +167,18 @@ impl VideoStreamFormat {
                 assumptions.push(Assumption::RangeChosen { chosen });
                 Some(chosen.is_full())
             }
-            None => {
-                assumptions.push(Assumption::RangeNotSaid);
-                Some(false)
-            }
+            None => match self.pixel_format.as_deref() {
+                Some(pixel_format) if pixel_format.starts_with("yuvj") => {
+                    assumptions.push(Assumption::RangeIsFullBecauseOfThePixelFormat {
+                        pixel_format: pixel_format.to_owned(),
+                    });
+                    Some(true)
+                }
+                _ => {
+                    assumptions.push(Assumption::RangeNotSaid);
+                    Some(false)
+                }
+            },
             Some("tv" | "mpeg") => Some(false),
             Some("pc" | "jpeg") => Some(true),
             Some(other) => {

@@ -18,7 +18,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::SlotWriter;
-use super::colour::IngestConversion;
+use super::colour::{IngestConversion, WorkingSpace};
+use crate::colour_space::ChromaSiting;
 
 /// Which matrix turns the colour differences into red, green and blue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -164,13 +165,14 @@ impl RgbToYuvConversion {
 impl YuvConversion {
     /// Writes the numbers as the shader's struct has them: the matrix, what is taken off before it is used, and then, in the four bytes that the offsets leave over of
     /// their sixteen, the number of the curve of the codes, and the matrix that makes the light of the picture's primaries that of the working space (`ingest`: the
-    /// same numbers as a picture of bytes is given).
-    pub fn write(&self, writer: &mut SlotWriter, ingest: &IngestConversion) {
+    /// same numbers as a picture of bytes is given), and last how the colour differences are made one for each pixel (see [`ChromaReconstruction`]).
+    pub fn write(&self, writer: &mut SlotWriter, ingest: &IngestConversion, chroma: ChromaReconstruction) {
         writer
             .mat3x3_from_rows(self.rows)
             .vec3(self.offsets)
             .u32(ingest.curve)
             .mat3x3_from_rows(ingest.to_working);
+        chroma.write(writer);
     }
 
     /// The red, green and blue (0 to 1, cut off) of one pixel's 8-bit brightness and colour differences. This is the arithmetic the shader does, in the
@@ -179,6 +181,36 @@ impl YuvConversion {
         let shifted = [y - self.offsets[0], u - self.offsets[1], v - self.offsets[2]];
         self.rows
             .map(|row| (row[0] * shifted[0] + row[1] * shifted[1] + row[2] * shifted[2]).clamp(0.0, 1.0))
+    }
+}
+
+/// How the colour differences of a picture in planes are made one for every pixel.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChromaReconstruction {
+    /// Each pixel of a square of four has the colour difference of the square: what ffmpeg makes, and what the compatibility mode keeps.
+    Copied,
+    /// Each pixel has the blend of the colour differences round it, by where the colour differences sit.
+    Smooth(ChromaSiting),
+}
+
+impl ChromaReconstruction {
+    /// How a picture made for `working` is reconstructed, when its colour differences sit as `siting` says: smooth in linear light, copied in the compatibility mode.
+    pub fn of(working: WorkingSpace, siting: ChromaSiting) -> Self {
+        match working {
+            WorkingSpace::DisplayReferred => Self::Copied,
+            WorkingSpace::Linear(_) => Self::Smooth(siting),
+        }
+    }
+
+    /// Writes the 16 bytes that `struct Conversion` of `yuv.wgsl` ends with: whether it is smooth (1 or 0) and where the colour differences sit (across, down).
+    pub fn write(self, writer: &mut SlotWriter) {
+        match self {
+            Self::Copied => writer.vec4([0.0, 0.0, 0.0, 0.0]),
+            Self::Smooth(siting) => {
+                let (across, down) = siting.offsets_in_luma_pixels();
+                writer.vec4([1.0, across, down, 0.0])
+            }
+        };
     }
 }
 
@@ -208,6 +240,49 @@ pub fn reference_rgba(width: u32, height: u32, y: &[u8], u: &[u8], v: &[u8], col
                 f32::from(u[chroma_index]) / 255.0,
                 f32::from(v[chroma_index]) / 255.0,
             );
+            rgba.extend(rgb.map(|channel| (channel * 255.0 + 0.5) as u8));
+            rgba.push(255);
+        }
+    }
+    rgba
+}
+
+/// [`reference_rgba`] with the colour differences blended and not copied: each pixel's colour difference is the blend of the four of the squares round it (the two nearest
+/// across, the two nearest down, by how near), where the colour differences sit as `siting` says. Past the outermost colour differences the nearest one is used. This is what
+/// the graphics card makes of a picture in linear light (`yuv.wgsl`), and the arithmetic is in the same order, in `f32`.
+pub fn reference_rgba_smooth(
+    width: u32,
+    height: u32,
+    y: &[u8],
+    u: &[u8],
+    v: &[u8],
+    colour: YuvColour,
+    siting: ChromaSiting,
+) -> Vec<u8> {
+    let (chroma_width, chroma_height) = chroma_size(width, height);
+    let (offset_across, offset_down) = siting.offsets_in_luma_pixels();
+    let conversion = colour.conversion();
+    let at = |plane: &[u8], across: i32, down: i32| -> f32 {
+        let across = across.clamp(0, chroma_width as i32 - 1) as usize;
+        let down = down.clamp(0, chroma_height as i32 - 1) as usize;
+        f32::from(plane[down * chroma_width as usize + across]) / 255.0
+    };
+    let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+    for down in 0..height as usize {
+        for across in 0..width as usize {
+            let chroma_across = (across as f32 - offset_across) / 2.0;
+            let chroma_down = (down as f32 - offset_down) / 2.0;
+            let (first_across, first_down) = (chroma_across.floor(), chroma_down.floor());
+            let (weight_across, weight_down) = (chroma_across - first_across, chroma_down - first_down);
+            let (first_across, first_down) = (first_across as i32, first_down as i32);
+            let blend = |plane: &[u8]| -> f32 {
+                let top = at(plane, first_across, first_down) * (1.0 - weight_across)
+                    + at(plane, first_across + 1, first_down) * weight_across;
+                let bottom = at(plane, first_across, first_down + 1) * (1.0 - weight_across)
+                    + at(plane, first_across + 1, first_down + 1) * weight_across;
+                top * (1.0 - weight_down) + bottom * weight_down
+            };
+            let rgb = conversion.rgb_of(f32::from(y[down * width as usize + across]) / 255.0, blend(u), blend(v));
             rgba.extend(rgb.map(|channel| (channel * 255.0 + 0.5) as u8));
             rgba.push(255);
         }
@@ -401,14 +476,16 @@ mod tests {
             .iter()
             .map(|member| (member.name.clone().unwrap(), member.offset))
             .collect();
-        // (Rewritten on purpose in phase 3: the struct has the number of the curve, in the four bytes that the offsets leave over, and the matrix to the working space.)
+        // (Rewritten on purpose in phase 3: the struct has the number of the curve, in the four bytes that the offsets leave over, the matrix to the working space, and
+        // how the colour differences are made one for each pixel.)
         assert_eq!(
             members,
             vec![
                 ("to_rgb".to_owned(), 0),
                 ("offsets".to_owned(), 48),
                 ("curve".to_owned(), 60),
-                ("to_working".to_owned(), 64)
+                ("to_working".to_owned(), 64),
+                ("chroma".to_owned(), 112)
             ]
         );
         assert_eq!(u64::from(*span), YUV_UNIFORM_BYTES);
@@ -422,7 +499,9 @@ mod tests {
             curve: 4,
         };
         let mut bytes = UniformBytes::new(256);
-        let slot = bytes.add_slot(|writer| conversion.write(writer, &ingest));
+        let slot = bytes.add_slot(|writer| {
+            conversion.write(writer, &ingest, ChromaReconstruction::Smooth(ChromaSiting::Center));
+        });
         assert_eq!(u64::from(slot.size), YUV_UNIFORM_BYTES);
         let number = |offset: usize| f32::from_le_bytes(bytes.as_bytes()[offset..offset + 4].try_into().unwrap());
         // Column by column, 16 bytes each: the first column is the first number of each row.
@@ -442,6 +521,11 @@ mod tests {
             [number(96), number(100), number(104)],
             [15.0, 18.0, 21.0],
             "and the last"
+        );
+        assert_eq!(
+            [number(112), number(116), number(120)],
+            [1.0, 0.5, 0.5],
+            "and then whether the colour differences are blended, and where they sit"
         );
     }
 

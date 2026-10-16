@@ -87,6 +87,7 @@ fn describe_with(
 
 fn video_picture(serial_number: u64) -> SuppliedPicture {
     SuppliedPicture {
+        chroma_siting: crate::colour_space::ChromaSiting::Left,
         colour: crate::engine::PictureColour::SRGB,
         source: SourceMediaIdentifier::new(1),
         source_frame: SourceFrameIndex::new(0),
@@ -853,4 +854,31 @@ fn the_picture_of_a_picture_file_is_made_in_the_colour_it_comes_with_and_in_anot
         ids[0], ids[1],
         "the same decoded picture, read as another colour, is not the picture that the engine has"
     );
+}
+
+#[test]
+fn a_picture_in_planes_is_made_with_the_colour_differences_sitting_where_its_video_says() {
+    use crate::colour_space::ChromaSiting;
+    let mut text_renderer = LazyTextRenderer::new(Arc::new(|| {}));
+    for siting in ChromaSiting::ALL {
+        let planes = SuppliedPicture {
+            frame: SuppliedFrame::Yuv420p {
+                frame: DecodedYuvFrame {
+                    width_in_pixels: 2,
+                    height_in_pixels: 2,
+                    y: vec![1, 2, 3, 4],
+                    u: vec![5],
+                    v: vec![6],
+                },
+                colour: NativeYuv420p {
+                    matrix: VideoMatrix::Bt709,
+                    full_range: false,
+                },
+            },
+            chroma_siting: siting,
+            ..video_picture(2)
+        };
+        let data = HowToMakeIt::VideoPicture(&planes).make(&mut text_renderer).unwrap();
+        assert_eq!(data.chroma_siting, siting);
+    }
 }

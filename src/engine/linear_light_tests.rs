@@ -323,38 +323,43 @@ fn a_video_picture_in_planes_is_made_light_and_comes_out_as_the_numbers_its_matr
             (YuvMatrix::Bt709, YuvRange::Full),
         ] {
             let colour = YuvColour { matrix, range };
-            // 8 by 4: a gradient of brightness and two colour differences that change along the picture, so that every part of the arithmetic is used.
+            // 8 by 4: a gradient of brightness, and colour differences that are the same all over the picture. (Rewritten on purpose in phase 3: the colour differences used
+            // to change along the picture, and in linear light they are blended from the squares round each pixel, which is not what the codes of the compatibility mode
+            // are, whose colour differences are copied; the blend is held to its own arithmetic in `chroma_tests`. This test is about the matrix, the range and the curve, which
+            // the colour differences that are alike all over use as much as any: three pairs of them are tried.)
             let (width, height) = (8_u32, 4_u32);
             let y: Vec<u8> = (0..width * height).map(|number| 20 + (number * 7) as u8).collect();
             let chroma_count = (width / 2 * (height / 2)) as usize;
-            let u: Vec<u8> = (0..chroma_count).map(|number| 100 + (number * 9) as u8).collect();
-            let v: Vec<u8> = (0..chroma_count).map(|number| 180 - (number * 11) as u8).collect();
-            let compatibility = {
-                let data = PictureData::yuv420p8(width, height, y.clone(), u.clone(), v.clone(), colour).unwrap();
-                upload(&mut renderer, 1, &data);
-                render(
-                    &mut renderer,
-                    (width, height),
-                    colour_of(WorkingSpace::DisplayReferred),
-                    vec![the_whole_frame(1)],
-                )
-            };
-            for working in [LINEAR_REC709, LINEAR_ACESCG] {
-                let data = PictureData::yuv420p8(width, height, y.clone(), u.clone(), v.clone(), colour)
-                    .unwrap()
-                    .in_colour(PictureColour::SRGB, working);
-                upload(&mut renderer, 2, &data);
-                let in_light = render(
-                    &mut renderer,
-                    (width, height),
-                    colour_of(working),
-                    vec![the_whole_frame(2)],
-                );
-                let off = the_largest_difference(&in_light, &compatibility);
-                assert!(
-                    off <= 1,
-                    "{matrix:?} {range:?} in {working:?}: {off} levels from the codes that the matrix makes"
-                );
+            for (blue_difference, red_difference) in [(100_u8, 180_u8), (128, 128), (190, 60)] {
+                let u: Vec<u8> = vec![blue_difference; chroma_count];
+                let v: Vec<u8> = vec![red_difference; chroma_count];
+                let compatibility = {
+                    let data = PictureData::yuv420p8(width, height, y.clone(), u.clone(), v.clone(), colour).unwrap();
+                    upload(&mut renderer, 1, &data);
+                    render(
+                        &mut renderer,
+                        (width, height),
+                        colour_of(WorkingSpace::DisplayReferred),
+                        vec![the_whole_frame(1)],
+                    )
+                };
+                for working in [LINEAR_REC709, LINEAR_ACESCG] {
+                    let data = PictureData::yuv420p8(width, height, y.clone(), u.clone(), v.clone(), colour)
+                        .unwrap()
+                        .in_colour(PictureColour::SRGB, working);
+                    upload(&mut renderer, 2, &data);
+                    let in_light = render(
+                        &mut renderer,
+                        (width, height),
+                        colour_of(working),
+                        vec![the_whole_frame(2)],
+                    );
+                    let off = the_largest_difference(&in_light, &compatibility);
+                    assert!(
+                        off <= 1,
+                        "{matrix:?} {range:?} in {working:?}: {off} levels from the codes that the matrix makes"
+                    );
+                }
             }
         }
     });

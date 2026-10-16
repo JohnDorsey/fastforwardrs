@@ -500,3 +500,94 @@ fn the_stream_of_a_run_is_let_go_of_with_its_last_picture_and_not_before() {
     drop(pictures);
     assert_eq!(script.state().alive, 0, "and the rest go with the pictures");
 }
+
+#[test]
+fn ffmpeg_is_told_how_to_read_the_colours_of_a_video_that_is_not_delivered_in_planes_and_not_otherwise() {
+    use crate::colour_space::VideoRange;
+    use crate::media::HowToReadColours;
+    let plan = plan_of(&project_with_video(320, 180, false));
+    let told = HowToReadColours {
+        matrix: Some(VideoMatrix::Bt601),
+        range: Some(VideoRange::Limited),
+    };
+    let readings = HashMap::from([(
+        SourceMediaIdentifier::new(1),
+        VideoReading {
+            chroma_siting: crate::colour_space::ChromaSiting::Left,
+            planes: None,
+            picture_colour: PictureColour::SRGB,
+            ffmpeg_is_told: Some(told),
+        },
+    )]);
+    let script = Script::default();
+    let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new())
+        .unwrap()
+        .with_readings(&readings);
+    pictures.start_the_runs_that_begin_soon(0).unwrap();
+    let request = script.state().started[0].0.clone();
+    assert_eq!(request.delivery, FrameDelivery::Rgba);
+    assert_eq!(request.ffmpeg_reads_planes_as, Some(told));
+
+    // A video that nothing is said of is read as before: ffmpeg is told nothing.
+    let script = Script::default();
+    let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new()).unwrap();
+    pictures.start_the_runs_that_begin_soon(0).unwrap();
+    assert_eq!(script.state().started[0].0.ffmpeg_reads_planes_as, None);
+}
+
+#[test]
+fn the_codes_of_the_pictures_of_a_video_are_what_its_reading_says_and_srgb_for_a_video_with_none() {
+    use crate::colour_space::{StandardPrimaries, TransferFunction};
+    let plan = plan_of(&project_with_video(320, 180, false));
+    let chosen = PictureColour {
+        primaries: StandardPrimaries::Rec2020,
+        curve: TransferFunction::Gamma24,
+    };
+    for (readings, expected) in [
+        (
+            HashMap::from([(
+                SourceMediaIdentifier::new(1),
+                VideoReading {
+                    chroma_siting: crate::colour_space::ChromaSiting::Left,
+                    planes: None,
+                    picture_colour: chosen,
+                    ffmpeg_is_told: None,
+                },
+            )]),
+            chosen,
+        ),
+        (HashMap::new(), PictureColour::SRGB),
+    ] {
+        let script = Script::default();
+        script.state().to_say.push_back(vec![rgba(1)]);
+        let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new())
+            .unwrap()
+            .with_readings(&readings);
+        let picture = pictures.picture(0, 0, &nobody_cancels()).unwrap();
+        assert_eq!(picture.colour, expected);
+    }
+}
+
+#[test]
+fn the_pictures_of_a_video_come_with_the_place_the_colour_differences_sit_at_that_its_reading_says() {
+    use crate::colour_space::ChromaSiting;
+    let plan = plan_of(&project_with_video(320, 180, false));
+    for siting in ChromaSiting::ALL {
+        let readings = HashMap::from([(
+            SourceMediaIdentifier::new(1),
+            VideoReading {
+                planes: None,
+                picture_colour: PictureColour::SRGB,
+                ffmpeg_is_told: None,
+                chroma_siting: siting,
+            },
+        )]);
+        let script = Script::default();
+        script.state().to_say.push_back(vec![rgba(1)]);
+        let mut pictures = PicturesOfTheRuns::new(script.clone(), &plan, &locations(), &HashMap::new())
+            .unwrap()
+            .with_readings(&readings);
+        let picture = pictures.picture(0, 0, &nobody_cancels()).unwrap();
+        assert_eq!(picture.chroma_siting, siting);
+    }
+}

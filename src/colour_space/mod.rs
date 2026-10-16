@@ -18,7 +18,7 @@ mod video;
 pub use primaries::{ACES_WHITE, Chromaticity, D65, Primaries, bradford_adaptation};
 pub use table::StandardPrimaries;
 pub use transfer::TransferFunction;
-pub use video::{VideoMatrix, VideoRange};
+pub use video::{ChromaSiting, VideoMatrix, VideoRange};
 
 #[cfg(test)]
 mod tests;

@@ -84,7 +84,8 @@ impl HowToMakeIt<'_> {
                     frame.v.clone(),
                     colour_for_the_engine(*colour),
                 )
-                .ok(),
+                .ok()
+                .map(|data| data.with_chroma_siting(supplied.chroma_siting)),
             },
             Self::Thumbnail(compressed) => {
                 let frame = compressed.decompress().ok()?;

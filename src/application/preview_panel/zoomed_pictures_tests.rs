@@ -75,6 +75,7 @@ impl Preview {
             text_renderer: LazyTextRenderer::new(Arc::new(|| {})),
             commands: Vec::new(),
             supplied: SuppliedPicture {
+                chroma_siting: crate::colour_space::ChromaSiting::Left,
                 colour: crate::engine::PictureColour::SRGB,
                 source: THE_VIDEO,
                 source_frame: SourceFrameIndex::new(0),

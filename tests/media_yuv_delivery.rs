@@ -458,3 +458,131 @@ fn hard_edges_of_colour_come_out_as_ffmpeg_makes_them_which_is_one_colour_differ
         "{compared} cases were compared and {skipped} left alone: that is too few that were compared"
     );
 }
+
+// --- ffmpeg told what it must not guess (phase 3, piece 3.7) ---
+
+#[test]
+fn a_video_in_any_stored_form_is_made_into_colours_by_ffmpeg_with_the_matrix_and_range_it_is_told_and_not_the_one_it_guesses()
+ {
+    use fastforwardrs::colour_space::VideoRange;
+    use fastforwardrs::media::{FrameDelivery, FrameStreamEvent, HowToReadColours};
+    use support::yuv_videos::{first_picture, first_picture_told};
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let size = (1280, 720);
+    let rgba_of = |video: &Path, told: Option<HowToReadColours>| -> Vec<u8> {
+        match first_picture_told(&toolchain, video, size, (640, 360), FrameDelivery::Rgba, told) {
+            FrameStreamEvent::Frame(frame) => frame.rgba_pixels,
+            other => panic!("RGBA was asked for: {other:?}"),
+        }
+    };
+    let told_bt709_limited = Some(HowToReadColours {
+        matrix: Some(VideoMatrix::Bt709),
+        range: Some(VideoRange::Limited),
+    });
+    let _ = first_picture; // (the untold stream is made through `first_picture_told` with nothing told)
+    for pixel_format in ["yuv420p", "yuv422p", "yuv444p", "yuv420p10le", "yuv444p10le"] {
+        let name = pixel_format.replace(' ', "_");
+        let untagged = video_made_by_geq(
+            &toolchain,
+            folder.path(),
+            &format!("untagged_{name}"),
+            size,
+            FOUR_COLOURS,
+            pixel_format,
+            UNTAGGED,
+        );
+        let tagged = video_made_by_geq(
+            &toolchain,
+            folder.path(),
+            &format!("tagged_{name}"),
+            size,
+            FOUR_COLOURS,
+            pixel_format,
+            BT709_LIMITED,
+        );
+
+        let told = rgba_of(&untagged, told_bt709_limited);
+        let the_file_says_so = rgba_of(&tagged, None);
+        let guessed = rgba_of(&untagged, None);
+
+        let (largest_told, mean_told) = differences(&told, &the_file_says_so);
+        let (_, mean_guessed) = differences(&guessed, &the_file_says_so);
+        eprintln!(
+            "{pixel_format}: told {largest_told} / {mean_told:.3}; guessing, {mean_guessed:.3} from the file that says so"
+        );
+        assert_eq!(
+            largest_told, 0,
+            "{pixel_format}: an untagged video that is told BT.709 limited is the video that says BT.709 limited"
+        );
+        assert!(
+            mean_guessed > 3.0,
+            "{pixel_format}: a premise: ffmpeg's guess (BT.601) is a different picture, {mean_guessed} levels from the right one on average"
+        );
+    }
+}
+
+#[test]
+fn a_video_stored_as_yuvj_is_full_range_to_ffmpeg_already_so_telling_it_the_full_range_changes_nothing_and_telling_it_the_limited_one_would_wash_every_colour_out()
+ {
+    // (Measured, ffmpeg 9: the name of the pixel format decides the range of such a file, so what the program tells ffmpeg of it is harmless either way. The program says "full"
+    // for a yuvj file that does not say its range all the same, because that is what is true of it; if a newer ffmpeg took the told range for such a file, this test says so.)
+    use fastforwardrs::colour_space::VideoRange;
+    use fastforwardrs::media::{FrameDelivery, FrameStreamEvent, HowToReadColours};
+    use support::yuv_videos::first_picture_told;
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let size = (1280, 720);
+    let rgba_of = |video: &Path, told: Option<HowToReadColours>| -> Vec<u8> {
+        match first_picture_told(&toolchain, video, size, (640, 360), FrameDelivery::Rgba, told) {
+            FrameStreamEvent::Frame(frame) => frame.rgba_pixels,
+            other => panic!("RGBA was asked for: {other:?}"),
+        }
+    };
+    let range_only = |range| {
+        Some(HowToReadColours {
+            matrix: None,
+            range: Some(range),
+        })
+    };
+    // (A real yuvj file: MJPEG keeps the pixel format, which the lossless codec used for the other videos here does not. It says `pc` as its range, as ffprobe infers it from
+    // the pixel format: the case of a yuvj file that says nothing is covered by the unit tests, and ffmpeg is not known to write one.)
+    let video = folder.path().join("yuvj.mkv");
+    let mut command = ffmpeg(&toolchain);
+    command
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=1280x720:r=1:d=1,format=yuvj420p",
+            "-c:v",
+            "mjpeg",
+            "-frames:v",
+            "1",
+        ])
+        .arg(&video);
+    run(command);
+    let format = probe_video_stream_format(&toolchain, video.clone()).expect("the video can be probed");
+    assert_eq!(
+        format.pixel_format.as_deref(),
+        Some("yuvj420p"),
+        "a premise: the file is stored as yuvj420p"
+    );
+    assert_eq!(
+        format.colour_of_a_picture_of_size(size.0, size.1).full_range,
+        Some(true),
+        "and the program reads it as full range"
+    );
+
+    let left_to_ffmpeg = rgba_of(&video, None);
+    let told_full = rgba_of(&video, range_only(VideoRange::Full));
+    let told_limited = rgba_of(&video, range_only(VideoRange::Limited));
+
+    for (name, told) in [("full", told_full), ("limited", told_limited)] {
+        assert_eq!(
+            differences(&told, &left_to_ffmpeg).0,
+            0,
+            "told {name}, a yuvj file comes out as ffmpeg makes it when it is told nothing"
+        );
+    }
+}

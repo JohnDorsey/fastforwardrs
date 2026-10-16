@@ -22,6 +22,7 @@ pub use super::child_process::WaitedFor;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::location::MediaLocation;
+use crate::colour_space::{VideoMatrix, VideoRange};
 use crate::project::{FrameRate, SourceFrameIndex, SpeedFactor, fit_inside_picture};
 
 /// How many decoded pictures may wait to be shown before decoding pauses. Small, because each
@@ -39,6 +40,36 @@ pub enum FrameDelivery {
     /// after the one before. What the numbers stand for is not said by the bytes: whoever asked for them knows it from the video's tags. Only for a
     /// video that is stored that way (see `VideoStreamFormat::as_native_yuv420p`).
     Yuv420p,
+}
+
+/// What ffmpeg is **told** about the planes of a video that it turns into red, green and blue itself (a stream that delivers [`FrameDelivery::Rgba`]), so that it does not
+/// guess: its guess for a file that says nothing is BT.601 whatever the size of the picture, where the program reads such a file by the size (BT.709 for high definition).
+/// A part that is `None` is left to ffmpeg.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HowToReadColours {
+    pub matrix: Option<VideoMatrix>,
+    pub range: Option<VideoRange>,
+}
+
+impl HowToReadColours {
+    /// The options of ffmpeg's `scale` filter that say it (each with a colon in front), or nothing for a part that is left to ffmpeg.
+    fn as_scale_options(self) -> String {
+        let mut options = String::new();
+        if let Some(matrix) = self.matrix {
+            options.push_str(match matrix {
+                VideoMatrix::Bt601 => ":in_color_matrix=bt601",
+                VideoMatrix::Bt709 => ":in_color_matrix=bt709",
+                VideoMatrix::Bt2020 => ":in_color_matrix=bt2020",
+            });
+        }
+        if let Some(range) = self.range {
+            options.push_str(match range {
+                VideoRange::Limited => ":in_range=limited",
+                VideoRange::Full => ":in_range=full",
+            });
+        }
+        options
+    }
 }
 
 /// What to decode.
@@ -67,6 +98,9 @@ pub struct FrameStreamRequest {
     pub picture_height_in_pixels: u32,
     /// What the pictures are delivered as.
     pub delivery: FrameDelivery,
+    /// What ffmpeg is told about the planes it turns into colours, for a stream that delivers RGBA (`None` leaves everything to ffmpeg). A stream that delivers planes
+    /// turns nothing into colours, and this is not used.
+    pub ffmpeg_reads_planes_as: Option<HowToReadColours>,
 }
 
 impl FrameStreamRequest {
@@ -398,8 +432,15 @@ pub fn frame_stream_arguments_delivering(
         FrameDelivery::Rgba => "rgba",
         FrameDelivery::Yuv420p => "yuv420p",
     };
+    let told_how_to_read_colours = match request.delivery {
+        FrameDelivery::Rgba => request
+            .ffmpeg_reads_planes_as
+            .map(HowToReadColours::as_scale_options)
+            .unwrap_or_default(),
+        FrameDelivery::Yuv420p => String::new(),
+    };
     filters.push_str(&format!(
-        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags={scaling},format={delivered_format}",
+        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}{told_how_to_read_colours}:flags={scaling},format={delivered_format}",
         project_frame_rate.denominator(),
         project_frame_rate.numerator(),
     ));
@@ -442,6 +483,7 @@ mod tests {
             picture_width_in_pixels: 640,
             picture_height_in_pixels: 360,
             delivery: FrameDelivery::Rgba,
+            ffmpeg_reads_planes_as: None,
         }
     }
 
@@ -892,6 +934,61 @@ mod tests {
             rgba_filters.strip_suffix("format=rgba"),
             planes_filters.strip_suffix("format=yuv420p"),
             "everything before the pixel format is the same"
+        );
+    }
+
+    #[test]
+    fn a_stream_that_delivers_rgba_can_be_told_the_matrix_and_the_range_of_the_planes_it_makes_colours_of() {
+        let told = |matrix, range| FrameStreamRequest {
+            ffmpeg_reads_planes_as: Some(HowToReadColours { matrix, range }),
+            ..request(300, 300, 1)
+        };
+        for (matrix, range, options) in [
+            (
+                Some(VideoMatrix::Bt709),
+                Some(VideoRange::Limited),
+                ":in_color_matrix=bt709:in_range=limited",
+            ),
+            (
+                Some(VideoMatrix::Bt601),
+                Some(VideoRange::Full),
+                ":in_color_matrix=bt601:in_range=full",
+            ),
+            (Some(VideoMatrix::Bt2020), None, ":in_color_matrix=bt2020"),
+            (None, Some(VideoRange::Full), ":in_range=full"),
+            (None, None, ""),
+        ] {
+            let filters = filters_of(&told(matrix, range));
+            assert!(
+                filters.ends_with(&format!(",scale=640:360{options}:flags=fast_bilinear,format=rgba")),
+                "{matrix:?} {range:?}: {filters}"
+            );
+        }
+        assert_eq!(
+            filters_of(&request(300, 300, 1)),
+            filters_of(&told(None, None)),
+            "told nothing is as not told"
+        );
+    }
+
+    #[test]
+    fn a_stream_that_delivers_planes_is_not_told_how_to_make_colours_because_it_makes_none() {
+        let planes = FrameStreamRequest {
+            delivery: FrameDelivery::Yuv420p,
+            ffmpeg_reads_planes_as: Some(HowToReadColours {
+                matrix: Some(VideoMatrix::Bt709),
+                range: Some(VideoRange::Limited),
+            }),
+            ..request(300, 300, 1)
+        };
+        let filters = filters_of(&planes);
+        assert!(
+            !filters.contains("in_color_matrix") && !filters.contains("in_range"),
+            "{filters}"
+        );
+        assert!(
+            filters.ends_with(",scale=640:360:flags=fast_bilinear,format=yuv420p"),
+            "{filters}"
         );
     }
 

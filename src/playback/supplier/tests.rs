@@ -123,6 +123,7 @@ fn the_first_request_starts_a_stream_at_the_wanted_picture_that_runs_to_the_end_
             picture_width_in_pixels: 64,
             picture_height_in_pixels: 36,
             delivery: FrameDelivery::Rgba,
+            ffmpeg_reads_planes_as: None,
         }]
     );
 }
@@ -859,4 +860,70 @@ fn what_the_user_says_of_the_colours_of_a_video_is_what_its_pictures_come_with_w
         supplier.picture().expect("the picture arrived").colour,
         PictureColour::SRGB
     );
+}
+
+#[test]
+fn a_stream_for_a_video_that_is_not_in_planes_is_told_how_to_read_its_colours_and_one_in_planes_is_not() {
+    use crate::colour_space::VideoRange;
+    use crate::media::HowToReadColours;
+    for (format, planes_wanted, expected) in [
+        // 1280 by 720 and the file says nothing of its matrix: BT.709, and the limited range.
+        (
+            Some(eight_bit_four_two_zero(None, None)),
+            false,
+            Some(HowToReadColours {
+                matrix: Some(VideoMatrix::Bt709),
+                range: Some(VideoRange::Limited),
+            }),
+        ),
+        (
+            Some(VideoStreamFormat {
+                pixel_format: Some("yuv444p".to_owned()),
+                colour_space: Some("smpte170m".to_owned()),
+                colour_range: Some("pc".to_owned()),
+                ..VideoStreamFormat::default()
+            }),
+            true,
+            Some(HowToReadColours {
+                matrix: Some(VideoMatrix::Bt601),
+                range: Some(VideoRange::Full),
+            }),
+        ),
+        (Some(eight_bit_four_two_zero(None, None)), true, None),
+        (None, false, None),
+    ] {
+        let (mut supplier, script) = supplier_of_a_video_that_is(format.clone(), planes_wanted);
+        supplier.supply(Some(wanted(50)), false, Instant::now());
+        assert_eq!(
+            script.requests()[0].ffmpeg_reads_planes_as,
+            expected,
+            "{format:?}, planes wanted: {planes_wanted}"
+        );
+    }
+}
+
+#[test]
+fn the_pictures_of_a_video_come_with_the_place_its_file_says_the_colour_differences_sit_at() {
+    use crate::colour_space::ChromaSiting;
+    for (location, expected) in [
+        (Some("center"), ChromaSiting::Center),
+        (Some("topleft"), ChromaSiting::TopLeft),
+        (Some("left"), ChromaSiting::Left),
+        (None, ChromaSiting::Left),
+    ] {
+        let format = VideoStreamFormat {
+            chroma_location: location.map(str::to_owned),
+            ..eight_bit_four_two_zero(Some("bt709"), None)
+        };
+        let (mut supplier, script) = supplier_of_a_video_that_is(Some(format), true);
+        let now = Instant::now();
+        supplier.supply(Some(wanted(50)), false, now);
+        script.deliver(0, 1);
+        supplier.supply(Some(wanted(50)), false, now);
+        assert_eq!(
+            supplier.picture().expect("the picture arrived").chroma_siting,
+            expected,
+            "{location:?}"
+        );
+    }
 }

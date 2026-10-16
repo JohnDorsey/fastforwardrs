@@ -292,6 +292,7 @@ fn a_random_video_picture(random: &mut Random, serial_number: u64, in_planes: bo
         })
     };
     SuppliedPicture {
+        chroma_siting: crate::colour_space::ChromaSiting::Left,
         colour: crate::engine::PictureColour::SRGB,
         source: SourceMediaIdentifier::new(1),
         source_frame: SourceFrameIndex::new(0),
@@ -606,6 +607,7 @@ fn a_video_picture_that_is_the_size_of_the_frame_is_exactly_what_the_old_drawing
             pixel[3] = 255;
         }
         let picture = SuppliedPicture {
+            chroma_siting: crate::colour_space::ChromaSiting::Left,
             colour: crate::engine::PictureColour::SRGB,
             source: SourceMediaIdentifier::new(1),
             source_frame: SourceFrameIndex::new(0),

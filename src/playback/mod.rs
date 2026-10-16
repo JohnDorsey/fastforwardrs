@@ -22,6 +22,7 @@ mod preview_pictures;
 mod scripted_streams;
 mod sound_effects;
 mod supplier;
+mod video_reading;
 mod wanted;
 
 pub use audio_device::{DeviceAudioSink, opener_of_the_default_speakers};
@@ -46,4 +47,5 @@ pub use supplier::{
     PICTURES_BEFORE_THE_END_TO_GET_THE_NEXT_CLIP_READY, PictureStream, PictureStreamStarter, PictureSupplier,
     PreviewSetup, PreviewVideo, SuppliedFrame, SuppliedPicture, SupplyReport, colour_for_the_engine,
 };
+pub use video_reading::{VideoReading, reading_of_a_video};
 pub use wanted::{UpcomingVideo, WantedPicture, wanted_pictures};

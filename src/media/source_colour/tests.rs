@@ -11,6 +11,7 @@ fn said(
     transfer: Option<&str>,
 ) -> VideoStreamFormat {
     VideoStreamFormat {
+        chroma_location: None,
         pixel_format: Some("yuv420p".to_owned()),
         colour_space: matrix.map(str::to_owned),
         colour_range: range.map(str::to_owned),
@@ -460,5 +461,54 @@ fn a_video_with_a_chosen_matrix_and_range_is_native_planes_of_that_matrix_and_ra
             matrix: VideoMatrix::Bt601,
             full_range: true
         })
+    );
+}
+
+// --- the range of a pixel format that is of full range by its name ---
+
+#[test]
+fn a_file_stored_as_yuvj_that_does_not_say_its_range_is_of_full_range_and_says_why_and_a_file_that_says_is_believed() {
+    let yuvj = |range: Option<&str>| VideoStreamFormat {
+        pixel_format: Some("yuvj420p".to_owned()),
+        colour_range: range.map(str::to_owned),
+        ..VideoStreamFormat::default()
+    };
+
+    let silent = yuvj(None).colour_of_a_picture_of_size(1920, 1080);
+
+    assert_eq!(silent.full_range, Some(true));
+    assert!(
+        silent
+            .assumptions
+            .contains(&Assumption::RangeIsFullBecauseOfThePixelFormat {
+                pixel_format: "yuvj420p".to_owned()
+            })
+    );
+    assert!(!silent.assumptions.contains(&Assumption::RangeNotSaid));
+    let words = Assumption::RangeIsFullBecauseOfThePixelFormat {
+        pixel_format: "yuvj420p".to_owned(),
+    }
+    .in_words();
+    assert!(words.contains("yuvj420p") && words.contains("full"), "{words}");
+    assert_eq!(
+        yuvj(Some("tv")).colour_of_a_picture_of_size(1920, 1080).full_range,
+        Some(false)
+    );
+    assert_eq!(
+        yuvj(Some("pc")).colour_of_a_picture_of_size(1920, 1080).full_range,
+        Some(true)
+    );
+    // And an ordinary pixel format is limited when it says nothing, as it was.
+    let ordinary = VideoStreamFormat {
+        pixel_format: Some("yuv420p".to_owned()),
+        ..VideoStreamFormat::default()
+    };
+    assert_eq!(ordinary.colour_of_a_picture_of_size(1920, 1080).full_range, Some(false));
+    assert_eq!(
+        VideoStreamFormat::default()
+            .colour_of_a_picture_of_size(1920, 1080)
+            .full_range,
+        Some(false),
+        "and one whose pixel format is not known"
     );
 }

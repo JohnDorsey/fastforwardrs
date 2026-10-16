@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use super::colour::{PictureColour, WorkingSpace};
 use super::yuv::{YuvColour, chroma_size};
+use crate::colour_space::ChromaSiting;
 
 /// How the pixels of a picture are laid out.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +37,9 @@ pub struct PictureData {
     /// The working space that the engine is to make the picture for (it is converted when it is uploaded, once). **The frames that use the picture say the same one**; the
     /// engine refuses a frame whose layers are not made for its working space. The compatibility mode unless the sender says otherwise.
     pub working: WorkingSpace,
+    /// Where the colour differences of a picture in planes sit among the pixels (it says how they are blended back into one for every pixel, in linear light; the
+    /// compatibility mode copies each to its four pixels and does not look at it). The usual place unless the sender says otherwise.
+    pub chroma_siting: ChromaSiting,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -62,6 +66,7 @@ impl PictureData {
             pixels: PicturePixels::Rgba8 { straight_alpha },
             colour: PictureColour::default(),
             working: WorkingSpace::default(),
+            chroma_siting: ChromaSiting::default(),
         };
         data.check()?;
         Ok(data)
@@ -72,6 +77,13 @@ impl PictureData {
     pub fn in_colour(mut self, colour: PictureColour, working: WorkingSpace) -> Self {
         self.colour = colour;
         self.working = working;
+        self
+    }
+
+    /// The same picture, its colour differences sitting where `siting` says (which a picture of bytes has none of).
+    #[must_use]
+    pub fn with_chroma_siting(mut self, siting: ChromaSiting) -> Self {
+        self.chroma_siting = siting;
         self
     }
 
@@ -90,6 +102,7 @@ impl PictureData {
             pixels: PicturePixels::Yuv420p8 { y, u, v, colour },
             colour: PictureColour::default(),
             working: WorkingSpace::default(),
+            chroma_siting: ChromaSiting::default(),
         };
         data.check()?;
         Ok(data)

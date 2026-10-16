@@ -157,6 +157,18 @@ pub fn first_picture(
     picture_size: (u32, u32),
     delivery: FrameDelivery,
 ) -> FrameStreamEvent {
+    first_picture_told(toolchain, video, video_size, picture_size, delivery, None)
+}
+
+/// [`first_picture`], with ffmpeg told how to read the colours of the planes it makes RGBA of.
+pub fn first_picture_told(
+    toolchain: &FfmpegToolchain,
+    video: &Path,
+    video_size: (u32, u32),
+    picture_size: (u32, u32),
+    delivery: FrameDelivery,
+    ffmpeg_reads_planes_as: Option<fastforwardrs::media::HowToReadColours>,
+) -> FrameStreamEvent {
     let request = FrameStreamRequest {
         video: video.to_path_buf().into(),
         project_frame_rate: FrameRate::new(1, 1).unwrap(),
@@ -168,6 +180,7 @@ pub fn first_picture(
         picture_width_in_pixels: picture_size.0,
         picture_height_in_pixels: picture_size.1,
         delivery,
+        ffmpeg_reads_planes_as,
     };
     let stream = FrameStream::start(toolchain, &request, Arc::new(|| {})).expect("the stream should start");
     let started = Instant::now();

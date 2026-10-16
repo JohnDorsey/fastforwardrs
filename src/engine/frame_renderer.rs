@@ -25,7 +25,7 @@ use super::plan::{EffectsThatRun, KindOfEffect, PassPlan, plan_frame};
 use super::readback::{PendingReadback, ReadbackBuffers, ReadbackProblem};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
-use super::yuv::{YuvColour, chroma_size};
+use super::yuv::{ChromaReconstruction, YuvColour, chroma_size};
 use super::{
     COLOUR_MATRIX_KEY, FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, RenderedPlanes,
     UniformBytes, UniformSlot,
@@ -324,9 +324,11 @@ impl FrameRenderer {
         self.upload_uniforms.clear();
         let conversion_slot = match &data.pixels {
             PicturePixels::Rgba8 { .. } => self.upload_uniforms.add_slot(|writer| ingest.write(writer)),
-            PicturePixels::Yuv420p8 { colour, .. } => self
-                .upload_uniforms
-                .add_slot(|writer| colour.conversion().write(writer, &ingest)),
+            PicturePixels::Yuv420p8 { colour, .. } => {
+                let chroma = ChromaReconstruction::of(data.working, data.chroma_siting);
+                self.upload_uniforms
+                    .add_slot(|writer| colour.conversion().write(writer, &ingest, chroma))
+            }
         };
 
         let ((), mistake) = self.device.catching_errors(|| {

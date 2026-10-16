@@ -199,6 +199,7 @@ fn a_picture_that_cannot_be_used_is_refused_and_not_kept() {
         let wrong_number_of_bytes = PictureData {
             colour: Default::default(),
             working: Default::default(),
+            chroma_siting: Default::default(),
             width_in_pixels: 4,
             height_in_pixels: 4,
             pixels: PicturePixels::Rgba8 {
@@ -208,6 +209,7 @@ fn a_picture_that_cannot_be_used_is_refused_and_not_kept() {
         let empty = PictureData {
             colour: Default::default(),
             working: Default::default(),
+            chroma_siting: Default::default(),
             width_in_pixels: 0,
             height_in_pixels: 4,
             pixels: PicturePixels::Rgba8 { straight_alpha: vec![] },
@@ -216,6 +218,7 @@ fn a_picture_that_cannot_be_used_is_refused_and_not_kept() {
         let wider_than_the_card_takes = PictureData {
             colour: Default::default(),
             working: Default::default(),
+            chroma_siting: Default::default(),
             width_in_pixels: largest + 1,
             height_in_pixels: 1,
             pixels: PicturePixels::Rgba8 {
@@ -406,6 +409,7 @@ fn a_picture_that_cannot_be_used_is_reported_by_its_id() {
         Arc::new(PictureData {
             colour: Default::default(),
             working: Default::default(),
+            chroma_siting: Default::default(),
             width_in_pixels: 5,
             height_in_pixels: 5,
             pixels: PicturePixels::Rgba8 {

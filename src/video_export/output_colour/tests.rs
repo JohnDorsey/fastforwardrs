@@ -87,6 +87,7 @@ fn what_the_file_says_is_read_back_by_the_function_that_reads_a_file_as_what_the
     for space in OutputColourSpace::ALL {
         let colour = output_colour_for(space);
         let file = VideoStreamFormat {
+            chroma_location: None,
             pixel_format: Some("yuv420p".to_owned()),
             colour_space: colour.tags.matrix.clone(),
             colour_range: Some("tv".to_owned()),

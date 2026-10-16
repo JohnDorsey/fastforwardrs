@@ -17,12 +17,13 @@ use thiserror::Error;
 
 use super::plan::ExportPlan;
 use super::runs::VideoRun;
+use crate::colour_space::ChromaSiting;
 use crate::engine::PictureColour;
 use crate::media::{
     FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest, MediaLocation,
     NativeYuv420p, WaitedFor,
 };
-use crate::playback::{SuppliedFrame, SuppliedPicture};
+use crate::playback::{SuppliedFrame, SuppliedPicture, VideoReading};
 use crate::project::{SourceFrameIndex, SourceMediaIdentifier};
 
 /// How long the export waits for a picture before it gives up (ffmpeg has to start and seek, which takes a moment, and a file on a network drive can take longer).
@@ -88,8 +89,10 @@ struct RunToRead {
     /// What the planes stand for, if the pictures are delivered as planes.
     colour: Option<NativeYuv420p>,
     /// What the codes of the red, green and blue of the pictures stand for (the primaries and the curve the file says, or the ones assumed): sRGB until the export says
-    /// otherwise ([`PicturesOfTheRuns::with_picture_colours`]).
+    /// otherwise ([`PicturesOfTheRuns::with_readings`]).
     picture_colour: PictureColour,
+    /// Where the colour differences of the pictures in planes sit among the pixels.
+    chroma_siting: ChromaSiting,
     /// What the video is called in a message.
     name: String,
 }
@@ -164,9 +167,11 @@ impl<Starter: RunStreamStarter> PicturesOfTheRuns<Starter> {
                     } else {
                         FrameDelivery::Rgba
                     },
+                    ffmpeg_reads_planes_as: None,
                 },
                 colour,
                 picture_colour: PictureColour::SRGB,
+                chroma_siting: ChromaSiting::default(),
                 name: location.file().file_name().map_or_else(
                     || format!("the video {}", run.source),
                     |name| name.to_string_lossy().into_owned(),
@@ -185,12 +190,16 @@ impl<Starter: RunStreamStarter> PicturesOfTheRuns<Starter> {
         })
     }
 
-    /// Says what the codes of the pictures of each video stand for (the primaries and the curve): the others stay sRGB.
+    /// Says how the colours of each video are read (see [`crate::playback::reading_of_a_video`]): what the codes of its pictures stand for (the primaries and the curve), and what ffmpeg is
+    /// told about the matrix and the range when it makes the colours of a video that is not delivered in planes. A video that has no reading stays sRGB, and ffmpeg is told
+    /// nothing.
     #[must_use]
-    pub fn with_picture_colours(mut self, colours: &HashMap<SourceMediaIdentifier, PictureColour>) -> Self {
+    pub fn with_readings(mut self, readings: &HashMap<SourceMediaIdentifier, VideoReading>) -> Self {
         for run in &mut self.runs {
-            if let Some(colour) = colours.get(&run.run.source) {
-                run.picture_colour = *colour;
+            if let Some(reading) = readings.get(&run.run.source) {
+                run.picture_colour = reading.picture_colour;
+                run.chroma_siting = reading.chroma_siting;
+                run.request.ffmpeg_reads_planes_as = reading.ffmpeg_is_told;
             }
         }
         self
@@ -321,6 +330,7 @@ impl<Starter: RunStreamStarter> PicturesOfTheRuns<Starter> {
                 source_frame: SourceFrameIndex::new(to_read.run.source_frame_of_picture(reading.delivered)),
                 frame,
                 colour: to_read.picture_colour,
+                chroma_siting: to_read.chroma_siting,
                 serial_number,
             }));
             reading.delivered += 1;

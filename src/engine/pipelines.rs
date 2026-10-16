@@ -28,7 +28,7 @@ pub const PLACEMENT_UNIFORM_BYTES: u64 = 64;
 
 /// How many bytes the uniforms of the pass that makes a video picture red, green and blue (and the numbers of the working space) take up (see `yuv.wgsl`): the matrix, the
 /// offsets with the number of the curve in the last four of their sixteen bytes, and the matrix to the working space.
-pub const YUV_UNIFORM_BYTES: u64 = 112;
+pub const YUV_UNIFORM_BYTES: u64 = 128;
 
 /// How many bytes the uniforms of the pass that makes a picture of bytes the numbers of the working space take up (see `ingest.wgsl`): a 3 by 3 matrix, three columns of 16
 /// bytes, and the number of the curve, in a struct that is a multiple of 16.

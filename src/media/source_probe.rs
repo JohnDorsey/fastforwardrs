@@ -11,7 +11,7 @@ use thiserror::Error;
 use super::child_process::{background_command, end_of_error_output};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::location::MediaLocation;
-use crate::colour_space::VideoMatrix;
+use crate::colour_space::{ChromaSiting, VideoMatrix};
 use crate::project::{
     FrameRate, InputColourOverride, SourceAudioProperties, SourceImageProperties, SourceMediaProperties,
     SourceVideoProperties,
@@ -91,6 +91,7 @@ pub fn video_stream_format_from_probe_output(probe_output_json: &str) -> Result<
         colour_range: stated(&video_stream.color_range),
         colour_primaries: stated(&video_stream.color_primaries),
         colour_transfer: stated(&video_stream.color_transfer),
+        chroma_location: stated(&video_stream.chroma_location),
     })
 }
 
@@ -105,6 +106,15 @@ pub struct VideoStreamFormat {
     pub colour_range: Option<String>,
     pub colour_primaries: Option<String>,
     pub colour_transfer: Option<String>,
+    /// Where the colour differences sit among the pixels (`left`, `center`, `topleft`...), for a video that stores one for every square of four pixels.
+    pub chroma_location: Option<String>,
+}
+
+impl VideoStreamFormat {
+    /// Where the colour differences of the pictures sit: what the file says, and the usual place where it does not.
+    pub fn chroma_siting(&self) -> ChromaSiting {
+        ChromaSiting::from_ffprobe(self.chroma_location.as_deref())
+    }
 }
 
 /// A video whose pictures the preview can take as ffmpeg decodes them, in planes, and turn into colours itself: 8 bits to a number, 4:2:0, with a
@@ -387,6 +397,7 @@ struct ProbeStream {
     color_range: Option<String>,
     color_primaries: Option<String>,
     color_transfer: Option<String>,
+    chroma_location: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -543,6 +554,25 @@ mod tests {
     }
 
     #[test]
+    fn where_the_colour_differences_sit_is_read_and_a_file_that_does_not_say_has_the_usual_place() {
+        for (said, expected) in [
+            (r#", "chroma_location": "left""#, ChromaSiting::Left),
+            (r#", "chroma_location": "center""#, ChromaSiting::Center),
+            (r#", "chroma_location": "topleft""#, ChromaSiting::TopLeft),
+            (r#", "chroma_location": "unspecified""#, ChromaSiting::Left),
+            (r#", "chroma_location": "top""#, ChromaSiting::Left),
+            ("", ChromaSiting::Left),
+        ] {
+            assert_eq!(format_of(said).chroma_siting(), expected, "{said}");
+        }
+        assert_eq!(
+            format_of(r#", "chroma_location": "center""#).chroma_location.as_deref(),
+            Some("center")
+        );
+        assert_eq!(format_of(r#", "chroma_location": "unspecified""#).chroma_location, None);
+    }
+
+    #[test]
     fn the_pixel_format_and_the_colours_a_video_says_are_read_and_what_it_does_not_say_is_nothing() {
         let format = format_of(
             r#", "pix_fmt": "yuv420p", "color_space": "bt709", "color_range": "tv", "color_primaries": "bt709", "color_transfer": "bt709""#,
@@ -555,6 +585,7 @@ mod tests {
                 colour_range: Some("tv".to_owned()),
                 colour_primaries: Some("bt709".to_owned()),
                 colour_transfer: Some("bt709".to_owned()),
+                chroma_location: None,
             }
         );
         assert_eq!(format_of(""), VideoStreamFormat::default());
