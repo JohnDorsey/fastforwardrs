@@ -17,6 +17,7 @@ use std::sync::mpsc::SyncSender;
 use thiserror::Error;
 
 use super::UserInterfaceWakeUp;
+pub use super::child_process::WaitedFor;
 use super::child_process::{StreamingTool, background_command};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::location::MediaLocation;
@@ -138,12 +139,35 @@ impl FrameStream {
         request: &FrameStreamRequest,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, FrameStreamError> {
-        if request.picture_width_in_pixels == 0 || request.picture_height_in_pixels == 0 {
+        Self::start_delivering(
+            toolchain,
+            request,
+            request.delivered_size(),
+            QUICK_SCALING_OF_THE_PREVIEW,
+            wake_up,
+        )
+    }
+
+    /// Like [`Self::start`], but the pictures are delivered `delivered_size` pixels big (not as big as can be inside the picture of the request) and scaled by ffmpeg
+    /// with `scaling` (such as `bicubic`, ffmpeg's own and best default, which the export has always used). For the export, which decodes a video as big as the layer
+    /// that shows it needs it.
+    pub fn start_delivering(
+        toolchain: &FfmpegToolchain,
+        request: &FrameStreamRequest,
+        delivered_size: (u32, u32),
+        scaling: &str,
+        wake_up: UserInterfaceWakeUp,
+    ) -> Result<Self, FrameStreamError> {
+        if request.picture_width_in_pixels == 0
+            || request.picture_height_in_pixels == 0
+            || delivered_size.0 == 0
+            || delivered_size.1 == 0
+        {
             return Err(FrameStreamError::EmptyPicture);
         }
         let mut command = background_command(toolchain.ffmpeg_path());
-        command.args(frame_stream_arguments(request));
-        let (delivered_width, delivered_height) = request.delivered_size();
+        command.args(frame_stream_arguments_delivering(request, delivered_size, scaling));
+        let (delivered_width, delivered_height) = delivered_size;
         let frame_size = FrameSize {
             width_in_pixels: delivered_width,
             height_in_pixels: delivered_height,
@@ -170,7 +194,15 @@ impl FrameStream {
     pub fn try_next_event(&self) -> Option<FrameStreamEvent> {
         self.tool.try_next_event()
     }
+
+    /// The next event, waiting for it for as long as `how_long` if it is not ready.
+    pub fn wait_for_an_event(&self, how_long: std::time::Duration) -> WaitedFor<FrameStreamEvent> {
+        self.tool.wait_for_an_event(how_long)
+    }
 }
+
+/// How the preview has ffmpeg scale the pictures it decodes: quickly (the preview wants them in time, and is not looked at closely).
+const QUICK_SCALING_OF_THE_PREVIEW: &str = "fast_bilinear";
 
 #[derive(Clone, Copy)]
 struct FrameSize {
@@ -340,6 +372,15 @@ fn microseconds_as_seconds(microseconds: u64) -> String {
 ///   and every picture would be a frame too early whenever no picture was in the frame wanted first;
 /// * `-frames:v` ends the stream after the pictures that are wanted, however many the reading brought.
 pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
+    frame_stream_arguments_delivering(request, request.delivered_size(), QUICK_SCALING_OF_THE_PREVIEW)
+}
+
+/// Like [`frame_stream_arguments`], for pictures delivered `delivered_size` pixels big and scaled with `scaling`.
+pub fn frame_stream_arguments_delivering(
+    request: &FrameStreamRequest,
+    delivered_size: (u32, u32),
+    scaling: &str,
+) -> Vec<OsString> {
     let timing = StreamTiming::of(request);
     let first_frame_moved_to_time_zero =
         timing.first_frame_after_the_start as i64 - BIAS_TOWARDS_THE_LATER_FRAME_IN_MICROSECONDS;
@@ -351,13 +392,13 @@ pub fn frame_stream_arguments(request: &FrameStreamRequest) -> Vec<OsString> {
     if request.speed_factor.is_accelerated() {
         filters.push_str(&format!(",select='not(mod(n,{}))'", request.speed_factor.value()));
     }
-    let (delivered_width, delivered_height) = request.delivered_size();
+    let (delivered_width, delivered_height) = delivered_size;
     let delivered_format = match request.delivery {
         FrameDelivery::Rgba => "rgba",
         FrameDelivery::Yuv420p => "yuv420p",
     };
     filters.push_str(&format!(
-        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags=fast_bilinear,format={delivered_format}",
+        ",setpts=N*{}/({}*TB),scale={delivered_width}:{delivered_height}:flags={scaling},format={delivered_format}",
         project_frame_rate.denominator(),
         project_frame_rate.numerator(),
     ));
@@ -446,6 +487,41 @@ mod tests {
                 "rawvideo",
                 "pipe:1",
             ]
+        );
+    }
+
+    #[test]
+    fn a_stream_can_be_asked_to_deliver_another_size_with_another_scaling_and_nothing_else_of_the_command_line_changes()
+    {
+        let request = request(300, 300, 1);
+        let preview = arguments_as_text(&request);
+        let export: Vec<String> = frame_stream_arguments_delivering(&request, (200, 100), "bicubic")
+            .into_iter()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(export.len(), preview.len());
+        let differences: Vec<(&String, &String)> = preview.iter().zip(&export).filter(|(a, b)| a != b).collect();
+        assert_eq!(differences.len(), 1, "{differences:?}");
+        assert!(
+            differences[0]
+                .0
+                .contains(",scale=640:360:flags=fast_bilinear,format=rgba"),
+            "{differences:?}"
+        );
+        assert!(
+            differences[0].1.contains(",scale=200:100:flags=bicubic,format=rgba"),
+            "{differences:?}"
+        );
+        assert_eq!(
+            differences[0]
+                .0
+                .replace("scale=640:360:flags=fast_bilinear", "scale=200:100:flags=bicubic"),
+            *differences[0].1
+        );
+        // The preview's own command line is the one for the size that fits inside its picture, scaled quickly.
+        assert_eq!(
+            frame_stream_arguments(&request),
+            frame_stream_arguments_delivering(&request, request.delivered_size(), "fast_bilinear")
         );
     }
 

@@ -77,6 +77,25 @@ impl<Event: Send + 'static> StreamingTool<Event> {
     pub(super) fn try_next_event(&self) -> Option<Event> {
         self.events.try_recv().ok()
     }
+
+    /// The next event, waiting for it for as long as `how_long` if it is not ready.
+    pub(super) fn wait_for_an_event(&self, how_long: std::time::Duration) -> WaitedFor<Event> {
+        match self.events.recv_timeout(how_long) {
+            Ok(event) => WaitedFor::Event(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => WaitedFor::NothingYet,
+            Err(mpsc::RecvTimeoutError::Disconnected) => WaitedFor::Ended,
+        }
+    }
+}
+
+/// What waiting for the next event of a tool came to.
+#[derive(Debug, PartialEq, Eq)]
+pub enum WaitedFor<Event> {
+    Event(Event),
+    /// The time was up and nothing had come.
+    NothingYet,
+    /// The tool's reading thread is gone: nothing more will come.
+    Ended,
 }
 
 impl<Event> Drop for StreamingTool<Event> {
