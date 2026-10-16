@@ -19,10 +19,20 @@ use crate::engine::EngineRequest;
 use crate::engine::testing::{DevicesMade, software_graphics};
 use crate::media::DecodedFrame;
 use crate::playback::{SuppliedFrame, SuppliedPicture};
-use crate::project::{SourceFrameIndex, SourceMediaIdentifier, SpeedIndicatorLayout};
+use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedIndicatorLayout};
 
 const RENDER_SIZE: (u32, u32) = (64, 36);
 const A_LONG_TIME: Duration = Duration::from_secs(30);
+
+/// The clock of a project that is not playing (which the quality of the preview leaves alone, except that a picture that has been still for a while is made whole),
+/// at this moment.
+fn the_clock_is_stopped() -> HowTheClockGoes {
+    HowTheClockGoes {
+        is_playing: false,
+        how_long_a_frame_lasts: Duration::from_millis(33),
+        now: Instant::now(),
+    }
+}
 
 /// A preview of these layers on a picture of 1600 by 900 pixels.
 fn content<'a>(layers: Vec<PreviewLayer<'a>>) -> PreviewContent<'a> {
@@ -62,6 +72,9 @@ struct Setup {
     context: Context,
     preview: EnginePreview,
     text_renderer: LazyTextRenderer,
+    /// Whether the project is playing, and how long a frame of it lasts, as the preview is told when it is drawn.
+    is_playing: bool,
+    how_long_a_frame_lasts: Duration,
 }
 
 fn setup() -> Option<Setup> {
@@ -76,6 +89,8 @@ fn setup_with(settings: EngineSettings) -> Option<Setup> {
         context: Context::default(),
         preview: EnginePreview::with_engine(Engine::start(settings, Arc::new(|| {}))),
         text_renderer: LazyTextRenderer::new(Arc::new(|| {})),
+        is_playing: false,
+        how_long_a_frame_lasts: Duration::from_millis(33),
     })
 }
 
@@ -85,8 +100,19 @@ impl Setup {
     }
 
     fn update_with(&mut self, content: &PreviewContent<'_>, filter: PictureFilter) {
-        self.preview
-            .update(&self.context, content, RENDER_SIZE, filter, &mut self.text_renderer);
+        let clock = HowTheClockGoes {
+            is_playing: self.is_playing,
+            how_long_a_frame_lasts: self.how_long_a_frame_lasts,
+            now: Instant::now(),
+        };
+        self.preview.update(
+            &self.context,
+            content,
+            RENDER_SIZE,
+            filter,
+            &mut self.text_renderer,
+            clock,
+        );
     }
 
     /// Updates with `content` until `done`, or fails after a while.
@@ -118,6 +144,38 @@ impl Setup {
 
 fn pixel_of(frame: &RenderedFrame, across: u32, down: u32) -> [u8; 4] {
     frame.pixel(across, down)
+}
+
+#[test]
+fn the_clock_of_a_project_lasts_a_frame_by_its_frame_rate_and_says_whether_it_plays_and_when() {
+    let now = Instant::now();
+    let at_sixty = HowTheClockGoes::new(true, FrameRate::from_whole_frames_per_second(60).unwrap(), now);
+    assert!(at_sixty.is_playing);
+    assert_eq!(at_sixty.now, now);
+    assert!(
+        at_sixty
+            .how_long_a_frame_lasts
+            .abs_diff(Duration::from_secs_f64(1.0 / 60.0))
+            < Duration::from_micros(1),
+        "{:?}",
+        at_sixty.how_long_a_frame_lasts
+    );
+    let at_ntsc = HowTheClockGoes::new(false, FrameRate::new(30000, 1001).unwrap(), now);
+    assert!(!at_ntsc.is_playing);
+    assert!(
+        at_ntsc
+            .how_long_a_frame_lasts
+            .abs_diff(Duration::from_secs_f64(1001.0 / 30000.0))
+            < Duration::from_micros(1),
+        "a frame of 29.97 to the second lasts 33.37 milliseconds: {:?}",
+        at_ntsc.how_long_a_frame_lasts
+    );
+    // A million frames to the second is a frame of a millionth of a second, and a frame rate so high that a frame is less than a billionth of one lasts no
+    // time that can be told, which is what the quality of the preview leaves alone.
+    let a_million = HowTheClockGoes::new(true, FrameRate::new(1_000_000, 1).unwrap(), now);
+    assert_eq!(a_million.how_long_a_frame_lasts, Duration::from_micros(1));
+    let as_fast_as_can_be = HowTheClockGoes::new(true, FrameRate::new(u32::MAX, 1).unwrap(), now);
+    assert_eq!(as_fast_as_can_be.how_long_a_frame_lasts, Duration::ZERO);
 }
 
 #[test]
@@ -419,6 +477,7 @@ fn an_engine_that_cannot_start_says_so() {
             RENDER_SIZE,
             PictureFilter::Smooth,
             &mut text_renderer,
+            the_clock_is_stopped(),
         );
         assert!(
             started.elapsed() < A_LONG_TIME,
@@ -533,7 +592,14 @@ fn a_frame_that_failed_is_not_asked_for_again_but_when_the_device_was_replaced_i
     let picture = flat_picture(1, [10, 20, 30, 255]);
     let shown = content(vec![showing(1, &picture)]);
     let mut draw = |preview: &mut EnginePreview| {
-        preview.update(&context, &shown, RENDER_SIZE, PictureFilter::Smooth, &mut text_renderer);
+        preview.update(
+            &context,
+            &shown,
+            RENDER_SIZE,
+            PictureFilter::Smooth,
+            &mut text_renderer,
+            the_clock_is_stopped(),
+        );
     };
 
     draw(&mut preview);
@@ -579,4 +645,373 @@ fn a_frame_that_failed_is_not_asked_for_again_but_when_the_device_was_replaced_i
     // And it is asked for once, not again at every drawing of the window.
     draw(&mut preview);
     assert_eq!(what_was_asked(&requests), (Vec::new(), Vec::new()));
+}
+
+#[test]
+fn a_frame_that_was_made_before_comes_from_the_engines_cache_when_the_content_comes_back_to_what_it_was() {
+    let Some(mut setup) = setup() else { return };
+    let red = flat_picture(1, [200, 20, 20, 255]);
+    let green = flat_picture(2, [20, 200, 20, 255]);
+    let red_shown = content(vec![showing(1, &red)]);
+    let green_shown = content(vec![showing(1, &green)]);
+    let first_red = setup.show_a_new_frame_of(&red_shown);
+    setup.show_a_new_frame_of(&green_shown);
+    assert_eq!(setup.preview.frames_from_the_cache(), 0, "two frames that are new");
+    // The playhead goes back and forth over the two: each is made again, and the engine has it.
+    let second_red = setup.show_a_new_frame_of(&red_shown);
+    assert_eq!(setup.preview.frames_from_the_cache(), 1);
+    let second_green = setup.show_a_new_frame_of(&green_shown);
+    assert_eq!(setup.preview.frames_from_the_cache(), 2);
+    assert_eq!(second_red, first_red, "the same frame");
+    assert_eq!(pixel_of(&second_green, 10, 10), [20, 200, 20, 255]);
+    assert_eq!(
+        setup.preview.frames_asked_for(),
+        4,
+        "all four were asked for: the window does not remember frames, the engine does"
+    );
+}
+
+// ---- the size the frames are made at: the quality of the preview ----
+
+/// A frame that the engine made, as an event says it, of this size.
+fn a_frame_of_size(serial: u64, size: (u32, u32), came_from_the_cache: bool) -> EngineEvent {
+    EngineEvent::Frame {
+        serial,
+        frame: Arc::new(RenderedFrame {
+            width_in_pixels: size.0,
+            height_in_pixels: size.1,
+            rgba_pixels: [0, 0, 0, 255].repeat((size.0 * size.1) as usize),
+        }),
+        statistics: crate::engine::FrameStatistics {
+            came_from_the_cache,
+            ..Default::default()
+        },
+    }
+}
+
+/// What a drawing of the preview did, as far as the engine and the window are concerned.
+#[derive(Debug, PartialEq, Eq)]
+struct Drawn {
+    /// The size of the frame that was asked for, if one was.
+    asked_for_a_frame_of: Option<(u32, u32)>,
+    /// How long from now the window was asked to be drawn again, each time it was asked to.
+    asked_to_be_drawn_again_after: Vec<Duration>,
+}
+
+/// A preview and a scripted engine, and what it takes to draw it: a picture for each number (each is another picture, so that the content changes), and a way
+/// to draw it at a time that is made up, with the clock going or not.
+struct Scripted {
+    preview: EnginePreview,
+    events: std::sync::mpsc::Sender<EngineEvent>,
+    requests: Receiver<EngineRequest>,
+    text_renderer: LazyTextRenderer,
+    pictures: Vec<SuppliedPicture>,
+    start: Instant,
+}
+
+impl Scripted {
+    fn new() -> Self {
+        let (engine, events, requests) = Engine::scripted_for_tests();
+        Self {
+            preview: EnginePreview::with_engine(engine),
+            events,
+            requests,
+            text_renderer: LazyTextRenderer::new(Arc::new(|| {})),
+            pictures: (1..=40)
+                .map(|serial| flat_picture(serial, [serial as u8 * 5, 0, 0, 255]))
+                .collect(),
+            start: Instant::now(),
+        }
+    }
+
+    /// Draws the preview of picture `number` `milliseconds` after the start, with the clock going or not, in a window that has not been asked to be drawn
+    /// again. A frame of the project lasts 100 milliseconds.
+    fn draw(&mut self, number: usize, is_playing: bool, milliseconds: u64) -> Drawn {
+        let context = Context::default();
+        let delays = Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let delays = Arc::clone(&delays);
+            context.set_request_repaint_callback(move |information| delays.lock().unwrap().push(information.delay));
+        }
+        let shown = content(vec![showing(1, &self.pictures[number])]);
+        self.preview.update(
+            &context,
+            &shown,
+            RENDER_SIZE,
+            PictureFilter::Smooth,
+            &mut self.text_renderer,
+            HowTheClockGoes {
+                is_playing,
+                how_long_a_frame_lasts: Duration::from_millis(100),
+                now: self.start + Duration::from_millis(milliseconds),
+            },
+        );
+        let (_, frames) = what_was_asked(&self.requests);
+        assert!(frames.len() <= 1, "{frames:?}");
+        let asked_to_be_drawn_again_after = delays.lock().unwrap().clone();
+        Drawn {
+            asked_for_a_frame_of: frames.first().map(|(_, description)| description.render_size),
+            asked_to_be_drawn_again_after,
+        }
+    }
+
+    /// The size of the frame asked for by a drawing (which must have asked for one).
+    fn size_asked_for(&mut self, number: usize, is_playing: bool, milliseconds: u64) -> (u32, u32) {
+        self.draw(number, is_playing, milliseconds)
+            .asked_for_a_frame_of
+            .expect("a frame was asked for")
+    }
+
+    /// The engine says that it made the frame it was last asked for, at the size it was asked for.
+    fn the_frame_comes(&self, serial: u64, size: (u32, u32), came_from_the_cache: bool) {
+        self.events
+            .send(a_frame_of_size(serial, size, came_from_the_cache))
+            .unwrap();
+    }
+}
+
+const WHOLE: (u32, u32) = (64, 36);
+const HALF: (u32, u32) = (32, 18);
+const QUARTER: (u32, u32) = (16, 9);
+
+#[test]
+fn while_the_clock_goes_two_frames_that_come_late_make_the_next_ones_asked_for_smaller() {
+    let mut scripted = Scripted::new();
+    // (Each frame is asked for at the time the one before came, and comes 95 milliseconds after that, which is late for a frame of 100.)
+    assert_eq!(scripted.size_asked_for(0, true, 0), WHOLE);
+    scripted.the_frame_comes(1, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(1, true, 95), WHOLE, "one late frame is not two");
+    scripted.the_frame_comes(2, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(2, true, 190), HALF, "two are");
+    scripted.the_frame_comes(3, HALF, false);
+    assert_eq!(
+        scripted.size_asked_for(3, true, 285),
+        HALF,
+        "and the count begins again"
+    );
+    scripted.the_frame_comes(4, HALF, false);
+    assert_eq!(scripted.size_asked_for(4, true, 380), QUARTER);
+    scripted.the_frame_comes(5, QUARTER, false);
+    assert_eq!(scripted.size_asked_for(5, true, 475), QUARTER);
+    scripted.the_frame_comes(6, QUARTER, false);
+    assert_eq!(
+        scripted.size_asked_for(6, true, 570),
+        QUARTER,
+        "it does not go below a quarter"
+    );
+}
+
+#[test]
+fn frames_that_came_comfortably_make_the_size_go_up_again_ten_of_them_for_each_step() {
+    let mut scripted = Scripted::new();
+    // Down to a quarter first.
+    let (mut serial, mut at, mut number) = (0, 0, 0);
+    let mut size = scripted.size_asked_for(number, true, at);
+    let mut sizes = vec![size];
+    for _ in 0..4 {
+        serial += 1;
+        scripted.the_frame_comes(serial, size, false);
+        at += 95;
+        number += 1;
+        size = scripted.size_asked_for(number, true, at);
+        sizes.push(size);
+    }
+    assert_eq!(sizes, vec![WHOLE, WHOLE, HALF, HALF, QUARTER]);
+    // Then frames that come at once: ten of them make it half, and ten more make it whole.
+    let mut sizes_asked = Vec::new();
+    for _ in 0..20 {
+        serial += 1;
+        scripted.the_frame_comes(serial, size, false);
+        at += 10;
+        number += 1;
+        size = scripted.size_asked_for(number, true, at);
+        sizes_asked.push(size);
+    }
+    let mut expected = vec![QUARTER; 9];
+    expected.push(HALF);
+    expected.extend([HALF; 9]);
+    expected.push(WHOLE);
+    assert_eq!(sizes_asked, expected);
+}
+
+#[test]
+fn a_frame_that_was_asked_for_while_an_older_one_was_still_on_its_way_is_timed_from_when_it_was_asked_for() {
+    // The card is slower than what is shown changes: the second frame is asked for before the first has come.
+    let mut scripted = Scripted::new();
+    assert_eq!(scripted.size_asked_for(0, true, 0), WHOLE);
+    assert_eq!(scripted.size_asked_for(1, true, 10), WHOLE);
+    // The first comes at 95: 95 milliseconds from when it was asked for, which is late. (The third is asked for as that is taken.)
+    scripted.the_frame_comes(1, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(2, true, 95), WHOLE);
+    // The second comes at 190: 180 milliseconds from when it was asked for (at 10), which is late again, and that is two in a row.
+    scripted.the_frame_comes(2, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(3, true, 190), HALF);
+}
+
+#[test]
+fn a_frame_that_came_from_the_cache_says_nothing_about_how_fast_the_card_is() {
+    let mut scripted = Scripted::new();
+    let mut size = scripted.size_asked_for(0, true, 0);
+    for number in 1..=8 {
+        scripted.the_frame_comes(number as u64, size, true);
+        size = scripted.size_asked_for(number, true, number as u64 * 95);
+        assert_eq!(
+            size, WHOLE,
+            "frame {number}: frames of the cache are not late, and are not comfortable either"
+        );
+    }
+}
+
+#[test]
+fn the_size_is_kept_while_the_picture_is_changed_with_the_clock_stopped_and_a_picture_that_is_still_is_asked_for_whole_after_120_milliseconds()
+ {
+    let mut scripted = Scripted::new();
+    // Down to half while playing.
+    assert_eq!(scripted.size_asked_for(0, true, 0), WHOLE);
+    scripted.the_frame_comes(1, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(1, true, 95), WHOLE);
+    scripted.the_frame_comes(2, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(2, true, 190), HALF);
+    // The clock stops and the picture is changed (the playhead is dragged over frames): each is asked for at the size it was.
+    for (step, number) in (3..9).enumerate() {
+        assert_eq!(
+            scripted.size_asked_for(number, false, 200 + step as u64 * 40),
+            HALF,
+            "frame {number}"
+        );
+    }
+    // It stays as it is, and 119 milliseconds of that are not enough while 120 are. (It is seen to be still at the first drawing that has nothing new.)
+    let still_since = 200 + 5 * 40 + 1;
+    assert_eq!(scripted.draw(8, false, still_since).asked_for_a_frame_of, None);
+    assert_eq!(scripted.draw(8, false, still_since + 100).asked_for_a_frame_of, None);
+    assert_eq!(scripted.draw(8, false, still_since + 119).asked_for_a_frame_of, None);
+    assert_eq!(
+        scripted.draw(8, false, still_since + 120).asked_for_a_frame_of,
+        Some(WHOLE)
+    );
+    // And it is asked for once.
+    assert_eq!(scripted.draw(8, false, still_since + 300).asked_for_a_frame_of, None);
+}
+
+#[test]
+fn a_clock_that_goes_again_keeps_the_picture_from_being_made_whole() {
+    let mut scripted = Scripted::new();
+    scripted.draw(0, true, 0);
+    scripted.the_frame_comes(1, WHOLE, false);
+    scripted.draw(1, true, 95);
+    scripted.the_frame_comes(2, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(2, true, 190), HALF);
+    // Still for 100 milliseconds with the clock stopped, then it goes again on the same picture (the clock has not moved a frame yet).
+    assert_eq!(scripted.draw(2, false, 200).asked_for_a_frame_of, None);
+    assert_eq!(scripted.draw(2, false, 300).asked_for_a_frame_of, None);
+    assert_eq!(scripted.draw(2, true, 310).asked_for_a_frame_of, None);
+    assert_eq!(
+        scripted.draw(2, true, 1000).asked_for_a_frame_of,
+        None,
+        "playing is not still: it is not made whole"
+    );
+    // Stopped again: 120 milliseconds from here.
+    assert_eq!(scripted.draw(2, false, 1010).asked_for_a_frame_of, None);
+    assert_eq!(scripted.draw(2, false, 1129).asked_for_a_frame_of, None);
+    assert_eq!(scripted.draw(2, false, 1130).asked_for_a_frame_of, Some(WHOLE));
+}
+
+#[test]
+fn the_window_is_asked_to_be_drawn_again_for_a_still_picture_to_be_made_whole_and_not_otherwise() {
+    let mut scripted = Scripted::new();
+    // (egui asks for the window to be drawn a little before the time it is given: a frame of a screen of 60 to the second sooner, so as not to be late.)
+    let is_asked_for_in_about = |delays: Vec<Duration>, milliseconds: u64| {
+        let asked = Duration::from_millis(milliseconds);
+        matches!(delays.as_slice(), [delay] if *delay <= asked && *delay + Duration::from_millis(20) >= asked)
+    };
+    // A whole picture waits for nothing, still or not.
+    assert_eq!(
+        scripted.draw(0, false, 0).asked_to_be_drawn_again_after,
+        Vec::<Duration>::new()
+    );
+    assert_eq!(
+        scripted.draw(0, false, 500).asked_to_be_drawn_again_after,
+        Vec::<Duration>::new()
+    );
+    scripted.the_frame_comes(1, WHOLE, false);
+    scripted.draw(1, true, 600);
+    scripted.the_frame_comes(2, WHOLE, false);
+    scripted.draw(2, true, 695);
+    scripted.the_frame_comes(3, WHOLE, false);
+    assert_eq!(scripted.size_asked_for(3, true, 790), HALF);
+    // A smaller picture that is playing, or is being changed, does not wait for a moment of stillness. One that is still does, for as long as is left of the time.
+    assert_eq!(
+        scripted.draw(3, true, 800).asked_to_be_drawn_again_after,
+        Vec::<Duration>::new()
+    );
+    assert_eq!(
+        scripted.draw(4, false, 810).asked_to_be_drawn_again_after,
+        Vec::<Duration>::new()
+    );
+    assert!(is_asked_for_in_about(
+        scripted.draw(4, false, 820).asked_to_be_drawn_again_after,
+        120
+    ));
+    assert!(is_asked_for_in_about(
+        scripted.draw(4, false, 870).asked_to_be_drawn_again_after,
+        70
+    ));
+    // When it has been made whole it waits for nothing.
+    let drawn = scripted.draw(4, false, 940);
+    assert_eq!(drawn.asked_for_a_frame_of, Some(WHOLE));
+    assert_eq!(drawn.asked_to_be_drawn_again_after, Vec::<Duration>::new());
+    assert_eq!(
+        scripted.draw(4, false, 950).asked_to_be_drawn_again_after,
+        Vec::<Duration>::new()
+    );
+}
+
+#[test]
+fn with_a_real_engine_frames_that_come_late_are_made_smaller_and_frames_that_come_at_once_are_made_bigger_again_and_what_is_shown_is_the_frame_of_that_size()
+ {
+    let Some(mut setup) = setup() else { return };
+    let pictures: Vec<SuppliedPicture> = (1..=100)
+        .map(|serial| flat_picture(serial, [(serial % 200) as u8 + 10, 40, 40, 255]))
+        .collect();
+    let mut number = 0;
+    let mut next_frame = |setup: &mut Setup| {
+        let shown = content(vec![showing(1, &pictures[number])]);
+        number += 1;
+        let frame = setup.show_a_new_frame_of(&shown);
+        (frame.width_in_pixels, frame.height_in_pixels)
+    };
+
+    // A frame of the project that lasts a nanosecond: nothing is in time for it.
+    setup.is_playing = true;
+    setup.how_long_a_frame_lasts = Duration::from_nanos(1);
+    let mut sizes = Vec::new();
+    for _ in 0..10 {
+        sizes.push(next_frame(&mut setup));
+    }
+    assert_eq!(sizes[0], RENDER_SIZE, "the first frames are whole");
+    assert_eq!(
+        *sizes.last().unwrap(),
+        (16, 9),
+        "and the frames that came late made them smaller, down to a quarter: {sizes:?}"
+    );
+    assert!(
+        sizes.windows(2).all(|pair| pair[1].0 <= pair[0].0),
+        "and they never went up: {sizes:?}"
+    );
+
+    // A frame of the project that lasts an hour: everything is in time for it.
+    setup.how_long_a_frame_lasts = Duration::from_secs(3600);
+    let mut sizes = Vec::new();
+    for _ in 0..60 {
+        sizes.push(next_frame(&mut setup));
+        if *sizes.last().unwrap() == RENDER_SIZE {
+            break;
+        }
+    }
+    assert_eq!(*sizes.last().unwrap(), RENDER_SIZE, "back to whole: {sizes:?}");
+    assert!(
+        sizes.windows(2).all(|pair| pair[1].0 >= pair[0].0),
+        "and they never went down: {sizes:?}"
+    );
+    assert!(sizes.contains(&(32, 18)), "by way of half: {sizes:?}");
 }

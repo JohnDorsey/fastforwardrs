@@ -201,6 +201,17 @@ whether the clock is playing, how long the description has been the same. Output
 while playing, two late frames in a row (latency > 80 % of a project frame) step the scale down; ten comfortable frames (latency < 35 %) step it up; **paused**, the scale is 1 once the description has been unchanged for 120 ms (the window
 asks for a repaint at that time), and scrubbing keeps the scale it had. The render size is `max(2, round(shown_size * scale))` for each side, kept in the picture's shape.
 
+**As built (piece 1.7, 2026-10-16).** `engine/quality.rs`: `PreviewScale` (`Whole`, `Half`, `Quarter`), `QualityRules` (the numbers above: 0.8, 0.35, 2 late frames, 10 comfortable frames, 120 ms) and `QualityGovernor` with three calls:
+`a_frame_came(latency, frame_duration, is_playing)`, `the_window_is_drawn(now, is_playing, what_is_shown_changed) -> PreviewScale` and `how_long_until_the_picture_is_made_whole(now)`. It is told the time, not given a clock, so every rule is tested
+with made-up times (18 tests). **Where it differs from the sketch:** (1) the counting is of frames **in a row** and not a moving average: a frame in the band between late and comfortable (35 % to 80 % of a frame) undoes the count of both, which is what keeps it from going up and
+down; (2) a frame that comes **from the engine's cache** says nothing about what the card can do and is not counted (a project that loops over a few frames would otherwise climb to a size the card cannot keep up with, and fall again); (3) a frame that comes while
+the clock is stopped is not counted either. **The window's side** (`EnginePreview::update` now takes `HowTheClockGoes { is_playing, how_long_a_frame_lasts, now }`, made by `HowTheClockGoes::new` from the project's frame rate): the latency of a frame is the time from asking
+for it to taking it (each request's time is remembered; the frames that were passed over by the engine, which makes only the newest, are forgotten as the one after them comes); the frame is described at `scale.of_the_size(whole_size)` and described again if the governor changed the scale in that very
+drawing; **what is shown, apart from its size** (`FrameDescription::fingerprint_of_what_is_shown`) is what tells the governor that a picture is being changed; a window that is not drawn when nothing changes is asked to be drawn again when a still picture is to be made whole
+(`request_repaint_after`; egui asks for it one frame of the screen sooner than it is told). Tested with a scripted engine (no card) with invented times and with the real engine on the software adapter, where frames of a project whose frame lasts a nanosecond are made
+smaller to a quarter, and frames of a project whose frame lasts an hour make it whole again. **Not done, and for the maintainer's eyes on the integrated graphics:** the numbers are the first guesses of the design. Nothing says that 80 % and 35 % are right on a real card; the benchmark (below) is what
+to tune them with, and the governor is a change of one struct (`QualityRules`) to retune.
+
 ## 8. Describing a frame: `describe_frame(content, shown_size, scale) -> (FrameDescription, Vec<PictureWanted>)`
 
 Pure, in the application layer next to the old drawing; its test is *the same `PreviewContent`s the old drawing's tests use*. For each `PreviewLayer`, in order:
@@ -280,6 +291,36 @@ which those are: a test holds `plan::NEAR_ENOUGH_TO_CHANGE_NOTHING` to `ColourMa
    hard edge in the engine; egui draws it with an edge that is soft over about a pixel (this is the only visible difference of the placeholders: where they are, their colour and what covers them are the same); **(b)** where the edge of a
    picture goes through the middle of a pixel (to a thousandth of a pixel), which of the two layers shows in that pixel can differ: single pixels, at most 2 in a frame of 320 by 180 in all 400 scenes, each on the edge of a picture (the gate checks
    that every such pixel is within 0.05 pixel of an edge). Nothing else was found: every other pixel of every scene agrees to within 2 levels.
+
+**The pictures (piece 1.7, 2026-10-16).** For each of these there is a picture of three panels, made at the size the engine is tested at (320 by 180), **the old drawing, the engine, and
+what is different between them** (the biggest difference of any number of a pixel, made sixteen times as big in grey: black is the same, and a pixel that is one level off is a sixteenth of the way to
+white). The first five are written by `write_the_pictures_that_show_what_differs` (an ignored test in `engine_parity_tests/pictures.rs`), the rest by `write_the_pictures_of_the_edges_of_colours`
+(an ignored integration test that needs ffmpeg 9, `tests/engine_chroma_pictures.rs`; the pictures are three times as big as they are and the difference is made twice as big).
+Both drawings of the first five are the real ones: the old drawing is `preview_panel::show` run in an egui context and drawn by egui's own renderer.
+
+| picture | what it shows | the largest difference of any number of a pixel |
+|---|---|---|
+| `01-pictures-turned-and-see-through` | difference 3: a picture, a soft disc and a checker of half-clear squares, turned and made bigger and smaller, over each other | **2** of 255, and 2 of 57 600 pixels differ by more than 1 (the edge of a layer that goes through the middle of a pixel: 8b) |
+| `02-colour-effects` | difference 1: two pictures with a hue turned by 120 degrees and with a general matrix, which the engine works in half-float numbers | **1**, and no pixel differs by more than 1 |
+| `03-a-video-in-planes` | the planes of a video, made into colours on the card (BT.709, limited range), turned and made smaller | **1**, and no pixel differs by more than 1 |
+| `04-the-symbol-over-a-video` | difference 5: the fast-forward symbol at 8 times, which the engine draws at the resolution of the frame | **1**, and no pixel differs by more than 1 |
+| `05-text-over-a-picture` | difference 3: text over a picture, turned: the edges of the letters have every opacity | **1**, and no pixel differs by more than 1 |
+| `06-edges-of-colours-at-the-size-of-the-video` | difference 2, the hardest edges of colour there are (colour differences of 160 between neighbours), a video made into a picture of its own size: ffmpeg's colours beside the engine's | **3**, 1.50 on average, no pixel differs by more than 10 |
+| `07-edges-of-colours-at-half-the-size-of-the-video` | the same, made into a picture of half the size | **3**, 1.56 on average, no pixel differs by more than 10 |
+| `08-edges-of-colours-at-two-thirds-of-the-size-of-the-video` | the same, at **two thirds**: where ffmpeg scales the colour planes in its own way before it gives them | **111**, 24.06 on average, and 3109 of 9216 pixels differ by more than 10: **this is the difference that can be seen** |
+| `09-colours-that-change-smoothly-at-two-thirds-of-the-size-of-the-video` | colours that change smoothly, at the same scale | **4**, 2.47 on average (difference 2b: ffmpeg's whole-number arithmetic cuts off and the engine rounds) |
+
+![the pictures that are turned and see-through: the old drawing, the engine, and the difference made sixteen times as big](engine-comparison/01-pictures-turned-and-see-through.png)
+
+![text over a picture](engine-comparison/05-text-over-a-picture.png)
+
+![the hardest edges of colour at two thirds of the size of the video: ffmpeg's colours, the engine's, and the difference made twice as big](engine-comparison/08-edges-of-colours-at-two-thirds-of-the-size-of-the-video.png)
+
+What can be seen, then, is **one thing, and only at some sizes**: where a video is not shown at its own size, at half of it or at a whole number of times it, the edges of colours (red against green, a coloured
+word on a plain background) are a little different from what ffmpeg made of them: ffmpeg scales the colour planes of the video itself, in more bits and with its own filter, and the engine is given the planes ffmpeg
+made at that scale and cannot know what they were before. The engine's edges are the harder ones. **It is for the maintainer to say whether this is acceptable** (it was the engine's choice to take the planes at the size of
+the preview, so that no more is sent to the card than is shown). The other way is to have ffmpeg give the planes at the video's own size, and the card scale the picture: the edges would then be the card's at every scale, and no longer ffmpeg's at any, which is a
+difference of its own, and four times as many bytes to send for a video that is shown at half of its size.
 
 ## 12. Order of work, and the gate of each piece
 

@@ -47,7 +47,8 @@ cargo run --release -- "C:\path\to\project.ffrs"     # open a project straight a
 graphics card (design: `docs/engine-phase-1-design.md`), is tried by setting `FASTFORWARDRS_PREVIEW=engine` before the program is started: the preview is then one
 picture that the engine made of all the layers, and the window still draws the outlines, the handles and the places the mouse can take hold of itself. If the engine
 cannot start, or stops, the program says so and makes the preview the old way from then on. If the graphics card is reset, or does not finish a frame in two seconds, the engine makes itself a new graphics device and goes on (a picture may be late); if that is needed again within a minute and again, it stops, as above. The old way (`FASTFORWARDRS_PREVIEW=simple`, or no setting) is what the preview is
-made by until the engine has been tried on more graphics cards. The export does not use the engine.
+made by until the engine has been tried on more graphics cards. The export does not use the engine. How fast the engine is on this computer's graphics card is measured by `cargo run --release --example engine_benchmark` (it says which adapters there are with `-- --list`);
+it makes frames of four layers with two blurs, a colour matrix and a lookup on them, and says the frames to the second and what each kind of pass costs.
 
 ## Using it
 

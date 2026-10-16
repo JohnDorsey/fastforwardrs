@@ -11,8 +11,9 @@
 //! **If the engine stops** (it could not make a device, or lost it, or its thread ended) the preview says so ([`EnginePreview::why_it_stopped`]) and the
 //! window draws the preview the old way from then on.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use egui::{Color32, ColorImage, Context, Painter, Rect, TextureHandle, pos2};
 
@@ -20,8 +21,10 @@ use super::PreviewContent;
 use super::engine_view::{PictureSupply, PictureWanted, SentPictures, describe_frame};
 use crate::application::textures::PictureFilter;
 use crate::engine::{
-    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameDescription, LayerSource, PictureId, RenderedFrame, WakeUp,
+    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameDescription, LayerSource, PictureId, QualityGovernor,
+    QualityRules, RenderedFrame, WakeUp,
 };
+use crate::project::FrameRate;
 use crate::text_rendering::LazyTextRenderer;
 
 /// How many pictures are kept in the engine, at the most, before the ones that the last frames did not use are let go of. (A picture of a video is a new
@@ -46,6 +49,34 @@ pub fn render_size_for(
         (width * scale).round().max(2.0) as u32,
         (height * scale).round().max(2.0) as u32,
     )
+}
+
+/// How many frames that were asked for and have not come are remembered, to tell how long the one that comes took.
+const MOST_FRAMES_WAITED_FOR: usize = 64;
+
+/// How the clock of the project goes, as far as the quality of the preview is concerned: while it goes the frames are made smaller if the card cannot keep up, and while
+/// it is stopped a picture that is still is made whole (see `engine::quality`).
+#[derive(Clone, Copy, Debug)]
+pub struct HowTheClockGoes {
+    /// Whether the project is playing.
+    pub is_playing: bool,
+    /// How long a frame of the project lasts.
+    pub how_long_a_frame_lasts: Duration,
+    /// What time it is.
+    pub now: Instant,
+}
+
+impl HowTheClockGoes {
+    /// How the clock of a project that has `frame_rate` goes at `now`, playing or not.
+    pub fn new(is_playing: bool, frame_rate: FrameRate, now: Instant) -> Self {
+        Self {
+            is_playing,
+            // (A frame rate is a number above nothing, so this is the time of a frame; if it were not, no time would be what the quality of the preview leaves alone.)
+            how_long_a_frame_lasts: Duration::try_from_secs_f64(1.0 / frame_rate.frames_per_second())
+                .unwrap_or(Duration::ZERO),
+            now,
+        }
+    }
 }
 
 /// The frame that is on the preview.
@@ -74,8 +105,16 @@ pub struct EnginePreview {
     asked_for: Option<(u64, u64)>,
     /// How many frames were asked for.
     frames_asked_for: u64,
+    /// How many of the frames that came were in the engine's cache of the frames it has made: asked for again, they came at once.
+    frames_from_the_cache: u64,
     /// The serial number of the last request.
     last_serial: u64,
+    /// Decides what part of the size of the picture the frames are made at.
+    governor: QualityGovernor,
+    /// When each of the frames that were asked for was asked for, the oldest first, so that how long the one that comes took can be told.
+    asked_at: VecDeque<(u64, Instant)>,
+    /// What was shown when the window was drawn last, not counting the size it is made at.
+    what_was_shown: Option<u64>,
     /// The first serial number whose frame may be shown: the frames of requests before it are of what the window has let go of.
     first_serial_that_counts: u64,
     shown: Option<ShownFrame>,
@@ -101,7 +140,11 @@ impl EnginePreview {
             generation: 0,
             asked_for: None,
             frames_asked_for: 0,
+            frames_from_the_cache: 0,
             last_serial: 0,
+            governor: QualityGovernor::new(QualityRules::default()),
+            asked_at: VecDeque::new(),
+            what_was_shown: None,
             first_serial_that_counts: 0,
             shown: None,
             stopped: None,
@@ -124,6 +167,12 @@ impl EnginePreview {
     #[cfg(test)]
     pub fn frames_asked_for(&self) -> u64 {
         self.frames_asked_for
+    }
+
+    /// How many of the frames that came were in the engine's cache of the frames it has made.
+    #[cfg(test)]
+    pub fn frames_from_the_cache(&self) -> u64 {
+        self.frames_from_the_cache
     }
 
     /// The number that the window changes whenever it lets go of what it knows of its files.
@@ -175,17 +224,19 @@ impl EnginePreview {
         self.first_serial_that_counts = self.last_serial + 1;
     }
 
-    /// Takes what the engine has said, describes `content` as a frame `render_size` big, sends what the engine does not have, and asks for the frame if it
-    /// is not the one asked for last. `filter` says how the frame is put on the screen.
+    /// Takes what the engine has said, describes `content` as a frame made at `whole_size` (or the part of it that the quality of the preview says: see
+    /// `engine::quality`), sends what the engine does not have, and asks for the frame if it is not the one asked for last. `filter` says how the frame is put on
+    /// the screen, and `clock` how the clock of the project goes.
     pub fn update(
         &mut self,
         context: &Context,
         content: &PreviewContent<'_>,
-        render_size: (u32, u32),
+        whole_size: (u32, u32),
         filter: PictureFilter,
         text_renderer: &mut LazyTextRenderer,
+        clock: HowTheClockGoes,
     ) {
-        self.take_what_the_engine_says(context, filter);
+        self.take_what_the_engine_says(context, filter, clock);
         if self.stopped.is_some() {
             return;
         }
@@ -193,24 +244,20 @@ impl EnginePreview {
             self.stopped = Some("the picture engine's thread ended without saying why".to_owned());
             return;
         }
-        let description = {
-            let Self {
-                engine,
-                sent,
-                rejected,
-                generation,
-                ..
-            } = self;
-            let mut supply = SuppliesWhatIsNotRejected {
-                inner: SentPictures {
-                    sent,
-                    text_renderer,
-                    send: |id, data| engine.upload_picture(id, Arc::new(data)),
-                },
-                rejected,
-            };
-            describe_frame(content, render_size, *generation, &mut supply)
-        };
+        // The frame is described at the size the quality of the preview has now; what is shown (apart from its size) tells the quality whether the picture is
+        // being changed, and the quality may say that the size is another, which makes it be described again at that.
+        let scale_before = self.governor.scale();
+        let mut description = self.describe(content, scale_before.of_the_size(whole_size), text_renderer);
+        let what_is_shown_now = description.fingerprint_of_what_is_shown();
+        let what_is_shown_has_changed = self.what_was_shown != Some(what_is_shown_now);
+        let scale = self
+            .governor
+            .the_window_is_drawn(clock.now, clock.is_playing, what_is_shown_has_changed);
+        if scale != scale_before {
+            description = self.describe(content, scale.of_the_size(whole_size), text_renderer);
+        }
+        self.what_was_shown = Some(description.fingerprint_of_what_is_shown());
+
         let fingerprint = description.fingerprint();
         if self.asked_for.map(|(asked, _)| asked) != Some(fingerprint) {
             self.note_the_pictures_used(&description);
@@ -218,9 +265,42 @@ impl EnginePreview {
             self.asked_for = Some((fingerprint, serial));
             self.last_serial = serial;
             self.frames_asked_for += 1;
+            self.asked_at.push_back((serial, clock.now));
+            while self.asked_at.len() > MOST_FRAMES_WAITED_FOR {
+                self.asked_at.pop_front();
+            }
             self.let_go_of_the_pictures_that_are_not_used_any_more();
         }
         self.put_the_frame_on_the_screen_the_way_it_is_asked_for(context, filter);
+        // (A picture that is still is made whole after a while, and the window is not drawn when nothing changes: it is asked to be.)
+        if let Some(wait) = self.governor.how_long_until_the_picture_is_made_whole(clock.now) {
+            context.request_repaint_after(wait);
+        }
+    }
+
+    /// The frame that `content` is, made at `render_size`, with the pictures it needs sent to the engine if it does not have them.
+    fn describe(
+        &mut self,
+        content: &PreviewContent<'_>,
+        render_size: (u32, u32),
+        text_renderer: &mut LazyTextRenderer,
+    ) -> FrameDescription {
+        let Self {
+            engine,
+            sent,
+            rejected,
+            generation,
+            ..
+        } = self;
+        let mut supply = SuppliesWhatIsNotRejected {
+            inner: SentPictures {
+                sent,
+                text_renderer,
+                send: |id, data| engine.upload_picture(id, Arc::new(data)),
+            },
+            rejected,
+        };
+        describe_frame(content, render_size, *generation, &mut supply)
     }
 
     /// Paints the frame that is shown over `rectangle` (all of the picture, wherever it is on the screen, which may reach past what `painter` is clipped to).
@@ -241,10 +321,18 @@ impl EnginePreview {
         self.engine.stop();
     }
 
-    fn take_what_the_engine_says(&mut self, context: &Context, filter: PictureFilter) {
+    fn take_what_the_engine_says(&mut self, context: &Context, filter: PictureFilter, clock: HowTheClockGoes) {
         while let Some(event) = self.engine.try_next_event() {
             match event {
-                EngineEvent::Frame { serial, frame, .. } => self.show(context, serial, frame, filter),
+                EngineEvent::Frame {
+                    serial,
+                    frame,
+                    statistics,
+                } => {
+                    self.frames_from_the_cache += u64::from(statistics.came_from_the_cache);
+                    self.note_how_long_the_frame_took(serial, statistics.came_from_the_cache, clock);
+                    self.show(context, serial, frame, filter);
+                }
                 EngineEvent::FrameFailed { problem, .. } => self.last_problem = Some(problem),
                 EngineEvent::PicturesMissing { ids, .. } => {
                     // (They are sent again, and the frame is asked for again.)
@@ -272,6 +360,25 @@ impl EnginePreview {
                 }
                 EngineEvent::Stopped { problem } => self.stopped = Some(problem),
             }
+        }
+    }
+
+    /// Tells the quality of the preview how long the frame with this serial number took from being asked for to coming, if it is one that the card made. (A frame
+    /// that came from the cache says nothing about what the card can do; and the frames before it that never came were passed over by the engine, which makes only the
+    /// newest.)
+    fn note_how_long_the_frame_took(&mut self, serial: u64, came_from_the_cache: bool, clock: HowTheClockGoes) {
+        let asked_at = self
+            .asked_at
+            .iter()
+            .find(|(asked, _)| *asked == serial)
+            .map(|(_, asked_at)| *asked_at);
+        self.asked_at.retain(|(asked, _)| *asked > serial);
+        if let (Some(asked_at), false) = (asked_at, came_from_the_cache) {
+            self.governor.a_frame_came(
+                clock.now.saturating_duration_since(asked_at),
+                clock.how_long_a_frame_lasts,
+                clock.is_playing,
+            );
         }
     }
 

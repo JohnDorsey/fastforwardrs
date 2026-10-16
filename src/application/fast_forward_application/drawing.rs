@@ -6,6 +6,7 @@
 //! slider on one line over it.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use egui::{Frame, Margin, Ui};
 
@@ -13,7 +14,7 @@ use super::{FastForwardApplication, FrameState, SourceFileState};
 use crate::application::commands::Command;
 use crate::application::menu_bar::{self, MenuAvailability};
 use crate::application::preview_panel::{
-    self, PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
+    self, HowTheClockGoes, PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture,
 };
 use crate::application::properties_panel::{self, PropertiesContent};
 use crate::application::theme;
@@ -119,6 +120,7 @@ impl FastForwardApplication {
                     &mut self.interface.preview_view,
                     engine_preview,
                     &mut self.environment.text_renderer,
+                    HowTheClockGoes::new(frame_state.is_playing, frame_state.frame_rate, Instant::now()),
                     commands,
                 ),
                 None => preview_panel::show(

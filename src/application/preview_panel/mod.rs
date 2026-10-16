@@ -46,9 +46,9 @@ mod view;
 mod zoomed_pictures_tests;
 mod zooming;
 
-pub use engine_preview::EnginePreview;
 #[cfg(test)]
 pub use engine_preview::render_size_for;
+pub use engine_preview::{EnginePreview, HowTheClockGoes};
 pub use view::PreviewView;
 #[cfg(test)]
 pub use zooming::FIT_BUTTON_LABEL;
@@ -206,13 +206,18 @@ pub fn show_drawn_by_the_engine(
     view: &mut PreviewView,
     engine: &mut EnginePreview,
     text_renderer: &mut LazyTextRenderer,
+    clock: HowTheClockGoes,
     commands: &mut Vec<Command>,
 ) {
     show_how(
         ui,
         content,
         view,
-        HowThePicturesAreMade::ByTheEngine { engine, text_renderer },
+        HowThePicturesAreMade::ByTheEngine {
+            engine,
+            text_renderer,
+            clock,
+        },
         commands,
     );
 }
@@ -226,6 +231,7 @@ enum HowThePicturesAreMade<'a> {
     ByTheEngine {
         engine: &'a mut EnginePreview,
         text_renderer: &'a mut LazyTextRenderer,
+        clock: HowTheClockGoes,
     },
 }
 
@@ -255,9 +261,13 @@ fn show_how(
             textures,
             text_renderer,
         },
-        HowThePicturesAreMade::ByTheEngine { engine, text_renderer } => {
+        HowThePicturesAreMade::ByTheEngine {
+            engine,
+            text_renderer,
+            clock,
+        } => {
             let render_size = engine_preview::render_size_for(picture_rectangle.size(), pixels_per_point, picture_size);
-            engine.update(ui.ctx(), content, render_size, filter, text_renderer);
+            engine.update(ui.ctx(), content, render_size, filter, text_renderer, clock);
             engine.paint(&ui.painter().with_clip_rect(picture_rectangle), picture_rectangle);
             layers::Drawing::ByTheEngine
         }

@@ -719,3 +719,6 @@ fn the_symbol_over_a_video_is_the_same_picture_in_the_engine_and_in_the_old_draw
         }
     });
 }
+
+// The pictures of what differs, for looking at (an ignored test that writes them).
+mod pictures;

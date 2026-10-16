@@ -88,23 +88,35 @@ impl FrameDescription {
     pub fn fingerprint(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.render_size.hash(&mut hasher);
-        self.layers.len().hash(&mut hasher);
+        self.hash_the_layers(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Like [`Self::fingerprint`], but not made of the size the frame is made at: it is the same for two descriptions of what is shown that are made at different
+    /// sizes, and it is not for two that show something different. (It is what the quality of the preview goes by, which changes the size and not the picture.)
+    pub fn fingerprint_of_what_is_shown(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash_the_layers(&mut hasher);
+        hasher.finish()
+    }
+
+    fn hash_the_layers(&self, hasher: &mut DefaultHasher) {
+        self.layers.len().hash(hasher);
         for layer in &self.layers {
-            layer.source.hash(&mut hasher);
+            layer.source.hash(hasher);
             for (across, down) in layer.corners {
-                across.to_bits().hash(&mut hasher);
-                down.to_bits().hash(&mut hasher);
+                across.to_bits().hash(hasher);
+                down.to_bits().hash(hasher);
             }
-            layer.effects.len().hash(&mut hasher);
+            layer.effects.len().hash(hasher);
             for effect in &layer.effects {
-                effect.key.hash(&mut hasher);
-                effect.values.len().hash(&mut hasher);
+                effect.key.hash(hasher);
+                effect.values.len().hash(hasher);
                 for value in &effect.values {
-                    value.to_bits().hash(&mut hasher);
+                    value.to_bits().hash(hasher);
                 }
             }
         }
-        hasher.finish()
     }
 }
 
@@ -201,6 +213,41 @@ mod tests {
         fingerprints.sort_unstable();
         fingerprints.dedup();
         assert_eq!(fingerprints.len(), changes.len());
+    }
+
+    #[test]
+    fn what_is_shown_has_a_fingerprint_that_is_not_made_of_the_size_and_is_made_of_everything_else() {
+        let original = description();
+        let mut bigger = original.clone();
+        bigger.render_size = (1280, 720);
+        assert_ne!(bigger.fingerprint(), original.fingerprint());
+        assert_eq!(
+            bigger.fingerprint_of_what_is_shown(),
+            original.fingerprint_of_what_is_shown(),
+            "the same layers made at another size are the same picture"
+        );
+        let mut moved = original.clone();
+        moved.layers[1].corners[0].0 += 0.001;
+        assert_ne!(
+            moved.fingerprint_of_what_is_shown(),
+            original.fingerprint_of_what_is_shown()
+        );
+        let mut other_picture = original.clone();
+        other_picture.layers[0].source = LayerSource::Picture(PictureId(2));
+        assert_ne!(
+            other_picture.fingerprint_of_what_is_shown(),
+            original.fingerprint_of_what_is_shown()
+        );
+        let mut other_numbers = original.clone();
+        other_numbers.layers[1].effects[0].values[0] = 0.75;
+        assert_ne!(
+            other_numbers.fingerprint_of_what_is_shown(),
+            original.fingerprint_of_what_is_shown()
+        );
+        assert_ne!(
+            FrameDescription::black((8, 8)).fingerprint_of_what_is_shown(),
+            original.fingerprint_of_what_is_shown()
+        );
     }
 
     #[test]
