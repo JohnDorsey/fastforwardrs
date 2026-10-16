@@ -8,19 +8,20 @@
 //! (`EngineEvent::DeviceReplaced`). What the thread knows about the frame that did not finish is which effects of strangers it had in it, and those are
 //! switched off for as long as the engine runs. If a new device is needed again and again the engine stops instead (see `replacement`).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
 use super::device::{DeviceError, DeviceTrouble, EngineDevice};
 use super::frame_cache::FrameCache;
-use super::frame_renderer::{FrameRenderer, RenderProblem};
+use super::frame_renderer::{FinishedFrame, FrameOutput, FrameRenderer, PendingFrame, RenderProblem};
 use super::guard::GuardedShader;
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::replacement::{
     AfterAFailedFrame, ReplacementLimiter, what_to_do_after_a_failed_frame, why_the_device_was_lost,
 };
-use super::{FrameDescription, FrameStatistics, PictureData, PictureId};
+use super::{FrameDescription, FrameStatistics, PictureData, PictureId, YuvColour};
 
 /// What the thread does after a batch of requests.
 enum Next {
@@ -75,6 +76,14 @@ pub(super) fn run(
     }
 }
 
+/// A frame of the export that was begun and has not been finished: the card is at work on it.
+struct OnItsWay {
+    serial: u64,
+    pending: PendingFrame,
+    /// What the frame has in it that the engine did not write, written down in case it does not finish and the effects are to be switched off.
+    effects_of_strangers: Vec<String>,
+}
+
 /// Everything the thread keeps from one batch to the next.
 struct Worker<'a> {
     settings: &'a EngineSettings,
@@ -86,6 +95,8 @@ struct Worker<'a> {
     /// The keys of the effects that are not run any more because a frame they were in did not finish.
     switched_off: Vec<String>,
     replacements: ReplacementLimiter,
+    /// The frames of the export that are on their way, the one asked for first at the front. (Always empty between batches.)
+    on_their_way: VecDeque<OnItsWay>,
 }
 
 impl<'a> Worker<'a> {
@@ -103,10 +114,12 @@ impl<'a> Worker<'a> {
                 settings.replacements_that_stop_the_engine,
                 settings.how_long_replacements_are_counted,
             ),
+            on_their_way: VecDeque::new(),
         })
     }
 
-    /// Does what a batch of requests says, in order, and then makes the newest frame that was asked for in it.
+    /// Does what a batch of requests says, in order (the frames of the export too, each in its place, with the card at work on one while the one before it is read
+    /// back), and then makes the newest frame of the preview that was asked for in it.
     fn take(&mut self, batch: Vec<EngineRequest>) -> Next {
         if let Err(problem) = self.replace_the_device_if_it_was_lost() {
             return Next::Stop(problem);
@@ -125,6 +138,15 @@ impl<'a> Worker<'a> {
                     newest_render = Some((serial, description));
                     Ok(())
                 }
+                EngineRequest::RenderForExport {
+                    serial,
+                    description,
+                    colour,
+                } => match self.begin_an_export_frame(serial, &description, colour) {
+                    Next::GoOn => Ok(()),
+                    Next::Stop(problem) => Err(problem),
+                    Next::Quit => return Next::Quit,
+                },
                 EngineRequest::Stop => {
                     stop = true;
                     Ok(())
@@ -135,7 +157,13 @@ impl<'a> Worker<'a> {
             }
         }
         if stop {
+            // (What the card was doing for the frames that were on their way is not wanted any more.)
+            self.on_their_way.clear();
             return Next::Stop("the picture engine was told to stop".to_owned());
+        }
+        match self.finish_the_export_frames_on_their_way() {
+            Next::GoOn => {}
+            other => return other,
         }
         match newest_render {
             Some((serial, description)) => self.answer(serial, description),
@@ -192,6 +220,112 @@ impl<'a> Worker<'a> {
         Ok(())
     }
 
+    /// Begins the frame of the export that `description` describes: records it and gives it to the card. Another frame is finished when as many are on their way
+    /// as there is room for, so that the card has the next to work on while the pixels of the one before are taken. A frame that cannot be begun is answered for
+    /// (after the frames before it, so that what is said is in the order it was asked in).
+    fn begin_an_export_frame(&mut self, serial: u64, description: &FrameDescription, colour: YuvColour) -> Next {
+        let effects_of_strangers = self.renderer.shader_effects_in(description);
+        match self
+            .renderer
+            .begin_frame(description, FrameOutput::Planes(colour), self.settings.frame_timeout)
+        {
+            Ok(pending) => {
+                self.on_their_way.push_back(OnItsWay {
+                    serial,
+                    pending,
+                    effects_of_strangers,
+                });
+                while self.on_their_way.len() >= self.settings.export_frames_in_flight.max(1) {
+                    match self.finish_the_oldest_export_frame() {
+                        Next::GoOn => {}
+                        other => return other,
+                    }
+                }
+                Next::GoOn
+            }
+            Err(problem) => {
+                match self.finish_the_export_frames_on_their_way() {
+                    Next::GoOn => {}
+                    other => return other,
+                }
+                match problem {
+                    RenderProblem::PicturesMissing(ids) => self.say(EngineEvent::PicturesMissing { serial, ids }),
+                    other => self.after_a_failed_frame(serial, &other, effects_of_strangers, Vec::new()),
+                }
+            }
+        }
+    }
+
+    /// Waits for the card to finish the frame of the export that was begun first, and says how it came out. A frame that does not finish gives up the frames that
+    /// were begun after it too: they were on the same card.
+    fn finish_the_oldest_export_frame(&mut self) -> Next {
+        let Some(oldest) = self.on_their_way.pop_front() else {
+            return Next::GoOn;
+        };
+        match self.renderer.finish_frame(oldest.pending) {
+            Ok((FinishedFrame::Planes(planes), statistics)) => self.say(EngineEvent::ExportFrame {
+                serial: oldest.serial,
+                planes,
+                statistics,
+            }),
+            Ok((FinishedFrame::Rgba8(_), _)) => {
+                unreachable!("a frame of the export was begun as planes")
+            }
+            Err(problem) => {
+                let behind_it: Vec<OnItsWay> = self.on_their_way.drain(..).collect();
+                self.after_a_failed_frame(oldest.serial, &problem, oldest.effects_of_strangers, behind_it)
+            }
+        }
+    }
+
+    /// Finishes the frames of the export that are on their way, in the order they were asked in.
+    fn finish_the_export_frames_on_their_way(&mut self) -> Next {
+        while !self.on_their_way.is_empty() {
+            match self.finish_the_oldest_export_frame() {
+                Next::GoOn => {}
+                other => return other,
+            }
+        }
+        Next::GoOn
+    }
+
+    /// Says that the frame with this serial number could not be made (and, with it, the frames of the export that were `given_up_with_it`), and replaces the device
+    /// if what went wrong calls for that.
+    fn after_a_failed_frame(
+        &mut self,
+        serial: u64,
+        problem: &RenderProblem,
+        effects_of_strangers: Vec<String>,
+        given_up_with_it: Vec<OnItsWay>,
+    ) -> Next {
+        let device_lost = self.the_device_was_lost();
+        let failed = EngineEvent::FrameFailed {
+            serial,
+            problem: problem.to_string(),
+        };
+        let others_failed: Vec<EngineEvent> = given_up_with_it
+            .iter()
+            .map(|frame| EngineEvent::FrameFailed {
+                serial: frame.serial,
+                problem: format!("the frame was given up with the frame {serial}, which could not be made: {problem}"),
+            })
+            .collect();
+        for event in std::iter::once(failed).chain(others_failed) {
+            if !(self.tell)(event) {
+                return Next::Quit;
+            }
+        }
+        match what_to_do_after_a_failed_frame(problem, device_lost, self.settings.frame_timeout) {
+            AfterAFailedFrame::GoOn => Next::GoOn,
+            AfterAFailedFrame::ReplaceTheDevice { why } => {
+                match self.replace_the_device(why, effects_of_strangers, given_up_with_it) {
+                    Ok(()) => Next::GoOn,
+                    Err(problem) => Next::Stop(problem),
+                }
+            }
+        }
+    }
+
     /// Makes the frame `description` describes (or takes it from the cache), and says how it came out. A frame that did not finish makes a new device.
     fn answer(&mut self, serial: u64, description: FrameDescription) -> Next {
         let fingerprint = description.fingerprint();
@@ -219,23 +353,7 @@ impl<'a> Worker<'a> {
             Err(problem) => {
                 // What the frame had in it that the engine did not write, written down before the renderer may be thrown away.
                 let effects_of_strangers = self.renderer.shader_effects_in(&description);
-                let device_lost = self.the_device_was_lost();
-                let failed = EngineEvent::FrameFailed {
-                    serial,
-                    problem: problem.to_string(),
-                };
-                match what_to_do_after_a_failed_frame(&problem, device_lost, self.settings.frame_timeout) {
-                    AfterAFailedFrame::GoOn => self.say(failed),
-                    AfterAFailedFrame::ReplaceTheDevice { why } => {
-                        if !(self.tell)(failed) {
-                            return Next::Quit;
-                        }
-                        match self.replace_the_device(why, effects_of_strangers) {
-                            Ok(()) => Next::GoOn,
-                            Err(problem) => Next::Stop(problem),
-                        }
-                    }
-                }
+                self.after_a_failed_frame(serial, &problem, effects_of_strangers, Vec::new())
             }
         }
     }
@@ -253,7 +371,7 @@ impl<'a> Worker<'a> {
         let Some(reason) = self.the_device_was_lost() else {
             return Ok(first);
         };
-        self.replace_the_device(why_the_device_was_lost(&reason), Vec::new())?;
+        self.replace_the_device(why_the_device_was_lost(&reason), Vec::new(), Vec::new())?;
         Ok(attempt(&mut self.renderer))
     }
 
@@ -279,14 +397,19 @@ impl<'a> Worker<'a> {
 
     fn replace_the_device_if_it_was_lost(&mut self) -> Result<(), String> {
         match self.the_device_was_lost() {
-            Some(reason) => self.replace_the_device(why_the_device_was_lost(&reason), Vec::new()),
+            Some(reason) => self.replace_the_device(why_the_device_was_lost(&reason), Vec::new(), Vec::new()),
             None => Ok(()),
         }
     }
 
     /// Throws the device away and makes a new one, gives it the effects that are still trusted, and tells the window. Fails (and the engine stops) if the device
     /// has been replaced too often or the new one cannot be made.
-    fn replace_the_device(&mut self, why: String, effects_to_switch_off: Vec<String>) -> Result<(), String> {
+    fn replace_the_device(
+        &mut self,
+        why: String,
+        effects_to_switch_off: Vec<String>,
+        abandoned: Vec<OnItsWay>,
+    ) -> Result<(), String> {
         if !self.replacements.allow_another(Instant::now()) {
             return Err(format!(
                 "the graphics device has had to be replaced {} times within {:?} and would have to be replaced again (because {why}), so the picture engine stops",
@@ -301,7 +424,8 @@ impl<'a> Worker<'a> {
             .map_err(|error| format!("the graphics device could not be replaced ({why}): {error}"))?;
         tell_the_watcher_of_the_tests(self.settings, &new_device);
         let old_renderer = std::mem::replace(&mut self.renderer, FrameRenderer::new(new_device));
-        let_go_of_it_on_another_thread(old_renderer);
+        // (The frames that were on their way hold buffers of the old device, and are let go of with it, on the same thread: see below.)
+        let_go_of_it_on_another_thread((old_renderer, abandoned));
         // (Frames that were made are of the effects the engine trusted then, and of the effects it trusts now.)
         self.cache.clear();
 

@@ -11,6 +11,9 @@
 //! the *matrix*, which a video file says (BT.601 for old and standard-definition video, BT.709 for most high-definition video, BT.2020 for the newest).
 //! A file that does not say gets BT.601, because that is what ffmpeg has always done with it, and the pictures of this program must not change by
 //! the move to the graphics card: that is the compatibility mode (CM-20). What a better guess for HD video would be is for phase 3.
+//!
+//! The export goes the other way: the finished 8-bit frame is made into the planes of `yuv420p` for the encoder, with the same matrix and range
+//! ([`YuvColour::forward_conversion`], [`reference_yuv420p`]). The colour differences of a square of four pixels are the average of those of its four pixels.
 
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +64,35 @@ impl YuvColour {
         range: YuvRange::Limited,
     };
 
+    /// The numbers of the conversion the other way: from red, green and blue to brightness and colour differences, with the weights of the standard (`Y = Kr R + Kg G +
+    /// Kb B`, `U = (B - Y) / (2 (1 - Kb))`, `V = (R - Y) / (2 (1 - Kr))`) and the scale and offsets of the range. It is the inverse of [`Self::conversion`].
+    pub fn forward_conversion(self) -> RgbToYuvConversion {
+        let (red_weight, blue_weight) = self.matrix.red_and_blue_weights();
+        let green_weight = 1.0 - red_weight - blue_weight;
+        // How much of 0 to 1 the 8-bit numbers of the brightness and of the colour differences span, divided by 255, and where they begin.
+        let (brightness_scale, colour_scale, brightness_offset) = match self.range {
+            YuvRange::Limited => (219.0 / 255.0, 224.0 / 255.0, 16.0 / 255.0),
+            YuvRange::Full => (1.0, 1.0, 0.0),
+        };
+        let brightness = [red_weight, green_weight, blue_weight].map(|weight| weight * brightness_scale);
+        let blue_difference = [
+            -red_weight / (2.0 * (1.0 - blue_weight)),
+            -green_weight / (2.0 * (1.0 - blue_weight)),
+            0.5,
+        ]
+        .map(|number| number * colour_scale);
+        let red_difference = [
+            0.5,
+            -green_weight / (2.0 * (1.0 - red_weight)),
+            -blue_weight / (2.0 * (1.0 - red_weight)),
+        ]
+        .map(|number| number * colour_scale);
+        RgbToYuvConversion {
+            rows: [brightness, blue_difference, red_difference].map(|row| row.map(|number| number as f32)),
+            offsets: [brightness_offset as f32, (128.0 / 255.0) as f32, (128.0 / 255.0) as f32],
+        }
+    }
+
     /// The numbers of the conversion.
     pub fn conversion(self) -> YuvConversion {
         let (red_weight, blue_weight) = self.matrix.red_and_blue_weights();
@@ -98,6 +130,34 @@ impl YuvColour {
 pub struct YuvConversion {
     pub rows: [[f32; 3]; 3],
     pub offsets: [f32; 3],
+}
+
+/// The conversion the other way: `yuv = rows * rgb + offsets`, with red, green and blue from 0 to 1 and y, u and v as the 8-bit numbers divided by 255. Nothing is
+/// cut off here: the 8-bit picture that the card writes does that.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RgbToYuvConversion {
+    pub rows: [[f32; 3]; 3],
+    pub offsets: [f32; 3],
+}
+
+impl RgbToYuvConversion {
+    /// Writes the numbers as the shaders' struct has them: three rows of a `vec4<f32>` each, the three numbers that multiply red, green and blue and then what is
+    /// added.
+    pub fn write(&self, writer: &mut SlotWriter) {
+        for (row, offset) in self.rows.iter().zip(self.offsets) {
+            writer.vec4([row[0], row[1], row[2], offset]);
+        }
+    }
+
+    /// What one row makes of a colour, without its offset: the arithmetic the shaders do, in the same order, in `f32`.
+    pub fn row_of(&self, row: usize, rgb: [f32; 3]) -> f32 {
+        self.rows[row][0] * rgb[0] + self.rows[row][1] * rgb[1] + self.rows[row][2] * rgb[2]
+    }
+
+    /// The brightness and the two colour differences of one colour (as the 8-bit numbers divided by 255, not cut off).
+    pub fn yuv_of(&self, rgb: [f32; 3]) -> [f32; 3] {
+        [0, 1, 2].map(|row| self.row_of(row, rgb) + self.offsets[row])
+    }
 }
 
 impl YuvConversion {
@@ -146,6 +206,43 @@ pub fn reference_rgba(width: u32, height: u32, y: &[u8], u: &[u8], v: &[u8], col
         }
     }
     rgba
+}
+
+/// The planes of the `yuv420p` picture that an RGBA picture is (the alpha is not looked at), made on the processor the way the graphics card makes them (it is what
+/// the tests hold the card's to): the brightness of every pixel, and for every square of four the **average** of the colour differences of its four pixels (at an odd
+/// edge the pixel that is there is counted again for the one that is not). The numbers are rounded to the nearest and cut off at the ends of the 8 bits. The planes are
+/// returned in order, the brightness, the blue colour difference and the red one.
+pub fn reference_yuv420p(width: u32, height: u32, rgba: &[u8], colour: YuvColour) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let (width, height) = (width as usize, height as usize);
+    let (chroma_width, chroma_height) = chroma_size(width as u32, height as u32);
+    let conversion = colour.forward_conversion();
+    let colour_at = |across: usize, down: usize| -> [f32; 3] {
+        let first = (down.min(height - 1) * width + across.min(width - 1)) * 4;
+        [rgba[first], rgba[first + 1], rgba[first + 2]].map(|byte| f32::from(byte) / 255.0)
+    };
+    let eight_bit = |value: f32| (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+
+    let mut y = Vec::with_capacity(width * height);
+    for down in 0..height {
+        for across in 0..width {
+            y.push(eight_bit(conversion.yuv_of(colour_at(across, down))[0]));
+        }
+    }
+    let mut u = Vec::with_capacity(chroma_width as usize * chroma_height as usize);
+    let mut v = Vec::with_capacity(u.capacity());
+    for down in 0..chroma_height as usize {
+        for across in 0..chroma_width as usize {
+            let (mut blue_sum, mut red_sum) = (0.0f32, 0.0f32);
+            for (step_across, step_down) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let rgb = colour_at(across * 2 + step_across, down * 2 + step_down);
+                blue_sum += conversion.row_of(1, rgb);
+                red_sum += conversion.row_of(2, rgb);
+            }
+            u.push(eight_bit(blue_sum / 4.0 + conversion.offsets[1]));
+            v.push(eight_bit(red_sum / 4.0 + conversion.offsets[2]));
+        }
+    }
+    (y, u, v)
 }
 
 #[cfg(test)]
@@ -351,6 +448,186 @@ mod tests {
         assert_eq!(rgb[2], 0.0);
         // And a brightness of 255 is brighter than white in the limited range: cut off at 1.
         assert_eq!(conversion.rgb_of(1.0, 128.0 / 255.0, 128.0 / 255.0), [1.0; 3]);
+    }
+
+    /// Brightness and colour differences of the primary colours as the standards (and the books on video) give them, in the 8-bit numbers: BT.601 and BT.709 for the
+    /// limited range (red 82, 90, 240 and green 145, 54, 34 and blue 41, 240, 110 in BT.601; 63, 102, 240 and 173, 42, 26 and 32, 240, 118 in BT.709), and JFIF's
+    /// (BT.601, full range: red 76.2, 85.0, 255.5). (BT.2020's published numbers are those of the matrix the other way, which `the_matrix_of_each_standard_has_the_numbers_that_the_standard_gives_for_the_full_range`
+    /// has, and this is its inverse.)
+    #[test]
+    fn the_numbers_the_standards_give_for_the_primary_colours_are_what_the_forward_conversion_makes() {
+        let eight_bit =
+            |colour: YuvColour, rgb: [f32; 3]| colour.forward_conversion().yuv_of(rgb).map(|number| number * 255.0);
+        let limited = |matrix| YuvColour {
+            matrix,
+            range: YuvRange::Limited,
+        };
+        for (colour, rgb, expected) in [
+            (limited(YuvMatrix::Bt601), [1.0, 0.0, 0.0], [81.48, 90.22, 240.0]),
+            (limited(YuvMatrix::Bt601), [0.0, 1.0, 0.0], [144.55, 53.79, 34.21]),
+            (limited(YuvMatrix::Bt601), [0.0, 0.0, 1.0], [40.97, 240.0, 109.79]),
+            (limited(YuvMatrix::Bt709), [1.0, 0.0, 0.0], [62.56, 102.34, 240.0]),
+            (limited(YuvMatrix::Bt709), [0.0, 1.0, 0.0], [172.64, 41.66, 26.28]),
+            (limited(YuvMatrix::Bt709), [0.0, 0.0, 1.0], [31.81, 240.0, 117.73]),
+            (FULL_601, [1.0, 0.0, 0.0], [76.245, 84.97, 255.5]),
+            (FULL_601, [0.0, 0.0, 1.0], [29.07, 255.5, 107.265]),
+        ] {
+            let made = eight_bit(colour, rgb);
+            for channel in 0..3 {
+                assert!(
+                    (made[channel] - expected[channel]).abs() < 0.1,
+                    "{colour:?} {rgb:?}: {made:?} is not {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn black_and_white_are_the_ends_of_the_range_with_no_colour_in_every_matrix() {
+        for matrix in [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020] {
+            for (range, black, white) in [(YuvRange::Limited, 16.0, 235.0), (YuvRange::Full, 0.0, 255.0)] {
+                let colour = YuvColour { matrix, range };
+                let eight_bit = |rgb: [f32; 3]| colour.forward_conversion().yuv_of(rgb).map(|number| number * 255.0);
+                let (dark, light) = (eight_bit([0.0; 3]), eight_bit([1.0; 3]));
+                for (made, expected) in dark.into_iter().zip([black, 128.0, 128.0]) {
+                    assert!((made - expected).abs() < 1e-3, "{matrix:?} {range:?} black: {dark:?}");
+                }
+                for (made, expected) in light.into_iter().zip([white, 128.0, 128.0]) {
+                    assert!((made - expected).abs() < 1e-3, "{matrix:?} {range:?} white: {light:?}");
+                }
+            }
+        }
+    }
+
+    /// The conversion the other way is the inverse of this one, for every matrix and range: a colour made into brightness and colour differences and back is
+    /// itself (the numbers are not rounded to 8 bits here, so only the float arithmetic is between them).
+    #[test]
+    fn the_forward_conversion_is_the_inverse_of_the_other_way_for_every_matrix_and_range() {
+        for matrix in [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020] {
+            for range in [YuvRange::Limited, YuvRange::Full] {
+                let colour = YuvColour { matrix, range };
+                let (forward, backward) = (colour.forward_conversion(), colour.conversion());
+                for red in 0..=4 {
+                    for green in 0..=4 {
+                        for blue in 0..=4 {
+                            let rgb = [red, green, blue].map(|step| step as f32 / 4.0);
+                            let [y, u, v] = forward.yuv_of(rgb);
+                            let back = backward.rgb_of(y, u, v);
+                            for channel in 0..3 {
+                                assert!(
+                                    (back[channel] - rgb[channel]).abs() < 2e-5,
+                                    "{matrix:?} {range:?}: {rgb:?} came back as {back:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_forward_conversion_is_written_as_three_rows_of_four_numbers_the_row_and_then_what_is_added() {
+        use crate::engine::UniformBytes;
+        let conversion = RgbToYuvConversion {
+            rows: [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+            offsets: [10.0, 11.0, 12.0],
+        };
+        let mut bytes = UniformBytes::new(256);
+        let slot = bytes.add_slot(|writer| conversion.write(writer));
+        assert_eq!(slot.size, 48);
+        let numbers: Vec<f32> = bytes.as_bytes()[..48]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
+            .collect();
+        assert_eq!(
+            numbers,
+            vec![1.0, 2.0, 3.0, 10.0, 4.0, 5.0, 6.0, 11.0, 7.0, 8.0, 9.0, 12.0]
+        );
+    }
+
+    #[test]
+    fn the_planes_of_a_flat_picture_are_flat_and_the_numbers_of_its_colour() {
+        let (width, height) = (5, 3);
+        let red = [255, 0, 0, 255].repeat((width * height) as usize);
+        let (y, u, v) = reference_yuv420p(width, height, &red, LIMITED_601);
+        assert_eq!((y.len(), u.len(), v.len()), (15, 6, 6));
+        assert!(y.iter().all(|number| *number == 81), "{y:?}");
+        assert!(u.iter().all(|number| *number == 90), "{u:?}");
+        assert!(v.iter().all(|number| *number == 240), "{v:?}");
+    }
+
+    #[test]
+    fn the_numbers_of_the_planes_are_rounded_to_the_nearest_and_not_cut_off_where_the_fraction_ends() {
+        // Green in BT.601 limited range is 144.55, 53.79 and 34.21 (brightness, blue and red colour difference): 145, 54 and 34.
+        let (y, u, v) = reference_yuv420p(2, 2, &[0, 255, 0, 255].repeat(4), LIMITED_601);
+        assert_eq!((y[0], u[0], v[0]), (145, 54, 34));
+    }
+
+    #[test]
+    fn the_colour_differences_of_a_square_of_four_are_the_average_of_those_of_its_four_pixels() {
+        // Red, green, blue and white in the four corners of a square.
+        let rgba = [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+        let (y, u, v) = reference_yuv420p(2, 2, &rgba, FULL_601);
+        let row = |rgb: [f32; 3], row: usize| FULL_601.forward_conversion().row_of(row, rgb);
+        let colours = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 1.0, 1.0]];
+        let average = |number: usize| colours.iter().map(|rgb| row(*rgb, number)).sum::<f32>() / 4.0 + 128.0 / 255.0;
+        assert_eq!(u, vec![(average(1) * 255.0 + 0.5) as u8]);
+        assert_eq!(v, vec![(average(2) * 255.0 + 0.5) as u8]);
+        // Each pixel has its own brightness.
+        assert_eq!(y.len(), 4);
+        assert_ne!(y[0], y[1]);
+        assert_ne!(y[1], y[2]);
+    }
+
+    #[test]
+    fn at_an_odd_edge_the_pixel_that_is_there_stands_for_the_one_that_is_not() {
+        // 3 across and 1 down: the second colour difference of each plane is for the last pixel alone (counted for the missing pixel to its right, and for the
+        // missing row below it).
+        let rgba = [255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255];
+        let (_, u, v) = reference_yuv420p(3, 1, &rgba, FULL_601);
+        let alone = |rgba: &[u8]| reference_yuv420p(1, 1, rgba, FULL_601);
+        let (_, blue_u, blue_v) = alone(&[0, 0, 255, 255]);
+        assert_eq!(u.len(), 2);
+        assert_eq!((u[1], v[1]), (blue_u[0], blue_v[0]));
+        let (_, red_u, red_v) = alone(&[255, 0, 0, 255]);
+        assert_eq!((u[0], v[0]), (red_u[0], red_v[0]));
+    }
+
+    #[test]
+    fn colours_made_into_planes_and_back_and_into_planes_again_give_the_same_planes_within_a_level() {
+        // A picture of flat squares of four (so that the colour differences of a square are one), of colours that are inside what red, green and blue can be.
+        let (width, height) = (8usize, 6usize);
+        let mut rgba = Vec::new();
+        for down in 0..height {
+            for across in 0..width {
+                let square = (across / 2 + 4 * (down / 2)) as u32;
+                rgba.extend([
+                    (40 + 17 * square % 180) as u8,
+                    (60 + 29 * square % 150) as u8,
+                    (30 + 41 * square % 190) as u8,
+                    255,
+                ]);
+            }
+        }
+        for colour in [LIMITED_601, FULL_601] {
+            let (y, u, v) = reference_yuv420p(width as u32, height as u32, &rgba, colour);
+            let back = reference_rgba(width as u32, height as u32, &y, &u, &v, colour);
+            let (again_y, again_u, again_v) = reference_yuv420p(width as u32, height as u32, &back, colour);
+            for (before, after) in [(&y, &again_y), (&u, &again_u), (&v, &again_v)] {
+                assert!(
+                    before.iter().zip(after.iter()).all(|(a, b)| a.abs_diff(*b) <= 1),
+                    "{colour:?}: {before:?} against {after:?}"
+                );
+            }
+            // And the colours are the ones that went in, within the few levels that a colour difference of 8 bits for a square costs.
+            assert!(
+                rgba.iter().zip(&back).all(|(a, b)| a.abs_diff(*b) <= 4),
+                "{colour:?}: the colours did not come back"
+            );
+        }
     }
 
     #[test]

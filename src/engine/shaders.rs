@@ -18,6 +18,12 @@ pub const COLOUR_MATRIX: &str = include_str!("shaders/colour_matrix.wgsl");
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");
 
+/// The export's pass that makes the brightness plane of a finished frame.
+pub const RGB_TO_LUMA: &str = include_str!("shaders/rgb_to_luma.wgsl");
+
+/// The export's pass that makes the two colour difference planes of a finished frame.
+pub const RGB_TO_CHROMA: &str = include_str!("shaders/rgb_to_chroma.wgsl");
+
 /// The vertex stage of the effects that others wrote (their shaders only have a fragment stage): one triangle that covers all of the picture.
 pub const FULL_SCREEN_TRIANGLE: &str = include_str!("shaders/full_screen_triangle.wgsl");
 
@@ -29,6 +35,8 @@ pub const ALL: &[(&str, &str)] = &[
     ("yuv.wgsl", YUV),
     ("colour_matrix.wgsl", COLOUR_MATRIX),
     ("place.wgsl", PLACE),
+    ("rgb_to_luma.wgsl", RGB_TO_LUMA),
+    ("rgb_to_chroma.wgsl", RGB_TO_CHROMA),
 ];
 
 #[cfg(test)]

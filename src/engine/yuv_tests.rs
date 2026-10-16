@@ -15,7 +15,7 @@ use super::{
 
 const A_LONG_TIME: Duration = Duration::from_secs(60);
 
-fn whole_frame_of(picture: u64, size: (u32, u32)) -> FrameDescription {
+pub(super) fn whole_frame_of(picture: u64, size: (u32, u32)) -> FrameDescription {
     FrameDescription {
         render_size: size,
         layers: vec![LayerDescription {
@@ -27,7 +27,7 @@ fn whole_frame_of(picture: u64, size: (u32, u32)) -> FrameDescription {
 }
 
 /// Numbers that look random and are the same every time.
-fn noise(count: usize, seed: u64) -> Vec<u8> {
+pub(super) fn noise(count: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
     (0..count)
         .map(|_| {

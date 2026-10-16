@@ -54,6 +54,58 @@ fn a_picture_that_was_sent_is_on_the_card_with_its_size_and_a_frame_may_use_it()
 }
 
 #[test]
+fn the_texture_of_a_picture_that_is_let_go_of_is_what_the_next_picture_is_made_in_and_shows_nothing_of_the_last() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        // A video that plays has a picture to send in every frame: ten pictures of one size, each let go of before the next is sent, are made in the same two
+        // textures (the one the bytes go to, and the one the picture is kept in).
+        for number in 0..10u8 {
+            renderer
+                .upload_picture(PictureId(1), &flat(16, [number * 20, 255 - number * 20, 7, 255]))
+                .unwrap();
+            let (frame, _) = renderer.render(&frame_of((16, 16), &[1]), A_LONG_TIME).unwrap();
+            assert!(
+                frame.every_pixel_is([number * 20, 255 - number * 20, 7, 255]),
+                "picture {number}: {:?}",
+                frame.pixel(0, 0)
+            );
+            renderer.forget_pictures([PictureId(1)]);
+        }
+        let statistics = renderer.pool_statistics();
+        // Four were made, for the first picture and its frame (the one the bytes go to, the one the picture is kept in, the one the frame is put together in and
+        // the 8-bit one), and each of the nine that came after reused all four.
+        assert_eq!((statistics.made, statistics.reused), (4, 36));
+    });
+}
+
+#[test]
+fn a_picture_sent_again_under_its_id_gives_up_its_old_texture_and_a_picture_let_go_of_to_make_room_does_too() {
+    with_software_graphics!(graphics, {
+        // Room for two pictures of 8 by 8 (512 bytes on the card each).
+        let mut renderer = FrameRenderer::with_picture_budget(graphics.device.clone(), 1100);
+        renderer.upload_picture(PictureId(1), &flat(8, [1, 2, 3, 255])).unwrap();
+        renderer.upload_picture(PictureId(2), &flat(8, [4, 5, 6, 255])).unwrap();
+        let made_for_two = renderer.pool_statistics().made;
+        // Sent again under the same id: the old texture is what the new picture is made in.
+        renderer.upload_picture(PictureId(1), &flat(8, [7, 8, 9, 255])).unwrap();
+        // A third picture: the one used least recently (2) is let go of, and its texture is what the third is made in.
+        renderer
+            .upload_picture(PictureId(3), &flat(8, [10, 11, 12, 255]))
+            .unwrap();
+        assert_eq!(renderer.pictures_on_the_card().0, 2);
+        assert_eq!(
+            renderer.pool_statistics().made,
+            made_for_two + 1,
+            "the picture sent again made one texture before it gave up the old one, and the third picture was made in a texture that was given back"
+        );
+        let (frame, _) = renderer.render(&frame_of((8, 8), &[1]), A_LONG_TIME).unwrap();
+        assert!(frame.every_pixel_is([7, 8, 9, 255]));
+        let (frame, _) = renderer.render(&frame_of((8, 8), &[3]), A_LONG_TIME).unwrap();
+        assert!(frame.every_pixel_is([10, 11, 12, 255]));
+    });
+}
+
+#[test]
 fn a_frame_that_uses_pictures_that_are_not_there_says_which_each_once_and_draws_nothing() {
     with_software_graphics!(graphics, {
         let mut renderer = FrameRenderer::new(graphics.device.clone());

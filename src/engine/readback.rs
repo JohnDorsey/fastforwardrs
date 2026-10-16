@@ -53,15 +53,20 @@ pub struct ReadbackBuffers {
 }
 
 impl ReadbackBuffers {
-    /// Asks for `texture` (of a format with four bytes to the pixel, which is all the engine reads back) to be copied to a buffer, as part of the
-    /// work that `encoder` is making. Give the result to [`Self::collect`] once the work has been submitted.
+    /// Asks for `texture` (of a format whose pixels are whole bytes: four of them for the frames of the preview, one for the brightness plane of the export and two
+    /// for its colour differences) to be copied to a buffer, as part of the work that `encoder` is making. Give the result to [`Self::collect`] once the work has
+    /// been submitted.
     pub fn record_copy(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         texture: &wgpu::Texture,
     ) -> PendingReadback {
-        let row_bytes = texture.width() * 4;
+        let bytes_per_pixel = texture
+            .format()
+            .block_copy_size(None)
+            .expect("a texture that is read back has pixels of whole bytes");
+        let row_bytes = texture.width() * bytes_per_pixel;
         let padded_row_bytes = padded_bytes_per_row(row_bytes);
         let rows = texture.height();
         let size_in_bytes = u64::from(padded_row_bytes) * u64::from(rows);

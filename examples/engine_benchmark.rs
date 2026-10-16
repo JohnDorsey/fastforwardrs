@@ -11,6 +11,7 @@
 //! cargo run --release --example engine_benchmark -- --adapter 1     (that one)
 //! cargo run --release --example engine_benchmark -- --software      (a processor does it: slow, and not the gate)
 //! cargo run --release --example engine_benchmark -- --size 1280x720 --frames 300
+//! cargo run --release --example engine_benchmark -- --in-flight 1  (only the frames one at a time; the default is that and then two overlapping)
 //! ```
 //!
 //! It draws with shaders that are part of the program and nothing else: there is nothing in it that could keep a graphics card busy for long.
@@ -28,6 +29,7 @@ const HELP: &str = "Measures the picture engine on a graphics adapter of this co
 \n  --software         use the software adapter (a processor does the drawing: slow, and not the gate)
 \n  --size WxH         the size of the frames, 1920x1080 unless it is said
 \n  --frames N         how many frames of each scene are timed, 120 unless it is said
+\n  --in-flight N      how many frames are on their way at once in the second table (2 unless it is said; 1 makes only the first table)
 \n  --help             this";
 
 fn main() -> ExitCode {
@@ -56,6 +58,15 @@ fn main() -> ExitCode {
             }
             _ => {
                 eprintln!("--size is a width and a height like 1920x1080, not {size:?}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if let Some(frames_in_flight) = value_of("--in-flight") {
+        match frames_in_flight.parse::<usize>() {
+            Ok(frames_in_flight) if frames_in_flight > 0 => settings.frames_in_flight = frames_in_flight,
+            _ => {
+                eprintln!("--in-flight is a number of frames above nothing, not {frames_in_flight:?}");
                 return ExitCode::FAILURE;
             }
         }
@@ -104,14 +115,18 @@ fn main() -> ExitCode {
         AdapterChoice::Window(Arc::new(chosen.clone()))
     };
 
-    match run(&adapter, &settings) {
-        Ok(report) => {
-            println!("{}", report.describe());
-            ExitCode::SUCCESS
-        }
-        Err(problem) => {
-            eprintln!("the benchmark did not run: {problem}");
-            ExitCode::FAILURE
+    // First the frames one at a time, each all the way before the next (what the first run of the benchmark measured), and then the frames overlapping, which is what
+    // a project that plays can have: the last line is the gate, by the last scene of the last table.
+    let overlapping = settings.frames_in_flight;
+    for frames_in_flight in if overlapping > 1 { vec![1, overlapping] } else { vec![1] } {
+        settings.frames_in_flight = frames_in_flight;
+        match run(&adapter, &settings) {
+            Ok(report) => println!("{}", report.describe()),
+            Err(problem) => {
+                eprintln!("the benchmark did not run: {problem}");
+                return ExitCode::FAILURE;
+            }
         }
     }
+    ExitCode::SUCCESS
 }

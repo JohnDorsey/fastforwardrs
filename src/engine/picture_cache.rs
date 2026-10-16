@@ -5,15 +5,16 @@
 //! put in its place on a frame. Which are kept is decided by how recently each was used and how much room they take (see [`super::byte_lru`]).
 
 use super::PictureId;
-use super::byte_lru::{ByteLru, Kept};
+use super::byte_lru::ByteLru;
 
 /// How many bytes of pictures are kept on the card.
 pub const DEFAULT_BUDGET_IN_BYTES: usize = 512 * 1024 * 1024;
 
 /// A picture on the card.
 pub struct GpuPicture {
-    /// (A view keeps its texture alive, but nothing here should depend on that: the picture is the texture.)
-    pub _texture: wgpu::Texture,
+    /// (A view keeps its texture alive, but nothing here should depend on that: the picture is the texture.) When a picture is let go of, its texture is what the
+    /// renderer keeps to make the next picture in.
+    pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub width_in_pixels: u32,
     pub height_in_pixels: u32,
@@ -31,9 +32,12 @@ impl PictureCache {
         }
     }
 
-    /// Keeps a picture, which takes up `size_in_bytes` on the card, and lets go of the ones used least recently while there is not room for all.
-    pub fn insert(&mut self, id: PictureId, picture: GpuPicture, size_in_bytes: usize) -> Kept {
-        self.pictures.insert(id, picture, size_in_bytes)
+    /// Keeps a picture, which takes up `size_in_bytes` on the card, and lets go of the ones used least recently while there is not room for all. Gives back the
+    /// pictures that were let go of (the one that was kept under the same id, if there was one, and the new one itself if it is too big to keep).
+    pub fn insert(&mut self, id: PictureId, picture: GpuPicture, size_in_bytes: usize) -> Vec<GpuPicture> {
+        self.pictures
+            .insert_giving_back_what_is_let_go(id, picture, size_in_bytes)
+            .1
     }
 
     /// Counts these pictures as used just now (the ones that a frame is about to use are not the ones to let go of).
@@ -58,11 +62,9 @@ impl PictureCache {
         missing
     }
 
-    /// Lets go of these pictures.
-    pub fn forget(&mut self, ids: impl IntoIterator<Item = PictureId>) {
-        for id in ids {
-            self.pictures.remove(&id);
-        }
+    /// Lets go of these pictures, and gives them back.
+    pub fn forget(&mut self, ids: impl IntoIterator<Item = PictureId>) -> Vec<GpuPicture> {
+        ids.into_iter().filter_map(|id| self.pictures.remove(&id)).collect()
     }
 
     pub fn len(&self) -> usize {

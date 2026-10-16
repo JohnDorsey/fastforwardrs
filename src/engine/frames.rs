@@ -36,6 +36,49 @@ impl RenderedFrame {
     }
 }
 
+/// A finished frame as the planes of a `yuv420p` picture, which is what the export hands to the encoder: the brightness of every pixel, row by row, the top row first,
+/// and then the blue colour difference and the red one of every square of four pixels (at an odd edge, one for the single pixels that are left over), each plane after
+/// the one before. One piece of bytes, exactly as ffmpeg reads raw `yuv420p` video.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderedPlanes {
+    pub width_in_pixels: u32,
+    pub height_in_pixels: u32,
+    pub planes: Vec<u8>,
+}
+
+impl RenderedPlanes {
+    /// How many bytes the planes take up.
+    pub fn byte_count(&self) -> usize {
+        self.planes.len()
+    }
+
+    fn brightness_bytes(&self) -> usize {
+        self.width_in_pixels as usize * self.height_in_pixels as usize
+    }
+
+    fn colour_difference_bytes(&self) -> usize {
+        let (width, height) = super::yuv::chroma_size(self.width_in_pixels, self.height_in_pixels);
+        width as usize * height as usize
+    }
+
+    /// The brightness of every pixel.
+    pub fn luma(&self) -> &[u8] {
+        &self.planes[..self.brightness_bytes()]
+    }
+
+    /// The blue colour difference of every square of four pixels.
+    pub fn blue_difference(&self) -> &[u8] {
+        let first = self.brightness_bytes();
+        &self.planes[first..first + self.colour_difference_bytes()]
+    }
+
+    /// The red colour difference of every square of four pixels.
+    pub fn red_difference(&self) -> &[u8] {
+        let first = self.brightness_bytes() + self.colour_difference_bytes();
+        &self.planes[first..first + self.colour_difference_bytes()]
+    }
+}
+
 /// What making a frame came to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStatistics {

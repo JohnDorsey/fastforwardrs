@@ -7,25 +7,31 @@
 //! **What it measures.** Frames are made one after another, each one all the way to the pixels in the program's memory (the way the engine makes frames for the
 //! window), and the time of each is the engine's own (`FrameStatistics::time_taken`: from taking the request to having the frame in hand, the read-back of the
 //! pixels included). The scenes are a ladder: the same four pictures with one more thing done to them in each, so that what a pass costs is what the next scene
-//! takes more than the one before it.
+//! takes more than the one before it. **The last scene is a project that plays:** the whole stack, and in every frame a new picture of each of the two videos is sent
+//! to the card first (the others are on the card already, as an image or a text is). **And the frames can overlap** (`BenchmarkSettings::frames_in_flight`): with
+//! two on their way, the next frame is recorded and given to the card before the pixels of the one before are taken, which is what the engine does for the export,
+//! and the time of a frame is then the time between two frames that are finished (what the card makes in a second, and not how long one frame is on its way).
+//! With one on its way, a frame is made all the way before the next is begun.
 //!
 //! **What it is for.** The gate of phase 1 (EN-07) is that the whole stack plays at **1080p and 60 frames to the second on the integrated graphics** of the
 //! maintainer's computer. That is for the maintainer to measure, with the example (`cargo run --release --example engine_benchmark`), which uses the graphics
 //! card; the tests use the software adapter, at a size that a processor can make, only to see that the benchmark works. (The numbers of the software adapter
-//! say what a processor takes, not what a card does.)
+//! say what a processor takes, not what a card does.) The maintainer's first run (2026-10-16, frames one at a time, no pictures sent) made 49.8 frames to the
+//! second on the integrated graphics; the scene of a project that plays and the overlap of frames were added to find out what a project that plays makes.
 //!
 //! **What stands in for what.** The two blurs are effects that are shaders (one along the rows and one down the columns, 17 reads each, so a blur is two passes);
 //! the lookup table of a colour grade is **not** here: a 3-D table is a resource that an effect of this first form does not have, and the pass that stands in for
 //! it makes eight reads of the picture at places that the picture's own colour says, which is as many reads as a lookup in a table makes, without the table. Both
 //! become the engine's own effects in phase 4.
 
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
 use super::device::{AdapterChoice, DeviceError, EngineDevice};
-use super::frame_renderer::{FrameRenderer, RenderProblem};
+use super::frame_renderer::{FrameOutput, FrameRenderer, PendingFrame, RenderProblem};
 use super::guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, guard_wgsl};
 use super::pictures::PictureProblem;
 use super::yuv::YuvColour;
@@ -93,16 +99,20 @@ pub struct BenchmarkSettings {
     pub frames_to_leave_out_first: usize,
     /// How long a frame is waited for.
     pub frame_timeout: Duration,
+    /// How many frames are on their way at once: with one, each frame is made all the way before the next is begun; with more, the next is recorded and given to
+    /// the card while the card is at work on the one before, and its pixels are taken after that.
+    pub frames_in_flight: usize,
 }
 
 impl BenchmarkSettings {
-    /// What the gate of the phase is measured with: 1080p, 120 frames of each scene.
+    /// What the gate of the phase is measured with: 1080p, 120 frames of each scene, the frames overlapping as they do for the export.
     pub fn for_the_gate() -> Self {
         Self {
             frame_size: (1920, 1080),
             frames_of_each_scene: 120,
             frames_to_leave_out_first: 10,
             frame_timeout: Duration::from_secs(60),
+            frames_in_flight: 2,
         }
     }
 }
@@ -136,6 +146,8 @@ pub struct BenchmarkReport {
     pub is_a_software_adapter: bool,
     pub frame_size: (u32, u32),
     pub frames_of_each_scene: usize,
+    /// How many frames were on their way at once.
+    pub frames_in_flight: usize,
     /// How long it took to send one video picture of the size of the frame to the card and have it ready, once.
     pub time_to_send_a_video_picture: Duration,
     pub scenes: Vec<SceneTimes>,
@@ -168,8 +180,18 @@ impl BenchmarkReport {
         );
         let _ = writeln!(
             text,
-            "  frames: {} by {} pixels, {} timed of each scene",
-            self.frame_size.0, self.frame_size.1, self.frames_of_each_scene
+            "  frames: {} by {} pixels, {} timed of each scene, {}",
+            self.frame_size.0,
+            self.frame_size.1,
+            self.frames_of_each_scene,
+            if self.frames_in_flight <= 1 {
+                "one at a time, each all the way before the next".to_owned()
+            } else {
+                format!(
+                    "{} on their way at once (the time is between two that are finished)",
+                    self.frames_in_flight
+                )
+            }
         );
         let _ = writeln!(
             text,
@@ -179,13 +201,13 @@ impl BenchmarkReport {
         let _ = writeln!(text);
         let _ = writeln!(
             text,
-            "  {:<44} {:>6} {:>10} {:>9} {:>9} {:>9} {:>14}",
+            "  {:<60} {:>6} {:>10} {:>9} {:>9} {:>9} {:>14}",
             "scene", "passes", "frames/s", "mean ms", "best ms", "worst ms", "waiting (ms)"
         );
         for scene in &self.scenes {
             let _ = writeln!(
                 text,
-                "  {:<44} {:>6} {:>10.1} {:>9.2} {:>9.2} {:>9.2} {:>14.2}",
+                "  {:<60} {:>6} {:>10.1} {:>9.2} {:>9.2} {:>9.2} {:>14.2}",
                 scene.name,
                 scene.passes,
                 scene.frames_per_second(),
@@ -200,7 +222,8 @@ impl BenchmarkReport {
             let makes_it = whole.frames_per_second() >= FRAMES_TO_THE_SECOND_OF_THE_GATE;
             let _ = writeln!(
                 text,
-                "  the whole stack: {:.1} frames to the second; the gate is {:.0} at 1080p on the integrated graphics: {}",
+                "  {}: {:.1} frames to the second; the gate is {:.0} at 1080p on the integrated graphics: {}",
+                whole.name,
                 whole.frames_per_second(),
                 FRAMES_TO_THE_SECOND_OF_THE_GATE,
                 match (self.frame_size == (1920, 1080), self.is_a_software_adapter, makes_it) {
@@ -243,6 +266,13 @@ pub fn run(adapter: &AdapterChoice, settings: &BenchmarkSettings) -> Result<Benc
 
     let (width, height) = settings.frame_size;
     let pictures = pictures_of(width, height)?;
+    // (The first two are the pictures of video, which a project that plays has new ones of in every frame.)
+    let video_pictures: Vec<(PictureId, &PictureData)> = pictures
+        .iter()
+        .enumerate()
+        .take(2)
+        .map(|(number, picture)| (PictureId(number as u64 + 1), picture))
+        .collect();
     let mut time_to_send_a_video_picture = Duration::ZERO;
     for (number, picture) in pictures.iter().enumerate() {
         let started = Instant::now();
@@ -262,15 +292,12 @@ pub fn run(adapter: &AdapterChoice, settings: &BenchmarkSettings) -> Result<Benc
     for scene in the_scenes() {
         let description = scene.description(settings.frame_size);
         let passes = plan_frame(&description, &known).passes_recorded();
-        let mut times = Vec::with_capacity(settings.frames_of_each_scene);
-        let mut waiting = Vec::with_capacity(settings.frames_of_each_scene);
-        for number in 0..settings.frames_to_leave_out_first + settings.frames_of_each_scene {
-            let (_, statistics) = renderer.render(&description, settings.frame_timeout)?;
-            if number >= settings.frames_to_leave_out_first {
-                times.push(statistics.time_taken);
-                waiting.push(statistics.time_waiting_for_the_graphics_card);
-            }
-        }
+        let (times, waiting) = time_the_frames_of(
+            &mut renderer,
+            &description,
+            scene.sends_video_pictures.then_some(video_pictures.as_slice()),
+            settings,
+        )?;
         scenes.push(SceneTimes {
             name: scene.name,
             passes,
@@ -287,9 +314,75 @@ pub fn run(adapter: &AdapterChoice, settings: &BenchmarkSettings) -> Result<Benc
         is_a_software_adapter,
         frame_size: settings.frame_size,
         frames_of_each_scene: settings.frames_of_each_scene,
+        frames_in_flight: settings.frames_in_flight,
         time_to_send_a_video_picture,
         scenes,
     })
+}
+
+/// Makes the frames of one scene and says how long each took and how much of that was waiting for the card: the frames that are left out first are made and not
+/// counted. If `send_every_frame` has pictures, they are sent before each frame (the time it takes the processor to give them to the card is part of the frame).
+fn time_the_frames_of(
+    renderer: &mut FrameRenderer,
+    description: &FrameDescription,
+    send_every_frame: Option<&[(PictureId, &PictureData)]>,
+    settings: &BenchmarkSettings,
+) -> Result<(Vec<Duration>, Vec<Duration>), BenchmarkProblem> {
+    let frames_to_make = settings.frames_to_leave_out_first + settings.frames_of_each_scene;
+    let mut times = Vec::with_capacity(settings.frames_of_each_scene);
+    let mut waiting = Vec::with_capacity(settings.frames_of_each_scene);
+    let send = |renderer: &mut FrameRenderer| -> Result<Duration, BenchmarkProblem> {
+        let started = Instant::now();
+        for (id, picture) in send_every_frame.unwrap_or_default() {
+            renderer.upload_picture(*id, picture)?;
+        }
+        Ok(started.elapsed())
+    };
+    if settings.frames_in_flight <= 1 {
+        for number in 0..frames_to_make {
+            let time_to_send = send(renderer)?;
+            let (_, statistics) = renderer.render(description, settings.frame_timeout)?;
+            if number >= settings.frames_to_leave_out_first {
+                times.push(time_to_send + statistics.time_taken);
+                waiting.push(statistics.time_waiting_for_the_graphics_card);
+            }
+        }
+        return Ok((times, waiting));
+    }
+    // Frames overlap: each is recorded and given to the card, and when as many are on their way as there are to be, the oldest is finished. What is timed is the time
+    // from one finished frame to the next.
+    let mut on_their_way: VecDeque<PendingFrame> = VecDeque::new();
+    let mut finished = 0;
+    let mut last_finished_at = Instant::now();
+    let mut finish_the_oldest = |renderer: &mut FrameRenderer,
+                                 on_their_way: &mut VecDeque<PendingFrame>,
+                                 times: &mut Vec<Duration>,
+                                 waiting: &mut Vec<Duration>|
+     -> Result<(), BenchmarkProblem> {
+        let Some(oldest) = on_their_way.pop_front() else {
+            return Ok(());
+        };
+        let (_, statistics) = renderer.finish_frame(oldest)?;
+        let now = Instant::now();
+        if finished >= settings.frames_to_leave_out_first {
+            times.push(now.duration_since(last_finished_at));
+            waiting.push(statistics.time_waiting_for_the_graphics_card);
+        }
+        finished += 1;
+        last_finished_at = now;
+        Ok(())
+    };
+    for _ in 0..frames_to_make {
+        send(renderer)?;
+        on_their_way.push_back(renderer.begin_frame(description, FrameOutput::Rgba8, settings.frame_timeout)?);
+        while on_their_way.len() >= settings.frames_in_flight {
+            finish_the_oldest(renderer, &mut on_their_way, &mut times, &mut waiting)?;
+        }
+    }
+    while !on_their_way.is_empty() {
+        finish_the_oldest(renderer, &mut on_their_way, &mut times, &mut waiting)?;
+    }
+    Ok((times, waiting))
 }
 
 fn mean_of(times: &[Duration]) -> Duration {
@@ -366,6 +459,8 @@ struct Scene {
     name: &'static str,
     /// Which of the pictures are in it (from the back), and what is done to each.
     layers: Vec<SceneLayer>,
+    /// Whether a new picture of each video is sent to the card before every frame, as a video that plays has.
+    sends_video_pictures: bool,
 }
 
 /// A layer of a scene: a picture, where it is, and what is done to it.
@@ -447,38 +542,53 @@ fn the_scenes() -> Vec<Scene> {
             SceneLayer::new(4, upright(0.05, 0.6, 0.3, 0.3), Vec::new()),
         ]
     };
+    let whole_stack = || {
+        four(
+            vec![Effect::Blur],
+            vec![Effect::ColourMatrix, Effect::LookupStandIn],
+            vec![Effect::Blur],
+        )
+    };
     vec![
         Scene {
             name: "a black frame (the output and the read-back)",
             layers: Vec::new(),
+            sends_video_pictures: false,
         },
         Scene {
             name: "one picture of video",
             layers: vec![SceneLayer::new(1, whole, Vec::new())],
+            sends_video_pictures: false,
         },
         Scene {
             name: "four pictures",
             layers: four(Vec::new(), Vec::new(), Vec::new()),
+            sends_video_pictures: false,
         },
         Scene {
             name: "four pictures, a colour matrix",
             layers: four(Vec::new(), vec![Effect::ColourMatrix], Vec::new()),
+            sends_video_pictures: false,
         },
         Scene {
             name: "four pictures, one blur (two passes)",
             layers: four(vec![Effect::Blur], Vec::new(), Vec::new()),
+            sends_video_pictures: false,
         },
         Scene {
             name: "four pictures, the lookup stand-in",
             layers: four(Vec::new(), Vec::new(), vec![Effect::LookupStandIn]),
+            sends_video_pictures: false,
         },
         Scene {
             name: "the whole stack: two blurs, a matrix, a lookup",
-            layers: four(
-                vec![Effect::Blur],
-                vec![Effect::ColourMatrix, Effect::LookupStandIn],
-                vec![Effect::Blur],
-            ),
+            layers: whole_stack(),
+            sends_video_pictures: false,
+        },
+        Scene {
+            name: "the whole stack, with new pictures of video in every frame",
+            layers: whole_stack(),
+            sends_video_pictures: true,
         },
     ]
 }

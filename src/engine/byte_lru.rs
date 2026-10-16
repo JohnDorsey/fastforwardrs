@@ -74,9 +74,21 @@ impl<Key: Eq + Hash + Copy, Value> ByteLru<Key, Value> {
     /// Keeps `value`, which takes up `size_in_bytes`, under `key` (instead of what was kept under it), and lets go of the things used least recently
     /// while there are more than are wanted. The thing just kept is the one used most recently, so it is the last to go.
     pub fn insert(&mut self, key: Key, value: Value, size_in_bytes: usize) -> Kept {
-        self.remove(&key);
+        self.insert_giving_back_what_is_let_go(key, value, size_in_bytes).0
+    }
+
+    /// Like [`Self::insert`], and gives back what was let go of instead of dropping it: what was kept under `key`, what was used least recently, and `value` itself if
+    /// it is too big to be kept. (For things that are worth more than being thrown away, such as a texture that can be used again.)
+    pub fn insert_giving_back_what_is_let_go(
+        &mut self,
+        key: Key,
+        value: Value,
+        size_in_bytes: usize,
+    ) -> (Kept, Vec<Value>) {
+        let mut let_go_of: Vec<Value> = self.remove(&key).into_iter().collect();
         if size_in_bytes > self.most_bytes {
-            return Kept::TooBig;
+            let_go_of.push(value);
+            return (Kept::TooBig, let_go_of);
         }
         self.use_counter += 1;
         self.bytes += size_in_bytes;
@@ -92,9 +104,9 @@ impl<Key: Eq + Hash + Copy, Value> ByteLru<Key, Value> {
             let Some((&least_recently_used, _)) = self.entries.iter().min_by_key(|(_, entry)| entry.last_used) else {
                 break;
             };
-            self.remove(&least_recently_used);
+            let_go_of.extend(self.remove(&least_recently_used));
         }
-        Kept::Yes
+        (Kept::Yes, let_go_of)
     }
 
     /// Lets go of what is kept under `key`, and gives it.
@@ -213,6 +225,32 @@ mod tests {
         assert_eq!(lru.insert(1, "huge", 4000), Kept::TooBig);
         assert!(lru.is_empty());
         assert_eq!(lru.byte_count(), 0);
+    }
+
+    #[test]
+    fn what_is_let_go_of_is_given_back_when_asked_for_the_one_that_was_under_the_key_those_used_least_recently_and_a_thing_that_is_too_big()
+     {
+        let mut lru = ByteLru::new(Some(3), 100);
+        let (kept, let_go_of) = lru.insert_giving_back_what_is_let_go(1, "one", 10);
+        assert_eq!((kept, let_go_of), (Kept::Yes, vec![]), "nothing was in the way");
+        lru.insert(2, "two", 10);
+        lru.insert(3, "three", 10);
+        // Under a key that is taken: the old one comes back.
+        let (_, let_go_of) = lru.insert_giving_back_what_is_let_go(2, "second", 10);
+        assert_eq!(let_go_of, vec!["two"]);
+        // Too many things: the one used least recently (1) comes back.
+        let (kept, let_go_of) = lru.insert_giving_back_what_is_let_go(4, "four", 10);
+        assert_eq!((kept, let_go_of), (Kept::Yes, vec!["one"]));
+        // Too many bytes: the ones that have to go to make room come back, oldest first.
+        let (kept, let_go_of) = lru.insert_giving_back_what_is_let_go(5, "five", 95);
+        assert_eq!(kept, Kept::Yes);
+        assert_eq!(let_go_of.len(), 3);
+        assert!(lru.contains(&5) && lru.len() == 1);
+        // Too big to keep: the thing itself comes back (and what was under its key).
+        let (kept, let_go_of) = lru.insert_giving_back_what_is_let_go(5, "huge", 400);
+        assert_eq!(kept, Kept::TooBig);
+        assert_eq!(let_go_of, vec!["five", "huge"]);
+        assert!(lru.is_empty());
     }
 
     #[test]

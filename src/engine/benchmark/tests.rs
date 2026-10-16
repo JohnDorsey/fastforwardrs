@@ -13,6 +13,7 @@ fn small() -> BenchmarkSettings {
         frames_of_each_scene: 3,
         frames_to_leave_out_first: 1,
         frame_timeout: Duration::from_secs(60),
+        frames_in_flight: 1,
     }
 }
 
@@ -28,7 +29,7 @@ fn the_scenes_are_a_ladder_and_each_takes_the_passes_that_it_is_made_of() {
     // and a blur is two (along the rows, and down the columns).
     assert_eq!(
         plans.iter().map(|plan| plan.passes_recorded()).collect::<Vec<_>>(),
-        vec![2, 2, 2, 3, 4, 3, 8],
+        vec![2, 2, 2, 3, 4, 3, 8, 8],
         "{:?}",
         scenes.iter().map(|scene| scene.name).collect::<Vec<_>>()
     );
@@ -231,8 +232,16 @@ fn the_pictures_are_what_they_are_said_to_be_and_not_all_one_colour() {
 #[test]
 fn the_benchmark_runs_every_scene_on_the_software_adapter_and_says_what_it_found() {
     let Some(_graphics) = software_graphics() else { return };
-    let settings = small();
-    let report = run(&AdapterChoice::SoftwareOnly, &settings).unwrap();
+    for frames_in_flight in [1, 2, 3] {
+        let mut settings = small();
+        settings.frames_in_flight = frames_in_flight;
+        run_every_scene_and_check_the_report(&settings);
+    }
+}
+
+fn run_every_scene_and_check_the_report(settings: &BenchmarkSettings) {
+    let report = run(&AdapterChoice::SoftwareOnly, settings).unwrap();
+    assert_eq!(report.frames_in_flight, settings.frames_in_flight);
     assert!(report.is_a_software_adapter);
     assert_eq!(report.frame_size, (96, 54));
     assert_eq!(report.scenes.len(), the_scenes().len());
@@ -259,6 +268,81 @@ fn the_benchmark_runs_every_scene_on_the_software_adapter_and_says_what_it_found
     }
     assert!(text.contains("software adapter"), "{text}");
     assert!(text.contains("96 by 54"), "{text}");
+    assert_eq!(text.contains("one at a time"), settings.frames_in_flight == 1, "{text}");
+    assert_eq!(
+        text.contains(&format!("{} on their way at once", settings.frames_in_flight)),
+        settings.frames_in_flight > 1,
+        "{text}"
+    );
+}
+
+#[test]
+fn only_the_last_scene_sends_new_pictures_of_video_and_it_is_the_whole_stack_otherwise() {
+    let scenes = the_scenes();
+    let (last, others) = scenes.split_last().unwrap();
+    assert!(last.sends_video_pictures);
+    assert!(others.iter().all(|scene| !scene.sends_video_pictures));
+    let whole_stack = &others[others.len() - 1];
+    let layers_of = |scene: &Scene| -> Vec<String> {
+        scene
+            .layers
+            .iter()
+            .map(|layer| format!("{} {:?} {}", layer.picture, layer.corners, layer.effects.len()))
+            .collect()
+    };
+    assert_eq!(
+        layers_of(last),
+        layers_of(whole_stack),
+        "the same stack, and the video is what is new"
+    );
+    assert!(last.name.contains("whole stack") && last.name.contains("every frame"));
+}
+
+#[test]
+fn pictures_that_are_sent_before_every_frame_reuse_the_textures_of_the_ones_before_and_frames_that_overlap_are_timed_between_one_finished_and_the_next()
+ {
+    let Some(graphics) = software_graphics() else { return };
+    let mut renderer = FrameRenderer::new(graphics.device.clone());
+    let pictures = pictures_of(96, 54).unwrap();
+    let video: Vec<(PictureId, &PictureData)> = pictures
+        .iter()
+        .enumerate()
+        .take(2)
+        .map(|(number, picture)| (PictureId(number as u64 + 1), picture))
+        .collect();
+    for (number, picture) in pictures.iter().enumerate() {
+        renderer.upload_picture(PictureId(number as u64 + 1), picture).unwrap();
+    }
+    let scene = the_scenes().pop().unwrap();
+    let description = scene.description((96, 54));
+    for frames_in_flight in [1, 2] {
+        let mut settings = small();
+        settings.frames_in_flight = frames_in_flight;
+        settings.frames_of_each_scene = 4;
+        // (The first frames make the textures there are to be; the ones after them make none.)
+        time_the_frames_of(&mut renderer, &description, Some(&video), &settings).unwrap();
+        let made_after_the_first = renderer.pool_statistics().made;
+        let reused_after_the_first = renderer.pool_statistics().reused;
+        let (times, waiting) = time_the_frames_of(&mut renderer, &description, Some(&video), &settings).unwrap();
+        assert_eq!((times.len(), waiting.len()), (4, 4), "{frames_in_flight} on their way");
+        assert!(times.iter().all(|time| *time > Duration::ZERO));
+        assert_eq!(
+            renderer.pool_statistics().made,
+            made_after_the_first,
+            "{frames_in_flight} on their way: sending pictures again made no new texture"
+        );
+        assert!(
+            renderer.pool_statistics().reused >= reused_after_the_first + 5 * 8,
+            "{frames_in_flight} on their way: the pictures were sent again"
+        );
+    }
+    // Without pictures to send, nothing is sent.
+    let reused_before = renderer.pool_statistics().reused;
+    let mut settings = small();
+    settings.frames_in_flight = 1;
+    time_the_frames_of(&mut renderer, &description, None, &settings).unwrap();
+    let reused_by_frames_alone = renderer.pool_statistics().reused - reused_before;
+    assert!(reused_by_frames_alone <= 4 * 6, "{reused_by_frames_alone}");
 }
 
 #[test]
@@ -292,6 +376,7 @@ fn report_of(frame_size: (u32, u32), is_a_software_adapter: bool, mean_in_millis
         is_a_software_adapter,
         frame_size,
         frames_of_each_scene: 10,
+        frames_in_flight: 1,
         time_to_send_a_video_picture: Duration::from_micros(12_300),
         scenes: vec![scene_of(mean_in_milliseconds)],
     }

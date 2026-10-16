@@ -56,6 +56,8 @@ mod effect_tests;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]
+mod export_frames_tests;
+#[cfg(test)]
 mod foreign_effect_tests;
 #[cfg(test)]
 mod guard_tests;
@@ -66,13 +68,15 @@ pub(crate) mod oracle_tests;
 #[cfg(test)]
 mod picture_tests;
 #[cfg(test)]
+mod planes_out_tests;
+#[cfg(test)]
 mod yuv_tests;
 
 pub use device::{AdapterChoice, DeviceError, DeviceTrouble, EngineDevice};
 pub use effect_shaders::{FOREIGN_EFFECT_UNIFORM_BYTES, MOST_NUMBERS_OF_A_FOREIGN_EFFECT};
 pub use frame_cache::FrameCache;
-pub use frame_renderer::{FrameRenderer, RenderProblem};
-pub use frames::{FrameStatistics, RenderedFrame};
+pub use frame_renderer::{FinishedFrame, FrameOutput, FrameRenderer, PendingFrame, RenderProblem};
+pub use frames::{FrameStatistics, RenderedFrame, RenderedPlanes};
 pub use guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader, ShaderProblem, cap_loops, guard_wgsl};
 pub use handle::{EffectShaderReport, Engine};
 pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
@@ -85,4 +89,7 @@ pub use scene::{
 };
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};
 pub use uniform_bytes::{SlotWriter, UniformBytes, UniformSlot};
-pub use yuv::{YuvColour, YuvConversion, YuvMatrix, YuvRange, chroma_size, reference_rgba as rgba_of_yuv420p_planes};
+pub use yuv::{
+    RgbToYuvConversion, YuvColour, YuvConversion, YuvMatrix, YuvRange, chroma_size,
+    reference_rgba as rgba_of_yuv420p_planes, reference_yuv420p as yuv420p_planes_of_rgba,
+};

@@ -15,22 +15,26 @@ use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_c
 use super::guard::GuardedShader;
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
 use super::pictures::{PictureData, PicturePixels};
-use super::pipelines::{ACCUMULATION_FORMAT, OUTPUT_FORMAT, PLANE_FORMAT, Pipelines, SENT_PICTURE_FORMAT};
+use super::pipelines::{
+    ACCUMULATION_FORMAT, CHROMA_FORMAT, LUMA_FORMAT, OUTPUT_FORMAT, PLANE_FORMAT, Pipelines, RGB_TO_YUV_UNIFORM_BYTES,
+    SENT_PICTURE_FORMAT,
+};
 use super::placement::PlacementUniforms;
 use super::plan::{EffectsThatRun, KindOfEffect, PassPlan, plan_frame};
-use super::readback::{ReadbackBuffers, ReadbackProblem};
+use super::readback::{PendingReadback, ReadbackBuffers, ReadbackProblem};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
-use super::yuv::chroma_size;
+use super::yuv::{YuvColour, chroma_size};
 use super::{
-    COLOUR_MATRIX_KEY, FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, UniformBytes,
-    UniformSlot,
+    COLOUR_MATRIX_KEY, FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, RenderedPlanes,
+    UniformBytes, UniformSlot,
 };
 
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
 const IDLE_TEXTURE_BUDGET_IN_BYTES: u64 = 256 * 1024 * 1024;
 
-/// How many read-back buffers are kept from one frame to the next.
+/// How many read-back buffers are kept from one frame to the next. (The planes of the export take two for each frame, and the buffers of a frame that is on its way
+/// are not waiting: the two that a frame finishing gives back are the two that the next frame begun takes.)
 const READBACK_BUFFERS_KEPT: usize = 2;
 
 /// How many bytes a pixel of a picture takes up on the card once it is half-float.
@@ -56,6 +60,61 @@ pub enum RenderProblem {
     BadPicture(String),
     #[error("the shader of an effect cannot be used: {0}")]
     BadEffectShader(String),
+}
+
+/// What a frame is taken back as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameOutput {
+    /// The 8-bit frame that the preview shows: four bytes to the pixel.
+    Rgba8,
+    /// The planes of a `yuv420p` picture, made of that same 8-bit frame the way the colour says (matrix and range): what the export hands to the encoder.
+    Planes(YuvColour),
+}
+
+/// A frame that has been submitted to the graphics card and not taken back yet. [`FrameRenderer::begin_frame`] makes one and [`FrameRenderer::finish_frame`]
+/// waits for it, so that the next frame can be recorded while the card is still at work on this one.
+pub struct PendingFrame {
+    width_in_pixels: u32,
+    height_in_pixels: u32,
+    readbacks: PendingReadbacks,
+    started: Instant,
+    deadline: Instant,
+    passes_recorded: usize,
+    effects_not_run: usize,
+}
+
+enum PendingReadbacks {
+    Rgba8(PendingReadback),
+    /// The brightness plane, and the two colour differences side by side (blue, red, blue, red...).
+    Planes {
+        luma: PendingReadback,
+        chroma: PendingReadback,
+    },
+}
+
+/// A frame that has been taken back, as it was asked for.
+#[derive(Debug)]
+pub enum FinishedFrame {
+    Rgba8(RenderedFrame),
+    Planes(RenderedPlanes),
+}
+
+impl FinishedFrame {
+    /// The frame, which was asked for as [`FrameOutput::Rgba8`].
+    pub fn into_rgba8(self) -> RenderedFrame {
+        match self {
+            Self::Rgba8(frame) => frame,
+            Self::Planes(_) => panic!("a frame that was asked for as planes is not an RGBA frame"),
+        }
+    }
+
+    /// The planes, which were asked for as [`FrameOutput::Planes`].
+    pub fn into_planes(self) -> RenderedPlanes {
+        match self {
+            Self::Planes(planes) => planes,
+            Self::Rgba8(_) => panic!("a frame that was asked for as RGBA is not planes"),
+        }
+    }
 }
 
 /// Makes frames on a device. See the module documentation.
@@ -210,9 +269,26 @@ impl FrameRenderer {
             .map(|picture| (picture.width_in_pixels, picture.height_in_pixels))
     }
 
-    /// Lets go of these pictures (the ones that are not on the card are not missed).
+    /// Lets go of these pictures (the ones that are not on the card are not missed). Their textures are kept to make the next pictures in.
     pub fn forget_pictures(&mut self, ids: impl IntoIterator<Item = PictureId>) {
-        self.pictures.forget(ids);
+        let forgotten = self.pictures.forget(ids);
+        self.keep_the_textures_of(forgotten);
+    }
+
+    /// Gives the textures of pictures that were let go of to the pool, to be made into other pictures (a video that plays has a picture to send in every frame, and
+    /// a texture of 16.6 megabytes at 1080p is not made again for each).
+    fn keep_the_textures_of(&mut self, pictures: Vec<GpuPicture>) {
+        for GpuPicture {
+            texture,
+            view,
+            width_in_pixels,
+            height_in_pixels,
+        } in pictures
+        {
+            drop(view);
+            self.pool
+                .release(shape_of_a_picture(width_in_pixels, height_in_pixels), texture);
+        }
     }
 
     /// Takes a picture that was sent: makes it what the passes of a frame work on, and keeps it, under `id`, instead of what was kept under that id.
@@ -233,20 +309,8 @@ impl FrameRenderer {
             .iter()
             .map(|plane| self.pool.acquire(&self.device.device, plane.shape))
             .collect();
-        let converted = self.device.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("engine: a picture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: ACCUMULATION_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        let converted_shape = shape_of_a_picture(width, height);
+        let converted = self.pool.acquire(&self.device.device, converted_shape);
         let converted_view = converted.create_view(&wgpu::TextureViewDescriptor::default());
         let conversion_slot = match &data.pixels {
             PicturePixels::Rgba8 { .. } => None,
@@ -347,27 +411,55 @@ impl FrameRenderer {
             self.pool.release(plane.shape, texture);
         }
         if let Some(mistake) = mistake {
+            drop(converted_view);
+            self.pool.release(converted_shape, converted);
             return Err(RenderProblem::GraphicsMistake(mistake));
         }
-        self.pictures.insert(
+        let let_go_of = self.pictures.insert(
             id,
             GpuPicture {
-                _texture: converted,
+                texture: converted,
                 view: converted_view,
                 width_in_pixels: width,
                 height_in_pixels: height,
             },
             width as usize * height as usize * BYTES_PER_PIXEL_ON_THE_CARD,
         );
+        self.keep_the_textures_of(let_go_of);
         Ok(())
     }
 
-    /// The frame that `description` describes, made within `timeout`.
+    /// The frame that `description` describes, made within `timeout`, as the 8-bit RGBA frame that the preview shows.
     pub fn render(
         &mut self,
         description: &FrameDescription,
         timeout: Duration,
     ) -> Result<(RenderedFrame, FrameStatistics), RenderProblem> {
+        let pending = self.begin_frame(description, FrameOutput::Rgba8, timeout)?;
+        let (frame, statistics) = self.finish_frame(pending)?;
+        Ok((frame.into_rgba8(), statistics))
+    }
+
+    /// The frame that `description` describes, made within `timeout`, as the planes of a `yuv420p` picture made of the same 8-bit frame the way `colour` says.
+    pub fn render_planes(
+        &mut self,
+        description: &FrameDescription,
+        colour: YuvColour,
+        timeout: Duration,
+    ) -> Result<(RenderedPlanes, FrameStatistics), RenderProblem> {
+        let pending = self.begin_frame(description, FrameOutput::Planes(colour), timeout)?;
+        let (planes, statistics) = self.finish_frame(pending)?;
+        Ok((planes.into_planes(), statistics))
+    }
+
+    /// Records the frame that `description` describes, submits it to the card, and gives back what is needed to take its pixels when the card is done: the
+    /// frame has `timeout` from now to be finished by [`Self::finish_frame`]. (Another frame can be begun before this one is finished.)
+    pub fn begin_frame(
+        &mut self,
+        description: &FrameDescription,
+        output_kind: FrameOutput,
+        timeout: Duration,
+    ) -> Result<PendingFrame, RenderProblem> {
         let started = Instant::now();
         let deadline = started + timeout;
         let (width, height) = description.render_size;
@@ -394,14 +486,38 @@ impl FrameRenderer {
             format: ACCUMULATION_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         };
+        // The 8-bit frame is copied out for the preview, and read by the passes that make the planes for the export.
         let output_shape = TextureShape {
             width_in_pixels: width,
             height_in_pixels: height,
             format: OUTPUT_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | match output_kind {
+                    FrameOutput::Rgba8 => wgpu::TextureUsages::COPY_SRC,
+                    FrameOutput::Planes(_) => wgpu::TextureUsages::TEXTURE_BINDING,
+                },
+        };
+        let (chroma_width, chroma_height) = chroma_size(width, height);
+        let luma_shape = TextureShape {
+            width_in_pixels: width,
+            height_in_pixels: height,
+            format: LUMA_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        };
+        let chroma_shape = TextureShape {
+            width_in_pixels: chroma_width,
+            height_in_pixels: chroma_height,
+            format: CHROMA_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         };
         let accumulation = self.pool.acquire(&self.device.device, accumulation_shape);
         let output = self.pool.acquire(&self.device.device, output_shape);
+        let planes_textures = matches!(output_kind, FrameOutput::Planes(_)).then(|| {
+            (
+                self.pool.acquire(&self.device.device, luma_shape),
+                self.pool.acquire(&self.device.device, chroma_shape),
+            )
+        });
 
         // What the effects of the layers make: a picture for each effect that runs, as big as the picture the effect is run on, from the pool and given back
         // after the frame. `effect_picture_numbers` says, for each layer that has effects, which of them are its own, in the order they are made in (the last
@@ -436,7 +552,7 @@ impl FrameRenderer {
         }
         self.uniforms.clear();
 
-        let (pending, mistake) = self.device.catching_errors(|| {
+        let (readbacks, mistake) = self.device.catching_errors(|| {
             let accumulation_view = accumulation.create_view(&wgpu::TextureViewDescriptor::default());
             let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
             let effect_views: Vec<wgpu::TextureView> = effect_pictures
@@ -482,6 +598,14 @@ impl FrameRenderer {
                     PassPlan::ClearAccumulation | PassPlan::Output => effect_slots.push(Vec::new()),
                 }
             }
+            // The numbers that make the planes of the export are the last slot.
+            let planes_slot = match output_kind {
+                FrameOutput::Planes(colour) => Some(
+                    self.uniforms
+                        .add_slot(|writer| colour.forward_conversion().write(writer)),
+                ),
+                FrameOutput::Rgba8 => None,
+            };
             let uniform_buffer = self
                 .arena
                 .upload(&self.device.device, &self.device.queue, &self.uniforms);
@@ -649,49 +773,156 @@ impl FrameRenderer {
                     }
                 }
             }
-            let pending = self.readback.record_copy(&self.device.device, &mut encoder, &output);
-            self.device.queue.submit([encoder.finish()]);
-            pending
+            match (&planes_textures, planes_slot) {
+                (Some((luma, chroma)), Some(slot)) => {
+                    let uniform_buffer = uniform_buffer.expect("a frame with planes has uniforms");
+                    let bind_group = self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("engine planes pass"),
+                        layout: &self.pipelines.planes.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: uniform_buffer,
+                                    offset: 0,
+                                    size: NonZeroU64::new(RGB_TO_YUV_UNIFORM_BYTES),
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&output_view),
+                            },
+                        ],
+                    });
+                    for (label, texture, pipeline) in [
+                        (
+                            "engine: the brightness plane",
+                            luma,
+                            &self.pipelines.planes.luma_pipeline,
+                        ),
+                        (
+                            "engine: the colour difference planes",
+                            chroma,
+                            &self.pipelines.planes.chroma_pipeline,
+                        ),
+                    ] {
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let mut render_pass =
+                            begin_pass(&mut encoder, label, &view, wgpu::LoadOp::Clear(wgpu::Color::BLACK));
+                        render_pass.set_pipeline(pipeline);
+                        render_pass.set_bind_group(0, &bind_group, &[slot.offset]);
+                        render_pass.draw(0..3, 0..1);
+                    }
+                    let readbacks = PendingReadbacks::Planes {
+                        luma: self.readback.record_copy(&self.device.device, &mut encoder, luma),
+                        chroma: self.readback.record_copy(&self.device.device, &mut encoder, chroma),
+                    };
+                    self.device.queue.submit([encoder.finish()]);
+                    readbacks
+                }
+                _ => {
+                    let readbacks =
+                        PendingReadbacks::Rgba8(self.readback.record_copy(&self.device.device, &mut encoder, &output));
+                    self.device.queue.submit([encoder.finish()]);
+                    readbacks
+                }
+            }
         });
         self.pool.release(accumulation_shape, accumulation);
         self.pool.release(output_shape, output);
+        if let Some((luma, chroma)) = planes_textures {
+            self.pool.release(luma_shape, luma);
+            self.pool.release(chroma_shape, chroma);
+        }
         for (shape, texture) in effect_pictures {
             self.pool.release(shape, texture);
         }
         if let Some(mistake) = mistake {
             return Err(RenderProblem::GraphicsMistake(mistake));
         }
+        let planes_passes = if matches!(output_kind, FrameOutput::Planes(_)) {
+            2
+        } else {
+            0
+        };
+        Ok(PendingFrame {
+            width_in_pixels: width,
+            height_in_pixels: height,
+            readbacks,
+            started,
+            deadline,
+            passes_recorded: plan.passes_recorded() + planes_passes,
+            effects_not_run: plan.effects_not_run,
+        })
+    }
 
+    /// Waits for the card to finish `pending` (until the time it was begun with `timeout` after) and takes its pixels.
+    pub fn finish_frame(&mut self, pending: PendingFrame) -> Result<(FinishedFrame, FrameStatistics), RenderProblem> {
         #[cfg(test)]
         if self.the_card_never_finishes {
             return Err(RenderProblem::TimedOut);
         }
+        let PendingFrame {
+            width_in_pixels: width,
+            height_in_pixels: height,
+            readbacks,
+            started,
+            deadline,
+            passes_recorded,
+            effects_not_run,
+        } = pending;
         let waiting_since = Instant::now();
-        let rgba_pixels =
+        let mut collect = |pending: PendingReadback| {
             self.readback
                 .collect(&self.device.device, pending, deadline)
                 .map_err(|problem| match problem {
                     ReadbackProblem::TimedOut => RenderProblem::TimedOut,
                     ReadbackProblem::Failed(message) => RenderProblem::ReadbackFailed(message),
-                })?;
+                })
+        };
+        let finished = match readbacks {
+            PendingReadbacks::Rgba8(readback) => FinishedFrame::Rgba8(RenderedFrame {
+                width_in_pixels: width,
+                height_in_pixels: height,
+                rgba_pixels: collect(readback)?,
+            }),
+            PendingReadbacks::Planes { luma, chroma } => {
+                let luma = collect(luma)?;
+                let chroma = collect(chroma)?;
+                FinishedFrame::Planes(RenderedPlanes {
+                    width_in_pixels: width,
+                    height_in_pixels: height,
+                    planes: planes_from_the_textures(width, height, luma, &chroma),
+                })
+            }
+        };
         let waited = waiting_since.elapsed();
         self.pool.end_frame(IDLE_TEXTURE_BUDGET_IN_BYTES);
         self.readback.end_frame(READBACK_BUFFERS_KEPT);
         Ok((
-            RenderedFrame {
-                width_in_pixels: width,
-                height_in_pixels: height,
-                rgba_pixels,
-            },
+            finished,
             FrameStatistics {
                 time_taken: started.elapsed(),
                 time_waiting_for_the_graphics_card: waited,
-                passes_recorded: plan.passes_recorded(),
+                passes_recorded,
                 came_from_the_cache: false,
-                effects_not_run: plan.effects_not_run,
+                effects_not_run,
             },
         ))
     }
+}
+
+/// The planes of a `yuv420p` picture from what the card gave: the brightness plane as it is, and the colour differences, which came side by side (blue, red, blue,
+/// red...), taken apart and put after it.
+fn planes_from_the_textures(width: u32, height: u32, brightness: Vec<u8>, side_by_side: &[u8]) -> Vec<u8> {
+    let (chroma_width, chroma_height) = chroma_size(width, height);
+    let colour_difference_bytes = chroma_width as usize * chroma_height as usize;
+    debug_assert_eq!(side_by_side.len(), 2 * colour_difference_bytes);
+    let mut planes = brightness;
+    planes.reserve(2 * colour_difference_bytes);
+    planes.extend(side_by_side.iter().step_by(2));
+    planes.extend(side_by_side.iter().skip(1).step_by(2));
+    planes
 }
 
 /// The three rows of the matrix of an effect that mixes colours, from its nine numbers (the plan only lets one through that has nine).
@@ -702,6 +933,17 @@ fn colour_matrix_rows(values: &[f32]) -> [[f32; 3]; 3] {
         [values[3], values[4], values[5]],
         [values[6], values[7], values[8]],
     ]
+}
+
+/// The shape of the texture that a picture is kept in on the card: premultiplied, in half floats, to be read by the passes of a frame and drawn into by the pass
+/// that makes it (and by the effects, which make pictures of the same shape).
+fn shape_of_a_picture(width: u32, height: u32) -> TextureShape {
+    TextureShape {
+        width_in_pixels: width,
+        height_in_pixels: height,
+        format: ACCUMULATION_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+    }
 }
 
 /// One of the textures that the bytes of a picture are put in before the picture is made what the frames work on.

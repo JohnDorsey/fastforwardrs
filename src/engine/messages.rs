@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::device::AdapterChoice;
 use super::guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader};
-use super::{FrameDescription, FrameStatistics, PictureData, PictureId, RenderedFrame};
+use super::{FrameDescription, FrameStatistics, PictureData, PictureId, RenderedFrame, RenderedPlanes, YuvColour};
 
 /// What the engine calls when it has something to tell: the window's way of being asked to draw again, so that the engine's thread does not
 /// have to be waited for. (It is called from the engine's thread.)
@@ -27,6 +27,15 @@ pub enum EngineRequest {
     /// Make the frame `description` describes. If more requests have come by the time the engine looks, only the newest of them is made, and
     /// the others are not answered: the window only wants the latest.
     Render { serial: u64, description: FrameDescription },
+    /// Make the frame `description` describes for the export, as the planes of a `yuv420p` picture made the way `colour` says. **Every such request is made, in the
+    /// order it was asked in** (none is passed over for a newer one, and none is looked for in the cache of finished frames), and answered with an
+    /// [`EngineEvent::ExportFrame`] (or, if it could not be made, with the same events a frame of the preview has), in that order. Pictures that the frame uses are
+    /// sent before it, and the ones that none of the frames after it uses can be let go of after it: the requests are done in the order they come in.
+    RenderForExport {
+        serial: u64,
+        description: FrameDescription,
+        colour: YuvColour,
+    },
     /// Stop.
     Stop,
 }
@@ -38,6 +47,12 @@ pub enum EngineEvent {
     Frame {
         serial: u64,
         frame: Arc<RenderedFrame>,
+        statistics: FrameStatistics,
+    },
+    /// The frame of the export with this serial number, as planes.
+    ExportFrame {
+        serial: u64,
+        planes: RenderedPlanes,
         statistics: FrameStatistics,
     },
     /// The frame of the request with this serial number could not be made. The engine goes on.
@@ -74,6 +89,9 @@ pub struct EngineSettings {
     pub most_cached_frame_bytes: usize,
     /// How many passes a loop of a shader that was given to the engine is let make (see `guard`).
     pub most_passes_of_a_loop: u32,
+    /// How many frames of the export may be on their way at once: while the card is at work on one, the next is recorded and the one before is read back. One is
+    /// no overlap at all.
+    pub export_frames_in_flight: usize,
     /// When the graphics device has had to be replaced this many times within `how_long_replacements_are_counted`, the engine stops instead (see `replacement`).
     pub replacements_that_stop_the_engine: usize,
     pub how_long_replacements_are_counted: Duration,
@@ -94,6 +112,7 @@ impl EngineSettings {
             most_cached_frames: 32,
             most_cached_frame_bytes: 256 * 1024 * 1024,
             most_passes_of_a_loop: DEFAULT_MOST_PASSES_OF_A_LOOP,
+            export_frames_in_flight: 2,
             replacements_that_stop_the_engine: 3,
             how_long_replacements_are_counted: Duration::from_secs(60),
             #[cfg(test)]

@@ -748,3 +748,146 @@ fn a_shader_that_is_given_under_a_key_again_replaces_the_first_and_the_frame_tha
     assert!(!statistics.came_from_the_cache);
     assert!(second.every_pixel_is([0, 255, 0, 255]), "{:?}", second.pixel(0, 0));
 }
+
+// ---- the frames of the export ----
+
+/// A frame of 8 by 8 that is one flat grey of this level.
+fn grey(level: u8) -> FrameDescription {
+    FrameDescription {
+        render_size: (8, 8),
+        layers: vec![LayerDescription {
+            source: LayerSource::Solid([level, level, level, 255]),
+            corners: CORNERS_OF_THE_WHOLE_PICTURE,
+            effects: Vec::new(),
+        }],
+    }
+}
+
+fn export_request(serial: u64, level: u8) -> EngineRequest {
+    EngineRequest::RenderForExport {
+        serial,
+        description: grey(level),
+        colour: YuvColour::UNSPECIFIED,
+    }
+}
+
+fn the_serials_of_the_export_frames_in(said: &[EngineEvent]) -> Vec<u64> {
+    said.iter()
+        .map(|event| match event {
+            EngineEvent::ExportFrame { serial, .. } => *serial,
+            other => panic!("not a frame of the export: {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_frame_of_the_export_is_finished_when_as_many_are_on_their_way_as_there_is_room_for_and_the_rest_at_the_end_of_the_batch()
+ {
+    let Some(_graphics) = software_graphics() else { return };
+    for room in [1usize, 2, 3] {
+        let mut settings = software_settings();
+        settings.export_frames_in_flight = room;
+        with_a_worker(settings, |worker, told| {
+            let mut serials = Vec::new();
+            for serial in 1..=5u64 {
+                let next = worker.begin_an_export_frame(serial, &grey(serial as u8 * 10), YuvColour::UNSPECIFIED);
+                assert!(matches!(next, Next::GoOn));
+                // The card has the new frame to work on while the one before is read back: as many are on their way as there is room for, less the one that was
+                // finished to make room (with room for one there is no overlap, and a frame is finished as soon as it is begun).
+                assert_eq!(
+                    worker.on_their_way.len(),
+                    (serial as usize).min(room - 1),
+                    "room for {room}, frame {serial}"
+                );
+                serials.extend(the_serials_of_the_export_frames_in(&what_was_said(told)));
+                assert_eq!(serials.len() + worker.on_their_way.len(), serial as usize);
+            }
+            assert!(matches!(worker.finish_the_export_frames_on_their_way(), Next::GoOn));
+            serials.extend(the_serials_of_the_export_frames_in(&what_was_said(told)));
+            assert_eq!(
+                serials,
+                vec![1, 2, 3, 4, 5],
+                "room for {room}: in the order they were asked in, none left out"
+            );
+            assert!(worker.on_their_way.is_empty());
+        });
+    }
+}
+
+#[test]
+fn all_the_frames_of_the_export_of_a_batch_are_answered_by_the_end_of_it() {
+    let Some(_graphics) = software_graphics() else { return };
+    with_a_worker(software_settings(), |worker, told| {
+        let batch = (1..=7)
+            .map(|serial| export_request(serial, serial as u8 * 10))
+            .collect();
+        assert!(matches!(worker.take(batch), Next::GoOn));
+        assert_eq!(
+            the_serials_of_the_export_frames_in(&what_was_said(told)),
+            (1..=7).collect::<Vec<u64>>()
+        );
+        assert!(
+            worker.on_their_way.is_empty(),
+            "nothing is left on its way between batches"
+        );
+    });
+}
+
+#[test]
+fn when_a_frame_of_the_export_does_not_finish_the_frames_begun_after_it_are_given_up_with_it_the_device_is_replaced_and_the_next_frames_are_made()
+ {
+    let Some(_graphics) = software_graphics() else { return };
+    let mut settings = software_settings();
+    settings.export_frames_in_flight = 3;
+    with_a_worker(settings, |worker, told| {
+        worker.renderer.pretend_the_card_never_finishes();
+        assert!(matches!(
+            worker.take(vec![export_request(1, 10), export_request(2, 20)]),
+            Next::GoOn
+        ));
+        let said = what_was_said(told);
+        assert_eq!(said.len(), 3, "{said:?}");
+        assert!(
+            matches!(&said[0], EngineEvent::FrameFailed { serial: 1, problem } if problem.contains("did not finish")),
+            "{said:?}"
+        );
+        assert!(
+            matches!(&said[1], EngineEvent::FrameFailed { serial: 2, problem } if problem.contains("given up with the frame 1")),
+            "{said:?}"
+        );
+        assert!(matches!(&said[2], EngineEvent::DeviceReplaced { .. }), "{said:?}");
+        assert!(worker.on_their_way.is_empty());
+        assert_eq!(worker.replacements_made_so_far(), 1);
+
+        // The new device makes the frames after them.
+        assert!(matches!(worker.take(vec![export_request(3, 30)]), Next::GoOn));
+        assert_eq!(the_serials_of_the_export_frames_in(&what_was_said(told)), vec![3]);
+    });
+}
+
+#[test]
+fn a_device_that_was_lost_before_a_batch_of_the_export_is_replaced_before_its_frames_are_made() {
+    let Some(_graphics) = software_graphics() else { return };
+    with_a_worker(software_settings(), |worker, told| {
+        worker.renderer.device().destroy();
+        assert!(matches!(
+            worker.take(vec![export_request(1, 10), export_request(2, 20)]),
+            Next::GoOn
+        ));
+        let said = what_was_said(told);
+        assert!(matches!(&said[0], EngineEvent::DeviceReplaced { .. }), "{said:?}");
+        assert_eq!(the_serials_of_the_export_frames_in(&said[1..]), vec![1, 2]);
+    });
+}
+
+#[test]
+fn a_stop_in_a_batch_of_the_export_stops_the_engine_without_waiting_for_the_frames_on_their_way() {
+    let Some(_graphics) = software_graphics() else { return };
+    let mut settings = software_settings();
+    settings.export_frames_in_flight = 3;
+    with_a_worker(settings, |worker, _| {
+        let next = worker.take(vec![export_request(1, 10), export_request(2, 20), EngineRequest::Stop]);
+        assert!(matches!(next, Next::Stop(_)));
+        assert!(worker.on_their_way.is_empty());
+    });
+}

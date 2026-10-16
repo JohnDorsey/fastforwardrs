@@ -31,6 +31,15 @@ pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 48;
 /// The format of the planes of a video picture, which are sent as they are.
 pub const PLANE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
+/// The format of the brightness plane that the export makes of a finished frame.
+pub const LUMA_FORMAT: wgpu::TextureFormat = PLANE_FORMAT;
+
+/// The format of the texture that the two colour difference planes of a finished frame are made side by side in (blue in the red channel, red in the green one).
+pub const CHROMA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg8Unorm;
+
+/// How many bytes the uniforms of the passes that make the planes of a finished frame take up (see `rgb_to_luma.wgsl`): three rows of a `vec4<f32>`.
+pub const RGB_TO_YUV_UNIFORM_BYTES: u64 = 48;
+
 /// The last pass: the accumulation picture to the 8-bit frame.
 pub struct OutputPass {
     pub pipeline: wgpu::RenderPipeline,
@@ -46,6 +55,14 @@ pub struct IngestPass {
 /// The pass that makes a video picture in planes red, green and blue.
 pub struct YuvPass {
     pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
+/// The two passes that make the planes of `yuv420p` of a finished frame, for the export: they read the same things (the numbers of the conversion, and the 8-bit
+/// frame) and write other textures.
+pub struct PlanesPass {
+    pub luma_pipeline: wgpu::RenderPipeline,
+    pub chroma_pipeline: wgpu::RenderPipeline,
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -68,6 +85,7 @@ pub struct Pipelines {
     pub output: OutputPass,
     pub ingest: IngestPass,
     pub yuv: YuvPass,
+    pub planes: PlanesPass,
     pub colour_matrix: ColourMatrixPass,
     pub place: PlacePass,
     /// What the effects that others wrote are made from (the pipeline of each is made when its shader is given to the engine).
@@ -80,6 +98,7 @@ impl Pipelines {
             output: output_pass(device),
             ingest: ingest_pass(device),
             yuv: yuv_pass(device),
+            planes: planes_pass(device),
             colour_matrix: colour_matrix_pass(device),
             place: place_pass(device),
             foreign_effect: ForeignEffectPass::create(device),
@@ -225,6 +244,51 @@ fn yuv_pass(device: &wgpu::Device) -> YuvPass {
     });
     YuvPass {
         pipeline: pipeline(device, "engine yuv pass", &module, &layout, ACCUMULATION_FORMAT, None),
+        bind_group_layout,
+    }
+}
+
+fn planes_pass(device: &wgpu::Device) -> PlanesPass {
+    let luma_module = shader_module(device, "engine brightness plane pass", shaders::RGB_TO_LUMA);
+    let chroma_module = shader_module(device, "engine colour difference planes pass", shaders::RGB_TO_CHROMA);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine planes pass bindings"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(RGB_TO_YUV_UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            loaded_texture_entry(1),
+        ],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine planes pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    PlanesPass {
+        luma_pipeline: pipeline(
+            device,
+            "engine brightness plane pass",
+            &luma_module,
+            &layout,
+            LUMA_FORMAT,
+            None,
+        ),
+        chroma_pipeline: pipeline(
+            device,
+            "engine colour difference planes pass",
+            &chroma_module,
+            &layout,
+            CHROMA_FORMAT,
+            None,
+        ),
         bind_group_layout,
     }
 }

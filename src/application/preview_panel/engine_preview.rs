@@ -333,6 +333,8 @@ impl EnginePreview {
                     self.note_how_long_the_frame_took(serial, statistics.came_from_the_cache, clock);
                     self.show(context, serial, frame, filter);
                 }
+                // (The preview does not ask for frames of the export.)
+                EngineEvent::ExportFrame { .. } => {}
                 EngineEvent::FrameFailed { problem, .. } => self.last_problem = Some(problem),
                 EngineEvent::PicturesMissing { ids, .. } => {
                     // (They are sent again, and the frame is asked for again.)

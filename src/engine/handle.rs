@@ -13,7 +13,7 @@ use super::effect_shaders::check_that_it_is_an_effect;
 use super::guard::{ShaderProblem, guard_wgsl};
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::worker;
-use super::{COLOUR_MATRIX_KEY, FrameDescription, PictureData, PictureId};
+use super::{COLOUR_MATRIX_KEY, FrameDescription, PictureData, PictureId, YuvColour};
 
 /// How long dropping the handle waits for the engine's thread to finish before it leaves it behind. (A thread that is stuck on the graphics card
 /// cannot be stopped from outside: the program leaves it, and it ends with the program.)
@@ -105,6 +105,19 @@ impl Engine {
         self.next_serial += 1;
         // (If the engine has stopped, nobody is listening, and the window will have been told so by a `Stopped` event.)
         let _ = self.requests.send(EngineRequest::Render { serial, description });
+        serial
+    }
+
+    /// Asks for a frame of the export, as planes made the way `colour` says, and gives the serial number that its [`EngineEvent::ExportFrame`] will have. Unlike
+    /// [`Self::request_frame`] **every one of these is made, in the order it was asked in**.
+    pub fn request_export_frame(&mut self, description: FrameDescription, colour: YuvColour) -> u64 {
+        let serial = self.next_serial;
+        self.next_serial += 1;
+        let _ = self.requests.send(EngineRequest::RenderForExport {
+            serial,
+            description,
+            colour,
+        });
         serial
     }
 
