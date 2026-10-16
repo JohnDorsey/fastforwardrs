@@ -234,7 +234,8 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    assert_eq!(FILE_FORMAT_VERSION, 11);
+    // (Rewritten on purpose in phase 3: 12, the version that has the colours of the source files.)
+    assert_eq!(FILE_FORMAT_VERSION, 12);
 }
 
 // --- the trip through the file ---

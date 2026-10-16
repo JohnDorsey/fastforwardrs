@@ -93,7 +93,7 @@ mod tests {
     use crate::media::MediaLocation;
     use crate::playback::scripted_streams::{Script, ScriptedStarter};
     use crate::playback::supplier::PreviewVideo;
-    use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
+    use crate::project::{FrameRate, InputColourOverride, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
     const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
     const ANOTHER_VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(2);
@@ -110,6 +110,7 @@ mod tests {
                     display_size_in_pixels: (1280, 720),
                     frame_rate: FrameRate::new(30, 1).unwrap(),
                     format: None,
+                    colour: InputColourOverride::AUTOMATIC,
                 },
                 PreviewVideo {
                     source: ANOTHER_VIDEO,
@@ -117,6 +118,7 @@ mod tests {
                     display_size_in_pixels: (720, 1280),
                     frame_rate: FrameRate::new(25, 1).unwrap(),
                     format: None,
+                    colour: InputColourOverride::AUTOMATIC,
                 },
             ],
             planes_wanted: false,

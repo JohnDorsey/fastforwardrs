@@ -11,6 +11,7 @@
 mod archive_cache;
 mod background;
 mod clip_moving;
+mod colour_of_a_file_window;
 pub mod command_line;
 mod commands;
 mod dialogs;

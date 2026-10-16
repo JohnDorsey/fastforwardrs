@@ -11,8 +11,10 @@ use thiserror::Error;
 use super::child_process::{background_command, end_of_error_output};
 use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::location::MediaLocation;
+use crate::colour_space::VideoMatrix;
 use crate::project::{
-    FrameRate, SourceAudioProperties, SourceImageProperties, SourceMediaProperties, SourceVideoProperties,
+    FrameRate, InputColourOverride, SourceAudioProperties, SourceImageProperties, SourceMediaProperties,
+    SourceVideoProperties,
 };
 
 #[derive(Debug, Error)]
@@ -105,19 +107,11 @@ pub struct VideoStreamFormat {
     pub colour_transfer: Option<String>,
 }
 
-/// The matrices that the preview can turn into colours itself.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NativeMatrix {
-    Bt601,
-    Bt709,
-    Bt2020,
-}
-
 /// A video whose pictures the preview can take as ffmpeg decodes them, in planes, and turn into colours itself: 8 bits to a number, 4:2:0, with a
 /// matrix it knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeYuv420p {
-    pub matrix: NativeMatrix,
+    pub matrix: VideoMatrix,
     pub full_range: bool,
 }
 
@@ -129,10 +123,16 @@ impl VideoStreamFormat {
     /// **Which matrix and which range is what [`VideoStreamFormat::colour_of_a_picture_of_size`] says**: what the file says, and where it says nothing the matrix that
     /// goes with the size of the picture (BT.709 for high definition, BT.601 for standard definition; it was BT.601 for every size until phase 3) and the limited range.
     pub fn as_native_yuv420p(&self, width: u32, height: u32) -> Option<NativeYuv420p> {
+        self.as_native_yuv420p_with(width, height, &InputColourOverride::AUTOMATIC)
+    }
+
+    /// [`Self::as_native_yuv420p`] when the user has said some of the colours of the video (see [`Self::colour_of_a_picture_of_size_with`]). A matrix that the user
+    /// chooses is one that the program has, and makes planes of a video whose own matrix it has not.
+    pub fn as_native_yuv420p_with(&self, width: u32, height: u32, said: &InputColourOverride) -> Option<NativeYuv420p> {
         if self.pixel_format.as_deref() != Some("yuv420p") {
             return None;
         }
-        let colour = self.colour_of_a_picture_of_size(width, height);
+        let colour = self.colour_of_a_picture_of_size_with(width, height, said);
         Some(NativeYuv420p {
             matrix: colour.matrix?,
             full_range: colour.full_range?,
@@ -593,7 +593,7 @@ mod tests {
         assert_eq!(
             native(""),
             Some(NativeYuv420p {
-                matrix: NativeMatrix::Bt601,
+                matrix: VideoMatrix::Bt601,
                 full_range: false
             }),
             "says nothing, and is small: BT.601, limited"
@@ -602,16 +602,16 @@ mod tests {
         assert_eq!(
             format_of(r#", "pix_fmt": "yuv420p""#).as_native_yuv420p(1920, 1080),
             Some(NativeYuv420p {
-                matrix: NativeMatrix::Bt709,
+                matrix: VideoMatrix::Bt709,
                 full_range: false
             }),
             "says nothing, and is high definition: BT.709, limited"
         );
         for (name, matrix) in [
-            ("bt470bg", NativeMatrix::Bt601),
-            ("smpte170m", NativeMatrix::Bt601),
-            ("bt709", NativeMatrix::Bt709),
-            ("bt2020nc", NativeMatrix::Bt2020),
+            ("bt470bg", VideoMatrix::Bt601),
+            ("smpte170m", VideoMatrix::Bt601),
+            ("bt709", VideoMatrix::Bt709),
+            ("bt2020nc", VideoMatrix::Bt2020),
         ] {
             assert_eq!(
                 native(&format!(r#", "color_space": "{name}""#)),
@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(
             native(r#", "color_space": "bt709", "color_range": "pc""#),
             Some(NativeYuv420p {
-                matrix: NativeMatrix::Bt709,
+                matrix: VideoMatrix::Bt709,
                 full_range: true
             })
         );

@@ -19,6 +19,7 @@ use super::{PreviewContent, PreviewLayer, PreviewLayerContent, VideoInThePicture
 use crate::application::commands::Command;
 use crate::application::textures::{PictureFilter, Textures};
 use crate::colour_effects::ColourMatrix;
+use crate::engine::PictureColour;
 use crate::media::{CompressedPicture, DecodedFrame, PictureSize, ThumbnailKey, ThumbnailLibrary};
 use crate::playback::SuppliedPicture;
 use crate::project::{
@@ -132,6 +133,7 @@ fn show_the_preview(ui: &mut egui::Ui, preview: &mut Preview) {
             PreviewLayerContent::Image {
                 source: THE_PICTURE_FILE,
                 picture: Some(from_a_file),
+                colour: PictureColour::SRGB,
             },
         ),
     ];

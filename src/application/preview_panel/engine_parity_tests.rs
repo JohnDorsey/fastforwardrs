@@ -22,12 +22,12 @@ use super::{
 use crate::application::textures::Textures;
 use crate::application::theme;
 use crate::colour_effects::ColourMatrix;
+use crate::colour_space::VideoMatrix;
 use crate::engine::oracle_tests::render_with_egui;
 use crate::engine::testing::{SoftwareGraphics, with_software_graphics};
-use crate::engine::{FrameDescription, FrameRenderer, LayerSource};
+use crate::engine::{FrameDescription, FrameRenderer, LayerSource, PictureColour};
 use crate::media::{
-    CompressedPicture, DecodedFrame, DecodedYuvFrame, NativeMatrix, NativeYuv420p, PictureSize, ThumbnailKey,
-    ThumbnailLibrary,
+    CompressedPicture, DecodedFrame, DecodedYuvFrame, NativeYuv420p, PictureSize, ThumbnailKey, ThumbnailLibrary,
 };
 use crate::playback::{SuppliedFrame, SuppliedPicture};
 use crate::project::{
@@ -195,10 +195,12 @@ impl Scene {
                     Kind::Image(index) => PreviewLayerContent::Image {
                         source: SourceMediaIdentifier::new(index as u32 + 10),
                         picture: Some(&self.images[index]),
+                        colour: PictureColour::SRGB,
                     },
                     Kind::ImageNotDecoded => PreviewLayerContent::Image {
                         source: SourceMediaIdentifier::new(99),
                         picture: None,
+                        colour: PictureColour::SRGB,
                     },
                     Kind::Thumbnail(index) => PreviewLayerContent::Video(VideoInThePicture::Thumbnail {
                         source: SourceMediaIdentifier::new(index as u32 + 50),
@@ -274,7 +276,7 @@ fn a_random_video_picture(random: &mut Random, serial_number: u64, in_planes: bo
                 v: random.bytes(chroma_width * chroma_height),
             },
             colour: NativeYuv420p {
-                matrix: [NativeMatrix::Bt601, NativeMatrix::Bt709, NativeMatrix::Bt2020][random.below(3) as usize],
+                matrix: [VideoMatrix::Bt601, VideoMatrix::Bt709, VideoMatrix::Bt2020][random.below(3) as usize],
                 full_range: random.one_in(2),
             },
         }

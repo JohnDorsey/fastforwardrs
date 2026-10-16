@@ -9,8 +9,8 @@ use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
     AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, EffectInstanceId, EffectKind,
-    FrameRate, Gain, GroupColour, GroupId, GroupKind, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings,
-    PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
+    FrameRate, Gain, GroupColour, GroupId, GroupKind, InputColourOverride, KeyframeId, KeyframeMove, Member, Placement,
+    ProjectSettings, PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
     SpeedIndicatorLayout, TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
@@ -322,6 +322,14 @@ pub enum Command {
 
     /// Move or resize the fast-forward symbol.
     SetSpeedIndicatorLayout(SpeedIndicatorLayout),
+
+    /// Open the window that says what the colours of a source file are and lets the user say them differently (from the menu of a clip made from the file).
+    ShowTheColoursOfAFile(SourceMediaIdentifier),
+    /// Say what the colours of a source file are, instead of what it says (every part automatic, to say nothing): the pictures that are made of it are made again.
+    SetTheColoursOfAFile {
+        source: SourceMediaIdentifier,
+        colour: InputColourOverride,
+    },
 }
 
 impl Command {
@@ -400,7 +408,8 @@ impl Command {
             | Self::MergeRacks(_)
             | Self::MoveRacks { .. }
             | Self::SetProjectFrameRate(_)
-            | Self::SetSpeedIndicatorLayout(_) => true,
+            | Self::SetSpeedIndicatorLayout(_)
+            | Self::SetTheColoursOfAFile { .. } => true,
 
             Self::LoadProject
             | Self::SaveProject
@@ -428,7 +437,8 @@ impl Command {
             | Self::SelectItems { .. }
             | Self::RelinkSource(_)
             | Self::IncludeFilesInTheProjectFile(_)
-            | Self::TakeFilesOutOfTheProjectFile(_) => false,
+            | Self::TakeFilesOutOfTheProjectFile(_)
+            | Self::ShowTheColoursOfAFile(_) => false,
         }
     }
 
@@ -511,7 +521,9 @@ impl Command {
             | Self::DeleteRacks(_)
             | Self::MergeRacks(_)
             | Self::MoveRacks { .. }
-            | Self::SetSpeedIndicatorLayout(_) => None,
+            | Self::SetSpeedIndicatorLayout(_)
+            | Self::ShowTheColoursOfAFile(_)
+            | Self::SetTheColoursOfAFile { .. } => None,
         }
     }
 
@@ -561,6 +573,7 @@ impl Command {
                 Some(EditKey::about(&("the place of the racks", racks)))
             }
             Self::SetSpeedIndicatorLayout(_) => Some(EditKey::about(&"where the fast-forward symbol is")),
+            Self::SetTheColoursOfAFile { source, .. } => Some(EditKey::about(&("the colours of the file", source))),
             _ => None,
         }
     }

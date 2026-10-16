@@ -19,9 +19,9 @@ use std::time::{Duration, Instant};
 use fastforwardrs::engine::{AdapterChoice, there_is_a_software_adapter};
 use fastforwardrs::media::{FfmpegToolchain, MediaLocation, probe_source_media, probe_video};
 use fastforwardrs::project::{
-    AnimationTarget, Clip, ClipId, MediaClip, Project, PropertyId, PropertyValue, Settings, SourceAudioProperties,
-    SourceFrameIndex, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SpeedFactor, SpeedIndicatorLayout,
-    TextObject, TimelineFrameIndex, Track, TrackId,
+    AnimationTarget, Clip, ClipId, InputColourOverride, MediaClip, Project, PropertyId, PropertyValue, Settings,
+    SourceAudioProperties, SourceFrameIndex, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SpeedFactor,
+    SpeedIndicatorLayout, TextObject, TimelineFrameIndex, Track, TrackId,
 };
 use fastforwardrs::rgba_picture::RgbaPicture;
 use fastforwardrs::video_export::{ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export};
@@ -564,6 +564,7 @@ pub fn project_with_a_picture_over_a_video(
                 identifier: SourceMediaIdentifier::new(2),
                 link: SourceMediaLink::from_absolute_path(path),
                 properties,
+                colour: InputColourOverride::AUTOMATIC,
             },
             TimelineFrameIndex::new(first_frame),
         )

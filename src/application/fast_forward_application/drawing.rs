@@ -20,7 +20,7 @@ use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
 use crate::composition::{Layer, PictureSection, VisibleVideo};
-use crate::frame_scene::{colour_of_the_preview, layers_of_a_section, symbol_of_a_section};
+use crate::frame_scene::{colour_of_a_picture_file, colour_of_the_preview, layers_of_a_section, symbol_of_a_section};
 use crate::media::thumbnail_second_for_source_frame;
 use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
 use crate::project::{ClipId, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
@@ -205,7 +205,12 @@ fn preview_content<'a>(
             section,
             frame_state.current_frame,
             |layer, video| video_in_the_picture(section, layer, video, preview_pictures, frame_state, source_looks),
-            |source| source_looks.get(&source).and_then(|look| look.picture),
+            |source| {
+                (
+                    source_looks.get(&source).and_then(|look| look.picture),
+                    colour_of_a_picture_file(&project.source_colour(source).unwrap_or_default()),
+                )
+            },
         )
     });
     PreviewContent {

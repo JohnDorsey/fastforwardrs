@@ -198,7 +198,7 @@ fn the_scenes() -> Vec<(&'static str, Scene)> {
                     .collect(),
             },
             colour: NativeYuv420p {
-                matrix: NativeMatrix::Bt709,
+                matrix: VideoMatrix::Bt709,
                 full_range: false,
             },
         },

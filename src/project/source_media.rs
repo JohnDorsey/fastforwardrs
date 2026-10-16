@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::FrameRate;
+use super::{FrameRate, InputColourOverride};
 
 /// Tells the source files of one project apart. Clips refer to their file by this number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -212,6 +212,8 @@ pub struct SourceMedia {
     pub identifier: SourceMediaIdentifier,
     pub link: SourceMediaLink,
     pub properties: SourceMediaProperties,
+    /// What the user says the colours of the file are, instead of what the file says (all automatic until they say).
+    pub colour: InputColourOverride,
 }
 
 impl SourceMedia {
@@ -220,6 +222,7 @@ impl SourceMedia {
             identifier,
             link,
             properties: SourceMediaProperties::Video(properties),
+            colour: InputColourOverride::AUTOMATIC,
         }
     }
 
@@ -228,6 +231,7 @@ impl SourceMedia {
             identifier,
             link,
             properties: SourceMediaProperties::Audio(properties),
+            colour: InputColourOverride::AUTOMATIC,
         }
     }
 
@@ -236,6 +240,7 @@ impl SourceMedia {
             identifier,
             link,
             properties: SourceMediaProperties::Image(properties),
+            colour: InputColourOverride::AUTOMATIC,
         }
     }
 

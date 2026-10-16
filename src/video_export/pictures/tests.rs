@@ -5,7 +5,7 @@
 //! when it comes late, too soon, or not at all. (With the real ffmpeg: `tests/video_export_pictures.rs`.)
 
 use super::*;
-use crate::media::NativeMatrix;
+use crate::colour_space::VideoMatrix;
 use crate::project::{CanvasArea, FrameRate, Placement, Project, Settings};
 use crate::video_export::plan_export;
 use crate::video_export::test_projects::{
@@ -214,7 +214,7 @@ fn a_video_that_can_be_had_in_planes_is_asked_for_in_planes_and_the_pictures_say
     let script = Script::default();
     script.state().to_say.push_back(vec![planes(10), planes(20)]);
     let native = NativeYuv420p {
-        matrix: NativeMatrix::Bt709,
+        matrix: VideoMatrix::Bt709,
         full_range: false,
     };
     let mut pictures = PicturesOfTheRuns::new(

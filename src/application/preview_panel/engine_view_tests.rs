@@ -16,13 +16,13 @@ use super::test_content::{clip, in_the_middle, layer, whole_picture};
 use super::{PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
 use crate::application::theme;
 use crate::colour_effects::ColourMatrix;
+use crate::colour_space::VideoMatrix;
 use crate::engine::{
     COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameColour, FrameDescription, LayerSource,
     PictureColour, PictureData, PictureId, PicturePixels, WorkingSpace,
 };
 use crate::media::{
-    CompressedPicture, DecodedFrame, DecodedYuvFrame, NativeMatrix, NativeYuv420p, PictureSize, ThumbnailKey,
-    ThumbnailLibrary,
+    CompressedPicture, DecodedFrame, DecodedYuvFrame, NativeYuv420p, PictureSize, ThumbnailKey, ThumbnailLibrary,
 };
 use crate::playback::{SuppliedFrame, SuppliedPicture};
 use crate::project::{
@@ -112,10 +112,22 @@ fn image_layer<'a>(
     picture: Option<&'a RgbaPicture>,
     placement: Placement,
 ) -> PreviewLayer<'a> {
+    image_layer_in_colour(number, source, picture, placement, PictureColour::SRGB)
+}
+
+/// [`image_layer`], the codes of whose picture stand for `colour`.
+fn image_layer_in_colour<'a>(
+    number: u32,
+    source: u32,
+    picture: Option<&'a RgbaPicture>,
+    placement: Placement,
+    colour: PictureColour,
+) -> PreviewLayer<'a> {
     PreviewLayer {
         content: PreviewLayerContent::Image {
             source: SourceMediaIdentifier::new(source),
             picture,
+            colour,
         },
         ..layer(number, placement)
     }
@@ -727,7 +739,7 @@ fn what_a_picture_is_made_of_is_what_the_engine_is_sent() {
                 v: vec![5, 6, 7, 8],
             },
             colour: NativeYuv420p {
-                matrix: NativeMatrix::Bt709,
+                matrix: VideoMatrix::Bt709,
                 full_range: true,
             },
         },
@@ -742,7 +754,7 @@ fn what_a_picture_is_made_of_is_what_the_engine_is_sent() {
     assert_eq!(
         *colour,
         crate::playback::colour_for_the_engine(NativeYuv420p {
-            matrix: NativeMatrix::Bt709,
+            matrix: VideoMatrix::Bt709,
             full_range: true,
         })
     );
@@ -799,6 +811,41 @@ fn the_picture_of_a_video_is_made_in_the_colour_it_comes_with_and_a_picture_of_a
             supply.colours,
             vec![(picture.colour, working)],
             "what the picture is made in"
+        );
+        ids.push(supply.asked[0]);
+    }
+    assert_ne!(
+        ids[0], ids[1],
+        "the same decoded picture, read as another colour, is not the picture that the engine has"
+    );
+}
+
+#[test]
+fn the_picture_of_a_picture_file_is_made_in_the_colour_it_comes_with_and_in_another_colour_it_is_another_picture_to_the_engine()
+ {
+    use crate::colour_space::{StandardPrimaries, TransferFunction};
+    let decoded = an_image();
+    let chosen = PictureColour {
+        primaries: StandardPrimaries::DisplayP3,
+        curve: TransferFunction::Linear,
+    };
+    let working = WorkingSpace::Linear(StandardPrimaries::Rec709);
+    let colour = FrameColour {
+        working,
+        ..FrameColour::default()
+    };
+    let mut ids = Vec::new();
+    for in_colour in [PictureColour::SRGB, chosen] {
+        let shown = content(
+            vec![image_layer_in_colour(0, 1, Some(&decoded), whole_picture(), in_colour)],
+            None,
+        );
+        let mut supply = WritesItDown::default();
+        super::engine_view::describe_frame_in_colour(&shown, RENDER_SIZE, 0, colour, &mut supply);
+        assert_eq!(
+            supply.colours,
+            vec![(in_colour, working)],
+            "what the picture file is made in"
         );
         ids.push(supply.asked[0]);
     }

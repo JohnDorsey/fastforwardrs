@@ -39,9 +39,8 @@ pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
 pub use source_colour::{Assumption, VideoColour, matrix_assumed_for, matrix_name};
 pub use source_probe::{
-    NativeMatrix, NativeYuv420p, ProbeError, VideoStreamFormat, probe_source_media, probe_video,
-    probe_video_stream_format, properties_from_probe_output, source_properties_from_probe_output,
-    video_stream_format_from_probe_output,
+    NativeYuv420p, ProbeError, VideoStreamFormat, probe_source_media, probe_video, probe_video_stream_format,
+    properties_from_probe_output, source_properties_from_probe_output, video_stream_format_from_probe_output,
 };
 pub use thumbnail_library::{ThumbnailLibrary, plan_finer_thumbnails};
 pub use thumbnails::{

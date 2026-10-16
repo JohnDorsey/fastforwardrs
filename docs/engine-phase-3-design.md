@@ -171,3 +171,18 @@ Decisions that I took and that you may want to look at before they are built, mo
 4. **C8: three display transforms**, no profile reading.
 
 *(This section is where the answers go.)*
+
+## 12. Where the building is (written as the pieces are finished; the report replaces it)
+
+| piece | state | commit | what is different from the design above |
+|---|---|---|---|
+| 3.1 `colour_space` | done, verified | `545f86d` and before | none |
+| 3.2 WGSL and `WorkingSpace`/`FrameColour` | done, verified on WARP and lavapipe | `545f86d` | `DisplayReferred` is the default **inside the engine**; the window and the export ask for linear light |
+| 3.3 ingest, planes, colour matrix with their colour | done | `545f86d` | the hue shift (display-referred) is run in the sRGB-encoded domain between two uniform matrices, as C10 says; **effects of strangers run on working-space numbers** for now: converting around them (C10's `ColourDomain`) waits for phase 4, where the first foreign effect that cares exists |
+| 3.4 what a file's tags mean | done, verified | `417ecb0` | the function is `VideoStreamFormat::colour_of_a_picture_of_size_with`; the matrix enum moved to `colour_space` (`VideoMatrix`, was `NativeMatrix` in `media`) |
+| 3.5 the export in linear light | done, verified | `417ecb0` | **C13 is done as written** (`ENCODED_FORMAT`, the same shader with a half-float target, no second pipeline of arithmetic); **C14 is done**: the planes are BT.709 limited whatever the first video was, the file says `bt709` matrix, `bt709` primaries, the output space's transfer, `tv`; `ExportPlan::first_video` is gone because nothing asks it any more |
+| 3.6 the file's own colours | done, verified | (this commit) | the dialog is a **window whose choices apply at once**, each choice an edit joined to the one before it on the same file (as the settings windows apply at once), not a window with an *OK* button; it is opened from the clip's menu (*Colour space of this file...*); a **picture file** has the primaries and the curve (no matrix, no range); a sound has none; the file format is **12** and a fixture of a version-11 file is kept |
+| 3.7 native formats and smooth chroma | not begun | | |
+| 3.8 the list of differences, the campaign, the report | not begun | | |
+
+Two limits that the dialog says in words: the matrix and the range **do not apply to a video that is not stored as 8-bit 4:2:0** (ffmpeg makes its colours with its own matrix) until 3.7, and the **old drawing** (the window's fallback when the engine stops) ignores all colour settings, as it always did.

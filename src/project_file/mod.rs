@@ -31,16 +31,16 @@ use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
     Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectKind, Effects, FontSize,
-    ImageClip, MediaClip, Placement, Project, ProjectSettings, PropertyValue, SourceAudioProperties,
-    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
-    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track, TrackHeight, TrackId,
-    ValueKind,
+    ImageClip, InputColourOverride, MediaClip, Placement, Project, ProjectSettings, PropertyValue,
+    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
+    TrackHeight, TrackId, ValueKind,
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
-    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ColourDocument, KeyframeValueDocument,
-    PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument, SpeedIndicatorDocument,
-    TrackDocument,
+    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ColourDocument, InputColourDocument,
+    KeyframeValueDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument,
+    SpeedIndicatorDocument, TrackDocument,
 };
 use effects::{
     EffectDocument, KindsOfEffects, chain_of_the_effects_from_documents, effect_documents_of, plugin_documents_of,
@@ -102,8 +102,11 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// its id; and what the program does not know of an effect, a type of effect or a value is kept. (A file of version 10 calls an effect by the
 /// name that the program had for it, `hue shift`, has the values in a list, has at most one effect of each kind and names none: they are
 /// named in the order they are in, and a rack is of the effect that has a value of the name it says: see `legacy_effects.rs`. So is a file of
-/// version 11 as it was written while the effects were being named.)
-pub const FILE_FORMAT_VERSION: u32 = 11;
+/// version 11 as it was written while the effects were being named.) Version 12 added the colours: what the user says the colours of a source file are (`colour`
+/// of a video or a picture file, each part of it left out when it is automatic), and the three colour settings (the display transform, the working colour space and
+/// the output colour space) that a project may have set for itself. A file of version 11 has none of them: the user said nothing, and the project follows the global
+/// colour settings.
+pub const FILE_FORMAT_VERSION: u32 = 12;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -551,17 +554,21 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
             display_width_in_pixels,
             display_height_in_pixels,
             has_audio,
-        } => SourceMedia::video(
-            identifier,
-            link_from(absolute_path, relative_path, included_as),
-            SourceVideoProperties {
-                frame_rate,
-                total_frame_count,
-                display_width_in_pixels,
-                display_height_in_pixels,
-                has_audio,
-            },
-        ),
+            colour,
+        } => SourceMedia {
+            colour: colour.map(InputColourOverride::from).unwrap_or_default(),
+            ..SourceMedia::video(
+                identifier,
+                link_from(absolute_path, relative_path, included_as),
+                SourceVideoProperties {
+                    frame_rate,
+                    total_frame_count,
+                    display_width_in_pixels,
+                    display_height_in_pixels,
+                    has_audio,
+                },
+            )
+        },
         SourceDocument::Audio {
             identifier,
             absolute_path,
@@ -582,14 +589,18 @@ fn source_from_document(document: SourceDocument) -> SourceMedia {
             included_as,
             display_width_in_pixels,
             display_height_in_pixels,
-        } => SourceMedia::image(
-            identifier,
-            link_from(absolute_path, relative_path, included_as),
-            SourceImageProperties {
-                display_width_in_pixels,
-                display_height_in_pixels,
-            },
-        ),
+            colour,
+        } => SourceMedia {
+            colour: colour.map(InputColourOverride::from).unwrap_or_default(),
+            ..SourceMedia::image(
+                identifier,
+                link_from(absolute_path, relative_path, included_as),
+                SourceImageProperties {
+                    display_width_in_pixels,
+                    display_height_in_pixels,
+                },
+            )
+        },
     }
 }
 
@@ -974,6 +985,11 @@ fn project_from_legacy_document(document: LegacyProjectDocument) -> Result<Proje
     .map_err(|inconsistency| invalid_project(inconsistency.to_string()))
 }
 
+/// What a file says of the colours the user has said for a source: nothing, if they have said nothing.
+fn colour_document_of(said: &InputColourOverride) -> Option<InputColourDocument> {
+    (!said.is_automatic()).then(|| InputColourDocument::from(said))
+}
+
 fn document_from_project(project: &Project, project_directory: &Path) -> Result<ProjectDocument, ProjectFileError> {
     let sources = project
         .sources()
@@ -1002,6 +1018,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                     display_width_in_pixels: video.display_width_in_pixels,
                     display_height_in_pixels: video.display_height_in_pixels,
                     has_audio: video.has_audio,
+                    colour: colour_document_of(&source.colour),
                 },
                 SourceMediaProperties::Audio(audio) => SourceDocument::Audio {
                     identifier: source.identifier,
@@ -1017,6 +1034,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                     included_as,
                     display_width_in_pixels: image.display_width_in_pixels,
                     display_height_in_pixels: image.display_height_in_pixels,
+                    colour: colour_document_of(&source.colour),
                 },
             })
         })
@@ -1188,6 +1206,8 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod colour_tests;
 #[cfg(test)]
 mod effects_tests;
 #[cfg(test)]

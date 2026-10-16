@@ -15,6 +15,10 @@
 //! has it in it (see [`crate::project_file`]), and one to take it out of the project file again, whichever it is now. The items are
 //! about the files of the clips the menu is about, one for each file however many of the clips are made from it.
 //!
+//! A clip that is made from a video or a picture file has an item that opens the window of the colour space of that file (*Colour space of this file...*), where the
+//! user says what its colours are where the program would otherwise read them from the file or assume them (see [`crate::project::InputColourOverride`]). It is about one
+//! file: when the clips the menu is about are of several files it cannot be used, and says why when it is hovered over.
+//!
 //! The items that make groups are about the clips the menu is about, and the groups that are selected with them: *Create tag* makes a tag
 //! of them, *Create clip group* (for two or more) a clip group, and *Add to tag* lists the tags there are to put them in. A group that is
 //! selected is something that can be put in a group too, as a clip is: a tag can have any, a clip group only clip groups.
@@ -24,12 +28,18 @@ use egui::{Button, Color32, FontId, TextFormat, Ui};
 
 use crate::application::commands::Command;
 use crate::application::selection::Selection;
-use crate::project::{ClipId, ClipSide, Group, GroupId, GroupKind, Member, Project, SourceMediaIdentifier};
+use crate::project::{
+    ClipId, ClipSide, Group, GroupId, GroupKind, Member, Project, SourceMediaIdentifier, SourceMediaKind,
+};
 
 /// What the items that make a group of the clips say, and the one that opens the list of tags to put them in.
 pub const CREATE_TAG_LABEL: &str = "Create tag";
 pub const CREATE_CLIP_GROUP_LABEL: &str = "Create clip group";
 pub const ADD_TO_TAG_LABEL: &str = "Add to tag";
+
+/// What the item that opens the window of the colour space of a file says, and what is said of it when the clips are of several files.
+pub const COLOUR_OF_THE_FILE_LABEL: &str = "Colour space of this file...";
+const COLOURS_ARE_OF_ONE_FILE: &str = "Select clips of one file to say what its colours are";
 
 /// What is said of the item that makes a clip group when it cannot be used because only one thing is chosen.
 const A_CLIP_GROUP_NEEDS_TWO: &str = "Select more than one clip to make a clip group of them";
@@ -182,6 +192,27 @@ pub(super) fn files_of(
     (not_included, included)
 }
 
+/// The files that `clips` are made from that have colours (a video, a picture), each once, in the order of the clips.
+pub(super) fn files_with_colours_of(clips: &[ClipId], project: &Project) -> Vec<SourceMediaIdentifier> {
+    let mut files = Vec::new();
+    for clip in clips {
+        let Some(identifier) = project
+            .placement_of(*clip)
+            .and_then(|placement| placement.clip.source())
+        else {
+            continue;
+        };
+        if project
+            .source(identifier)
+            .is_some_and(|source| source.kind() != SourceMediaKind::Audio)
+            && !files.contains(&identifier)
+        {
+            files.push(identifier);
+        }
+    }
+    files
+}
+
 /// The menu of `clips` (at least one) and the `groups` that go with them, which adds a command when something in it is chosen. What
 /// deletes them is last, apart from the others, so that it is not what a click that has hardly moved from the right-click chooses.
 pub(super) fn show(ui: &mut Ui, clips: &[ClipId], groups: &[GroupId], project: &Project, commands: &mut Vec<Command>) {
@@ -218,6 +249,19 @@ pub(super) fn show(ui: &mut Ui, clips: &[ClipId], groups: &[GroupId], project: &
     if !included.is_empty() && ui.button(take_out_label(included.len())).clicked() {
         commands.push(Command::TakeFilesOutOfTheProjectFile(included));
         ui.close();
+    }
+    match files_with_colours_of(clips, project).as_slice() {
+        [] => {}
+        [file] => {
+            if ui.button(COLOUR_OF_THE_FILE_LABEL).clicked() {
+                commands.push(Command::ShowTheColoursOfAFile(*file));
+                ui.close();
+            }
+        }
+        _ => {
+            ui.add_enabled(false, Button::new(COLOUR_OF_THE_FILE_LABEL))
+                .on_disabled_hover_text(COLOURS_ARE_OF_ONE_FILE);
+        }
     }
     ui.separator();
     show_the_items_that_make_groups(ui, clips, groups, project, commands);
@@ -284,6 +328,42 @@ mod tests {
 
     fn clip(number: u32) -> ClipId {
         ClipId::new(TrackId::new(0), number)
+    }
+
+    #[test]
+    fn the_files_that_have_colours_are_the_videos_and_the_pictures_of_the_clips_each_once_and_a_sound_has_none() {
+        use crate::video_export::test_projects::{audio_source, frame, picture_source, project_with_video};
+        let mut project = project_with_video(320, 180, false);
+        // The clips: the video (source 1) cut in two, the picture (source 2) and the sound (source 3).
+        project.split_at(frame(100), None);
+        project.import_source(picture_source(2, 64, 48), frame(400)).unwrap();
+        project.import_source(audio_source(3, 5), frame(0)).unwrap();
+        let clips_of = |source: u32| -> Vec<ClipId> {
+            project
+                .tracks()
+                .iter()
+                .flat_map(|track| track.placements())
+                .filter(|placement| placement.clip.source() == Some(SourceMediaIdentifier::new(source)))
+                .map(|placement| placement.id)
+                .collect()
+        };
+        let (video, picture, sound) = (clips_of(1), clips_of(2), clips_of(3));
+        assert_eq!(
+            (video.len(), picture.len(), sound.len()),
+            (2, 1, 1),
+            "a premise: the clips are there"
+        );
+
+        assert_eq!(
+            files_with_colours_of(&video, &project),
+            vec![SourceMediaIdentifier::new(1)]
+        );
+        assert_eq!(files_with_colours_of(&sound, &project), Vec::new());
+        assert_eq!(
+            files_with_colours_of(&[video[0], picture[0], sound[0], video[1]], &project),
+            vec![SourceMediaIdentifier::new(1), SourceMediaIdentifier::new(2)]
+        );
+        assert_eq!(files_with_colours_of(&[], &project), Vec::new());
     }
 
     #[test]

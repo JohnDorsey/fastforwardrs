@@ -25,8 +25,8 @@ use crate::media::{
 };
 use crate::playback::preview_picture_size;
 use crate::project::{
-    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
-    SourceVideoProperties,
+    InputColourOverride, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    SourceMediaProperties, SourceVideoProperties,
 };
 use crate::project_file::archive::entry_place;
 use crate::project_file::relative_path_between;
@@ -309,6 +309,7 @@ impl FastForwardApplication {
             identifier,
             link: self.link_to(location.file()),
             properties,
+            colour: InputColourOverride::AUTOMATIC,
         };
         let frame_rate_before = self.document.project.frame_rate();
         let total_frames = self.document.project.total_frame_count();

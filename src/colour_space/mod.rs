@@ -13,10 +13,12 @@ pub mod matrix;
 mod primaries;
 mod table;
 mod transfer;
+mod video;
 
 pub use primaries::{ACES_WHITE, Chromaticity, D65, Primaries, bradford_adaptation};
 pub use table::StandardPrimaries;
 pub use transfer::TransferFunction;
+pub use video::{VideoMatrix, VideoRange};
 
 #[cfg(test)]
 mod tests;

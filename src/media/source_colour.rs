@@ -19,8 +19,9 @@
 //!
 //! Everything that was assumed, and everything that is not what the file says, is in [`VideoColour::assumptions`], in words that the dialog of a source shows.
 
-use super::source_probe::{NativeMatrix, VideoStreamFormat};
-use crate::colour_space::{StandardPrimaries, TransferFunction};
+use super::source_probe::VideoStreamFormat;
+use crate::colour_space::{StandardPrimaries, TransferFunction, VideoMatrix, VideoRange};
+use crate::project::InputColourOverride;
 
 /// How wide a picture may be, and how tall, to be taken for one of standard definition when its file does not say which matrix it uses.
 pub const WIDEST_PICTURE_OF_STANDARD_DEFINITION: u32 = 1024;
@@ -31,7 +32,7 @@ pub const TALLEST_PICTURE_OF_STANDARD_DEFINITION: u32 = 576;
 pub struct VideoColour {
     /// The matrix that makes red, green and blue of brightness and the colour differences, or `None` for a matrix that the program cannot make colours with (ffmpeg
     /// makes the colours of such a video itself).
-    pub matrix: Option<NativeMatrix>,
+    pub matrix: Option<VideoMatrix>,
     /// Whether the numbers use all of 0 to 255, or (as nearly all video does) 16 to 235 and 16 to 240. `None` for what the file says that is not one of the two.
     pub full_range: Option<bool>,
     /// The primaries of the colours.
@@ -47,7 +48,7 @@ pub struct VideoColour {
 pub enum Assumption {
     /// The file does not say its matrix: it is `assumed` because of the size of the picture.
     MatrixNotSaid {
-        assumed: NativeMatrix,
+        assumed: VideoMatrix,
         width: u32,
         height: u32,
     },
@@ -67,6 +68,14 @@ pub enum Assumption {
     TransferIsForHighDynamicRange { said: String },
     /// The file says a transfer that the program has not got: it is read as sRGB's.
     TransferNotKnown { said: String },
+    /// The user chose the matrix, whatever the file says.
+    MatrixChosen { chosen: VideoMatrix },
+    /// The user chose the range, whatever the file says.
+    RangeChosen { chosen: VideoRange },
+    /// The user chose the primaries, whatever the file says.
+    PrimariesChosen { chosen: StandardPrimaries },
+    /// The user chose the curve, whatever the file says.
+    CurveChosen { chosen: TransferFunction },
 }
 
 impl Assumption {
@@ -93,42 +102,54 @@ impl Assumption {
             Self::TransferNotKnown { said } => {
                 format!("The file says that its transfer function is {said}, which this version does not have: the curve of sRGB is assumed.")
             }
+            Self::MatrixChosen { chosen } => format!("You chose {} as the matrix of the colours of this file.", matrix_name(*chosen)),
+            Self::RangeChosen { chosen } => format!("You chose {} as the range of the numbers of this file.", chosen.label()),
+            Self::PrimariesChosen { chosen } => format!("You chose {} as the primaries of the colours of this file.", chosen.label()),
+            Self::CurveChosen { chosen } => format!("You chose {} as the transfer function of this file.", chosen.label()),
         }
     }
 }
 
 /// What the matrix is called in the words of the dialog.
-pub fn matrix_name(matrix: NativeMatrix) -> &'static str {
-    match matrix {
-        NativeMatrix::Bt601 => "BT.601",
-        NativeMatrix::Bt709 => "BT.709",
-        NativeMatrix::Bt2020 => "BT.2020",
-    }
+pub fn matrix_name(matrix: VideoMatrix) -> &'static str {
+    matrix.label()
 }
 
 /// The matrix that a picture of this size is taken to use when its file does not say: BT.709 for high definition, BT.601 for standard definition.
-pub fn matrix_assumed_for(width: u32, height: u32) -> NativeMatrix {
+pub fn matrix_assumed_for(width: u32, height: u32) -> VideoMatrix {
     if width > WIDEST_PICTURE_OF_STANDARD_DEFINITION || height > TALLEST_PICTURE_OF_STANDARD_DEFINITION {
-        NativeMatrix::Bt709
+        VideoMatrix::Bt709
     } else {
-        NativeMatrix::Bt601
+        VideoMatrix::Bt601
     }
 }
 
 impl VideoStreamFormat {
     /// What the colours of a video of this format are, whose picture is `width` by `height` pixels (see the module documentation for the rules).
     pub fn colour_of_a_picture_of_size(&self, width: u32, height: u32) -> VideoColour {
+        self.colour_of_a_picture_of_size_with(width, height, &InputColourOverride::AUTOMATIC)
+    }
+
+    /// What the colours of a video of this format are when the user has said some of them (`said`): each part that they have said is what they said, and each part
+    /// that they have not is what [`Self::colour_of_a_picture_of_size`] makes of it. **This is the one function that the preview, the export and the command line read
+    /// the colours of a video with.**
+    pub fn colour_of_a_picture_of_size_with(&self, width: u32, height: u32, said: &InputColourOverride) -> VideoColour {
         let mut assumptions = Vec::new();
 
         let matrix = match self.colour_space.as_deref() {
+            _ if said.matrix.is_some() => {
+                let chosen = said.matrix.expect("the guard says it is there");
+                assumptions.push(Assumption::MatrixChosen { chosen });
+                Some(chosen)
+            }
             None => {
                 let assumed = matrix_assumed_for(width, height);
                 assumptions.push(Assumption::MatrixNotSaid { assumed, width, height });
                 Some(assumed)
             }
-            Some("bt709") => Some(NativeMatrix::Bt709),
-            Some("bt470bg" | "smpte170m") => Some(NativeMatrix::Bt601),
-            Some("bt2020nc") => Some(NativeMatrix::Bt2020),
+            Some("bt709") => Some(VideoMatrix::Bt709),
+            Some("bt470bg" | "smpte170m") => Some(VideoMatrix::Bt601),
+            Some("bt2020nc") => Some(VideoMatrix::Bt2020),
             Some(other) => {
                 assumptions.push(Assumption::MatrixNotKnown { said: other.to_owned() });
                 None
@@ -136,6 +157,11 @@ impl VideoStreamFormat {
         };
 
         let full_range = match self.colour_range.as_deref() {
+            _ if said.range.is_some() => {
+                let chosen = said.range.expect("the guard says it is there");
+                assumptions.push(Assumption::RangeChosen { chosen });
+                Some(chosen.is_full())
+            }
             None => {
                 assumptions.push(Assumption::RangeNotSaid);
                 Some(false)
@@ -149,6 +175,11 @@ impl VideoStreamFormat {
         };
 
         let primaries = match self.colour_primaries.as_deref() {
+            _ if said.primaries.is_some() => {
+                let chosen = said.primaries.expect("the guard says it is there");
+                assumptions.push(Assumption::PrimariesChosen { chosen });
+                chosen
+            }
             None => {
                 assumptions.push(Assumption::PrimariesNotSaid);
                 StandardPrimaries::Rec709
@@ -165,6 +196,11 @@ impl VideoStreamFormat {
         };
 
         let curve = match self.colour_transfer.as_deref() {
+            _ if said.curve.is_some() => {
+                let chosen = said.curve.expect("the guard says it is there");
+                assumptions.push(Assumption::CurveChosen { chosen });
+                chosen
+            }
             None => {
                 assumptions.push(Assumption::TransferNotSaid);
                 TransferFunction::Srgb

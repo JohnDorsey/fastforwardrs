@@ -54,6 +54,8 @@ mod engine_window_tests;
 mod export_flow;
 pub(crate) use export_flow::effects_the_export_would_leave_out;
 #[cfg(test)]
+mod file_colour_tests;
+#[cfg(test)]
 mod file_question_tests;
 #[cfg(test)]
 mod grip_dot_tests;
@@ -163,6 +165,7 @@ use egui::Context;
 
 use super::archive_cache::ArchiveCache;
 use super::background::BackgroundTask;
+use super::colour_of_a_file_window;
 use super::commands::Command;
 use super::dialogs::Dialog;
 use super::file_chooser::{NativeFileChooser, RefusingFileChooser};
@@ -618,6 +621,7 @@ impl FastForwardApplication {
                     display_size_in_pixels: (video.display_width_in_pixels, video.display_height_in_pixels),
                     frame_rate: video.frame_rate,
                     format: state.video_format.known.clone(),
+                    colour: source.colour,
                 })
             })
             .collect();
@@ -737,6 +741,18 @@ impl FastForwardApplication {
             &mut self.interface.settings_windows_open,
             (self.document.project.settings(), self.document.project.frame_rate()),
             self.environment.global_settings,
+            &mut commands,
+        );
+        colour_of_a_file_window::show(
+            &context,
+            &mut self.interface.colours_of_a_file_window_open_for,
+            &self.document.project,
+            |source| {
+                self.sources
+                    .files
+                    .get(&source)
+                    .and_then(|state| state.video_format.known.as_ref())
+            },
             &mut commands,
         );
         let agreed_to = self.show_dialogs(&context);

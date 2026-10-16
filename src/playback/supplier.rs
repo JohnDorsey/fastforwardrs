@@ -24,12 +24,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::wanted::{UpcomingVideo, WantedPicture};
+use crate::colour_space::VideoMatrix;
 use crate::engine::{PictureColour, YuvColour, YuvMatrix, YuvRange, rgba_of_yuv420p_planes};
 use crate::media::{
     DecodedFrame, DecodedYuvFrame, FfmpegToolchain, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent,
-    FrameStreamRequest, MediaLocation, NativeMatrix, NativeYuv420p, UserInterfaceWakeUp, VideoStreamFormat,
+    FrameStreamRequest, MediaLocation, NativeYuv420p, UserInterfaceWakeUp, VideoStreamFormat,
 };
-use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
+use crate::project::{FrameRate, InputColourOverride, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
 /// New streams are not started more often than this. (Starting ffmpeg takes tens of milliseconds
 /// and a lot of processor time, and a person dragging a slider asks for a new picture on every
@@ -109,6 +110,8 @@ pub struct PreviewVideo {
     /// How the video's pictures are stored and what colours they say they stand for, once that is known (it takes a moment to find out, after the file is
     /// found). Only used when the setup asks for planes.
     pub format: Option<VideoStreamFormat>,
+    /// What the user says the colours of the video are, instead of what it says.
+    pub colour: InputColourOverride,
 }
 
 /// The videos the preview shows pictures of, and how big the pictures are.
@@ -128,9 +131,9 @@ pub struct PreviewSetup {
 pub fn colour_for_the_engine(native: NativeYuv420p) -> YuvColour {
     YuvColour {
         matrix: match native.matrix {
-            NativeMatrix::Bt601 => YuvMatrix::Bt601,
-            NativeMatrix::Bt709 => YuvMatrix::Bt709,
-            NativeMatrix::Bt2020 => YuvMatrix::Bt2020,
+            VideoMatrix::Bt601 => YuvMatrix::Bt601,
+            VideoMatrix::Bt709 => YuvMatrix::Bt709,
+            VideoMatrix::Bt2020 => YuvMatrix::Bt2020,
         },
         range: if native.full_range {
             YuvRange::Full
@@ -448,7 +451,7 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
                 Some(FrameStreamEvent::YuvFrame(frame)) => {
                     // (A stream only delivers planes if it was asked to, and was then given the colour to say they stand for.)
                     let colour = stream.native_colour.unwrap_or(NativeYuv420p {
-                        matrix: NativeMatrix::Bt601,
+                        matrix: VideoMatrix::Bt601,
                         full_range: false,
                     });
                     latest_picture = Some((stream.pictures_taken, SuppliedFrame::Yuv420p { frame, colour }));
@@ -574,16 +577,19 @@ impl<Starter: PictureStreamStarter> PictureSupplier<Starter> {
         let native_colour = video
             .format
             .as_ref()
-            .and_then(|format| format.as_native_yuv420p(width, height))
+            .and_then(|format| format.as_native_yuv420p_with(width, height, &video.colour))
             .filter(|_| setup.planes_wanted);
-        // What the codes stand for is what the file says of its primaries and its curve, or what is assumed (sRGB where the file's format is not known yet).
-        let picture_colour = video.format.as_ref().map_or(PictureColour::SRGB, |format| {
-            let colour = format.colour_of_a_picture_of_size(width, height);
-            PictureColour {
-                primaries: colour.primaries,
-                curve: colour.curve,
-            }
-        });
+        // What the codes stand for is what the user says of the primaries and the curve, or else what the file says, or else what is assumed (a file whose format is not known
+        // yet says nothing, which is sRGB).
+        let colour = video
+            .format
+            .clone()
+            .unwrap_or_default()
+            .colour_of_a_picture_of_size_with(width, height, &video.colour);
+        let picture_colour = PictureColour {
+            primaries: colour.primaries,
+            curve: colour.curve,
+        };
         let request = FrameStreamRequest {
             video: video.location.clone(),
             project_frame_rate: setup.frame_rate,

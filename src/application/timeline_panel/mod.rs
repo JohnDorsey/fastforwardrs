@@ -57,6 +57,8 @@ use egui::scroll_area::{DragScroll, ScrollSource};
 use egui::{Context, Id, PointerButton, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 // The names the parts of the timeline are known by to screen readers, which the tests look them up by.
+#[cfg(test)]
+pub use clip_menu::COLOUR_OF_THE_FILE_LABEL;
 pub use drawers::DrawerSound;
 #[cfg(test)]
 pub use drawers::{drawer_button_label, track_drawer_button_label};

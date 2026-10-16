@@ -13,7 +13,8 @@ use crate::engine::FrameColour;
 use crate::frame_scene::colour_of_the_export;
 use crate::media::export::{SoundGraphSpecification, sound_graph_specification, sources_of_sound};
 use crate::project::{
-    FrameRate, OutputColourSpace, Project, Settings, SourceMediaIdentifier, SpeedIndicatorLayout, TimelineFrameIndex,
+    FrameRate, InputColourOverride, OutputColourSpace, Project, Settings, SourceMediaIdentifier, SpeedIndicatorLayout,
+    TimelineFrameIndex,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -38,6 +39,8 @@ pub struct VideoToExport {
     pub display_size_in_pixels: (u32, u32),
     /// How many pictures a second it has.
     pub frame_rate: FrameRate,
+    /// What the user says the colours of the video are, instead of what it says.
+    pub colour: InputColourOverride,
 }
 
 /// A picture file that the picture is made from.
@@ -47,6 +50,8 @@ pub struct ImageToExport {
     pub display_size_in_pixels: (u32, u32),
     /// The biggest box that a layer of it has on the finished picture, in pixels: it is decoded as big as that (and no bigger, as nothing of it is seen past that).
     pub largest_box_in_pixels: (u32, u32),
+    /// What the user says the colours of the picture are, instead of sRGB.
+    pub colour: InputColourOverride,
 }
 
 /// The sound of the finished video, as the encoder is given it.
@@ -137,6 +142,7 @@ pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, 
                                 properties.display_height_in_pixels,
                             ),
                             frame_rate: properties.frame_rate,
+                            colour: project.source_colour(video.source).unwrap_or_default(),
                         },
                     );
                 }
@@ -158,6 +164,7 @@ pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, 
                 ImageToExport {
                     display_size_in_pixels,
                     largest_box_in_pixels: super::runs::largest_box_of_an_image(&pictures, source, picture_size),
+                    colour: project.source_colour(source).unwrap_or_default(),
                 },
             ))
         })

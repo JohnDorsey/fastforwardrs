@@ -20,6 +20,15 @@ fn supplier_of_a_video_that_is(
     format: Option<VideoStreamFormat>,
     planes_wanted: bool,
 ) -> (PictureSupplier<ScriptedStarter>, Script) {
+    supplier_of_a_video_that_is_said_to_be(format, planes_wanted, InputColourOverride::AUTOMATIC)
+}
+
+/// [`supplier_of_a_video_that_is`] when the user says that the colours of the video are `said`.
+fn supplier_of_a_video_that_is_said_to_be(
+    format: Option<VideoStreamFormat>,
+    planes_wanted: bool,
+    said: InputColourOverride,
+) -> (PictureSupplier<ScriptedStarter>, Script) {
     let script = Script::default();
     let mut supplier = PictureSupplier::new(ScriptedStarter(script.clone()));
     supplier.set_setup(Some(PreviewSetup {
@@ -32,6 +41,7 @@ fn supplier_of_a_video_that_is(
             display_size_in_pixels: (1280, 720),
             frame_rate: FrameRate::new(25, 1).unwrap(),
             format,
+            colour: said,
         }],
         planes_wanted,
     }));
@@ -580,11 +590,11 @@ fn pictures_are_asked_for_in_planes_only_for_a_video_that_is_stored_that_way_and
 fn a_picture_in_planes_is_supplied_with_the_colour_its_video_says_it_has() {
     for (colour_space, colour_range, matrix, full_range) in [
         // (Rewritten on purpose in phase 3: this video is 1280 by 720, and a file that says nothing is BT.709 when its picture is high definition. It was BT.601.)
-        (None, None, NativeMatrix::Bt709, false),
-        (Some("bt709"), Some("tv"), NativeMatrix::Bt709, false),
-        (Some("bt709"), Some("pc"), NativeMatrix::Bt709, true),
-        (Some("bt2020nc"), None, NativeMatrix::Bt2020, false),
-        (Some("smpte170m"), Some("pc"), NativeMatrix::Bt601, true),
+        (None, None, VideoMatrix::Bt709, false),
+        (Some("bt709"), Some("tv"), VideoMatrix::Bt709, false),
+        (Some("bt709"), Some("pc"), VideoMatrix::Bt709, true),
+        (Some("bt2020nc"), None, VideoMatrix::Bt2020, false),
+        (Some("smpte170m"), Some("pc"), VideoMatrix::Bt601, true),
     ] {
         let (mut supplier, script) =
             supplier_of_a_video_that_is(Some(eight_bit_four_two_zero(colour_space, colour_range)), true);
@@ -713,7 +723,7 @@ fn a_picture_in_planes_can_be_had_as_rgba_and_one_that_is_rgba_is_not_copied_to_
             v: vec![240],
         },
         colour: NativeYuv420p {
-            matrix: NativeMatrix::Bt601,
+            matrix: VideoMatrix::Bt601,
             full_range: false,
         },
     };
@@ -752,7 +762,7 @@ fn a_picture_in_planes_of_an_odd_size_can_be_had_as_rgba() {
                 v: vec![128; chroma_width * chroma_height],
             },
             colour: NativeYuv420p {
-                matrix: NativeMatrix::Bt709,
+                matrix: VideoMatrix::Bt709,
                 full_range: true,
             },
         };
@@ -768,9 +778,9 @@ fn a_picture_in_planes_of_an_odd_size_can_be_had_as_rgba() {
 #[test]
 fn every_matrix_and_range_a_video_can_say_is_the_same_one_for_the_engine() {
     for (native, expected) in [
-        (NativeMatrix::Bt601, YuvMatrix::Bt601),
-        (NativeMatrix::Bt709, YuvMatrix::Bt709),
-        (NativeMatrix::Bt2020, YuvMatrix::Bt2020),
+        (VideoMatrix::Bt601, YuvMatrix::Bt601),
+        (VideoMatrix::Bt709, YuvMatrix::Bt709),
+        (VideoMatrix::Bt2020, YuvMatrix::Bt2020),
     ] {
         for (full_range, range) in [(false, YuvRange::Limited), (true, YuvRange::Full)] {
             assert_eq!(
@@ -785,4 +795,68 @@ fn every_matrix_and_range_a_video_can_say_is_the_same_one_for_the_engine() {
             );
         }
     }
+}
+
+#[test]
+fn what_the_user_says_of_the_colours_of_a_video_is_what_its_pictures_come_with_whatever_the_file_says() {
+    use crate::colour_space::{StandardPrimaries, TransferFunction, VideoRange};
+    use crate::engine::PictureColour;
+    let said = InputColourOverride {
+        matrix: Some(VideoMatrix::Bt601),
+        range: Some(VideoRange::Full),
+        primaries: Some(StandardPrimaries::DisplayP3),
+        curve: Some(TransferFunction::Gamma22),
+    };
+    let chosen_codes = PictureColour {
+        primaries: StandardPrimaries::DisplayP3,
+        curve: TransferFunction::Gamma22,
+    };
+    // In planes: the matrix and the range that the planes are made into colours with are the chosen ones, and so are the primaries and the curve of the colours.
+    let (mut supplier, script) =
+        supplier_of_a_video_that_is_said_to_be(Some(eight_bit_four_two_zero(Some("bt709"), Some("tv"))), true, said);
+    let now = Instant::now();
+    supplier.supply(Some(wanted(50)), false, now);
+    script.deliver(0, 1);
+    supplier.supply(Some(wanted(50)), false, now);
+    let picture = supplier.picture().expect("the picture arrived");
+    match &picture.frame {
+        SuppliedFrame::Yuv420p { colour, .. } => assert_eq!(
+            *colour,
+            NativeYuv420p {
+                matrix: VideoMatrix::Bt601,
+                full_range: true
+            }
+        ),
+        other => panic!("the picture is not in planes: {other:?}"),
+    }
+    assert_eq!(picture.colour, chosen_codes);
+
+    // Not in planes (ffmpeg made the colours): the primaries and the curve are still the chosen ones.
+    let (mut supplier, script) =
+        supplier_of_a_video_that_is_said_to_be(Some(eight_bit_four_two_zero(Some("bt709"), Some("tv"))), false, said);
+    supplier.supply(Some(wanted(50)), false, now);
+    script.deliver(0, 1);
+    supplier.supply(Some(wanted(50)), false, now);
+    assert_eq!(supplier.picture().expect("the picture arrived").colour, chosen_codes);
+
+    // Before the format of the file is known: only the primaries and the curve that the user chose can be used, over what is assumed of a file that says nothing.
+    let (mut supplier, script) = supplier_of_a_video_that_is_said_to_be(None, false, said);
+    supplier.supply(Some(wanted(50)), false, now);
+    script.deliver(0, 1);
+    supplier.supply(Some(wanted(50)), false, now);
+    assert_eq!(supplier.picture().expect("the picture arrived").colour, chosen_codes);
+
+    // And what is not said is as it was: the same video, the user saying nothing.
+    let (mut supplier, script) = supplier_of_a_video_that_is_said_to_be(
+        Some(eight_bit_four_two_zero(Some("bt709"), Some("tv"))),
+        true,
+        InputColourOverride::AUTOMATIC,
+    );
+    supplier.supply(Some(wanted(50)), false, now);
+    script.deliver(0, 1);
+    supplier.supply(Some(wanted(50)), false, now);
+    assert_eq!(
+        supplier.picture().expect("the picture arrived").colour,
+        PictureColour::SRGB
+    );
 }

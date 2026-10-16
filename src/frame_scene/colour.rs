@@ -6,8 +6,17 @@
 //! shows, and the output space says what the file's numbers are.
 
 use crate::colour_space::StandardPrimaries;
-use crate::engine::{FrameColour, OutputEncoding, WorkingSpace};
-use crate::project::Settings;
+use crate::engine::{FrameColour, OutputEncoding, PictureColour, WorkingSpace};
+use crate::project::{InputColourOverride, Settings};
+
+/// What the codes of the red, green and blue of a picture file stand for: sRGB, with the primaries and the curve that the user says instead (a picture has no matrix and no
+/// range, and what is said of them is not used).
+pub fn colour_of_a_picture_file(said: &InputColourOverride) -> PictureColour {
+    PictureColour {
+        primaries: said.primaries.unwrap_or(PictureColour::SRGB.primaries),
+        curve: said.curve.unwrap_or(PictureColour::SRGB.curve),
+    }
+}
 
 /// What the layers of every frame are put together in: light, in the primaries of the project's working colour space.
 pub fn working_space_of(settings: Settings) -> WorkingSpace {
@@ -45,6 +54,42 @@ mod tests {
     use super::*;
     use crate::colour_space::TransferFunction;
     use crate::project::{DisplayTransform, OutputColourSpace, WorkingColourSpace};
+
+    #[test]
+    fn a_picture_file_is_srgb_unless_the_user_says_otherwise_and_what_is_said_of_a_matrix_or_a_range_is_not_used() {
+        use crate::colour_space::{VideoMatrix, VideoRange};
+        assert_eq!(
+            colour_of_a_picture_file(&InputColourOverride::AUTOMATIC),
+            PictureColour::SRGB
+        );
+        let matrix_and_range_only = InputColourOverride {
+            matrix: Some(VideoMatrix::Bt2020),
+            range: Some(VideoRange::Full),
+            ..InputColourOverride::AUTOMATIC
+        };
+        assert_eq!(colour_of_a_picture_file(&matrix_and_range_only), PictureColour::SRGB);
+        let both = InputColourOverride {
+            primaries: Some(StandardPrimaries::DisplayP3),
+            curve: Some(TransferFunction::Linear),
+            ..InputColourOverride::AUTOMATIC
+        };
+        assert_eq!(
+            colour_of_a_picture_file(&both),
+            PictureColour {
+                primaries: StandardPrimaries::DisplayP3,
+                curve: TransferFunction::Linear
+            }
+        );
+        let only_primaries = InputColourOverride {
+            primaries: Some(StandardPrimaries::Rec2020),
+            ..InputColourOverride::AUTOMATIC
+        };
+        assert_eq!(colour_of_a_picture_file(&only_primaries).curve, TransferFunction::Srgb);
+        assert_eq!(
+            colour_of_a_picture_file(&only_primaries).primaries,
+            StandardPrimaries::Rec2020
+        );
+    }
 
     #[test]
     fn with_the_default_settings_a_frame_is_light_in_rec709_and_the_preview_and_the_export_encode_it_alike() {

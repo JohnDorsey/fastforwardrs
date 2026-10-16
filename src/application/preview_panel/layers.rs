@@ -160,6 +160,7 @@ fn draw_layer(
         PreviewLayerContent::Image {
             source,
             picture: Some(decoded),
+            ..
         } => Some(
             textures
                 .image_picture(context, *source, decoded, picture.filter, layer.colour)

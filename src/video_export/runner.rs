@@ -376,14 +376,17 @@ fn produce(job: Job) -> Result<(), Ending> {
         .iter()
         .filter_map(|(source, format)| {
             let (width, height) = size_of(source);
-            Some((*source, format.as_native_yuv420p(width, height)?))
+            Some((
+                *source,
+                format.as_native_yuv420p_with(width, height, &plan.videos[source].colour)?,
+            ))
         })
         .collect();
     let picture_colours: HashMap<SourceMediaIdentifier, PictureColour> = formats
         .iter()
         .map(|(source, format)| {
             let (width, height) = size_of(source);
-            let colour = format.colour_of_a_picture_of_size(width, height);
+            let colour = format.colour_of_a_picture_of_size_with(width, height, &plan.videos[source].colour);
             (
                 *source,
                 PictureColour {

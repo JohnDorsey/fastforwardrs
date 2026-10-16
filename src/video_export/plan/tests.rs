@@ -69,6 +69,29 @@ fn the_plan_carries_the_output_colour_space_of_the_settings_and_what_the_frames_
 }
 
 #[test]
+fn what_the_user_says_of_the_colours_of_a_video_and_of_a_picture_file_is_in_the_plan() {
+    use crate::colour_space::{StandardPrimaries, TransferFunction, VideoMatrix};
+    let mut project = project_with_video(320, 180, false);
+    project.import_source(picture_source(2, 64, 48), frame(0)).unwrap();
+    let said = InputColourOverride {
+        matrix: Some(VideoMatrix::Bt2020),
+        primaries: Some(StandardPrimaries::DisplayP3),
+        curve: Some(TransferFunction::Gamma22),
+        ..InputColourOverride::AUTOMATIC
+    };
+    let before = plan(&project).unwrap();
+    assert!(before.videos.values().all(|video| video.colour.is_automatic()));
+    assert!(before.images.values().all(|image| image.colour.is_automatic()));
+
+    assert!(project.set_source_colour(SourceMediaIdentifier::new(1), said));
+    assert!(project.set_source_colour(SourceMediaIdentifier::new(2), said));
+
+    let after = plan(&project).unwrap();
+    assert_eq!(after.videos[&SourceMediaIdentifier::new(1)].colour, said);
+    assert_eq!(after.images[&SourceMediaIdentifier::new(2)].colour, said);
+}
+
+#[test]
 fn a_project_of_a_single_frame_is_planned_as_a_video_of_a_single_frame() {
     let mut project = Project::empty();
     project

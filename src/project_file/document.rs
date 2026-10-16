@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The exact shape of a project file on disk (the current version, 11).
+//! The exact shape of a project file on disk (the current version, 12).
 //!
 //! These types are deliberately separate from the editing model in [`crate::project`]: the file
 //! format has to stay readable by future versions, while the model is free to change. Converting
@@ -13,9 +13,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::effects::{EffectDocument, PluginDocument};
+use crate::colour_space::{StandardPrimaries, TransferFunction, VideoMatrix, VideoRange};
 use crate::project::{
-    DisplayTransform, FrameRate, Gain, GroupColour, OutputColourSpace, SourceFrameIndex, SourceMediaIdentifier,
-    SpedUpClipSound, SpeedFactor, TextColour, TrackHeight, WorkingColourSpace,
+    DisplayTransform, FrameRate, Gain, GroupColour, InputColourOverride, OutputColourSpace, SourceFrameIndex,
+    SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TrackHeight, WorkingColourSpace,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,6 +90,9 @@ pub(super) enum SourceDocument {
         display_width_in_pixels: u32,
         display_height_in_pixels: u32,
         has_audio: bool,
+        /// What the user says the colours of the video are, instead of what it says. Left out when they say nothing, and in the files of versions before 12.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        colour: Option<InputColourDocument>,
     },
     Audio {
         identifier: SourceMediaIdentifier,
@@ -106,7 +110,47 @@ pub(super) enum SourceDocument {
         included_as: Option<String>,
         display_width_in_pixels: u32,
         display_height_in_pixels: u32,
+        /// What the user says the colours of the picture are, instead of sRGB. Left out when they say nothing, and in the files of versions before 12.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        colour: Option<InputColourDocument>,
     },
+}
+
+/// What the user says the colours of a source file are (format 12 and after). A part that is not there is automatic: what the file says, or what is assumed where it says
+/// nothing.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct InputColourDocument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<VideoMatrix>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<VideoRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primaries: Option<StandardPrimaries>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curve: Option<TransferFunction>,
+}
+
+impl From<&InputColourOverride> for InputColourDocument {
+    fn from(said: &InputColourOverride) -> Self {
+        Self {
+            matrix: said.matrix,
+            range: said.range,
+            primaries: said.primaries,
+            curve: said.curve,
+        }
+    }
+}
+
+impl From<InputColourDocument> for InputColourOverride {
+    fn from(document: InputColourDocument) -> Self {
+        Self {
+            matrix: document.matrix,
+            range: document.range,
+            primaries: document.primaries,
+            curve: document.curve,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

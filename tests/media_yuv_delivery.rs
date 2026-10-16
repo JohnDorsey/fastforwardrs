@@ -18,8 +18,9 @@ mod support;
 
 use std::path::Path;
 
+use fastforwardrs::colour_space::VideoMatrix;
 use fastforwardrs::engine::{YuvColour, YuvMatrix, YuvRange, chroma_size, rgba_of_yuv420p_planes};
-use fastforwardrs::media::{DecodedFrame, FfmpegToolchain, NativeMatrix, NativeYuv420p, probe_video_stream_format};
+use fastforwardrs::media::{DecodedFrame, FfmpegToolchain, NativeYuv420p, probe_video_stream_format};
 use fastforwardrs::playback::colour_for_the_engine;
 use support::scratch_directory;
 use support::yuv_videos::{
@@ -107,16 +108,16 @@ fn what_ffprobe_says_of_a_video_is_read_and_decides_whether_the_preview_can_use_
 
     let native = |matrix, full_range| Some(NativeYuv420p { matrix, full_range });
     for (name, tags, expected) in [
-        ("untagged", UNTAGGED, native(NativeMatrix::Bt601, false)),
-        ("bt709 limited", BT709_LIMITED, native(NativeMatrix::Bt709, false)),
-        ("bt709 full", BT709_FULL, native(NativeMatrix::Bt709, true)),
+        ("untagged", UNTAGGED, native(VideoMatrix::Bt601, false)),
+        ("bt709 limited", BT709_LIMITED, native(VideoMatrix::Bt709, false)),
+        ("bt709 full", BT709_FULL, native(VideoMatrix::Bt709, true)),
         (
             "smpte170m limited",
             SMPTE170M_LIMITED,
-            native(NativeMatrix::Bt601, false),
+            native(VideoMatrix::Bt601, false),
         ),
-        ("bt470bg full", BT470BG_FULL, native(NativeMatrix::Bt601, true)),
-        ("bt2020nc limited", BT2020_LIMITED, native(NativeMatrix::Bt2020, false)),
+        ("bt470bg full", BT470BG_FULL, native(VideoMatrix::Bt601, true)),
+        ("bt2020nc limited", BT2020_LIMITED, native(VideoMatrix::Bt2020, false)),
     ] {
         let video = video_made_by_geq(
             &toolchain,
@@ -172,7 +173,7 @@ fn an_ordinary_h264_file_is_probed_too_tagged_or_not() {
             "h264_untagged",
             UNTAGGED,
             NativeYuv420p {
-                matrix: NativeMatrix::Bt601,
+                matrix: VideoMatrix::Bt601,
                 full_range: false,
             },
         ),
@@ -185,7 +186,7 @@ fn an_ordinary_h264_file_is_probed_too_tagged_or_not() {
                 "range=tv",
             ][..],
             NativeYuv420p {
-                matrix: NativeMatrix::Bt709,
+                matrix: VideoMatrix::Bt709,
                 full_range: false,
             },
         ),

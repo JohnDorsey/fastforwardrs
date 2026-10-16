@@ -13,8 +13,9 @@ use std::path::Path;
 use fastforwardrs::colour_effects::ColourMatrix;
 use fastforwardrs::media::{FfmpegToolchain, probe_source_media};
 use fastforwardrs::project::{
-    AnimationTarget, ClipId, EffectInstanceId, EffectKind, GroupId, GroupKind, Member, Project, PropertyId,
-    PropertyValue, SourceMedia, SourceMediaIdentifier, SourceMediaLink, TextColour, TextObject, TimelineFrameIndex,
+    AnimationTarget, ClipId, EffectInstanceId, EffectKind, GroupId, GroupKind, InputColourOverride, Member, Project,
+    PropertyId, PropertyValue, SourceMedia, SourceMediaIdentifier, SourceMediaLink, TextColour, TextObject,
+    TimelineFrameIndex,
 };
 use support::{
     DecodedVideo, decode_video, export, export_with_text_pictures, make_a_keyframe,
@@ -50,6 +51,7 @@ fn project_of_a_flat_colour_video(
                 identifier: SourceMediaIdentifier::new(1),
                 link: SourceMediaLink::from_absolute_path(path),
                 properties,
+                colour: InputColourOverride::AUTOMATIC,
             },
             TimelineFrameIndex::new(0),
         )

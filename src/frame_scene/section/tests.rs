@@ -7,6 +7,7 @@
 use super::*;
 use crate::colour_effects::ColourMatrix;
 use crate::composition::{PicturePlan, plan_pictures};
+use crate::engine::PictureColour;
 use crate::project::{AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, TextObject};
 use crate::test_support::{HUE_SHIFT_AS_THE_FIRST_EFFECT, make_a_keyframe, put_a_hue_shift_on};
 use crate::video_export::test_projects::{
@@ -63,7 +64,7 @@ fn the_layers_at<'a>(
         },
         |source| {
             asked.pictures.push(source);
-            the_picture_file
+            (the_picture_file, PictureColour::SRGB)
         },
     )
 }
@@ -135,12 +136,21 @@ fn a_video_is_asked_about_once_with_its_layer_and_a_picture_file_once_with_its_s
     let mut picture_files = 0;
     for layer in &layers {
         match &layer.content {
-            PreviewLayerContent::Image { source, picture } => {
+            PreviewLayerContent::Image {
+                source,
+                picture,
+                colour,
+            } => {
                 picture_files += 1;
                 assert_eq!(*source, SourceMediaIdentifier::new(2));
                 assert!(
                     std::ptr::eq(picture.expect("the picture was given"), &the_picture_file),
                     "the picture that the caller gave is the layer's"
+                );
+                assert_eq!(
+                    *colour,
+                    PictureColour::SRGB,
+                    "and so is the colour that the caller gave"
                 );
             }
             PreviewLayerContent::Video(shown) => assert!(matches!(shown, VideoInThePicture::Waiting)),
@@ -358,4 +368,38 @@ fn a_section_with_nothing_in_it_has_no_layers_and_no_symbol() {
 
     assert!(layers.is_empty());
     assert!(symbol_of_a_section(&section).is_none());
+}
+
+#[test]
+fn the_colour_that_the_caller_gives_for_a_picture_file_is_the_colour_of_its_layer() {
+    use crate::colour_space::{StandardPrimaries, TransferFunction};
+    let mut project = project_with_video(320, 180, false);
+    project.import_source(picture_source(2, 64, 48), frame(0)).unwrap();
+    let plan = plan_pictures(&project, |_| true);
+    let section = plan.section_at(frame(0)).expect("the frame is on the timeline");
+    let chosen = PictureColour {
+        primaries: StandardPrimaries::Rec2020,
+        curve: TransferFunction::Gamma24,
+    };
+    let the_picture_file = RgbaPicture {
+        width_in_pixels: 1,
+        height_in_pixels: 1,
+        rgba_pixels: vec![1, 2, 3, 255],
+    };
+
+    let layers = layers_of_a_section(
+        section,
+        frame(0),
+        |_, _| VideoInThePicture::Waiting,
+        |_| (Some(&the_picture_file), chosen),
+    );
+
+    let colours: Vec<PictureColour> = layers
+        .iter()
+        .filter_map(|layer| match &layer.content {
+            PreviewLayerContent::Image { colour, .. } => Some(*colour),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(colours, vec![chosen]);
 }

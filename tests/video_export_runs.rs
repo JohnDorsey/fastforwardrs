@@ -575,6 +575,7 @@ fn project_of_the_video(toolchain: &FfmpegToolchain, source: &Path) -> Project {
                 identifier: fastforwardrs::project::SourceMediaIdentifier::new(1),
                 link: fastforwardrs::project::SourceMediaLink::from_absolute_path(source.to_owned()),
                 properties: fastforwardrs::media::probe_source_media(toolchain, source).unwrap(),
+                colour: fastforwardrs::project::InputColourOverride::AUTOMATIC,
             },
             fastforwardrs::project::TimelineFrameIndex::new(0),
         )
@@ -721,5 +722,91 @@ fn a_high_definition_video_that_says_nothing_of_its_colours_is_read_as_bt709_so_
     assert!(
         mean_if_bt601 > 3.0 * mean,
         "a premise: BT.601 and BT.709 make colours of these planes that are {mean_if_bt601:.3} apart on average, and the export is {mean:.3} from the truth"
+    );
+}
+
+#[test]
+fn what_the_user_says_of_the_matrix_of_a_video_is_the_matrix_its_colours_are_made_with_in_the_export() {
+    // (Phase 3, piece 3.6.) A high-definition video that says nothing is read as BT.709; the user says that it is BT.601, and the export comes out as ffmpeg's own decoding of
+    // the same planes saying so. The control: the same planes, the user saying nothing, come out as BT.709 does.
+    use fastforwardrs::colour_space::VideoMatrix;
+    use fastforwardrs::project::{InputColourOverride, SourceMediaIdentifier};
+    use support::yuv_videos::{BT709_LIMITED, FOUR_COLOURS, SMPTE170M_LIMITED, UNTAGGED, video_made_by_geq};
+    let toolchain = ready_or_skip!();
+    let scratch = scratch_directory();
+    let size = (1280, 720);
+    let says_nothing = video_made_by_geq(
+        &toolchain,
+        scratch.path(),
+        "says_nothing",
+        size,
+        FOUR_COLOURS,
+        "yuv420p",
+        UNTAGGED,
+    );
+    let as_bt601 = video_made_by_geq(
+        &toolchain,
+        scratch.path(),
+        "as_bt601",
+        size,
+        FOUR_COLOURS,
+        "yuv420p",
+        SMPTE170M_LIMITED,
+    );
+    let as_bt709 = video_made_by_geq(
+        &toolchain,
+        scratch.path(),
+        "as_bt709",
+        size,
+        FOUR_COLOURS,
+        "yuv420p",
+        BT709_LIMITED,
+    );
+    let mean_difference = |a: &[u8], b: &[u8]| -> f64 {
+        a.iter().zip(b).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / a.len() as f64
+    };
+
+    let mut project = project_of_the_video(&toolchain, &says_nothing);
+    assert!(project.set_source_colour(
+        SourceMediaIdentifier::new(1),
+        InputColourOverride {
+            matrix: Some(VideoMatrix::Bt601),
+            ..InputColourOverride::AUTOMATIC
+        }
+    ));
+    let chosen = scratch.path().join("chosen.mp4");
+    assert_eq!(export(&toolchain, &project, &chosen).result, ExportResult::Completed);
+    let left_alone = scratch.path().join("left_alone.mp4");
+    assert_eq!(
+        export(
+            &toolchain,
+            &project_of_the_video(&toolchain, &says_nothing),
+            &left_alone
+        )
+        .result,
+        ExportResult::Completed
+    );
+
+    let truth_601 = decode_video(&toolchain, &as_bt601, size.0, size.1);
+    let truth_709 = decode_video(&toolchain, &as_bt709, size.0, size.1);
+    let chosen = decode_video(&toolchain, &chosen, size.0, size.1);
+    let left_alone = decode_video(&toolchain, &left_alone, size.0, size.1);
+    let (chosen_601, chosen_709) = (
+        mean_difference(&chosen.pictures[0], &truth_601.pictures[0]),
+        mean_difference(&chosen.pictures[0], &truth_709.pictures[0]),
+    );
+    let (alone_601, alone_709) = (
+        mean_difference(&left_alone.pictures[0], &truth_601.pictures[0]),
+        mean_difference(&left_alone.pictures[0], &truth_709.pictures[0]),
+    );
+    eprintln!("chosen BT.601: {chosen_601:.3} from the 601 reading, {chosen_709:.3} from the 709 one");
+    eprintln!("left alone: {alone_601:.3} from the 601 reading, {alone_709:.3} from the 709 one");
+    assert!(
+        chosen_601 < 1.0 && chosen_709 > 3.0,
+        "chosen as BT.601: {chosen_601} and {chosen_709}"
+    );
+    assert!(
+        alone_709 < 1.0 && alone_601 > 3.0,
+        "left alone, BT.709: {alone_601} and {alone_709}"
     );
 }

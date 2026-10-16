@@ -16,13 +16,14 @@ mod colour;
 mod describe;
 mod section;
 
-pub use colour::{colour_of_the_export, colour_of_the_preview, working_space_of};
+pub use colour::{colour_of_a_picture_file, colour_of_the_export, colour_of_the_preview, working_space_of};
 pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, TextPictures, describe_frame};
 pub use section::{layers_of_a_section, symbol_of_a_section};
 
 use std::borrow::Cow;
 
 use crate::colour_effects::ColourMatrix;
+use crate::engine::PictureColour;
 use crate::media::ThumbnailLibrary;
 use crate::playback::SuppliedPicture;
 use crate::project::{
@@ -51,6 +52,8 @@ pub enum PreviewLayerContent<'a> {
     Image {
         source: SourceMediaIdentifier,
         picture: Option<&'a RgbaPicture>,
+        /// What the codes of the red, green and blue of the picture stand for: sRGB unless the user says that the file is another (see [`colour_of_a_picture_file`]).
+        colour: PictureColour,
     },
     /// A text object as it is at the current frame: what the clip says, or, if it has keyframes, as they change it.
     Text(Cow<'a, TextObject>),

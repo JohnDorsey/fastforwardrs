@@ -281,7 +281,8 @@ fn describe_layer(
     supply: &mut impl PictureSupply,
 ) -> Option<LayerDescription> {
     let corners = corners_of(layer, picture_size);
-    // (A picture file, a text, a symbol and a thumbnail are sRGB. The picture of a video is what its file says, or what is assumed of it: it comes with its colour.)
+    // (A text, a symbol and a thumbnail are sRGB. The picture of a video or of a picture file is what its file says, or what the user says, or what is assumed of it: it
+    // comes with its colour.)
     let colour = PictureColour::SRGB;
     let tag = colour_tag_of(colour, working);
     let wanted = match &layer.content {
@@ -313,14 +314,15 @@ fn describe_layer(
         PreviewLayerContent::Image {
             source,
             picture: Some(decoded),
+            colour: image_colour,
         } => PictureWanted {
             id: id_of(
                 KindOfPicture::Image,
                 (generation, source, decoded.width_in_pixels, decoded.height_in_pixels),
-                tag,
+                colour_tag_of(*image_colour, working),
             ),
             how: HowToMakeIt::Image(decoded),
-            colour,
+            colour: *image_colour,
             working,
         },
         PreviewLayerContent::Text(object) => PictureWanted {

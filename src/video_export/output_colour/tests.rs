@@ -6,7 +6,8 @@
 
 use super::*;
 use crate::colour_space::StandardPrimaries;
-use crate::media::{NativeMatrix, NativeYuv420p, VideoStreamFormat};
+use crate::colour_space::VideoMatrix;
+use crate::media::{NativeYuv420p, VideoStreamFormat};
 use crate::playback::colour_for_the_engine;
 use crate::project::OutputColourSpace;
 
@@ -94,7 +95,7 @@ fn what_the_file_says_is_read_back_by_the_function_that_reads_a_file_as_what_the
         };
         for size in [(320, 180), (1920, 1080)] {
             let read = file.colour_of_a_picture_of_size(size.0, size.1);
-            assert_eq!(read.matrix, Some(NativeMatrix::Bt709), "{space:?} at {size:?}");
+            assert_eq!(read.matrix, Some(VideoMatrix::Bt709), "{space:?} at {size:?}");
             assert_eq!(read.full_range, Some(false), "{space:?} at {size:?}");
             assert_eq!(read.primaries, space.primaries(), "{space:?} at {size:?}");
             assert_eq!(

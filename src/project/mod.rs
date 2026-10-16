@@ -26,6 +26,7 @@ mod rack_editing;
 mod rack_merging;
 mod racks;
 mod settings;
+mod source_colour;
 mod source_media;
 mod speed_factor;
 mod speed_indicator_layout;
@@ -62,6 +63,7 @@ pub use settings::{
     AnySetting, DisplayTransform, OutputColourSpace, ProjectSettings, SETTINGS, Setting, SettingControlKind,
     SettingValue, Settings, SpedUpClipSound, WorkingColourSpace,
 };
+pub use source_colour::InputColourOverride;
 pub use source_media::{
     SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaKind, SourceMediaLink,
     SourceMediaProperties, SourceVideoProperties,
@@ -1093,5 +1095,7 @@ mod rack_merging_tests;
 mod rack_ordering_tests;
 #[cfg(test)]
 mod racks_tests;
+#[cfg(test)]
+mod source_colour_tests;
 #[cfg(test)]
 mod tests;

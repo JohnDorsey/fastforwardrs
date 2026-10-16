@@ -10,6 +10,7 @@
 
 use super::{PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
 use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
+use crate::engine::PictureColour;
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
 
@@ -17,12 +18,12 @@ use crate::rgba_picture::RgbaPicture;
 /// colours its effects make at that frame, and a text as its keyframes make it look at that frame.
 ///
 /// `video` says what shows where a video layer is (it is asked once for each video layer, in their order), and `image` gives the decoded picture of an image
-/// file, or `None` for a moment after it is opened (it is asked once for each image layer).
+/// file, or `None` for a moment after it is opened, and what the codes of it stand for (it is asked once for each image layer).
 pub fn layers_of_a_section<'a>(
     section: &'a PictureSection,
     frame: TimelineFrameIndex,
     mut video: impl FnMut(&Layer, &VisibleVideo) -> VideoInThePicture<'a>,
-    mut image: impl FnMut(SourceMediaIdentifier) -> Option<&'a RgbaPicture>,
+    mut image: impl FnMut(SourceMediaIdentifier) -> (Option<&'a RgbaPicture>, PictureColour),
 ) -> Vec<PreviewLayer<'a>> {
     section
         .layers
@@ -34,10 +35,14 @@ pub fn layers_of_a_section<'a>(
             colour: layer.colour_matrix_at(frame),
             content: match &layer.content {
                 LayerContent::Video(visible) => PreviewLayerContent::Video(video(layer, visible)),
-                LayerContent::Image { source } => PreviewLayerContent::Image {
-                    source: *source,
-                    picture: image(*source),
-                },
+                LayerContent::Image { source } => {
+                    let (picture, colour) = image(*source);
+                    PreviewLayerContent::Image {
+                        source: *source,
+                        picture,
+                        colour,
+                    }
+                }
                 LayerContent::Text(_) => {
                     PreviewLayerContent::Text(layer.text_at(frame).expect("a text layer has a text object"))
                 }

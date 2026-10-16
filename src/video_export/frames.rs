@@ -22,8 +22,8 @@ use super::pictures::{PicturesOfTheRuns, RunPictureProblem, RunStreamStarter};
 use super::plan::ExportPlan;
 use crate::engine::{FrameDescription, LayerSource, PictureData, PictureId};
 use crate::frame_scene::{
-    PreviewContent, SentPictures, TextPictures, VideoInThePicture, describe_frame, layers_of_a_section,
-    symbol_of_a_section,
+    PreviewContent, SentPictures, TextPictures, VideoInThePicture, colour_of_a_picture_file, describe_frame,
+    layers_of_a_section, symbol_of_a_section,
 };
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
@@ -132,7 +132,14 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
                             .expect("a picture was taken for every video"),
                     )
                 },
-                |source| self.images.get(&source),
+                |source| {
+                    (
+                        self.images.get(&source),
+                        colour_of_a_picture_file(
+                            &plan.images.get(&source).map(|image| image.colour).unwrap_or_default(),
+                        ),
+                    )
+                },
             ),
             symbol: symbol_of_a_section(section),
             indicator_layout: plan.symbol_layout,
