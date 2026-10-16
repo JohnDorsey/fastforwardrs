@@ -1,0 +1,310 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Exporting a project from the command line, with no window: `fastforwardrs-export [--adapter best|software] <project file> <video file>`.
+//!
+//! This is the first thing that uses the picture engine without a window (EN-11): the same export as the editor's File menu (`video_export`), on the best graphics
+//! adapter the computer has, with the progress told on the error stream, one line each time another per cent is done. It is a program of its own (and not an option
+//! of the editor's) because the editor is a windowed program on Windows, which has no console to write to.
+//!
+//! The project file is a plain one (`.json`) or an archive (`.ffrs`, which can have its videos in it). The source files are looked for where the project says they
+//! are and then next to the project file, as the editor does; the settings are the global ones of the editor (its settings file) with the project's own on top.
+
+use std::ffi::OsString;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use super::archive_cache::ArchiveCache;
+use crate::engine::AdapterChoice;
+use crate::media::{FfmpegToolchain, MediaLocation};
+use crate::project::{Project, Settings, SourceMedia};
+use crate::project_file::archive::entry_place;
+use crate::project_file::read_project_file;
+use crate::settings_file::{default_settings_file_path, read_settings_file};
+use crate::video_export::{ExportEvent, ExportOptions, ExportPlan, ExportResult, VideoExport, plan_export};
+
+/// What the program says when it is not given what it needs.
+pub const USAGE: &str = "\
+Usage: fastforwardrs-export [--adapter best|software] [--settings <file>]
+                            <project file> <video file>
+
+Exports the project in <project file> (a .json project, or a .ffrs project
+file with its videos in it) as a finished video in <video file> (.mp4, .mkv
+or .mov), with no window. The picture is made on the graphics card, and the
+progress is told on the error stream.
+
+  --adapter best        use the best graphics adapter the computer has
+                        (the default)
+  --adapter software    use a software graphics adapter (slow: for a
+                        computer with no graphics card, and for testing)
+  --settings <file>     read the settings that are the same for every
+                        project from this file and not from the editor's own
+                        (a file that is not there means the settings were
+                        never changed)
+  --help                say this
+
+The exit status is 0 when the video was made, 1 when the export failed, and
+2 when the command line was not understood.";
+
+/// Which graphics adapter the export is made on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdapterKind {
+    /// The best the computer has.
+    Best,
+    /// A software adapter.
+    Software,
+}
+
+impl AdapterKind {
+    fn as_a_choice(self) -> AdapterChoice {
+        match self {
+            Self::Best => AdapterChoice::BestAvailable,
+            Self::Software => AdapterChoice::SoftwareOnly,
+        }
+    }
+}
+
+/// What a command line asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportRequest {
+    pub project_file: PathBuf,
+    pub video_file: PathBuf,
+    pub adapter: AdapterKind,
+    /// The file the global settings are read from (`None`: there are none, and the defaults are used).
+    pub global_settings_file: Option<PathBuf>,
+    /// The folder the files that are taken out of a project file are kept in (`None`: the usual place).
+    pub archive_cache_folder: Option<PathBuf>,
+}
+
+/// What the arguments of a command line come to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommandLine {
+    Export(ExportRequest),
+    Help,
+}
+
+/// Reads the arguments that follow the name of the program. The settings and the cache are the usual ones.
+pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<CommandLine, String> {
+    let mut adapter = AdapterKind::Best;
+    let mut settings_file = default_settings_file_path();
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("--help" | "-h") => return Ok(CommandLine::Help),
+            Some("--adapter") => {
+                adapter = match arguments.next().as_deref().and_then(std::ffi::OsStr::to_str) {
+                    Some("best") => AdapterKind::Best,
+                    Some("software") => AdapterKind::Software,
+                    Some(other) => return Err(format!("--adapter has to be best or software, and not {other}")),
+                    None => return Err("--adapter has to be followed by best or software".to_owned()),
+                };
+            }
+            Some("--settings") => {
+                settings_file = Some(
+                    arguments
+                        .next()
+                        .map(PathBuf::from)
+                        .ok_or("--settings has to be followed by the name of a file")?,
+                );
+            }
+            Some(option) if option.starts_with("--") => {
+                return Err(format!("{option} is not an option of this program"));
+            }
+            _ => files.push(PathBuf::from(argument)),
+        }
+    }
+    match <[PathBuf; 2]>::try_from(files) {
+        Ok([project_file, video_file]) => Ok(CommandLine::Export(ExportRequest {
+            project_file,
+            video_file,
+            adapter,
+            global_settings_file: settings_file,
+            archive_cache_folder: None,
+        })),
+        Err(files) => Err(match files.len() {
+            0 | 1 => "the project file and the video file are both needed".to_owned(),
+            _ => "only the project file and the video file are wanted".to_owned(),
+        }),
+    }
+}
+
+/// What an export reports as it goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Report {
+    /// Something that the finished video will not have, or that is not as it should be, and that does not stop the export.
+    Warning(String),
+    /// How many frames of the video have been written.
+    Progress { frames_written: u64, total_frames: u64 },
+}
+
+/// The command line, from the arguments after the name of the program to the exit status, writing what is to be said to `error_stream`.
+pub fn run(arguments: impl IntoIterator<Item = OsString>, error_stream: &mut dyn Write) -> u8 {
+    let request = match parse_arguments(arguments) {
+        Ok(CommandLine::Help) => {
+            let _ = writeln!(error_stream, "{USAGE}");
+            return 0;
+        }
+        Ok(CommandLine::Export(request)) => request,
+        Err(problem) => {
+            let _ = writeln!(error_stream, "{problem}\n\n{USAGE}");
+            return 2;
+        }
+    };
+    let mut progress = ProgressTold::default();
+    let result = export_project(&request, &mut |report| match report {
+        Report::Warning(words) => {
+            let _ = writeln!(error_stream, "warning: {words}");
+        }
+        Report::Progress {
+            frames_written,
+            total_frames,
+        } => {
+            if let Some(line) = progress.line_for(frames_written, total_frames) {
+                let _ = writeln!(error_stream, "{line}");
+            }
+        }
+    });
+    match result {
+        Ok(()) => {
+            let _ = writeln!(error_stream, "The video was saved to {}", request.video_file.display());
+            0
+        }
+        Err(reason) => {
+            let _ = writeln!(error_stream, "The export failed: {reason}");
+            1
+        }
+    }
+}
+
+/// Says how far the export is: a line for each per cent that is reached, and none for a per cent that was told already.
+#[derive(Default)]
+struct ProgressTold {
+    last_per_cent: Option<u64>,
+}
+
+impl ProgressTold {
+    fn line_for(&mut self, frames_written: u64, total_frames: u64) -> Option<String> {
+        // (A video of no frames is done; and more frames than there are, which ffmpeg does not say, is not more than all.)
+        let per_cent = (frames_written * 100).checked_div(total_frames).unwrap_or(100).min(100);
+        if self.last_per_cent == Some(per_cent) {
+            return None;
+        }
+        self.last_per_cent = Some(per_cent);
+        Some(format!("{per_cent}% ({frames_written} of {total_frames} frames)"))
+    }
+}
+
+/// Exports the project in `request.project_file` to `request.video_file`, reporting to `report`; the reason, if it failed.
+pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -> Result<(), String> {
+    let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
+    let project = read_project_file(&request.project_file).map_err(|error| error.to_string())?;
+    let global_settings = match &request.global_settings_file {
+        Some(path) => read_settings_file(path).map_err(|error| error.to_string())?,
+        None => Settings::DEFAULT,
+    };
+    let plan = plan_export(&project, project.settings().resolve(global_settings)).map_err(|error| error.to_string())?;
+    for effect in super::fast_forward_application::effects_the_export_would_leave_out(&project) {
+        report(Report::Warning(format!(
+            "the effect {effect} is not in this program, so the video does not have what it does"
+        )));
+    }
+    let cache = match &request.archive_cache_folder {
+        Some(folder) => Some(ArchiveCache::at(folder.clone())),
+        None => ArchiveCache::in_the_usual_place(),
+    };
+    let locations = locate_the_sources(&project, &plan, &request.project_file, cache.as_ref())?;
+    let export = VideoExport::start(
+        &toolchain,
+        &plan,
+        &locations,
+        &request.video_file,
+        ExportOptions::new(request.adapter.as_a_choice()),
+        Arc::new(|| {}),
+    )
+    .map_err(|error| error.to_string())?;
+    loop {
+        match export.try_next_event() {
+            Some(ExportEvent::Progress { frames_written }) => report(Report::Progress {
+                frames_written,
+                total_frames: plan.total_frame_count,
+            }),
+            Some(ExportEvent::Finished(ExportResult::Completed)) => return Ok(()),
+            Some(ExportEvent::Finished(ExportResult::Cancelled)) => return Err("the export was cancelled".to_owned()),
+            Some(ExportEvent::Finished(ExportResult::Failed { reason })) => return Err(reason),
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
+/// Where the files the export is made from are, in the order the plan lists them: where the project says each is, then next to the project file; a file that is
+/// included in a project file, where it is in it (or, if it is compressed there, taken out into the cache). The reason, if any cannot be found.
+fn locate_the_sources(
+    project: &Project,
+    plan: &ExportPlan,
+    project_file: &Path,
+    cache: Option<&ArchiveCache>,
+) -> Result<Vec<MediaLocation>, String> {
+    let project_directory = project_file.parent();
+    let mut locations = Vec::with_capacity(plan.source_files.len());
+    let mut problems = Vec::new();
+    for &identifier in &plan.source_files {
+        let source: &SourceMedia = project
+            .source(identifier)
+            .expect("the plan is made of the sources of the project");
+        let name = source.link.absolute_path.file_name().map_or_else(
+            || source.link.absolute_path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let found = match &source.link.included_as {
+            Some(entry_name) => location_of_an_included_file(project_file, entry_name, cache),
+            None => source
+                .link
+                .candidate_paths(project_directory)
+                .into_iter()
+                .find(|path| path.is_file())
+                .map(MediaLocation::of_a_file)
+                .ok_or_else(|| "it is not where the project says it is, or next to the project file".to_owned()),
+        };
+        match found {
+            Ok(location) => locations.push(location),
+            Err(why) => problems.push(format!("{name}: {why}")),
+        }
+    }
+    if problems.is_empty() {
+        Ok(locations)
+    } else {
+        Err(format!(
+            "these files of the project cannot be used:\n  {}",
+            problems.join("\n  ")
+        ))
+    }
+}
+
+/// Where the bytes of the file `entry_name` of the project file `archive` are: in the project file where they are stored as they are, and otherwise in the
+/// cache, once taken out.
+fn location_of_an_included_file(
+    archive: &Path,
+    entry_name: &str,
+    cache: Option<&ArchiveCache>,
+) -> Result<MediaLocation, String> {
+    let place = entry_place(archive, entry_name).map_err(|error| error.to_string())?;
+    if let Some(location) = place.as_a_location_in(archive) {
+        return Ok(location);
+    }
+    match cache {
+        Some(cache) => cache
+            .take_out(archive, entry_name)
+            .map(MediaLocation::of_a_file)
+            .map_err(|error| error.to_string()),
+        None => Err(
+            "it is compressed in the project file, and there is nowhere to keep the files that are taken out of it"
+                .to_owned(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests;

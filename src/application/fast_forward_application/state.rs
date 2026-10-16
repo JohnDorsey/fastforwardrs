@@ -28,6 +28,7 @@ use crate::application::selection::Selection;
 use crate::application::settings_windows::SettingsWindowsOpen;
 use crate::application::textures::Textures;
 use crate::application::timeline_panel::TimelineViewState;
+use crate::engine::AdapterChoice;
 use crate::media::{FfmpegToolchain, MediaLocation, UserInterfaceWakeUp, VideoStreamFormat};
 use crate::playback::{
     AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter, PlaybackClock, PreviewPictures,
@@ -219,6 +220,9 @@ pub(super) type VideoFormatProber = Arc<dyn Fn(&MediaLocation) -> Option<VideoSt
 /// fonts, and the way to wake the window up from another thread.
 pub(super) struct Environment {
     pub(super) toolchain: Option<std::sync::Arc<FfmpegToolchain>>,
+    /// The graphics adapter an export is made on: the one the window is drawn with. `None` where there is no window (and nothing has said what to use): the export
+    /// is then refused, with a message. (The tests give a software adapter; see `FastForwardApplication::use_this_adapter_for_exports`.)
+    pub(super) export_adapter: Option<AdapterChoice>,
     /// Finds out how the pictures of a video are stored (see [`Playback::planes_wanted`]).
     pub(super) video_format_prober: VideoFormatProber,
     /// What asks the person which file to open or where to save one.

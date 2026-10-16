@@ -19,7 +19,7 @@ mod plan;
 mod runner;
 mod runs;
 #[cfg(test)]
-mod test_projects;
+pub(crate) mod test_projects;
 #[cfg(test)]
 mod test_streams;
 

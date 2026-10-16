@@ -3,7 +3,6 @@
 
 //! Exporting the finished video, and keeping track of how it is going.
 
-use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,10 +10,8 @@ use super::{FastForwardApplication, RunningExport};
 use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::media::MediaLocation;
-use crate::media::export::{ExportEvent, ExportResult, VideoExport, plan_export};
-use crate::project::{EffectKind, SourceMediaIdentifier, TextObject};
-use crate::rgba_picture::RgbaPicture;
-use crate::text_rendering::area_size_in_pixels;
+use crate::project::{EffectKind, Project, SourceMediaIdentifier};
+use crate::video_export::{ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export};
 
 /// The file types the finished video can be saved as. All of them hold the same H.264 and AAC.
 const EXPORT_FILE_EXTENSIONS: [&str; 3] = ["mp4", "mkv", "mov"];
@@ -35,15 +32,25 @@ fn export_finished_text(destination: &std::path::Path, frames_missing_a_picture:
     }
 }
 
-/// The picture a text object gets when the fonts could not be loaded: a transparent one, so that
-/// the export still finishes (without the text).
-fn blank_picture_of_text_area(object: &TextObject, picture_width: u32, picture_height: u32) -> RgbaPicture {
-    let (width_in_pixels, height_in_pixels) = area_size_in_pixels(object, picture_width, picture_height);
-    RgbaPicture {
-        width_in_pixels,
-        height_in_pixels,
-        rgba_pixels: vec![0; width_in_pixels as usize * height_in_pixels as usize * 4],
-    }
+/// The effects that the program does not have (a project file brought them) that are applied to the clips of `project`, so that the video would not have what
+/// they do: each once, by its name, its key and its version, in the order of their keys.
+pub(crate) fn effects_the_export_would_leave_out(project: &Project) -> Vec<String> {
+    let mut missing: Vec<EffectKind> = project
+        .effects_applied_to_every_clip()
+        .values()
+        .flatten()
+        .map(|applied| applied.effect.kind())
+        .filter(|kind| !kind.is_installed())
+        .collect();
+    missing.sort();
+    missing.dedup();
+    missing
+        .into_iter()
+        .map(|kind| {
+            let (major, minor) = kind.version();
+            format!("{} ({}, version {major}.{minor})", kind.name(), kind.key())
+        })
+        .collect()
 }
 
 impl FastForwardApplication {
@@ -67,24 +74,7 @@ impl FastForwardApplication {
     /// The effects that the program does not have (a project file brought them) that are applied to the clips of the project, so that the
     /// video would not have what they do: each once, by its name, its key and its version, in the order of their keys.
     pub(super) fn effects_that_the_export_would_leave_out(&self) -> Vec<String> {
-        let mut missing: Vec<EffectKind> = self
-            .document
-            .project
-            .effects_applied_to_every_clip()
-            .values()
-            .flatten()
-            .map(|applied| applied.effect.kind())
-            .filter(|kind| !kind.is_installed())
-            .collect();
-        missing.sort();
-        missing.dedup();
-        missing
-            .into_iter()
-            .map(|kind| {
-                let (major, minor) = kind.version();
-                format!("{} ({}, version {major}.{minor})", kind.name(), kind.key())
-            })
-            .collect()
+        effects_the_export_would_leave_out(&self.document.project)
     }
 
     /// Asks where to save the finished video and starts exporting it, if the video would have all that the project says; and if it would
@@ -118,27 +108,15 @@ impl FastForwardApplication {
         if !self.sources_in_use_that_are_not_available().is_empty() {
             return;
         }
+        let Some(adapter) = self.environment.export_adapter.clone() else {
+            self.show_message(
+                "The export could not be started",
+                "The export is made by the picture engine, which needs the graphics adapter that the window is drawn with, and there is none.",
+            );
+            return;
+        };
         let settings = self.effective_settings();
-        let has_text = self
-            .document
-            .project
-            .tracks()
-            .iter()
-            .flat_map(|track| track.entries())
-            .any(|entry| entry.clip().as_text().is_some());
-        // The fonts are wanted now, if any text is to be drawn: wait for them if they are not ready.
-        let text_renderer = has_text
-            .then(|| self.environment.text_renderer.get_waiting_if_needed())
-            .flatten()
-            .map(RefCell::new);
-        let plan = plan_export(
-            &self.document.project,
-            settings,
-            &|object, picture_width, picture_height| match &text_renderer {
-                Some(renderer) => renderer.borrow_mut().render(object, picture_width, picture_height),
-                None => blank_picture_of_text_area(object, picture_width, picture_height),
-            },
-        );
+        let plan = plan_export(&self.document.project, settings);
         let plan = match plan {
             Ok(plan) => plan,
             Err(error) => {
@@ -156,6 +134,7 @@ impl FastForwardApplication {
             &plan,
             &source_file_locations,
             &destination,
+            ExportOptions::new(adapter),
             Arc::clone(&self.environment.wake_up),
         ) {
             Ok(export) => {
@@ -249,16 +228,5 @@ mod tests {
             text.contains("417 frames of the project are missing the picture of a video"),
             "{text}"
         );
-    }
-
-    #[test]
-    fn a_text_whose_fonts_could_not_be_loaded_is_a_transparent_picture_the_size_of_its_area() {
-        let object = TextObject::default();
-        let picture = blank_picture_of_text_area(&object, 1000, 500);
-        assert_eq!(
-            (picture.width_in_pixels, picture.height_in_pixels),
-            area_size_in_pixels(&object, 1000, 500)
-        );
-        assert!(picture.rgba_pixels.iter().all(|byte| *byte == 0));
     }
 }

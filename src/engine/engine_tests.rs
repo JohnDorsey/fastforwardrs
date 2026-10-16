@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use super::device::how_far_down_the_list_a_backend_is;
+use super::device::{how_far_down_the_list_a_backend_is, how_far_down_the_list_an_adapter_is};
 use super::picture_cache::DEFAULT_BUDGET_IN_BYTES;
 use super::testing::{Gate, software_graphics, software_graphics_with_a_device_of_its_own, with_software_graphics};
 use super::{
@@ -192,6 +192,38 @@ fn of_several_software_adapters_the_one_of_vulkan_is_liked_before_direct3d_and_t
     assert!(place(Vulkan) < place(Dx12));
     assert!(place(Dx12) < place(Metal));
     assert_eq!(place(Metal), place(Gl), "the others are liked alike");
+}
+
+#[test]
+fn of_the_adapters_a_computer_has_the_best_is_a_card_of_its_own_then_the_graphics_of_the_processor_and_a_software_adapter_is_the_last_resort()
+ {
+    use wgpu::Backend::{Dx12, Metal, Vulkan};
+    use wgpu::DeviceType::{Cpu, DiscreteGpu, IntegratedGpu, Other, VirtualGpu};
+    let place = how_far_down_the_list_an_adapter_is;
+    let kinds = [DiscreteGpu, IntegratedGpu, VirtualGpu, Other, Cpu];
+    for pair in kinds.windows(2) {
+        // (Whatever the backends: a card of its own on the worse backend is liked before the graphics of the processor on the better.)
+        assert!(
+            place(pair[0], Dx12) < place(pair[1], Vulkan),
+            "{:?} is liked before {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+    assert!(
+        place(DiscreteGpu, Vulkan) < place(DiscreteGpu, Dx12),
+        "of two of one kind, the better backend"
+    );
+    assert!(place(IntegratedGpu, Dx12) < place(IntegratedGpu, Metal));
+    let mut adapters = [
+        (Cpu, Vulkan),
+        (IntegratedGpu, Vulkan),
+        (DiscreteGpu, Dx12),
+        (DiscreteGpu, Vulkan),
+    ];
+    adapters.sort_by_key(|&(kind, backend)| place(kind, backend));
+    assert_eq!(adapters[0], (DiscreteGpu, Vulkan));
+    assert_eq!(adapters[3], (Cpu, Vulkan));
 }
 
 #[test]

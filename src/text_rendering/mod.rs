@@ -248,9 +248,11 @@ impl LazyTextRenderer {
         matches!(self.state, LoadingState::Ready(_))
     }
 
-    /// Whether the fonts are being loaded now: asked for, and not ready yet.
+    /// Whether the fonts are being loaded now: asked for, and the thread that loads them has not finished. (A thread that has finished is not loading, though
+    /// the renderer is not [ready](Self::is_ready) until it is asked for again and takes what the thread made: nothing is being done, and nothing needs to be waited
+    /// for.)
     pub fn is_loading(&self) -> bool {
-        matches!(self.state, LoadingState::Loading(_))
+        matches!(&self.state, LoadingState::Loading(handle) if !handle.is_finished())
     }
 
     fn finish_loading(&mut self) {

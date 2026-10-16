@@ -415,7 +415,7 @@ fn pictures_are_exact_in_files_whose_timestamps_are_rounded_to_milliseconds() {
         ),
         (
             TestVideoSpecification {
-                name: "ntsc_20_seconds_mkv",
+                name: "ntsc_20_seconds_mkv_without_sound",
                 container: "mkv",
                 frame_rate: "30000/1001",
                 with_audio: false,

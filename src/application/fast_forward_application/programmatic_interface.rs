@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use super::{FastForwardApplication, OpeningPurpose};
 use crate::application::selection::SelectionItem;
+use crate::engine::AdapterChoice;
 use crate::media::MediaLocation;
 use crate::playback::{AudioSinkOpener, EffectSpeakersOpener, SuppliedPicture};
 use crate::project::{ClipId, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
@@ -107,6 +108,13 @@ impl FastForwardApplication {
     /// included in the project file) the stretch of the project file that it is.
     pub fn location_of_the_source(&self, identifier: SourceMediaIdentifier) -> Option<MediaLocation> {
         self.sources.files.get(&identifier)?.location_if_available().cloned()
+    }
+
+    /// Says which graphics adapter an export is made on. The window does this itself (an export is made on the adapter the window is drawn with); an editor with no
+    /// window is given the adapter to use, and one that is not given any refuses to export. (The tests give a software adapter, so that nothing they do is done on a
+    /// real graphics card.)
+    pub fn use_this_adapter_for_exports(&mut self, adapter: AdapterChoice) {
+        self.environment.export_adapter = Some(adapter);
     }
 
     /// Sets how many bytes of files a save copies without doing it in the background (where there is a window that says how it goes,

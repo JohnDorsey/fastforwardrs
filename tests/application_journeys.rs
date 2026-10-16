@@ -73,6 +73,7 @@ fn cut_into_three_with_the_middle_at_ten_times(journey: &mut Journey) {
 }
 
 fn export_to(journey: &mut Journey, destination: &Path) {
+    let _one_export_at_a_time = support::one_export_at_a_time();
     journey.application_mut().export_video_to(destination.to_owned());
     assert!(
         journey.application().is_working_in_the_background(),
@@ -178,7 +179,7 @@ fn the_preview_shows_the_picture_of_whichever_frame_is_current_even_through_sped
 
 #[test]
 fn a_whole_journey_import_edit_save_load_export() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
@@ -298,7 +299,7 @@ fn a_project_and_its_video_moved_together_are_found_again_by_the_relative_path()
 
 #[test]
 fn a_project_whose_video_cannot_be_found_warns_keeps_every_edit_and_can_be_pointed_at_the_video_again() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let video_copy = scratch.path().join("holiday.mp4");
@@ -376,7 +377,7 @@ fn a_project_whose_video_cannot_be_found_warns_keeps_every_edit_and_can_be_point
 #[test]
 fn a_replacement_video_of_another_frame_rate_that_lasts_as_long_takes_the_place_of_the_old_one_with_the_edits_where_they_were()
  {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let video_copy = scratch.path().join("holiday.mp4");
@@ -431,7 +432,7 @@ fn a_replacement_video_of_another_frame_rate_that_lasts_as_long_takes_the_place_
 
 #[test]
 fn a_shorter_replacement_video_keeps_the_edits_and_the_export_is_black_where_the_video_has_nothing() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let video_copy = scratch.path().join("holiday.mp4");
@@ -609,7 +610,7 @@ fn a_new_project_forgets_everything_about_the_old_one() {
 
 #[test]
 fn exporting_over_the_source_video_is_refused_with_a_message_and_the_video_is_untouched() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let video_copy = scratch.path().join("holiday.mp4");
@@ -636,7 +637,7 @@ const TONE_AMPLITUDE: f64 = 0.125;
 
 #[test]
 fn a_sound_file_imported_at_the_playhead_goes_on_a_track_of_its_own_with_a_waveform_and_is_heard_in_the_export() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain); // 20 seconds with a 440 hertz tone
     let tone = support::tone_file(&toolchain, 330, 4);
     let scratch = scratch_directory();
@@ -724,7 +725,7 @@ fn bright_pixels_in(picture: &[u8], width: usize, area: (usize, usize, usize, us
 
 #[test]
 fn a_text_object_made_with_the_mouse_is_saved_and_drawn_over_the_picture_in_the_export() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
@@ -806,7 +807,7 @@ fn a_text_object_made_with_the_mouse_is_saved_and_drawn_over_the_picture_in_the_
 
 #[test]
 fn a_video_made_smaller_and_dragged_past_the_edge_keeps_its_place_in_the_file_and_is_cut_off_there_in_the_export() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
@@ -927,7 +928,7 @@ fn of_two_videos_at_once_the_preview_shows_the_one_in_front_and_the_other_where_
 
 #[test]
 fn a_video_of_another_frame_rate_than_the_projects_is_added_for_as_long_as_it_lasts_and_the_project_keeps_its_rate() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain); // 30 frames a second
     let other_frame_rate = test_video(&toolchain, &TestVideoSpecification::PAL_3_SECONDS); // 75 pictures at 25
     let scratch = scratch_directory();
@@ -999,7 +1000,7 @@ fn a_video_of_another_frame_rate_than_the_projects_is_added_for_as_long_as_it_la
 #[test]
 fn choosing_another_frame_rate_in_the_project_settings_keeps_every_clip_as_long_in_time_and_the_export_runs_at_that_rate()
  {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain); // 20 seconds at 30 frames a second: 600 frames
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
@@ -1131,7 +1132,7 @@ fn a_short_track_and_a_zoomed_in_timeline_get_finer_thumbnails_made_for_what_is_
 
 #[test]
 fn a_picture_imported_from_a_file_is_decoded_for_the_preview_put_in_front_of_the_video_and_drawn_in_the_export() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     // A picture twice as wide as it is tall, red on its left half and blue on its right.
@@ -1197,7 +1198,7 @@ fn make_a_keyframe_with_the_stopwatch(journey: &mut Journey, property: &str) {
 
 #[test]
 fn a_video_animated_with_the_stopwatch_and_the_panel_is_saved_with_its_keyframes_and_exported_as_it_moves_and_fades() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
@@ -1329,7 +1330,7 @@ fn name_of_the_rack(rack: fastforwardrs::project::RackId) -> String {
 fn keyframes_kept_in_the_drawer_of_a_text_lower_the_video_wherever_the_text_or_a_copy_of_it_is() {
     use fastforwardrs::project::{AnimationTarget, PropertyId};
 
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain); // 20 seconds with a 440 hertz tone
     let scratch = scratch_directory();
     let mut journey = Journey::importing(&toolchain, &video.path);
@@ -1520,14 +1521,16 @@ fn video_of_a_minute(toolchain: &FfmpegToolchain) -> support::TestVideo {
     )
 }
 
-/// Regression test: the message for a project that cannot be exported was always headed "There is nothing to export", which
-/// is what it was for when there was only that to say.
+/// What the export used to refuse (a project that needed more than 1500 stretches in which everything is in one place, "too much animation to export") is
+/// exported now, since the export draws every frame as it is: a video that goes a pixel across and back at every one of 1560 frames is a different place in each, and
+/// its left edge is where the keyframes say in every frame.
 #[test]
-fn an_animation_that_is_too_much_to_export_is_refused_with_a_message_that_says_so_and_nothing_is_written() {
-    let toolchain = toolchain_or_skip!();
+fn an_animation_with_a_different_place_for_every_one_of_more_than_fifteen_hundred_frames_is_exported_and_every_frame_is_where_its_keyframes_say()
+ {
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = video_of_a_minute(&toolchain);
     let scratch = scratch_directory();
-    // The video goes a pixel across and back at every frame of its minute: a different place for every frame.
+    const FRAMES: u64 = 1560;
     let mut project = support::project_with_tracks_of_videos(
         &toolchain,
         &[&video],
@@ -1536,7 +1539,7 @@ fn an_animation_that_is_too_much_to_export_is_refused_with_a_message_that_says_s
             &[support::ClipOfTheVideo {
                 gap_before_frames: 0,
                 first_source_frame: 0,
-                end_source_frame: 1800,
+                end_source_frame: FRAMES,
                 speed: 1,
             }],
         )],
@@ -1548,7 +1551,9 @@ fn an_animation_that_is_too_much_to_export_is_refused_with_a_message_that_says_s
             fastforwardrs::project::Placement::upright(fastforwardrs::project::CanvasArea::new(0.0, 0.0, 0.25, 0.25)),
         )
         .unwrap();
-    for frame in 0..1800 {
+    for frame in 0..FRAMES {
+        // (Where the middle of the video is: a quarter of the picture is 80 pixels across and 45 down, so its left edge is at the picture's left edge when its
+        // middle is 40 pixels in, and one pixel in from it when its middle is 41.)
         let across = if frame % 2 == 0 { 0.125 } else { 0.125 + 1.0 / 320.0 };
         support::make_a_keyframe(
             &mut project,
@@ -1558,33 +1563,36 @@ fn an_animation_that_is_too_much_to_export_is_refused_with_a_message_that_says_s
             fastforwardrs::project::PropertyValue::Pair(across, 0.125),
         );
     }
-    let project_path = scratch.path().join("too_much.fastforwardrs.json");
+    let project_path = scratch.path().join("many_places.fastforwardrs.json");
     fastforwardrs::project_file::write_project_file(&project, &project_path).unwrap();
     let mut journey = Journey::start(&toolchain);
     journey.application_mut().load_project_from(project_path);
     journey.wait_until_idle();
-    let destination = scratch.path().join("too_much.mp4");
+    let destination = scratch.path().join("many_places.mp4");
 
-    journey.application_mut().export_video_to(destination.clone());
-    journey.settle();
+    export_to(&mut journey, &destination);
 
-    assert!(
-        !journey.application().is_working_in_the_background(),
-        "the export did not start"
-    );
-    let (title, text) = journey.application().message_showing().expect("a message says why");
-    assert_eq!(title, "There is too much animation to export");
-    assert!(text.contains("1500"), "{text}");
-    assert!(!destination.exists(), "nothing was written");
-    assert!(
-        !destination.with_extension("exporting.mp4").exists(),
-        "and no half-written file was left"
-    );
+    let exported = decode_video(&toolchain, &destination, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(exported.pictures.len() as u64, FRAMES);
+    for (frame, picture) in exported.pictures.iter().enumerate() {
+        if frame % 7 != 0 && frame > 10 && frame + 10 < FRAMES as usize {
+            continue;
+        }
+        let (left, _top, right, bottom) =
+            support::box_of_what_is_not_black(picture, VIDEO_WIDTH as usize, VIDEO_HEIGHT as usize);
+        let one_pixel_in = usize::from(frame % 2 == 1);
+        // (The top is not looked at: the strip at the top of the test pictures that carries the number of the frame is black where its number has a 0.)
+        assert_eq!(
+            (left, right - left + 1, bottom),
+            (one_pixel_in, 80, 44),
+            "frame {frame}: where the video is"
+        );
+    }
 }
 
 #[test]
 fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_with_the_clip_and_exported_turned() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let scratch = scratch_directory();
     let orange = (200u8, 100u8, 50u8);
     let video = support::flat_colour_video(&toolchain, scratch.path(), orange);
@@ -1639,7 +1647,7 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
 
 #[test]
 fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_when_the_original_is_gone() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let footage = scratch.path().join("footage");
@@ -1754,7 +1762,7 @@ fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_wh
 #[test]
 fn a_video_that_is_embedded_and_imported_is_in_the_project_file_at_once_and_is_read_there_and_the_original_is_not_needed()
  {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let footage = scratch.path().join("footage");
@@ -1944,7 +1952,8 @@ fn closing_the_window_while_the_sound_plays_from_the_project_file_lets_go_of_the
 
 #[test]
 fn closing_the_window_while_an_export_is_going_on_does_not_write_the_project_file_again() {
-    let toolchain = toolchain_or_skip!();
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let _one_export_at_a_time = support::one_export_at_a_time();
     let video = counter_video(&toolchain);
     let scratch = scratch_directory();
     let archive_path = scratch.path().join("trip.ffrs");

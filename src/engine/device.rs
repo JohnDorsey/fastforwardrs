@@ -23,6 +23,9 @@ pub enum AdapterChoice {
     /// A software adapter and nothing else (the one of device type `Cpu`: WARP on Windows, lavapipe on Linux), which the tests use so that nothing they
     /// do is done on a real graphics card.
     SoftwareOnly,
+    /// The best graphics adapter the computer has (a card of its own before the graphics of the processor, and so on: `how_far_down_the_list_an_adapter_is`): for a
+    /// program that has no window to take one from, such as the command-line export. **Not for the tests**, which use a software adapter and nothing else.
+    BestAvailable,
     /// For the tests of what happens when the engine cannot start: there is no adapter.
     #[cfg(test)]
     NoAdapterAtAll,
@@ -33,6 +36,7 @@ impl std::fmt::Debug for AdapterChoice {
         match self {
             Self::Window(adapter) => write!(formatter, "the window's adapter ({})", adapter.get_info().name),
             Self::SoftwareOnly => write!(formatter, "a software adapter"),
+            Self::BestAvailable => write!(formatter, "the best graphics adapter the computer has"),
             #[cfg(test)]
             Self::NoAdapterAtAll => write!(formatter, "no adapter at all"),
         }
@@ -52,6 +56,8 @@ pub enum DeviceTrouble {
 pub enum DeviceError {
     #[error("there is no software graphics adapter on this computer")]
     NoSoftwareAdapter,
+    #[error("there is no graphics adapter on this computer")]
+    NoGraphicsAdapter,
     #[error("the graphics adapter would not give a device: {0}")]
     CouldNotMakeADevice(#[from] wgpu::RequestDeviceError),
 }
@@ -75,6 +81,7 @@ impl EngineDevice {
         let adapter = match choice {
             AdapterChoice::Window(adapter) => adapter.as_ref().clone(),
             AdapterChoice::SoftwareOnly => software_adapter().ok_or(DeviceError::NoSoftwareAdapter)?,
+            AdapterChoice::BestAvailable => best_adapter().ok_or(DeviceError::NoGraphicsAdapter)?,
             #[cfg(test)]
             AdapterChoice::NoAdapterAtAll => return Err(DeviceError::NoSoftwareAdapter),
         };
@@ -158,6 +165,32 @@ fn software_adapter() -> Option<wgpu::Adapter> {
         .collect();
     software.sort_by_key(|adapter| how_far_down_the_list_a_backend_is(adapter.get_info().backend));
     software.into_iter().next()
+}
+
+/// The best graphics adapter there is: of those the primary backends find, the one that is liked best by [`how_far_down_the_list_an_adapter_is`]. (A software
+/// adapter is the last choice, and is the one that is used if there is no other.)
+fn best_adapter() -> Option<wgpu::Adapter> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let mut adapters: Vec<wgpu::Adapter> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::PRIMARY));
+    adapters.sort_by_key(|adapter| {
+        let information = adapter.get_info();
+        how_far_down_the_list_an_adapter_is(information.device_type, information.backend)
+    });
+    adapters.into_iter().next()
+}
+
+/// Where an adapter is in the list of the ones that are liked, the lower the better: a card of its own before the graphics of the processor, before a virtual card,
+/// before whatever else there is, before a software adapter; and of those of one kind the backend that is liked best
+/// ([`how_far_down_the_list_a_backend_is`]).
+pub(super) fn how_far_down_the_list_an_adapter_is(device_type: wgpu::DeviceType, backend: wgpu::Backend) -> (u8, u8) {
+    let kind = match device_type {
+        wgpu::DeviceType::DiscreteGpu => 0,
+        wgpu::DeviceType::IntegratedGpu => 1,
+        wgpu::DeviceType::VirtualGpu => 2,
+        wgpu::DeviceType::Other => 3,
+        wgpu::DeviceType::Cpu => 4,
+    };
+    (kind, how_far_down_the_list_a_backend_is(backend))
 }
 
 /// Where a backend is in the list of the ones that are liked, when there is a software adapter of more than one: the lower the number, the better liked.

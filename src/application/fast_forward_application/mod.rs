@@ -52,6 +52,7 @@ mod embed_and_import_tests;
 #[cfg(test)]
 mod engine_window_tests;
 mod export_flow;
+pub(crate) use export_flow::effects_the_export_would_leave_out;
 #[cfg(test)]
 mod file_question_tests;
 #[cfg(test)]
@@ -174,7 +175,6 @@ use super::theme;
 use super::timeline_panel::DrawerSound;
 use crate::composition::{PicturePlan, plan_pictures};
 use crate::engine::AdapterChoice;
-use crate::media::export::VideoExport;
 use crate::media::{
     FfmpegToolchain, FinerThumbnails, MediaLocation, ThumbnailExtraction, ThumbnailLibrary, ToolchainError,
     UserInterfaceWakeUp, VideoStreamFormat, Waveform, WaveformExtraction,
@@ -189,6 +189,7 @@ use crate::project::{FrameRate, Project, Settings, SourceMediaIdentifier, Timeli
 use crate::rgba_picture::RgbaPicture;
 use crate::settings_file::default_settings_file_path;
 use crate::text_rendering::LazyTextRenderer;
+use crate::video_export::VideoExport;
 
 use source_media_flow::ffprobe_as_the_video_format_prober;
 use state::{BackgroundJobs, Document, Environment, Interface, Playback, SourceFiles};
@@ -343,6 +344,10 @@ impl FastForwardApplication {
             application.keep_global_settings_in(settings_path);
         }
         application.use_the_default_speakers();
+        application.environment.export_adapter = creation_context
+            .wgpu_render_state
+            .as_ref()
+            .map(|render_state| AdapterChoice::Window(Arc::new(render_state.adapter.clone())));
         application.start_the_picture_engine_if_it_is_asked_for(creation_context);
         application.document.archive_cache = ArchiveCache::in_the_usual_place();
         if let Some(path) = project_to_open {
@@ -454,6 +459,7 @@ impl FastForwardApplication {
             interface: Interface::new(startup_dialog),
             environment: Environment {
                 toolchain,
+                export_adapter: None,
                 video_format_prober,
                 file_chooser: Box::new(RefusingFileChooser),
                 text_renderer: LazyTextRenderer::new(Arc::clone(&wake_up)),

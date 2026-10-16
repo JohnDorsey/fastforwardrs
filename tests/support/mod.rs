@@ -179,6 +179,13 @@ pub struct TestVideo {
     pub specification: TestVideoSpecification,
 }
 
+/// A number that is the same for two specifications exactly when they say the same (FNV-1a of what `Debug` prints, which has every field).
+fn fingerprint_of(specification: &TestVideoSpecification) -> u32 {
+    format!("{specification:?}").bytes().fold(0x811c_9dc5u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    })
+}
+
 fn fixture_directory() -> PathBuf {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target")
@@ -196,10 +203,13 @@ pub fn test_video(toolchain: &FfmpegToolchain, specification: &TestVideoSpecific
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let path = fixture_directory().join(format!("{}.{}", specification.name, specification.container));
+    // (The file is named by everything the specification says and not only by its name: two specifications that share a name but differ would otherwise share
+    // a file, and whichever test program ran first would decide what the other found. One did: the video of a test of the probe was made without its sound by a
+    // test of the frame stream that ran before it, on a computer that skipped the tests that export.)
+    let file_stem = format!("{}-{:08x}", specification.name, fingerprint_of(specification));
+    let path = fixture_directory().join(format!("{file_stem}.{}", specification.container));
     if !path.exists() {
-        let unfinished_path =
-            fixture_directory().join(format!("{}.unfinished.{}", specification.name, specification.container));
+        let unfinished_path = fixture_directory().join(format!("{file_stem}.unfinished.{}", specification.container));
         generate_video(toolchain, specification, &unfinished_path);
         fs::rename(&unfinished_path, &path).expect("could not move the finished test video into place");
     }

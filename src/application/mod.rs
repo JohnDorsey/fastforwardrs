@@ -11,6 +11,7 @@
 mod archive_cache;
 mod background;
 mod clip_moving;
+pub mod command_line;
 mod commands;
 mod dialogs;
 mod duration_control;

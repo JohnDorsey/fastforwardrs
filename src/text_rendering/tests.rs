@@ -329,6 +329,31 @@ fn the_fonts_load_in_the_background_when_first_wanted_and_the_window_is_woken_wh
     assert_eq!(woken.load(Ordering::SeqCst), 1, "woken exactly once, when loaded");
 }
 
+/// Regression test: a renderer whose fonts were being loaded was "loading" until someone asked it for the fonts again, however long ago the thread had finished.
+/// An editor that nothing drew the text of (the text it drew was deleted, say) was then working in the background for ever, and the tests that wait for it to
+/// stop (and anyone who asks) waited for ever.
+#[test]
+fn a_renderer_whose_fonts_have_been_loaded_is_no_longer_loading_though_nobody_has_asked_for_them_again() {
+    let mut lazy = LazyTextRenderer::new(Arc::new(|| {}));
+    assert!(!lazy.is_loading(), "nothing was asked for");
+    let _ = lazy.get_if_ready(); // the first request starts the loading
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while lazy.is_loading() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the fonts were still loading after 20 seconds"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!lazy.is_loading());
+    assert!(
+        !lazy.is_ready(),
+        "(they have not been taken yet: that is for the next request)"
+    );
+    assert!(lazy.get_if_ready().is_some(), "and they are there when asked for");
+    assert!(lazy.is_ready() && !lazy.is_loading());
+}
+
 #[test]
 fn waiting_for_the_fonts_gives_a_renderer_that_works() {
     let mut lazy = LazyTextRenderer::new(Arc::new(|| {}));

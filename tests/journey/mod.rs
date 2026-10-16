@@ -23,6 +23,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use fastforwardrs::application::FastForwardApplication;
+use fastforwardrs::engine::AdapterChoice;
 use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::project::{Clip, TimelineFrameIndex};
 
@@ -63,7 +64,9 @@ impl Journey {
     /// Like [`Self::start`], with each frame of the window lasting `seconds` on the window's own clock, which is
     /// the one animations go by (not real time, which is as fast as the computer goes).
     pub fn start_with_frames_lasting(toolchain: &FfmpegToolchain, seconds: f32) -> Self {
-        let application = FastForwardApplication::with_context(&egui::Context::default(), Ok(toolchain.clone()));
+        let mut application = FastForwardApplication::with_context(&egui::Context::default(), Ok(toolchain.clone()));
+        // (An export is made on a software adapter, so that nothing a test does is done on a real graphics card.)
+        application.use_this_adapter_for_exports(AdapterChoice::SoftwareOnly);
         let mut harness = Harness::builder()
             .with_size(vec2(WINDOW_WIDTH, WINDOW_HEIGHT))
             .with_step_dt(seconds)
