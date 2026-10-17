@@ -40,7 +40,10 @@ mod track_properties;
 
 // The names the buttons of the keyframes and of the effects are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
-pub use effects::{ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, SWITCH_EFFECT_OFF_LABEL, SWITCHED_OFF_NOTE};
+pub use effects::{
+    ADD_EFFECT_LABEL, CHOOSE_A_TABLE_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_TABLE_CHOSEN_NOTE,
+    SWITCH_EFFECT_OFF_LABEL, SWITCHED_OFF_NOTE, TABLE_NOT_IN_THE_PROJECT_NOTE,
+};
 #[cfg(test)]
 pub use keyframe_buttons::{KeyframeButton, keyframe_button_label};
 

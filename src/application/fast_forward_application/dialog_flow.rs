@@ -73,7 +73,14 @@ impl FastForwardApplication {
                         Dialog::MustSaveAsAnArchiveToEmbedAFile { .. } => {
                             self.save_as_an_archive_and_ask_for_a_file_to_embed();
                         }
+                        Dialog::HowToKeepATable { embed, .. } => agreed_to.push(*embed),
                         Dialog::Message { .. } => {}
+                    }
+                }
+                DialogAnswer::ConfirmedTheOtherWay => {
+                    self.interface.dialog = None;
+                    if let Dialog::HowToKeepATable { link, .. } = dialog {
+                        agreed_to.push(*link);
                     }
                 }
             }

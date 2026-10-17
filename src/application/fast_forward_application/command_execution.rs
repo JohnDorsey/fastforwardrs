@@ -211,6 +211,18 @@ impl FastForwardApplication {
             } => {
                 let _ = self.document.project.set_effect_enabled(owner, instance, enabled);
             }
+            Command::DuplicateEffect { owner, instance } => {
+                let _ = self.document.project.duplicate_effect(owner, instance);
+            }
+            Command::AddEffectFromFile { owner } => self.add_an_effect_from_a_file(owner, now, context),
+            Command::ChooseTableFile { owner, instance } => self.choose_the_table_of(owner, instance, now, context),
+            Command::UseATable {
+                owner,
+                instance,
+                wanted_name,
+                bytes,
+                link,
+            } => self.use_a_table(owner, instance, &wanted_name, bytes, link, now),
             Command::SetEffectValue {
                 target,
                 property,

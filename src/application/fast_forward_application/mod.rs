@@ -46,6 +46,8 @@ mod drawing;
 #[cfg(test)]
 mod duplicate_tests;
 #[cfg(test)]
+mod effect_menu_tests;
+#[cfg(test)]
 mod effect_tests;
 #[cfg(test)]
 mod embed_and_import_tests;
@@ -130,6 +132,9 @@ mod source_media_flow;
 mod state;
 #[cfg(test)]
 mod still_window_tests;
+mod table_flow;
+#[cfg(test)]
+mod table_tests;
 #[cfg(test)]
 mod test_window;
 #[cfg(test)]

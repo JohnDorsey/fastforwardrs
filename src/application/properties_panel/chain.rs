@@ -12,13 +12,14 @@
 //!
 //! What a badge stands for is selected with a **double click**, so that taking hold of a badge to move it does not select anything.
 
-use egui::{CornerRadius, Popup, Rect, Response, RichText, Stroke, Ui, pos2, vec2};
+use egui::{CornerRadius, Key, Popup, Rect, Response, RichText, Stroke, TextEdit, Ui, pos2, vec2};
 
 use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
-    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, NOT_INSTALLED_NOTE, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
-    SWITCHED_OFF_NOTE, effects_to_offer, show_the_control_of, show_the_control_of_a_group_effect,
+    ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE,
+    NOT_INSTALLED_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE,
+    effects_that_match, effects_to_offer, grouped_by_category, show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -135,6 +136,7 @@ fn show_an_effect(
     let kind = effect.kind();
     let mut to_be_deleted = false;
     let mut to_be_switched = false;
+    let mut to_be_duplicated = false;
     let title = chain.map_or_else(
         || what_an_effect_is_called(kind),
         |chain| what_an_effect_in_a_chain_is_called(chain, effect),
@@ -150,6 +152,10 @@ fn show_an_effect(
             };
             if ui.button(label).clicked() {
                 to_be_switched = true;
+                ui.close();
+            }
+            if ui.button(DUPLICATE_EFFECT_LABEL).clicked() {
+                to_be_duplicated = true;
                 ui.close();
             }
             if ui.button(DELETE_EFFECT_LABEL).clicked() {
@@ -173,7 +179,7 @@ fn show_an_effect(
                         show_the_control_of(ui, content, AnimationTarget::Track(track), kind, property, commands);
                     }
                     Member::Group(group) => {
-                        show_the_control_of_a_group_effect(ui, group, effect, property, commands);
+                        show_the_control_of_a_group_effect(ui, content.project, group, effect, property, commands);
                     }
                 }
             }
@@ -181,6 +187,12 @@ fn show_an_effect(
     );
     if to_be_deleted {
         commands.push(command_that_takes_off(owner, effect.instance()));
+    }
+    if to_be_duplicated {
+        commands.push(Command::DuplicateEffect {
+            owner,
+            instance: effect.instance(),
+        });
     }
     if to_be_switched {
         commands.push(Command::SetEffectEnabled {
@@ -350,6 +362,77 @@ fn kinds_that_can_be_put_on(content: &PropertiesContent<'_>, owner: Member) -> i
     }
 }
 
+/// Shows the menu of the plus button: a field to search the effects (which has the keyboard at once, and Enter adds the first that matches), the effects that match
+/// listed under the heading of their categories, and at the bottom *Add effect from file...*.
+fn show_the_menu_of_effects(
+    ui: &mut Ui,
+    to_offer: &[EffectKind],
+    offers_a_file: bool,
+    owner: Member,
+    commands: &mut Vec<Command>,
+) {
+    let id = ui.id().with("the search of the effects");
+    let mut typed: String = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    // (A menu that was not drawn in the pass before this one has just been opened: it begins empty, and the field has the keyboard.)
+    let this_pass = ui.ctx().cumulative_pass_nr();
+    let just_opened = ui
+        .data(|data| data.get_temp::<u64>(id.with("pass")))
+        .is_none_or(|last| this_pass > last + 1);
+    ui.data_mut(|data| data.insert_temp(id.with("pass"), this_pass));
+    if just_opened {
+        typed.clear();
+    }
+    ui.set_min_width(MENU_OF_EFFECTS_WIDTH);
+    let search = ui.add(
+        TextEdit::singleline(&mut typed)
+            .hint_text(SEARCH_EFFECTS_HINT)
+            .desired_width(f32::INFINITY),
+    );
+    if just_opened {
+        search.request_focus();
+    }
+    let matching = effects_that_match(to_offer, &typed);
+    let enter_was_pressed = search.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+    let mut chosen = None;
+    if enter_was_pressed {
+        chosen = matching.first().copied();
+    }
+    if matching.is_empty() {
+        ui.label(RichText::new(NO_EFFECT_FOUND_NOTE).weak());
+    }
+    for (heading, members) in grouped_by_category(&matching) {
+        ui.label(RichText::new(heading).weak().small());
+        for kind in members {
+            if ui
+                .button(what_an_effect_is_called(kind))
+                .on_hover_text(kind.description())
+                .clicked()
+            {
+                chosen = Some(kind);
+            }
+        }
+    }
+    let mut from_a_file = false;
+    if offers_a_file {
+        ui.separator();
+        from_a_file = ui.button(ADD_EFFECT_FROM_FILE_LABEL).clicked();
+    }
+    if let Some(kind) = chosen {
+        commands.push(command_that_puts_on(owner, kind));
+    }
+    if from_a_file {
+        commands.push(Command::AddEffectFromFile { owner });
+    }
+    if chosen.is_some() || from_a_file {
+        typed.clear();
+        ui.close();
+    }
+    ui.data_mut(|data| data.insert_temp(id, typed));
+}
+
+/// How wide the menu of effects is at least, in points.
+const MENU_OF_EFFECTS_WIDTH: f32 = 220.0;
+
 /// Shows the plus button under the effects, which opens the menu of the effects that can be put on, and adds a command when one is chosen. A
 /// thing that no effect can be put on is not given a plus button, as it would have nothing to put on.
 fn show_the_plus_button(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Member, commands: &mut Vec<Command>) {
@@ -374,18 +457,8 @@ fn show_the_plus_button(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Mem
         ui.is_enabled() && !to_offer.is_empty(),
         theme::PROPERTIES_BOX_BACKGROUND,
     );
-    Popup::menu(&button).show(|ui| {
-        for kind in &to_offer {
-            if ui
-                .button(what_an_effect_is_called(*kind))
-                .on_hover_text(kind.description())
-                .clicked()
-            {
-                commands.push(command_that_puts_on(owner, *kind));
-                ui.close();
-            }
-        }
-    });
+    let offers_a_file = to_offer.contains(&EffectKind::LUT);
+    Popup::menu(&button).show(|ui| show_the_menu_of_effects(ui, &to_offer, offers_a_file, owner, commands));
 }
 
 #[cfg(test)]

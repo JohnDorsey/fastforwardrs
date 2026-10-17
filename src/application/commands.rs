@@ -213,6 +213,32 @@ pub enum Command {
         instance: EffectInstanceId,
         enabled: bool,
     },
+    /// Put a copy of an effect of a clip, a track or a group right after it (from the menu of its box): the one that is named `instance` in its chain, with its values (and not
+    /// its keyframes).
+    DuplicateEffect {
+        owner: Member,
+        instance: EffectInstanceId,
+    },
+    /// Choose a table of colours (a `.cube` file) and put an effect on `owner` that looks the colours up in it (from the menu of the plus button). What is done with the file
+    /// is asked, if the settings say so (see [`Self::UseATable`]).
+    AddEffectFromFile {
+        owner: Member,
+    },
+    /// Choose a table of colours (a `.cube` file) for the effect `instance` of `owner`, which looks the colours up in a table (from the button of its table).
+    ChooseTableFile {
+        owner: Member,
+        instance: EffectInstanceId,
+    },
+    /// Add the file `bytes` as a resource called `wanted_name` of the project (kept as `link` says: embedded or linked), and use it: for the effect `instance` of `owner`
+    /// that looks colours up in a table, or, if that is `None`, for a new such effect put on `owner`. (What the two commands above come to when the file has been chosen
+    /// and read, and the user has said how to keep it if they were asked.)
+    UseATable {
+        owner: Member,
+        instance: Option<EffectInstanceId>,
+        wanted_name: String,
+        bytes: std::sync::Arc<[u8]>,
+        link: crate::project::SourceMediaLink,
+    },
     /// Give a value of an effect of a clip or a track (a property of it) a value: at the playhead if it has keyframes, as for any
     /// property.
     SetEffectValue {
@@ -394,6 +420,8 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::DuplicateEffect { .. }
+            | Self::UseATable { .. }
             | Self::SetEffectValue { .. }
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }
@@ -446,6 +474,8 @@ impl Command {
             | Self::RelinkSource(_)
             | Self::IncludeFilesInTheProjectFile(_)
             | Self::TakeFilesOutOfTheProjectFile(_)
+            | Self::AddEffectFromFile { .. }
+            | Self::ChooseTableFile { .. }
             | Self::ShowTheColoursOfAFile(_) => false,
         }
     }
@@ -509,6 +539,8 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::DuplicateEffect { .. }
+            | Self::UseATable { .. }
             | Self::SetEffectValue { .. }
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }
@@ -531,6 +563,8 @@ impl Command {
             | Self::MergeRacks(_)
             | Self::MoveRacks { .. }
             | Self::SetSpeedIndicatorLayout(_)
+            | Self::AddEffectFromFile { .. }
+            | Self::ChooseTableFile { .. }
             | Self::ShowTheColoursOfAFile(_)
             | Self::SetTheColoursOfAFile { .. } => None,
         }

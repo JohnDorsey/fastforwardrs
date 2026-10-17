@@ -11,19 +11,25 @@
 //! like any other, so it is an edit that is undone with one step, and a value that has keyframes is changed at the playhead. (The values of
 //! the effect of a group have no keyframes: they are not animated.)
 
-use egui::{DragValue, Slider, SliderClamping, Ui};
+use egui::{ComboBox, DragValue, RichText, Slider, SliderClamping, Ui};
 
 use super::PropertiesContent;
 use super::animatable::{self, Animatable};
 use super::controls::labelled_row;
 use crate::application::commands::Command;
-use crate::project::{AnimationTarget, Effect, EffectKind, GroupId, PropertyId, PropertyValue};
+use crate::project::{
+    AnimationTarget, Effect, EffectKind, GroupId, Member, ParameterControl, Project, PropertyId, PropertyValue,
+    Resource,
+};
 
 /// What the plus button that puts an effect on is called, which it says when the pointer rests on it, and to screen readers.
 pub const ADD_EFFECT_LABEL: &str = "Add an effect";
 
 /// What the item of the menu of a box of an effect that deletes the effect is called.
 pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
+
+/// What the item of the menu of a box of an effect that puts a copy of the effect after it is called.
+pub const DUPLICATE_EFFECT_LABEL: &str = "Duplicate effect";
 
 /// What the items of the menu of a box of an effect that switch it off (bypass it) and on say, and what the box says while it is off.
 pub const SWITCH_EFFECT_OFF_LABEL: &str = "Switch off";
@@ -34,6 +40,50 @@ pub const SWITCHED_OFF_NOTE: &str = "Switched off: it is not done, and its value
 /// lost.
 pub const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";
 
+/// What the search field of the menu of the plus button says while it is empty, and what the item that adds an effect from a file is called.
+pub const SEARCH_EFFECTS_HINT: &str = "Search effects";
+pub const ADD_EFFECT_FROM_FILE_LABEL: &str = "Add effect from file...";
+pub const NO_EFFECT_FOUND_NOTE: &str = "No effect matches";
+
+/// The headings of the menu of effects, in the order they are listed in; a category that is not here (one that a project file brought) comes after them, in the order its
+/// first effect is offered in.
+const CATEGORIES_IN_ORDER: [&str; 5] = ["Colour", "Light", "Blur and sharpen", "Transform", "Looks"];
+
+/// The effects among `kinds` that match what was typed in the search field of the menu (nothing typed matches all): those whose name, description or category has it in it,
+/// whatever the case of the letters, in the order they are in.
+pub(super) fn effects_that_match(kinds: &[EffectKind], typed: &str) -> Vec<EffectKind> {
+    let needle = typed.trim().to_lowercase();
+    kinds
+        .iter()
+        .copied()
+        .filter(|kind| {
+            needle.is_empty()
+                || kind.name().to_lowercase().contains(&needle)
+                || kind.description().to_lowercase().contains(&needle)
+                || kind.descriptor().category.to_lowercase().contains(&needle)
+        })
+        .collect()
+}
+
+/// The kinds of `kinds` grouped by their categories: the headings in [`CATEGORIES_IN_ORDER`] first, then the others, each with its effects in the order they are in.
+pub(super) fn grouped_by_category(kinds: &[EffectKind]) -> Vec<(String, Vec<EffectKind>)> {
+    let mut groups: Vec<(String, Vec<EffectKind>)> = Vec::new();
+    for kind in kinds {
+        let category = kind.descriptor().category.to_string();
+        match groups.iter_mut().find(|(heading, _)| *heading == category) {
+            Some((_, members)) => members.push(*kind),
+            None => groups.push((category, vec![*kind])),
+        }
+    }
+    groups.sort_by_key(|(heading, _)| {
+        CATEGORIES_IN_ORDER
+            .iter()
+            .position(|known| known == heading)
+            .unwrap_or(CATEGORIES_IN_ORDER.len())
+    });
+    groups
+}
+
 /// The effects among `kinds` that the menu of the plus button offers: those that `can_have` says the thing can have, in the order they are
 /// in `kinds`. (What it has already is offered again: it may have several effects of one kind.)
 pub(super) fn effects_to_offer(
@@ -41,6 +91,48 @@ pub(super) fn effects_to_offer(
     can_have: impl Fn(EffectKind) -> bool,
 ) -> Vec<EffectKind> {
     kinds.into_iter().filter(|kind| can_have(*kind)).collect()
+}
+
+/// What the button that chooses a file for the table of a look-up table effect says, and what the line that says no table is chosen says.
+pub const CHOOSE_A_TABLE_LABEL: &str = "Choose a file...";
+pub const NO_TABLE_CHOSEN_NOTE: &str = "No table chosen";
+pub const TABLE_NOT_IN_THE_PROJECT_NOTE: &str = "The project does not have this table.";
+
+/// What a control of the value of an effect asks for.
+enum Change {
+    /// The value is to be this.
+    Value(PropertyValue),
+    /// A file is to be chosen for the value (a table).
+    ChooseAFile,
+}
+
+/// The member of the project that the clip or the track `target` is, for the commands that are about the effects of a thing of any kind.
+fn member_of(target: AnimationTarget) -> Member {
+    match target {
+        AnimationTarget::Clip(clip) => Member::Clip(clip),
+        AnimationTarget::Track(track) => Member::Track(track),
+    }
+}
+
+/// The command that a change of the value `property` of an effect of `owner` is.
+fn command_for(owner: Member, property: PropertyId, change: Change) -> Option<Command> {
+    let PropertyId::EffectValue { instance, .. } = property else {
+        return None;
+    };
+    Some(match (owner, change) {
+        (Member::Clip(clip), Change::Value(value)) => Command::SetEffectValue {
+            target: AnimationTarget::Clip(clip),
+            property,
+            value,
+        },
+        (Member::Track(track), Change::Value(value)) => Command::SetEffectValue {
+            target: AnimationTarget::Track(track),
+            property,
+            value,
+        },
+        (Member::Group(group), Change::Value(value)) => Command::SetGroupEffectValue { group, property, value },
+        (owner, Change::ChooseAFile) => Command::ChooseTableFile { owner, instance },
+    })
 }
 
 /// Shows the row of the control of the value of an effect of a clip or a track that `property` is, with the buttons of its keyframes, and
@@ -59,16 +151,19 @@ pub(super) fn show_the_control_of(
     else {
         return;
     };
-    // (A value that is not a number has a line that says what it is, and no keyframe buttons: the controls of the other kinds of value, and the
-    // animation of them, come with the effects that need them.)
+    // (A value that is not a number is not animated by the stopwatch: it has no buttons of keyframes, and holds until it is changed.)
     if !matches!(shown, PropertyValue::Number(_)) {
-        labelled_row(ui, |ui| control_for(ui, kind, property, &shown));
+        if let Some(change) = labelled_row(ui, |ui| control_for(ui, content.project, kind, property, &shown))
+            && let Some(command) = command_for(member_of(target), property, change)
+        {
+            commands.push(command);
+        }
         return;
     }
     let changed = animatable::row(ui, content, Animatable { target, property }, commands, |ui, _| {
-        labelled_row(ui, |ui| control_for(ui, kind, property, &shown))
+        labelled_row(ui, |ui| control_for(ui, content.project, kind, property, &shown))
     });
-    if let Some(value) = changed {
+    if let Some(Change::Value(value)) = changed {
         commands.push(Command::SetEffectValue {
             target,
             property,
@@ -81,6 +176,7 @@ pub(super) fn show_the_control_of(
 /// keyframes (its values are not animated), and adds a command if it is changed.
 pub(super) fn show_the_control_of_a_group_effect(
     ui: &mut Ui,
+    project: &Project,
     group: GroupId,
     effect: &Effect,
     property: PropertyId,
@@ -89,46 +185,112 @@ pub(super) fn show_the_control_of_a_group_effect(
     let Some(shown) = effect.value_of(property) else {
         return;
     };
-    if let Some(value) = labelled_row(ui, |ui| control_for(ui, effect.kind(), property, shown)) {
-        commands.push(Command::SetGroupEffectValue { group, property, value });
+    if let Some(change) = labelled_row(ui, |ui| control_for(ui, project, effect.kind(), property, shown))
+        && let Some(command) = command_for(Member::Group(group), property, change)
+    {
+        commands.push(command);
     }
 }
 
-/// The control that changes the value of an effect that `property` is, which shows `shown`: the new value if it was changed. A
-/// property that is not a value of an effect has none. What the control looks like is what the effect says of its value (its label, the range
-/// it shows, what it is in): a number has a slider, or a box to drag in if it has no range; the other kinds of value are only said.
-fn control_for(ui: &mut Ui, kind: EffectKind, property: PropertyId, shown: &PropertyValue) -> Option<PropertyValue> {
+/// The control that changes the value of an effect that `property` is, which shows `shown`: what it asks for if it was changed. A property that is not a value of an
+/// effect has none. **What the control looks like is what the effect says of its value** (its label, its control, the range it shows, what it is in): a number has a slider,
+/// or a box to drag in if it has no range; a choice is a list; a flag is a switch; a table is a button that chooses a file, with the name of the table and what is wrong
+/// with it if anything is.
+fn control_for(
+    ui: &mut Ui,
+    project: &Project,
+    kind: EffectKind,
+    property: PropertyId,
+    shown: &PropertyValue,
+) -> Option<Change> {
     let PropertyId::EffectValue { slot, .. } = property else {
         return None;
     };
     let parameter = kind.parameters().get(usize::from(slot))?;
-    let PropertyValue::Number(number) = shown else {
-        ui.label(format!("{}: {}", parameter.label, what_a_value_says(shown)));
-        return None;
-    };
-    let mut number = *number;
-    let label = ui.label(&*parameter.label);
-    // (The range is what the slider shows: the value can be typed to go further, as a turn of the colours is typed to go round more than
-    // once, which is how many times they go round between two keyframes.)
-    let changed = match parameter.range {
-        Some((least, most)) => {
-            let mut slider = Slider::new(&mut number, least..=most)
-                .clamping(SliderClamping::Never)
-                .suffix(&*parameter.unit);
-            if let Some(decimals) = parameter.decimals {
-                slider = slider.max_decimals(usize::from(decimals));
-            }
-            ui.add(slider).labelled_by(label.id).changed()
+    match (&parameter.control, shown) {
+        (ParameterControl::Choice(options), PropertyValue::Words(chosen)) => {
+            let label = ui.label(&*parameter.label);
+            let selected = options
+                .iter()
+                .find(|option| option.id == chosen.as_str())
+                .map_or(chosen.as_str(), |option| &*option.label);
+            let mut picked = None;
+            ComboBox::from_id_salt(("the choice of", property))
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for option in options.iter() {
+                        if ui
+                            .selectable_label(option.id == chosen.as_str(), &*option.label)
+                            .clicked()
+                        {
+                            picked = Some(option.id.to_string());
+                        }
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+            picked
+                .filter(|id| id != chosen)
+                .map(|id| Change::Value(PropertyValue::Words(id)))
         }
-        None => {
-            let mut drag = DragValue::new(&mut number).suffix(&*parameter.unit);
-            if let Some(decimals) = parameter.decimals {
-                drag = drag.max_decimals(usize::from(decimals));
+        (ParameterControl::Resource(_), PropertyValue::Words(name)) => {
+            ui.label(&*parameter.label);
+            let named = project.resource_named_by(&parameter.control, shown);
+            if name.is_empty() {
+                ui.label(RichText::new(NO_TABLE_CHOSEN_NOTE).weak());
+            } else {
+                ui.label(name);
             }
-            ui.add(drag).labelled_by(label.id).changed()
+            let clicked = ui.button(CHOOSE_A_TABLE_LABEL).clicked();
+            if !name.is_empty() {
+                // (What is wrong with the table, under the row it is in: it is not in the way of the row.)
+                match named.map(Resource::cube_table) {
+                    None => {
+                        ui.label(RichText::new(TABLE_NOT_IN_THE_PROJECT_NOTE).weak());
+                    }
+                    Some(Err(why)) => {
+                        ui.label(RichText::new(format!("{name}: {why}")).weak());
+                    }
+                    Some(Ok(_)) => {}
+                }
+            }
+            clicked.then_some(Change::ChooseAFile)
         }
-    };
-    changed.then_some(PropertyValue::Number(number))
+        (_, PropertyValue::Flag(on)) => {
+            let mut on = *on;
+            let changed = ui.checkbox(&mut on, &*parameter.label).changed();
+            changed.then_some(Change::Value(PropertyValue::Flag(on)))
+        }
+        (_, PropertyValue::Number(number)) => {
+            let mut number = *number;
+            let label = ui.label(&*parameter.label);
+            // (The range is what the slider shows: the value can be typed to go further, as a turn of the colours is typed to go round more than
+            // once, which is how many times they go round between two keyframes.)
+            let changed = match parameter.range {
+                Some((least, most)) => {
+                    let mut slider = Slider::new(&mut number, least..=most)
+                        .clamping(SliderClamping::Never)
+                        .suffix(&*parameter.unit);
+                    if let Some(decimals) = parameter.decimals {
+                        slider = slider.max_decimals(usize::from(decimals));
+                    }
+                    ui.add(slider).labelled_by(label.id).changed()
+                }
+                None => {
+                    let mut drag = DragValue::new(&mut number).suffix(&*parameter.unit);
+                    if let Some(decimals) = parameter.decimals {
+                        drag = drag.max_decimals(usize::from(decimals));
+                    }
+                    ui.add(drag).labelled_by(label.id).changed()
+                }
+            };
+            changed.then_some(Change::Value(PropertyValue::Number(number)))
+        }
+        _ => {
+            ui.label(format!("{}: {}", parameter.label, what_a_value_says(shown)));
+            None
+        }
+    }
 }
 
 /// What a value is, in words, for a value that has no control.

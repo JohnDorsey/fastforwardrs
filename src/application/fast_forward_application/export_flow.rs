@@ -50,13 +50,21 @@ pub(crate) fn effects_the_export_would_leave_out(project: &Project) -> Vec<Strin
         .collect();
     missing.sort();
     missing.dedup();
-    missing
+    let mut left_out: Vec<String> = missing
         .into_iter()
         .map(|kind| {
             let (major, minor) = kind.version();
             format!("{} ({}, version {major}.{minor})", kind.name(), kind.key())
         })
-        .collect()
+        .collect();
+    // (A look-up table effect whose table the project does not have, or whose file is not a table or is missing, does nothing to the picture.)
+    left_out.extend(
+        project
+            .resources_in_use_that_are_missing()
+            .into_iter()
+            .map(|name| format!("the table {name} (the project does not have it, or it cannot be read)")),
+    );
+    left_out
 }
 
 impl FastForwardApplication {

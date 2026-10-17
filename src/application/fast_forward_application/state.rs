@@ -178,6 +178,8 @@ pub(super) struct Interface {
     pub(super) dialog: Option<Dialog>,
     /// Whether the "source files not found" warning is showing.
     pub(super) missing_sources_warning_open: bool,
+    /// Whether the user has been told, in this run, that a table of colours was linked and not embedded because the project file is plain JSON (they are told once).
+    pub(super) told_that_a_table_was_linked_for_plain_json: bool,
     /// Whether the window is to be closed as soon as nothing is being done in the background and no message is up (it was asked to close,
     /// and was kept open for that).
     pub(super) close_when_not_busy: bool,
@@ -209,6 +211,7 @@ impl Interface {
             colours_of_a_file_window_open_for: None,
             dialog: startup_dialog,
             missing_sources_warning_open: false,
+            told_that_a_table_was_linked_for_plain_json: false,
             close_when_not_busy: false,
             close_confirmed: false,
         }

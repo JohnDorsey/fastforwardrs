@@ -38,6 +38,14 @@ pub enum Dialog {
         /// Whether the project has a project file (a plain one), and has not just never been saved.
         has_a_plain_project_file: bool,
     },
+    /// A table of colours has been chosen, and the settings say to ask how it is kept: embedded in the project file (`embed`, which is not offered when the project file is plain
+    /// JSON and cannot have it, `can_embed`), or linked by its path (`link`). The command that is chosen is carried out.
+    HowToKeepATable {
+        file_name: String,
+        can_embed: bool,
+        embed: Box<Command>,
+        link: Box<Command>,
+    },
     /// A file cannot be embedded in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked
     /// where to save it as one, and if the user agrees it is, and then the file to embed is asked for.
     MustSaveAsAnArchiveToEmbedAFile {
@@ -55,7 +63,13 @@ pub enum DialogAnswer {
     Dismissed,
     /// Agreed to what the dialog asked.
     Confirmed,
+    /// Chose the other of the two ways that a dialog that has two offers (and a way to cancel).
+    ConfirmedTheOtherWay,
 }
+
+/// What the two buttons of the question about how a table is kept say.
+pub const HOW_TO_KEEP_A_TABLE_EMBED: &str = "Embed in the project file";
+pub const HOW_TO_KEEP_A_TABLE_LINK: &str = "Link to the file";
 
 const DIALOG_WIDTH: f32 = 420.0;
 
@@ -143,11 +157,40 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                     }
                 });
             }
+            Dialog::HowToKeepATable {
+                file_name,
+                can_embed,
+                ..
+            } => {
+                ui.heading("How should the table be kept?");
+                ui.add_space(6.0);
+                ui.label(format!(
+                    "{file_name} can be put inside the project file, so that the project can be moved with everything it uses, or the project can remember where the file is, \
+                     as it does for a video.{}",
+                    if *can_embed {
+                        ""
+                    } else {
+                        " (The project is saved as a plain .json file, which has no room for it: only linking is possible.)"
+                    }
+                ));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if *can_embed && ui.button(HOW_TO_KEEP_A_TABLE_EMBED).clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                    if ui.button(HOW_TO_KEEP_A_TABLE_LINK).clicked() {
+                        answer = DialogAnswer::ConfirmedTheOtherWay;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                });
+            }
             Dialog::ConfirmExportWithMissingEffects { effects } => {
                 ui.heading("Export without some effects?");
                 ui.add_space(6.0);
                 ui.label(
-                    "The project has effects that this program does not have, so the video would not have what they do. \
+                    "The project has effects that this program does not have, or tables of colours that it cannot use, so the video would not have what they do. \
                      Their values are kept in the project, and the video can be exported again when the program has them:",
                 );
                 for effect in effects {

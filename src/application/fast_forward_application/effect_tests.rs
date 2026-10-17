@@ -943,7 +943,12 @@ fn an_effect_the_program_does_not_have_has_a_box_with_its_name_a_note_that_it_do
         is_shown(&window, "Point: 0.5, 0.25"),
         "a pair, which has no control yet, is said"
     );
-    assert!(is_shown(&window, "On: yes"), "and so is a flag");
+    // (Rewritten on purpose in phase 4: a flag has a switch now, made from what the effect says of the value, and not a line that says what it is.)
+    assert_eq!(
+        window.harness.get_by_label("On").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "and a flag is a switch that is on"
+    );
     assert!(!is_shown(&window, TURN), "none of what the program's own effect has");
 }
 

@@ -492,3 +492,34 @@ fn loading_a_project_or_starting_a_new_one_asks_whether_to_discard_the_unsaved_c
         assert!(chooser.questions_asked().is_empty(), "and not for a file yet");
     }
 }
+
+#[test]
+fn exporting_a_project_whose_look_up_table_has_no_table_to_use_lists_the_table_among_what_the_video_would_not_have() {
+    let chooser = ScriptedFileChooser::default();
+    let mut window = Window::showing(project_of(300));
+    window.use_file_chooser(&chooser);
+    let clip = crate::project::AnimationTarget::Clip(window.application().project().tracks()[0].entries()[0].id());
+    let project = &mut window.application_mut().document.project;
+    let instance = project.add_effect(clip, crate::project::EffectKind::LUT).unwrap();
+    project
+        .set_property_at(
+            clip,
+            crate::project::PropertyId::effect_value(crate::project::EffectKind::LUT, instance, 0),
+            crate::project::PropertyValue::Words("grade.cube".to_owned()),
+            crate::project::TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    window.settle();
+
+    window.do_this(Command::ExportVideo);
+
+    let Some(Dialog::ConfirmExportWithMissingEffects { effects }) = window.application().interface.dialog.clone()
+    else {
+        panic!("a question about what the video would not have was expected");
+    };
+    assert_eq!(
+        effects,
+        ["the table grade.cube (the project does not have it, or it cannot be read)"]
+    );
+    assert_eq!(chooser.questions_asked().len(), 0);
+}

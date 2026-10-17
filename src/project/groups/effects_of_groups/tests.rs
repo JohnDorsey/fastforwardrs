@@ -1157,3 +1157,136 @@ fn switching_an_effect_that_is_not_there_off_is_an_error_and_changes_nothing() {
     );
     assert_eq!(laid.project, before);
 }
+
+// --- duplicating an effect ---
+
+fn the_effects_in_order(project: &Project, owner: Member) -> Vec<(EffectKind, u32, bool)> {
+    project
+        .chain_of_the_member(owner)
+        .unwrap()
+        .iter()
+        .map(|effect| (effect.kind(), effect.instance().number(), effect.is_enabled()))
+        .collect()
+}
+
+#[test]
+fn an_effect_that_is_duplicated_is_copied_right_after_itself_with_the_next_name_the_values_and_the_switch_and_the_original_is_not_changed()
+ {
+    let mut laid = four_tracks();
+    let clip = laid.clip(0, 0);
+    let owner = Member::Clip(clip);
+    let target = AnimationTarget::Clip(clip);
+    for kind in [HUE_SHIFT, EffectKind::EXPOSURE, EffectKind::SATURATION] {
+        laid.project.add_effect(target, kind).unwrap();
+    }
+    laid.project
+        .set_property_at(target, HUE, PropertyValue::Number(33.0), TimelineFrameIndex::new(0))
+        .unwrap();
+    laid.project
+        .set_effect_enabled(owner, crate::project::EffectInstanceId::FIRST, false)
+        .unwrap();
+
+    let copy = laid
+        .project
+        .duplicate_effect(owner, crate::project::EffectInstanceId::FIRST)
+        .unwrap();
+
+    assert_eq!(copy.number(), 3);
+    assert_eq!(
+        the_effects_in_order(&laid.project, owner),
+        [
+            (HUE_SHIFT, 0, false),
+            (HUE_SHIFT, 3, false),
+            (EffectKind::EXPOSURE, 1, true),
+            (EffectKind::SATURATION, 2, true)
+        ]
+    );
+    let effects = laid.project.chain_of_the_member(owner).unwrap();
+    assert_eq!(effects.instance(copy).unwrap().values(), [PropertyValue::Number(33.0)]);
+    assert_eq!(
+        effects
+            .instance(crate::project::EffectInstanceId::FIRST)
+            .unwrap()
+            .values(),
+        [PropertyValue::Number(33.0)]
+    );
+    // The copy is its own: changing it does not change the original.
+    laid.project
+        .set_property_at(
+            target,
+            PropertyId::effect_value(HUE_SHIFT, copy, 0),
+            PropertyValue::Number(5.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    let effects = laid.project.chain_of_the_member(owner).unwrap();
+    assert_eq!(
+        effects
+            .instance(crate::project::EffectInstanceId::FIRST)
+            .unwrap()
+            .values(),
+        [PropertyValue::Number(33.0)]
+    );
+}
+
+#[test]
+fn the_copy_of_the_last_effect_is_last_and_the_copy_of_an_effect_before_the_badge_of_the_track_stays_before_it() {
+    let mut laid = four_tracks();
+    hue_shift_on_the_track(&mut laid, 0);
+    hue_shift_on_the_clip(&mut laid, 0, 0);
+    let clip = Member::Clip(laid.clip(0, 0));
+    let before = rows_of(&laid.project, clip);
+
+    laid.project
+        .duplicate_effect(clip, crate::project::EffectInstanceId::FIRST)
+        .unwrap();
+
+    let after = rows_of(&laid.project, clip);
+    assert_eq!(after.len(), before.len() + 1);
+    assert_eq!(after.last(), before.last(), "what was last is still last");
+    let effects: Vec<_> = after.iter().filter(|row| row.starts_with("effect")).collect();
+    assert_eq!(effects.len(), 2);
+}
+
+#[test]
+fn a_track_and_a_group_can_have_an_effect_duplicated_too_and_what_is_not_there_is_refused() {
+    let mut laid = four_tracks();
+    hue_shift_on_the_track(&mut laid, 1);
+    let track = Member::Track(laid.tracks[1]);
+    assert!(
+        laid.project
+            .duplicate_effect(track, crate::project::EffectInstanceId::FIRST)
+            .is_ok()
+    );
+    assert_eq!(laid.project.chain_of_the_member(track).unwrap().len(), 2);
+
+    let clip = laid.clip(0, 0);
+    let tag = laid
+        .project
+        .create_group(GroupKind::Tag, &[Member::Clip(clip)])
+        .unwrap();
+    laid.project.add_effect_to_the_group(tag, HUE_SHIFT).unwrap();
+    let group = Member::Group(tag);
+    assert!(
+        laid.project
+            .duplicate_effect(group, crate::project::EffectInstanceId::FIRST)
+            .is_ok()
+    );
+    assert_eq!(laid.project.group(tag).unwrap().effects().len(), 2);
+
+    let before = laid.project.clone();
+    assert!(matches!(
+        laid.project
+            .duplicate_effect(track, crate::project::EffectInstanceId::new(9)),
+        Err(EditError::NotInTheChain { .. })
+    ));
+    assert!(
+        laid.project
+            .duplicate_effect(
+                Member::Clip(ClipId::new(laid.tracks[0], 99)),
+                crate::project::EffectInstanceId::FIRST
+            )
+            .is_err()
+    );
+    assert_eq!(laid.project, before, "nothing is changed by a refusal");
+}

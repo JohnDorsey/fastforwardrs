@@ -313,6 +313,37 @@ impl Project {
         }
     }
 
+    /// Puts a copy of the effect that is named `instance` in the chain of `owner` right after it, with the values it has (and whether it is switched off), named as the next
+    /// effect of the chain is, and gives that name. **Its keyframes are not copied**: the values the copy has are the values the original has when it is not animated. It is an
+    /// error, and nothing is changed, if there is no such thing as `owner`, or its chain has no such effect.
+    pub fn duplicate_effect(
+        &mut self,
+        owner: EffectOwner,
+        instance: EffectInstanceId,
+    ) -> Result<EffectInstanceId, EditError> {
+        let has_the_track_badge = matches!(owner, Member::Clip(_));
+        let chain = self
+            .chain_of_the_member_mut(owner)
+            .ok_or_else(|| nothing_has_the_chain(owner))?;
+        let Some(original) = chain.instance(instance).cloned() else {
+            return Err(EditError::NotInTheChain {
+                owner,
+                item: ChainItemKey::Effect(instance),
+            });
+        };
+        let keys = chain.keys(has_the_track_badge);
+        let after_it = keys
+            .iter()
+            .position(|key| *key == ChainItemKey::Effect(instance))
+            .and_then(|place| keys.get(place + 1))
+            .copied();
+        let copy = chain.put_on(original);
+        if after_it.is_some() {
+            chain.move_before(ChainItemKey::Effect(copy), after_it, has_the_track_badge);
+        }
+        Ok(copy)
+    }
+
     /// Moves `item` of the chain of `owner` to right before `before`, or to the end of what is shown of the chain if that is `None`
     /// (what is moved is an effect or a badge; the clip group or track group that the owner is in is always last, and is not in the chain).
     /// The badge of the track of a clip is shown only when its track has effects that apply to the clip (see [`Self::chain_rows_of`]): when it is
