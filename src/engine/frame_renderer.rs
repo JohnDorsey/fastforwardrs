@@ -14,6 +14,7 @@ use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, Outp
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_call};
 use super::guard::GuardedShader;
+use super::own_effects::{blur_numbers, crop_numbers, gain_factors};
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
 use super::pictures::{PictureData, PicturePixels};
 use super::pipelines::{
@@ -602,6 +603,14 @@ impl FrameRenderer {
                     PassPlan::Effects { layer, .. } => {
                         let effects = &description.layers[*layer].effects;
                         let domain = DisplayDomainConversion::of(description.colour.working);
+                        // (The size of the picture that the effects work on: the effects that depend on it are the blur and the crop.)
+                        let picture_size = match description.layers[*layer].source {
+                            LayerSource::Picture(id) => self
+                                .pictures
+                                .get(id)
+                                .map_or((1, 1), |picture| (picture.width_in_pixels, picture.height_in_pixels)),
+                            LayerSource::Solid(_) => (1, 1),
+                        };
                         effect_slots.push(
                             plan.steps_of_effects[pass_number]
                                 .iter()
@@ -622,6 +631,20 @@ impl FrameRenderer {
                                                     writer.vec4(factors);
                                                 })
                                             }
+                                            // (The first of the two passes of a blur is along the rows.)
+                                            Some(KindOfEffect::Blur) => {
+                                                let (sigma, half_width) =
+                                                    blur_numbers(effect.values[0], picture_size.1);
+                                                self.uniforms.add_slot(|writer| {
+                                                    writer.i32(1).i32(0).f32(sigma).i32(half_width);
+                                                })
+                                            }
+                                            Some(KindOfEffect::Crop) => {
+                                                let (edges, soft_width) = crop_numbers(&effect.values, picture_size);
+                                                self.uniforms.add_slot(|writer| {
+                                                    writer.vec4(edges).f32(soft_width);
+                                                })
+                                            }
                                             _ => {
                                                 let (rows, offsets) = colour_matrix_numbers(&effect.values);
                                                 let parts = MixingParts {
@@ -637,6 +660,13 @@ impl FrameRenderer {
                                                 })
                                             }
                                         }
+                                    }
+                                    // (The second pass of a blur is along the columns.)
+                                    EffectStep::SecondPass { call } => {
+                                        let (sigma, half_width) = blur_numbers(effects[call].values[0], picture_size.1);
+                                        self.uniforms.add_slot(|writer| {
+                                            writer.i32(0).i32(1).f32(sigma).i32(half_width);
+                                        })
                                     }
                                     // (A pass of the colour matrix that only converts: it mixes nothing and cuts nothing off.)
                                     EffectStep::Conversion { into_display } => {
@@ -721,7 +751,7 @@ impl FrameRenderer {
                             .zip(&plan.steps_of_effects[pass_number])
                         {
                             let kind = match *step {
-                                EffectStep::Call { call, .. } => self
+                                EffectStep::Call { call, .. } | EffectStep::SecondPass { call } => self
                                     .effects_that_run
                                     .kind_of(&description.layers[*layer].effects[call].key),
                                 EffectStep::Conversion { .. } => Some(KindOfEffect::ColourMatrix),
@@ -757,6 +787,24 @@ impl FrameRenderer {
                                         ],
                                     }),
                                     "engine: an effect that was given to the engine as a shader",
+                                ),
+                                Some(KindOfEffect::Blur) => (
+                                    &self.pipelines.blur.pipeline,
+                                    self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("engine blur pass"),
+                                        layout: &self.pipelines.blur.bind_group_layout,
+                                        entries: &[uniform_binding, picture_binding],
+                                    }),
+                                    "engine: blur a layer's picture along one line",
+                                ),
+                                Some(KindOfEffect::Crop) => (
+                                    &self.pipelines.crop.pipeline,
+                                    self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("engine crop pass"),
+                                        layout: &self.pipelines.crop.bind_group_layout,
+                                        entries: &[uniform_binding, picture_binding],
+                                    }),
+                                    "engine: crop a layer's picture",
                                 ),
                                 Some(KindOfEffect::Exposure | KindOfEffect::Opacity) => (
                                     &self.pipelines.gain.pipeline,
@@ -1036,20 +1084,6 @@ fn planes_from_the_textures(width: u32, height: u32, brightness: Vec<u8>, side_b
 }
 
 /// The three rows of the matrix of an effect that mixes colours, from its nine numbers (the plan only lets one through that has nine).
-/// The factors that the premultiplied red, green, blue and opacity of a picture are multiplied by, for an exposure of `value` stops or an opacity of `value`.
-fn gain_factors(kind: KindOfEffect, value: f32) -> [f32; 4] {
-    match kind {
-        KindOfEffect::Exposure => {
-            let gain = value.exp2();
-            [gain, gain, gain, 1.0]
-        }
-        _ => {
-            let opacity = value.clamp(0.0, 1.0);
-            [opacity; 4]
-        }
-    }
-}
-
 /// The rows and the offsets that the nine or twelve numbers of a call of the colour matrix are (the offsets of one with nine are nothing).
 fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
     debug_assert!(NUMBERS_OF_A_COLOUR_MATRIX.contains(&values.len()));
@@ -1068,7 +1102,7 @@ fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
 /// The number of the effect that a step runs. (Only asked of the steps that call a shader.)
 fn step_call(step: &EffectStep) -> usize {
     match step {
-        EffectStep::Call { call, .. } => *call,
+        EffectStep::Call { call, .. } | EffectStep::SecondPass { call } => *call,
         EffectStep::Conversion { .. } => unreachable!("a conversion is not run by a shader"),
     }
 }

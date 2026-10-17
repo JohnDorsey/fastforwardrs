@@ -80,7 +80,10 @@ impl PreviewLayer<'_> {
             .iter()
             .filter_map(|operation| match operation {
                 PictureOperation::Mix(matrix) => Some(*matrix),
-                PictureOperation::Exposure { .. } | PictureOperation::Opacity { .. } => None,
+                PictureOperation::Exposure { .. }
+                | PictureOperation::Opacity { .. }
+                | PictureOperation::Blur { .. }
+                | PictureOperation::Crop { .. } => None,
             })
             .fold(ColourMatrix::NOTHING_CHANGES, ColourMatrix::then)
     }

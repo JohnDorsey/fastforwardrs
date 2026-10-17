@@ -76,7 +76,7 @@ fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version_and_the_o
 fn the_descriptors_of_the_effects_of_phase_4_are_what_they_were_in_their_first_version() {
     // (key, name, category, whether it is done to each pixel by itself, [(id, label, default, range, unit, decimals)])
     type AValue = (&'static str, &'static str, f32, (f32, f32), &'static str, u8);
-    let table: [(&str, &str, &str, bool, Vec<AValue>); 4] = [
+    let table: [(&str, &str, &str, bool, Vec<AValue>); 6] = [
         (
             "builtin:saturation",
             "saturation",
@@ -107,6 +107,26 @@ fn the_descriptors_of_the_effects_of_phase_4_are_what_they_were_in_their_first_v
             "Transform",
             false,
             vec![("opacity", "Amount", 1.0, (0.0, 1.0), "", 2)],
+        ),
+        (
+            "builtin:blur",
+            "blur",
+            "Blur and sharpen",
+            false,
+            vec![("radius", "Radius", 0.0, (0.0, 100.0), " pt", 1)],
+        ),
+        (
+            "builtin:crop",
+            "crop",
+            "Transform",
+            false,
+            vec![
+                ("left", "Left", 0.0, (0.0, 1.0), "", 3),
+                ("top", "Top", 0.0, (0.0, 1.0), "", 3),
+                ("right", "Right", 0.0, (0.0, 1.0), "", 3),
+                ("bottom", "Bottom", 0.0, (0.0, 1.0), "", 3),
+                ("feather", "Feather", 0.0, (0.0, 0.5), "", 3),
+            ],
         ),
     ];
     for (key, name, category, each_pixel, values) in table {

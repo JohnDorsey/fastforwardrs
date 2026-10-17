@@ -34,6 +34,7 @@ mod frames;
 mod guard;
 mod handle;
 mod messages;
+mod own_effects;
 mod picture_cache;
 mod pictures;
 mod pipelines;
@@ -53,6 +54,8 @@ mod uniform_bytes;
 mod worker;
 mod yuv;
 
+#[cfg(test)]
+mod blur_and_crop_tests;
 #[cfg(test)]
 mod chroma_tests;
 #[cfg(test)]
@@ -104,12 +107,13 @@ pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 pub use pictures::{PictureData, PicturePixels, PictureProblem};
 pub use plan::{
     CallDomain, EffectStep, EffectToRun, EffectsThatRun, FramePlan, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan,
-    exposure_changes_nothing, opacity_changes_nothing, plan_frame, steps_of_a_run_of_effects,
+    blur_changes_nothing, crop_changes_nothing, exposure_changes_nothing, opacity_changes_nothing, plan_frame,
+    steps_of_a_run_of_effects,
 };
 pub use quality::{PreviewScale, QualityGovernor, QualityRules};
 pub use scene::{
-    COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EXPOSURE_KEY, EffectCall, FrameDescription, LayerDescription,
-    LayerSource, OPACITY_KEY, PictureId,
+    BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, FrameDescription,
+    LayerDescription, LayerSource, OPACITY_KEY, PictureId,
 };
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};
 pub use uniform_bytes::{SlotWriter, UniformBytes, UniformSlot};

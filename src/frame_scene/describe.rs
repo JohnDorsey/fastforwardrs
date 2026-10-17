@@ -367,6 +367,14 @@ fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
         PictureOperation::Mix(matrix) => EffectCall::colour_matrix_with_offsets(matrix.rows(), matrix.offsets()),
         PictureOperation::Exposure { stops } => EffectCall::exposure(*stops),
         PictureOperation::Opacity { opacity } => EffectCall::opacity(*opacity),
+        PictureOperation::Blur { radius } => EffectCall::blur(*radius),
+        PictureOperation::Crop {
+            left,
+            top,
+            right,
+            bottom,
+            feather,
+        } => EffectCall::crop(*left, *top, *right, *bottom, *feather),
     })
 }
 

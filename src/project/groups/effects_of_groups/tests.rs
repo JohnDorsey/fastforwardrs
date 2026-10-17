@@ -445,8 +445,11 @@ fn a_tag_can_have_every_effect_and_a_clip_group_or_a_track_group_every_effect_th
             assert_eq!(effect.applies_to_a_group_of_kind(kind), wanted, "{effect} on a {kind}");
         }
     }
-    assert!(!EffectKind::OPACITY.applies_to_a_group_of_kind(GroupKind::ClipGroup));
-    assert!(!EffectKind::OPACITY.applies_to_a_group_of_kind(GroupKind::TrackGroup));
+    for effect in [EffectKind::OPACITY, EffectKind::BLUR, EffectKind::CROP] {
+        assert!(!effect.applies_to_a_group_of_kind(GroupKind::ClipGroup), "{effect}");
+        assert!(!effect.applies_to_a_group_of_kind(GroupKind::TrackGroup), "{effect}");
+        assert!(effect.applies_to_a_group_of_kind(GroupKind::Tag), "{effect}");
+    }
     for effect in [
         EffectKind::HUE_SHIFT,
         EffectKind::SATURATION,

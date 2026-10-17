@@ -33,6 +33,12 @@ pub const EXPOSURE_KEY: &str = "builtin:exposure";
 /// The key of the opacity.
 pub const OPACITY_KEY: &str = "builtin:opacity";
 
+/// The key of the blur.
+pub const BLUR_KEY: &str = "builtin:blur";
+
+/// The key of the crop.
+pub const CROP_KEY: &str = "builtin:crop";
+
 /// The hue shift: the hues of the colours of the picture are turned round the wheel of colours, as far as its one value says.
 pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
     key: Cow::Borrowed(HUE_SHIFT_KEY),
@@ -182,6 +188,117 @@ pub(super) static OPACITY: EffectDescriptor = EffectDescriptor {
 /// step of the 256 steps of a colour changes no pixel. (The same limit as the colour matrix's.)
 const NEAR_ENOUGH_TO_CHANGE_NOTHING: f32 = 1.0 / 256.0 / 100.0;
 
+/// Softens the picture with a Gaussian blur.
+pub(super) static BLUR: EffectDescriptor = EffectDescriptor {
+    key: Cow::Borrowed(BLUR_KEY),
+    version: (1, 0),
+    name: Cow::Borrowed("blur"),
+    description: Cow::Borrowed("Softens the picture with a Gaussian blur, of light"),
+    category: Cow::Borrowed("Blur and sharpen"),
+    domain: EffectDomain::Picture,
+    // (Not done to each pixel by itself: it mixes a pixel with the ones round it, so on a group it would not be what it is done to the picture the members make together.)
+    changes_each_pixel_by_itself: false,
+    parameters: Cow::Borrowed(&[ParameterDescriptor {
+        id: Cow::Borrowed("radius"),
+        name: Cow::Borrowed("blur"),
+        label: Cow::Borrowed("Radius"),
+        // (In points of a picture 1080 high: a picture of another height is blurred in proportion, so that a small preview of a picture looks like the whole of it. It is
+        // the standard deviation of the Gaussian. It can be typed to go further, up to what the card can do in a pass.)
+        default: PropertyValue::Number(0.0),
+        range: Some((0.0, 100.0)),
+        unit: Cow::Borrowed(" pt"),
+        decimals: Some(1),
+        unknown_fields: UnknownFields::none(),
+        scale: ValueScale::Linear,
+        control: ParameterControl::Automatic,
+    }]),
+    unknown_fields: UnknownFields::none(),
+};
+
+/// Cuts the edges off the picture, with a soft edge if wanted.
+pub(super) static CROP: EffectDescriptor = EffectDescriptor {
+    key: Cow::Borrowed(CROP_KEY),
+    version: (1, 0),
+    name: Cow::Borrowed("crop"),
+    description: Cow::Borrowed("Cuts the edges off the picture, with a soft edge if wanted: what is cut off is clear"),
+    category: Cow::Borrowed("Transform"),
+    domain: EffectDomain::Picture,
+    changes_each_pixel_by_itself: false,
+    parameters: Cow::Borrowed(&[
+        ParameterDescriptor {
+            id: Cow::Borrowed("left"),
+            name: Cow::Borrowed("crop from the left"),
+            label: Cow::Borrowed("Left"),
+            // (The fraction of the picture's width that is cut off from the left. The same for the others.)
+            default: PropertyValue::Number(0.0),
+            range: Some((0.0, 1.0)),
+            unit: Cow::Borrowed(""),
+            decimals: Some(3),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("top"),
+            name: Cow::Borrowed("crop from the top"),
+            label: Cow::Borrowed("Top"),
+            default: PropertyValue::Number(0.0),
+            range: Some((0.0, 1.0)),
+            unit: Cow::Borrowed(""),
+            decimals: Some(3),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("right"),
+            name: Cow::Borrowed("crop from the right"),
+            label: Cow::Borrowed("Right"),
+            default: PropertyValue::Number(0.0),
+            range: Some((0.0, 1.0)),
+            unit: Cow::Borrowed(""),
+            decimals: Some(3),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("bottom"),
+            name: Cow::Borrowed("crop from the bottom"),
+            label: Cow::Borrowed("Bottom"),
+            default: PropertyValue::Number(0.0),
+            range: Some((0.0, 1.0)),
+            unit: Cow::Borrowed(""),
+            decimals: Some(3),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("feather"),
+            name: Cow::Borrowed("feather of the crop"),
+            label: Cow::Borrowed("Feather"),
+            // (How wide the soft edge is, as a fraction of the picture's height; half of it is inside each edge and half outside. Every edge has it, those that cut nothing
+            // too: a feather with nothing cut off is a soft edge round the picture.)
+            default: PropertyValue::Number(0.0),
+            range: Some((0.0, 0.5)),
+            unit: Cow::Borrowed(""),
+            decimals: Some(3),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+    ]),
+    unknown_fields: UnknownFields::none(),
+};
+
+/// The radius of a blur, in points of a picture 1080 high, under which it changes nothing: the Gaussian is narrower than a hundredth of a pixel. (The same limit as the
+/// engine's.)
+const MOST_THAT_A_BLUR_CAN_BE_AND_CHANGE_NOTHING: f32 = 0.01;
+
+/// The fraction of the picture that a crop or its soft edge can be, under which it changes nothing: a ten-thousandth. (The same limit as the engine's.)
+const MOST_THAT_A_CROP_CAN_CUT_AND_CHANGE_NOTHING: f32 = 1.0e-4;
+
 /// The most stops of exposure that is made: two to this is the most that the light is multiplied by, which half floats can hold many times over.
 pub const MOST_STOPS_OF_EXPOSURE: f32 = 12.0;
 
@@ -194,6 +311,16 @@ pub enum PictureOperation {
     Exposure { stops: f32 },
     /// The picture is made this much opaque (from 0 to 1) of what it is.
     Opacity { opacity: f32 },
+    /// The picture is blurred by a Gaussian of this standard deviation, in points of a picture 1080 high.
+    Blur { radius: f32 },
+    /// The fractions of the picture that are cut off from the left, the top, the right and the bottom, and the width of the soft edge as a fraction of the picture's height.
+    Crop {
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        feather: f32,
+    },
 }
 
 impl PictureOperation {
@@ -204,6 +331,16 @@ impl PictureOperation {
             Self::Mix(matrix) => matrix.changes_nothing(),
             Self::Exposure { stops } => (stops.exp2() - 1.0).abs() < NEAR_ENOUGH_TO_CHANGE_NOTHING,
             Self::Opacity { opacity } => 1.0 - opacity < NEAR_ENOUGH_TO_CHANGE_NOTHING,
+            Self::Blur { radius } => *radius < MOST_THAT_A_BLUR_CAN_BE_AND_CHANGE_NOTHING,
+            Self::Crop {
+                left,
+                top,
+                right,
+                bottom,
+                feather,
+            } => [left, top, right, bottom, feather]
+                .into_iter()
+                .all(|fraction| *fraction < MOST_THAT_A_CROP_CAN_CUT_AND_CHANGE_NOTHING),
         }
     }
 
@@ -224,7 +361,7 @@ struct Behaviour {
     operation: fn(&[PropertyValue]) -> PictureOperation,
 }
 
-const BEHAVIOURS: [Behaviour; 5] = [
+const BEHAVIOURS: [Behaviour; 7] = [
     Behaviour {
         kind: EffectKind::HUE_SHIFT,
         operation: hue_shift_operation,
@@ -244,6 +381,14 @@ const BEHAVIOURS: [Behaviour; 5] = [
     Behaviour {
         kind: EffectKind::OPACITY,
         operation: opacity_operation,
+    },
+    Behaviour {
+        kind: EffectKind::BLUR,
+        operation: blur_operation,
+    },
+    Behaviour {
+        kind: EffectKind::CROP,
+        operation: crop_operation,
     },
 ];
 
@@ -283,6 +428,40 @@ fn exposure_operation(values: &[PropertyValue]) -> PictureOperation {
             stops: stops.clamp(-MOST_STOPS_OF_EXPOSURE, MOST_STOPS_OF_EXPOSURE),
         },
         _ => PictureOperation::Exposure { stops: 0.0 },
+    }
+}
+
+fn blur_operation(values: &[PropertyValue]) -> PictureOperation {
+    match values {
+        [PropertyValue::Number(radius)] => PictureOperation::Blur {
+            radius: radius.max(0.0),
+        },
+        _ => PictureOperation::Blur { radius: 0.0 },
+    }
+}
+
+fn crop_operation(values: &[PropertyValue]) -> PictureOperation {
+    match values {
+        [
+            PropertyValue::Number(left),
+            PropertyValue::Number(top),
+            PropertyValue::Number(right),
+            PropertyValue::Number(bottom),
+            PropertyValue::Number(feather),
+        ] => PictureOperation::Crop {
+            left: left.clamp(0.0, 1.0),
+            top: top.clamp(0.0, 1.0),
+            right: right.clamp(0.0, 1.0),
+            bottom: bottom.clamp(0.0, 1.0),
+            feather: feather.clamp(0.0, 1.0),
+        },
+        _ => PictureOperation::Crop {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            feather: 0.0,
+        },
     }
 }
 

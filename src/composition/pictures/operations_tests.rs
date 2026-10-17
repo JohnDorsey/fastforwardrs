@@ -98,6 +98,82 @@ fn each_effect_of_the_program_asks_the_operation_its_values_say() {
 }
 
 #[test]
+fn blur_and_crop_ask_the_operation_their_values_say_cut_off_where_the_effect_ends() {
+    let (mut project, clip) = a_video();
+    put_on(&mut project, clip, EffectKind::BLUR, &[number(12.5)]);
+    assert_eq!(
+        operations_at(&project, 3),
+        vec![PictureOperation::Blur { radius: 12.5 }]
+    );
+
+    let (mut project, clip) = a_video();
+    put_on(&mut project, clip, EffectKind::BLUR, &[number(-4.0)]);
+    assert_eq!(
+        operations_at(&project, 3),
+        Vec::new(),
+        "a blur of less than nothing is none"
+    );
+
+    let (mut project, clip) = a_video();
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::CROP,
+        &[number(0.1), number(0.2), number(0.3), number(0.4), number(0.05)],
+    );
+    assert_eq!(
+        operations_at(&project, 3),
+        vec![PictureOperation::Crop {
+            left: 0.1,
+            top: 0.2,
+            right: 0.3,
+            bottom: 0.4,
+            feather: 0.05
+        }]
+    );
+
+    let (mut project, clip) = a_video();
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::CROP,
+        &[number(-1.0), number(7.0), number(0.0), number(0.0), number(0.0)],
+    );
+    assert_eq!(
+        operations_at(&project, 3),
+        vec![PictureOperation::Crop {
+            left: 0.0,
+            top: 1.0,
+            right: 0.0,
+            bottom: 0.0,
+            feather: 0.0
+        }],
+        "the fractions are cut off to nought to one"
+    );
+}
+
+#[test]
+fn a_blur_and_a_crop_end_a_run_of_colour_mixes_like_any_effect_that_is_not_a_mix() {
+    let (mut project, clip) = a_video();
+    put_on(&mut project, clip, EffectKind::SATURATION, &[number(0.5)]);
+    put_on(&mut project, clip, EffectKind::BLUR, &[number(3.0)]);
+    put_on(&mut project, clip, EffectKind::SATURATION, &[number(0.5)]);
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::CROP,
+        &[number(0.0), number(0.0), number(0.25), number(0.0), number(0.0)],
+    );
+    put_on(&mut project, clip, EffectKind::SATURATION, &[number(0.5)]);
+
+    let operations = operations_at(&project, 3);
+
+    assert_eq!(operations.len(), 5, "{operations:?}");
+    assert!(matches!(operations[1], PictureOperation::Blur { .. }));
+    assert!(matches!(operations[3], PictureOperation::Crop { .. }));
+}
+
+#[test]
 fn colour_mixes_that_are_neighbours_are_one_operation_in_the_order_they_are_applied_in() {
     let (mut project, clip) = a_video();
     put_on(&mut project, clip, EffectKind::HUE_SHIFT, &[number(70.0)]);
@@ -303,6 +379,33 @@ fn the_operation_that_changes_nothing_is_the_engines_own_idea_of_it() {
             exposure_changes_nothing(stops),
             "{stops} stops"
         );
+    }
+    use crate::engine::{blur_changes_nothing, crop_changes_nothing};
+    for radius in [-1.0, 0.0, 0.005, 0.0099, 0.01, 0.0101, 0.02, 1.0, 100.0] {
+        assert_eq!(
+            PictureOperation::Blur { radius }.changes_nothing(),
+            blur_changes_nothing(radius),
+            "{radius} points"
+        );
+    }
+    for fraction in [0.0, 1.0e-6, 9.9e-5, 1.0e-4, 1.01e-4, 1.0e-3, 0.5, 1.0] {
+        for place in 0..5 {
+            let mut fractions = [0.0_f32; 5];
+            fractions[place] = fraction;
+            let [left, top, right, bottom, feather] = fractions;
+            assert_eq!(
+                PictureOperation::Crop {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    feather
+                }
+                .changes_nothing(),
+                crop_changes_nothing(&fractions),
+                "{fractions:?}"
+            );
+        }
     }
     for opacity in [
         0.0, 0.5, 0.9, 0.999, 0.99995, 0.99996, 0.99997, 0.99999, 1.0, 1.0001, 7.0, -1.0,

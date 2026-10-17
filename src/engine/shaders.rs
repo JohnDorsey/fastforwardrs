@@ -43,6 +43,12 @@ pub const COLOUR_MATRIX: &str = concat!(
 /// The effects of exposure and of opacity: the premultiplied picture of a layer multiplied by four numbers.
 pub const GAIN: &str = include_str!("shaders/gain.wgsl");
 
+/// One pass of the blur of a layer's picture: a Gaussian along one line.
+pub const BLUR: &str = include_str!("shaders/blur.wgsl");
+
+/// The crop of a layer's picture: what is outside a rectangle becomes clear.
+pub const CROP: &str = include_str!("shaders/crop.wgsl");
+
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");
 
@@ -63,6 +69,8 @@ pub const ALL: &[(&str, &str)] = &[
     ("yuv.wgsl", YUV),
     ("colour_matrix.wgsl", COLOUR_MATRIX),
     ("gain.wgsl", GAIN),
+    ("blur.wgsl", BLUR),
+    ("crop.wgsl", CROP),
     ("place.wgsl", PLACE),
     ("rgb_to_luma.wgsl", RGB_TO_LUMA),
     ("rgb_to_chroma.wgsl", RGB_TO_CHROMA),

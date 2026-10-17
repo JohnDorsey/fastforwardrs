@@ -16,7 +16,9 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, PoisonError};
 
-use super::built_in::{self, BRIGHTNESS_AND_CONTRAST, EXPOSURE, HUE_SHIFT, OPACITY, PictureOperation, SATURATION};
+use super::built_in::{
+    self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, OPACITY, PictureOperation, SATURATION,
+};
 use super::{EffectDescriptor, EffectDomain, ParameterDescriptor};
 use crate::colour_effects::ColourMatrix;
 use crate::project::animation::{PropertyValue, ValueKind};
@@ -46,13 +48,21 @@ impl EffectKind {
     /// The opacity, which makes the picture more or less see-through.
     pub const OPACITY: EffectKind = EffectKind(&OPACITY);
 
+    /// The blur, which softens the picture.
+    pub const BLUR: EffectKind = EffectKind(&BLUR);
+
+    /// The crop, which cuts the edges off the picture.
+    pub const CROP: EffectKind = EffectKind(&CROP);
+
     /// The effects that the program has in itself, in the order they are offered in.
-    pub const BUILT_IN: [EffectKind; 5] = [
+    pub const BUILT_IN: [EffectKind; 7] = [
         Self::HUE_SHIFT,
         Self::SATURATION,
         Self::BRIGHTNESS_AND_CONTRAST,
         Self::EXPOSURE,
         Self::OPACITY,
+        Self::BLUR,
+        Self::CROP,
     ];
 
     /// The kind of effect that a snapshot of a descriptor, which a project file kept, says one is: the effect of the program that can stand in for
@@ -183,7 +193,10 @@ impl EffectKind {
     pub fn colour_matrix(self, values: &[PropertyValue]) -> Option<ColourMatrix> {
         match self.picture_operation(values)? {
             PictureOperation::Mix(matrix) => Some(matrix),
-            PictureOperation::Exposure { .. } | PictureOperation::Opacity { .. } => None,
+            PictureOperation::Exposure { .. }
+            | PictureOperation::Opacity { .. }
+            | PictureOperation::Blur { .. }
+            | PictureOperation::Crop { .. } => None,
         }
     }
 

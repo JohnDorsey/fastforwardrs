@@ -893,6 +893,22 @@ fn the_operations_of_a_layer_are_described_as_one_call_each_in_order_and_the_one
         PictureOperation::Exposure { stops: 1.5 },
         PictureOperation::Mix(ColourMatrix::brightness_and_contrast(0.1, 1.2)),
         PictureOperation::Opacity { opacity: 0.25 },
+        PictureOperation::Blur { radius: 8.0 },
+        PictureOperation::Crop {
+            left: 0.1,
+            top: 0.2,
+            right: 0.3,
+            bottom: 0.4,
+            feather: 0.05,
+        },
+        PictureOperation::Blur { radius: 0.0 },
+        PictureOperation::Crop {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            feather: 0.0,
+        },
         PictureOperation::Exposure { stops: 0.0 },
         PictureOperation::Opacity { opacity: 1.0 },
         PictureOperation::Mix(ColourMatrix::NOTHING_CHANGES),
@@ -908,6 +924,8 @@ fn the_operations_of_a_layer_are_described_as_one_call_each_in_order_and_the_one
             EffectCall::exposure(1.5),
             EffectCall::colour_matrix_with_offsets(brightness.rows(), brightness.offsets()),
             EffectCall::opacity(0.25),
+            EffectCall::blur(8.0),
+            EffectCall::crop(0.1, 0.2, 0.3, 0.4, 0.05),
         ]
     );
     assert_eq!(

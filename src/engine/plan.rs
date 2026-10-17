@@ -23,7 +23,8 @@ use std::collections::HashSet;
 
 use super::effect_shaders::MOST_NUMBERS_OF_A_FOREIGN_EFFECT;
 use super::{
-    COLOUR_MATRIX_KEY, EXPOSURE_KEY, FrameDescription, LayerDescription, LayerSource, OPACITY_KEY, WorkingSpace,
+    BLUR_KEY, COLOUR_MATRIX_KEY, CROP_KEY, EXPOSURE_KEY, FrameDescription, LayerDescription, LayerSource, OPACITY_KEY,
+    WorkingSpace,
 };
 
 /// How far a number of a colour matrix may be from what it is in the matrix that changes nothing, for the matrix to be taken for that one: a change
@@ -95,6 +96,8 @@ pub enum EffectStep {
         converts_into_display: bool,
         converts_out_of_display: bool,
     },
+    /// The second pass of the effect with this number among the layer's effects, for an effect that takes two (the blur: along the rows, and then along the columns).
+    SecondPass { call: usize },
     /// A pass of its own that only converts, light to display codes (`into_display`) or display codes to light.
     Conversion { into_display: bool },
 }
@@ -105,6 +108,8 @@ pub struct EffectToRun {
     /// The number of the effect among the layer's effects.
     pub call: usize,
     pub domain: CallDomain,
+    /// How many passes of the card the effect takes (one, or two for the blur).
+    pub passes: usize,
     /// Whether the effect's own pass can do the conversion before it (when it is the first of its domain) and after it (when it is the last): the engine's colour matrix can.
     pub converts_itself: bool,
 }
@@ -131,50 +136,46 @@ pub fn steps_of_a_run_of_effects(effects: &[EffectToRun], working_space_is_light
             _ => steps.push(EffectStep::Conversion { into_display: false }),
         }
     }
+    // The call of an effect, and the second pass after it if it takes two.
+    fn call(
+        steps: &mut Vec<EffectStep>,
+        effect: &EffectToRun,
+        converts_into_display: bool,
+        converts_out_of_display: bool,
+    ) {
+        steps.push(EffectStep::Call {
+            call: effect.call,
+            converts_into_display,
+            converts_out_of_display,
+        });
+        if effect.passes == 2 {
+            steps.push(EffectStep::SecondPass { call: effect.call });
+        }
+    }
     let mut steps: Vec<EffectStep> = Vec::with_capacity(effects.len());
     let mut in_display_codes = false;
     for effect in effects {
         if !working_space_is_light {
-            steps.push(EffectStep::Call {
-                call: effect.call,
-                converts_into_display: effect.converts_itself,
-                converts_out_of_display: effect.converts_itself,
-            });
+            call(&mut steps, effect, effect.converts_itself, effect.converts_itself);
             continue;
         }
         match effect.domain {
             CallDomain::DisplayReferred if !in_display_codes => {
                 in_display_codes = true;
                 if effect.converts_itself {
-                    steps.push(EffectStep::Call {
-                        call: effect.call,
-                        converts_into_display: true,
-                        converts_out_of_display: false,
-                    });
+                    call(&mut steps, effect, true, false);
                 } else {
                     steps.push(EffectStep::Conversion { into_display: true });
-                    steps.push(EffectStep::Call {
-                        call: effect.call,
-                        converts_into_display: false,
-                        converts_out_of_display: false,
-                    });
+                    call(&mut steps, effect, false, false);
                 }
             }
-            CallDomain::DisplayReferred => steps.push(EffectStep::Call {
-                call: effect.call,
-                converts_into_display: false,
-                converts_out_of_display: false,
-            }),
+            CallDomain::DisplayReferred => call(&mut steps, effect, false, false),
             CallDomain::SceneLinear => {
                 if in_display_codes {
                     leave(&mut steps, effects);
                     in_display_codes = false;
                 }
-                steps.push(EffectStep::Call {
-                    call: effect.call,
-                    converts_into_display: false,
-                    converts_out_of_display: false,
-                });
+                call(&mut steps, effect, false, false);
             }
         }
     }
@@ -193,6 +194,10 @@ pub enum KindOfEffect {
     Exposure,
     /// The engine's own effect that makes the picture more or less see-through, by the fraction that its one number says.
     Opacity,
+    /// The engine's own Gaussian blur, by the radius that its one number says, in two passes.
+    Blur,
+    /// The engine's own crop, with the five numbers that [`CROP_KEY`] says.
+    Crop,
     /// A shader that was given to the engine (see `effect_shaders`), which is given as many numbers as the call has, up to a limit.
     Shader,
 }
@@ -203,7 +208,15 @@ impl KindOfEffect {
     pub fn domain(self) -> CallDomain {
         match self {
             Self::ColourMatrix | Self::Shader => CallDomain::DisplayReferred,
-            Self::Exposure | Self::Opacity => CallDomain::SceneLinear,
+            Self::Exposure | Self::Opacity | Self::Blur | Self::Crop => CallDomain::SceneLinear,
+        }
+    }
+
+    /// How many passes of the card an effect of this kind takes.
+    pub fn passes(self) -> usize {
+        match self {
+            Self::Blur => 2,
+            Self::ColourMatrix | Self::Shader | Self::Exposure | Self::Opacity | Self::Crop => 1,
         }
     }
 }
@@ -238,6 +251,10 @@ impl EffectsThatRun {
             Some(KindOfEffect::Exposure)
         } else if key == OPACITY_KEY {
             Some(KindOfEffect::Opacity)
+        } else if key == BLUR_KEY {
+            Some(KindOfEffect::Blur)
+        } else if key == CROP_KEY {
+            Some(KindOfEffect::Crop)
         } else if self.keys_of_shaders.contains(key) {
             Some(KindOfEffect::Shader)
         } else {
@@ -267,6 +284,18 @@ pub fn opacity_changes_nothing(opacity: f32) -> bool {
     1.0 - opacity < NEAR_ENOUGH_TO_CHANGE_NOTHING
 }
 
+/// Whether a blur of this many points of a picture 1080 high is none, or none that can be told from none: the Gaussian is narrower than a hundredth of a pixel of a picture
+/// that high. (A blur of less than nothing is none.)
+pub fn blur_changes_nothing(radius: f32) -> bool {
+    radius < 0.01
+}
+
+/// Whether the five numbers of a crop (the fractions cut off from the left, the top, the right and the bottom, and the width of the soft edge) are those of a crop that
+/// changes nothing: no edge is cut and the soft edge has no width, or less than a ten-thousandth of the picture across for every one of them.
+pub fn crop_changes_nothing(values: &[f32]) -> bool {
+    values.iter().all(|value| *value < 1.0e-4)
+}
+
 /// Which effects of `layer` run, and how many cannot.
 fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (Vec<usize>, usize) {
     if matches!(layer.source, LayerSource::Solid(_)) {
@@ -290,6 +319,16 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
             }
             Some(KindOfEffect::Opacity) if effect.values.len() == 1 && numbers_are_finite => {
                 if !opacity_changes_nothing(effect.values[0]) {
+                    calls.push(number);
+                }
+            }
+            Some(KindOfEffect::Blur) if effect.values.len() == 1 && numbers_are_finite => {
+                if !blur_changes_nothing(effect.values[0]) {
+                    calls.push(number);
+                }
+            }
+            Some(KindOfEffect::Crop) if effect.values.len() == 5 && numbers_are_finite => {
+                if !crop_changes_nothing(&effect.values) {
                     calls.push(number);
                 }
             }
@@ -323,6 +362,7 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
                     EffectToRun {
                         call,
                         domain: kind.domain(),
+                        passes: kind.passes(),
                         converts_itself: kind == KindOfEffect::ColourMatrix,
                     }
                 })
@@ -359,6 +399,7 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{BLUR_KEY, CROP_KEY};
     use crate::engine::{CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, LayerDescription, LayerSource, PictureId};
 
     /// What was planned before effects could be given as shaders: the effects the engine has of its own, and no others.
@@ -616,6 +657,7 @@ mod tests {
         EffectToRun {
             call,
             domain: CallDomain::DisplayReferred,
+            passes: 1,
             converts_itself: true,
         }
     }
@@ -624,6 +666,7 @@ mod tests {
         EffectToRun {
             call,
             domain: CallDomain::DisplayReferred,
+            passes: 1,
             converts_itself: false,
         }
     }
@@ -632,7 +675,113 @@ mod tests {
         EffectToRun {
             call,
             domain: CallDomain::SceneLinear,
+            passes: 1,
             converts_itself: false,
+        }
+    }
+
+    /// An effect of light that takes two passes of the card, as the blur does.
+    fn a_blur(call: usize) -> EffectToRun {
+        EffectToRun {
+            passes: 2,
+            ..a_pass_of_light(call)
+        }
+    }
+
+    fn second_pass_of(call: usize) -> EffectStep {
+        EffectStep::SecondPass { call }
+    }
+
+    #[test]
+    fn an_effect_that_takes_two_passes_has_its_second_pass_right_after_its_first_wherever_it_is() {
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_matrix(0), a_blur(1), a_matrix(2)], true),
+            vec![
+                call_of(0, true, true),
+                call_of(1, false, false),
+                second_pass_of(1),
+                call_of(2, true, true)
+            ]
+        );
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_shader(0), a_blur(1), a_blur(2)], true),
+            vec![
+                INTO_THE_CODES,
+                call_of(0, false, false),
+                OUT_OF_THE_CODES,
+                call_of(1, false, false),
+                second_pass_of(1),
+                call_of(2, false, false),
+                second_pass_of(2)
+            ],
+            "(a shader's conversion out of the codes is a pass of its own, before the blur; two blurs need none between them)"
+        );
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_blur(0), a_matrix(1)], false),
+            vec![call_of(0, false, false), second_pass_of(0), call_of(1, true, true)],
+            "in the compatibility mode too"
+        );
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_blur(0)], true),
+            vec![call_of(0, false, false), second_pass_of(0)],
+            "a blur of light needs no conversion"
+        );
+    }
+
+    #[test]
+    fn a_blur_is_given_one_number_and_a_crop_five_and_the_passes_of_a_blur_are_two() {
+        let mut known = EffectsThatRun::built_in_only();
+        known.add_shader("test:shader");
+        let blur = |numbers: &[f32]| EffectCall {
+            key: BLUR_KEY.to_owned(),
+            values: numbers.to_vec(),
+        };
+        let crop = |numbers: &[f32]| EffectCall {
+            key: CROP_KEY.to_owned(),
+            values: numbers.to_vec(),
+        };
+        let plan_of = |effects: Vec<EffectCall>| plan_frame(&description_of(vec![layer_with(1, effects)]), &known);
+        // (A layer, its effects, the place and the output: two passes besides the effects.)
+        let runs = |effects: Vec<EffectCall>| plan_of(effects).passes.len() == 3;
+
+        assert!(runs(vec![blur(&[4.0])]));
+        assert_eq!(
+            plan_of(vec![blur(&[4.0])]).passes_recorded(),
+            2 + 2,
+            "a blur takes two passes"
+        );
+        assert_eq!(plan_of(vec![blur(&[4.0]), blur(&[1.0])]).passes_recorded(), 2 + 4);
+        assert!(!runs(vec![blur(&[0.0])]), "a blur of nothing is not run");
+        assert!(!runs(vec![blur(&[0.005])]));
+        assert!(runs(vec![blur(&[0.02])]));
+        assert!(!runs(vec![blur(&[-3.0])]), "and a blur of less than nothing is none");
+        assert_eq!(
+            plan_of(vec![blur(&[0.0])]).effects_not_run,
+            0,
+            "it did what it was asked to"
+        );
+        for wrong in [blur(&[]), blur(&[1.0, 2.0]), blur(&[f32::NAN]), blur(&[f32::INFINITY])] {
+            let plan = plan_of(vec![wrong.clone()]);
+            assert_eq!((plan.passes.len(), plan.effects_not_run), (2, 1), "{wrong:?}");
+        }
+
+        assert!(runs(vec![crop(&[0.1, 0.0, 0.0, 0.0, 0.0])]));
+        assert!(
+            runs(vec![crop(&[0.0, 0.0, 0.0, 0.0, 0.05])]),
+            "a feather alone is a soft edge round the picture"
+        );
+        assert_eq!(plan_of(vec![crop(&[0.1, 0.0, 0.0, 0.0, 0.0])]).passes_recorded(), 2 + 1);
+        assert!(!runs(vec![crop(&[0.0; 5])]));
+        assert!(!runs(vec![crop(&[1.0e-5, 0.0, -1.0, 0.0, 0.0])]));
+        assert_eq!(plan_of(vec![crop(&[0.0; 5])]).effects_not_run, 0);
+        for wrong in [
+            crop(&[0.1; 4]),
+            crop(&[0.1; 6]),
+            crop(&[]),
+            crop(&[0.1, 0.1, 0.1, f32::NAN, 0.0]),
+        ] {
+            let plan = plan_of(vec![wrong.clone()]);
+            assert_eq!((plan.passes.len(), plan.effects_not_run), (2, 1), "{wrong:?}");
         }
     }
 

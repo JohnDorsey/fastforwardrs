@@ -30,6 +30,14 @@ pub const EXPOSURE_KEY: &str = "engine:exposure";
 /// together, is multiplied. It is an effect of the scene-linear domain.
 pub const OPACITY_KEY: &str = "engine:opacity";
 
+/// The key of the effect that blurs a picture with a Gaussian blur: one number, the radius (the standard deviation) in points of a picture 1080 high, which is that many
+/// pixels in a picture of that height and in proportion in another. It is an effect of the scene-linear domain, and takes two passes of the card.
+pub const BLUR_KEY: &str = "engine:blur";
+
+/// The key of the effect that crops a picture: five numbers, the fractions of the picture's width and height that are cut off from the left, the top, the right and the
+/// bottom, and the width of the soft edge as a fraction of the picture's height. What is outside becomes clear. It is an effect of the scene-linear domain.
+pub const CROP_KEY: &str = "engine:crop";
+
 /// The corners of a layer that is all of the picture: top left, top right, bottom right, bottom left, as fractions of the picture.
 pub const CORNERS_OF_THE_WHOLE_PICTURE: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 
@@ -76,6 +84,23 @@ impl EffectCall {
         Self {
             key: EXPOSURE_KEY.to_owned(),
             values: vec![stops],
+        }
+    }
+
+    /// The effect that blurs a picture by `radius` points of a picture 1080 high (see [`BLUR_KEY`]).
+    pub fn blur(radius: f32) -> Self {
+        Self {
+            key: BLUR_KEY.to_owned(),
+            values: vec![radius],
+        }
+    }
+
+    /// The effect that cuts the fractions `left`, `top`, `right` and `bottom` off a picture, with an edge `feather` (a fraction of the picture's height) wide (see
+    /// [`CROP_KEY`]).
+    pub fn crop(left: f32, top: f32, right: f32, bottom: f32, feather: f32) -> Self {
+        Self {
+            key: CROP_KEY.to_owned(),
+            values: vec![left, top, right, bottom, feather],
         }
     }
 

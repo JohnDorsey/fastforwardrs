@@ -40,6 +40,12 @@ pub const OUTPUT_UNIFORM_BYTES: u64 = 64;
 /// How many bytes the uniforms of the effects of exposure and of opacity take up (see `gain.wgsl`): four numbers.
 pub const GAIN_UNIFORM_BYTES: u64 = 16;
 
+/// How many bytes the uniforms of a pass of the blur take up (see `blur.wgsl`): the step along the line, the standard deviation and the half width of the kernel.
+pub const BLUR_UNIFORM_BYTES: u64 = 16;
+
+/// How many bytes the uniforms of the crop take up (see `crop.wgsl`): four edges and the width of the step across them, in a struct that is a multiple of 16.
+pub const CROP_UNIFORM_BYTES: u64 = 32;
+
 /// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): three 3 by 3 matrices, three columns of 16 bytes each, the number
 /// of the curve, the three offsets and the number that says which parts are left out, in a struct that is a multiple of 16.
 pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 176;
@@ -90,8 +96,9 @@ pub struct ColourMatrixPass {
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
-/// The effects of exposure and of opacity: a picture in, a picture of the same size out, multiplied by four numbers.
-pub struct GainPass {
+/// An effect that is a pass of its own on one picture: a uniform buffer of numbers and the picture in, a picture of the same size out. (The effects of exposure and of
+/// opacity, the blur and the crop are each one.)
+pub struct OnePicturePass {
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -111,7 +118,9 @@ pub struct Pipelines {
     pub yuv: YuvPass,
     pub planes: PlanesPass,
     pub colour_matrix: ColourMatrixPass,
-    pub gain: GainPass,
+    pub gain: OnePicturePass,
+    pub blur: OnePicturePass,
+    pub crop: OnePicturePass,
     pub place: PlacePass,
     /// What the effects that others wrote are made from (the pipeline of each is made when its shader is given to the engine).
     pub foreign_effect: ForeignEffectPass,
@@ -125,7 +134,9 @@ impl Pipelines {
             yuv: yuv_pass(device),
             planes: planes_pass(device),
             colour_matrix: colour_matrix_pass(device),
-            gain: gain_pass(device),
+            gain: one_picture_pass(device, "gain", shaders::GAIN, GAIN_UNIFORM_BYTES),
+            blur: one_picture_pass(device, "blur", shaders::BLUR, BLUR_UNIFORM_BYTES),
+            crop: one_picture_pass(device, "crop", shaders::CROP, CROP_UNIFORM_BYTES),
             place: place_pass(device),
             foreign_effect: ForeignEffectPass::create(device),
         }
@@ -334,10 +345,11 @@ fn planes_pass(device: &wgpu::Device) -> PlanesPass {
     }
 }
 
-fn gain_pass(device: &wgpu::Device) -> GainPass {
-    let module = shader_module(device, "engine gain pass", shaders::GAIN);
+/// The pass of an effect that works on one picture with a uniform buffer of `uniform_bytes` bytes (`what` names it in the labels).
+fn one_picture_pass(device: &wgpu::Device, what: &str, source: &str, uniform_bytes: u64) -> OnePicturePass {
+    let module = shader_module(device, &format!("engine {what} pass"), source);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("engine gain pass bindings"),
+        label: Some(&format!("engine {what} pass bindings")),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -345,7 +357,7 @@ fn gain_pass(device: &wgpu::Device) -> GainPass {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: NonZeroU64::new(GAIN_UNIFORM_BYTES),
+                    min_binding_size: NonZeroU64::new(uniform_bytes),
                 },
                 count: None,
             },
@@ -353,12 +365,19 @@ fn gain_pass(device: &wgpu::Device) -> GainPass {
         ],
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("engine gain pass layout"),
+        label: Some(&format!("engine {what} pass layout")),
         bind_group_layouts: &[Some(&bind_group_layout)],
         immediate_size: 0,
     });
-    GainPass {
-        pipeline: pipeline(device, "engine gain pass", &module, &layout, ACCUMULATION_FORMAT, None),
+    OnePicturePass {
+        pipeline: pipeline(
+            device,
+            &format!("engine {what} pass"),
+            &module,
+            &layout,
+            ACCUMULATION_FORMAT,
+            None,
+        ),
         bind_group_layout,
     }
 }

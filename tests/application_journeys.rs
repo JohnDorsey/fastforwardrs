@@ -1737,6 +1737,52 @@ fn an_exposure_and_a_brightness_put_on_with_the_plus_button_are_exported_as_the_
 }
 
 #[test]
+fn a_crop_put_on_with_the_plus_button_is_exported_with_the_left_half_cut_off() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let orange = (200u8, 100u8, 50u8);
+    let video = support::flat_colour_video(&toolchain, scratch.path(), orange);
+    let mut journey = Journey::importing(&toolchain, &video);
+
+    journey.select_the_clip_at(10);
+    let plus = journey.rectangle_of("Add an effect");
+    journey.click(plus.center());
+    let item = journey.rectangle_of("Crop");
+    journey.click(item.center());
+    journey.set_slider("Left", 0.5);
+
+    let exported = scratch.path().join("cropped.mp4");
+    export_to(&mut journey, &exported);
+    let decoded = decode_video(&toolchain, &exported, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(decoded.pictures.len(), 60);
+
+    // The left half shows nothing (the black the frame is made on), the right half is the video as it was, and the edge is in the middle of the picture to the pixel.
+    let pixel = |frame: usize, across: usize| {
+        let first = (VIDEO_HEIGHT as usize / 2 * VIDEO_WIDTH as usize + across) * 3;
+        &decoded.pictures[frame][first..first + 3]
+    };
+    let width = VIDEO_WIDTH as usize;
+    for frame in [0, 30, 59] {
+        for across in [2, width / 4, width / 2 - 4] {
+            assert!(
+                pixel(frame, across).iter().all(|colour| *colour <= 24),
+                "frame {frame}, column {across}: {:?} where black was wanted",
+                pixel(frame, across)
+            );
+        }
+        for across in [width / 2 + 4, width * 3 / 4, width - 3] {
+            let found = pixel(frame, across);
+            for (channel, (found, wanted)) in found.iter().zip([orange.0, orange.1, orange.2]).enumerate() {
+                assert!(
+                    found.abs_diff(wanted) <= 10,
+                    "frame {frame}, column {across}, channel {channel}: {found} where {wanted} was wanted"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn a_video_included_in_the_project_file_travels_with_it_and_plays_and_exports_when_the_original_is_gone() {
     let toolchain = toolchain_and_graphics_or_skip!();
     let video = counter_video(&toolchain);
