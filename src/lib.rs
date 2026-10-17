@@ -33,6 +33,7 @@ mod atomic_file;
 pub mod colour_effects;
 pub mod colour_space;
 pub mod composition;
+pub mod cube_table;
 pub mod engine;
 pub mod frame_scene;
 pub mod media;
