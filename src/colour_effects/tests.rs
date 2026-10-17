@@ -4,7 +4,7 @@
 use super::*;
 use crate::test_support::DeterministicRandomNumbers;
 
-fn applied_to(matrix: ColourMatrix, red: u8, green: u8, blue: u8) -> [u8; 3] {
+pub(super) fn applied_to(matrix: ColourMatrix, red: u8, green: u8, blue: u8) -> [u8; 3] {
     let mut pixel = [red, green, blue, 99];
     matrix.apply_to_rgba_pixels(&mut pixel);
     assert_eq!(pixel[3], 99, "how clear it is is not changed");
@@ -90,12 +90,9 @@ fn one_turn_after_another_is_the_turn_of_the_two_added_as_far_as_the_numbers_tha
 
 #[test]
 fn one_matrix_after_another_does_the_first_matrix_first() {
-    let to_green_only = ColourMatrix {
-        rows: [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]],
-    };
-    let swap_red_and_green = ColourMatrix {
-        rows: [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-    };
+    // (Rewritten on purpose in phase 4: a matrix has offsets too now, so these are made by `from_rows`, which gives them none.)
+    let to_green_only = ColourMatrix::from_rows([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]);
+    let swap_red_and_green = ColourMatrix::from_rows([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
     assert_eq!(
         applied_to(to_green_only.then(swap_red_and_green), 10, 20, 30),
         [20, 0, 0]

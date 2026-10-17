@@ -22,6 +22,14 @@ use super::colour::FrameColour;
 /// that are added to the mixed colour, in the codes of the display-referred domain, before it is cut off (brightness and contrast need them).
 pub const COLOUR_MATRIX_KEY: &str = "engine:colour_matrix";
 
+/// The key of the effect that makes the light of a picture brighter or darker by whole and part stops: one number, the stops (the light is multiplied by two to the stops;
+/// the opacity is not changed). It is an effect of the scene-linear domain.
+pub const EXPOSURE_KEY: &str = "engine:exposure";
+
+/// The key of the effect that makes a picture more or less see-through: one number, from 0 (all see-through) to 1 (as it is), by which the picture, colours and opacity
+/// together, is multiplied. It is an effect of the scene-linear domain.
+pub const OPACITY_KEY: &str = "engine:opacity";
+
 /// The corners of a layer that is all of the picture: top left, top right, bottom right, bottom left, as fractions of the picture.
 pub const CORNERS_OF_THE_WHOLE_PICTURE: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 
@@ -52,6 +60,30 @@ impl EffectCall {
         Self {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: rows.into_iter().flatten().collect(),
+        }
+    }
+
+    /// The effect that mixes colours with `rows` and then adds `offsets` (see [`COLOUR_MATRIX_KEY`]).
+    pub fn colour_matrix_with_offsets(rows: [[f32; 3]; 3], offsets: [f32; 3]) -> Self {
+        Self {
+            key: COLOUR_MATRIX_KEY.to_owned(),
+            values: rows.into_iter().flatten().chain(offsets).collect(),
+        }
+    }
+
+    /// The effect that makes the light of a picture brighter or darker by `stops` (see [`EXPOSURE_KEY`]).
+    pub fn exposure(stops: f32) -> Self {
+        Self {
+            key: EXPOSURE_KEY.to_owned(),
+            values: vec![stops],
+        }
+    }
+
+    /// The effect that makes a picture `opacity` as opaque as it is (see [`OPACITY_KEY`]).
+    pub fn opacity(opacity: f32) -> Self {
+        Self {
+            key: OPACITY_KEY.to_owned(),
+            values: vec![opacity],
         }
     }
 }

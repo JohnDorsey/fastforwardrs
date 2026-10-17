@@ -27,7 +27,7 @@ use crate::engine::PictureColour;
 use crate::media::ThumbnailLibrary;
 use crate::playback::SuppliedPicture;
 use crate::project::{
-    ClipId, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId,
+    ClipId, PictureOperation, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId,
 };
 use crate::rgba_picture::RgbaPicture;
 
@@ -66,11 +66,34 @@ pub struct PreviewLayer<'a> {
     pub track: TrackId,
     /// Where the layer is at the current frame: where the clip says, or, if it has keyframes, as they change that.
     pub placement: Placement,
-    /// How the effects of the layer change the colours of its picture at the current frame, all of them together. (The picture that
-    /// stands in for a video until its own arrives, a blurry thumbnail, has them changed too, so that the colours do not jump when
-    /// the sharp picture comes.)
-    pub colour: ColourMatrix,
+    /// What the effects of the layer do to its picture at the current frame, one after another (see [`Layer::operations_at`](crate::composition::Layer::operations_at)).
+    /// The old drawing does the colour mixes of them and leaves the others out ([`Self::colour`]).
+    pub operations: Vec<PictureOperation>,
     pub content: PreviewLayerContent<'a>,
+}
+
+impl PreviewLayer<'_> {
+    /// How the colour mixes among the operations of the layer change the colours of its picture, all of them together. (The picture that stands in for a video until
+    /// its own arrives, a blurry thumbnail, has them changed too, so that the colours do not jump when the sharp picture comes.)
+    pub fn colour(&self) -> ColourMatrix {
+        self.operations
+            .iter()
+            .filter_map(|operation| match operation {
+                PictureOperation::Mix(matrix) => Some(*matrix),
+                PictureOperation::Exposure { .. } | PictureOperation::Opacity { .. } => None,
+            })
+            .fold(ColourMatrix::NOTHING_CHANGES, ColourMatrix::then)
+    }
+
+    /// The operations of a layer that has no effect but a mix of colours, which it leaves out if it changes nothing. (What the tests make layers of.)
+    #[cfg(test)]
+    pub fn operations_of_a_colour(colour: ColourMatrix) -> Vec<PictureOperation> {
+        if colour.changes_nothing() {
+            Vec::new()
+        } else {
+            vec![PictureOperation::Mix(colour)]
+        }
+    }
 }
 
 /// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.

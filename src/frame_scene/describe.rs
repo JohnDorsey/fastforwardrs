@@ -26,7 +26,7 @@ use crate::engine::{
 };
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
-use crate::project::{Corner, SpeedFactor, SpeedIndicatorLayout, TextObject};
+use crate::project::{Corner, PictureOperation, SpeedFactor, SpeedIndicatorLayout, TextObject};
 use crate::rgba_picture::RgbaPicture;
 use crate::speed_indicator::{
     SMALLEST_HEIGHT_IN_PIXELS, indicator_aspect_ratio, place_indicator, render_speed_indicator,
@@ -347,17 +347,26 @@ fn describe_layer(
     if !supply.make_sure_the_engine_has(&wanted) {
         return None;
     }
-    // A layer's effects that only mix colours are one matrix already (the content has them folded, and the window cuts the colours off once, at the end),
-    // which is one call, unless it changes nothing.
-    let effects = if layer.colour.changes_nothing() {
-        Vec::new()
-    } else {
-        vec![EffectCall::colour_matrix(layer.colour.rows())]
-    };
+    // A layer's effects are its operations, one call each (the colours that are mixed one after another are one operation already, and the window cuts the
+    // colours off once, at the end), unless one changes nothing.
+    let effects = layer.operations.iter().filter_map(call_of_an_operation).collect();
     Some(LayerDescription {
         source: LayerSource::Picture(wanted.id),
         corners,
         effects,
+    })
+}
+
+/// The call of the engine that does an operation, or none if the operation changes nothing. (The call of a colour mix has nine numbers, or twelve if it has offsets.)
+fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
+    if operation.changes_nothing() {
+        return None;
+    }
+    Some(match operation {
+        PictureOperation::Mix(matrix) if matrix.offsets() == [0.0; 3] => EffectCall::colour_matrix(matrix.rows()),
+        PictureOperation::Mix(matrix) => EffectCall::colour_matrix_with_offsets(matrix.rows(), matrix.offsets()),
+        PictureOperation::Exposure { stops } => EffectCall::exposure(*stops),
+        PictureOperation::Opacity { opacity } => EffectCall::opacity(*opacity),
     })
 }
 

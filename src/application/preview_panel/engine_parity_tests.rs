@@ -186,7 +186,7 @@ impl Scene {
                 clip: clip(number as u32),
                 track: TrackId::new(number as u32),
                 placement: recipe.placement,
-                colour: recipe.colour,
+                operations: PreviewLayer::operations_of_a_colour(recipe.colour),
                 content: match recipe.kind {
                     Kind::VideoInRgba(index) | Kind::VideoInPlanes(index) => {
                         PreviewLayerContent::Video(VideoInThePicture::Picture(&self.video_pictures[index]))
@@ -624,7 +624,7 @@ fn a_video_picture_that_is_the_size_of_the_frame_is_exactly_what_the_old_drawing
                 clip: clip(0),
                 track: TrackId::new(0),
                 placement: Placement::upright(CanvasArea::WHOLE_PICTURE),
-                colour: ColourMatrix::NOTHING_CHANGES,
+                operations: Vec::new(),
                 content: PreviewLayerContent::Video(VideoInThePicture::Picture(&picture)),
             }],
             symbol: None,
@@ -646,7 +646,7 @@ fn a_text_object_is_the_same_picture_in_the_engine_and_in_the_old_drawing_whatev
             clip: clip(0),
             track: TrackId::new(0),
             placement,
-            colour,
+            operations: PreviewLayer::operations_of_a_colour(colour),
             content: PreviewLayerContent::Text(std::borrow::Cow::Owned(TextObject {
                 text: words.to_owned(),
                 ..TextObject::default()
@@ -705,7 +705,7 @@ fn the_symbol_over_a_video_is_the_same_picture_in_the_engine_and_in_the_old_draw
                         clip: clip(0),
                         track: TrackId::new(0),
                         placement: Placement::upright(CanvasArea::WHOLE_PICTURE),
-                        colour: ColourMatrix::NOTHING_CHANGES,
+                        operations: Vec::new(),
                         content: PreviewLayerContent::Video(VideoInThePicture::Picture(&picture)),
                     }],
                     symbol: Some(SymbolOnThePreview {

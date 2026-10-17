@@ -1209,6 +1209,8 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
 #[cfg(test)]
 mod animation_tests;
 #[cfg(test)]
+mod built_in_effects_tests;
+#[cfg(test)]
 mod colour_tests;
 #[cfg(test)]
 mod effects_tests;

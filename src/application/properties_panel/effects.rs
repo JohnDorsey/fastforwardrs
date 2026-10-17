@@ -161,10 +161,15 @@ mod tests {
             Vec::<EffectKind>::new(),
             "what it cannot have is not offered"
         );
+        // (Rewritten on purpose in phase 4: there are five effects now, not one, so what a thing cannot have is left out of the five and the others are still offered.)
         assert_eq!(
             effects_to_offer(kinds, |kind| kind != EffectKind::HUE_SHIFT),
-            Vec::<EffectKind>::new(),
-            "whichever it is that it cannot have"
+            kinds[1..].to_vec(),
+            "whichever it is that it cannot have is left out, and the others are offered in their order"
+        );
+        assert_eq!(
+            effects_to_offer(kinds, |kind| kind == EffectKind::OPACITY),
+            vec![EffectKind::OPACITY]
         );
         assert_eq!(
             effects_to_offer([EffectKind::HUE_SHIFT, EffectKind::HUE_SHIFT], |_| true).len(),

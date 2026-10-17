@@ -70,6 +70,8 @@ mod export_frames_tests;
 #[cfg(test)]
 mod foreign_effect_tests;
 #[cfg(test)]
+mod gain_tests;
+#[cfg(test)]
 mod guard_tests;
 #[cfg(test)]
 mod hang_tests;
@@ -102,12 +104,12 @@ pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 pub use pictures::{PictureData, PicturePixels, PictureProblem};
 pub use plan::{
     CallDomain, EffectStep, EffectToRun, EffectsThatRun, FramePlan, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan,
-    plan_frame, steps_of_a_run_of_effects,
+    exposure_changes_nothing, opacity_changes_nothing, plan_frame, steps_of_a_run_of_effects,
 };
 pub use quality::{PreviewScale, QualityGovernor, QualityRules};
 pub use scene::{
-    COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameDescription, LayerDescription, LayerSource,
-    PictureId,
+    COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EXPOSURE_KEY, EffectCall, FrameDescription, LayerDescription,
+    LayerSource, OPACITY_KEY, PictureId,
 };
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};
 pub use uniform_bytes::{SlotWriter, UniformBytes, UniformSlot};

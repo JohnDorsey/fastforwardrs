@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 use crate::colour_effects::ColourMatrix;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, Member, Project, PropertyId,
-    PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, Member, PictureOperation,
+    Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -137,8 +137,34 @@ impl Layer {
         !self.animation.is_empty() || self.effects.iter().any(LayerEffect::is_animated)
     }
 
-    /// How the effects of the layer change the colours of its picture at `timeline_frame` (a frame it is seen at), all of them
-    /// together: the matrix that changes nothing if none of them changes colours.
+    /// What the effects of the layer do to its picture at `timeline_frame` (a frame it is seen at), one after another in the order they are applied in. **An effect that
+    /// does nothing at the frame is left out, and neighbouring effects that mix colours are one** (a hue shift, a saturation and a brightness make one operation, which
+    /// the engine does in one pass).
+    pub fn operations_at(&self, timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
+        let mut operations: Vec<PictureOperation> = Vec::new();
+        for effect in &self.effects {
+            let Some(next) = effect.kind.picture_operation(&effect.values_at(timeline_frame.value())) else {
+                continue;
+            };
+            if next.changes_nothing() {
+                continue;
+            }
+            match operations.last().and_then(|last| last.then_if_alike(next)) {
+                Some(together) => {
+                    operations.pop();
+                    // (Two that undo each other are none.)
+                    if !together.changes_nothing() {
+                        operations.push(together);
+                    }
+                }
+                None => operations.push(next),
+            }
+        }
+        operations
+    }
+
+    /// How the effects of the layer that mix colours change the colours of its picture at `timeline_frame` (a frame it is seen at), all of them
+    /// together: the matrix that changes nothing if none of them changes colours. (What the old drawing does; the others are left out of it.)
     pub fn colour_matrix_at(&self, timeline_frame: TimelineFrameIndex) -> ColourMatrix {
         self.effects
             .iter()
@@ -607,5 +633,7 @@ mod animation_tests;
 mod effects_tests;
 #[cfg(test)]
 mod group_effects_tests;
+#[cfg(test)]
+mod operations_tests;
 #[cfg(test)]
 mod tests;

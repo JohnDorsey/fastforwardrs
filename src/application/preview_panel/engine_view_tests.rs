@@ -268,7 +268,7 @@ fn the_colours_of_a_layer_are_one_matrix_when_it_changes_something_and_nothing_w
         (ColourMatrix::hue_rotation(0.001), None),
     ] {
         let mut shown = showing(0, &picture, whole_picture());
-        shown.colour = colour;
+        shown.operations = PreviewLayer::operations_of_a_colour(colour);
         let (description, _) = describe(&content(vec![shown], None));
         match expected {
             Some(matrix) => assert_eq!(
@@ -280,7 +280,7 @@ fn the_colours_of_a_layer_are_one_matrix_when_it_changes_something_and_nothing_w
         }
     }
     let mut shown = showing(0, &picture, whole_picture());
-    shown.colour = hue;
+    shown.operations = PreviewLayer::operations_of_a_colour(hue);
     let (description, _) = describe(&content(vec![shown], None));
     assert_eq!(description.layers[0].effects[0].key, COLOUR_MATRIX_KEY);
     assert_eq!(
@@ -296,7 +296,7 @@ fn a_matrix_that_the_engine_would_not_run_is_not_described_and_one_that_it_would
     let picture = video_picture(1);
     for degrees in [0.0, 0.001, 0.005, 0.01, 0.05, 0.1, 1.0, 45.0, 359.0, 360.0, 360.01] {
         let mut shown = showing(0, &picture, whole_picture());
-        shown.colour = ColourMatrix::hue_rotation(degrees);
+        shown.operations = PreviewLayer::operations_of_a_colour(ColourMatrix::hue_rotation(degrees));
         let (description, _) = describe(&content(vec![shown], None));
         let plan = crate::engine::plan_frame(&description, &crate::engine::EffectsThatRun::built_in_only());
         assert_eq!(
@@ -312,9 +312,9 @@ fn a_matrix_that_the_engine_would_not_run_is_not_described_and_one_that_it_would
 #[test]
 fn a_video_that_has_no_picture_yet_and_a_picture_file_that_is_not_decoded_are_each_a_colour_and_have_no_effects() {
     let mut waiting = layer(0, in_the_middle());
-    waiting.colour = ColourMatrix::hue_rotation(120.0);
+    waiting.operations = PreviewLayer::operations_of_a_colour(ColourMatrix::hue_rotation(120.0));
     let mut not_decoded = image_layer(1, 7, None, whole_picture());
-    not_decoded.colour = ColourMatrix::hue_rotation(120.0);
+    not_decoded.operations = PreviewLayer::operations_of_a_colour(ColourMatrix::hue_rotation(120.0));
     let (description, supply) = describe(&content(vec![waiting, not_decoded], None));
     let colour = theme::TRACK_BACKGROUND.to_srgba_unmultiplied();
     assert_eq!(description.layers.len(), 2);
@@ -390,7 +390,7 @@ fn a_thumbnail_that_stands_in_for_a_video_is_a_picture_of_its_own_with_the_colou
  {
     let library = a_thumbnail_library();
     let mut standing_in = thumbnail_layer(3, &library);
-    standing_in.colour = ColourMatrix::hue_rotation(200.0);
+    standing_in.operations = PreviewLayer::operations_of_a_colour(ColourMatrix::hue_rotation(200.0));
     let (description, supply) = describe(&content(vec![standing_in], None));
     assert_eq!(supply.kinds, vec!["thumbnail"]);
     assert_eq!(description.layers.len(), 1);
@@ -881,4 +881,43 @@ fn a_picture_in_planes_is_made_with_the_colour_differences_sitting_where_its_vid
         let data = HowToMakeIt::VideoPicture(&planes).make(&mut text_renderer).unwrap();
         assert_eq!(data.chroma_siting, siting);
     }
+}
+
+#[test]
+fn the_operations_of_a_layer_are_described_as_one_call_each_in_order_and_the_ones_that_change_nothing_are_left_out() {
+    use crate::project::PictureOperation;
+    let picture = video_picture(1);
+    let mut shown = showing(0, &picture, whole_picture());
+    shown.operations = vec![
+        PictureOperation::Mix(ColourMatrix::hue_rotation(40.0)),
+        PictureOperation::Exposure { stops: 1.5 },
+        PictureOperation::Mix(ColourMatrix::brightness_and_contrast(0.1, 1.2)),
+        PictureOperation::Opacity { opacity: 0.25 },
+        PictureOperation::Exposure { stops: 0.0 },
+        PictureOperation::Opacity { opacity: 1.0 },
+        PictureOperation::Mix(ColourMatrix::NOTHING_CHANGES),
+    ];
+
+    let (description, _) = describe(&content(vec![shown], None));
+
+    let brightness = ColourMatrix::brightness_and_contrast(0.1, 1.2);
+    assert_eq!(
+        description.layers[0].effects,
+        vec![
+            EffectCall::colour_matrix(ColourMatrix::hue_rotation(40.0).rows()),
+            EffectCall::exposure(1.5),
+            EffectCall::colour_matrix_with_offsets(brightness.rows(), brightness.offsets()),
+            EffectCall::opacity(0.25),
+        ]
+    );
+    assert_eq!(
+        description.layers[0].effects[2].values.len(),
+        12,
+        "the nine and the three offsets"
+    );
+    assert_eq!(
+        description.layers[0].effects[0].values.len(),
+        9,
+        "a mix with no offsets has nine numbers, as it always had"
+    );
 }

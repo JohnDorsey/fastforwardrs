@@ -133,7 +133,7 @@ fn draw_layer(
     let texture: Option<TextureId> = match &layer.content {
         PreviewLayerContent::Video(VideoInThePicture::Picture(supplied)) => Some(
             textures
-                .preview_picture(context, layer.track, supplied, picture.filter, layer.colour)
+                .preview_picture(context, layer.track, supplied, picture.filter, layer.colour())
                 .id(),
         ),
         PreviewLayerContent::Video(VideoInThePicture::Thumbnail {
@@ -146,7 +146,7 @@ fn draw_layer(
                 index: *second,
             };
             textures
-                .thumbnail_with_colours_changed(context, *source, library, key, layer.colour)
+                .thumbnail_with_colours_changed(context, *source, library, key, layer.colour())
                 .map(|texture| texture.id())
         }
         PreviewLayerContent::Video(VideoInThePicture::Waiting) => {
@@ -163,7 +163,7 @@ fn draw_layer(
             ..
         } => Some(
             textures
-                .image_picture(context, *source, decoded, picture.filter, layer.colour)
+                .image_picture(context, *source, decoded, picture.filter, layer.colour())
                 .id(),
         ),
         PreviewLayerContent::Image { picture: None, .. } => {
@@ -178,7 +178,7 @@ fn draw_layer(
             let (picture_width, picture_height) = picture.size_in_whole_pixels();
             let key = TextAppearance::of(object, picture_width, picture_height);
             textures
-                .text_picture(context, key, picture.filter, layer.colour, || {
+                .text_picture(context, key, picture.filter, layer.colour(), || {
                     text_renderer
                         .get_if_ready()
                         .map(|renderer| renderer.render(object, picture_width, picture_height))

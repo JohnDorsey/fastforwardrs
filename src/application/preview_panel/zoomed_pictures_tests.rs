@@ -115,7 +115,7 @@ fn show_the_preview(ui: &mut egui::Ui, preview: &mut Preview) {
         clip: ClipId::new(TrackId::new(number), 0),
         track: TrackId::new(number),
         placement: Placement::upright(CanvasArea::WHOLE_PICTURE),
-        colour,
+        operations: PreviewLayer::operations_of_a_colour(colour),
         content,
     };
     let video = match thumbnails {

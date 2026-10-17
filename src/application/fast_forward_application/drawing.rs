@@ -397,7 +397,7 @@ mod tests {
         for (frame, track_turn) in [(0, 0.0), (50, 30.0), (100, 60.0), (400, 60.0)] {
             let colour = look_at_the_preview(&project, frame, |content| {
                 assert_eq!(content.layers.len(), 1);
-                content.layers[0].colour
+                content.layers[0].colour()
             });
 
             assert_eq!(
@@ -412,7 +412,7 @@ mod tests {
     fn a_layer_of_the_preview_with_no_effects_has_its_colours_as_they_are() {
         let project = project_of_a_sped_up_clip(1, 1);
 
-        let colour = look_at_the_preview(&project, 10, |content| content.layers[0].colour);
+        let colour = look_at_the_preview(&project, 10, |content| content.layers[0].colour());
 
         assert_eq!(colour, ColourMatrix::NOTHING_CHANGES);
     }

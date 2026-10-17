@@ -273,7 +273,11 @@ fn other_content_is_asked_for_and_the_frame_that_is_shown_becomes_the_new_one() 
 
     // The colours of the layer are part of what is asked for.
     let mut turned = showing(0, &second);
-    turned.colour = ColourMatrix::from_rows([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]);
+    turned.operations = PreviewLayer::operations_of_a_colour(ColourMatrix::from_rows([
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+    ]));
     let frame = setup.show_a_new_frame_of(&content(vec![turned]));
     assert_eq!(pixel_of(&frame, 10, 10), [90, 220, 10, 255]);
     assert_eq!(setup.preview.frames_asked_for(), 3);

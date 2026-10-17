@@ -242,7 +242,7 @@ fn the_colours_of_a_layer_are_what_its_effects_make_at_the_frame_asked_for_and_n
                 ColourMatrix::NOTHING_CHANGES
             };
             assert_eq!(
-                layer.colour,
+                layer.colour(),
                 expected,
                 "frame {timeline_frame}, a {}",
                 kind_of_the_layer_made(layer)

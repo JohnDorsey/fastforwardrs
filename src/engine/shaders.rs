@@ -40,6 +40,9 @@ pub const COLOUR_MATRIX: &str = concat!(
     include_str!("shaders/colour_matrix.wgsl")
 );
 
+/// The effects of exposure and of opacity: the premultiplied picture of a layer multiplied by four numbers.
+pub const GAIN: &str = include_str!("shaders/gain.wgsl");
+
 /// Putting a layer's picture in its place on the frame.
 pub const PLACE: &str = include_str!("shaders/place.wgsl");
 
@@ -59,6 +62,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("ingest.wgsl", INGEST),
     ("yuv.wgsl", YUV),
     ("colour_matrix.wgsl", COLOUR_MATRIX),
+    ("gain.wgsl", GAIN),
     ("place.wgsl", PLACE),
     ("rgb_to_luma.wgsl", RGB_TO_LUMA),
     ("rgb_to_chroma.wgsl", RGB_TO_CHROMA),

@@ -616,6 +616,12 @@ impl FrameRenderer {
                                             Some(KindOfEffect::Shader) => self.uniforms.add_slot(|writer| {
                                                 write_the_numbers_of_a_call(writer, &effect.values);
                                             }),
+                                            Some(kind @ (KindOfEffect::Exposure | KindOfEffect::Opacity)) => {
+                                                let factors = gain_factors(kind, effect.values[0]);
+                                                self.uniforms.add_slot(|writer| {
+                                                    writer.vec4(factors);
+                                                })
+                                            }
                                             _ => {
                                                 let (rows, offsets) = colour_matrix_numbers(&effect.values);
                                                 let parts = MixingParts {
@@ -751,6 +757,15 @@ impl FrameRenderer {
                                         ],
                                     }),
                                     "engine: an effect that was given to the engine as a shader",
+                                ),
+                                Some(KindOfEffect::Exposure | KindOfEffect::Opacity) => (
+                                    &self.pipelines.gain.pipeline,
+                                    self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("engine gain pass"),
+                                        layout: &self.pipelines.gain.bind_group_layout,
+                                        entries: &[uniform_binding, picture_binding],
+                                    }),
+                                    "engine: make a layer's picture brighter, darker or more see-through",
                                 ),
                                 _ => (
                                     &self.pipelines.colour_matrix.pipeline,
@@ -1021,6 +1036,20 @@ fn planes_from_the_textures(width: u32, height: u32, brightness: Vec<u8>, side_b
 }
 
 /// The three rows of the matrix of an effect that mixes colours, from its nine numbers (the plan only lets one through that has nine).
+/// The factors that the premultiplied red, green, blue and opacity of a picture are multiplied by, for an exposure of `value` stops or an opacity of `value`.
+fn gain_factors(kind: KindOfEffect, value: f32) -> [f32; 4] {
+    match kind {
+        KindOfEffect::Exposure => {
+            let gain = value.exp2();
+            [gain, gain, gain, 1.0]
+        }
+        _ => {
+            let opacity = value.clamp(0.0, 1.0);
+            [opacity; 4]
+        }
+    }
+}
+
 /// The rows and the offsets that the nine or twelve numbers of a call of the colour matrix are (the offsets of one with nine are nothing).
 fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
     debug_assert!(NUMBERS_OF_A_COLOUR_MATRIX.contains(&values.len()));

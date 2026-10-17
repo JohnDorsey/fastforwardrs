@@ -32,7 +32,7 @@ pub fn layers_of_a_section<'a>(
             clip: layer.clip,
             track: layer.track,
             placement: layer.placement_at(frame),
-            colour: layer.colour_matrix_at(frame),
+            operations: layer.operations_at(frame),
             content: match &layer.content {
                 LayerContent::Video(visible) => PreviewLayerContent::Video(video(layer, visible)),
                 LayerContent::Image { source } => {

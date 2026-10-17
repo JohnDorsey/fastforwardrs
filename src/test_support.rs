@@ -89,6 +89,30 @@ pub fn put_a_hue_shift_on(project: &mut Project, target: AnimationTarget, degree
     instance
 }
 
+/// Puts an effect of `kind` on `target` (a clip or a track), with `values` for what its values are when they are not animated (one for each of the values the effect has,
+/// in their order), and gives the name it has in the chain of `target`.
+pub fn put_an_effect_on(
+    project: &mut Project,
+    target: AnimationTarget,
+    kind: EffectKind,
+    values: &[PropertyValue],
+) -> EffectInstanceId {
+    let instance = project
+        .add_effect(target, kind)
+        .expect("it is something that can have the effect");
+    for (slot, value) in values.iter().enumerate() {
+        project
+            .set_property_at(
+                target,
+                PropertyId::effect_value(kind, instance, u8::try_from(slot).expect("few values")),
+                value.clone(),
+                TimelineFrameIndex::new(0),
+            )
+            .expect("the effect was just put on");
+    }
+    instance
+}
+
 /// Puts a keyframe at `timeline_frame` that makes `property` of `target` have `value` there. (The property is animated from
 /// then on, if it was not.)
 pub fn make_a_keyframe(

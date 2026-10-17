@@ -16,7 +16,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, PoisonError};
 
-use super::built_in::{self, HUE_SHIFT};
+use super::built_in::{self, BRIGHTNESS_AND_CONTRAST, EXPOSURE, HUE_SHIFT, OPACITY, PictureOperation, SATURATION};
 use super::{EffectDescriptor, EffectDomain, ParameterDescriptor};
 use crate::colour_effects::ColourMatrix;
 use crate::project::animation::{PropertyValue, ValueKind};
@@ -34,8 +34,26 @@ impl EffectKind {
     /// The hue shift, which turns the colours of a picture round the wheel of colours.
     pub const HUE_SHIFT: EffectKind = EffectKind(&HUE_SHIFT);
 
+    /// The saturation, which makes the colours more or less colourful.
+    pub const SATURATION: EffectKind = EffectKind(&SATURATION);
+
+    /// Brightness and contrast, which make the picture lighter or darker and its lights and darks further apart or nearer together.
+    pub const BRIGHTNESS_AND_CONTRAST: EffectKind = EffectKind(&BRIGHTNESS_AND_CONTRAST);
+
+    /// The exposure, which makes the light of the picture brighter or darker by whole and part stops.
+    pub const EXPOSURE: EffectKind = EffectKind(&EXPOSURE);
+
+    /// The opacity, which makes the picture more or less see-through.
+    pub const OPACITY: EffectKind = EffectKind(&OPACITY);
+
     /// The effects that the program has in itself, in the order they are offered in.
-    pub const BUILT_IN: [EffectKind; 1] = [Self::HUE_SHIFT];
+    pub const BUILT_IN: [EffectKind; 5] = [
+        Self::HUE_SHIFT,
+        Self::SATURATION,
+        Self::BRIGHTNESS_AND_CONTRAST,
+        Self::EXPOSURE,
+        Self::OPACITY,
+    ];
 
     /// The kind of effect that a snapshot of a descriptor, which a project file kept, says one is: the effect of the program that can stand in for
     /// it (see [`EffectDescriptor::can_stand_in_for`]) if there is one, and otherwise a kind of effect of its own, which the program does not
@@ -154,10 +172,19 @@ impl EffectKind {
         }
     }
 
+    /// What the effect asks to be done to a picture when its values are `values` (one for each of its values, in order), if the program has the effect. (`None`
+    /// for an effect that is not installed, which changes nothing.)
+    pub fn picture_operation(self, values: &[PropertyValue]) -> Option<PictureOperation> {
+        built_in::picture_operation(self, values)
+    }
+
     /// How the effect changes the colours of a picture when its values are `values` (one for each of its values, in order), if it changes
-    /// colours at all. (`None` for an effect that is not installed, which changes nothing.)
+    /// colours by mixing them. (`None` for an effect that is not installed, which changes nothing, and for one that is not a mixing of colours, such as exposure.)
     pub fn colour_matrix(self, values: &[PropertyValue]) -> Option<ColourMatrix> {
-        built_in::colour_matrix(self, values)
+        match self.picture_operation(values)? {
+            PictureOperation::Mix(matrix) => Some(matrix),
+            PictureOperation::Exposure { .. } | PictureOperation::Opacity { .. } => None,
+        }
     }
 
     fn address(self) -> usize {

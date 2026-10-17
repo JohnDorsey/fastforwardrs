@@ -317,7 +317,7 @@ fn write_the_pictures_that_show_what_differs() {
                     clip: clip(1),
                     track: TrackId::new(1),
                     placement: Placement::new(CanvasArea::new(0.1, 0.25, 0.8, 0.5), Angle::from_degrees(-12.0)),
-                    colour: ColourMatrix::NOTHING_CHANGES,
+                    operations: Vec::new(),
                     content: PreviewLayerContent::Text(std::borrow::Cow::Owned(TextObject {
                         text: "Hello, preview".to_owned(),
                         ..TextObject::default()

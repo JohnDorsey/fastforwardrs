@@ -30,7 +30,7 @@ mod built_in;
 mod descriptor;
 mod kind;
 
-pub use built_in::HUE_SHIFT_KEY;
+pub use built_in::{HUE_SHIFT_KEY, PictureOperation};
 pub use descriptor::{
     ChoiceOption, EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
     UnknownFields, ValueScale,

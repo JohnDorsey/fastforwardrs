@@ -32,7 +32,7 @@ type ThumbnailTextureKey = (SourceMediaIdentifier, ThumbnailKey);
 /// Which texture of a thumbnail: which thumbnail, and how its colours were changed before it was uploaded (what tells one way of
 /// changing colours from another is [`ColourMatrix::bit_pattern`]). The timeline's thumbnails are as they are; those that stand in
 /// for the picture of a video in the preview have the colours of the effects of the clip.
-type ThumbnailTextureWithColoursKey = (ThumbnailTextureKey, [u32; 9]);
+type ThumbnailTextureWithColoursKey = (ThumbnailTextureKey, [u32; 12]);
 
 /// How a picture is put on the screen when it is drawn bigger than it is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -86,7 +86,7 @@ pub struct Textures {
     symbols: HashMap<(u32, u32), TextureHandle>,
     /// The pictures of text, for each way it looks, each way it is put on the screen and each way its colours are changed
     /// (what tells one way of changing colours from another is [`ColourMatrix::bit_pattern`]).
-    text_pictures: HashMap<(TextAppearance, PictureFilter, [u32; 9]), TextureHandle>,
+    text_pictures: HashMap<(TextAppearance, PictureFilter, [u32; 12]), TextureHandle>,
     image_pictures: HashMap<SourceMediaIdentifier, ImageTexture>,
     /// The grain that the racks of keyframes are textured with, which is repeated across them.
     rack_grain: Option<TextureHandle>,
@@ -344,7 +344,7 @@ impl Textures {
     /// How each of the pictures of text was put on the screen and had its colours changed before it was uploaded (as
     /// [`ColourMatrix::bit_pattern`]), in no order.
     #[cfg(test)]
-    pub fn ways_the_pictures_of_text_were_made(&self) -> Vec<(PictureFilter, [u32; 9])> {
+    pub fn ways_the_pictures_of_text_were_made(&self) -> Vec<(PictureFilter, [u32; 12])> {
         self.text_pictures
             .keys()
             .map(|(_, filter, colour)| (*filter, *colour))
@@ -354,7 +354,7 @@ impl Textures {
     /// How the colours of each of the thumbnails on the graphics card were changed before it was uploaded (as
     /// [`ColourMatrix::bit_pattern`]), in no order.
     #[cfg(test)]
-    pub fn ways_the_colours_of_the_thumbnails_were_changed(&self) -> Vec<[u32; 9]> {
+    pub fn ways_the_colours_of_the_thumbnails_were_changed(&self) -> Vec<[u32; 12]> {
         self.thumbnails.keys().map(|(_, colour)| *colour).collect()
     }
 }

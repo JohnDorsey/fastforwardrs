@@ -70,6 +70,96 @@ fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version_and_the_o
     assert_eq!(EffectKind::from_snapshot(as_it_was).unwrap(), EffectKind::HUE_SHIFT);
 }
 
+/// **What a project file that has a snapshot of one of the effects of phase 4 is read with**: the descriptors as they were in version 1.0, written out here (the same
+/// rule as the hue shift's: change one and its version has to change).
+#[test]
+fn the_descriptors_of_the_effects_of_phase_4_are_what_they_were_in_their_first_version() {
+    // (key, name, category, whether it is done to each pixel by itself, [(id, label, default, range, unit, decimals)])
+    type AValue = (&'static str, &'static str, f32, (f32, f32), &'static str, u8);
+    let table: [(&str, &str, &str, bool, Vec<AValue>); 4] = [
+        (
+            "builtin:saturation",
+            "saturation",
+            "Colour",
+            true,
+            vec![("amount", "Amount", 1.0, (0.0, 2.0), "", 2)],
+        ),
+        (
+            "builtin:brightness_contrast",
+            "brightness and contrast",
+            "Light",
+            true,
+            vec![
+                ("brightness", "Brightness", 0.0, (-1.0, 1.0), "", 2),
+                ("contrast", "Contrast", 1.0, (0.0, 2.0), "", 2),
+            ],
+        ),
+        (
+            "builtin:exposure",
+            "exposure",
+            "Light",
+            true,
+            vec![("stops", "Amount", 0.0, (-5.0, 5.0), " stops", 2)],
+        ),
+        (
+            "builtin:opacity",
+            "opacity",
+            "Transform",
+            false,
+            vec![("opacity", "Amount", 1.0, (0.0, 1.0), "", 2)],
+        ),
+    ];
+    for (key, name, category, each_pixel, values) in table {
+        let kind =
+            EffectKind::built_in_with_key(key).unwrap_or_else(|| panic!("{key} is not an effect of the program"));
+        let descriptor = kind.descriptor();
+        assert_eq!(descriptor.version, (1, 0), "{key}");
+        assert_eq!(descriptor.name, name, "{key}");
+        assert_eq!(descriptor.category, category, "{key}");
+        assert_eq!(descriptor.domain, EffectDomain::Picture, "{key}");
+        assert_eq!(descriptor.changes_each_pixel_by_itself, each_pixel, "{key}");
+        assert_eq!(descriptor.parameters.len(), values.len(), "{key}");
+        for (parameter, (id, label, default, range, unit, decimals)) in descriptor.parameters.iter().zip(values) {
+            assert_eq!(parameter.id, id, "{key}");
+            assert_eq!(parameter.label, label, "{key}.{id}");
+            assert_eq!(parameter.default, degrees(default), "{key}.{id}");
+            assert_eq!(parameter.range, Some(range), "{key}.{id}");
+            assert_eq!(parameter.unit, unit, "{key}.{id}");
+            assert_eq!(parameter.decimals, Some(decimals), "{key}.{id}");
+            assert_eq!(parameter.scale, ValueScale::Linear, "{key}.{id}");
+            assert_eq!(parameter.control, ParameterControl::Automatic, "{key}.{id}");
+        }
+    }
+}
+
+#[test]
+fn every_effect_of_the_program_is_valid_installed_and_the_effect_that_its_own_snapshot_is_and_has_a_key_and_a_name_of_its_own()
+ {
+    let mut keys = Vec::new();
+    let mut names = Vec::new();
+    for kind in EffectKind::BUILT_IN {
+        let descriptor = kind.descriptor();
+        assert_eq!(descriptor.problem(), None, "{kind}");
+        assert!(kind.is_installed(), "{kind}");
+        assert_eq!(EffectKind::from_snapshot(descriptor.clone()).unwrap(), kind, "{kind}");
+        assert_eq!(EffectKind::built_in_with_key(kind.key()), Some(kind));
+        assert!(kind.key().starts_with("builtin:"), "{kind}");
+        assert!(
+            ["Colour", "Light", "Blur and sharpen", "Transform", "Looks"].contains(&&*descriptor.category),
+            "{kind}: {}",
+            descriptor.category
+        );
+        keys.push(kind.key());
+        names.push(kind.name());
+    }
+    for list in [&mut keys, &mut names] {
+        let count = list.len();
+        list.sort_unstable();
+        list.dedup();
+        assert_eq!(list.len(), count, "{list:?}");
+    }
+}
+
 // --- making a kind of a snapshot ---
 
 #[test]

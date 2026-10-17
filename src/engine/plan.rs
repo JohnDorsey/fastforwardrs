@@ -22,7 +22,9 @@
 use std::collections::HashSet;
 
 use super::effect_shaders::MOST_NUMBERS_OF_A_FOREIGN_EFFECT;
-use super::{COLOUR_MATRIX_KEY, FrameDescription, LayerDescription, LayerSource, WorkingSpace};
+use super::{
+    COLOUR_MATRIX_KEY, EXPOSURE_KEY, FrameDescription, LayerDescription, LayerSource, OPACITY_KEY, WorkingSpace,
+};
 
 /// How far a number of a colour matrix may be from what it is in the matrix that changes nothing, for the matrix to be taken for that one: a change
 /// of less than a hundredth of a step of the 256 steps of a colour changes no pixel. (It is the same number that the window's own colour matrix uses;
@@ -187,16 +189,21 @@ pub fn steps_of_a_run_of_effects(effects: &[EffectToRun], working_space_is_light
 pub enum KindOfEffect {
     /// The engine's own effect that mixes colours with a matrix of nine numbers, or twelve with three offsets.
     ColourMatrix,
+    /// The engine's own effect that makes the light brighter or darker, by the stops that its one number says.
+    Exposure,
+    /// The engine's own effect that makes the picture more or less see-through, by the fraction that its one number says.
+    Opacity,
     /// A shader that was given to the engine (see `effect_shaders`), which is given as many numbers as the call has, up to a limit.
     Shader,
 }
 
 impl KindOfEffect {
     /// The colour domain the effect works in: the codes of a screen, for the engine's colour matrix (its matrices are made for them) and for every shader (what shader
-    /// files are written for).
+    /// files are written for); the light of the working space, for exposure and opacity.
     pub fn domain(self) -> CallDomain {
         match self {
             Self::ColourMatrix | Self::Shader => CallDomain::DisplayReferred,
+            Self::Exposure | Self::Opacity => CallDomain::SceneLinear,
         }
     }
 }
@@ -227,6 +234,10 @@ impl EffectsThatRun {
     pub fn kind_of(&self, key: &str) -> Option<KindOfEffect> {
         if key == COLOUR_MATRIX_KEY {
             Some(KindOfEffect::ColourMatrix)
+        } else if key == EXPOSURE_KEY {
+            Some(KindOfEffect::Exposure)
+        } else if key == OPACITY_KEY {
+            Some(KindOfEffect::Opacity)
         } else if self.keys_of_shaders.contains(key) {
             Some(KindOfEffect::Shader)
         } else {
@@ -245,6 +256,17 @@ pub fn colour_matrix_changes_nothing(values: &[f32]) -> bool {
         .all(|(number, nothing)| (number - nothing).abs() < NEAR_ENOUGH_TO_CHANGE_NOTHING)
 }
 
+/// Whether an exposure of this many stops is none, or none that can be told from none: the light is multiplied by a number that is less than a hundredth of a step of the
+/// 256 steps of a colour from one.
+pub fn exposure_changes_nothing(stops: f32) -> bool {
+    (stops.exp2() - 1.0).abs() < NEAR_ENOUGH_TO_CHANGE_NOTHING
+}
+
+/// Whether an opacity is the whole opacity, or less than a hundredth of a step of the 256 steps of a colour from it. (More than the whole is the whole.)
+pub fn opacity_changes_nothing(opacity: f32) -> bool {
+    1.0 - opacity < NEAR_ENOUGH_TO_CHANGE_NOTHING
+}
+
 /// Which effects of `layer` run, and how many cannot.
 fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (Vec<usize>, usize) {
     if matches!(layer.source, LayerSource::Solid(_)) {
@@ -258,6 +280,16 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
                 if NUMBERS_OF_A_COLOUR_MATRIX.contains(&effect.values.len()) && numbers_are_finite =>
             {
                 if !colour_matrix_changes_nothing(&effect.values) {
+                    calls.push(number);
+                }
+            }
+            Some(KindOfEffect::Exposure) if effect.values.len() == 1 && numbers_are_finite => {
+                if !exposure_changes_nothing(effect.values[0]) {
+                    calls.push(number);
+                }
+            }
+            Some(KindOfEffect::Opacity) if effect.values.len() == 1 && numbers_are_finite => {
+                if !opacity_changes_nothing(effect.values[0]) {
                     calls.push(number);
                 }
             }
@@ -548,8 +580,9 @@ mod tests {
             ColourMatrix::hue_rotation(120.0),
             ColourMatrix::hue_rotation(10.0).then(ColourMatrix::hue_rotation(-10.0)),
         ];
-        // And ones that are one number off from the one that changes nothing by amounts on both sides of the limit.
-        for place in 0..9 {
+        // And ones that are one number off from the one that changes nothing by amounts on both sides of the limit. (Rewritten on purpose in phase 4: the twelve numbers
+        // are the nine of the matrix and its three offsets, which the window's matrix has now.)
+        for place in 0..12 {
             for difference in [0.0, 1e-5, 3.0e-5, 3.8e-5, 3.9e-5, 4.0e-5, 4.1e-5, 1e-4, 1e-3, 0.1] {
                 for sign in [1.0, -1.0] {
                     let mut numbers = nothing;
@@ -567,13 +600,16 @@ mod tests {
         }
     }
 
-    /// A `ColourMatrix` with these nine numbers, row by row.
-    fn matrix_of(numbers: [f32; 9]) -> crate::colour_effects::ColourMatrix {
-        crate::colour_effects::ColourMatrix::from_rows([
-            [numbers[0], numbers[1], numbers[2]],
-            [numbers[3], numbers[4], numbers[5]],
-            [numbers[6], numbers[7], numbers[8]],
-        ])
+    /// A `ColourMatrix` with these twelve numbers: nine, row by row, and then the three offsets.
+    fn matrix_of(numbers: [f32; 12]) -> crate::colour_effects::ColourMatrix {
+        crate::colour_effects::ColourMatrix::from_rows_and_offsets(
+            [
+                [numbers[0], numbers[1], numbers[2]],
+                [numbers[3], numbers[4], numbers[5]],
+                [numbers[6], numbers[7], numbers[8]],
+            ],
+            [numbers[9], numbers[10], numbers[11]],
+        )
     }
 
     fn a_matrix(call: usize) -> EffectToRun {

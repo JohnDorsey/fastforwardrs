@@ -435,11 +435,26 @@ fn something_that_is_not_there_has_no_chain_to_move_things_in() {
 // --- the effects of a group ---
 
 #[test]
-fn every_kind_of_group_can_have_every_effect_that_there_is_for_now() {
+fn a_tag_can_have_every_effect_and_a_clip_group_or_a_track_group_every_effect_that_changes_each_pixel_by_itself() {
+    // (Rewritten on purpose in phase 4: the first effect that is not done to each pixel by itself, the opacity, is on the program now. Done to each member of a group it is
+    // not what it would be done to the picture that the members make together, so a clip group and a track group cannot have it; a tag, which has its effects applied
+    // to each member, can.)
     for effect in EffectKind::BUILT_IN {
         for kind in GroupKind::ALL {
-            assert!(effect.applies_to_a_group_of_kind(kind), "{effect} on a {kind}");
+            let wanted = kind == GroupKind::Tag || effect.descriptor().changes_each_pixel_by_itself;
+            assert_eq!(effect.applies_to_a_group_of_kind(kind), wanted, "{effect} on a {kind}");
         }
+    }
+    assert!(!EffectKind::OPACITY.applies_to_a_group_of_kind(GroupKind::ClipGroup));
+    assert!(!EffectKind::OPACITY.applies_to_a_group_of_kind(GroupKind::TrackGroup));
+    for effect in [
+        EffectKind::HUE_SHIFT,
+        EffectKind::SATURATION,
+        EffectKind::BRIGHTNESS_AND_CONTRAST,
+        EffectKind::EXPOSURE,
+    ] {
+        assert!(effect.applies_to_a_group_of_kind(GroupKind::ClipGroup), "{effect}");
+        assert!(effect.applies_to_a_group_of_kind(GroupKind::TrackGroup), "{effect}");
     }
 }
 

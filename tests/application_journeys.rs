@@ -16,9 +16,10 @@ use std::path::{Path, PathBuf};
 use egui::{Key, Modifiers, PointerButton, vec2};
 use egui_kittest::kittest::Queryable;
 use fastforwardrs::colour_effects::ColourMatrix;
+use fastforwardrs::colour_space::TransferFunction;
 use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::project::{
-    AnimationTarget, Clip, EffectInstanceId, Project, SourceMediaIdentifier, TimelineFrameIndex,
+    AnimationTarget, Clip, EffectInstanceId, EffectKind, Project, SourceMediaIdentifier, TimelineFrameIndex,
 };
 use journey::Journey;
 use support::{
@@ -1677,6 +1678,59 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
             assert!(
                 found.abs_diff(wanted) <= 10,
                 "frame {frame}, channel {channel}: {found} where the turned colour {turned:?} has {wanted}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_exposure_and_a_brightness_put_on_with_the_plus_button_are_exported_as_the_light_and_the_codes_they_make() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let orange = (200u8, 100u8, 50u8);
+    let video = support::flat_colour_video(&toolchain, scratch.path(), orange);
+    let mut journey = Journey::importing(&toolchain, &video);
+
+    // One stop less light, which is done to the light, and then a tenth of the steps less brightness, which is done to the codes of the screen.
+    journey.select_the_clip_at(10);
+    for (menu_item, slider, value) in [
+        ("Exposure", "Amount", -1.0),
+        ("Brightness and contrast", "Brightness", -0.1),
+    ] {
+        let plus = journey.rectangle_of("Add an effect");
+        journey.click(plus.center());
+        let item = journey.rectangle_of(menu_item);
+        journey.click(item.center());
+        journey.set_slider(slider, value);
+    }
+    let clip = journey.application().project().tracks()[0].entries()[0].id();
+    let kinds: Vec<_> = journey
+        .application()
+        .project()
+        .effects_of(AnimationTarget::Clip(clip))
+        .unwrap()
+        .iter()
+        .map(|effect| effect.kind())
+        .collect();
+    assert_eq!(kinds, vec![EffectKind::EXPOSURE, EffectKind::BRIGHTNESS_AND_CONTRAST]);
+
+    let exported = scratch.path().join("darker.mp4");
+    export_to(&mut journey, &exported);
+    let decoded = decode_video(&toolchain, &exported, VIDEO_WIDTH, VIDEO_HEIGHT);
+    assert_eq!(decoded.pictures.len(), 60);
+
+    // Each colour: its light, halved; the code of that; and a tenth of the steps less.
+    let wanted = [orange.0, orange.1, orange.2].map(|code| {
+        let light = TransferFunction::Srgb.decode_to_light(f64::from(code) / 255.0) * 0.5;
+        (TransferFunction::Srgb.encode_from_light(light) - 0.1).max(0.0) * 255.0
+    });
+    for frame in [0, 30, 59] {
+        let middle = (VIDEO_HEIGHT as usize / 2 * VIDEO_WIDTH as usize + VIDEO_WIDTH as usize / 2) * 3;
+        let found = &decoded.pictures[frame][middle..middle + 3];
+        for (channel, (found, wanted)) in found.iter().zip(wanted).enumerate() {
+            assert!(
+                (f64::from(*found) - wanted).abs() <= 10.0,
+                "frame {frame}, channel {channel}: {found} where {wanted:.1} was wanted (all of them {wanted:?})"
             );
         }
     }

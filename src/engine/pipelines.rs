@@ -37,6 +37,9 @@ pub const INGEST_UNIFORM_BYTES: u64 = 64;
 /// How many bytes the uniforms of the last pass take up (see `output.wgsl`): the same as the pass before it.
 pub const OUTPUT_UNIFORM_BYTES: u64 = 64;
 
+/// How many bytes the uniforms of the effects of exposure and of opacity take up (see `gain.wgsl`): four numbers.
+pub const GAIN_UNIFORM_BYTES: u64 = 16;
+
 /// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): three 3 by 3 matrices, three columns of 16 bytes each, the number
 /// of the curve, the three offsets and the number that says which parts are left out, in a struct that is a multiple of 16.
 pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 176;
@@ -87,6 +90,12 @@ pub struct ColourMatrixPass {
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
+/// The effects of exposure and of opacity: a picture in, a picture of the same size out, multiplied by four numbers.
+pub struct GainPass {
+    pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
 /// The pass that puts a layer's picture in its place on the frame.
 pub struct PlacePass {
     pub pipeline: wgpu::RenderPipeline,
@@ -102,6 +111,7 @@ pub struct Pipelines {
     pub yuv: YuvPass,
     pub planes: PlanesPass,
     pub colour_matrix: ColourMatrixPass,
+    pub gain: GainPass,
     pub place: PlacePass,
     /// What the effects that others wrote are made from (the pipeline of each is made when its shader is given to the engine).
     pub foreign_effect: ForeignEffectPass,
@@ -115,6 +125,7 @@ impl Pipelines {
             yuv: yuv_pass(device),
             planes: planes_pass(device),
             colour_matrix: colour_matrix_pass(device),
+            gain: gain_pass(device),
             place: place_pass(device),
             foreign_effect: ForeignEffectPass::create(device),
         }
@@ -319,6 +330,35 @@ fn planes_pass(device: &wgpu::Device) -> PlanesPass {
             CHROMA_FORMAT,
             None,
         ),
+        bind_group_layout,
+    }
+}
+
+fn gain_pass(device: &wgpu::Device) -> GainPass {
+    let module = shader_module(device, "engine gain pass", shaders::GAIN);
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine gain pass bindings"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(GAIN_UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            loaded_texture_entry(1),
+        ],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine gain pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    GainPass {
+        pipeline: pipeline(device, "engine gain pass", &module, &layout, ACCUMULATION_FORMAT, None),
         bind_group_layout,
     }
 }
