@@ -40,6 +40,14 @@ pub const COLOUR_MATRIX: &str = concat!(
     include_str!("shaders/colour_matrix.wgsl")
 );
 
+/// The effect that applies a look-up table to the colours of a layer's picture.
+pub const LUT: &str = concat!(
+    include_str!("shaders/colour.wgsl"),
+    "
+",
+    include_str!("shaders/lut.wgsl")
+);
+
 /// The effects of exposure and of opacity: the premultiplied picture of a layer multiplied by four numbers.
 pub const GAIN: &str = include_str!("shaders/gain.wgsl");
 
@@ -69,6 +77,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("yuv.wgsl", YUV),
     ("colour_matrix.wgsl", COLOUR_MATRIX),
     ("gain.wgsl", GAIN),
+    ("lut.wgsl", LUT),
     ("blur.wgsl", BLUR),
     ("crop.wgsl", CROP),
     ("place.wgsl", PLACE),

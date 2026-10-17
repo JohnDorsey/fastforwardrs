@@ -4,7 +4,10 @@
 //! The numbers that the engine's own effects (exposure, opacity, blur, crop) give their passes, worked out from the numbers of a call and the size of the picture they work
 //! on. There is no graphics card in it, so that what a call comes to can be looked at and tested without one.
 
+use super::colour::LutSpaceConversion;
 use super::plan::KindOfEffect;
+use super::uniform_bytes::SlotWriter;
+use super::{LutInterpolation, LutSpace, WorkingSpace};
 
 /// The widest a blur is: how many pixels each side of a pixel are averaged, at the most. (A blur of 100 points of a picture 1080 high is 100 pixels of standard deviation
 /// in it, and three of those each side is 300.)
@@ -46,6 +49,86 @@ pub fn crop_numbers(values: &[f32], (width, height): (u32, u32)) -> ([f32; 4], f
         ],
         (feather * height).max(1.0),
     )
+}
+
+/// The numbers of one pass of the look-up table effect (see `lut.wgsl`), worked out from the numbers of a call, the table, and the working space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LutNumbers {
+    pub spaces: LutSpaceConversion,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+    /// How many points a side a 3-D table has, or how many points a 1-D table has.
+    pub size: u32,
+    pub intensity: f32,
+    /// The conversion into the table's space is left out (the colour is in it already), and the one out of it.
+    pub leaves_out_converting_in: bool,
+    pub leaves_out_converting_out: bool,
+    pub interpolation: LutInterpolation,
+    pub one_dimensional: bool,
+}
+
+impl LutNumbers {
+    /// The numbers for a call whose four numbers are `values` (the intensity, the two spaces and the way of looking up: `None` if they are not numbers that mean those), on the
+    /// table whose shape and domain are given, in a frame put together in `working`. The pass converts into the table's space and out of it unless the plan says that a
+    /// neighbour does (only for a table of the codes of a screen).
+    pub fn of(
+        values: &[f32],
+        shape: crate::cube_table::CubeShape,
+        domain_min: [f32; 3],
+        domain_max: [f32; 3],
+        working: WorkingSpace,
+        converts_into_display: bool,
+        converts_out_of_display: bool,
+    ) -> Option<Self> {
+        let [intensity, input, output, way] = values[..] else {
+            return None;
+        };
+        let (input, output, interpolation) = (
+            LutSpace::from_number(input)?,
+            LutSpace::from_number(output)?,
+            LutInterpolation::from_number(way)?,
+        );
+        let (size, one_dimensional) = match shape {
+            crate::cube_table::CubeShape::OneDimensional { points } => (points as u32, true),
+            crate::cube_table::CubeShape::ThreeDimensional { points_a_side } => (points_a_side as u32, false),
+        };
+        Some(Self {
+            spaces: LutSpaceConversion::of(working, input, output),
+            domain_min,
+            domain_max,
+            size,
+            intensity: intensity.clamp(0.0, 1.0),
+            leaves_out_converting_in: !converts_into_display,
+            leaves_out_converting_out: !converts_out_of_display,
+            interpolation,
+            one_dimensional,
+        })
+    }
+
+    /// The number that says which parts of the pass are left out (`parts` in `lut.wgsl`).
+    pub fn left_out(&self) -> u32 {
+        u32::from(self.leaves_out_converting_in) | u32::from(self.leaves_out_converting_out) << 1
+    }
+
+    /// Writes them into a slot, in the order of `struct Look` in `lut.wgsl`.
+    pub fn write(&self, writer: &mut SlotWriter) {
+        writer
+            .mat3x3_from_rows(self.spaces.to_input)
+            .mat3x3_from_rows(self.spaces.from_output)
+            .vec3(self.domain_min)
+            .u32(self.size)
+            .vec3(self.domain_max)
+            .f32(self.intensity)
+            .u32(self.spaces.input_curve)
+            .u32(self.spaces.output_curve)
+            .u32(self.left_out())
+            .u32(match self.interpolation {
+                LutInterpolation::Tetrahedral => 0,
+                LutInterpolation::Trilinear => 1,
+            })
+            .u32(u32::from(self.one_dimensional))
+            .u32(u32::from(self.spaces.clamps_the_output));
+    }
 }
 
 #[cfg(test)]

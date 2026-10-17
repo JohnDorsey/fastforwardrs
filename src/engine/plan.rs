@@ -23,8 +23,8 @@ use std::collections::HashSet;
 
 use super::effect_shaders::MOST_NUMBERS_OF_A_FOREIGN_EFFECT;
 use super::{
-    BLUR_KEY, COLOUR_MATRIX_KEY, CROP_KEY, EXPOSURE_KEY, FrameDescription, LayerDescription, LayerSource, OPACITY_KEY,
-    WorkingSpace,
+    BLUR_KEY, COLOUR_MATRIX_KEY, CROP_KEY, EXPOSURE_KEY, EffectCall, FrameDescription, LUT_KEY, LayerDescription,
+    LayerSource, LutInterpolation, LutSpace, OPACITY_KEY, TableId, WorkingSpace,
 };
 
 /// How far a number of a colour matrix may be from what it is in the matrix that changes nothing, for the matrix to be taken for that one: a change
@@ -198,6 +198,8 @@ pub enum KindOfEffect {
     Blur,
     /// The engine's own crop, with the five numbers that [`CROP_KEY`] says.
     Crop,
+    /// The engine's own look-up table effect, with the four numbers and the table that [`LUT_KEY`] says.
+    Lut,
     /// A shader that was given to the engine (see `effect_shaders`), which is given as many numbers as the call has, up to a limit.
     Shader,
 }
@@ -209,6 +211,27 @@ impl KindOfEffect {
         match self {
             Self::ColourMatrix | Self::Shader => CallDomain::DisplayReferred,
             Self::Exposure | Self::Opacity | Self::Blur | Self::Crop => CallDomain::SceneLinear,
+            // (The domain of a look-up table depends on the call: see [`Self::domain_of_a_call`].)
+            Self::Lut => CallDomain::SceneLinear,
+        }
+    }
+
+    /// The colour domain the effect works in for this call. Only a look-up table differs from [`Self::domain`]: **a table of the codes of a screen, of which the whole is
+    /// wanted, works in the display-referred domain** (neighbours of that domain are not converted between), and any other call of it is of the scene-linear domain and
+    /// converts into and out of its spaces itself.
+    pub fn domain_of_a_call(self, call: &EffectCall) -> CallDomain {
+        match self {
+            Self::Lut if lut_works_on_the_codes_of_a_screen(&call.values) => CallDomain::DisplayReferred,
+            _ => self.domain(),
+        }
+    }
+
+    /// Whether the pass of the effect for this call can convert into the display-referred domain and out of it itself (see [`EffectToRun::converts_itself`]).
+    pub fn converts_itself_for_a_call(self, call: &EffectCall) -> bool {
+        match self {
+            Self::ColourMatrix => true,
+            Self::Lut => lut_works_on_the_codes_of_a_screen(&call.values),
+            Self::Shader | Self::Exposure | Self::Opacity | Self::Blur | Self::Crop => false,
         }
     }
 
@@ -216,7 +239,7 @@ impl KindOfEffect {
     pub fn passes(self) -> usize {
         match self {
             Self::Blur => 2,
-            Self::ColourMatrix | Self::Shader | Self::Exposure | Self::Opacity | Self::Crop => 1,
+            Self::ColourMatrix | Self::Shader | Self::Exposure | Self::Opacity | Self::Crop | Self::Lut => 1,
         }
     }
 }
@@ -225,6 +248,8 @@ impl KindOfEffect {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectsThatRun {
     keys_of_shaders: HashSet<String>,
+    /// The tables that the card has, which a look-up table effect needs one of.
+    tables: HashSet<TableId>,
 }
 
 impl EffectsThatRun {
@@ -243,6 +268,16 @@ impl EffectsThatRun {
         self.keys_of_shaders.remove(key);
     }
 
+    /// These tables are the ones the engine has, and no others.
+    pub fn set_tables(&mut self, tables: impl IntoIterator<Item = TableId>) {
+        self.tables = tables.into_iter().collect();
+    }
+
+    /// Whether the engine has the table.
+    pub fn has_the_table(&self, table: TableId) -> bool {
+        self.tables.contains(&table)
+    }
+
     /// How the effect under `key` is run, if the engine can run it.
     pub fn kind_of(&self, key: &str) -> Option<KindOfEffect> {
         if key == COLOUR_MATRIX_KEY {
@@ -255,6 +290,8 @@ impl EffectsThatRun {
             Some(KindOfEffect::Blur)
         } else if key == CROP_KEY {
             Some(KindOfEffect::Crop)
+        } else if key == LUT_KEY {
+            Some(KindOfEffect::Lut)
         } else if self.keys_of_shaders.contains(key) {
             Some(KindOfEffect::Shader)
         } else {
@@ -296,6 +333,20 @@ pub fn crop_changes_nothing(values: &[f32]) -> bool {
     values.iter().all(|value| *value < 1.0e-4)
 }
 
+/// Whether the four numbers of a look-up table effect say a table of the codes of a screen coming out as the codes of a screen, of which the whole is wanted: the one that
+/// works in the display-referred domain.
+fn lut_works_on_the_codes_of_a_screen(values: &[f32]) -> bool {
+    matches!(values, [intensity, input, output, _]
+        if *intensity >= 1.0 && *input == LutSpace::Screen.number() && *output == LutSpace::Screen.number())
+}
+
+/// Whether a look-up table effect with these numbers changes nothing: none of the table is wanted.
+pub fn lut_changes_nothing(values: &[f32]) -> bool {
+    values
+        .first()
+        .is_some_and(|intensity| *intensity < NEAR_ENOUGH_TO_CHANGE_NOTHING)
+}
+
 /// Which effects of `layer` run, and how many cannot.
 fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (Vec<usize>, usize) {
     if matches!(layer.source, LayerSource::Solid(_)) {
@@ -319,6 +370,18 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
             }
             Some(KindOfEffect::Opacity) if effect.values.len() == 1 && numbers_are_finite => {
                 if !opacity_changes_nothing(effect.values[0]) {
+                    calls.push(number);
+                }
+            }
+            Some(KindOfEffect::Lut)
+                if effect.values.len() == 4
+                    && numbers_are_finite
+                    && LutSpace::from_number(effect.values[1]).is_some()
+                    && LutSpace::from_number(effect.values[2]).is_some()
+                    && LutInterpolation::from_number(effect.values[3]).is_some()
+                    && effect.table.is_some_and(|table| effects_that_run.has_the_table(table)) =>
+            {
+                if !lut_changes_nothing(&effect.values) {
                     calls.push(number);
                 }
             }
@@ -359,11 +422,12 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
                     let kind = effects_that_run
                         .kind_of(&layer.effects[call].key)
                         .expect("a call that runs is of a kind that the engine can run");
+                    let call_itself = &layer.effects[call];
                     EffectToRun {
                         call,
-                        domain: kind.domain(),
+                        domain: kind.domain_of_a_call(call_itself),
                         passes: kind.passes(),
-                        converts_itself: kind == KindOfEffect::ColourMatrix,
+                        converts_itself: kind.converts_itself_for_a_call(call_itself),
                     }
                 })
                 .collect();
@@ -539,22 +603,27 @@ mod tests {
         let unknown = EffectCall {
             key: "someone:else".to_owned(),
             values: vec![1.0, 2.0],
+            table: None,
         };
         let too_few_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 8],
+            table: None,
         };
         let too_many_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 10],
+            table: None,
         };
         let not_a_number = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::NAN, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            table: None,
         };
         let infinite = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::INFINITY, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            table: None,
         };
         let plan = plan_of_the_built_in_effects(&description_of(vec![
             layer_with(1, vec![unknown, redder(), too_few_numbers]),
@@ -735,10 +804,12 @@ mod tests {
         let blur = |numbers: &[f32]| EffectCall {
             key: BLUR_KEY.to_owned(),
             values: numbers.to_vec(),
+            table: None,
         };
         let crop = |numbers: &[f32]| EffectCall {
             key: CROP_KEY.to_owned(),
             values: numbers.to_vec(),
+            table: None,
         };
         let plan_of = |effects: Vec<EffectCall>| plan_frame(&description_of(vec![layer_with(1, effects)]), &known);
         // (A layer, its effects, the place and the output: two passes besides the effects.)
@@ -913,6 +984,7 @@ mod tests {
         let shader = EffectCall {
             key: "test:shader".to_owned(),
             values: vec![1.0],
+            table: None,
         };
         let mut description = in_light();
         description.layers = vec![
@@ -950,6 +1022,7 @@ mod tests {
         let call = |numbers: &[f32]| EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: numbers.to_vec(),
+            table: None,
         };
         let with = |offsets: [f32; 3]| [nine.as_slice(), offsets.as_slice()].concat();
         for (numbers, runs) in [
@@ -978,6 +1051,7 @@ mod tests {
         let call = |offsets: [f32; 3]| EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: [identity.as_slice(), offsets.as_slice()].concat(),
+            table: None,
         };
         let plan = plan_of_the_built_in_effects(&description_of(vec![layer_with(1, vec![call([0.0; 3])])]));
         assert_eq!(

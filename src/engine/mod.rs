@@ -46,6 +46,7 @@ mod recycler;
 mod replacement;
 mod scene;
 mod shaders;
+mod tables;
 #[cfg(test)]
 pub(crate) mod testing;
 mod texture_pool;
@@ -81,6 +82,8 @@ mod hang_tests;
 #[cfg(test)]
 mod linear_light_tests;
 #[cfg(test)]
+mod lut_tests;
+#[cfg(test)]
 pub(crate) mod oracle_tests;
 #[cfg(test)]
 mod picture_tests;
@@ -90,8 +93,8 @@ mod planes_out_tests;
 mod yuv_tests;
 
 pub use colour::{
-    ColourDomain, DisplayDomainConversion, FrameColour, IngestConversion, MixingParts, OutputConversion,
-    OutputEncoding, PictureColour, WorkingSpace,
+    ColourDomain, DisplayDomainConversion, FrameColour, IngestConversion, LutSpaceConversion, MixingParts,
+    OutputConversion, OutputEncoding, PictureColour, WorkingSpace,
 };
 pub use device::{
     AdapterChoice, DeviceError, DeviceTrouble, EngineDevice, TESTS_MAY_USE_ANY_ADAPTER_VARIABLE,
@@ -107,14 +110,15 @@ pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 pub use pictures::{PictureData, PicturePixels, PictureProblem};
 pub use plan::{
     CallDomain, EffectStep, EffectToRun, EffectsThatRun, FramePlan, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan,
-    blur_changes_nothing, crop_changes_nothing, exposure_changes_nothing, opacity_changes_nothing, plan_frame,
-    steps_of_a_run_of_effects,
+    blur_changes_nothing, crop_changes_nothing, exposure_changes_nothing, lut_changes_nothing, opacity_changes_nothing,
+    plan_frame, steps_of_a_run_of_effects,
 };
 pub use quality::{PreviewScale, QualityGovernor, QualityRules};
 pub use scene::{
     BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, FrameDescription,
-    LayerDescription, LayerSource, OPACITY_KEY, PictureId,
+    LUT_KEY, LayerDescription, LayerSource, LutInterpolation, LutSpace, OPACITY_KEY, PictureId, TableId,
 };
+pub use tables::{MOST_TABLES_ON_THE_CARD, publish_table, published_table};
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};
 pub use uniform_bytes::{SlotWriter, UniformBytes, UniformSlot};
 pub use yuv::{

@@ -158,6 +158,56 @@ impl DisplayDomainConversion {
     }
 }
 
+/// The numbers of the pass of the look-up table effect that are about the spaces (CM-11): how the light of the working space is taken into the space that the table wants
+/// its colours in, and out of the space that it gives them in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LutSpaceConversion {
+    pub to_input: [[f32; 3]; 3],
+    pub from_output: [[f32; 3]; 3],
+    pub input_curve: u32,
+    pub output_curve: u32,
+    /// Whether the colour that comes out of the table is codes, which are cut off at 0 and 1, and not linear light, which is not.
+    pub clamps_the_output: bool,
+}
+
+impl LutSpaceConversion {
+    /// The conversions for a table that takes its colours in `input` and gives them in `output`, when the frame is put together in `working`. **In the compatibility mode
+    /// (`WorkingSpace::DisplayReferred`) the numbers already are codes, the spaces are not told apart, and nothing is converted.**
+    pub fn of(working: WorkingSpace, input: super::LutSpace, output: super::LutSpace) -> Self {
+        use super::LutSpace;
+        let identity = matrix::to_f32(&matrix::IDENTITY);
+        let one_way = |space: LutSpace, into: bool| -> ([[f32; 3]; 3], u32) {
+            match (working, space) {
+                (WorkingSpace::DisplayReferred, _) | (WorkingSpace::Linear(_), LutSpace::Linear) => {
+                    (identity, TransferFunction::Linear.number_for_the_shaders())
+                }
+                (WorkingSpace::Linear(_), LutSpace::Screen | LutSpace::Video) => {
+                    let curve = if space == LutSpace::Screen {
+                        TransferFunction::Srgb
+                    } else {
+                        TransferFunction::Gamma24
+                    };
+                    let primaries = if into {
+                        working.matrix_to(StandardPrimaries::Rec709)
+                    } else {
+                        working.matrix_from(StandardPrimaries::Rec709)
+                    };
+                    (matrix::to_f32(&primaries), curve.number_for_the_shaders())
+                }
+            }
+        };
+        let (to_input, input_curve) = one_way(input, true);
+        let (from_output, output_curve) = one_way(output, false);
+        Self {
+            to_input,
+            from_output,
+            input_curve,
+            output_curve,
+            clamps_the_output: matches!(working, WorkingSpace::DisplayReferred) || output != LutSpace::Linear,
+        }
+    }
+}
+
 /// What the pass of the colour matrix does besides mixing with the matrix: the three numbers added to the mixed colour, and which of its three parts it does (see `parts`
 /// in `colour_matrix.wgsl`). A pass that is one of several in a row in the display-referred domain leaves out the conversions that its neighbours make unnecessary.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -231,3 +231,86 @@ fn a_1d_table_makes_the_colours_that_ffmpegs_lut1d_makes_to_within_a_level() {
         ours[at]
     );
 }
+
+/// What the engine's look-up table pass makes of `input` (8-bit colours, `SIDE` by `SIDE`) with `table`, in the engine's compatibility mode (where the numbers already are the
+/// codes of a screen, which is what a table takes and what ffmpeg's filter takes), on the software adapter: `None` where there is none.
+fn what_the_pass_makes_of(
+    table: &std::sync::Arc<CubeTable>,
+    input: &[[u8; 3]],
+    way: fastforwardrs::engine::LutInterpolation,
+) -> Option<Vec<[u8; 3]>> {
+    use fastforwardrs::engine::{
+        AdapterChoice, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, EngineDevice, FrameDescription, FrameRenderer,
+        LayerDescription, LayerSource, LutSpace, PictureData, PictureId, publish_table,
+    };
+    let device = EngineDevice::create(&AdapterChoice::SoftwareOnly).ok()?;
+    let mut renderer = FrameRenderer::new(device);
+    let rgba: Vec<u8> = input.iter().flat_map(|[r, g, b]| [*r, *g, *b, 255]).collect();
+    renderer
+        .upload_picture(
+            PictureId(1),
+            &PictureData::rgba8(SIDE as u32, SIDE as u32, rgba).unwrap(),
+        )
+        .unwrap();
+    let id = publish_table(table);
+    let mut description = FrameDescription::black((SIDE as u32, SIDE as u32));
+    description.layers = vec![LayerDescription {
+        source: LayerSource::Picture(PictureId(1)),
+        corners: CORNERS_OF_THE_WHOLE_PICTURE,
+        effects: vec![EffectCall::lut(id, 1.0, LutSpace::Screen, LutSpace::Screen, way)],
+    }];
+    let (frame, statistics) = renderer
+        .render(&description, std::time::Duration::from_secs(60))
+        .unwrap();
+    assert_eq!(statistics.effects_not_run, 0);
+    Some(
+        frame
+            .rgba_pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| [p[0], p[1], p[2]])
+            .collect(),
+    )
+}
+
+/// **The gate of piece 4.6 (PH-04): a table through the card's pass equals ffmpeg's `lut3d`**, for each of the tables, both ways of looking up. Measured on the software adapter
+/// of Windows (WARP) against ffmpeg 9.0.2 on 2026-10-17: **1 level at the worst colour of 4096, for each of the five tables and both ways of looking up** (the bound).
+#[test]
+fn a_table_through_the_pass_of_the_card_makes_the_colours_that_ffmpegs_lut3d_makes_to_within_a_level() {
+    use fastforwardrs::engine::LutInterpolation;
+    let toolchain = toolchain_or_skip!();
+    if !support::there_is_graphics_to_export_with() {
+        return;
+    }
+    let folder = scratch_directory();
+    let input = colours_to_look_up();
+    for (name, text) in tables() {
+        let table = std::sync::Arc::new(parse_cube(&text).unwrap());
+        let cube = folder.path().join("table.cube");
+        std::fs::write(&cube, &text).unwrap();
+        for (way, interp) in [
+            (LutInterpolation::Tetrahedral, "tetrahedral"),
+            (LutInterpolation::Trilinear, "trilinear"),
+        ] {
+            let filter = format!(
+                "lut3d=file='{}':interp={interp}",
+                cube.to_str().unwrap().replace('\\', "/").replace(':', "\\:")
+            );
+            let theirs = what_ffmpeg_makes_of(&toolchain, folder.path(), &input, &filter);
+            let Some(ours) = what_the_pass_makes_of(&table, &input, way) else {
+                return;
+            };
+
+            let (largest, at) = the_largest_difference(&theirs, &ours);
+            eprintln!("the pass against ffmpeg, {name}, {interp}: the largest difference is {largest} levels");
+            assert!(
+                largest <= 1,
+                "{name} {interp}: the largest difference is {largest} levels, at the colour {:?}, where ffmpeg makes {:?} and the pass makes {:?}",
+                input[at],
+                theirs[at],
+                ours[at]
+            );
+        }
+    }
+}

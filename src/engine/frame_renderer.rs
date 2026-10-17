@@ -14,7 +14,7 @@ use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, Outp
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_call};
 use super::guard::GuardedShader;
-use super::own_effects::{blur_numbers, crop_numbers, gain_factors};
+use super::own_effects::{LutNumbers, blur_numbers, crop_numbers, gain_factors};
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
 use super::pictures::{PictureData, PicturePixels};
 use super::pipelines::{
@@ -22,8 +22,13 @@ use super::pipelines::{
     RGB_TO_YUV_UNIFORM_BYTES, SENT_PICTURE_FORMAT,
 };
 use super::placement::PlacementUniforms;
-use super::plan::{EffectStep, EffectsThatRun, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan, plan_frame};
+use super::plan::{
+    CallDomain, EffectStep, EffectsThatRun, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan, plan_frame,
+};
 use super::readback::{PendingReadback, ReadbackBuffers, ReadbackProblem};
+use super::tables::{
+    MOST_TABLES_ON_THE_CARD, TableOnTheCard, published_table, put_on_the_card as put_the_table_on_the_card,
+};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
 use super::yuv::{ChromaReconstruction, YuvColour, chroma_size};
@@ -31,6 +36,7 @@ use super::{
     COLOUR_MATRIX_KEY, FrameDescription, FrameStatistics, LayerSource, PictureId, RenderedFrame, RenderedPlanes,
     UniformBytes, UniformSlot,
 };
+use super::{LUT_KEY, TableId};
 
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
 const IDLE_TEXTURE_BUDGET_IN_BYTES: u64 = 256 * 1024 * 1024;
@@ -142,6 +148,10 @@ pub struct FrameRenderer {
     shader_effects: HashMap<String, wgpu::RenderPipeline>,
     /// Which effects the engine can run: its own, and the keys of `shader_effects`.
     effects_that_run: EffectsThatRun,
+    /// The look-up tables the card has, taken from the shelf (see `tables`) when a frame needed them, and let go of when there are too many.
+    tables: HashMap<TableId, TableOnTheCard>,
+    /// The tables of `tables`, the one used longest ago first.
+    table_use_order: Vec<TableId>,
     /// For the tests of what happens when a frame does not finish (which no card can be made to do on purpose, in no time, without spending the processor for
     /// as long as the program runs): the frames that are made say they did not finish.
     #[cfg(test)]
@@ -198,6 +208,8 @@ impl FrameRenderer {
             upload_arena: UniformArena::default(),
             shader_effects: HashMap::new(),
             effects_that_run: EffectsThatRun::built_in_only(),
+            tables: HashMap::new(),
+            table_use_order: Vec::new(),
             #[cfg(test)]
             the_card_never_finishes: false,
         }
@@ -450,6 +462,41 @@ impl FrameRenderer {
         Ok(())
     }
 
+    /// Makes sure the card has the look-up tables that the frame `description` asks for: those it has not are taken from the shelf (see `tables`) and put on it, if somebody
+    /// still has them (a table nobody has is not run: the plan counts the effect as one that was not run), and the ones used longest ago are let go of when there are more
+    /// than [`MOST_TABLES_ON_THE_CARD`].
+    fn have_the_tables_of(&mut self, description: &FrameDescription) {
+        let mut wanted: Vec<TableId> = Vec::new();
+        for effect in description.layers.iter().flat_map(|layer| &layer.effects) {
+            if effect.key == LUT_KEY
+                && let Some(id) = effect.table
+                && !wanted.contains(&id)
+            {
+                wanted.push(id);
+            }
+        }
+        for id in &wanted {
+            if self.tables.contains_key(id) {
+                continue;
+            }
+            if let Some(table) = published_table(*id) {
+                let on_the_card = put_the_table_on_the_card(&self.device.device, &self.device.queue, &table);
+                self.tables.insert(*id, on_the_card);
+            }
+        }
+        self.table_use_order.retain(|id| !wanted.contains(id));
+        self.table_use_order
+            .extend(wanted.iter().filter(|id| self.tables.contains_key(id)));
+        while self.tables.len() > MOST_TABLES_ON_THE_CARD {
+            let Some(oldest) = self.table_use_order.iter().position(|id| !wanted.contains(id)) else {
+                break;
+            };
+            let id = self.table_use_order.remove(oldest);
+            self.tables.remove(&id);
+        }
+        self.effects_that_run.set_tables(self.tables.keys().copied());
+    }
+
     /// The frame that `description` describes, made within `timeout`, as the 8-bit RGBA frame that the preview shows.
     pub fn render(
         &mut self,
@@ -513,6 +560,7 @@ impl FrameRenderer {
         }
         self.pictures.touch(pictures_used());
 
+        self.have_the_tables_of(description);
         let plan = plan_frame(description, &self.effects_that_run);
         let accumulation_shape = TextureShape {
             width_in_pixels: width,
@@ -644,6 +692,27 @@ impl FrameRenderer {
                                                 self.uniforms.add_slot(|writer| {
                                                     writer.vec4(edges).f32(soft_width);
                                                 })
+                                            }
+                                            Some(KindOfEffect::Lut) => {
+                                                let on_screen_codes = KindOfEffect::Lut.domain_of_a_call(effect)
+                                                    == CallDomain::DisplayReferred;
+                                                let table = effect
+                                                    .table
+                                                    .and_then(|id| self.tables.get(&id))
+                                                    .expect("a look-up table effect that runs has its table on the card");
+                                                let numbers = LutNumbers::of(
+                                                    &effect.values,
+                                                    table.shape,
+                                                    table.domain_min,
+                                                    table.domain_max,
+                                                    description.colour.working,
+                                                    // (The plan has the pass leave out its conversions only where its neighbours made them: the codes of a screen. A table
+                                                    // of any other call is of the scene-linear domain, and the pass converts for itself.)
+                                                    converts_into_display || !on_screen_codes,
+                                                    converts_out_of_display || !on_screen_codes,
+                                                )
+                                                .expect("the numbers of a look-up table effect that runs mean what they should");
+                                                self.uniforms.add_slot(|writer| numbers.write(writer))
                                             }
                                             _ => {
                                                 let (rows, offsets) = colour_matrix_numbers(&effect.values);
@@ -797,6 +866,32 @@ impl FrameRenderer {
                                     }),
                                     "engine: blur a layer's picture along one line",
                                 ),
+                                Some(KindOfEffect::Lut) => {
+                                    let table = description.layers[*layer].effects[step_call(step)]
+                                        .table
+                                        .and_then(|id| self.tables.get(&id))
+                                        .expect("a look-up table effect that runs has its table on the card");
+                                    (
+                                        &self.pipelines.lut.pipeline,
+                                        self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                            label: Some("engine lut pass"),
+                                            layout: &self.pipelines.lut.bind_group_layout,
+                                            entries: &[
+                                                uniform_binding,
+                                                picture_binding,
+                                                wgpu::BindGroupEntry {
+                                                    binding: 2,
+                                                    resource: wgpu::BindingResource::TextureView(&table.cube),
+                                                },
+                                                wgpu::BindGroupEntry {
+                                                    binding: 3,
+                                                    resource: wgpu::BindingResource::TextureView(&table.strip),
+                                                },
+                                            ],
+                                        }),
+                                        "engine: look up the colours of a layer's picture in a table",
+                                    )
+                                }
                                 Some(KindOfEffect::Crop) => (
                                     &self.pipelines.crop.pipeline,
                                     self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {

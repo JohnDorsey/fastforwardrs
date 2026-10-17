@@ -147,6 +147,7 @@ pub(super) fn call(key: &str, numbers: &[f32]) -> EffectCall {
     EffectCall {
         key: key.to_owned(),
         values: numbers.to_vec(),
+        table: None,
     }
 }
 

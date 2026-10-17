@@ -515,6 +515,7 @@ fn calls_of(effect: Effect) -> Vec<EffectCall> {
     let call = |key: &str, values: &[f32]| EffectCall {
         key: key.to_owned(),
         values: values.to_vec(),
+        table: None,
     };
     match effect {
         Effect::ColourMatrix => vec![EffectCall::colour_matrix([

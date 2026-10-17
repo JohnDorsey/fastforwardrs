@@ -221,6 +221,7 @@ fn an_exposure_of_nothing_and_an_opacity_of_all_are_not_run_and_a_call_with_the_
                     vec![EffectCall {
                         key: key.to_owned(),
                         values: values.clone(),
+                        table: None,
                     }],
                 );
                 assert_eq!(statistics.effects_not_run, 1, "{key}, {name}");

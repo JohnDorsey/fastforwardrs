@@ -38,6 +38,60 @@ pub const BLUR_KEY: &str = "engine:blur";
 /// bottom, and the width of the soft edge as a fraction of the picture's height. What is outside becomes clear. It is an effect of the scene-linear domain.
 pub const CROP_KEY: &str = "engine:crop";
 
+/// The key of the effect that applies a look-up table (a `.cube` file) to the colours of a picture: four numbers, how much of the table's colours there are in the result (0 to
+/// 1), the space the colours are taken to the table in (see [`LutSpace`]), the space they come out of it in, and how the table is looked up between its points (see
+/// [`LutInterpolation`]); and the table, by the [`TableId`] that the call has. A call without a table does nothing. An effect of the display-referred domain where the two spaces are
+/// the codes of a screen and the whole of the table is wanted, and of the scene-linear domain otherwise.
+pub const LUT_KEY: &str = "engine:lut";
+
+/// Which table a call uses: the table (a [`CubeTable`](crate::cube_table::CubeTable)) has been published to the engine under this number (see `tables`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TableId(pub u64);
+
+/// The space that the colours of a picture are in when they go into a table, or come out of it (CM-11): **a number, in the call**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LutSpace {
+    /// The codes of a screen: sRGB codes of Rec.709 primaries. What a table made for pictures nearly always wants.
+    Screen = 0,
+    /// Rec.709 video: the primaries of Rec.709 and the power 2.4 of BT.1886.
+    Video = 1,
+    /// Linear light, in the primaries of the working space as they are.
+    Linear = 2,
+}
+
+impl LutSpace {
+    pub const ALL: [Self; 3] = [Self::Screen, Self::Video, Self::Linear];
+
+    /// The number that a call has for it.
+    pub fn number(self) -> f32 {
+        f32::from(self as u8)
+    }
+
+    /// The space that a number of a call says, if it says one.
+    pub fn from_number(number: f32) -> Option<Self> {
+        Self::ALL.into_iter().find(|space| space.number() == number)
+    }
+}
+
+/// How a table is looked up between its points: **a number, in the call**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LutInterpolation {
+    Tetrahedral = 0,
+    Trilinear = 1,
+}
+
+impl LutInterpolation {
+    pub const ALL: [Self; 2] = [Self::Tetrahedral, Self::Trilinear];
+
+    pub fn number(self) -> f32 {
+        f32::from(self as u8)
+    }
+
+    pub fn from_number(number: f32) -> Option<Self> {
+        Self::ALL.into_iter().find(|way| way.number() == number)
+    }
+}
+
 /// The corners of a layer that is all of the picture: top left, top right, bottom right, bottom left, as fractions of the picture.
 pub const CORNERS_OF_THE_WHOLE_PICTURE: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 
@@ -60,6 +114,9 @@ pub enum LayerSource {
 pub struct EffectCall {
     pub key: String,
     pub values: Vec<f32>,
+    /// The table that the effect uses, if it uses one (see [`LUT_KEY`]).
+    #[serde(default)]
+    pub table: Option<TableId>,
 }
 
 impl EffectCall {
@@ -68,6 +125,7 @@ impl EffectCall {
         Self {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: rows.into_iter().flatten().collect(),
+            table: None,
         }
     }
 
@@ -76,6 +134,7 @@ impl EffectCall {
         Self {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: rows.into_iter().flatten().chain(offsets).collect(),
+            table: None,
         }
     }
 
@@ -84,6 +143,7 @@ impl EffectCall {
         Self {
             key: EXPOSURE_KEY.to_owned(),
             values: vec![stops],
+            table: None,
         }
     }
 
@@ -92,6 +152,7 @@ impl EffectCall {
         Self {
             key: BLUR_KEY.to_owned(),
             values: vec![radius],
+            table: None,
         }
     }
 
@@ -101,6 +162,23 @@ impl EffectCall {
         Self {
             key: CROP_KEY.to_owned(),
             values: vec![left, top, right, bottom, feather],
+            table: None,
+        }
+    }
+
+    /// The effect that applies the table `table` (see [`LUT_KEY`]): `intensity` of it (0 to 1), taking the colours to it in `input` and out of it in `output`, looked up
+    /// as `interpolation` says.
+    pub fn lut(
+        table: TableId,
+        intensity: f32,
+        input: LutSpace,
+        output: LutSpace,
+        interpolation: LutInterpolation,
+    ) -> Self {
+        Self {
+            key: LUT_KEY.to_owned(),
+            values: vec![intensity, input.number(), output.number(), interpolation.number()],
+            table: Some(table),
         }
     }
 
@@ -109,6 +187,7 @@ impl EffectCall {
         Self {
             key: OPACITY_KEY.to_owned(),
             values: vec![opacity],
+            table: None,
         }
     }
 }
@@ -178,6 +257,7 @@ impl FrameDescription {
             layer.effects.len().hash(hasher);
             for effect in &layer.effects {
                 effect.key.hash(hasher);
+                effect.table.hash(hasher);
                 effect.values.len().hash(hasher);
                 for value in &effect.values {
                     value.to_bits().hash(hasher);
@@ -273,6 +353,18 @@ mod tests {
             d.layers[0].effects.push(EffectCall::colour_matrix([[1.0; 3]; 3]))
         });
         changed("an effect is left out", &|d| d.layers[1].effects.clear());
+        changed("an effect has a table", &|d| {
+            d.layers[1].effects[0].table = Some(TableId(7))
+        });
+        changed("an effect has another table", &|d| {
+            d.layers[0].effects.push(EffectCall::lut(
+                TableId(8),
+                1.0,
+                LutSpace::Screen,
+                LutSpace::Screen,
+                LutInterpolation::Tetrahedral,
+            ));
+        });
         for (name, other) in &changes {
             assert_ne!(other.fingerprint(), original.fingerprint(), "{name}");
         }
@@ -328,6 +420,7 @@ mod tests {
             effects: vec![EffectCall {
                 key: "a".to_owned(),
                 values: vec![1.0, 2.0],
+                table: None,
             }],
         });
         let mut second = FrameDescription::black((8, 8));
@@ -338,10 +431,12 @@ mod tests {
                 EffectCall {
                     key: "a".to_owned(),
                     values: vec![1.0],
+                    table: None,
                 },
                 EffectCall {
                     key: String::new(),
                     values: vec![2.0],
+                    table: None,
                 },
             ],
         });

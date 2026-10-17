@@ -40,6 +40,10 @@ pub const OUTPUT_UNIFORM_BYTES: u64 = 64;
 /// How many bytes the uniforms of the effects of exposure and of opacity take up (see `gain.wgsl`): four numbers.
 pub const GAIN_UNIFORM_BYTES: u64 = 16;
 
+/// How many bytes the uniforms of the look-up table effect take up (see `lut.wgsl`): two 3 by 3 matrices, the domain of the table, its size, and the numbers that say how it is
+/// looked up, in a struct that is a multiple of 16.
+pub const LUT_UNIFORM_BYTES: u64 = 160;
+
 /// How many bytes the uniforms of a pass of the blur take up (see `blur.wgsl`): the step along the line, the standard deviation and the half width of the kernel.
 pub const BLUR_UNIFORM_BYTES: u64 = 16;
 
@@ -96,6 +100,12 @@ pub struct ColourMatrixPass {
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
+/// The effect that applies a look-up table: the picture, and the table, both a 3-D texture and a strip of which the pass reads the one that the table is.
+pub struct LutPass {
+    pub pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
 /// An effect that is a pass of its own on one picture: a uniform buffer of numbers and the picture in, a picture of the same size out. (The effects of exposure and of
 /// opacity, the blur and the crop are each one.)
 pub struct OnePicturePass {
@@ -119,6 +129,7 @@ pub struct Pipelines {
     pub planes: PlanesPass,
     pub colour_matrix: ColourMatrixPass,
     pub gain: OnePicturePass,
+    pub lut: LutPass,
     pub blur: OnePicturePass,
     pub crop: OnePicturePass,
     pub place: PlacePass,
@@ -135,6 +146,7 @@ impl Pipelines {
             planes: planes_pass(device),
             colour_matrix: colour_matrix_pass(device),
             gain: one_picture_pass(device, "gain", shaders::GAIN, GAIN_UNIFORM_BYTES),
+            lut: lut_pass(device),
             blur: one_picture_pass(device, "blur", shaders::BLUR, BLUR_UNIFORM_BYTES),
             crop: one_picture_pass(device, "crop", shaders::CROP, CROP_UNIFORM_BYTES),
             place: place_pass(device),
@@ -341,6 +353,47 @@ fn planes_pass(device: &wgpu::Device) -> PlanesPass {
             CHROMA_FORMAT,
             None,
         ),
+        bind_group_layout,
+    }
+}
+
+fn lut_pass(device: &wgpu::Device) -> LutPass {
+    let module = shader_module(device, "engine lut pass", shaders::LUT);
+    let table_entry = |binding: u32, view_dimension: wgpu::TextureViewDimension| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("engine lut pass bindings"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(LUT_UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            loaded_texture_entry(1),
+            table_entry(2, wgpu::TextureViewDimension::D3),
+            table_entry(3, wgpu::TextureViewDimension::D2),
+        ],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("engine lut pass layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+    LutPass {
+        pipeline: pipeline(device, "engine lut pass", &module, &layout, ACCUMULATION_FORMAT, None),
         bind_group_layout,
     }
 }
