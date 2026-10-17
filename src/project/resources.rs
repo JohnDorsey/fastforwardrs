@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The resources of a project: files that its effects use and that are not pictures or sounds to cut (a `.cube` table of colours, to begin with). **A project has a list of
-//! them, and an effect names the one it uses by its name** (the value of a parameter whose control is a resource: see [`ParameterControl::Resource`]).
+//! them, and an effect names the one it uses by its name** (the value of a parameter whose control is a resource: see [`ParameterControl::Resource`](crate::project::ParameterControl::Resource)).
 //!
 //! A resource is **read into memory when the project is opened** and kept there (RS-07), so that a frame never waits for a disk. Where its bytes are kept for good is the
 //! same as for the source files of a project (see [`SourceMediaLink`]): *included* in the project file (an archive, a `.ffrs` file), which is the default, or *linked* by
