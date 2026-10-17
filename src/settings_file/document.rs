@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::{DisplayTransform, OutputColourSpace, SpedUpClipSound, WorkingColourSpace};
+use crate::project::{DisplayTransform, OutputColourSpace, ResourceStorage, SpedUpClipSound, WorkingColourSpace};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct SettingsDocument {
@@ -39,4 +39,7 @@ pub(super) struct SettingsValuesDocument {
     pub working_colour_space: Option<WorkingColourSpace>,
     #[serde(default)]
     pub output_colour_space: Option<OutputColourSpace>,
+    /// How the files that effects use are kept when they are added (phase 4): not there in the files of earlier versions, which get the default.
+    #[serde(default)]
+    pub resource_storage: Option<ResourceStorage>,
 }

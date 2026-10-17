@@ -105,6 +105,7 @@ pub fn settings_from_json_text(text: &str) -> Result<Settings, String> {
         output_colour_space: values
             .output_colour_space
             .unwrap_or(Settings::DEFAULT.output_colour_space),
+        resource_storage: values.resource_storage.unwrap_or(Settings::DEFAULT.resource_storage),
     })
 }
 
@@ -120,6 +121,7 @@ pub fn settings_to_json_text(settings: Settings) -> String {
             display_transform: Some(settings.display_transform),
             working_colour_space: Some(settings.working_colour_space),
             output_colour_space: Some(settings.output_colour_space),
+            resource_storage: Some(settings.resource_storage),
         },
     };
     let mut text = serde_json::to_string_pretty(&document).expect("settings can always be written as JSON");
@@ -139,6 +141,7 @@ mod tests {
             display_transform: crate::project::DisplayTransform::Gamma24,
             working_colour_space: crate::project::WorkingColourSpace::AcesCg,
             output_colour_space: crate::project::OutputColourSpace::Srgb,
+            resource_storage: crate::project::ResourceStorage::Ask,
         }
     }
 
@@ -159,7 +162,8 @@ mod tests {
     "sped_up_clip_sound": "maintain_pitch",
     "display_transform": "srgb",
     "working_colour_space": "linear_rec709",
-    "output_colour_space": "rec709_as_previewed"
+    "output_colour_space": "rec709_as_previewed",
+    "resource_storage": "embed"
   }
 }
 "#

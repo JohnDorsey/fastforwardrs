@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use thiserror::Error;
 use zip::ZipArchive;
@@ -45,6 +46,10 @@ pub const PROJECT_ENTRY_NAME: &str = "project.fastforwardrs.json";
 
 /// What the names of the entries of included files begin with.
 const RESOURCES_FOLDER: &str = "resources/";
+
+/// What the names of the entries of the resources of the project (the files that its effects use) begin with. (Not the same folder: the source files that are included
+/// are numbered by the identifier of the source, and these by the CRC-32 of their bytes.)
+const PROJECT_RESOURCES_FOLDER: &str = "project-resources/";
 
 /// How long the name of an entry of an included file may be, in bytes (the most that a name of a file can be on most systems).
 const LONGEST_ENTRY_NAME_IN_BYTES: usize = 255;
@@ -82,13 +87,54 @@ pub enum ArchiveError {
     Stopped,
 }
 
+/// Where the bytes of a file to put in an archive are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileSource {
+    /// A file of its own, or a stretch of another (an archive that has it), which they are read from.
+    Location(MediaLocation),
+    /// Bytes that the program has in memory (a resource of the project).
+    Bytes(Arc<[u8]>),
+}
+
+impl FileSource {
+    /// How long the file is, as far as can be told (a file that cannot be found has none).
+    pub fn length(&self) -> u64 {
+        match self {
+            Self::Location(location) => location
+                .stretch()
+                .map(|stretch| stretch.length)
+                .or_else(|| fs::metadata(location.file()).ok().map(|metadata| metadata.len()))
+                .unwrap_or(0),
+            Self::Bytes(bytes) => bytes.len() as u64,
+        }
+    }
+}
+
+impl From<MediaLocation> for FileSource {
+    fn from(location: MediaLocation) -> Self {
+        Self::Location(location)
+    }
+}
+
+impl From<&Path> for FileSource {
+    fn from(path: &Path) -> Self {
+        Self::Location(path.into())
+    }
+}
+
+impl From<PathBuf> for FileSource {
+    fn from(path: PathBuf) -> Self {
+        Self::Location(path.into())
+    }
+}
+
 /// A file to put in an archive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileToInclude {
     /// The name of its entry (see [`resource_entry_name`]).
     pub entry_name: String,
-    /// Where its bytes are, which they are read from: a file of its own, or a stretch of another (an archive that has it).
-    pub source: MediaLocation,
+    /// Where its bytes are, which they are read from.
+    pub source: FileSource,
 }
 
 /// What an archive says about one of its entries, without taking it out.
@@ -242,6 +288,38 @@ pub fn is_a_resource_entry_name(name: &str) -> bool {
             .any(|character| character.is_control() || "/\\:*?\"<>|".contains(character))
 }
 
+/// The name of the entry for the resource of the project that is called `name` and has the bytes whose CRC-32 is `crc32`. **The CRC-32 is in it, so a resource that is
+/// changed is another entry**, and one that is not is the entry that an archive has already: a save adds only what is new.
+pub fn project_resource_entry_name(crc32: u32, name: &str) -> String {
+    // (The name of a resource has been checked as the name of a file, so it is a name that can be a part of an entry's; the length is what is left to see to.)
+    let number = crc32.to_string();
+    let room_for_the_name = LONGEST_ENTRY_NAME_IN_BYTES - PROJECT_RESOURCES_FOLDER.len() - number.len() - 1;
+    let mut cleaned = name.to_owned();
+    while cleaned.len() > room_for_the_name {
+        let first_character_length = cleaned.chars().next().map_or(1, char::len_utf8);
+        cleaned.drain(..first_character_length);
+    }
+    format!("{PROJECT_RESOURCES_FOLDER}{number}-{cleaned}")
+}
+
+/// Whether `name` is a name that [`project_resource_entry_name`] could have made. (A project file that is read is not to be believed about what an entry is called.)
+pub fn is_a_project_resource_entry_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(PROJECT_RESOURCES_FOLDER) else {
+        return false;
+    };
+    let Some((number, file_name)) = rest.split_once('-') else {
+        return false;
+    };
+    name.len() <= LONGEST_ENTRY_NAME_IN_BYTES
+        && number.parse::<u32>().is_ok()
+        && !file_name.is_empty()
+        && file_name != "."
+        && file_name != ".."
+        && !file_name
+            .chars()
+            .any(|character| character.is_control() || "/\\:*?\"<>|".contains(character))
+}
+
 /// The name that the file of a resource entry had: what is after the number and the dash. `None` if `name` is not the name
 /// of an entry of a resource.
 pub fn file_name_of_a_resource_entry(name: &str) -> Option<&str> {
@@ -272,6 +350,18 @@ impl Opened {
         }
     }
 
+    /// The bytes of `source`: all of a file, the stretch of one that it is, or bytes in memory.
+    fn of(source: &FileSource) -> io::Result<Self> {
+        match source {
+            FileSource::Location(location) => Self::at(location),
+            FileSource::Bytes(bytes) => Ok(Self {
+                length: bytes.len() as u64,
+                reader: Box::new(Cursor::new(bytes.clone())),
+                known_crc: Some(crc32fast::hash(bytes)),
+            }),
+        }
+    }
+
     /// The bytes at `location`: all of a file, or the stretch of one that it is.
     fn at(location: &MediaLocation) -> io::Result<Self> {
         let mut file = File::open(location.file())?;
@@ -297,8 +387,11 @@ fn open_what_is_to_be_written(
 ) -> Result<Vec<(String, Opened)>, ArchiveError> {
     let mut opened = vec![(PROJECT_ENTRY_NAME.to_owned(), Opened::text(project_text))];
     for included in files {
-        let source = Opened::at(&included.source).map_err(|source| ArchiveError::CouldNotRead {
-            path: included.source.file().to_owned(),
+        let source = Opened::of(&included.source).map_err(|source| ArchiveError::CouldNotRead {
+            path: match &included.source {
+                FileSource::Location(location) => location.file().to_owned(),
+                FileSource::Bytes(_) => PathBuf::from(&included.entry_name),
+            },
             source,
         })?;
         opened.push((included.entry_name.clone(), source));
@@ -573,6 +666,38 @@ pub fn read_project_text(archive: &Path) -> Result<String, ArchiveError> {
             reason: format!("the project in it could not be read: {error}"),
         })?;
     Ok(text)
+}
+
+/// The bytes of the entry `entry_name` of the archive at `archive`, which is at most `most_bytes` long (a longer one is an error: it is not read). The CRC-32 of what was
+/// read is checked against the archive's.
+pub fn read_entry_bytes(archive: &Path, entry_name: &str, most_bytes: usize) -> Result<Vec<u8>, ArchiveError> {
+    let mut zip = open_archive(archive)?;
+    let entry = zip.by_name(entry_name).map_err(|error| match error {
+        ZipError::FileNotFound => ArchiveError::NoSuchEntry {
+            path: archive.to_owned(),
+            entry_name: entry_name.to_owned(),
+        },
+        other => unreadable(archive, &other),
+    })?;
+    if entry.size() > most_bytes as u64 {
+        return Err(ArchiveError::Unreadable {
+            path: archive.to_owned(),
+            reason: format!(
+                "\"{entry_name}\" in it is {} bytes long, which is more than {most_bytes}",
+                entry.size()
+            ),
+        });
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
+    // (A damaged file is found out at the end of it, where the zip file's check of it is made: that is an error of reading.)
+    entry
+        .take(most_bytes as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| ArchiveError::Unreadable {
+            path: archive.to_owned(),
+            reason: format!("\"{entry_name}\" in it is damaged: {error}"),
+        })?;
+    Ok(bytes)
 }
 
 /// Takes the entry `entry_name` out of the archive at `archive` and puts it in a file at `destination`, which is replaced if it is

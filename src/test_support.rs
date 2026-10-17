@@ -56,6 +56,17 @@ pub fn the_descriptor_of_an_effect_the_program_does_not_have(
     }
 }
 
+/// The kind of an effect that the program does not have and that uses a resource: `test:uses_a_table`, with one value, `table`, which is the name of a resource of the
+/// kind `cube` (words, with the control that wants a resource; it begins as nothing).
+pub fn a_kind_of_effect_that_uses_a_resource() -> EffectKind {
+    let mut descriptor = the_descriptor_of_an_effect_the_program_does_not_have(
+        "test:uses_a_table",
+        &[("table", PropertyValue::Words(String::new()))],
+    );
+    descriptor.parameters.to_mut()[0].control = crate::project::ParameterControl::Resource(Cow::Borrowed("cube"));
+    EffectKind::from_snapshot(descriptor).expect("the descriptor is one that can be used")
+}
+
 /// The kind of an effect that the program does not have (see [`the_descriptor_of_an_effect_the_program_does_not_have`]), made as a file's
 /// snapshot makes one.
 pub fn a_kind_of_effect_the_program_does_not_have(key: &str, values: &[(&str, PropertyValue)]) -> EffectKind {

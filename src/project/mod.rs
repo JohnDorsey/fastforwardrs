@@ -25,6 +25,8 @@ mod keyframe_copying;
 mod rack_editing;
 mod rack_merging;
 mod racks;
+mod resource_editing;
+mod resources;
 mod settings;
 mod source_colour;
 mod source_media;
@@ -60,9 +62,14 @@ pub use rack_editing::{KeyframeDestination, KeyframeMove, RackDestination};
 pub use racks::{
     DrawerExtent, FrameRoom, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations,
 };
+pub use resources::{
+    MOST_BYTES_OF_A_RESOURCE, MOST_RESOURCES, Resource, ResourceKind, ResourceProblem, Resources,
+    why_not_the_name_of_a_resource,
+};
 pub use settings::{
-    AnySetting, DisplayTransform, OutputColourSpace, ProjectSettings, SETTINGS, Setting, SettingControlKind,
-    SettingValue, Settings, SpedUpClipSound, WorkingColourSpace,
+    AnySetting, DisplayTransform, HowToKeepAResource, OutputColourSpace, ProjectFileKind, ProjectSettings,
+    ResourceStorage, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
+    WorkingColourSpace,
 };
 pub use source_colour::InputColourOverride;
 pub use source_media::{
@@ -101,6 +108,8 @@ pub struct Project {
     next_group_number: u32,
     speed_indicator_layout: SpeedIndicatorLayout,
     settings: ProjectSettings,
+    /// The files that the effects use (see [`Resources`]), in the order they were added in.
+    resources: Resources,
     /// The frame rate the project was given, or `None` while it follows its first video (and has the
     /// rate of [`FRAME_RATE_WITHOUT_A_VIDEO`] until there is one).
     frame_rate: Option<FrameRate>,
@@ -258,6 +267,7 @@ impl Project {
             next_group_number: 0,
             speed_indicator_layout: SpeedIndicatorLayout::DEFAULT,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
+            resources: Resources::default(),
             frame_rate: None,
         };
         project.add_track_in_front();
@@ -335,6 +345,7 @@ impl Project {
             next_group_number: 0,
             speed_indicator_layout,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
+            resources: Resources::default(),
             frame_rate: None,
         }
         .with_groups(groups)?;
@@ -1096,6 +1107,8 @@ mod rack_merging_tests;
 mod rack_ordering_tests;
 #[cfg(test)]
 mod racks_tests;
+#[cfg(test)]
+mod resource_editing_tests;
 #[cfg(test)]
 mod source_colour_tests;
 #[cfg(test)]

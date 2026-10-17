@@ -170,6 +170,69 @@ impl OutputColourSpace {
     }
 }
 
+/// How a file that an effect uses (a `.cube` table of colours) is kept when it is added to a project (RS-02, RS-03): in the project file, or by a path. **It changes only the
+/// files that are added after it is changed** (a file that is in the project is kept as it is).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceStorage {
+    /// The file is put in the project file, so that the project can be moved with everything it uses. (A project that is a plain JSON file has no room for it: the file
+    /// is linked, and the program says so.)
+    #[default]
+    Embed,
+    /// The file stays where it is and the project remembers the path, as for a video.
+    Link,
+    /// The program asks each time.
+    Ask,
+}
+
+/// What the file of a project is, as far as keeping a resource in it goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectFileKind {
+    /// The project has not been saved: it will be saved as whichever the person chooses.
+    NotSavedYet,
+    /// An archive (a `.ffrs` file), which has room for files.
+    Archive,
+    /// Plain JSON, which has none.
+    PlainJson,
+}
+
+/// What is done with a file that is added to a project as a resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HowToKeepAResource {
+    /// It is put in the project file.
+    Embed,
+    /// It stays where it is and is linked by its path.
+    Link,
+    /// It is linked, because the project file is plain JSON and cannot have it in it; the person is told so, and asked once whether to save the project as a `.ffrs` file.
+    LinkBecauseTheFileIsPlainJson,
+    /// The person is asked which of the others.
+    Ask,
+}
+
+impl ResourceStorage {
+    pub const ALL: [Self; 3] = [Self::Embed, Self::Link, Self::Ask];
+
+    /// What to do with a file that is added as a resource, by this setting, to a project whose file is `file` (RS-02, Q-03). **A project that is plain JSON cannot embed**, so
+    /// where the setting says to embed it links, and says so.
+    pub fn how_to_keep(self, file: ProjectFileKind) -> HowToKeepAResource {
+        match (self, file) {
+            (Self::Ask, _) => HowToKeepAResource::Ask,
+            (Self::Link, _) => HowToKeepAResource::Link,
+            (Self::Embed, ProjectFileKind::PlainJson) => HowToKeepAResource::LinkBecauseTheFileIsPlainJson,
+            (Self::Embed, ProjectFileKind::NotSavedYet | ProjectFileKind::Archive) => HowToKeepAResource::Embed,
+        }
+    }
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Embed => "Embed in the project file",
+            Self::Link => "Link to the file",
+            Self::Ask => "Ask each time",
+        }
+    }
+}
+
 /// A value for every setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -185,6 +248,8 @@ pub struct Settings {
     pub working_colour_space: WorkingColourSpace,
     /// What the numbers of the exported video are.
     pub output_colour_space: OutputColourSpace,
+    /// How the files that effects use are kept when they are added.
+    pub resource_storage: ResourceStorage,
 }
 
 impl Settings {
@@ -195,6 +260,7 @@ impl Settings {
         display_transform: DisplayTransform::Srgb,
         working_colour_space: WorkingColourSpace::LinearRec709,
         output_colour_space: OutputColourSpace::Rec709AsPreviewed,
+        resource_storage: ResourceStorage::Embed,
     };
 }
 
@@ -212,6 +278,7 @@ pub struct ProjectSettings {
     pub display_transform: Option<DisplayTransform>,
     pub working_colour_space: Option<WorkingColourSpace>,
     pub output_colour_space: Option<OutputColourSpace>,
+    pub resource_storage: Option<ResourceStorage>,
 }
 
 impl ProjectSettings {
@@ -222,6 +289,7 @@ impl ProjectSettings {
         display_transform: None,
         working_colour_space: None,
         output_colour_space: None,
+        resource_storage: None,
     };
 
     /// The settings in effect for the project: its own where it has set them, the global ones
@@ -233,6 +301,7 @@ impl ProjectSettings {
             display_transform: self.display_transform.unwrap_or(global.display_transform),
             working_colour_space: self.working_colour_space.unwrap_or(global.working_colour_space),
             output_colour_space: self.output_colour_space.unwrap_or(global.output_colour_space),
+            resource_storage: self.resource_storage.unwrap_or(global.resource_storage),
         }
     }
 }
@@ -297,6 +366,15 @@ impl SettingValue for OutputColourSpace {
 
     fn label(self) -> &'static str {
         OutputColourSpace::label(self)
+    }
+}
+
+impl SettingValue for ResourceStorage {
+    const ALL: &'static [Self] = &ResourceStorage::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        ResourceStorage::label(self)
     }
 }
 
@@ -395,13 +473,20 @@ const OUTPUT_COLOUR_SPACE: Setting<OutputColourSpace> = Setting {
     project: |settings| &mut settings.output_colour_space,
 };
 
+const RESOURCE_STORAGE: Setting<ResourceStorage> = Setting {
+    label: "Files that effects use (tables of colours)",
+    global: |settings| &mut settings.resource_storage,
+    project: |settings| &mut settings.resource_storage,
+};
+
 /// Every setting, in the order the settings windows show them.
-pub static SETTINGS: [&dyn AnySetting; 5] = [
+pub static SETTINGS: [&dyn AnySetting; 6] = [
     &AUTOSAVE,
     &SPED_UP_CLIP_SOUND,
     &DISPLAY_TRANSFORM,
     &WORKING_COLOUR_SPACE,
     &OUTPUT_COLOUR_SPACE,
+    &RESOURCE_STORAGE,
 ];
 
 #[cfg(test)]
@@ -416,6 +501,7 @@ mod tests {
             display_transform: DisplayTransform::Gamma24,
             working_colour_space: WorkingColourSpace::AcesCg,
             output_colour_space: OutputColourSpace::Srgb,
+            resource_storage: ResourceStorage::Ask,
         }
     }
 
@@ -605,7 +691,67 @@ mod tests {
                 ("Display (how the screen shows colours)", SettingControlKind::Dropdown),
                 ("Working colour space", SettingControlKind::Dropdown),
                 ("Colour space of exported videos", SettingControlKind::Dropdown),
+                // (Added on purpose in phase 4: the setting for how the files that effects use are kept.)
+                (
+                    "Files that effects use (tables of colours)",
+                    SettingControlKind::Dropdown
+                ),
             ]
+        );
+    }
+
+    #[test]
+    fn a_new_resource_is_kept_as_the_setting_says_except_that_plain_json_has_no_room_to_embed_it() {
+        use HowToKeepAResource::{Ask, Embed, Link, LinkBecauseTheFileIsPlainJson};
+        use ProjectFileKind::{Archive, NotSavedYet, PlainJson};
+        for (storage, file, wanted) in [
+            (ResourceStorage::Embed, Archive, Embed),
+            (ResourceStorage::Embed, NotSavedYet, Embed),
+            (ResourceStorage::Embed, PlainJson, LinkBecauseTheFileIsPlainJson),
+            (ResourceStorage::Link, Archive, Link),
+            (ResourceStorage::Link, NotSavedYet, Link),
+            (ResourceStorage::Link, PlainJson, Link),
+            (ResourceStorage::Ask, Archive, Ask),
+            (ResourceStorage::Ask, NotSavedYet, Ask),
+            (ResourceStorage::Ask, PlainJson, Ask),
+        ] {
+            assert_eq!(storage.how_to_keep(file), wanted, "{storage:?} in {file:?}");
+        }
+    }
+
+    #[test]
+    fn files_that_effects_use_are_embedded_unless_someone_says_otherwise_and_the_project_can_say_otherwise_for_itself()
+    {
+        assert_eq!(Settings::DEFAULT.resource_storage, ResourceStorage::Embed);
+        assert_eq!(ResourceStorage::default(), ResourceStorage::Embed);
+        let labels: Vec<&str> = ResourceStorage::ALL.iter().map(|storage| storage.label()).collect();
+        assert_eq!(
+            labels,
+            ["Embed in the project file", "Link to the file", "Ask each time"]
+        );
+        let global = Settings {
+            resource_storage: ResourceStorage::Link,
+            ..Settings::DEFAULT
+        };
+        assert_eq!(
+            ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
+                .resolve(global)
+                .resource_storage,
+            ResourceStorage::Link,
+            "a project that says nothing follows the global setting"
+        );
+        let project = ProjectSettings {
+            resource_storage: Some(ResourceStorage::Ask),
+            ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
+        };
+        assert_eq!(
+            project.resolve(global).resource_storage,
+            ResourceStorage::Ask,
+            "the project's beats the global"
+        );
+        assert_eq!(
+            project.resolve(Settings::DEFAULT).resource_storage,
+            ResourceStorage::Ask
         );
     }
 

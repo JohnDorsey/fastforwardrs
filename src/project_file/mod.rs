@@ -18,6 +18,9 @@ mod groups;
 mod legacy;
 mod legacy_effects;
 mod relative_path;
+mod resources;
+
+pub use resources::{ResourceFileProblem, link_of_a_new_resource, read_a_resource_file};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -107,7 +110,8 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// the output colour space) that a project may have set for itself. A file of version 11 has none of them: the user said nothing, and the project follows the global
 /// colour settings. Version 13 added what the effects need to be chosen and shown (a `category` for a type of effect in its snapshot, and a `scale` and a `control` for a
 /// value of it), and the `enabled` flag of an effect (`false` for one that is switched off; left out when on). A file of version 12 has none of them: its effects are on, and its
-/// snapshots say nothing of how a value is shown.
+/// snapshots say nothing of how a value is shown. Version 13 also added the `resources` of the project (the files that its effects use, such as a table of colours): see
+/// `resources.rs`. A file of version 12 has none; and a setting for how they are kept, `resource_storage`, that a project may have set for itself.
 pub const FILE_FORMAT_VERSION: u32 = 13;
 
 /// The newest version that has the old layout.
@@ -171,15 +175,19 @@ enum FilesIncluded {
 pub fn read_project_file(path: &Path) -> Result<Project, ProjectFileError> {
     if archive::is_an_archive(path) {
         let text = archive::read_project_text(path)?;
-        let project = project_from_text(&text, FilesIncluded::Allowed)?;
+        let mut project = project_from_text(&text, FilesIncluded::Allowed)?;
         check_that_the_archive_has_the_files_included_in_it(path, &project)?;
+        resources::check_that_the_archive_has_the_entries(path, &project)?;
+        resources::load_the_bytes(&mut project, path, true)?;
         return Ok(project);
     }
     let text = fs::read_to_string(path).map_err(|source| ProjectFileError::CouldNotRead {
         path: path.to_owned(),
         source,
     })?;
-    project_from_json_text(&text)
+    let mut project = project_from_json_text(&text)?;
+    resources::load_the_bytes(&mut project, path, false)?;
+    Ok(project)
 }
 
 /// Saves a project to a file, replacing any file already there: an archive if the name ends in `.ffrs`, and plain JSON otherwise.
@@ -241,7 +249,7 @@ impl WritePlan {
             WhatToWrite::AddToTheArchive { new_files, .. } => new_files,
             WhatToWrite::CompactTheArchive { bytes_in_use } => return *bytes_in_use,
         };
-        files.iter().map(|file| length_of(&file.source)).sum()
+        files.iter().map(|file| file.source.length()).sum()
     }
 
     /// Writes it. `on_progress` is told how many bytes of files have been copied so far, and an error from it (of kind
@@ -289,15 +297,6 @@ pub fn plan_the_compaction(archive: &Path) -> Option<WritePlan> {
     })
 }
 
-/// How long the bytes at `location` are, as far as can be told (a file that cannot be found has none).
-fn length_of(location: &MediaLocation) -> u64 {
-    location
-        .stretch()
-        .map(|stretch| stretch.length)
-        .or_else(|| fs::metadata(location.file()).ok().map(|metadata| metadata.len()))
-        .unwrap_or(0)
-}
-
 /// Works out what writing `project` to `destination` is going to do (see [`write_project_file_including`]).
 pub fn plan_the_write(
     project: &Project,
@@ -318,8 +317,9 @@ pub fn plan_the_write(
         .iter()
         .filter(|source| source.link.is_included())
         .collect();
+    let included_resources = resources::entries_to_write(project)?;
     if !is_the_name_of_an_archive(destination) {
-        if !included_sources.is_empty() {
+        if !included_sources.is_empty() || !included_resources.is_empty() {
             return Err(ProjectFileError::IncludedFilesNeedAnArchive {
                 path: destination.to_owned(),
             });
@@ -339,21 +339,38 @@ pub fn plan_the_write(
             .iter()
             .cloned()
             .partition(|(entry_name, _)| state.entries.contains_key(entry_name));
-        let keep = in_it_already.into_iter().map(|(entry_name, _)| entry_name).collect();
-        WhatToWrite::AddToTheArchive {
-            keep,
-            new_files: files_to_include_in_an_archive(&not_yet, files)?,
-        }
+        let (resources_in_it_already, resources_not_yet): (Vec<_>, Vec<_>) = included_resources
+            .into_iter()
+            .partition(|(entry_name, _)| state.entries.contains_key(entry_name));
+        let keep = in_it_already
+            .into_iter()
+            .map(|(entry_name, _)| entry_name)
+            .chain(resources_in_it_already.into_iter().map(|(entry_name, _)| entry_name))
+            .collect();
+        let mut new_files = files_to_include_in_an_archive(&not_yet, files)?;
+        new_files.extend(files_of_the_resources(resources_not_yet));
+        WhatToWrite::AddToTheArchive { keep, new_files }
     } else {
-        WhatToWrite::ArchiveAnew {
-            files: files_to_include_in_an_archive(&entries, files)?,
-        }
+        let mut all = files_to_include_in_an_archive(&entries, files)?;
+        all.extend(files_of_the_resources(included_resources));
+        WhatToWrite::ArchiveAnew { files: all }
     };
     Ok(WritePlan {
         destination: absolute_destination,
         text,
         what,
     })
+}
+
+/// The files to put in an archive for the resources that are included: each its bytes, in memory.
+fn files_of_the_resources(entries: Vec<resources::EntryToWrite>) -> Vec<FileToInclude> {
+    entries
+        .into_iter()
+        .map(|(entry_name, bytes)| FileToInclude {
+            entry_name,
+            source: archive::FileSource::Bytes(bytes),
+        })
+        .collect()
 }
 
 /// The entry of each of the sources that are included. Their entries must be names that an archive has for the files included in it,
@@ -404,7 +421,7 @@ fn files_to_include_in_an_archive(
                 })?;
             Ok(FileToInclude {
                 entry_name: entry_name.clone(),
-                source: location.clone(),
+                source: location.clone().into(),
             })
         })
         .collect()
@@ -463,6 +480,14 @@ fn project_from_text(text: &str, files_included: FilesIncluded) -> Result<Projec
                 source.link.absolute_path.display()
             )));
         }
+    }
+    if files_included == FilesIncluded::NotAllowed
+        && let Some(resource) = project.resources().iter().find(|resource| resource.is_included())
+    {
+        return Err(invalid_project(format!(
+            "the resource \"{}\" is said to be included in the project file, and only a project file that is a .ffrs file can have files included in it",
+            resource.name()
+        )));
     }
     Ok(project)
 }
@@ -524,6 +549,7 @@ fn settings_from_document(document: Option<ProjectSettingsDocument>) -> ProjectS
             display_transform: settings.display_transform,
             working_colour_space: settings.working_colour_space,
             output_colour_space: settings.output_colour_space,
+            resource_storage: settings.resource_storage,
         }
     })
 }
@@ -837,6 +863,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
     let sources = document.sources.into_iter().map(source_from_document).collect();
     let group_count = document.groups.len();
     let kinds = KindsOfEffects::from_documents(document.plugins).map_err(invalid_project)?;
+    let resources = resources::from_documents(document.resources).map_err(invalid_project)?;
 
     // The clips are made first: the racks of keyframes may be of any clip of any track, and which clips there are, of what
     // kind, and how long each lasts is what the racks are checked against.
@@ -940,6 +967,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
         .map(|project| {
             project
                 .with_settings(settings_from_document(document.settings))
+                .with_resources(resources)
                 .with_frame_rate(document.frame_rate)
         })
         .map_err(|inconsistency| invalid_project(inconsistency.to_string()))
@@ -1085,6 +1113,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         file_format_version: FILE_FORMAT_VERSION,
         sources,
         plugins: plugin_documents_of(project),
+        resources: resources::documents_of(project, project_directory)?,
         tracks,
         groups,
         speed_indicator: SpeedIndicatorDocument {
@@ -1099,6 +1128,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
             display_transform: settings.display_transform,
             working_colour_space: settings.working_colour_space,
             output_colour_space: settings.output_colour_space,
+            resource_storage: settings.resource_storage,
         }),
         frame_rate: project.chosen_frame_rate(),
     })
@@ -1222,5 +1252,7 @@ mod groups_tests;
 mod included_files_tests;
 #[cfg(test)]
 mod plugins_tests;
+#[cfg(test)]
+mod resources_tests;
 #[cfg(test)]
 mod tests;

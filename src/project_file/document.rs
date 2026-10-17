@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use super::effects::{EffectDocument, PluginDocument};
 use crate::colour_space::{StandardPrimaries, TransferFunction, VideoMatrix, VideoRange};
 use crate::project::{
-    DisplayTransform, FrameRate, Gain, GroupColour, InputColourOverride, OutputColourSpace, SourceFrameIndex,
-    SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TrackHeight, WorkingColourSpace,
+    DisplayTransform, FrameRate, Gain, GroupColour, InputColourOverride, OutputColourSpace, ResourceStorage,
+    SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TrackHeight, WorkingColourSpace,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,6 +30,9 @@ pub(super) struct ProjectDocument {
     /// 11, which say what an effect is by its name (see `super::effects`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<PluginDocument>,
+    /// The files that the effects use (format 13 and after), each once. Left out when there are none, and in the files of versions before 13.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<ResourceDocument>,
     /// The tracks, the one in front first.
     pub tracks: Vec<TrackDocument>,
     /// The groups, in the order they were made in. A group is named in the rest of the file by its place in this list, counted from 0.
@@ -44,6 +47,28 @@ pub(super) struct ProjectDocument {
     /// files of versions before 5 (in which it always did).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_rate: Option<FrameRate>,
+}
+
+/// A file that the effects of the project use, and where it is kept (see `super::resources`).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ResourceDocument {
+    /// What the effects that use it call it: no two resources have one name.
+    pub name: String,
+    /// What kind of file it is: `"cube"`.
+    pub kind: String,
+    /// How many bytes it had when the project was saved, and the CRC-32 of them. Left out for a resource that was missing then (the program did not have its bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crc32: Option<u32>,
+    /// The name of the entry of the project file (an archive) that has it, if it is included. The two paths are then where it was when it was included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub included_as: Option<String>,
+    pub absolute_path: String,
+    /// Relative to the folder that has the project file. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
 }
 
 /// The settings a project has set for itself. A setting that follows the global one is not in the
@@ -67,6 +92,10 @@ pub(super) struct ProjectSettingsDocument {
     pub working_colour_space: Option<WorkingColourSpace>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_colour_space: Option<OutputColourSpace>,
+    /// How the files that effects use are kept when they are added (format 13 and after). Not there in the files of earlier versions, and not there for a setting that
+    /// follows the global one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_storage: Option<ResourceStorage>,
 }
 
 /// A file the project is made from.

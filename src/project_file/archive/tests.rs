@@ -1079,3 +1079,107 @@ fn writing_an_archive_again_stores_a_file_that_another_zip_program_compressed_an
     assert_eq!(read_project_text(&archive).unwrap(), "{\"a project\": 1}");
     assert_eq!(state.bytes_of_garbage, 0);
 }
+
+// --- the resources of a project, whose bytes are in memory ---
+
+#[test]
+fn the_entry_of_a_resource_of_the_project_is_made_of_the_checksum_and_the_name_and_is_a_name_that_is_checked() {
+    let name = project_resource_entry_name(crc32_of(b"table"), "Kodak 2383 D55.cube");
+    assert_eq!(
+        name,
+        format!("project-resources/{}-Kodak 2383 D55.cube", crc32_of(b"table"))
+    );
+    assert!(is_a_project_resource_entry_name(&name));
+    // The same name with other bytes is another entry, and the same bytes with another name too.
+    assert_ne!(
+        name,
+        project_resource_entry_name(crc32_of(b"another"), "Kodak 2383 D55.cube")
+    );
+    assert_ne!(name, project_resource_entry_name(crc32_of(b"table"), "Other.cube"));
+    // A name that is too long loses the beginning of its name and keeps its ending.
+    let long = format!("{}.cube", "n".repeat(300));
+    let cut = project_resource_entry_name(u32::MAX, &long);
+    assert!(cut.len() <= 255 && cut.ends_with(".cube"), "{cut}");
+    assert!(is_a_project_resource_entry_name(&cut));
+    for not in [
+        "",
+        "project-resources/",
+        "project-resources/5",
+        "project-resources/5-",
+        "project-resources/x-grade.cube",
+        "project-resources/-5-grade.cube",
+        "project-resources/4294967296-grade.cube",
+        "project-resources/5-../grade.cube",
+        "project-resources/5-a/b",
+        r"project-resources/5-a\b",
+        "project-resources/5-a?b",
+        "project-resources/5-a\u{0}b",
+        "project-resources/5-..",
+        "project-resources/5-.",
+        "resources/5-grade.cube",
+        "../project-resources/5-grade.cube",
+    ] {
+        assert!(!is_a_project_resource_entry_name(not), "{not:?}");
+    }
+    // And the names of the entries of the source files are not the names of these.
+    assert!(!is_a_project_resource_entry_name(&resource_entry_name(
+        identifier(5),
+        "grade.cube"
+    )));
+    assert!(!is_a_resource_entry_name(&name));
+}
+
+#[test]
+fn bytes_in_memory_are_written_as_an_entry_with_the_checksum_of_the_bytes_and_read_back_whole() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = folder.path().join("a.ffrs");
+    let contents: Arc<[u8]> = Arc::from(&b"LUT_3D_SIZE 2\n0 0 0\n1 1 1\n"[..]);
+    let entry = project_resource_entry_name(crc32_of(&contents), "grade.cube");
+
+    write_archive(
+        &archive,
+        "{}",
+        &[FileToInclude {
+            entry_name: entry.clone(),
+            source: FileSource::Bytes(contents.clone()),
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(read_entry_bytes(&archive, &entry, 1000).unwrap(), contents.to_vec());
+    let facts = facts_of_entry(&archive, &entry).unwrap();
+    assert_eq!(facts.size, contents.len() as u64);
+    assert_eq!(facts.crc32, crc32_of(&contents));
+    assert_eq!(FileSource::Bytes(contents.clone()).length(), contents.len() as u64);
+    // An entry that is bigger than the most is not read, and one that is not there is said not to be.
+    assert!(matches!(
+        read_entry_bytes(&archive, &entry, contents.len() - 1),
+        Err(ArchiveError::Unreadable { .. })
+    ));
+    assert_eq!(
+        read_entry_bytes(&archive, &entry, contents.len()).unwrap().len(),
+        contents.len()
+    );
+    assert!(matches!(
+        read_entry_bytes(&archive, "project-resources/1-gone.cube", 1000),
+        Err(ArchiveError::NoSuchEntry { .. })
+    ));
+}
+
+#[test]
+fn a_file_is_a_source_by_its_place_and_its_length_is_what_is_there() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("x.bin");
+    fs::write(&path, b"12345").unwrap();
+    assert_eq!(FileSource::from(path.clone()).length(), 5);
+    assert_eq!(FileSource::from(path.as_path()).length(), 5);
+    assert_eq!(
+        FileSource::from(MediaLocation::of_a_stretch_of(&path, 1, 3)).length(),
+        3
+    );
+    assert_eq!(
+        FileSource::from(folder.path().join("gone.bin")).length(),
+        0,
+        "(a file that cannot be found has none)"
+    );
+}
