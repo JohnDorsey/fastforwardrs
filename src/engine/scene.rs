@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use super::colour::FrameColour;
 
 /// The key of the effect that mixes colours with a 3 by 3 matrix: the nine numbers are the rows, one after the other (how much of the red, green
-/// and blue the new red is made of, then the new green, then the new blue). The mixed colour is cut off at 0 and 1.
+/// and blue the new red is made of, then the new green, then the new blue). The mixed colour is cut off at 0 and 1. **Three more numbers may follow the nine**: offsets
+/// that are added to the mixed colour, in the codes of the display-referred domain, before it is cut off (brightness and contrast need them).
 pub const COLOUR_MATRIX_KEY: &str = "engine:colour_matrix";
 
 /// The corners of a layer that is all of the picture: top left, top right, bottom right, bottom left, as fractions of the picture.

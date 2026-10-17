@@ -137,7 +137,7 @@ pub(super) fn guarded(source: &str, most_passes_of_a_loop: u32) -> GuardedShader
     guard_wgsl(source, most_passes_of_a_loop).unwrap_or_else(|problem| panic!("{problem}\n{source}"))
 }
 
-fn installed(renderer: &mut FrameRenderer, key: &str, source: &str) {
+pub(super) fn installed(renderer: &mut FrameRenderer, key: &str, source: &str) {
     renderer
         .install_effect(key, &guarded(source, DEFAULT_MOST_PASSES_OF_A_LOOP))
         .unwrap_or_else(|problem| panic!("{key}: {problem}"));

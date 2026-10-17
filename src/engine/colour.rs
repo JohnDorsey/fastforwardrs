@@ -158,6 +158,38 @@ impl DisplayDomainConversion {
     }
 }
 
+/// What the pass of the colour matrix does besides mixing with the matrix: the three numbers added to the mixed colour, and which of its three parts it does (see `parts`
+/// in `colour_matrix.wgsl`). A pass that is one of several in a row in the display-referred domain leaves out the conversions that its neighbours make unnecessary.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MixingParts {
+    pub offsets: [f32; 3],
+    pub converts_into_the_domain: bool,
+    pub converts_out_of_the_domain: bool,
+    pub mixes: bool,
+}
+
+impl MixingParts {
+    /// The usual pass: the conversions and the mixing, with offsets of nothing.
+    pub const ALL: Self = Self {
+        offsets: [0.0; 3],
+        converts_into_the_domain: true,
+        converts_out_of_the_domain: true,
+        mixes: true,
+    };
+
+    /// The number that says which parts are left out (`parts` in `colour_matrix.wgsl`).
+    pub fn left_out(&self) -> u32 {
+        u32::from(!self.converts_into_the_domain)
+            | u32::from(!self.converts_out_of_the_domain) << 1
+            | u32::from(!self.mixes) << 2
+    }
+
+    /// Writes the numbers that follow the curve of the domain in the slot, in the order of `struct Mixing` in `colour_matrix.wgsl`.
+    pub fn write(&self, writer: &mut SlotWriter) {
+        writer.vec3(self.offsets).u32(self.left_out());
+    }
+}
+
 /// The numbers of the pass that makes the frame: the conversion of the working space's light to the output's primaries, and the curve that the output's codes are made with.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OutputConversion {

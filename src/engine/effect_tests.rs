@@ -556,14 +556,17 @@ fn the_shader_has_its_matrix_where_the_writer_puts_the_numbers_and_the_struct_is
         .map(|member| (member.name.clone().unwrap(), member.offset))
         .collect();
     // (Rewritten on purpose in phase 3: after the matrix that mixes there are the two that take the light of the working space to the display-referred domain and back, and
-    // the number of the curve of the domain.)
+    // the number of the curve of the domain. And again in phase 4, piece 4.2: after those, the three offsets that are added to the mixed colour, and the number that says
+    // which parts of the pass are left out. The first four are where they were.)
     assert_eq!(
         members,
         vec![
             ("to_new".to_owned(), 0),
             ("into_domain".to_owned(), 48),
             ("out_of_domain".to_owned(), 96),
-            ("curve".to_owned(), 144)
+            ("curve".to_owned(), 144),
+            ("offsets".to_owned(), 160),
+            ("parts".to_owned(), 172),
         ]
     );
     assert_eq!(u64::from(*span), COLOUR_MATRIX_UNIFORM_BYTES);
@@ -574,9 +577,16 @@ fn the_shader_has_its_matrix_where_the_writer_puts_the_numbers_and_the_struct_is
         curve: 5,
     };
     let mut bytes = UniformBytes::new(256);
+    let parts = super::MixingParts {
+        offsets: [0.25, 0.5, 0.75],
+        converts_into_the_domain: false,
+        converts_out_of_the_domain: true,
+        mixes: false,
+    };
     let slot = bytes.add_slot(|writer| {
         writer.mat3x3_from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
         domain.write(writer);
+        parts.write(writer);
     });
     assert_eq!(u64::from(slot.size), COLOUR_MATRIX_UNIFORM_BYTES);
     let number = |offset: usize| f32::from_le_bytes(bytes.as_bytes()[offset..offset + 4].try_into().unwrap());
@@ -598,5 +608,15 @@ fn the_shader_has_its_matrix_where_the_writer_puts_the_numbers_and_the_struct_is
         u32::from_le_bytes(bytes.as_bytes()[144..148].try_into().unwrap()),
         5,
         "the curve of the domain, after them"
+    );
+    assert_eq!(
+        [number(160), number(164), number(168)],
+        [0.25, 0.5, 0.75],
+        "the offsets"
+    );
+    assert_eq!(
+        u32::from_le_bytes(bytes.as_bytes()[172..176].try_into().unwrap()),
+        0b101,
+        "the conversion into the domain and the mixing are left out, and the conversion out of it is not"
     );
 }

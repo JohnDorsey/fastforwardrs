@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use super::colour::{DisplayDomainConversion, IngestConversion, OutputConversion};
+use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, OutputConversion};
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_call};
 use super::guard::GuardedShader;
@@ -21,7 +21,7 @@ use super::pipelines::{
     RGB_TO_YUV_UNIFORM_BYTES, SENT_PICTURE_FORMAT,
 };
 use super::placement::PlacementUniforms;
-use super::plan::{EffectsThatRun, KindOfEffect, PassPlan, plan_frame};
+use super::plan::{EffectStep, EffectsThatRun, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan, plan_frame};
 use super::readback::{PendingReadback, ReadbackBuffers, ReadbackProblem};
 use super::texture_pool::{PoolStatistics, TexturePool, TextureShape};
 use super::uniform_arena::UniformArena;
@@ -557,8 +557,8 @@ impl FrameRenderer {
         // is the one the layer is put in its place from).
         let mut effect_pictures: Vec<(TextureShape, wgpu::Texture)> = Vec::new();
         let mut effect_picture_numbers: HashMap<usize, Vec<usize>> = HashMap::new();
-        for pass in &plan.passes {
-            let PassPlan::Effects { layer, calls } = pass else {
+        for (pass_number, pass) in plan.passes.iter().enumerate() {
+            let PassPlan::Effects { layer, .. } = pass else {
                 continue;
             };
             let LayerSource::Picture(id) = description.layers[*layer].source else {
@@ -574,7 +574,7 @@ impl FrameRenderer {
                 format: ACCUMULATION_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             };
-            let numbers = calls
+            let numbers = plan.steps_of_effects[pass_number]
                 .iter()
                 .map(|_| {
                     effect_pictures.push((shape, self.pool.acquire(&self.device.device, shape)));
@@ -597,27 +597,58 @@ impl FrameRenderer {
             // the plan, in its order: the slots of the effects it runs (none for the others); and, for the layers that are put in their places, each one's.
             let mut effect_slots: Vec<Vec<UniformSlot>> = Vec::with_capacity(plan.passes.len());
             let mut slots = Vec::new();
-            for pass in &plan.passes {
+            for (pass_number, pass) in plan.passes.iter().enumerate() {
                 match pass {
-                    PassPlan::Effects { layer, calls } => {
+                    PassPlan::Effects { layer, .. } => {
                         let effects = &description.layers[*layer].effects;
+                        let domain = DisplayDomainConversion::of(description.colour.working);
                         effect_slots.push(
-                            calls
+                            plan.steps_of_effects[pass_number]
                                 .iter()
-                                .map(|&call| {
-                                    let effect = &effects[call];
-                                    match self.effects_that_run.kind_of(&effect.key) {
-                                        Some(KindOfEffect::Shader) => self.uniforms.add_slot(|writer| {
-                                            write_the_numbers_of_a_call(writer, &effect.values);
-                                        }),
-                                        _ => {
-                                            let rows = colour_matrix_rows(&effect.values);
-                                            let domain = DisplayDomainConversion::of(description.colour.working);
-                                            self.uniforms.add_slot(|writer| {
-                                                writer.mat3x3_from_rows(rows);
-                                                domain.write(writer);
-                                            })
+                                .map(|step| match *step {
+                                    EffectStep::Call {
+                                        call,
+                                        converts_into_display,
+                                        converts_out_of_display,
+                                    } => {
+                                        let effect = &effects[call];
+                                        match self.effects_that_run.kind_of(&effect.key) {
+                                            Some(KindOfEffect::Shader) => self.uniforms.add_slot(|writer| {
+                                                write_the_numbers_of_a_call(writer, &effect.values);
+                                            }),
+                                            _ => {
+                                                let (rows, offsets) = colour_matrix_numbers(&effect.values);
+                                                let parts = MixingParts {
+                                                    offsets,
+                                                    converts_into_the_domain: converts_into_display,
+                                                    converts_out_of_the_domain: converts_out_of_display,
+                                                    mixes: true,
+                                                };
+                                                self.uniforms.add_slot(|writer| {
+                                                    writer.mat3x3_from_rows(rows);
+                                                    domain.write(writer);
+                                                    parts.write(writer);
+                                                })
+                                            }
                                         }
+                                    }
+                                    // (A pass of the colour matrix that only converts: it mixes nothing and cuts nothing off.)
+                                    EffectStep::Conversion { into_display } => {
+                                        let parts = MixingParts {
+                                            offsets: [0.0; 3],
+                                            converts_into_the_domain: into_display,
+                                            converts_out_of_the_domain: !into_display,
+                                            mixes: false,
+                                        };
+                                        self.uniforms.add_slot(|writer| {
+                                            writer.mat3x3_from_rows([
+                                                [1.0, 0.0, 0.0],
+                                                [0.0, 1.0, 0.0],
+                                                [0.0, 0.0, 1.0],
+                                            ]);
+                                            domain.write(writer);
+                                            parts.write(writer);
+                                        })
                                     }
                                 })
                                 .collect(),
@@ -667,7 +698,7 @@ impl FrameRenderer {
                             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         ));
                     }
-                    PassPlan::Effects { layer, calls } => {
+                    PassPlan::Effects { layer, .. } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with effects has uniforms");
                         let LayerSource::Picture(id) = description.layers[*layer].source else {
                             continue;
@@ -678,12 +709,17 @@ impl FrameRenderer {
                             .get(id)
                             .expect("the pictures of the frame are on the card")
                             .view;
-                        for ((slot, &picture_number), &call) in effect_slots[pass_number]
+                        for ((slot, &picture_number), step) in effect_slots[pass_number]
                             .iter()
                             .zip(&effect_picture_numbers[layer])
-                            .zip(calls)
+                            .zip(&plan.steps_of_effects[pass_number])
                         {
-                            let effect = &description.layers[*layer].effects[call];
+                            let kind = match *step {
+                                EffectStep::Call { call, .. } => self
+                                    .effects_that_run
+                                    .kind_of(&description.layers[*layer].effects[call].key),
+                                EffectStep::Conversion { .. } => Some(KindOfEffect::ColourMatrix),
+                            };
                             let uniform_binding = wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -697,9 +733,9 @@ impl FrameRenderer {
                                 resource: wgpu::BindingResource::TextureView(input_view),
                             };
                             // (The effect that mixes colours reads its picture with no sampler; one that a shader runs also has the sampler of the effects.)
-                            let (pipeline, bind_group, label) = match self.effects_that_run.kind_of(&effect.key) {
+                            let (pipeline, bind_group, label) = match kind {
                                 Some(KindOfEffect::Shader) => (
-                                    &self.shader_effects[&effect.key],
+                                    &self.shader_effects[&description.layers[*layer].effects[step_call(step)].key],
                                     self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
                                         label: Some("engine effect pass"),
                                         layout: &self.pipelines.foreign_effect.bind_group_layout,
@@ -985,13 +1021,27 @@ fn planes_from_the_textures(width: u32, height: u32, brightness: Vec<u8>, side_b
 }
 
 /// The three rows of the matrix of an effect that mixes colours, from its nine numbers (the plan only lets one through that has nine).
-fn colour_matrix_rows(values: &[f32]) -> [[f32; 3]; 3] {
-    debug_assert_eq!(values.len(), 9);
-    [
+/// The rows and the offsets that the nine or twelve numbers of a call of the colour matrix are (the offsets of one with nine are nothing).
+fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
+    debug_assert!(NUMBERS_OF_A_COLOUR_MATRIX.contains(&values.len()));
+    let rows = [
         [values[0], values[1], values[2]],
         [values[3], values[4], values[5]],
         [values[6], values[7], values[8]],
-    ]
+    ];
+    let offsets = match values {
+        [.., red, green, blue] if values.len() == 12 => [*red, *green, *blue],
+        _ => [0.0; 3],
+    };
+    (rows, offsets)
+}
+
+/// The number of the effect that a step runs. (Only asked of the steps that call a shader.)
+fn step_call(step: &EffectStep) -> usize {
+    match step {
+        EffectStep::Call { call, .. } => *call,
+        EffectStep::Conversion { .. } => unreachable!("a conversion is not run by a shader"),
+    }
 }
 
 /// The shape of the texture that a picture is kept in on the card: premultiplied, in half floats, to be read by the passes of a frame and drawn into by the pass

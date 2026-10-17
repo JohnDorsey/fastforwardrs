@@ -37,9 +37,9 @@ pub const INGEST_UNIFORM_BYTES: u64 = 64;
 /// How many bytes the uniforms of the last pass take up (see `output.wgsl`): the same as the pass before it.
 pub const OUTPUT_UNIFORM_BYTES: u64 = 64;
 
-/// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): three 3 by 3 matrices, three columns of 16 bytes each, and the number
-/// of the curve, in a struct that is a multiple of 16.
-pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 160;
+/// How many bytes the uniforms of the effect that mixes colours take up (see `colour_matrix.wgsl`): three 3 by 3 matrices, three columns of 16 bytes each, the number
+/// of the curve, the three offsets and the number that says which parts are left out, in a struct that is a multiple of 16.
+pub const COLOUR_MATRIX_UNIFORM_BYTES: u64 = 176;
 
 /// The format of the planes of a video picture, which are sent as they are.
 pub const PLANE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;

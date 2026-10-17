@@ -58,6 +58,8 @@ mod chroma_tests;
 #[cfg(test)]
 mod colour_tests;
 #[cfg(test)]
+mod domain_tests;
+#[cfg(test)]
 mod effect_tests;
 #[cfg(test)]
 mod encoded_planes_tests;
@@ -83,8 +85,8 @@ mod planes_out_tests;
 mod yuv_tests;
 
 pub use colour::{
-    ColourDomain, DisplayDomainConversion, FrameColour, IngestConversion, OutputConversion, OutputEncoding,
-    PictureColour, WorkingSpace,
+    ColourDomain, DisplayDomainConversion, FrameColour, IngestConversion, MixingParts, OutputConversion,
+    OutputEncoding, PictureColour, WorkingSpace,
 };
 pub use device::{
     AdapterChoice, DeviceError, DeviceTrouble, EngineDevice, TESTS_MAY_USE_ANY_ADAPTER_VARIABLE,
@@ -98,7 +100,10 @@ pub use guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader, ShaderProblem, cap
 pub use handle::{EffectShaderReport, Engine};
 pub use messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 pub use pictures::{PictureData, PicturePixels, PictureProblem};
-pub use plan::{EffectsThatRun, FramePlan, KindOfEffect, PassPlan, plan_frame};
+pub use plan::{
+    CallDomain, EffectStep, EffectToRun, EffectsThatRun, FramePlan, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan,
+    plan_frame, steps_of_a_run_of_effects,
+};
 pub use quality::{PreviewScale, QualityGovernor, QualityRules};
 pub use scene::{
     COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameDescription, LayerDescription, LayerSource,
