@@ -315,3 +315,24 @@ fn a_value_in_a_place_the_effect_has_no_value_in_is_not_a_value_of_it_and_is_not
     assert!(!chain.set_value(nowhere, &degrees(10.0)));
     assert!(!chain.has_the_value(nowhere));
 }
+
+#[test]
+fn an_effect_is_switched_on_when_it_is_put_on_and_a_change_of_a_value_does_not_switch_it() {
+    let mut chain = Effects::none();
+    let instance = chain.add(EffectKind::HUE_SHIFT);
+    assert!(chain.instance(instance).unwrap().is_enabled());
+
+    assert!(chain.set_enabled(instance, false));
+    let property = PropertyId::effect_value(EffectKind::HUE_SHIFT, instance, 0);
+    assert!(chain.set_value(property, &degrees(45.0)));
+
+    assert!(
+        !chain.instance(instance).unwrap().is_enabled(),
+        "a value that is changed leaves it off"
+    );
+    assert!(
+        !chain.set_enabled(EffectInstanceId::new(9), true),
+        "there is no such effect"
+    );
+    assert!(Effect::new(EffectKind::HUE_SHIFT).with_enabled(false) != Effect::new(EffectKind::HUE_SHIFT));
+}

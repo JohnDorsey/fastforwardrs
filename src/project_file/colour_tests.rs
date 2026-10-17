@@ -140,11 +140,11 @@ fn project_of_a_video_a_picture_and_a_sound() -> Project {
 }
 
 #[test]
-fn this_build_writes_version_12() {
+fn this_build_writes_a_version_that_has_the_colours_of_the_source_files() {
     // (The colours of the source files are the change that makes version 12; so are the three colour settings, which version 11 files do not have: an older program
     // that was given a file of version 12 says that the file is from a newer version, and does not fail on a field it has not heard of.)
-    assert_eq!(FILE_FORMAT_VERSION, 12);
-    assert!(saved(&edited_project(link_to_missing_video())).contains(&version_line(12)));
+    // (Rewritten on purpose in phase 4: the version is 13 now, which has all of version 12 and the shown-ness of the effects; what version 12 added is held by the tests below.)
+    assert!(saved(&edited_project(link_to_missing_video())).contains(&version_line(FILE_FORMAT_VERSION)));
 }
 
 #[test]
@@ -169,14 +169,14 @@ fn a_file_of_version_11_loads_as_one_in_which_the_user_said_nothing_of_any_colou
 }
 
 #[test]
-fn a_file_of_version_11_that_is_loaded_and_saved_is_the_same_file_with_the_version_12_line() {
+fn a_file_of_version_11_that_is_loaded_and_saved_is_the_same_file_with_the_current_version_line() {
     let project = project_from_json_text(A_FILE_OF_VERSION_11).unwrap();
 
     let again = project_to_json_text(&project, Path::new("/projects")).unwrap();
 
     assert_eq!(
         again,
-        A_FILE_OF_VERSION_11.replace(&version_line(11), &version_line(12)),
+        A_FILE_OF_VERSION_11.replace(&version_line(11), &version_line(FILE_FORMAT_VERSION)),
         "nothing is added to a file for a colour that nobody said"
     );
 }

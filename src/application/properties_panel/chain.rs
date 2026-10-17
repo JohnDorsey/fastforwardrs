@@ -17,8 +17,8 @@ use egui::{CornerRadius, Popup, Rect, Response, RichText, Stroke, Ui, pos2, vec2
 use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
-    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, NOT_INSTALLED_NOTE, effects_to_offer, show_the_control_of,
-    show_the_control_of_a_group_effect,
+    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, NOT_INSTALLED_NOTE, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
+    SWITCHED_OFF_NOTE, effects_to_offer, show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -134,6 +134,7 @@ fn show_an_effect(
 ) -> DrawnRow {
     let kind = effect.kind();
     let mut to_be_deleted = false;
+    let mut to_be_switched = false;
     let title = chain.map_or_else(
         || what_an_effect_is_called(kind),
         |chain| what_an_effect_in_a_chain_is_called(chain, effect),
@@ -142,6 +143,15 @@ fn show_an_effect(
         ui,
         &title,
         |ui| {
+            let label = if effect.is_enabled() {
+                SWITCH_EFFECT_OFF_LABEL
+            } else {
+                SWITCH_EFFECT_ON_LABEL
+            };
+            if ui.button(label).clicked() {
+                to_be_switched = true;
+                ui.close();
+            }
             if ui.button(DELETE_EFFECT_LABEL).clicked() {
                 to_be_deleted = true;
                 ui.close();
@@ -150,6 +160,9 @@ fn show_an_effect(
         |ui| {
             if !kind.is_installed() {
                 ui.label(RichText::new(NOT_INSTALLED_NOTE).weak());
+            }
+            if !effect.is_enabled() {
+                ui.label(RichText::new(SWITCHED_OFF_NOTE).weak());
             }
             for property in effect.properties() {
                 match owner {
@@ -168,6 +181,13 @@ fn show_an_effect(
     );
     if to_be_deleted {
         commands.push(command_that_takes_off(owner, effect.instance()));
+    }
+    if to_be_switched {
+        commands.push(Command::SetEffectEnabled {
+            owner,
+            instance: effect.instance(),
+            enabled: !effect.is_enabled(),
+        });
     }
     draw_grip_dots(
         ui.painter(),

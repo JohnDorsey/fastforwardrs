@@ -17,9 +17,10 @@ use crate::test_support::a_kind_of_effect_the_program_does_not_have;
 fn the_snapshot_of_the_hue_shift() -> Value {
     json!({
         "key": "builtin:hue_shift",
-        "version": [1, 0],
+        "version": [1, 1],
         "name": "hue shift",
         "description": "Turns the colours round the wheel of colours",
+        "category": "Colour",
         "domain": "picture",
         "changes_each_pixel_by_itself": true,
         "params": [{
@@ -41,7 +42,7 @@ fn a_snapshot_of(key: &str) -> Value {
         "changes_each_pixel_by_itself": true,
         "params": [
             {"id": "amount", "name": "amount", "label": "Amount", "type": "number", "default": 0.5,
-             "range": [0.0, 1.0], "decimals": 2, "scale": "logarithmic"},
+             "range": [0.0, 1.0], "decimals": 2, "easing": "logarithmic"},
             {"id": "point", "name": "point", "label": "Point", "type": "pair", "default": [0.5, 0.25]},
             {"id": "tint", "name": "tint", "label": "Tint", "type": "colour", "default": "#FF8000FF"},
             {"id": "on", "name": "on", "label": "On", "type": "flag", "default": true},
@@ -137,7 +138,7 @@ fn the_file_with_effects_of_a_type_the_program_does_not_have(key: &str) -> Strin
             {"effect": key, "version": [2, 3], "instance": 0,
              "values": {"amount": 0.75, "tint": "#102030FF", "caption": "bye", "point": [0.0, 1.0], "on": false},
              "state": {"seed": 4}},
-            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 1}
+            {"effect": "builtin:hue_shift", "version": [1, 1], "instance": 1}
         ]);
         file["tracks"][2]["clips"][0]["drawer"] = json!([
             {"property": "amount", "effect": 0, "keyframes": [{"frame": 10, "value": 0.25}, {"frame": 30, "value": 0.75}]}
@@ -183,7 +184,7 @@ fn an_effect_of_a_type_the_program_does_not_have_is_kept_with_its_values_and_key
         "and of its type"
     );
     assert_eq!(
-        foreign.kind().parameters()[0].unknown_fields.fields().get("scale"),
+        foreign.kind().parameters()[0].unknown_fields.fields().get("easing"),
         Some(&json!("logarithmic")),
         "and of a value of it"
     );
@@ -366,7 +367,7 @@ fn a_snapshot_of_the_hue_shift_of_another_minor_version_that_has_nothing_the_pro
         json!([the_snapshot_of_the_hue_shift()]),
         "it is written as the program has it now"
     );
-    assert_eq!(written["tracks"][2]["clips"][0]["effects"][0]["version"], json!([1, 0]));
+    assert_eq!(written["tracks"][2]["clips"][0]["effects"][0]["version"], json!([1, 1]));
 }
 
 #[test]
@@ -563,7 +564,7 @@ fn a_rack_that_names_a_value_the_effect_has_not_is_refused_by_the_id() {
 fn a_value_that_a_snapshot_does_not_name_or_label_is_named_by_its_id_and_labelled_by_its_name() {
     let key = "isf:names_and_labels";
     let snapshot = json!({
-        "key": key, "version": [1, 0], "name": "names and labels", "domain": "picture",
+        "key": key, "version": [1, 1], "name": "names and labels", "domain": "picture",
         "params": [
             {"id": "plain", "type": "number", "default": 1.0},
             {"id": "named", "name": "what it is called", "type": "number", "default": 2.0},
@@ -571,7 +572,7 @@ fn a_value_that_a_snapshot_does_not_name_or_label_is_named_by_its_id_and_labelle
         ]
     });
     let text = the_file_with_a_snapshot_and(snapshot, |file| {
-        file["tracks"][1]["effects"] = json!([{"effect": key, "version": [1, 0], "instance": 0}]);
+        file["tracks"][1]["effects"] = json!([{"effect": key, "version": [1, 1], "instance": 0}]);
     });
 
     let project = project_from_json_text(&text).unwrap();

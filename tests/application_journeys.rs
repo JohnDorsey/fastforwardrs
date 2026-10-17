@@ -1649,7 +1649,7 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
     let (text_of_file, saved) = read_project_file_as_json(&project_path);
     assert_eq!(
         saved["tracks"][0]["clips"][0]["effects"],
-        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0, "values": {"degrees": 120.0}}]),
+        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 1], "instance": 0, "values": {"degrees": 120.0}}]),
         "{text_of_file}"
     );
     let mut fresh = Journey::start(&toolchain);

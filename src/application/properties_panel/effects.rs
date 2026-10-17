@@ -25,6 +25,11 @@ pub const ADD_EFFECT_LABEL: &str = "Add an effect";
 /// What the item of the menu of a box of an effect that deletes the effect is called.
 pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
 
+/// What the items of the menu of a box of an effect that switch it off (bypass it) and on say, and what the box says while it is off.
+pub const SWITCH_EFFECT_OFF_LABEL: &str = "Switch off";
+pub const SWITCH_EFFECT_ON_LABEL: &str = "Switch on";
+pub const SWITCHED_OFF_NOTE: &str = "Switched off: it is not done, and its values and keyframes are kept.";
+
 /// What the box of an effect that the program does not have says (a project file can bring one): that it does nothing, and that nothing of it is
 /// lost.
 pub const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";

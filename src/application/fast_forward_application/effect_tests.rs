@@ -15,7 +15,8 @@ use super::undo_tests::{redo, undo};
 use crate::application::commands::Command;
 use crate::application::naming::what_an_effect_is_called;
 use crate::application::properties_panel::{
-    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, KeyframeButton, keyframe_button_label,
+    ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, KeyframeButton, SWITCH_EFFECT_OFF_LABEL, SWITCHED_OFF_NOTE,
+    keyframe_button_label,
 };
 use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::project::{
@@ -1094,4 +1095,67 @@ fn a_value_that_is_not_a_number_has_no_stopwatch_and_a_number_that_has_a_unit_sh
         units_in_the_row.iter().any(|text| text == "°"),
         "the hue shift is in degrees, and says so: {units_in_the_row:?}"
     );
+}
+
+// --- switching an effect off and on ---
+
+#[test]
+fn the_menu_of_the_box_of_an_effect_switches_it_off_and_on_each_a_step_of_the_history_and_the_box_says_when_it_is_off()
+{
+    let (mut window, video) = window_with_the_video_selected();
+    window.do_this(Command::AddEffect {
+        target: clip(video),
+        kind: EffectKind::HUE_SHIFT,
+    });
+    window.do_this(Command::SetEffectValue {
+        target: clip(video),
+        property: HUE,
+        value: turn(30.0),
+    });
+    window.application_mut().note_everything_is_saved();
+    let enabled = |window: &Window| {
+        window
+            .application()
+            .project()
+            .effects_of(clip(video))
+            .unwrap()
+            .instance(EffectInstanceId::FIRST)
+            .unwrap()
+            .is_enabled()
+    };
+    let heading = || what_an_effect_is_called(EffectKind::HUE_SHIFT);
+
+    // (The words themselves: they are what a person reads.)
+    assert_eq!(SWITCH_EFFECT_OFF_LABEL, "Switch off");
+    window.right_click(window.rectangle_of(&heading()).center());
+    assert!(is_shown(&window, "Switch off"));
+    assert!(!is_shown(&window, "Switch on"), "it is on");
+    assert!(enabled(&window), "opening a menu changes nothing");
+    let item = window.rectangle_of("Switch off").center();
+    window.click(item);
+
+    assert!(!enabled(&window));
+    assert!(window.application().has_unsaved_changes());
+    assert_eq!(
+        value_at(&window, clip(video), 0),
+        Some(turn(30.0)),
+        "its values are kept"
+    );
+    assert!(is_shown(&window, TURN), "and its box is there");
+    assert!(is_shown(&window, SWITCHED_OFF_NOTE), "and says that it is off");
+
+    window.right_click(window.rectangle_of(&heading()).center());
+    assert!(is_shown(&window, "Switch on"));
+    assert!(!is_shown(&window, "Switch off"));
+    let item = window.rectangle_of("Switch on").center();
+    window.click(item);
+    assert!(enabled(&window));
+    assert!(!is_shown(&window, SWITCHED_OFF_NOTE));
+
+    undo(&mut window);
+    assert!(!enabled(&window), "switching it on was a step");
+    undo(&mut window);
+    assert!(enabled(&window), "and so was switching it off");
+    redo(&mut window);
+    assert!(!enabled(&window));
 }

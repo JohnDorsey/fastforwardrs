@@ -204,6 +204,13 @@ impl FastForwardApplication {
                 let _ = self.document.project.remove_effect(target, instance);
                 self.interface.selection.forget_what_is_gone(&self.document.project);
             }
+            Command::SetEffectEnabled {
+                owner,
+                instance,
+                enabled,
+            } => {
+                let _ = self.document.project.set_effect_enabled(owner, instance, enabled);
+            }
             Command::SetEffectValue {
                 target,
                 property,

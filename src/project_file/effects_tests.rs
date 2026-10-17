@@ -42,7 +42,7 @@ fn effects_are_saved_with_the_key_of_the_effect_and_the_values_it_has_when_they_
  {
     let file: serde_json::Value = serde_json::from_str(&saved(&project_with_everything())).unwrap();
     let hue_shift = |extra: serde_json::Value| {
-        let mut effect = serde_json::json!({"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0});
+        let mut effect = serde_json::json!({"effect": "builtin:hue_shift", "version": [1, 1], "instance": 0});
         effect
             .as_object_mut()
             .unwrap()
@@ -468,6 +468,7 @@ fn an_effect_that_what_it_is_on_cannot_have_is_refused_whichever_effect_it_is() 
             version: None,
             instance: None,
             values: ValuesDocument::default(),
+            enabled: true,
             unknown: std::collections::BTreeMap::new(),
         }]
     };
@@ -519,9 +520,9 @@ fn several_effects_of_one_kind_are_saved_each_with_its_name_and_values_and_come_
     assert_eq!(
         file["tracks"][2]["clips"][0]["effects"],
         serde_json::json!([
-            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0},
-            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 1, "values": {"degrees": 60.0}},
-            {"effect": "builtin:hue_shift", "version": [1, 0], "instance": 2, "values": {"degrees": -45.0}}
+            {"effect": "builtin:hue_shift", "version": [1, 1], "instance": 0},
+            {"effect": "builtin:hue_shift", "version": [1, 1], "instance": 1, "values": {"degrees": 60.0}},
+            {"effect": "builtin:hue_shift", "version": [1, 1], "instance": 2, "values": {"degrees": -45.0}}
         ])
     );
     let loaded = project_from_json_text(&saved(&project)).unwrap();

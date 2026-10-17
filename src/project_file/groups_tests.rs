@@ -160,7 +160,7 @@ fn a_group_is_saved_with_its_kind_name_and_colour_and_what_is_in_it_by_where_it_
     );
     assert_eq!(
         groups[0]["effects"],
-        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0, "values": {"degrees": 45.0}}])
+        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 1], "instance": 0, "values": {"degrees": 45.0}}])
     );
 
     assert_eq!(groups[1]["kind"], "clip_group");
@@ -171,7 +171,7 @@ fn a_group_is_saved_with_its_kind_name_and_colour_and_what_is_in_it_by_where_it_
     );
     assert_eq!(
         groups[1]["effects"],
-        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 0], "instance": 0}])
+        serde_json::json!([{"effect": "builtin:hue_shift", "version": [1, 1], "instance": 0}])
     );
 
     assert_eq!(groups[2]["kind"], "track_group");
@@ -234,8 +234,8 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    // (Rewritten on purpose in phase 3: 12, the version that has the colours of the source files.)
-    assert_eq!(FILE_FORMAT_VERSION, 12);
+    // (Rewritten on purpose in phase 3: 13, the version that has the shown-ness of the effects.)
+    assert_eq!(FILE_FORMAT_VERSION, 13);
 }
 
 // --- the trip through the file ---

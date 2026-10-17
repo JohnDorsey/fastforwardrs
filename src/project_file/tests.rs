@@ -73,7 +73,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 12,
+  "file_format_version": 13,
   "sources": [
     {
       "kind": "video",

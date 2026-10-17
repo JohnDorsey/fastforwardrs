@@ -105,8 +105,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// version 11 as it was written while the effects were being named.) Version 12 added the colours: what the user says the colours of a source file are (`colour`
 /// of a video or a picture file, each part of it left out when it is automatic), and the three colour settings (the display transform, the working colour space and
 /// the output colour space) that a project may have set for itself. A file of version 11 has none of them: the user said nothing, and the project follows the global
-/// colour settings.
-pub const FILE_FORMAT_VERSION: u32 = 12;
+/// colour settings. Version 13 added what the effects need to be chosen and shown (a `category` for a type of effect in its snapshot, and a `scale` and a `control` for a
+/// value of it), and the `enabled` flag of an effect (`false` for one that is switched off; left out when on). A file of version 12 has none of them: its effects are on, and its
+/// snapshots say nothing of how a value is shown.
+pub const FILE_FORMAT_VERSION: u32 = 13;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1210,6 +1212,8 @@ mod animation_tests;
 mod colour_tests;
 #[cfg(test)]
 mod effects_tests;
+#[cfg(test)]
+mod format_13_tests;
 #[cfg(test)]
 mod groups_tests;
 #[cfg(test)]

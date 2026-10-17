@@ -206,6 +206,13 @@ pub enum Command {
         target: AnimationTarget,
         instance: EffectInstanceId,
     },
+    /// Switch an effect of a clip, a track or a group off (bypass it) or on (from the menu of its box): the one that is named `instance` in its chain. It stays
+    /// where it is with its values and keyframes.
+    SetEffectEnabled {
+        owner: Member,
+        instance: EffectInstanceId,
+        enabled: bool,
+    },
     /// Give a value of an effect of a clip or a track (a property of it) a value: at the playhead if it has keyframes, as for any
     /// property.
     SetEffectValue {
@@ -386,6 +393,7 @@ impl Command {
             | Self::SetClipDuration { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
+            | Self::SetEffectEnabled { .. }
             | Self::SetEffectValue { .. }
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }
@@ -500,6 +508,7 @@ impl Command {
             | Self::SetTextObject { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
+            | Self::SetEffectEnabled { .. }
             | Self::SetEffectValue { .. }
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }

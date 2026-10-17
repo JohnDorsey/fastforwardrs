@@ -31,7 +31,10 @@ mod descriptor;
 mod kind;
 
 pub use built_in::HUE_SHIFT_KEY;
-pub use descriptor::{EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterDescriptor, UnknownFields};
+pub use descriptor::{
+    ChoiceOption, EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
+    UnknownFields, ValueScale,
+};
 pub use kind::EffectKind;
 
 use std::fmt;
@@ -70,6 +73,9 @@ pub struct Effect {
     values: Vec<PropertyValue>,
     /// What a project file said of the effect that this version of the program does not know, to be written back as it was.
     unknown_fields: UnknownFields,
+    /// Whether the effect is done. An effect that is **switched off** (bypassed) stays in its chain with its values and keyframes and is not applied, not exported and not
+    /// missed if it is one that the program does not have. It is on when it is put on.
+    enabled: bool,
 }
 
 impl Effect {
@@ -81,6 +87,7 @@ impl Effect {
             kind,
             values: kind.default_values(),
             unknown_fields: UnknownFields::none(),
+            enabled: true,
         }
     }
 
@@ -96,7 +103,20 @@ impl Effect {
             kind,
             values,
             unknown_fields: UnknownFields::none(),
+            enabled: true,
         })
+    }
+
+    /// The same effect, switched on or off.
+    #[must_use]
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Whether the effect is switched on (see [`Self::with_enabled`]).
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
     }
 
     /// The same effect, named `instance`.
@@ -177,6 +197,7 @@ impl Effect {
                 kind: self.kind,
                 values,
                 unknown_fields: self.unknown_fields.clone(),
+                enabled: self.enabled,
             }
         })
     }
@@ -393,6 +414,19 @@ impl Effects {
         let removed = self.links.len() != before;
         self.settle();
         removed
+    }
+
+    /// Switches the effect that is named `instance` on or off. `false` if there is none.
+    pub fn set_enabled(&mut self, instance: EffectInstanceId, enabled: bool) -> bool {
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link
+                && effect.instance() == instance
+            {
+                effect.enabled = enabled;
+                return true;
+            }
+        }
+        false
     }
 
     /// Whether `property` is the value of one of the effects of the chain.

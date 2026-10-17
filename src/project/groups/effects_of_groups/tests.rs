@@ -1008,3 +1008,134 @@ fn the_placeholder_is_off_where_a_colour_is_cut_off_and_the_members_are_partly_c
         .unwrap();
     assert!((10..=25).contains(&worst_over_opaque), "{worst_over_opaque}");
 }
+
+// --- an effect that is switched off ---
+
+#[test]
+fn an_effect_that_is_switched_off_is_not_applied_and_stays_in_its_chain_with_its_values_and_switching_it_on_applies_it_again()
+ {
+    let mut laid = four_tracks();
+    hue_shift_on_the_clip(&mut laid, 0, 0);
+    let clip = laid.clip(0, 0);
+    let owner = Member::Clip(clip);
+    let property = PropertyId::effect_value(HUE_SHIFT, crate::project::EffectInstanceId::FIRST, 0);
+    laid.project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            property,
+            PropertyValue::Number(90.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    assert_eq!(owners(&laid.project, clip), vec![owner], "a premise: it is applied");
+    assert!(
+        laid.project
+            .chain_of_the_member(owner)
+            .unwrap()
+            .iter()
+            .all(Effect::is_enabled),
+        "and it begins switched on"
+    );
+
+    laid.project
+        .set_effect_enabled(owner, crate::project::EffectInstanceId::FIRST, false)
+        .unwrap();
+
+    assert_eq!(owners(&laid.project, clip), Vec::<Member>::new(), "not applied");
+    assert_eq!(
+        rows_of(&laid.project, owner),
+        vec!["effect hue shift"],
+        "still in the chain, to be seen and switched on"
+    );
+    let kept = laid.project.chain_of_the_member(owner).unwrap().iter().next().unwrap();
+    assert!(!kept.is_enabled());
+    assert_eq!(
+        kept.value_of(property),
+        Some(&PropertyValue::Number(90.0)),
+        "its values are kept"
+    );
+    assert!(laid.project.effects_applied_to_every_clip()[&clip].is_empty());
+
+    laid.project
+        .set_effect_enabled(owner, crate::project::EffectInstanceId::FIRST, true)
+        .unwrap();
+    assert_eq!(owners(&laid.project, clip), vec![owner]);
+}
+
+#[test]
+fn switching_off_one_of_two_effects_leaves_the_other_and_the_effects_of_a_track_and_a_tag_can_be_switched_off_too() {
+    let mut laid = four_tracks();
+    hue_shift_on_the_clip(&mut laid, 0, 0);
+    hue_shift_on_the_clip(&mut laid, 0, 0);
+    hue_shift_on_the_track(&mut laid, 0);
+    let clip = laid.clip(0, 0);
+    let second = crate::project::EffectInstanceId::new(1);
+    laid.project
+        .set_effect_enabled(Member::Clip(clip), second, false)
+        .unwrap();
+    assert_eq!(
+        laid.project
+            .effects_applied_to_the_clip(clip)
+            .iter()
+            .map(|applied| (applied.owner, applied.effect.instance()))
+            .collect::<Vec<_>>(),
+        vec![
+            (Member::Clip(clip), crate::project::EffectInstanceId::FIRST),
+            (Member::Track(laid.tracks[0]), crate::project::EffectInstanceId::FIRST)
+        ]
+    );
+
+    // The only effect of the track, switched off: the clip has no badge of the track to show.
+    laid.project
+        .set_effect_enabled(
+            Member::Track(laid.tracks[0]),
+            crate::project::EffectInstanceId::FIRST,
+            false,
+        )
+        .unwrap();
+    assert!(
+        !rows_of(&laid.project, Member::Clip(clip))
+            .iter()
+            .any(|row| row.starts_with("track")),
+        "a track whose effects are all off has nothing to say in the chain of the clip"
+    );
+
+    // A tag.
+    let tag = laid
+        .project
+        .create_group(GroupKind::Tag, &[Member::Clip(laid.clip(1, 0))])
+        .unwrap();
+    laid.project.add_effect_to_the_group(tag, HUE_SHIFT).unwrap();
+    assert_eq!(owners(&laid.project, laid.clip(1, 0)), vec![Member::Group(tag)]);
+    laid.project
+        .set_effect_enabled(Member::Group(tag), crate::project::EffectInstanceId::FIRST, false)
+        .unwrap();
+    assert_eq!(owners(&laid.project, laid.clip(1, 0)), Vec::<Member>::new());
+}
+
+#[test]
+fn switching_an_effect_that_is_not_there_off_is_an_error_and_changes_nothing() {
+    let mut laid = four_tracks();
+    hue_shift_on_the_clip(&mut laid, 0, 0);
+    let before = laid.project.clone();
+    let clip = laid.clip(0, 0);
+
+    assert_eq!(
+        laid.project
+            .set_effect_enabled(Member::Clip(clip), crate::project::EffectInstanceId::new(7), false),
+        Err(EditError::NotInTheChain {
+            owner: Member::Clip(clip),
+            item: ChainItemKey::Effect(crate::project::EffectInstanceId::new(7))
+        })
+    );
+    assert!(
+        laid.project
+            .set_effect_enabled(
+                Member::Track(TrackId::new(99)),
+                crate::project::EffectInstanceId::FIRST,
+                false
+            )
+            .is_err()
+    );
+    assert_eq!(laid.project, before);
+}

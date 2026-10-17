@@ -23,8 +23,8 @@ use serde_json::Value;
 use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
-    ChainEntry, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects, ParameterDescriptor,
-    Project, UnknownFields, ValueKind,
+    ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
+    ParameterControl, ParameterDescriptor, Project, UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -39,6 +39,9 @@ pub(super) struct PluginDocument {
     /// What it does, in a few words. Left out when it says nothing.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// The heading it is listed under in the menu that effects are chosen from. Left out when it has none, and in the files of versions before 13.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub category: String,
     pub domain: DomainDocument,
     /// Whether it changes each pixel of a picture by itself, whatever the pixels round it are. Left out when it does not.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -53,6 +56,14 @@ pub(super) struct PluginDocument {
 
 fn is_false(flag: &bool) -> bool {
     !*flag
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(flag: &bool) -> bool {
+    *flag
 }
 
 /// What a type of effect works on.
@@ -99,6 +110,14 @@ pub(super) struct ParameterDocument {
     /// The most decimals a number is shown with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decimals: Option<u8>,
+    /// `"logarithmic"` for a number that is laid along its slider by ratios. Left out for the usual (linear) one, and in the files of versions before 13. (Read as a
+    /// value of JSON so that a scale that this version does not know is kept, and not refused: see [`scale_from_document`].)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<Value>,
+    /// How the control of the value works: `"slider"`, `"integer"`, `"toggle"`, `{"choice": [{"id": ..., "label": ...}]}` or `{"resource": "cube"}`. Left out for the
+    /// control that the kind of value has, and in the files of versions before 13. (Read as a value of JSON for the same reason as the scale.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<Value>,
     /// What this version of the program does not know of the value, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
@@ -123,6 +142,9 @@ pub(super) struct EffectDocument {
     /// its values are racks, like any other.)
     #[serde(default, skip_serializing_if = "ValuesDocument::is_empty")]
     pub values: ValuesDocument,
+    /// Whether the effect is done: `false` for one that is switched off (bypassed). Left out when it is on, and in the files of versions before 13.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub enabled: bool,
     /// What this version of the program does not know of the effect, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
@@ -237,6 +259,7 @@ fn descriptor_from_document(document: PluginDocument) -> Result<EffectDescriptor
         version: (document.version[0], document.version[1]),
         name: document.name.into(),
         description: document.description.into(),
+        category: document.category.into(),
         domain: match document.domain {
             DomainDocument::Picture => EffectDomain::Picture,
             DomainDocument::Sound => EffectDomain::Sound,
@@ -259,6 +282,9 @@ fn parameter_from_document(document: ParameterDocument) -> Result<ParameterDescr
         .map_err(|reason| format!("the value \"{}\": {reason}", document.id))?;
     let name = document.name.unwrap_or_else(|| document.id.clone());
     let label = document.label.unwrap_or_else(|| name.clone());
+    let mut unknown = document.unknown;
+    let scale = scale_from_document(document.scale, &mut unknown);
+    let control = control_from_document(document.control, &mut unknown);
     Ok(ParameterDescriptor {
         id: document.id.into(),
         name: name.into(),
@@ -267,7 +293,61 @@ fn parameter_from_document(document: ParameterDocument) -> Result<ParameterDescr
         range: document.range.map(|[least, most]| (least, most)),
         unit: document.unit.into(),
         decimals: document.decimals,
-        unknown_fields: UnknownFields::new(document.unknown),
+        unknown_fields: UnknownFields::new(unknown),
+        scale,
+        control,
+    })
+}
+
+/// The scale that the document says. One that this version does not know is the usual one, and is **kept in `unknown`** to be written back as it was.
+fn scale_from_document(document: Option<Value>, unknown: &mut BTreeMap<String, Value>) -> ValueScale {
+    match document {
+        None => ValueScale::Linear,
+        Some(Value::String(name)) if name == "linear" => ValueScale::Linear,
+        Some(Value::String(name)) if name == "logarithmic" => ValueScale::Logarithmic,
+        Some(other) => {
+            unknown.insert("scale".to_owned(), other);
+            ValueScale::Linear
+        }
+    }
+}
+
+/// The control that the document says. One that this version does not know is the one that the kind of value has, and is **kept in `unknown`** to be written back as it
+/// was.
+fn control_from_document(document: Option<Value>, unknown: &mut BTreeMap<String, Value>) -> ParameterControl {
+    let Some(document) = document else {
+        return ParameterControl::Automatic;
+    };
+    let known = match &document {
+        Value::String(name) => match name.as_str() {
+            "slider" => Some(ParameterControl::Slider),
+            "integer" => Some(ParameterControl::Integer),
+            "toggle" => Some(ParameterControl::Toggle),
+            _ => None,
+        },
+        Value::Object(object) if object.len() == 1 => {
+            if let Some(Value::Array(options)) = object.get("choice") {
+                options
+                    .iter()
+                    .map(|option| {
+                        Some(ChoiceOption {
+                            id: option.get("id")?.as_str()?.to_owned().into(),
+                            label: option.get("label")?.as_str()?.to_owned().into(),
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|options| ParameterControl::Choice(options.into()))
+            } else if let Some(Value::String(kind)) = object.get("resource") {
+                Some(ParameterControl::Resource(kind.clone().into()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    known.unwrap_or_else(|| {
+        unknown.insert("control".to_owned(), document);
+        ParameterControl::Automatic
     })
 }
 
@@ -306,7 +386,11 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
         }
     }
     Effect::with_values(kind, values)
-        .map(|effect| effect.with_unknown_fields(UnknownFields::new(document.unknown)))
+        .map(|effect| {
+            effect
+                .with_unknown_fields(UnknownFields::new(document.unknown))
+                .with_enabled(document.enabled)
+        })
         .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
 }
 
@@ -375,6 +459,7 @@ pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
                 version: Some([kind.version().0, kind.version().1]),
                 instance: Some(effect.instance().number()),
                 values: ValuesDocument::ById(values),
+                enabled: effect.is_enabled(),
                 unknown: effect.unknown_fields().fields().clone(),
             }
         })
@@ -409,6 +494,7 @@ fn plugin_document_of(descriptor: &EffectDescriptor) -> PluginDocument {
         version: [descriptor.version.0, descriptor.version.1],
         name: descriptor.name.to_string(),
         description: descriptor.description.to_string(),
+        category: descriptor.category.to_string(),
         domain: match descriptor.domain {
             EffectDomain::Picture => DomainDocument::Picture,
             EffectDomain::Sound => DomainDocument::Sound,
@@ -435,6 +521,28 @@ fn parameter_document_of(parameter: &ParameterDescriptor) -> ParameterDocument {
         range: parameter.range.map(|(least, most)| [least, most]),
         unit: parameter.unit.to_string(),
         decimals: parameter.decimals,
+        scale: match parameter.scale {
+            ValueScale::Linear => None,
+            ValueScale::Logarithmic => Some(Value::String("logarithmic".to_owned())),
+        },
+        control: control_document_of(&parameter.control),
         unknown: parameter.unknown_fields.fields().clone(),
+    }
+}
+
+/// What the document of a control says: nothing for the control that the kind of value has.
+fn control_document_of(control: &ParameterControl) -> Option<Value> {
+    match control {
+        ParameterControl::Automatic => None,
+        ParameterControl::Slider => Some(Value::String("slider".to_owned())),
+        ParameterControl::Integer => Some(Value::String("integer".to_owned())),
+        ParameterControl::Toggle => Some(Value::String("toggle".to_owned())),
+        ParameterControl::Choice(options) => Some(serde_json::json!({
+            "choice": options
+                .iter()
+                .map(|option| serde_json::json!({"id": option.id, "label": option.label}))
+                .collect::<Vec<_>>()
+        })),
+        ParameterControl::Resource(kind) => Some(serde_json::json!({ "resource": kind })),
     }
 }

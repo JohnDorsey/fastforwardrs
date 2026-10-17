@@ -12,7 +12,9 @@
 
 use std::borrow::Cow;
 
-use super::{EffectDescriptor, EffectDomain, EffectKind, ParameterDescriptor, UnknownFields};
+use super::{
+    EffectDescriptor, EffectDomain, EffectKind, ParameterControl, ParameterDescriptor, UnknownFields, ValueScale,
+};
 use crate::colour_effects::ColourMatrix;
 use crate::project::animation::PropertyValue;
 
@@ -22,9 +24,10 @@ pub const HUE_SHIFT_KEY: &str = "builtin:hue_shift";
 /// The hue shift: the hues of the colours of the picture are turned round the wheel of colours, as far as its one value says.
 pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
     key: Cow::Borrowed(HUE_SHIFT_KEY),
-    version: (1, 0),
+    version: (1, 1),
     name: Cow::Borrowed("hue shift"),
     description: Cow::Borrowed("Turns the colours round the wheel of colours"),
+    category: Cow::Borrowed("Colour"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: true,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
@@ -38,6 +41,8 @@ pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
         unit: Cow::Borrowed("°"),
         decimals: Some(1),
         unknown_fields: UnknownFields::none(),
+        scale: ValueScale::Linear,
+        control: ParameterControl::Automatic,
     }]),
     unknown_fields: UnknownFields::none(),
 };

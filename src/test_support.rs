@@ -27,6 +27,7 @@ pub fn the_descriptor_of_an_effect_the_program_does_not_have(
         version: (1, 0),
         name: Cow::Owned(key.split_once(':').map_or(key, |(_, id)| id).replace('_', " ")),
         description: Cow::Borrowed("Made up for a test"),
+        category: Cow::Borrowed(""),
         domain: EffectDomain::Picture,
         changes_each_pixel_by_itself: true,
         parameters: Cow::Owned(
@@ -46,6 +47,8 @@ pub fn the_descriptor_of_an_effect_the_program_does_not_have(
                     unit: Cow::Borrowed(""),
                     decimals: None,
                     unknown_fields: UnknownFields::none(),
+                    scale: crate::project::ValueScale::Linear,
+                    control: crate::project::ParameterControl::Automatic,
                 })
                 .collect(),
         ),

@@ -141,7 +141,7 @@ impl Project {
                         let effects_that_apply = track
                             .effects()
                             .iter()
-                            .filter(|effect| effect.kind().applies_to_a_clip_of_kind(kind))
+                            .filter(|effect| effect.is_enabled() && effect.kind().applies_to_a_clip_of_kind(kind))
                             .count();
                         if effects_that_apply > 0 {
                             rows.push(ChainRow::TrackBadge {
@@ -216,7 +216,8 @@ impl Project {
         for shape in shapes_round_the_clip.into_iter().chain(shapes_round_the_track) {
             self.add_the_effects_of_the_group(shape, self.groups.len(), &mut applied);
         }
-        applied.retain(|applied| applied.effect.kind().applies_to_a_clip_of_kind(kind));
+        // (An effect that is switched off is in its chain, and is not applied.)
+        applied.retain(|applied| applied.effect.is_enabled() && applied.effect.kind().applies_to_a_clip_of_kind(kind));
         applied
     }
 
@@ -288,6 +289,27 @@ impl Project {
             Ok(())
         } else {
             Err(EditError::NotAPropertyOfTheGroup { group, property })
+        }
+    }
+
+    /// Switches the effect that is named `instance` in the chain of `owner` on or off (see [`Effect::is_enabled`]). It is an error, and nothing is changed, if
+    /// there is no such thing as `owner`, or its chain has no such effect.
+    pub fn set_effect_enabled(
+        &mut self,
+        owner: EffectOwner,
+        instance: EffectInstanceId,
+        enabled: bool,
+    ) -> Result<(), EditError> {
+        let chain = self
+            .chain_of_the_member_mut(owner)
+            .ok_or_else(|| nothing_has_the_chain(owner))?;
+        if chain.set_enabled(instance, enabled) {
+            Ok(())
+        } else {
+            Err(EditError::NotInTheChain {
+                owner,
+                item: ChainItemKey::Effect(instance),
+            })
         }
     }
 

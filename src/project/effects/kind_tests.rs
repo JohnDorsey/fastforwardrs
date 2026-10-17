@@ -32,7 +32,9 @@ fn made_up(key: &str) -> EffectDescriptor {
 /// the effect that they were: change the version of the descriptor (and see that the files of the version before still bind: see
 /// [`EffectDescriptor::can_stand_in_for`]), and only then this.
 #[test]
-fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version() {
+fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version_and_the_one_thing_that_is_new() {
+    // (Rewritten on purpose in phase 4: the descriptor has a category and a way of showing each value now, so that the + menu can list the effect and the panel can make its
+    // control. That is a change of the descriptor, so it is version 1.1, and this says what is the same: everything that the first version said.)
     let first_version = EffectDescriptor {
         key: Cow::Borrowed("builtin:hue_shift"),
         version: (1, 0),
@@ -49,11 +51,23 @@ fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version() {
             unit: Cow::Borrowed("°"),
             decimals: Some(1),
             unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
         }]),
         unknown_fields: UnknownFields::none(),
+        category: Cow::Borrowed("Colour"),
+    };
+    let first_version = EffectDescriptor {
+        version: (1, 1),
+        ..first_version
     };
 
     assert_eq!(EffectKind::HUE_SHIFT.descriptor(), &first_version);
+    // And a snapshot of version 1.0, as every file that was saved before has, is still the hue shift.
+    let mut as_it_was = first_version.clone();
+    as_it_was.version = (1, 0);
+    as_it_was.category = Cow::Borrowed("");
+    assert_eq!(EffectKind::from_snapshot(as_it_was).unwrap(), EffectKind::HUE_SHIFT);
 }
 
 // --- making a kind of a snapshot ---
@@ -95,6 +109,8 @@ fn a_snapshot_with_another_major_number_or_a_value_the_effect_of_the_program_has
         unit: Cow::Borrowed(""),
         decimals: None,
         unknown_fields: UnknownFields::none(),
+        scale: ValueScale::Linear,
+        control: ParameterControl::Automatic,
     });
     let mut another_kind_of_value = own.clone();
     another_kind_of_value.parameters.to_mut()[0].default = PropertyValue::Flag(false);
@@ -443,4 +459,130 @@ fn a_sound_effect_is_for_sounds_and_for_no_picture_and_its_values_are_the_proper
     assert!(!sound.applies_to_a_group_of_kind(GroupKind::ClipGroup));
     assert!(!sound.applies_to_a_group_of_kind(GroupKind::TrackGroup));
     assert!(sound.applies_to_a_group_of_kind(GroupKind::Tag));
+}
+
+// --- what a descriptor says of how its values are shown (phase 4: category, scale, control) ---
+
+fn with_the_value(mut descriptor: EffectDescriptor, change: impl FnOnce(&mut ParameterDescriptor)) -> EffectDescriptor {
+    change(&mut descriptor.parameters.to_mut()[0]);
+    descriptor
+}
+
+fn choice(options: &[(&'static str, &'static str)]) -> ParameterControl {
+    ParameterControl::Choice(
+        options
+            .iter()
+            .map(|(id, label)| ChoiceOption {
+                id: Cow::Borrowed(*id),
+                label: Cow::Borrowed(*label),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+    )
+}
+
+#[test]
+fn what_a_descriptor_says_of_how_a_value_is_shown_has_to_be_right_for_the_kind_of_value_it_is() {
+    let words = || {
+        the_descriptor_of_an_effect_the_program_does_not_have(
+            "isf:shown",
+            &[("mode", PropertyValue::Words("soft".into()))],
+        )
+    };
+    let number = || the_descriptor_of_an_effect_the_program_does_not_have("isf:shown", &[("amount", degrees(0.5))]);
+    let flag =
+        || the_descriptor_of_an_effect_the_program_does_not_have("isf:shown", &[("on", PropertyValue::Flag(true))]);
+
+    // What is right.
+    for right in [
+        with_the_value(number(), |value| value.control = ParameterControl::Slider),
+        with_the_value(number(), |value| value.control = ParameterControl::Integer),
+        with_the_value(number(), |value| {
+            value.scale = ValueScale::Logarithmic;
+            value.range = Some((0.01, 100.0));
+            value.default = degrees(1.0);
+        }),
+        with_the_value(flag(), |value| value.control = ParameterControl::Toggle),
+        with_the_value(words(), |value| {
+            value.control = choice(&[("soft", "Soft"), ("hard", "Hard")])
+        }),
+        with_the_value(words(), |value| {
+            value.control = ParameterControl::Resource(Cow::Borrowed("cube"))
+        }),
+    ] {
+        assert_eq!(right.problem(), None, "{right:?}");
+    }
+
+    // What is not.
+    let mut wrong = Vec::new();
+    wrong.push((
+        with_the_value(words(), |value| value.control = ParameterControl::Slider),
+        "is a slider",
+    ));
+    wrong.push((
+        with_the_value(number(), |value| value.control = ParameterControl::Toggle),
+        "is a toggle",
+    ));
+    wrong.push((
+        with_the_value(number(), |value| value.control = choice(&[("a", "A")])),
+        "is a choice",
+    ));
+    wrong.push((
+        with_the_value(flag(), |value| value.control = ParameterControl::Integer),
+        "is a whole number",
+    ));
+    wrong.push((
+        with_the_value(words(), |value| value.control = choice(&[])),
+        "has no options",
+    ));
+    wrong.push((
+        with_the_value(words(), |value| {
+            value.control = choice(&[("soft", "Soft"), ("soft", "Again")])
+        }),
+        "two options with the id",
+    ));
+    wrong.push((
+        with_the_value(words(), |value| value.control = choice(&[("", "Nothing")])),
+        "an option with no id",
+    ));
+    wrong.push((
+        with_the_value(words(), |value| value.control = choice(&[("hard", "Hard")])),
+        "begins as an option that it has not",
+    ));
+    wrong.push((
+        with_the_value(number(), |value| value.scale = ValueScale::Logarithmic),
+        "which a number with a range needs",
+    ));
+    wrong.push((
+        with_the_value(number(), |value| {
+            value.scale = ValueScale::Logarithmic;
+            value.range = Some((0.0, 10.0));
+        }),
+        "which needs a range that is above 0 at both ends",
+    ));
+    wrong.push((
+        with_the_value(words(), |value| {
+            value.control = ParameterControl::Resource(Cow::Borrowed(""))
+        }),
+        "a resource with no kind",
+    ));
+    for (descriptor, wanted) in wrong {
+        let reason = descriptor
+            .problem()
+            .unwrap_or_else(|| panic!("{wanted}: it was not found wrong"));
+        assert!(reason.contains(wanted), "{wanted}: {reason}");
+    }
+}
+
+#[test]
+fn every_effect_of_the_program_has_a_category_and_a_hue_shift_is_a_colour_effect() {
+    for kind in EffectKind::BUILT_IN {
+        assert!(!kind.descriptor().category.is_empty(), "{kind:?}");
+    }
+    assert_eq!(EffectKind::HUE_SHIFT.descriptor().category, "Colour");
+    assert_eq!(
+        the_descriptor_of_an_effect_the_program_does_not_have("isf:x", &[]).category,
+        "",
+        "a file may say none"
+    );
 }
