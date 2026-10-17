@@ -50,4 +50,10 @@ ignore = [
     # `winit` -> `sctk-adwaita` -> `ab_glyph`; there is no upgrade to make, and the advisory names `skrifa` (already in the tree) as the way forward.
     # Look again when `ab_glyph` and `cosmic-text` move off it.
     { id = "RUSTSEC-2026-0192", reason = "unmaintained, not vulnerable; no upgrade is available; reached through ab_glyph and cosmic-text" },
+    # `zbus_names`, `zvariant` and `zvariant_derive` were merged into `zbus` 6 and are "unmaintained" as separate crates (advisories of 2026-10-17). They are used by the
+    # accessibility bridge of Linux (`eframe` -> `egui-winit` -> `accesskit_winit` -> `accesskit_unix` -> `atspi` -> `zbus-lockstep`), which is not ours to upgrade;
+    # nothing is vulnerable. Look again when `accesskit_unix` moves to `zbus` 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: unmaintained, merged into zbus 6; reached through accesskit_unix (Linux accessibility); not ours to upgrade" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: unmaintained, merged into zbus 6; reached through accesskit_unix (Linux accessibility); not ours to upgrade" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: unmaintained, merged into zbus 6; reached through accesskit_unix (Linux accessibility); not ours to upgrade" },
 ]
