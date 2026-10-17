@@ -939,3 +939,43 @@ fn the_operations_of_a_layer_are_described_as_one_call_each_in_order_and_the_one
         "a mix with no offsets has nine numbers, as it always had"
     );
 }
+
+#[test]
+fn a_look_up_table_operation_is_described_as_a_call_that_names_a_table_that_the_engine_can_take_and_one_of_none_of_it_is_left_out()
+ {
+    use crate::cube_table::{Interpolation, parse_cube};
+    use crate::engine::{LutInterpolation, LutSpace, TableId, published_table};
+    use crate::project::{LutOperation, LutSpace as SpaceOfTheProject, PictureOperation};
+    let picture = video_picture(1);
+    let table = std::sync::Arc::new(parse_cube("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").unwrap());
+    let look = |intensity: f32| {
+        PictureOperation::Lut(LutOperation {
+            table: table.clone(),
+            intensity,
+            input: SpaceOfTheProject::Linear,
+            output: SpaceOfTheProject::Video,
+            interpolation: Interpolation::Trilinear,
+        })
+    };
+    let mut shown = showing(0, &picture, whole_picture());
+    shown.operations = vec![look(0.5), look(0.0)];
+
+    let (description, _) = describe(&content(vec![shown], None));
+
+    let id = TableId(table.serial_number());
+    assert_eq!(
+        description.layers[0].effects,
+        vec![EffectCall::lut(
+            id,
+            0.5,
+            LutSpace::Linear,
+            LutSpace::Video,
+            LutInterpolation::Trilinear
+        )]
+    );
+    assert_eq!(
+        published_table(id).map(|found| found.serial_number()),
+        Some(table.serial_number()),
+        "(it has been put where the engine takes it from)"
+    );
+}

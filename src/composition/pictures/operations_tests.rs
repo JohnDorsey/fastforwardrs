@@ -54,10 +54,12 @@ fn every_effect_of_the_program_asks_nothing_of_the_picture_when_it_has_the_value
         let (mut project, clip) = a_video();
         project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
         assert_eq!(operations_at(&project, 50), Vec::new(), "{kind}");
-        let operation = kind
-            .picture_operation(&kind.default_values())
-            .expect("an effect of the program");
-        assert!(operation.changes_nothing(), "{kind}: {operation:?}");
+        // (An effect that needs a table and has none asks nothing at all.)
+        let operation = kind.picture_operation(&kind.default_values());
+        assert!(
+            operation.as_ref().is_none_or(PictureOperation::changes_nothing),
+            "{kind}: {operation:?}"
+        );
     }
 }
 
@@ -416,4 +418,179 @@ fn the_operation_that_changes_nothing_is_the_engines_own_idea_of_it() {
             "{opacity} of the opacity"
         );
     }
+}
+
+// --- the look-up table ---
+
+use crate::project::{LutSpace, SourceMediaLink};
+
+const A_TABLE: &str = "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
+
+fn words(text: &str) -> PropertyValue {
+    PropertyValue::Words(text.to_owned())
+}
+
+fn the_values_of_a_lut(table: &str, intensity: f32, input: &str, output: &str, way: &str) -> Vec<PropertyValue> {
+    vec![words(table), number(intensity), words(input), words(output), words(way)]
+}
+
+fn a_project_with_a_table(contents: &str) -> (Project, ClipId) {
+    let (mut project, clip) = a_video();
+    project
+        .add_resource(
+            "grade.cube",
+            crate::project::ResourceKind::Cube,
+            std::sync::Arc::from(contents.as_bytes()),
+            SourceMediaLink::from_absolute_path(std::path::PathBuf::from("/x/grade.cube")),
+        )
+        .unwrap();
+    (project, clip)
+}
+
+#[test]
+fn a_look_up_table_effect_whose_table_is_a_resource_that_is_a_table_asks_for_a_look_up_in_it_with_the_values_it_has() {
+    let (mut project, clip) = a_project_with_a_table(A_TABLE);
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::LUT,
+        &the_values_of_a_lut("grade.cube", 0.75, "linear", "video", "trilinear"),
+    );
+
+    let operations = operations_at(&project, 3);
+
+    let [PictureOperation::Lut(look)] = &operations[..] else {
+        panic!("{operations:?}")
+    };
+    let resource = project.resources().get("grade.cube").unwrap();
+    assert!(
+        std::sync::Arc::ptr_eq(&look.table, &resource.cube_table().unwrap()),
+        "the table of the resource"
+    );
+    assert_eq!(
+        (look.intensity, look.input, look.output, look.interpolation),
+        (
+            0.75,
+            LutSpace::Linear,
+            LutSpace::Video,
+            crate::cube_table::Interpolation::Trilinear
+        )
+    );
+}
+
+#[test]
+fn a_look_up_table_effect_with_no_table_that_can_be_used_asks_nothing_and_a_value_that_is_no_option_is_the_first_option()
+ {
+    for (name, contents) in [
+        ("", Some(A_TABLE)),
+        ("absent.cube", Some(A_TABLE)),
+        ("grade.cube", Some("LUT_3D_SIZE two\n")),
+        ("grade.cube", None),
+    ] {
+        let (mut project, clip) = match contents {
+            Some(contents) => a_project_with_a_table(contents),
+            None => {
+                let (mut project, clip) = a_video();
+                let mut resources = crate::project::Resources::default();
+                resources
+                    .add_as_it_was_saved(
+                        "grade.cube",
+                        crate::project::ResourceKind::Cube,
+                        None,
+                        SourceMediaLink::from_absolute_path(std::path::PathBuf::from("/gone")),
+                    )
+                    .unwrap();
+                project = project.with_resources(resources);
+                (project, clip)
+            }
+        };
+        put_on(
+            &mut project,
+            clip,
+            EffectKind::LUT,
+            &the_values_of_a_lut(name, 1.0, "screen", "screen", "tetrahedral"),
+        );
+        assert_eq!(operations_at(&project, 3), Vec::new(), "{name:?} {contents:?}");
+    }
+    let (mut project, clip) = a_project_with_a_table(A_TABLE);
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::LUT,
+        &the_values_of_a_lut("grade.cube", 1.0, "nonsense", "", "somehow"),
+    );
+    let [PictureOperation::Lut(look)] = &operations_at(&project, 3)[..] else {
+        panic!()
+    };
+    assert_eq!(
+        (look.input, look.output, look.interpolation),
+        (
+            LutSpace::Screen,
+            LutSpace::Screen,
+            crate::cube_table::Interpolation::Tetrahedral
+        )
+    );
+}
+
+#[test]
+fn a_look_up_table_of_none_of_the_table_is_left_out_and_one_ends_a_run_of_mixes_like_any_effect_that_is_not_a_mix() {
+    let (mut project, clip) = a_project_with_a_table(A_TABLE);
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::LUT,
+        &the_values_of_a_lut("grade.cube", 0.0, "screen", "screen", "tetrahedral"),
+    );
+    assert_eq!(operations_at(&project, 3), Vec::new());
+
+    let (mut project, clip) = a_project_with_a_table(A_TABLE);
+    put_on(&mut project, clip, EffectKind::SATURATION, &[number(0.5)]);
+    put_on(
+        &mut project,
+        clip,
+        EffectKind::LUT,
+        &the_values_of_a_lut("grade.cube", 1.0, "screen", "screen", "tetrahedral"),
+    );
+    put_on(&mut project, clip, EffectKind::SATURATION, &[number(0.5)]);
+    let operations = operations_at(&project, 3);
+    assert_eq!(operations.len(), 3, "{operations:?}");
+    assert!(matches!(operations[1], PictureOperation::Lut(_)));
+}
+
+#[test]
+fn the_look_up_in_a_table_that_is_changed_to_another_is_another_table_and_the_old_one_is_not_asked_for() {
+    let (mut project, clip) = a_project_with_a_table(A_TABLE);
+    let other = A_TABLE.replace("1 1 1\n", "0.5 0.5 0.5\n");
+    project
+        .add_resource(
+            "other.cube",
+            crate::project::ResourceKind::Cube,
+            std::sync::Arc::from(other.as_bytes()),
+            SourceMediaLink::from_absolute_path(std::path::PathBuf::from("/x/other.cube")),
+        )
+        .unwrap();
+    let instance = put_on(
+        &mut project,
+        clip,
+        EffectKind::LUT,
+        &the_values_of_a_lut("grade.cube", 1.0, "screen", "screen", "tetrahedral"),
+    );
+    let serial_of = |project: &Project| {
+        let [PictureOperation::Lut(look)] = &operations_at(project, 3)[..] else {
+            panic!()
+        };
+        look.table.serial_number()
+    };
+    let first = serial_of(&project);
+
+    project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            PropertyId::effect_value(EffectKind::LUT, instance, 0),
+            words("other.cube"),
+            crate::project::TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+
+    assert_ne!(serial_of(&project), first);
 }

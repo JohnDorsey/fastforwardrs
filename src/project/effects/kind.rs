@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, PoisonError};
 
 use super::built_in::{
-    self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, OPACITY, PictureOperation, SATURATION,
+    self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, LUT, OPACITY, PictureOperation, SATURATION,
 };
 use super::{EffectDescriptor, EffectDomain, ParameterDescriptor};
 use crate::colour_effects::ColourMatrix;
@@ -54,8 +54,11 @@ impl EffectKind {
     /// The crop, which cuts the edges off the picture.
     pub const CROP: EffectKind = EffectKind(&CROP);
 
+    /// The look-up table, which looks the colours of the picture up in a table (a `.cube` file).
+    pub const LUT: EffectKind = EffectKind(&LUT);
+
     /// The effects that the program has in itself, in the order they are offered in.
-    pub const BUILT_IN: [EffectKind; 7] = [
+    pub const BUILT_IN: [EffectKind; 8] = [
         Self::HUE_SHIFT,
         Self::SATURATION,
         Self::BRIGHTNESS_AND_CONTRAST,
@@ -63,6 +66,7 @@ impl EffectKind {
         Self::OPACITY,
         Self::BLUR,
         Self::CROP,
+        Self::LUT,
     ];
 
     /// The kind of effect that a snapshot of a descriptor, which a project file kept, says one is: the effect of the program that can stand in for
@@ -153,7 +157,7 @@ impl EffectKind {
         self.0
             .parameters
             .iter()
-            .map(|parameter| parameter.default.clone())
+            .map(ParameterDescriptor::value_it_begins_as)
             .collect()
     }
 
@@ -185,7 +189,17 @@ impl EffectKind {
     /// What the effect asks to be done to a picture when its values are `values` (one for each of its values, in order), if the program has the effect. (`None`
     /// for an effect that is not installed, which changes nothing.)
     pub fn picture_operation(self, values: &[PropertyValue]) -> Option<PictureOperation> {
-        built_in::picture_operation(self, values)
+        built_in::picture_operation(self, values, &[])
+    }
+
+    /// [`Self::picture_operation`] for an effect that uses tables: `tables` has one place for each of its values, `Some(table)` for a value that names a resource of the
+    /// project that is a table (see `Project::tables_of_the_values_of`). A look-up table effect with none asks nothing of the picture.
+    pub fn picture_operation_with_tables(
+        self,
+        values: &[PropertyValue],
+        tables: &[Option<std::sync::Arc<crate::cube_table::CubeTable>>],
+    ) -> Option<PictureOperation> {
+        built_in::picture_operation(self, values, tables)
     }
 
     /// How the effect changes the colours of a picture when its values are `values` (one for each of its values, in order), if it changes
@@ -196,7 +210,8 @@ impl EffectKind {
             PictureOperation::Exposure { .. }
             | PictureOperation::Opacity { .. }
             | PictureOperation::Blur { .. }
-            | PictureOperation::Crop { .. } => None,
+            | PictureOperation::Crop { .. }
+            | PictureOperation::Lut(_) => None,
         }
     }
 

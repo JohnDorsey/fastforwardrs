@@ -18,8 +18,10 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::colour_effects::ColourMatrix;
+use crate::cube_table::CubeTable;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
     Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, Member, PictureOperation,
@@ -65,6 +67,9 @@ pub struct LayerEffect {
     /// The keyframes of its values, from all the racks that animate them wherever they are kept. Their frames are frames of the
     /// timeline.
     pub animation: Animation,
+    /// The table that each of its values is, one for each value, `Some` for a value that names a resource of the project that is a table the program can read (the
+    /// resources are not in the layer, so what they are is worked out when the plan is made).
+    pub tables: Vec<Option<Arc<CubeTable>>>,
 }
 
 impl LayerEffect {
@@ -143,13 +148,16 @@ impl Layer {
     pub fn operations_at(&self, timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
         let mut operations: Vec<PictureOperation> = Vec::new();
         for effect in &self.effects {
-            let Some(next) = effect.kind.picture_operation(&effect.values_at(timeline_frame.value())) else {
+            let Some(next) = effect
+                .kind
+                .picture_operation_with_tables(&effect.values_at(timeline_frame.value()), &effect.tables)
+            else {
                 continue;
             };
             if next.changes_nothing() {
                 continue;
             }
-            match operations.last().and_then(|last| last.then_if_alike(next)) {
+            match operations.last().and_then(|last| last.then_if_alike(&next)) {
                 Some(together) => {
                     operations.pop();
                     // (Two that undo each other are none.)
@@ -352,7 +360,7 @@ impl Candidate<'_> {
 
 /// An effect that is applied to a clip, as a layer has it: with the keyframes of its values. (The values of an effect of a clip or of a track are
 /// animated by that clip's or track's keyframes; those of the effect of a group are not animated.)
-fn layer_effect_of(animations: &ResolvedAnimations, applied: &AppliedEffect<'_>) -> LayerEffect {
+fn layer_effect_of(project: &Project, animations: &ResolvedAnimations, applied: &AppliedEffect<'_>) -> LayerEffect {
     let kind = applied.effect.kind();
     let animation = match applied.owner {
         Member::Clip(clip) => Some(AnimationTarget::Clip(clip)),
@@ -369,6 +377,16 @@ fn layer_effect_of(animations: &ResolvedAnimations, applied: &AppliedEffect<'_>)
         kind,
         values: applied.effect.values().to_vec(),
         animation,
+        tables: kind
+            .parameters()
+            .iter()
+            .zip(applied.effect.values())
+            .map(|(parameter, value)| {
+                project
+                    .resource_named_by(&parameter.control, value)
+                    .and_then(|resource| resource.cube_table().ok())
+            })
+            .collect(),
     }
 }
 
@@ -417,7 +435,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                     .into_iter()
                     .flatten()
                     .filter(|applied| applied.effect.kind().is_installed())
-                    .map(|applied| layer_effect_of(&animations, applied))
+                    .map(|applied| layer_effect_of(project, &animations, applied))
                     .collect(),
             });
         }

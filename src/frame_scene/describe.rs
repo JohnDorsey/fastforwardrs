@@ -20,9 +20,10 @@ use std::hash::{Hash, Hasher};
 use egui::{Rect, pos2, vec2};
 
 use super::{PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
+use crate::cube_table::Interpolation;
 use crate::engine::{
-    EffectCall, FrameColour, FrameDescription, LayerDescription, LayerSource, PictureColour, PictureData, PictureId,
-    WorkingSpace,
+    EffectCall, FrameColour, FrameDescription, LayerDescription, LayerSource, LutInterpolation, LutSpace,
+    PictureColour, PictureData, PictureId, WorkingSpace, publish_table,
 };
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
@@ -367,6 +368,16 @@ fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
         PictureOperation::Mix(matrix) => EffectCall::colour_matrix_with_offsets(matrix.rows(), matrix.offsets()),
         PictureOperation::Exposure { stops } => EffectCall::exposure(*stops),
         PictureOperation::Opacity { opacity } => EffectCall::opacity(*opacity),
+        PictureOperation::Lut(look) => EffectCall::lut(
+            publish_table(&look.table),
+            look.intensity,
+            engine_space_of(look.input),
+            engine_space_of(look.output),
+            match look.interpolation {
+                Interpolation::Tetrahedral => LutInterpolation::Tetrahedral,
+                Interpolation::Trilinear => LutInterpolation::Trilinear,
+            },
+        ),
         PictureOperation::Blur { radius } => EffectCall::blur(*radius),
         PictureOperation::Crop {
             left,
@@ -376,6 +387,15 @@ fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
             feather,
         } => EffectCall::crop(*left, *top, *right, *bottom, *feather),
     })
+}
+
+/// The space of the engine that a space of a table of the project is.
+fn engine_space_of(space: crate::project::LutSpace) -> LutSpace {
+    match space {
+        crate::project::LutSpace::Screen => LutSpace::Screen,
+        crate::project::LutSpace::Video => LutSpace::Video,
+        crate::project::LutSpace::Linear => LutSpace::Linear,
+    }
 }
 
 /// Where the fast-forward symbol of `speed` is on a frame `width` by `height` pixels, with `layout` (the same sum that the window does to say where the symbol is on

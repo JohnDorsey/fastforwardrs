@@ -9,15 +9,29 @@ use super::*;
 use crate::project::{AnimationTarget, EffectKind, GroupKind, PropertyId};
 use crate::test_support::{make_a_keyframe, put_an_effect_on};
 
-/// Values that are not what the effect begins with, for each value of `kind`: a third of the way from the least to the most of its range.
+/// Values that are not what the effect begins with, for each value of `kind`: a third of the way from the least to the most of a range, the last of the options of a choice,
+/// the name of a table for a resource.
 fn values_that_are_not_the_defaults(kind: EffectKind) -> Vec<PropertyValue> {
     kind.parameters()
         .iter()
-        .map(|parameter| {
-            let (least, most) = parameter.range.expect("the effects of phase 4 have ranges");
-            PropertyValue::Number(least + (most - least) / 3.0)
+        .map(|parameter| match (&parameter.control, parameter.range) {
+            (crate::project::ParameterControl::Choice(options), _) => {
+                PropertyValue::Words(options.last().expect("a choice has options").id.to_string())
+            }
+            (crate::project::ParameterControl::Resource(_), _) => PropertyValue::Words("a table.cube".to_owned()),
+            (_, Some((least, most))) => PropertyValue::Number(least + (most - least) / 3.0),
+            (_, None) => panic!("{kind}: a value that is not a number, a choice or a resource"),
         })
         .collect()
+}
+
+/// The place of the first value of `kind` that is a number with a range, which is the one that the tests animate, and its range.
+fn the_first_number_with_a_range(kind: EffectKind) -> (u8, (f32, f32)) {
+    kind.parameters()
+        .iter()
+        .enumerate()
+        .find_map(|(place, parameter)| parameter.range.map(|range| (u8::try_from(place).unwrap(), range)))
+        .expect("every effect of the program has a number with a range")
 }
 
 fn the_first_video(project: &Project) -> ClipId {
@@ -36,8 +50,8 @@ fn every_effect_of_the_program_is_saved_with_its_values_and_its_keyframes_and_re
     }
     // One value of each is animated too.
     for (kind, instance) in &instances {
-        let property = PropertyId::effect_value(*kind, *instance, 0);
-        let (_, most) = kind.parameters()[0].range.unwrap();
+        let (place, (_, most)) = the_first_number_with_a_range(*kind);
+        let property = PropertyId::effect_value(*kind, *instance, place);
         make_a_keyframe(&mut project, target, property, 10, PropertyValue::Number(most));
         make_a_keyframe(&mut project, target, property, 20, PropertyValue::Number(most / 2.0));
     }
@@ -77,7 +91,11 @@ fn every_effect_of_the_program_is_saved_with_its_values_and_its_keyframes_and_re
         );
         let animated = loaded
             .animation_of(loaded_clip)
-            .keyframes_of(PropertyId::effect_value(kind, instance, 0))
+            .keyframes_of(PropertyId::effect_value(
+                kind,
+                instance,
+                the_first_number_with_a_range(kind).0,
+            ))
             .map(|keyframes| keyframes.len());
         assert_eq!(animated, Some(2), "{kind}: its keyframes");
     }

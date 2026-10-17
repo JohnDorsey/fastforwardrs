@@ -451,7 +451,7 @@ pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
                 .parameters()
                 .iter()
                 .zip(effect.values())
-                .filter(|(parameter, value)| parameter.default != **value)
+                .filter(|(parameter, value)| parameter.value_it_begins_as() != **value)
                 .map(|(parameter, value)| (parameter.id.to_string(), value_document_of(value)))
                 .collect();
             EffectDocument {
@@ -517,7 +517,7 @@ fn parameter_document_of(parameter: &ParameterDescriptor) -> ParameterDocument {
             ValueKind::Flag => ParameterKindDocument::Flag,
             ValueKind::Words => ParameterKindDocument::Words,
         },
-        default: value_document_of(&parameter.default),
+        default: value_document_of(&parameter.value_it_begins_as()),
         range: parameter.range.map(|(least, most)| [least, most]),
         unit: parameter.unit.to_string(),
         decimals: parameter.decimals,

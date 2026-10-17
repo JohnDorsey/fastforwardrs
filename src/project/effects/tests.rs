@@ -59,7 +59,8 @@ fn the_values_of_an_effect_are_properties_that_say_which_effect_and_which_place_
             assert!(property.is_a_value_of_an_effect(), "{property:?}");
             assert_eq!(Some(property.kind()), kind.value_kind(slot), "{kind:?}, place {slot}");
             assert_eq!(property.name(), parameter.name, "{kind:?}, place {slot}");
-            assert_eq!(effect.value_of(*property), Some(&parameter.default));
+            // (Rewritten on purpose in phase 4: a choice that has no default begins as its first option, so a value begins as what `value_it_begins_as` says.)
+            assert_eq!(effect.value_of(*property), Some(&parameter.value_it_begins_as()));
             assert_eq!(
                 effect.property_with_id(&parameter.id),
                 Some(*property),

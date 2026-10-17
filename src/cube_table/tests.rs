@@ -431,3 +431,75 @@ fn a_1d_table_is_looked_up_in_each_channels_own_column_by_linear_interpolation()
         "last row",
     );
 }
+
+// --- the sample tables ---
+
+const SAMPLES: [(&str, &str); 5] = [
+    ("Warm", include_str!("../../assets/luts/warm.cube")),
+    ("Cool", include_str!("../../assets/luts/cool.cube")),
+    ("Faded", include_str!("../../assets/luts/faded.cube")),
+    ("Punchy", include_str!("../../assets/luts/punchy.cube")),
+    ("Monochrome", include_str!("../../assets/luts/monochrome.cube")),
+];
+
+#[test]
+fn the_five_sample_tables_are_read_and_are_33_points_a_side_with_their_titles() {
+    for (title, text) in SAMPLES {
+        let table = parse_cube(text).unwrap_or_else(|problem| panic!("{title}: {problem}"));
+        assert_eq!(table.title(), title);
+        assert_eq!(table.shape(), CubeShape::ThreeDimensional { points_a_side: 33 });
+        assert_eq!(table.domain_min(), [0.0; 3]);
+        assert_eq!(table.domain_max(), [1.0; 3]);
+        assert!(
+            text.contains("SPDX-License-Identifier: CC0-1.0"),
+            "{title}: it says what its licence is"
+        );
+        assert!(
+            table
+                .rows()
+                .iter()
+                .all(|row| row.iter().all(|channel| (0.0..=1.0).contains(channel))),
+            "{title}: every colour is a colour"
+        );
+    }
+}
+
+#[test]
+fn each_sample_table_does_what_its_name_says() {
+    let table = |title: &str| parse_cube(SAMPLES.iter().find(|(name, _)| *name == title).unwrap().1).unwrap();
+    let at = |title: &str, colour: [f32; 3]| table(title).look_up(colour, Interpolation::Tetrahedral);
+    let mid = [0.5, 0.5, 0.5];
+    // Warm has more red and less blue than it was; cool the other way round.
+    let warm = at("Warm", mid);
+    assert!(warm[0] > 0.5 && warm[2] < 0.5, "{warm:?}");
+    let cool = at("Cool", mid);
+    assert!(cool[0] < 0.5 && cool[2] > 0.5, "{cool:?}");
+    // Faded lifts the black and softens the white, and has less colour.
+    let black = at("Faded", [0.0; 3]);
+    assert!(black.iter().all(|channel| (channel - 0.06).abs() < 1e-4), "{black:?}");
+    let white = at("Faded", [1.0; 3]);
+    assert!(white.iter().all(|channel| (channel - 0.94).abs() < 1e-4), "{white:?}");
+    let red = at("Faded", [1.0, 0.0, 0.0]);
+    assert!(red[1] > 0.06 + 0.88 * 0.0 && red[0] < 0.94, "{red:?}");
+    // Punchy is more colourful: a dull red gets redder.
+    let dull = [0.6, 0.4, 0.4];
+    let punched = at("Punchy", dull);
+    assert!(punched[0] - punched[1] > dull[0] - dull[1], "{punched:?}");
+    // Monochrome has no colour: red, green and blue come out equal, and by brightness (green is brighter than blue).
+    for colour in [[0.9, 0.2, 0.1], [0.1, 0.8, 0.3], [0.2, 0.2, 0.9]] {
+        let grey = at("Monochrome", colour);
+        assert!(
+            (grey[0] - grey[1]).abs() < 1e-5 && (grey[1] - grey[2]).abs() < 1e-5,
+            "{grey:?}"
+        );
+    }
+    assert!(at("Monochrome", [0.0, 1.0, 0.0])[0] > at("Monochrome", [0.0, 0.0, 1.0])[0]);
+    // And none of them moves black or white out of the range: nothing is clipped on the way.
+    for (title, _) in SAMPLES {
+        let (low, high) = (at(title, [0.0; 3]), at(title, [1.0; 3]));
+        assert!(
+            low.iter().chain(&high).all(|channel| (0.0..=1.0).contains(channel)),
+            "{title}"
+        );
+    }
+}

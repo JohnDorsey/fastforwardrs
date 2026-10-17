@@ -60,6 +60,22 @@ pub enum Interpolation {
     Trilinear,
 }
 
+impl Interpolation {
+    pub const ALL: [Self; 2] = [Self::Tetrahedral, Self::Trilinear];
+
+    /// What names it in a project file, and in the choice of the effect that uses it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Tetrahedral => "tetrahedral",
+            Self::Trilinear => "trilinear",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|way| way.id() == id)
+    }
+}
+
 /// A look-up table that was read from a `.cube` file.
 #[derive(Clone, Debug)]
 pub struct CubeTable {

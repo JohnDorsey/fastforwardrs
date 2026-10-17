@@ -119,6 +119,20 @@ impl ParameterDescriptor {
     pub fn value_kind(&self) -> ValueKind {
         self.default.kind()
     }
+
+    /// What the value begins as when an effect is put on. **A choice whose default is no words at all begins as its first option** (the effects of the program have their
+    /// descriptors in statics, where a word cannot be made); every other value begins as its default.
+    pub fn value_it_begins_as(&self) -> PropertyValue {
+        match (&self.control, &self.default) {
+            (ParameterControl::Choice(options), PropertyValue::Words(default)) if default.is_empty() => {
+                options.first().map_or_else(
+                    || self.default.clone(),
+                    |first| PropertyValue::Words(first.id.to_string()),
+                )
+            }
+            _ => self.default.clone(),
+        }
+    }
 }
 
 /// A type of effect: what is the same about all the effects of it that there are.
@@ -257,7 +271,11 @@ fn problem_with_how_it_is_shown(key: &str, parameter: &ParameterDescriptor) -> O
                 }
             }
             match &parameter.default {
-                PropertyValue::Words(default) if options.iter().any(|option| option.id == default.as_str()) => None,
+                PropertyValue::Words(default)
+                    if default.is_empty() || options.iter().any(|option| option.id == default.as_str()) =>
+                {
+                    None
+                }
                 _ => wrong("begins as an option that it has not"),
             }
         }

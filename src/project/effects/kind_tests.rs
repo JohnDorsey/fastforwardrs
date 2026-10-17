@@ -696,3 +696,112 @@ fn every_effect_of_the_program_has_a_category_and_a_hue_shift_is_a_colour_effect
         "a file may say none"
     );
 }
+
+// --- the look-up table ---
+
+#[test]
+fn the_look_up_table_has_a_table_an_intensity_two_spaces_and_a_way_of_looking_up_and_begins_with_no_table_and_the_first_option_of_each_choice()
+ {
+    let kind = EffectKind::LUT;
+    let descriptor = kind.descriptor();
+    assert_eq!(descriptor.key, "builtin:lut");
+    assert_eq!(descriptor.version, (1, 0));
+    assert_eq!(descriptor.category, "Looks");
+    assert_eq!(descriptor.name, "look-up table");
+    assert!(
+        descriptor.description.contains("LUT"),
+        "(so that a search for LUT finds it)"
+    );
+    assert!(descriptor.changes_each_pixel_by_itself, "(so a clip group can have it)");
+    let ids: Vec<&str> = descriptor.parameters.iter().map(|parameter| &*parameter.id).collect();
+    assert_eq!(
+        ids,
+        ["table", "intensity", "input_space", "output_space", "interpolation"]
+    );
+    let labels: Vec<&str> = descriptor
+        .parameters
+        .iter()
+        .map(|parameter| &*parameter.label)
+        .collect();
+    assert_eq!(
+        labels,
+        ["Table", "Intensity", "Input space", "Output space", "Interpolation"]
+    );
+    assert_eq!(
+        kind.default_values(),
+        [
+            PropertyValue::Words(String::new()),
+            PropertyValue::Number(1.0),
+            PropertyValue::Words("screen".to_owned()),
+            PropertyValue::Words("screen".to_owned()),
+            PropertyValue::Words("tetrahedral".to_owned()),
+        ]
+    );
+    assert_eq!(
+        descriptor.parameters[0].control,
+        ParameterControl::Resource(Cow::Borrowed("cube"))
+    );
+    assert_eq!(descriptor.parameters[1].range, Some((0.0, 1.0)));
+    let option_ids = |place: usize| -> Vec<String> {
+        match &descriptor.parameters[place].control {
+            ParameterControl::Choice(options) => options.iter().map(|option| option.id.to_string()).collect(),
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(option_ids(2), ["screen", "video", "linear"]);
+    assert_eq!(option_ids(3), ["screen", "video", "linear"]);
+    assert_eq!(option_ids(4), ["tetrahedral", "trilinear"]);
+    assert_eq!(descriptor.problem(), None);
+    for group in [GroupKind::Tag, GroupKind::ClipGroup, GroupKind::TrackGroup] {
+        assert!(kind.applies_to_a_group_of_kind(group), "{group:?}");
+    }
+}
+
+#[test]
+fn a_choice_that_has_no_default_begins_as_its_first_option_and_a_default_that_is_no_option_is_still_refused() {
+    let mut descriptor = made_up("test:choosing");
+    descriptor.parameters.to_mut()[1] = ParameterDescriptor {
+        id: Cow::Borrowed("mode"),
+        name: Cow::Borrowed("mode"),
+        label: Cow::Borrowed("Mode"),
+        default: PropertyValue::Words(String::new()),
+        range: None,
+        unit: Cow::Borrowed(""),
+        decimals: None,
+        unknown_fields: UnknownFields::none(),
+        scale: ValueScale::Linear,
+        control: ParameterControl::Choice(Cow::Owned(vec![
+            ChoiceOption {
+                id: Cow::Borrowed("soft"),
+                label: Cow::Borrowed("Soft"),
+            },
+            ChoiceOption {
+                id: Cow::Borrowed("hard"),
+                label: Cow::Borrowed("Hard"),
+            },
+        ])),
+    };
+    assert_eq!(descriptor.problem(), None);
+    assert_eq!(
+        descriptor.parameters[1].value_it_begins_as(),
+        PropertyValue::Words("soft".to_owned())
+    );
+    descriptor.parameters.to_mut()[1].default = PropertyValue::Words("hard".to_owned());
+    assert_eq!(
+        descriptor.parameters[1].value_it_begins_as(),
+        PropertyValue::Words("hard".to_owned()),
+        "a default that is an option is that"
+    );
+    descriptor.parameters.to_mut()[1].default = PropertyValue::Words("gone".to_owned());
+    assert!(
+        descriptor
+            .problem()
+            .unwrap()
+            .contains("begins as an option that it has not")
+    );
+    // A value that is not a choice begins as its default, empty words and all.
+    assert_eq!(
+        EffectKind::LUT.parameters()[0].value_it_begins_as(),
+        PropertyValue::Words(String::new())
+    );
+}

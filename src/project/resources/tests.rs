@@ -353,3 +353,70 @@ fn a_kind_of_resource_is_known_by_its_key() {
     assert_eq!(ResourceKind::from_key(""), None);
     assert_eq!(ResourceKind::from_key("png"), None);
 }
+
+// --- the file as a table ---
+
+const A_TABLE: &str = "TITLE \"x\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
+
+#[test]
+fn a_resource_that_is_a_cube_file_is_a_table_that_is_read_once_and_shared_by_its_copies() {
+    let mut resources = Resources::default();
+    resources
+        .add("grade.cube", ResourceKind::Cube, bytes(A_TABLE), linked("/x"))
+        .unwrap();
+    let resource = resources.get("grade.cube").unwrap();
+
+    let first = resource.cube_table().expect("it is a table");
+    let again = resource.cube_table().unwrap();
+    let copy = resources.clone().get("grade.cube").unwrap().cube_table().unwrap();
+
+    assert_eq!(first.title(), "x");
+    assert!(Arc::ptr_eq(&first, &again), "read once");
+    assert!(Arc::ptr_eq(&first, &copy), "and shared by the copies of the project");
+}
+
+#[test]
+fn a_resource_that_is_not_a_table_says_what_is_wrong_with_it_and_a_missing_one_says_so() {
+    let mut resources = Resources::default();
+    resources
+        .add("bad.cube", ResourceKind::Cube, bytes("LUT_3D_SIZE two\n"), linked("/x"))
+        .unwrap();
+    resources
+        .add(
+            "binary.cube",
+            ResourceKind::Cube,
+            Arc::from(&[0xff_u8, 0xfe, 0x00, 0x01][..]),
+            linked("/x"),
+        )
+        .unwrap();
+    resources
+        .add_as_it_was_saved("gone.cube", ResourceKind::Cube, None, linked("/gone"))
+        .unwrap();
+
+    assert_eq!(
+        resources.get("bad.cube").unwrap().cube_table().unwrap_err(),
+        "line 1: LUT_3D_SIZE needs a whole number, and \"two\" is not one"
+    );
+    assert_eq!(
+        resources.get("binary.cube").unwrap().cube_table().unwrap_err(),
+        "the file is not text"
+    );
+    assert_eq!(
+        resources.get("gone.cube").unwrap().cube_table().unwrap_err(),
+        "the file is missing"
+    );
+    // (A file that was missing and is found is read then.)
+    assert!(resources.found_the_bytes_of("gone.cube", bytes(A_TABLE)));
+    assert!(resources.get("gone.cube").unwrap().cube_table().is_ok());
+}
+
+#[test]
+fn what_a_resource_is_read_as_does_not_make_two_resources_different() {
+    let mut first = Resources::default();
+    first
+        .add("a.cube", ResourceKind::Cube, bytes(A_TABLE), linked("/x"))
+        .unwrap();
+    let second = first.clone();
+    let _ = first.get("a.cube").unwrap().cube_table();
+    assert_eq!(first, second);
+}

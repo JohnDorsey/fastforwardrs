@@ -11,11 +11,14 @@
 //! (A test has the descriptor as it was in the first version, to say so when it is changed.)
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use super::{
-    EffectDescriptor, EffectDomain, EffectKind, ParameterControl, ParameterDescriptor, UnknownFields, ValueScale,
+    ChoiceOption, EffectDescriptor, EffectDomain, EffectKind, ParameterControl, ParameterDescriptor, UnknownFields,
+    ValueScale,
 };
 use crate::colour_effects::ColourMatrix;
+use crate::cube_table::{CubeTable, Interpolation};
 use crate::project::animation::PropertyValue;
 
 /// The key of the hue shift.
@@ -38,6 +41,9 @@ pub const BLUR_KEY: &str = "builtin:blur";
 
 /// The key of the crop.
 pub const CROP_KEY: &str = "builtin:crop";
+
+/// The key of the look-up table.
+pub const LUT_KEY: &str = "builtin:lut";
 
 /// The hue shift: the hues of the colours of the picture are turned round the wheel of colours, as far as its one value says.
 pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
@@ -299,11 +305,153 @@ const MOST_THAT_A_BLUR_CAN_BE_AND_CHANGE_NOTHING: f32 = 0.01;
 /// The fraction of the picture that a crop or its soft edge can be, under which it changes nothing: a ten-thousandth. (The same limit as the engine's.)
 const MOST_THAT_A_CROP_CAN_CUT_AND_CHANGE_NOTHING: f32 = 1.0e-4;
 
+/// The spaces the colours go into a table in and come out of it in (CM-11), and the ids that name them in a file and in the choice of the effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LutSpace {
+    /// The codes of a screen (sRGB). What a table made for pictures wants, and the default.
+    Screen,
+    /// Rec.709 video: the primaries of Rec.709 and the power 2.4 of BT.1886.
+    Video,
+    /// Linear light, in the primaries of the working space.
+    Linear,
+}
+
+impl LutSpace {
+    pub const ALL: [Self; 3] = [Self::Screen, Self::Video, Self::Linear];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Screen => "screen",
+            Self::Video => "video",
+            Self::Linear => "linear",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|space| space.id() == id)
+    }
+}
+
+/// The options of the two spaces of a table (the same list for the input and for the output).
+static OPTIONS_OF_A_SPACE: [ChoiceOption; 3] = [
+    ChoiceOption {
+        id: Cow::Borrowed("screen"),
+        label: Cow::Borrowed("Screen codes (sRGB)"),
+    },
+    ChoiceOption {
+        id: Cow::Borrowed("video"),
+        label: Cow::Borrowed("Rec.709 video (gamma 2.4)"),
+    },
+    ChoiceOption {
+        id: Cow::Borrowed("linear"),
+        label: Cow::Borrowed("Linear light (the working space)"),
+    },
+];
+
+static OPTIONS_OF_THE_WAY_TO_LOOK_UP: [ChoiceOption; 2] = [
+    ChoiceOption {
+        id: Cow::Borrowed("tetrahedral"),
+        label: Cow::Borrowed("Tetrahedral"),
+    },
+    ChoiceOption {
+        id: Cow::Borrowed("trilinear"),
+        label: Cow::Borrowed("Trilinear"),
+    },
+];
+
+/// Looks the colours of the picture up in a table (a `.cube` file).
+pub(super) static LUT: EffectDescriptor = EffectDescriptor {
+    key: Cow::Borrowed(LUT_KEY),
+    version: (1, 0),
+    name: Cow::Borrowed("look-up table"),
+    description: Cow::Borrowed(
+        "Looks the colours of the picture up in a table of colours (a LUT, a .cube file), such as a look or a film emulation",
+    ),
+    category: Cow::Borrowed("Looks"),
+    domain: EffectDomain::Picture,
+    changes_each_pixel_by_itself: true,
+    parameters: Cow::Borrowed(&[
+        ParameterDescriptor {
+            id: Cow::Borrowed("table"),
+            name: Cow::Borrowed("table of the LUT"),
+            label: Cow::Borrowed("Table"),
+            // (The name of a resource of the project. Nothing, to begin with: an effect with no table does nothing.)
+            default: PropertyValue::Words(String::new()),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Resource(Cow::Borrowed("cube")),
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("intensity"),
+            name: Cow::Borrowed("intensity of the LUT"),
+            label: Cow::Borrowed("Intensity"),
+            default: PropertyValue::Number(1.0),
+            range: Some((0.0, 1.0)),
+            unit: Cow::Borrowed(""),
+            decimals: Some(2),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("input_space"),
+            name: Cow::Borrowed("input space of the LUT"),
+            label: Cow::Borrowed("Input space"),
+            // (The first option: see `ParameterDescriptor::value_it_begins_as`.)
+            default: PropertyValue::Words(String::new()),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Choice(Cow::Borrowed(&OPTIONS_OF_A_SPACE)),
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("output_space"),
+            name: Cow::Borrowed("output space of the LUT"),
+            label: Cow::Borrowed("Output space"),
+            default: PropertyValue::Words(String::new()),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Choice(Cow::Borrowed(&OPTIONS_OF_A_SPACE)),
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("interpolation"),
+            name: Cow::Borrowed("interpolation of the LUT"),
+            label: Cow::Borrowed("Interpolation"),
+            default: PropertyValue::Words(String::new()),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Choice(Cow::Borrowed(&OPTIONS_OF_THE_WAY_TO_LOOK_UP)),
+        },
+    ]),
+    unknown_fields: UnknownFields::none(),
+};
+
 /// The most stops of exposure that is made: two to this is the most that the light is multiplied by, which half floats can hold many times over.
 pub const MOST_STOPS_OF_EXPOSURE: f32 = 12.0;
 
+/// A look-up table to be applied: the table, how much of it, the spaces, and the way of looking up.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LutOperation {
+    pub table: Arc<CubeTable>,
+    pub intensity: f32,
+    pub input: LutSpace,
+    pub output: LutSpace,
+    pub interpolation: Interpolation,
+}
+
 /// What an effect asks to be done to the picture of its layer, with its values at a frame. The preview and the export turn each into a call of the engine.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PictureOperation {
     /// The colours are mixed with a matrix (and moved by its offsets), in the codes of a screen. Neighbouring ones are one operation (see [`Self::then_if_alike`]).
     Mix(ColourMatrix),
@@ -311,6 +459,8 @@ pub enum PictureOperation {
     Exposure { stops: f32 },
     /// The picture is made this much opaque (from 0 to 1) of what it is.
     Opacity { opacity: f32 },
+    /// The colours are looked up in a table.
+    Lut(LutOperation),
     /// The picture is blurred by a Gaussian of this standard deviation, in points of a picture 1080 high.
     Blur { radius: f32 },
     /// The fractions of the picture that are cut off from the left, the top, the right and the bottom, and the width of the soft edge as a fraction of the picture's height.
@@ -331,6 +481,7 @@ impl PictureOperation {
             Self::Mix(matrix) => matrix.changes_nothing(),
             Self::Exposure { stops } => (stops.exp2() - 1.0).abs() < NEAR_ENOUGH_TO_CHANGE_NOTHING,
             Self::Opacity { opacity } => 1.0 - opacity < NEAR_ENOUGH_TO_CHANGE_NOTHING,
+            Self::Lut(look) => look.intensity < NEAR_ENOUGH_TO_CHANGE_NOTHING,
             Self::Blur { radius } => *radius < MOST_THAT_A_BLUR_CAN_BE_AND_CHANGE_NOTHING,
             Self::Crop {
                 left,
@@ -346,56 +497,91 @@ impl PictureOperation {
 
     /// The one operation that does what this one does and then what `next` does, if they are alike so that they can be (two colour mixes), and `None` if not.
     #[must_use]
-    pub fn then_if_alike(self, next: Self) -> Option<Self> {
+    pub fn then_if_alike(&self, next: &Self) -> Option<Self> {
         match (self, next) {
-            (Self::Mix(first), Self::Mix(second)) => Some(Self::Mix(first.then(second))),
+            (Self::Mix(first), Self::Mix(second)) => Some(Self::Mix(first.then(*second))),
             _ => None,
         }
     }
 }
 
+/// The function that works out the operation of an effect from its values and the tables of them.
+type HowToMakeTheOperation = fn(&[PropertyValue], &[Option<Arc<CubeTable>>]) -> Option<PictureOperation>;
+
 /// What the program does for one of its effects.
 struct Behaviour {
     kind: EffectKind,
-    /// What it asks to be done to the picture, from its values.
-    operation: fn(&[PropertyValue]) -> PictureOperation,
+    /// What it asks to be done to the picture, from its values and the tables that its resources are (one for each value, `Some` for a value that names a table the
+    /// project has and can read); `None` for an effect that does nothing as it is.
+    operation: HowToMakeTheOperation,
 }
 
-const BEHAVIOURS: [Behaviour; 7] = [
+const BEHAVIOURS: [Behaviour; 8] = [
     Behaviour {
         kind: EffectKind::HUE_SHIFT,
-        operation: hue_shift_operation,
+        operation: |values, _| Some(hue_shift_operation(values)),
     },
     Behaviour {
         kind: EffectKind::SATURATION,
-        operation: saturation_operation,
+        operation: |values, _| Some(saturation_operation(values)),
     },
     Behaviour {
         kind: EffectKind::BRIGHTNESS_AND_CONTRAST,
-        operation: brightness_and_contrast_operation,
+        operation: |values, _| Some(brightness_and_contrast_operation(values)),
     },
     Behaviour {
         kind: EffectKind::EXPOSURE,
-        operation: exposure_operation,
+        operation: |values, _| Some(exposure_operation(values)),
     },
     Behaviour {
         kind: EffectKind::OPACITY,
-        operation: opacity_operation,
+        operation: |values, _| Some(opacity_operation(values)),
     },
     Behaviour {
         kind: EffectKind::BLUR,
-        operation: blur_operation,
+        operation: |values, _| Some(blur_operation(values)),
     },
     Behaviour {
         kind: EffectKind::CROP,
-        operation: crop_operation,
+        operation: |values, _| Some(crop_operation(values)),
+    },
+    Behaviour {
+        kind: EffectKind::LUT,
+        operation: lut_operation,
     },
 ];
 
 /// What the effect `kind` asks to be done to a picture when its values are `values`, if it is an effect of the program.
-pub(super) fn picture_operation(kind: EffectKind, values: &[PropertyValue]) -> Option<PictureOperation> {
+pub(super) fn picture_operation(
+    kind: EffectKind,
+    values: &[PropertyValue],
+    tables: &[Option<Arc<CubeTable>>],
+) -> Option<PictureOperation> {
     let operation = BEHAVIOURS.iter().find(|behaviour| behaviour.kind == kind)?.operation;
-    Some(operation(values))
+    operation(values, tables)
+}
+
+/// The look-up table effect: nothing, while it has no table (none is named, the project has none of the name, or the file is not a table); and otherwise a look-up in the
+/// table, by the spaces and the way that the other values say (one that is none of the options is the default).
+fn lut_operation(values: &[PropertyValue], tables: &[Option<Arc<CubeTable>>]) -> Option<PictureOperation> {
+    let [
+        _,
+        PropertyValue::Number(intensity),
+        PropertyValue::Words(input),
+        PropertyValue::Words(output),
+        PropertyValue::Words(way),
+    ] = values
+    else {
+        return None;
+    };
+    let table = tables.first()?.clone()?;
+    Some(PictureOperation::Lut(LutOperation {
+        table,
+        intensity: intensity.clamp(0.0, 1.0),
+        input: LutSpace::from_id(input).unwrap_or(LutSpace::Screen),
+        output: LutSpace::from_id(output).unwrap_or(LutSpace::Screen),
+        interpolation: Interpolation::from_id(way).unwrap_or_default(),
+    }))
 }
 
 /// How the hue shift changes colours: it turns them by the degrees that its one value says.

@@ -48,8 +48,8 @@ pub use animation::{
 pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
     Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
-    PictureOperation, UnknownFields, ValueScale,
+    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, LutOperation, LutSpace, MOST_VALUES_OF_AN_EFFECT,
+    ParameterControl, ParameterDescriptor, PictureOperation, UnknownFields, ValueScale,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};

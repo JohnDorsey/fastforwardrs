@@ -509,3 +509,173 @@ fn the_effects_of_a_clip_its_track_a_tag_a_clip_group_and_a_track_group_are_all_
         "10 and 20 and 30 and 40 and 50 degrees",
     );
 }
+
+// --- a look-up table ---
+
+/// The text of a 3-D table by formula: the warm, curved look of the sample tables.
+fn a_warm_grade() -> String {
+    let size = 17;
+    let mut text = String::from("TITLE \"a warm grade\"\nLUT_3D_SIZE 17\n");
+    for blue in 0..size {
+        for green in 0..size {
+            for red in 0..size {
+                let (r, g, b) = (red as f32 / 16.0, green as f32 / 16.0, blue as f32 / 16.0);
+                let (r, g, b) = (
+                    r.powf(0.8) * 1.05,
+                    g.powf(1.1) * 0.95 + 0.02 * r,
+                    (b * 0.9 + 0.1 * g).powf(1.3),
+                );
+                text.push_str(&format!("{r:.6} {g:.6} {b:.6}\n"));
+            }
+        }
+    }
+    text
+}
+
+/// The colour that the table makes of `colour`, as the reference look-up on the processor does it (the codes of a screen in, the codes of a screen out).
+fn looked_up(table: &fastforwardrs::cube_table::CubeTable, colour: (u8, u8, u8)) -> (u8, u8, u8) {
+    let out = table.look_up(
+        [colour.0, colour.1, colour.2].map(|channel| f32::from(channel) / 255.0),
+        fastforwardrs::cube_table::Interpolation::Tetrahedral,
+    );
+    let byte = |channel: f32| (channel * 255.0).round().clamp(0.0, 255.0) as u8;
+    (byte(out[0]), byte(out[1]), byte(out[2]))
+}
+
+/// Puts the look-up table effect on `target`, with `table_name` (the project has the resource of that name), and gives nothing else of it changed.
+fn put_a_look_up_table_on(project: &mut Project, target: AnimationTarget, table_name: &str) {
+    let instance = project.add_effect(target, EffectKind::LUT).unwrap();
+    project
+        .set_property_at(
+            target,
+            PropertyId::effect_value(EffectKind::LUT, instance, 0),
+            PropertyValue::Words(table_name.to_owned()),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+}
+
+fn add_the_warm_grade_to(project: &mut Project, link: SourceMediaLink) -> String {
+    project
+        .add_resource(
+            "warm.cube",
+            fastforwardrs::project::ResourceKind::Cube,
+            std::sync::Arc::from(a_warm_grade().as_bytes()),
+            link,
+        )
+        .unwrap()
+}
+
+#[test]
+fn the_look_up_table_of_a_clip_gives_the_exported_colours_the_table_says() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let table = fastforwardrs::cube_table::parse_cube(&a_warm_grade()).unwrap();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let name = add_the_warm_grade_to(
+        &mut project,
+        SourceMediaLink::from_absolute_path(scratch.path().join("warm.cube")),
+    );
+    put_a_look_up_table_on(&mut project, AnimationTarget::Clip(clip), &name);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "lut.mp4");
+
+    let wanted = looked_up(&table, ORANGE);
+    assert_ne!(
+        wanted, ORANGE,
+        "the table does not change the colour: the test would show nothing"
+    );
+    assert_every_picture_is(&decoded, wanted, "the warm grade");
+}
+
+#[test]
+fn a_look_up_table_that_is_embedded_in_a_project_file_that_is_saved_and_opened_again_still_gives_the_colours_the_table_says()
+ {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let table = fastforwardrs::cube_table::parse_cube(&a_warm_grade()).unwrap();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let bytes = a_warm_grade().into_bytes();
+    let link = fastforwardrs::project_file::link_of_a_new_resource(
+        &scratch.path().join("warm.cube"),
+        "warm.cube",
+        &bytes,
+        true,
+    );
+    let name = add_the_warm_grade_to(&mut project, link);
+    put_a_look_up_table_on(&mut project, AnimationTarget::Clip(clip), &name);
+    let saved_as = scratch.path().join("graded.ffrs");
+    fastforwardrs::project_file::write_project_file(&project, &saved_as).unwrap();
+    // (The table was never a file: it is in the project file and nowhere else.)
+    assert!(!scratch.path().join("warm.cube").exists());
+
+    let opened = fastforwardrs::project_file::read_project_file(&saved_as).unwrap();
+    assert!(
+        opened
+            .resources()
+            .get("warm.cube")
+            .is_some_and(|resource| resource.is_included())
+    );
+    let decoded = exported(&toolchain, &opened, scratch.path(), "embedded.mp4");
+
+    assert_every_picture_is(&decoded, looked_up(&table, ORANGE), "the embedded table");
+}
+
+#[test]
+fn a_look_up_table_that_is_missing_leaves_the_video_as_it_is_and_a_table_that_is_not_one_does_too() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    // A table that the project does not have.
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_look_up_table_on(&mut project, AnimationTarget::Clip(clip), "not there.cube");
+    let decoded = exported(&toolchain, &project, scratch.path(), "no_table.mp4");
+    assert_every_picture_is(&decoded, ORANGE, "a table that the project has not got");
+
+    // A file that is not a table.
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    project
+        .add_resource(
+            "bad.cube",
+            fastforwardrs::project::ResourceKind::Cube,
+            std::sync::Arc::from(&b"this is not a table\n"[..]),
+            SourceMediaLink::from_absolute_path(scratch.path().join("bad.cube")),
+        )
+        .unwrap();
+    put_a_look_up_table_on(&mut project, AnimationTarget::Clip(clip), "bad.cube");
+    let decoded = exported(&toolchain, &project, scratch.path(), "bad_table.mp4");
+    assert_every_picture_is(&decoded, ORANGE, "a file that is not a table");
+}
+
+#[test]
+fn the_look_up_table_of_a_track_and_of_a_tag_gives_the_colours_of_the_table_to_the_videos_they_have() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let table = fastforwardrs::cube_table::parse_cube(&a_warm_grade()).unwrap();
+
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let name = add_the_warm_grade_to(
+        &mut project,
+        SourceMediaLink::from_absolute_path(scratch.path().join("warm.cube")),
+    );
+    let track = project.tracks()[0].id();
+    put_a_look_up_table_on(&mut project, AnimationTarget::Track(track), &name);
+    let decoded = exported(&toolchain, &project, scratch.path(), "track_lut.mp4");
+    assert_every_picture_is(&decoded, looked_up(&table, ORANGE), "the table of a track");
+
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let name = add_the_warm_grade_to(
+        &mut project,
+        SourceMediaLink::from_absolute_path(scratch.path().join("warm.cube")),
+    );
+    let tag = project.create_group(GroupKind::Tag, &[Member::Clip(clip)]).unwrap();
+    let instance = project.add_effect_to_the_group(tag, EffectKind::LUT).unwrap();
+    project
+        .set_effect_value_of_the_group(
+            tag,
+            PropertyId::effect_value(EffectKind::LUT, instance, 0),
+            &PropertyValue::Words(name),
+        )
+        .unwrap();
+    let decoded = exported(&toolchain, &project, scratch.path(), "tag_lut.mp4");
+    assert_every_picture_is(&decoded, looked_up(&table, ORANGE), "the table of a tag");
+}

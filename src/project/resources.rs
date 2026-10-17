@@ -18,11 +18,12 @@
 //! (Not to be mistaken for the entries of an archive that are called resources in `project_file::archive`: those are the source files that were included.)
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
 
 use super::source_media::SourceMediaLink;
+use crate::cube_table::{CubeTable, parse_cube};
 
 /// The most bytes that one resource may have (64 MiB).
 pub const MOST_BYTES_OF_A_RESOURCE: usize = 64 << 20;
@@ -62,6 +63,19 @@ impl ResourceKind {
     }
 }
 
+/// What a resource of the kind `cube` is read as, once (the first time it is asked for), and shared by the copies of the resource: a project that is cloned for its history
+/// does not read its tables again. **It is not a part of what makes two resources equal** (it is a function of the bytes).
+#[derive(Clone, Debug, Default)]
+struct ReadOnce(Arc<OnceLock<Result<Arc<CubeTable>, String>>>);
+
+impl PartialEq for ReadOnce {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for ReadOnce {}
+
 /// A file that the effects of a project use.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resource {
@@ -72,9 +86,23 @@ pub struct Resource {
     /// Where the file is kept: included in the project file, or linked by its paths (see the top of this file). For an included resource the paths are where the file
     /// was when it was included, and are kept as they were.
     link: SourceMediaLink,
+    read: ReadOnce,
 }
 
 impl Resource {
+    /// What the file is as a table, for a resource of the kind `cube`: the table, or what is wrong with the file (with the line, as [`crate::cube_table::CubeProblem`] tells it),
+    /// or that the program has not got the bytes (it is missing). **Read once** and kept, so that asking again is nothing.
+    pub fn cube_table(&self) -> Result<Arc<CubeTable>, String> {
+        let bytes = self.bytes.as_ref().ok_or_else(|| "the file is missing".to_owned())?;
+        self.read
+            .0
+            .get_or_init(|| match std::str::from_utf8(bytes) {
+                Ok(text) => parse_cube(text).map(Arc::new).map_err(|problem| problem.to_string()),
+                Err(_) => Err("the file is not text".to_owned()),
+            })
+            .clone()
+    }
+
     /// What the effects that use it name it by.
     pub fn name(&self) -> &str {
         &self.name
@@ -209,6 +237,7 @@ impl Resources {
             kind,
             bytes: Some(bytes),
             link,
+            read: ReadOnce::default(),
         });
         Ok(name)
     }
@@ -250,6 +279,7 @@ impl Resources {
             kind,
             bytes,
             link,
+            read: ReadOnce::default(),
         });
         Ok(())
     }
