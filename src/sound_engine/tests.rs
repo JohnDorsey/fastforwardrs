@@ -894,3 +894,42 @@ fn the_sound_is_the_same_with_feeds_that_are_got_ready_ahead_and_every_clip_is_s
         );
     }
 }
+
+#[test]
+fn the_look_ahead_is_measured_from_where_each_clip_is_in_frames_to_the_sample() {
+    // Clips of a second one after another; a look-ahead of 1.02 seconds from the start reaches the clip that begins at 1 s (sample 48000) and not the one at 2 s.
+    let spawner = RampSpawner::new();
+    let mut feeds = LookAheadFeeds::with_limits(clips_one_after_another(5), spawner.clone(), 1.02, 12);
+    feeds.about_to_render(0);
+    assert_eq!(spawner.spawned(), vec![(0, 0), (0, 1)]);
+    // And just short of the clip at 1 s it is not reached: the look-ahead is 0.02 s short of it.
+    let spawner = RampSpawner::new();
+    let mut feeds = LookAheadFeeds::with_limits(clips_one_after_another(5), spawner.clone(), 0.98, 12);
+    feeds.about_to_render(0);
+    assert_eq!(spawner.spawned(), vec![(0, 0)]);
+}
+
+#[test]
+fn a_clip_that_was_opened_without_having_been_started_is_not_started_again_when_the_look_ahead_reaches_it() {
+    let spawner = RampSpawner::new();
+    let specification = clips_one_after_another(5);
+    let mut feeds = LookAheadFeeds::with_limits(specification.clone(), spawner.clone(), 0.5, 12);
+    feeds.about_to_render(0);
+    assert_eq!(
+        spawner.spawned(),
+        vec![(0, 0)],
+        "only the first is within half a second"
+    );
+    // The second clip is asked for before the look-ahead has reached it: it is started then.
+    let _second = feeds.open(&request_for(&specification, 0, 1));
+    assert_eq!(spawner.spawned(), vec![(0, 0), (0, 1)]);
+    // Now the look-ahead reaches it: it is not started again.
+    feeds.about_to_render(40_000);
+    assert_eq!(spawner.spawned(), vec![(0, 0), (0, 1)]);
+    feeds.about_to_render(80_000);
+    assert_eq!(
+        spawner.spawned(),
+        vec![(0, 0), (0, 1), (0, 2)],
+        "and the next one is, as it should be"
+    );
+}

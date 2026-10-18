@@ -882,3 +882,58 @@ fn speakers_that_want_another_kind_of_sound_are_given_it_by_a_conversion_and_it_
         }
     }
 }
+
+#[test]
+fn the_window_is_woken_when_the_first_sound_is_ready_and_when_the_sound_ends_and_not_otherwise() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let kinds = Kinds {
+        sped_up: false,
+        changing_volume: false,
+        wrong_lengths: false,
+    };
+    // The sound as the speakers want it (stereo at 48000: made by the engine itself) and as they might (44100: through a conversion): the same two wake-ups.
+    for format in [
+        STEREO_AT_48000,
+        AudioFormat {
+            sample_rate: 44_100,
+            channel_count: 2,
+        },
+    ] {
+        let specification = a_specification(5, FrameRate::new(30, 1).unwrap(), kinds, SpedUpClipSound::MaintainPitch);
+        let request = AudioStreamRequest {
+            source_files: sources.iter().map(|path| path.clone().into()).collect(),
+            sound: specification,
+            format,
+        };
+        let wake_ups = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&wake_ups);
+        let stream = EngineAudioStream::start(
+            &toolchain,
+            &request,
+            Arc::new(move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("the stream starts");
+        let started = Instant::now();
+        loop {
+            match stream.try_next_event() {
+                Some(AudioStreamEvent::Finished { .. }) => break,
+                Some(_) => {}
+                None => {
+                    assert!(started.elapsed() < TIME_ALLOWED);
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
+        }
+        // (The wake-up that goes with the end comes just after the event; a moment is allowed.)
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(
+            wake_ups.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "{format:?}: once for the first sound and once for the end"
+        );
+    }
+}
