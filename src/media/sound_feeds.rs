@@ -10,7 +10,7 @@
 
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -33,7 +33,7 @@ use crate::sound_engine::{
 const CHUNKS_BUFFERED_AHEAD_OF_A_CLIP: usize = 8;
 
 /// How often a feed that is waiting for sound looks at whether it has been told to stop.
-const HOW_OFTEN_TO_LOOK_AT_STOPPING: Duration = Duration::from_millis(50);
+const HOW_OFTEN_TO_LOOK_AT_STOPPING: Duration = Duration::from_millis(10);
 
 /// How many moments of sound the graph makes at a time for the preview (about 43 milliseconds), and how many sets wait to be played before the graph pauses.
 const MOMENTS_PER_CHUNK: usize = 2048;
@@ -42,9 +42,28 @@ const CHUNKS_BUFFERED_AHEAD: usize = 24;
 /// What the ffmpeg of a clips said that was not sound.
 type Problems = Arc<Mutex<Vec<String>>>;
 
+/// Counts an ffmpeg of a clip while it is running. (A field of a feed that comes **after** the tool: fields are dropped in order, so the count goes down when the program has been
+/// stopped and waited for, which is when it has let go of its file.)
+struct RunningClipProgram(Arc<AtomicUsize>);
+
+impl RunningClipProgram {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for RunningClipProgram {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// The feed of one clip: the sound its ffmpeg writes.
 struct FfmpegClipFeed {
     tool: StreamingTool<AudioStreamEvent>,
+    /// (After the tool: see [`RunningClipProgram`].)
+    _running: RunningClipProgram,
     /// Sound that has come and has not been given yet (interleaved), and how much of it has.
     waiting: Vec<f32>,
     given: usize,
@@ -116,6 +135,7 @@ pub struct FfmpegClipSpawner {
     sped_up_clip_sound: SpedUpClipSound,
     stop: Arc<AtomicBool>,
     problems: Problems,
+    running: Arc<AtomicUsize>,
 }
 
 impl FfmpegClipSpawner {
@@ -133,7 +153,13 @@ impl FfmpegClipSpawner {
             sped_up_clip_sound: specification.sped_up_clip_sound,
             stop,
             problems: Arc::default(),
+            running: Arc::default(),
         }
+    }
+
+    /// How many ffmpeg of clips are running now, which the spawner and the feeds it made keep up to date.
+    pub fn running_programs(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.running)
     }
 
     /// What the ffmpeg of the clips have complained of, so far.
@@ -175,6 +201,7 @@ impl ClipSpawner for FfmpegClipSpawner {
         match tool {
             Ok(tool) => Box::new(FfmpegClipFeed {
                 tool,
+                _running: RunningClipProgram::new(&self.running),
                 waiting: Vec::new(),
                 given: 0,
                 has_ended: false,
@@ -216,6 +243,22 @@ pub struct EngineAudioStream {
     source: Source,
     stop: Arc<AtomicBool>,
     problems: Problems,
+    running_programs: Arc<AtomicUsize>,
+    /// (Last: fields are dropped in order, so by the time this waits for the thread, the end of the channel the thread sends the sound into, or the converter it writes it
+    /// into, is gone and the thread cannot be stuck giving sound away.)
+    _graph_thread: WaitedForWhenDropped,
+}
+
+/// A thread that is waited for when this is dropped.
+struct WaitedForWhenDropped(Option<thread::JoinHandle<()>>);
+
+impl Drop for WaitedForWhenDropped {
+    fn drop(&mut self) {
+        if let Some(thread) = self.0.take() {
+            // (A thread that panicked has nothing left to wait for.)
+            let _ = thread.join();
+        }
+    }
 }
 
 enum Source {
@@ -242,12 +285,13 @@ impl EngineAudioStream {
             Arc::clone(&stop),
         );
         let problems = spawner.problems();
+        let running_programs = spawner.running_programs();
         let specification = request.sound.clone();
         let stop_for_the_thread = Arc::clone(&stop);
         let is_what_the_engine_makes = request.format.sample_rate == SAMPLE_RATE && request.format.channel_count == 2;
         if is_what_the_engine_makes {
             let (sender, events) = mpsc::sync_channel(CHUNKS_BUFFERED_AHEAD);
-            thread::spawn(move || {
+            let graph_thread = thread::spawn(move || {
                 let mut first_chunk = true;
                 make_the_sound(specification, spawner, &stop_for_the_thread, |samples| {
                     // A full channel makes this wait, which keeps the graph from racing ahead of the speakers; an error means nobody wants the sound.
@@ -264,6 +308,8 @@ impl EngineAudioStream {
                 source: Source::Direct(events),
                 stop,
                 problems,
+                running_programs,
+                _graph_thread: WaitedForWhenDropped(Some(graph_thread)),
             });
         }
         // The sound goes through an ffmpeg that changes its kind: it reads what the engine makes on its standard input and writes what the speakers want.
@@ -297,7 +343,7 @@ impl EngineAudioStream {
                 "the program's pipes were not created",
             )));
         };
-        thread::spawn(move || {
+        let graph_thread = thread::spawn(move || {
             make_the_sound(specification, spawner, &stop_for_the_thread, |samples| {
                 // (If the converter is gone, nobody wants the sound: the write fails and the graph stops.)
                 let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_le_bytes()).collect();
@@ -310,7 +356,14 @@ impl EngineAudioStream {
             source: Source::Converted(converter),
             stop,
             problems,
+            running_programs,
+            _graph_thread: WaitedForWhenDropped(Some(graph_thread)),
         })
+    }
+
+    /// How many ffmpeg of clips are running now (a count that stays up to date after this stream is gone, which is how to tell that they all have been stopped).
+    pub fn running_programs(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.running_programs)
     }
 
     /// The next event, if one is ready. Never waits.
@@ -336,6 +389,8 @@ impl EngineAudioStream {
 }
 
 impl Drop for EngineAudioStream {
+    /// Stops everything: when this has returned (and the fields have been dropped, the thread being the last), **the ffmpeg of every clip has been stopped and waited for**, as
+    /// that of the filter graph was. (A program that is still running has its file open: on Windows the editor could not write the project file when its window was closed.)
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
