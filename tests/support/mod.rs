@@ -26,6 +26,7 @@ use fastforwardrs::project::{
 use fastforwardrs::rgba_picture::RgbaPicture;
 use fastforwardrs::video_export::{ExportEvent, ExportOptions, ExportResult, VideoExport, plan_export};
 
+pub mod sound_files;
 pub mod yuv_videos;
 
 /// Set this to `1` to make the tests fail (instead of skipping themselves) when ffmpeg is missing.

@@ -14,7 +14,7 @@
 mod support;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,7 +26,7 @@ use fastforwardrs::media::{
     render_sound_to_file,
 };
 use fastforwardrs::project::{FrameRate, SpedUpClipSound, SpeedFactor};
-use fastforwardrs::sound_engine::SAMPLE_RATE;
+use support::sound_files::{FILE_SECONDS, steady_file, the_sources};
 use support::{RandomNumbers, scratch_directory};
 
 const TIME_ALLOWED: Duration = Duration::from_secs(120);
@@ -36,51 +36,6 @@ const STEREO_AT_48000: AudioFormat = AudioFormat {
     channel_count: 2,
 };
 
-/// A stereo WAV file of 32-bit floating point samples, 48000 a second, that has `value(channel, sample)` for the samples.
-fn write_wav(path: &Path, seconds: f64, value: impl Fn(usize, usize) -> f32) {
-    let samples = (seconds * f64::from(SAMPLE_RATE)) as usize;
-    let data_bytes = samples * 2 * 4;
-    let mut bytes = Vec::with_capacity(44 + data_bytes);
-    bytes.extend(b"RIFF");
-    bytes.extend(((36 + data_bytes) as u32).to_le_bytes());
-    bytes.extend(b"WAVEfmt ");
-    bytes.extend(16_u32.to_le_bytes());
-    bytes.extend(3_u16.to_le_bytes()); // IEEE floating point
-    bytes.extend(2_u16.to_le_bytes());
-    bytes.extend(SAMPLE_RATE.to_le_bytes());
-    bytes.extend((SAMPLE_RATE * 8).to_le_bytes());
-    bytes.extend(8_u16.to_le_bytes());
-    bytes.extend(32_u16.to_le_bytes());
-    bytes.extend(b"data");
-    bytes.extend((data_bytes as u32).to_le_bytes());
-    for sample in 0..samples {
-        for channel in 0..2 {
-            bytes.extend(value(channel, sample).to_le_bytes());
-        }
-    }
-    fs::write(path, bytes).expect("the sound file is written");
-}
-
-/// A file of noise: a number in -0.5..0.5 at every sample, different in the two channels, the same for the same `seed`.
-fn noise_file(folder: &Path, name: &str, seconds: f64, seed: u64) -> PathBuf {
-    let path = folder.join(name);
-    let mut random = RandomNumbers::with_seed(seed);
-    let mut numbers: Vec<f32> = Vec::new();
-    for _ in 0..(seconds * f64::from(SAMPLE_RATE)) as usize * 2 {
-        numbers.push(random.next_below(1_000_000) as f32 / 1_000_000.0 - 0.5);
-    }
-    write_wav(&path, seconds, |channel, sample| numbers[sample * 2 + channel]);
-    path
-}
-
-/// A file that is the same number all the way through.
-fn steady_file(folder: &Path, name: &str, seconds: f64, value: f32) -> PathBuf {
-    let path = folder.join(name);
-    write_wav(&path, seconds, |_, _| value);
-    path
-}
-
-/// The sound of `specification` as the filter graph of ffmpeg makes it (the oracle), interleaved.
 fn by_the_filter_graph(
     toolchain: &FfmpegToolchain,
     specification: &SoundGraphSpecification,
@@ -237,8 +192,6 @@ struct Kinds {
     wrong_lengths: bool,
 }
 
-const FILE_SECONDS: [f64; 3] = [6.0, 3.0, 9.0];
-
 fn a_specification(
     seed: u64,
     frame_rate: FrameRate,
@@ -305,14 +258,6 @@ fn a_specification(
         strips,
         sped_up_clip_sound,
     }
-}
-
-fn the_sources(folder: &Path) -> Vec<PathBuf> {
-    FILE_SECONDS
-        .iter()
-        .enumerate()
-        .map(|(number, seconds)| noise_file(folder, &format!("noise_{number}.wav"), *seconds, 1000 + number as u64))
-        .collect()
 }
 
 /// How the two sounds differ for `specification`, both made from `sources`.
@@ -647,81 +592,6 @@ fn the_preview_and_the_export_make_the_very_same_sound_and_it_is_the_sound_of_th
 }
 
 #[test]
-fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_never_falls_behind_the_speakers() {
-    let toolchain = toolchain_or_skip!();
-    let folder = scratch_directory();
-    let sources = the_sources(folder.path());
-    // Two hundred clips of 6 frames (a fifth of a second) one after another on one track, cut from different places of the files: 40 seconds.
-    let mut random = RandomNumbers::with_seed(77);
-    let clips: Vec<SoundItemToExport> = (0..200)
-        .map(|_| {
-            let first = random.next_below(150);
-            SoundItemToExport::Clip(SoundClipToExport {
-                source_input: random.next_below(3) as usize,
-                first_source_frame: first,
-                end_source_frame: first + 6,
-                speed_factor: SpeedFactor::new(1).unwrap(),
-                timeline_frame_count: 6,
-                loudness: LoudnessToExport::Constant(0.5),
-            })
-        })
-        .collect();
-    let specification = SoundGraphSpecification {
-        frame_rate: FrameRate::new(30, 1).unwrap(),
-        total_frame_count: 1200,
-        strips: vec![SoundStripToExport { items: clips }],
-        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
-    };
-    let request = AudioStreamRequest {
-        source_files: sources.iter().map(|path| path.clone().into()).collect(),
-        sound: specification,
-        format: STEREO_AT_48000,
-    };
-    let began = Instant::now();
-    let stream = EngineAudioStream::start(&toolchain, &request, Arc::new(|| {})).expect("the stream starts");
-    // The speakers play what has come at the pace of time, from when the first sound came, and are given sound ahead: so at any time the sound that has come
-    // has to be at least what has been played, or there was a gap. The sound is taken as it comes (the speakers' queue is not modelled).
-    let mut first_sound_at = None;
-    let mut moments_received = 0_usize;
-    let mut least_ahead_in_seconds = f64::MAX;
-    let mut finished = false;
-    while moments_received < 30 * 48_000 && !finished {
-        while let Some(event) = stream.try_next_event() {
-            match event {
-                AudioStreamEvent::Samples(samples) => {
-                    first_sound_at.get_or_insert_with(|| began.elapsed());
-                    moments_received += samples.len() / 2;
-                }
-                AudioStreamEvent::Finished { error_output } => {
-                    assert_eq!(error_output, None);
-                    finished = true;
-                }
-            }
-        }
-        if let Some(first) = first_sound_at {
-            let played = (began.elapsed().saturating_sub(first)).as_secs_f64();
-            least_ahead_in_seconds = least_ahead_in_seconds.min(moments_received as f64 / 48_000.0 - played);
-        }
-        assert!(
-            began.elapsed() < Duration::from_secs(60),
-            "not enough sound in a minute"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    let first = first_sound_at.expect("there was sound");
-    eprintln!(
-        "200 clips: the first sound after {first:?}; {} seconds of sound received in {:?}; never less than {least_ahead_in_seconds:.2} seconds ahead of the speakers",
-        moments_received as f64 / 48_000.0,
-        began.elapsed()
-    );
-    assert!(first < Duration::from_secs(3), "the first sound took {first:?}");
-    assert!(
-        least_ahead_in_seconds > -0.1,
-        "the sound fell {least_ahead_in_seconds:.2} seconds behind the speakers (a gap is any time behind at all; 0.1 seconds is the slack of the polling)"
-    );
-}
-
-#[test]
 fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_ends() {
     let toolchain = toolchain_or_skip!();
     let folder = scratch_directory();
@@ -928,12 +798,65 @@ fn the_window_is_woken_when_the_first_sound_is_ready_and_when_the_sound_ends_and
                 }
             }
         }
-        // (The wake-up that goes with the end comes just after the event; a moment is allowed.)
-        std::thread::sleep(Duration::from_millis(200));
+        // (The wake-up that goes with the end comes just after the event: it is waited for, and then a moment more is allowed for any that should not come.)
+        let waited = Instant::now();
+        while wake_ups.load(std::sync::atomic::Ordering::SeqCst) < 2 && waited.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(300));
         assert_eq!(
             wake_ups.load(std::sync::atomic::Ordering::SeqCst),
             2,
             "{format:?}: once for the first sound and once for the end"
         );
     }
+}
+
+/// A sound file that nothing ever writes to: a named pipe, which ffmpeg waits for for ever when it opens it. (Where there are named pipes.)
+#[cfg(unix)]
+#[test]
+fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at_once() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let stuck = folder.path().join("stuck.wav");
+    let made = std::process::Command::new("mkfifo").arg(&stuck).status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("SKIPPED: there is no mkfifo");
+        return;
+    }
+    let specification = SoundGraphSpecification {
+        frame_rate: FrameRate::new(30, 1).unwrap(),
+        total_frame_count: 30,
+        strips: vec![SoundStripToExport {
+            items: vec![SoundItemToExport::Clip(SoundClipToExport {
+                source_input: 0,
+                first_source_frame: 0,
+                end_source_frame: 30,
+                speed_factor: SpeedFactor::new(1).unwrap(),
+                timeline_frame_count: 30,
+                loudness: LoudnessToExport::UNCHANGED,
+            })],
+        }],
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+    };
+    let began = Instant::now();
+    let result = render_sound_to_file(
+        &toolchain,
+        &specification,
+        vec![stuck.clone().into()],
+        &folder.path().join("sound.f32"),
+        // (Stopped after a second, from outside: the sound of the clip is stuck, and no block is ever finished to ask at.)
+        &|| began.elapsed() > Duration::from_secs(1),
+    );
+    // Whatever happened, the pipe is let go of, so that a failure is a failure and not a test that never ends.
+    drop(fs::OpenOptions::new().read(true).write(true).open(&stuck));
+    assert!(
+        matches!(result, Err(fastforwardrs::media::SoundRenderError::Cancelled)),
+        "{result:?}"
+    );
+    assert!(
+        began.elapsed() < Duration::from_secs(5),
+        "it was stopped after {:?}",
+        began.elapsed()
+    );
 }

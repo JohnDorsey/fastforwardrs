@@ -376,14 +376,21 @@ pub enum SoundRenderError {
     FfmpegSaid(String),
 }
 
+/// How often a sound that is being made for an export looks at whether the export was stopped, while it waits for the sound of a clip.
+const HOW_OFTEN_TO_LOOK_AT_BEING_CANCELLED: Duration = Duration::from_millis(20);
+
 /// Makes the sound of `specification` (from `sources`, which its clips name by their place in the list) and writes it into the file at `path` as raw samples, 32-bit floating
-/// point, 48000 a second, stereo, which is how the encoder reads it. `is_cancelled` is asked between blocks.
+/// point, 48000 a second, stereo, which is how the encoder reads it.
+///
+/// `is_cancelled` is asked all the time (every few milliseconds, by a thread of its own), and not only between blocks: **the sound of a clip can be slow to come, or never come**
+/// (a file on a network that does not answer, a pipe that nothing writes to), and an export that is stopped has to stop then too. Once it says yes the feeds give up at once, and
+/// this ends with [`SoundRenderError::Cancelled`].
 pub fn render_sound_to_file(
     toolchain: &FfmpegToolchain,
     specification: &SoundGraphSpecification,
     sources: Vec<MediaLocation>,
     path: &Path,
-    is_cancelled: &dyn Fn() -> bool,
+    is_cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<(), SoundRenderError> {
     let stop = Arc::new(AtomicBool::new(false));
     let spawner = FfmpegClipSpawner::new(toolchain, sources, specification, Arc::clone(&stop));
@@ -391,6 +398,36 @@ pub fn render_sound_to_file(
     let feeds = LookAheadFeeds::new(specification.clone(), spawner);
     let mut graph = SoundGraph::new(specification.clone(), Box::new(feeds), Box::new(NoInsertions));
     let mut file = BufWriter::new(std::fs::File::create(path).map_err(SoundRenderError::CouldNotWrite)?);
+    let everything_is_made = AtomicBool::new(false);
+    let result = thread::scope(|scope| {
+        scope.spawn(|| {
+            while !everything_is_made.load(Ordering::Relaxed) {
+                if is_cancelled() {
+                    stop.store(true, Ordering::Relaxed);
+                    return;
+                }
+                thread::sleep(HOW_OFTEN_TO_LOOK_AT_BEING_CANCELLED);
+            }
+        });
+        let result = write_the_sound(&mut graph, &mut file, is_cancelled, &stop);
+        everything_is_made.store(true, Ordering::Relaxed);
+        result
+    });
+    result?;
+    file.flush().map_err(SoundRenderError::CouldNotWrite)?;
+    match what_the_clips_complained_of(&problems) {
+        Some(problem) => Err(SoundRenderError::FfmpegSaid(problem)),
+        None => Ok(()),
+    }
+}
+
+/// Makes the sound block by block and writes it, until it ends or the export is stopped.
+fn write_the_sound(
+    graph: &mut SoundGraph,
+    file: &mut BufWriter<std::fs::File>,
+    is_cancelled: &(dyn Fn() -> bool + Sync),
+    stop: &AtomicBool,
+) -> Result<(), SoundRenderError> {
     let (mut left, mut right) = (vec![0.0; MOMENTS_PER_CHUNK], vec![0.0; MOMENTS_PER_CHUNK]);
     let mut interleaved = Vec::with_capacity(MOMENTS_PER_CHUNK * 2);
     let mut bytes = Vec::with_capacity(MOMENTS_PER_CHUNK * 8);
@@ -401,16 +438,11 @@ pub fn render_sound_to_file(
         }
         let count = graph.render(&mut left, &mut right);
         if count == 0 {
-            break;
+            return Ok(());
         }
         interleave_into(&left[..count], &right[..count], &mut interleaved);
         bytes.clear();
         bytes.extend(interleaved.iter().flat_map(|sample| sample.to_le_bytes()));
         file.write_all(&bytes).map_err(SoundRenderError::CouldNotWrite)?;
-    }
-    file.flush().map_err(SoundRenderError::CouldNotWrite)?;
-    match what_the_clips_complained_of(&problems) {
-        Some(problem) => Err(SoundRenderError::FfmpegSaid(problem)),
-        None => Ok(()),
     }
 }
