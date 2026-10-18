@@ -4,9 +4,13 @@
 //! The windows that appear in the middle of the screen: messages, questions, the progress of an
 //! export, and the warning that source files must be chosen again.
 
-use egui::{Align2, Context, Id, Modal, ProgressBar, RichText, Window, vec2};
+use egui::{
+    Align2, Color32, Context, Id, Key, Modal, ProgressBar, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Widget,
+    WidgetInfo, WidgetType, Window, vec2,
+};
 
 use super::commands::Command;
+use crate::plugin_trust::{HoldToConfirm, Question, SECONDS_TO_HOLD};
 use crate::project::SourceMediaIdentifier;
 
 /// What to do once the user has agreed to throw away unsaved changes.
@@ -53,6 +57,10 @@ pub enum Dialog {
         /// Whether the project has a project file (a plain one), and has not just never been saved.
         has_a_plain_project_file: bool,
     },
+    /// A plugin is a program that runs with all the rights of the person who runs the editor: it is about to be run, and the person is asked. `Confirmed` is yes, anything else
+    /// is no. A plugin that is a file somewhere is asked about with a warning (once, by its path and what is in the file); one that is inside the project file with the
+    /// severe question, which can only be said yes to by holding the button down for five seconds.
+    AskAboutAPlugin { question: Question },
     /// A file cannot be embedded in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked
     /// where to save it as one, and if the user agrees it is, and then the file to embed is asked for.
     MustSaveAsAnArchiveToEmbedAFile {
@@ -74,7 +82,28 @@ pub enum DialogAnswer {
     ConfirmedTheOtherWay,
 }
 
-/// What the two buttons of the question about how a table is kept say.
+/// What the questions about a plugin say on their buttons.
+pub const PLUGIN_DONT_LOAD_LABEL: &str = "Don't load";
+pub const PLUGIN_LOAD_LABEL: &str = "Load it";
+
+/// What the question about a plugin that is a file somewhere says, for the plugin called `library` that is the file `path`.
+pub fn warning_about_a_linked_plugin(library: &str, path: &std::path::Path) -> String {
+    format!(
+        "The project uses the plugin \u{ab}{library}\u{bb}, which is the file {}. A plugin is a program: it runs with all your rights, and nothing checks what it does. \
+         Load it only if you know where it came from. If you say yes, that is remembered for this file as it is now; if the file changes you will be asked again.",
+        path.display()
+    )
+}
+
+/// What the severe question about a plugin that is inside the project file says (the words of SF-06 of the features list).
+pub fn warning_about_an_embedded_plugin(library: &str, platform: &str) -> String {
+    format!(
+        "This project contains a program: \u{ab}{library}\u{bb}, for {platform}. It runs with all your rights and nothing checks what it does. \
+         Load it only if you trust where this project came from."
+    )
+}
+
+/// What the question about how a table is kept says on its two buttons.
 pub const HOW_TO_KEEP_A_TABLE_EMBED: &str = "Embed in the project file";
 pub const HOW_TO_KEEP_A_TABLE_LINK: &str = "Link to the file";
 
@@ -242,6 +271,59 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                     }
                 });
             }
+            Dialog::AskAboutAPlugin {
+                question:
+                    Question::Linked {
+                        library,
+                        path,
+                        digest: _,
+                    },
+            } => {
+                ui.heading("Run this plugin?");
+                ui.add_space(6.0);
+                ui.label(warning_about_a_linked_plugin(library, path));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button(PLUGIN_DONT_LOAD_LABEL).clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                    if ui.button(PLUGIN_LOAD_LABEL).clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                });
+            }
+            Dialog::AskAboutAPlugin {
+                question:
+                    Question::Embedded {
+                        library,
+                        platform,
+                        size,
+                        digest,
+                    },
+            } => {
+                ui.heading(RichText::new("This project contains a program").color(Color32::from_rgb(200, 40, 40)));
+                ui.add_space(6.0);
+                ui.label(warning_about_an_embedded_plugin(library, platform));
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("({size} bytes, SHA-256 {})", digest.short_hex())).weak().small());
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button(PLUGIN_DONT_LOAD_LABEL).clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                    if HoldDownToConfirm::new(PLUGIN_LOAD_LABEL).ui(ui).changed() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "To load it, hold the button down with the mouse, or hold the Enter key, for {SECONDS_TO_HOLD:.0} seconds. Letting go starts it over."
+                    ))
+                    .weak()
+                    .small(),
+                );
+            }
             Dialog::ConfirmLosingKeyframes { change, how_many } => {
                 let (keyframes, them, would_be) = if *how_many == 1 {
                     ("1 keyframe".to_owned(), "it", "it would be")
@@ -273,6 +355,68 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
         answer = DialogAnswer::Dismissed;
     }
     answer
+}
+
+/// A button that is not clicked but **held down**: with the mouse on it or with the Enter key, for [`SECONDS_TO_HOLD`] without a break, while it fills up. Letting go starts it over.
+/// **A click does nothing, and nor does the Space bar** (it presses whatever has the focus, so that it must not be able to say yes to this): only the mouse button that went
+/// down on it and the Enter key are looked at. (It senses a drag as well as a click because egui stops calling a press a click after under a second, and a press that is held
+/// is a drag until the button goes up.) `changed()` of its response is true in the frame in which the hold is complete.
+struct HoldDownToConfirm<'label> {
+    label: &'label str,
+}
+
+impl<'label> HoldDownToConfirm<'label> {
+    fn new(label: &'label str) -> Self {
+        Self { label }
+    }
+}
+
+impl Widget for HoldDownToConfirm<'_> {
+    fn ui(self, ui: &mut Ui) -> egui::Response {
+        let (rect, mut response) = ui.allocate_exact_size(vec2(140.0, 26.0), Sense::click_and_drag());
+        let key_for_the_hold = ui.input(|input| input.key_down(Key::Enter));
+        let held = response.is_pointer_button_down_on() || key_for_the_hold;
+        let now = ui.input(|input| input.time);
+        let mut hold: HoldToConfirm = ui.data(|data| data.get_temp(response.id)).unwrap_or_default();
+        let was_confirmed = hold.is_confirmed();
+        let progress = hold.update(now, held);
+        ui.data_mut(|data| data.insert_temp(response.id, hold));
+        if held && !hold.is_confirmed() {
+            // (The fill is drawn every frame while it is held, and the time is read again then.)
+            ui.ctx().request_repaint();
+        }
+        if hold.is_confirmed() && !was_confirmed {
+            response.mark_changed();
+        }
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), self.label));
+        if ui.is_rect_visible(rect) {
+            let visuals = ui.style().interact(&response);
+            let painter = ui.painter();
+            painter.rect(
+                rect,
+                visuals.corner_radius,
+                visuals.weak_bg_fill,
+                visuals.bg_stroke,
+                StrokeKind::Inside,
+            );
+            let filled = Rect::from_min_size(rect.min, vec2(rect.width() * progress as f32, rect.height()));
+            painter.rect(
+                filled,
+                visuals.corner_radius,
+                Color32::from_rgb(200, 40, 40),
+                Stroke::NONE,
+                StrokeKind::Inside,
+            );
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                self.label,
+                egui::FontId::proportional(14.0),
+                visuals.text_color(),
+            );
+        }
+        response
+    }
 }
 
 /// Shows how far an export has got, with a button to stop it. Returns whether the button was pressed.

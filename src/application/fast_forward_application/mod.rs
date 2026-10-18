@@ -100,6 +100,9 @@ mod navigation_key_tests;
 mod picture_tests;
 #[cfg(test)]
 mod playing_edit_tests;
+mod plugin_flow;
+#[cfg(test)]
+mod plugin_tests;
 #[cfg(test)]
 mod preview_layer_tests;
 #[cfg(test)]
@@ -395,6 +398,9 @@ impl FastForwardApplication {
         if let Some(settings_path) = default_settings_file_path() {
             application.keep_global_settings_in(settings_path);
         }
+        if let Some(approvals_file) = crate::plugin_trust::ApprovalStore::default_file() {
+            application.keep_plugin_approvals_in(approvals_file);
+        }
         application.use_the_default_speakers();
         application.environment.export_adapter = creation_context
             .wgpu_render_state
@@ -536,6 +542,7 @@ impl FastForwardApplication {
                 font_families: None,
                 global_settings: Settings::DEFAULT,
                 global_settings_path: None,
+                plugin_trust: plugin_flow::PluginTrust::default(),
                 wake_up,
             },
         }

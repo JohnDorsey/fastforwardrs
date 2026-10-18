@@ -97,8 +97,13 @@ fn as_json(text: &str) -> Value {
 }
 
 #[test]
-fn this_build_writes_version_13() {
-    assert_eq!(FILE_FORMAT_VERSION, 13);
+fn this_build_writes_a_version_that_has_what_version_13_added() {
+    // (Rewritten on purpose in phase 7: this build writes 14, which has everything that 13 added and the plugin libraries.)
+    const { assert!(FILE_FORMAT_VERSION >= 13) };
+    assert!(
+        saved(&project_from_json_text(A_FILE_OF_VERSION_12).unwrap())
+            .contains(&format!("\"file_format_version\": {FILE_FORMAT_VERSION}"))
+    );
 }
 
 #[test]
@@ -124,7 +129,7 @@ fn a_file_of_version_12_that_is_loaded_and_saved_is_written_as_the_program_has_t
     let again = as_json(&saved(&project));
 
     let mut expected = as_json(A_FILE_OF_VERSION_12);
-    expected["file_format_version"] = json!(13);
+    expected["file_format_version"] = json!(FILE_FORMAT_VERSION);
     expected["plugins"][0]["version"] = json!([1, 1]);
     expected["plugins"][0]["category"] = json!("Colour");
     expected["tracks"][0]["clips"][0]["effects"][0]["version"] = json!([1, 1]);
@@ -223,9 +228,12 @@ fn the_category_the_scale_and_the_control_of_every_value_are_read_from_a_snapsho
     assert_eq!(descriptor.parameters[0].scale, ValueScale::Logarithmic);
     assert_eq!(descriptor.parameters[1].scale, ValueScale::Linear);
 
+    // (Rewritten on purpose in phase 7: the file that is written says the version of this build, 14, and nothing else of it changed.)
+    let mut expected = as_json(&original);
+    expected["file_format_version"] = json!(FILE_FORMAT_VERSION);
     assert_eq!(
         as_json(&saved(&project)),
-        as_json(&original),
+        expected,
         "nothing is lost, and nothing is added"
     );
 }
@@ -255,7 +263,9 @@ fn a_scale_or_a_control_that_this_version_does_not_know_is_kept_and_written_back
         "used as the control that its kind has"
     );
     assert_eq!(descriptor.parameters[0].scale, ValueScale::Linear);
-    assert_eq!(as_json(&saved(&project)), as_json(&original));
+    let mut expected = as_json(&original);
+    expected["file_format_version"] = json!(FILE_FORMAT_VERSION);
+    assert_eq!(as_json(&saved(&project)), expected);
 }
 
 #[test]

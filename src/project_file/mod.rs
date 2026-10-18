@@ -17,6 +17,7 @@ mod effects;
 mod groups;
 mod legacy;
 mod legacy_effects;
+mod plugin_libraries;
 mod relative_path;
 mod resources;
 
@@ -111,8 +112,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// colour settings. Version 13 added what the effects need to be chosen and shown (a `category` for a type of effect in its snapshot, and a `scale` and a `control` for a
 /// value of it), and the `enabled` flag of an effect (`false` for one that is switched off; left out when on). A file of version 12 has none of them: its effects are on, and its
 /// snapshots say nothing of how a value is shown. Version 13 also added the `resources` of the project (the files that its effects use, such as a table of colours): see
-/// `resources.rs`. A file of version 12 has none; and a setting for how they are kept, `resource_storage`, that a project may have set for itself.
-pub const FILE_FORMAT_VERSION: u32 = 13;
+/// `resources.rs`. A file of version 12 has none; and a setting for how they are kept, `resource_storage`, that a project may have set for itself. Version 14 added the
+/// `plugin_libraries` of the project (the libraries of native code that its sound effects come from, linked or with their builds inside the archive): see `plugin_libraries.rs`. A file
+/// of version 13 has none.
+pub const FILE_FORMAT_VERSION: u32 = 14;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -179,7 +182,8 @@ pub fn read_project_file(path: &Path) -> Result<Project, ProjectFileError> {
         check_that_the_archive_has_the_files_included_in_it(path, &project)?;
         resources::check_that_the_archive_has_the_entries(path, &project)?;
         resources::load_the_bytes(&mut project, path, true)?;
-        return Ok(project);
+        let libraries = plugin_libraries::from_text(&text, Some(path))?;
+        return Ok(project.with_plugin_libraries(libraries));
     }
     let text = fs::read_to_string(path).map_err(|source| ProjectFileError::CouldNotRead {
         path: path.to_owned(),
@@ -317,7 +321,9 @@ pub fn plan_the_write(
         .iter()
         .filter(|source| source.link.is_included())
         .collect();
-    let included_resources = resources::entries_to_write(project)?;
+    let mut included_resources = resources::entries_to_write(project)?;
+    // (The builds of the plugin libraries that are inside the file are written the same way as the resources are: their bytes are in memory.)
+    included_resources.extend(plugin_libraries::entries_to_write(project)?);
     if !is_the_name_of_an_archive(destination) {
         if !included_sources.is_empty() || !included_resources.is_empty() {
             return Err(ProjectFileError::IncludedFilesNeedAnArchive {
@@ -463,7 +469,12 @@ pub fn project_from_json_text(text: &str) -> Result<Project, ProjectFileError> {
 }
 
 fn project_from_text(text: &str, files_included: FilesIncluded) -> Result<Project, ProjectFileError> {
-    let project = project_from_text_of_any_kind(text)?;
+    let mut project = project_from_text_of_any_kind(text)?;
+    // (The libraries of a plain file are the linked ones; a file that says a plugin is inside it is refused. The libraries of an archive are read by `read_project_file`, which
+    // has the archive to read their builds from.)
+    if files_included == FilesIncluded::NotAllowed {
+        project = project.with_plugin_libraries(plugin_libraries::from_text(text, None)?);
+    }
     for source in project.sources() {
         let Some(entry_name) = &source.link.included_as else {
             continue;
@@ -1114,6 +1125,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
         sources,
         plugins: plugin_documents_of(project),
         resources: resources::documents_of(project, project_directory)?,
+        plugin_libraries: plugin_libraries::documents_of(project, project_directory)?,
         tracks,
         groups,
         speed_indicator: SpeedIndicatorDocument {
@@ -1250,6 +1262,8 @@ mod format_13_tests;
 mod groups_tests;
 #[cfg(test)]
 mod included_files_tests;
+#[cfg(test)]
+mod plugin_libraries_tests;
 #[cfg(test)]
 mod plugins_tests;
 #[cfg(test)]

@@ -103,8 +103,8 @@ fn the_project_in_an_archive_is_the_text_a_plain_project_file_of_the_same_folder
     let folder = std::path::absolute(files.folder.path()).unwrap();
     assert_eq!(text, project_to_json_text(&project, &folder).unwrap());
     let document: serde_json::Value = serde_json::from_str(&text).unwrap();
-    // (Rewritten on purpose in phase 3: version 12 has the colours of the source files.)
-    assert_eq!(document["file_format_version"], 13);
+    // (Rewritten on purpose in phase 7: version 14 has the plugin libraries.)
+    assert_eq!(document["file_format_version"], FILE_FORMAT_VERSION);
     let source = &document["sources"][0];
     assert_eq!(source["included_as"], "resources/1-holiday.mp4");
     assert_eq!(source["absolute_path"], "/videos/holiday.mp4", "where it was, kept");

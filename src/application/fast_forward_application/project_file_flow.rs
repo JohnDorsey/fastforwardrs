@@ -155,6 +155,7 @@ impl FastForwardApplication {
         self.playback
             .clock
             .reset_for_frame_rate(self.document.project.frame_rate());
+        self.ask_about_the_plugins_of_the_project();
     }
 
     /// Starts looking for the source files of a project that has just been loaded: where the

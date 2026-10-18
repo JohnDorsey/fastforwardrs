@@ -8,12 +8,38 @@ use std::sync::Arc;
 
 use super::effects::{Effects, ParameterControl};
 use super::source_media::SourceMediaLink;
-use super::{Project, PropertyValue, Resource, ResourceKind, ResourceProblem, Resources};
+use super::{
+    PluginLibraries, PluginLibrary, PluginLibraryProblem, Project, PropertyValue, Resource, ResourceKind,
+    ResourceProblem, Resources,
+};
 
 impl Project {
     /// The files that the effects of the project use.
     pub fn resources(&self) -> &Resources {
         &self.resources
+    }
+
+    /// The libraries of native code that the project's sound effects come from.
+    pub fn plugin_libraries(&self) -> &PluginLibraries {
+        &self.plugin_libraries
+    }
+
+    /// The same project with these plugin libraries. (What a project file brought.)
+    #[must_use]
+    pub fn with_plugin_libraries(mut self, libraries: PluginLibraries) -> Self {
+        self.plugin_libraries = libraries;
+        self
+    }
+
+    /// Adds a plugin library. It is an error, and nothing is added, if there are too many, or one of the name already, or the builds would be too big (see [`PluginLibraries::add`]).
+    /// (Putting a library in a project is not an edit that undo takes back, as including a file is not.)
+    pub fn add_plugin_library(&mut self, library: PluginLibrary) -> Result<(), PluginLibraryProblem> {
+        self.plugin_libraries.add(library)
+    }
+
+    /// Takes the plugin library called `name` away. Whether there was one.
+    pub fn remove_plugin_library(&mut self, name: &str) -> bool {
+        self.plugin_libraries.remove(name)
     }
 
     /// The same project with these resources. (What a project file brought.)

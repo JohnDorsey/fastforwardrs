@@ -35,6 +35,7 @@ crc32fast = "1.5"
 wgpu = "30.0.1"
 naga = { version = "30.0.1", features = ["wgsl-in", "wgsl-out"] }
 pollster = "0.4.0"
+sha2 = "0.11.1"
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["wgpu"] }

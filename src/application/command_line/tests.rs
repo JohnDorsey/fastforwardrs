@@ -4,6 +4,7 @@
 //! What the command line understands and says. (The export running from it, with the real program: `tests/command_line_export.rs`.)
 
 use super::*;
+use crate::plugin_trust::{ApprovalStore, this_platform};
 use crate::project::{Project, Settings, SourceMediaLink};
 use crate::video_export::test_projects::{frame, project_with_video, video_source};
 
@@ -422,4 +423,168 @@ fn a_file_in_a_project_file_that_is_not_an_archive_cannot_be_found_and_the_reaso
     let plan = plan_of(&project);
     let problem = locate_the_sources(&project, &plan, &not_an_archive, None).unwrap_err();
     assert!(problem.contains("1.mp4"), "{problem}");
+}
+
+// --- plugins: a command line cannot ask ---
+
+#[test]
+fn plugins_are_not_allowed_unless_the_command_line_says_so_and_the_approvals_are_those_of_the_editor_unless_it_names_a_file()
+ {
+    let plain = export_of(&["trip.json", "out.mp4"]);
+    assert!(!plain.allow_plugins);
+    assert_eq!(plain.plugin_approvals_file, ApprovalStore::default_file());
+
+    let allowed = export_of(&["--allow-plugins", "trip.json", "out.mp4"]);
+    assert!(allowed.allow_plugins);
+    let elsewhere = export_of(&["trip.json", "--plugin-approvals", "my approvals.json", "out.mp4"]);
+    assert_eq!(
+        elsewhere.plugin_approvals_file,
+        Some(PathBuf::from("my approvals.json"))
+    );
+    assert!(!elsewhere.allow_plugins);
+
+    let reason = parse_arguments(arguments(&["trip.json", "out.mp4", "--plugin-approvals"])).unwrap_err();
+    assert!(
+        reason.contains("--plugin-approvals has to be followed by the name of a file"),
+        "{reason}"
+    );
+    assert!(USAGE.contains("--allow-plugins") && USAGE.contains("--plugin-approvals"));
+}
+
+fn embedded_library(name: &str) -> crate::project::PluginLibrary {
+    crate::project::PluginLibrary::new(
+        name,
+        crate::project::PluginLibraryKind::Ladspa,
+        crate::project::PluginLibrarySource::Embedded(vec![
+            crate::project::EmbeddedBuild::new(&this_platform(), Arc::from(b"the library".as_slice())).unwrap(),
+        ]),
+    )
+    .unwrap()
+}
+
+fn linked_library(name: &str, path: &Path) -> crate::project::PluginLibrary {
+    crate::project::PluginLibrary::new(
+        name,
+        crate::project::PluginLibraryKind::Ladspa,
+        crate::project::PluginLibrarySource::Linked(crate::project::LinkedLibrary {
+            absolute_path: path.to_owned(),
+            relative_path: None,
+        }),
+    )
+    .unwrap()
+}
+
+/// A project file in `folder` for a project that has `libraries`, and a request to export it with the approvals in `approvals`.
+fn request_for_a_project_with(
+    folder: &Path,
+    libraries: Vec<crate::project::PluginLibrary>,
+    approvals: Option<PathBuf>,
+    allow: bool,
+) -> ExportRequest {
+    let mut project = project_with_video(320, 180, false);
+    for library in libraries {
+        project.add_plugin_library(library).unwrap();
+    }
+    let project_file = folder.join("trip.ffrs");
+    crate::project_file::write_project_file(&project, &project_file).unwrap();
+    ExportRequest {
+        archive_cache_folder: Some(folder.join("cache")),
+        allow_plugins: allow,
+        plugin_approvals_file: approvals,
+        ..export_of(&[
+            "--adapter",
+            "software",
+            &project_file.to_string_lossy(),
+            &folder.join("out.mp4").to_string_lossy(),
+        ])
+    }
+}
+
+#[test]
+fn a_project_with_a_plugin_inside_it_is_refused_with_the_plugin_listed_and_nothing_is_started() {
+    let folder = tempfile::tempdir().unwrap();
+    let request = request_for_a_project_with(folder.path(), vec![embedded_library("amp_1181.dll")], None, false);
+    let mut reports = Vec::new();
+
+    let result = export_project(&request, &mut |report| reports.push(report));
+
+    let reason = result.unwrap_err();
+    assert!(reason.contains("a command line cannot ask"), "{reason}");
+    assert!(reason.contains("  - amp_1181.dll (inside the project file"), "{reason}");
+    assert!(reason.contains("--allow-plugins"), "{reason}");
+    assert!(reports.is_empty(), "nothing was said to have begun");
+    assert!(!folder.path().join("out.mp4").exists());
+}
+
+#[test]
+fn a_plugin_file_that_has_not_been_approved_is_refused_and_one_that_has_is_not() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("tap_reverb.so");
+    std::fs::write(&file, "bytes").unwrap();
+    let approvals = folder.path().join("plugin_approvals.json");
+    let request = request_for_a_project_with(
+        folder.path(),
+        vec![linked_library("tap_reverb.so", &file)],
+        Some(approvals.clone()),
+        false,
+    );
+
+    let refused = export_project(&request, &mut |_| {}).unwrap_err();
+    assert!(
+        refused.contains("tap_reverb.so") && refused.contains("has not been approved"),
+        "{refused}"
+    );
+
+    // Approved in the editor (the same file, by path and contents): the command line no longer refuses it. (The export then goes on to look for ffmpeg and the video, which
+    // may not be there: what is checked is that it is not the plugin that stops it.)
+    ApprovalStore::at(approvals).approve(&file, crate::digest::Sha256Digest::of_bytes(b"bytes"));
+    let result = export_project(&request, &mut |_| {});
+    if let Err(reason) = result {
+        assert!(!reason.contains("a command line cannot ask"), "{reason}");
+    }
+}
+
+#[test]
+fn with_allow_plugins_the_plugins_do_not_stop_the_export() {
+    let folder = tempfile::tempdir().unwrap();
+    let request = request_for_a_project_with(folder.path(), vec![embedded_library("amp_1181.dll")], None, true);
+
+    let result = export_project(&request, &mut |_| {});
+
+    if let Err(reason) = result {
+        assert!(!reason.contains("a command line cannot ask"), "{reason}");
+    }
+}
+
+#[test]
+fn a_project_without_plugins_is_not_refused_for_them() {
+    let folder = tempfile::tempdir().unwrap();
+    let request = request_for_a_project_with(folder.path(), Vec::new(), None, false);
+
+    let result = export_project(&request, &mut |_| {});
+
+    if let Err(reason) = result {
+        assert!(!reason.contains("a command line cannot ask"), "{reason}");
+    }
+}
+
+#[test]
+fn a_refusal_is_told_on_the_error_stream_and_the_status_says_the_export_failed() {
+    let folder = tempfile::tempdir().unwrap();
+    let request = request_for_a_project_with(folder.path(), vec![embedded_library("amp_1181.dll")], None, false);
+    let mut said = Vec::new();
+
+    let status = run(
+        arguments(&[
+            "--adapter",
+            "software",
+            &request.project_file.to_string_lossy(),
+            &request.video_file.to_string_lossy(),
+        ]),
+        &mut said,
+    );
+
+    assert_eq!(status, 1);
+    let text = String::from_utf8_lossy(&said);
+    assert!(text.contains("amp_1181.dll"), "{text}");
 }

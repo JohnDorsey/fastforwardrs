@@ -51,6 +51,9 @@ const RESOURCES_FOLDER: &str = "resources/";
 /// are numbered by the identifier of the source, and these by the CRC-32 of their bytes.)
 const PROJECT_RESOURCES_FOLDER: &str = "project-resources/";
 
+/// What the names of the entries of the builds of embedded plugin libraries begin with.
+const PLUGIN_LIBRARIES_FOLDER: &str = "plugin-libraries/";
+
 /// How long the name of an entry of an included file may be, in bytes (the most that a name of a file can be on most systems).
 const LONGEST_ENTRY_NAME_IN_BYTES: usize = 255;
 
@@ -316,6 +319,33 @@ pub fn is_a_project_resource_entry_name(name: &str) -> bool {
         && file_name != "."
         && file_name != ".."
         && !file_name
+            .chars()
+            .any(|character| character.is_control() || "/\\:*?\"<>|".contains(character))
+}
+
+/// The name of the entry for the build of the plugin library called `library_name` for `platform` whose SHA-256 begins with `short_digest` (16 hexadecimal digits). **What is in it
+/// is in the name**, so a build that is changed is another entry, and one that is not is the entry that an archive has already.
+pub fn plugin_library_entry_name(short_digest: &str, platform: &str, library_name: &str) -> String {
+    format!("{PLUGIN_LIBRARIES_FOLDER}{short_digest}-{platform}-{library_name}")
+}
+
+/// Whether `name` is a name that [`plugin_library_entry_name`] could have made. (A project file that is read is not to be believed about what an entry is called.)
+pub fn is_a_plugin_library_entry_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(PLUGIN_LIBRARIES_FOLDER) else {
+        return false;
+    };
+    let Some((digest, platform_and_name)) = rest.split_once('-') else {
+        return false;
+    };
+    name.len() <= LONGEST_ENTRY_NAME_IN_BYTES
+        && digest.len() == 16
+        && digest
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
+        && !platform_and_name.is_empty()
+        && platform_and_name != "."
+        && platform_and_name != ".."
+        && !platform_and_name
             .chars()
             .any(|character| character.is_control() || "/\\:*?\"<>|".contains(character))
 }

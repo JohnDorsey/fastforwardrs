@@ -33,6 +33,10 @@ pub(super) struct ProjectDocument {
     /// The files that the effects use (format 13 and after), each once. Left out when there are none, and in the files of versions before 13.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resources: Vec<ResourceDocument>,
+    /// The libraries of native code that the sound effects come from (format 14 and after): linked, or with their builds inside the archive. Left out when there are none, and
+    /// in the files of versions before 14.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_libraries: Vec<PluginLibraryDocument>,
     /// The tracks, the one in front first.
     pub tracks: Vec<TrackDocument>,
     /// The groups, in the order they were made in. A group is named in the rest of the file by its place in this list, counted from 0.
@@ -69,6 +73,48 @@ pub(super) struct ResourceDocument {
     /// Relative to the folder that has the project file. Left out when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relative_path: Option<String>,
+}
+
+/// A library of plugins (see `super::plugin_libraries`): either `linked` (where its file is) or `embedded` (its builds, inside the archive), and one of the two.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PluginLibraryDocument {
+    pub name: String,
+    /// What kind of plugins it has in it: `"ladspa"`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<LinkedLibraryDocument>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedded: Option<EmbeddedLibraryDocument>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LinkedLibraryDocument {
+    pub absolute_path: String,
+    /// Relative to the folder that has the project file. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EmbeddedLibraryDocument {
+    pub builds: Vec<EmbeddedBuildDocument>,
+}
+
+/// One build of an embedded library, for one kind of computer.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EmbeddedBuildDocument {
+    /// The operating system and the processor it is for: `windows-x86_64`.
+    pub platform: String,
+    /// The SHA-256 of its bytes (64 hexadecimal digits).
+    pub sha256: String,
+    /// How many bytes it has.
+    pub size: u64,
+    /// The name of the entry of the project file (an archive) that has it.
+    pub entry: String,
 }
 
 /// The settings a project has set for itself. A setting that follows the global one is not in the

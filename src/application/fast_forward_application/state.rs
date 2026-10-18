@@ -241,4 +241,6 @@ pub(super) struct Environment {
     pub(super) global_settings: Settings,
     /// Where the global settings are kept. `None` keeps them only while the program runs.
     pub(super) global_settings_path: Option<PathBuf>,
+    /// Who may run which plugin (see `plugin_flow`).
+    pub(super) plugin_trust: super::plugin_flow::PluginTrust,
 }

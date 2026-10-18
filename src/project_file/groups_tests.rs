@@ -234,8 +234,8 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    // (Rewritten on purpose in phase 3: 13, the version that has the shown-ness of the effects.)
-    assert_eq!(FILE_FORMAT_VERSION, 13);
+    // (Rewritten on purpose in phase 7: 14, the version that has the plugin libraries; it was 13 for the shown-ness of the effects.)
+    assert_eq!(FILE_FORMAT_VERSION, 14);
 }
 
 // --- the trip through the file ---

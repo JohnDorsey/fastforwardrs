@@ -19,6 +19,7 @@ use std::time::Duration;
 use super::archive_cache::ArchiveCache;
 use crate::engine::AdapterChoice;
 use crate::media::{FfmpegToolchain, MediaLocation};
+use crate::plugin_trust::{ApprovalStore, this_platform, what_the_command_line_refuses};
 use crate::project::{Project, Settings, SourceMedia};
 use crate::project_file::archive::entry_place;
 use crate::project_file::read_project_file;
@@ -30,6 +31,7 @@ use crate::video_export::{
 /// What the program says when it is not given what it needs.
 pub const USAGE: &str = "\
 Usage: fastforwardrs-export [--adapter best|software] [--settings <file>]
+                            [--allow-plugins] [--plugin-approvals <file>]
                             <project file> <video file>
 
 Exports the project in <project file> (a .json project, or a .ffrs project
@@ -45,6 +47,14 @@ progress is told on the error stream.
                         project from this file and not from the editor's own
                         (a file that is not there means the settings were
                         never changed)
+  --allow-plugins       let the project's plugins (programs that run with all
+                        your rights) be run. A command line cannot ask, so
+                        without this a project that needs a plugin that is
+                        inside the project file, or one that is a file that
+                        has not been approved, is refused, and they are listed
+  --plugin-approvals <file>
+                        read the plugins that were approved from this file and
+                        not from the editor's own
   --help                say this
 
 The exit status is 0 when the video was made, 1 when the export failed, and
@@ -78,6 +88,10 @@ pub struct ExportRequest {
     pub global_settings_file: Option<PathBuf>,
     /// The folder the files that are taken out of a project file are kept in (`None`: the usual place).
     pub archive_cache_folder: Option<PathBuf>,
+    /// `--allow-plugins`: the plugins of the project may be run without asking (a command line cannot ask).
+    pub allow_plugins: bool,
+    /// The file the plugins that were approved are read from (`None`: none were).
+    pub plugin_approvals_file: Option<PathBuf>,
 }
 
 /// What the arguments of a command line come to.
@@ -91,6 +105,8 @@ pub enum CommandLine {
 pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<CommandLine, String> {
     let mut adapter = AdapterKind::Best;
     let mut settings_file = default_settings_file_path();
+    let mut allow_plugins = false;
+    let mut plugin_approvals_file = ApprovalStore::default_file();
     let mut files: Vec<PathBuf> = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -112,6 +128,15 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
                         .ok_or("--settings has to be followed by the name of a file")?,
                 );
             }
+            Some("--allow-plugins") => allow_plugins = true,
+            Some("--plugin-approvals") => {
+                plugin_approvals_file = Some(
+                    arguments
+                        .next()
+                        .map(PathBuf::from)
+                        .ok_or("--plugin-approvals has to be followed by the name of a file")?,
+                );
+            }
             // (Anything that begins with a dash is an option, and not a file name: a mistyped `-adapter` is told so, and not taken for the project file. A file whose name
             // begins with a dash can be given as `./-name`.)
             Some(option) if option.starts_with('-') => {
@@ -127,6 +152,8 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             adapter,
             global_settings_file: settings_file,
             archive_cache_folder: None,
+            allow_plugins,
+            plugin_approvals_file,
         })),
         Err(files) => Err(match files.len() {
             0 | 1 => "the project file and the video file are both needed".to_owned(),
@@ -203,8 +230,10 @@ impl ProgressTold {
 
 /// Exports the project in `request.project_file` to `request.video_file`, reporting to `report`; the reason, if it failed.
 pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -> Result<(), String> {
-    let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
     let project = read_project_file(&request.project_file).map_err(|error| error.to_string())?;
+    // (Before ffmpeg is looked for: a project that is refused is refused wherever it is asked.)
+    refuse_plugins_that_nobody_has_said_yes_to(request, &project)?;
+    let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
     let plan = plan_export(&project, settings_of_the_export(request, &project)?).map_err(|error| error.to_string())?;
     for words in warnings_about(&project) {
         report(Report::Warning(words));
@@ -241,6 +270,41 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
             None => std::thread::sleep(Duration::from_millis(20)),
         }
     }
+}
+
+/// A command line cannot ask a person whether a plugin may be run, and a plugin is a program that runs with all the rights of whoever runs it: so the plugins that the
+/// editor would have asked about (the ones inside the project file, and the files that have not been approved) **refuse the export, and are listed**, unless the command
+/// line says `--allow-plugins`.
+fn refuse_plugins_that_nobody_has_said_yes_to(request: &ExportRequest, project: &Project) -> Result<(), String> {
+    if request.allow_plugins {
+        return Ok(());
+    }
+    let approvals = request
+        .plugin_approvals_file
+        .clone()
+        .map_or_else(ApprovalStore::in_memory, ApprovalStore::at);
+    let project_directory = request
+        .project_file
+        .parent()
+        .and_then(|folder| std::path::absolute(folder).ok());
+    let refused = what_the_command_line_refuses(
+        project.plugin_libraries(),
+        project_directory.as_deref(),
+        &this_platform(),
+        &approvals,
+    );
+    if refused.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the project needs plugins, which are programs that run with all your rights, and a command line cannot ask whether they may be run, so nothing was exported:\n{}\n\
+         To export it anyway, say --allow-plugins; to approve the files, open the project in the editor.",
+        refused
+            .iter()
+            .map(|line| format!("  - {line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    ))
 }
 
 /// The settings that the export of `project` is made with: the global ones, from the file that the request names (the defaults where it names none, and where the file is

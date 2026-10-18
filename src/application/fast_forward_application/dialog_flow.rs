@@ -13,6 +13,7 @@ use crate::application::commands::Command;
 use crate::application::dialogs::{
     self, AfterConfirmation, Dialog, DialogAnswer, show_copy_progress, show_dialog, show_export_progress,
 };
+use crate::plugin_trust::Answer;
 
 impl FastForwardApplication {
     /// Asks before closing the window if there are unsaved changes. (With autosave on and a file
@@ -54,10 +55,18 @@ impl FastForwardApplication {
         {
             self.stop_the_running_save();
         }
+        // (The questions about plugins wait for the window to be free of whatever else is being said.)
+        self.show_the_next_plugin_question();
         if let Some(dialog) = self.interface.dialog.clone() {
             match show_dialog(context, &dialog) {
                 DialogAnswer::StillOpen => {}
-                DialogAnswer::Dismissed => self.interface.dialog = None,
+                DialogAnswer::Dismissed => {
+                    self.interface.dialog = None;
+                    // (Closing the window, or saying no, is the same answer.)
+                    if let Dialog::AskAboutAPlugin { question } = &dialog {
+                        self.answer_the_plugin_question(question, Answer::DontLoad);
+                    }
+                }
                 DialogAnswer::Confirmed => {
                     self.interface.dialog = None;
                     match dialog {
@@ -77,6 +86,9 @@ impl FastForwardApplication {
                             self.save_as_an_archive_and_ask_for_a_file_to_embed();
                         }
                         Dialog::HowToKeepATable { embed, .. } => agreed_to.push(*embed),
+                        Dialog::AskAboutAPlugin { question } => {
+                            self.answer_the_plugin_question(&question, Answer::Load)
+                        }
                         Dialog::Message { .. } => {}
                     }
                 }

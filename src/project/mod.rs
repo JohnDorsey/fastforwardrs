@@ -22,6 +22,7 @@ mod frame_index;
 mod frame_rate;
 pub(crate) mod groups;
 mod keyframe_copying;
+mod plugin_libraries;
 mod rack_editing;
 mod rack_merging;
 mod racks;
@@ -58,6 +59,11 @@ pub use groups::{
     GroupKind, GroupProblem, Member, Rectangle,
 };
 pub use keyframe_copying::TimeDirection;
+pub use plugin_libraries::{
+    EmbeddedBuild, LinkedLibrary, MOST_BUILDS_OF_A_LIBRARY, MOST_BYTES_OF_A_BUILD, MOST_BYTES_OF_ALL_BUILDS,
+    MOST_PLUGIN_LIBRARIES, PluginLibraries, PluginLibrary, PluginLibraryKind, PluginLibraryProblem,
+    PluginLibrarySource, is_a_platform_name,
+};
 pub use rack_editing::{KeyframeDestination, KeyframeMove, RackDestination};
 pub use racks::{
     DrawerExtent, FrameRoom, KeyframeLocation, LocatedKeyframe, LocatedRack, NewKeyframe, ResolvedAnimations,
@@ -110,6 +116,8 @@ pub struct Project {
     settings: ProjectSettings,
     /// The files that the effects use (see [`Resources`]), in the order they were added in.
     resources: Resources,
+    /// The libraries of native code that its sound effects come from (see [`PluginLibraries`]): linked or embedded. Nothing is loaded from them without a person's word.
+    plugin_libraries: PluginLibraries,
     /// The frame rate the project was given, or `None` while it follows its first video (and has the
     /// rate of [`FRAME_RATE_WITHOUT_A_VIDEO`] until there is one).
     frame_rate: Option<FrameRate>,
@@ -270,6 +278,7 @@ impl Project {
             speed_indicator_layout: SpeedIndicatorLayout::DEFAULT,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
             resources: Resources::default(),
+            plugin_libraries: PluginLibraries::default(),
             frame_rate: None,
         };
         project.add_track_in_front();
@@ -348,6 +357,7 @@ impl Project {
             speed_indicator_layout,
             settings: ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS,
             resources: Resources::default(),
+            plugin_libraries: PluginLibraries::default(),
             frame_rate: None,
         }
         .with_groups(groups)?;
