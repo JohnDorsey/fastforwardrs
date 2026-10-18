@@ -15,19 +15,18 @@ mod support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fastforwardrs::media::export::{
     LoudnessToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
-    clip_feed_filters,
 };
-use fastforwardrs::media::{AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain};
+use fastforwardrs::media::{
+    AudioFormat, AudioStream, AudioStreamEvent, AudioStreamRequest, EngineAudioStream, FfmpegToolchain,
+    render_sound_to_file,
+};
 use fastforwardrs::project::{FrameRate, SpedUpClipSound, SpeedFactor};
-use fastforwardrs::sound_engine::{
-    ClipFeed, ClipFeeds, ClipRequest, NoInsertions, SAMPLE_RATE, SoundGraph, SoundInMemory,
-};
+use fastforwardrs::sound_engine::SAMPLE_RATE;
 use support::{RandomNumbers, scratch_directory};
 
 const TIME_ALLOWED: Duration = Duration::from_secs(120);
@@ -81,23 +80,26 @@ fn steady_file(folder: &Path, name: &str, seconds: f64, value: f32) -> PathBuf {
     path
 }
 
-fn interleave(left: &[f32], right: &[f32]) -> Vec<f32> {
-    left.iter()
-        .zip(right)
-        .flat_map(|(left, right)| [*left, *right])
-        .collect()
-}
-
 /// The sound of `specification` as the filter graph of ffmpeg makes it (the oracle), interleaved.
 fn by_the_filter_graph(
     toolchain: &FfmpegToolchain,
     specification: &SoundGraphSpecification,
     sources: &[PathBuf],
 ) -> Vec<f32> {
+    by_the_filter_graph_as(toolchain, specification, sources, STEREO_AT_48000)
+}
+
+/// The same, in the kind of sound the speakers want.
+fn by_the_filter_graph_as(
+    toolchain: &FfmpegToolchain,
+    specification: &SoundGraphSpecification,
+    sources: &[PathBuf],
+    format: AudioFormat,
+) -> Vec<f32> {
     let request = AudioStreamRequest {
         source_files: sources.iter().map(|path| path.clone().into()).collect(),
         sound: specification.clone(),
-        format: STEREO_AT_48000,
+        format,
     };
     let stream = AudioStream::start(toolchain, &request, Arc::new(|| {})).expect("the stream starts");
     let started = Instant::now();
@@ -117,53 +119,70 @@ fn by_the_filter_graph(
     }
 }
 
-/// Feeds made by an ffmpeg that runs for each clip, with the filters that the filter graph has for it before the volume.
-struct FeedsFromFfmpeg {
-    ffmpeg: PathBuf,
-    sources: Vec<PathBuf>,
-    frame_rate: FrameRate,
-    sped_up_clip_sound: SpedUpClipSound,
-}
-
-impl ClipFeeds for FeedsFromFfmpeg {
-    fn open(&mut self, request: &ClipRequest<'_>) -> Box<dyn ClipFeed> {
-        let filters = clip_feed_filters(self.frame_rate, request.clip, self.sped_up_clip_sound);
-        let output = Command::new(&self.ffmpeg)
-            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
-            .arg(&self.sources[request.clip.source_input])
-            .args(["-af", &filters, "-f", "f32le", "-ar", "48000", "-ac", "2", "-"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .expect("ffmpeg runs");
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let samples: Vec<f32> = output
-            .stdout
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|bytes| f32::from_le_bytes(*bytes))
-            .collect();
-        Box::new(SoundInMemory::from_interleaved(&samples))
-    }
-}
-
-/// The sound of `specification` as the block graph makes it, interleaved.
+/// The sound of `specification` as the sound engine makes it for the export: into a file, by the graph with an ffmpeg for each clip (`render_sound_to_file`), read back.
+/// (`block` is no longer asked for: the export makes its sound in blocks of its own, and the graph gives the same sound for any block, which the unit tests hold it to.)
 fn by_the_block_graph(
     toolchain: &FfmpegToolchain,
     specification: &SoundGraphSpecification,
     sources: &[PathBuf],
-    block: usize,
+    _block: usize,
 ) -> Vec<f32> {
-    let feeds = FeedsFromFfmpeg {
-        ffmpeg: toolchain.ffmpeg_path().to_owned(),
-        sources: sources.to_vec(),
-        frame_rate: specification.frame_rate,
-        sped_up_clip_sound: specification.sped_up_clip_sound,
+    let folder = scratch_directory();
+    let file = folder.path().join("sound.f32");
+    render_sound_to_file(
+        toolchain,
+        specification,
+        sources.iter().map(|path| path.clone().into()).collect(),
+        &file,
+        &|| false,
+    )
+    .expect("the sound is made");
+    let bytes = fs::read(&file).expect("the file of sound is there");
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|sample| f32::from_le_bytes(*sample))
+        .collect()
+}
+
+/// The sound of `specification` as the sound engine makes it for the preview: the events of an [`EngineAudioStream`], put together.
+fn by_the_engine_stream(
+    toolchain: &FfmpegToolchain,
+    specification: &SoundGraphSpecification,
+    sources: &[PathBuf],
+) -> Vec<f32> {
+    by_the_engine_stream_as(toolchain, specification, sources, STEREO_AT_48000)
+}
+
+/// The same, in the kind of sound the speakers want.
+fn by_the_engine_stream_as(
+    toolchain: &FfmpegToolchain,
+    specification: &SoundGraphSpecification,
+    sources: &[PathBuf],
+    format: AudioFormat,
+) -> Vec<f32> {
+    let request = AudioStreamRequest {
+        source_files: sources.iter().map(|path| path.clone().into()).collect(),
+        sound: specification.clone(),
+        format,
     };
-    let mut graph = SoundGraph::new(specification.clone(), Box::new(feeds), Box::new(NoInsertions));
-    let (left, right) = graph.render_to_the_end(block);
-    interleave(&left, &right)
+    let stream = EngineAudioStream::start(toolchain, &request, Arc::new(|| {})).expect("the stream starts");
+    let started = Instant::now();
+    let mut samples = Vec::new();
+    loop {
+        match stream.try_next_event() {
+            Some(AudioStreamEvent::Samples(more)) => samples.extend(more),
+            Some(AudioStreamEvent::Finished { error_output }) => {
+                assert_eq!(error_output, None, "the engine made the sound");
+                return samples;
+            }
+            None => {
+                assert!(started.elapsed() < TIME_ALLOWED, "the stream did not finish in time");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
 }
 
 /// How two sounds differ.
@@ -583,5 +602,283 @@ fn at_a_frame_rate_that_is_not_a_whole_number_of_samples_a_frame_the_clips_are_t
         eprintln!(
             "seed {seed}: the filter graph's clips are at most {worst_drift} samples later than the exact places"
         );
+    }
+}
+
+#[test]
+fn the_preview_and_the_export_make_the_very_same_sound_and_it_is_the_sound_of_the_filter_graph_for_constant_volumes() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let kinds = Kinds {
+        sped_up: true,
+        changing_volume: false,
+        wrong_lengths: true,
+    };
+    let seeds: Vec<u64> = (0..8).collect();
+    let results = in_parallel(&seeds, |&seed| {
+        let specification = a_specification(
+            seed + 50,
+            FrameRate::new(30, 1).unwrap(),
+            kinds,
+            SpedUpClipSound::MaintainPitch,
+        );
+        let for_the_export = by_the_block_graph(&toolchain, &specification, &sources, 512);
+        let for_the_preview = by_the_engine_stream(&toolchain, &specification, &sources);
+        let oracle = by_the_filter_graph(&toolchain, &specification, &sources);
+        let difference = compare(&oracle, &for_the_preview);
+        (for_the_export, for_the_preview, difference)
+    });
+    for (seed, (for_the_export, for_the_preview, difference)) in seeds.iter().zip(&results) {
+        assert_eq!(
+            for_the_preview, for_the_export,
+            "seed {seed}: the stream and the file are one sound, bit for bit"
+        );
+        assert!(!for_the_export.is_empty());
+        assert_eq!(
+            difference.moments_of_the_oracle, difference.moments_of_the_block_graph,
+            "seed {seed}"
+        );
+        assert!(
+            difference.largest <= ONE_ROUNDING_OF_A_SAMPLE,
+            "seed {seed}: {difference:?}"
+        );
+    }
+}
+
+#[test]
+fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_never_falls_behind_the_speakers() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    // Two hundred clips of 6 frames (a fifth of a second) one after another on one track, cut from different places of the files: 40 seconds.
+    let mut random = RandomNumbers::with_seed(77);
+    let clips: Vec<SoundItemToExport> = (0..200)
+        .map(|_| {
+            let first = random.next_below(150);
+            SoundItemToExport::Clip(SoundClipToExport {
+                source_input: random.next_below(3) as usize,
+                first_source_frame: first,
+                end_source_frame: first + 6,
+                speed_factor: SpeedFactor::new(1).unwrap(),
+                timeline_frame_count: 6,
+                loudness: LoudnessToExport::Constant(0.5),
+            })
+        })
+        .collect();
+    let specification = SoundGraphSpecification {
+        frame_rate: FrameRate::new(30, 1).unwrap(),
+        total_frame_count: 1200,
+        strips: vec![SoundStripToExport { items: clips }],
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+    };
+    let request = AudioStreamRequest {
+        source_files: sources.iter().map(|path| path.clone().into()).collect(),
+        sound: specification,
+        format: STEREO_AT_48000,
+    };
+    let began = Instant::now();
+    let stream = EngineAudioStream::start(&toolchain, &request, Arc::new(|| {})).expect("the stream starts");
+    // The speakers play what has come at the pace of time, from when the first sound came, and are given sound ahead: so at any time the sound that has come
+    // has to be at least what has been played, or there was a gap. The sound is taken as it comes (the speakers' queue is not modelled).
+    let mut first_sound_at = None;
+    let mut moments_received = 0_usize;
+    let mut least_ahead_in_seconds = f64::MAX;
+    let mut finished = false;
+    while moments_received < 30 * 48_000 && !finished {
+        while let Some(event) = stream.try_next_event() {
+            match event {
+                AudioStreamEvent::Samples(samples) => {
+                    first_sound_at.get_or_insert_with(|| began.elapsed());
+                    moments_received += samples.len() / 2;
+                }
+                AudioStreamEvent::Finished { error_output } => {
+                    assert_eq!(error_output, None);
+                    finished = true;
+                }
+            }
+        }
+        if let Some(first) = first_sound_at {
+            let played = (began.elapsed().saturating_sub(first)).as_secs_f64();
+            least_ahead_in_seconds = least_ahead_in_seconds.min(moments_received as f64 / 48_000.0 - played);
+        }
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "not enough sound in a minute"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let first = first_sound_at.expect("there was sound");
+    eprintln!(
+        "200 clips: the first sound after {first:?}; {} seconds of sound received in {:?}; never less than {least_ahead_in_seconds:.2} seconds ahead of the speakers",
+        moments_received as f64 / 48_000.0,
+        began.elapsed()
+    );
+    assert!(first < Duration::from_secs(3), "the first sound took {first:?}");
+    assert!(
+        least_ahead_in_seconds > -0.1,
+        "the sound fell {least_ahead_in_seconds:.2} seconds behind the speakers (a gap is any time behind at all; 0.1 seconds is the slack of the polling)"
+    );
+}
+
+#[test]
+fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_ends() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let mut sources = the_sources(folder.path());
+    sources[1] = folder.path().join("not_a_file.wav");
+    let specification = SoundGraphSpecification {
+        frame_rate: FrameRate::new(30, 1).unwrap(),
+        total_frame_count: 60,
+        strips: vec![SoundStripToExport {
+            items: vec![
+                SoundItemToExport::Clip(SoundClipToExport {
+                    source_input: 0,
+                    first_source_frame: 0,
+                    end_source_frame: 30,
+                    speed_factor: SpeedFactor::new(1).unwrap(),
+                    timeline_frame_count: 30,
+                    loudness: LoudnessToExport::UNCHANGED,
+                }),
+                SoundItemToExport::Clip(SoundClipToExport {
+                    source_input: 1,
+                    first_source_frame: 0,
+                    end_source_frame: 30,
+                    speed_factor: SpeedFactor::new(1).unwrap(),
+                    timeline_frame_count: 30,
+                    loudness: LoudnessToExport::UNCHANGED,
+                }),
+            ],
+        }],
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+    };
+    let request = AudioStreamRequest {
+        source_files: sources.iter().map(|path| path.clone().into()).collect(),
+        sound: specification.clone(),
+        format: STEREO_AT_48000,
+    };
+    let stream = EngineAudioStream::start(&toolchain, &request, Arc::new(|| {})).expect("the stream starts");
+    let started = Instant::now();
+    let complaint = loop {
+        match stream.try_next_event() {
+            Some(AudioStreamEvent::Samples(_)) => {}
+            Some(AudioStreamEvent::Finished { error_output }) => break error_output,
+            None => {
+                assert!(started.elapsed() < TIME_ALLOWED);
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    };
+    assert!(
+        complaint.as_deref().is_some_and(|text| text.contains("not_a_file")),
+        "the stream says what ffmpeg said: {complaint:?}"
+    );
+
+    // The export fails with the same words, and the sound of the first clip is not lost to the second's trouble.
+    let file = folder.path().join("sound.f32");
+    let problem = render_sound_to_file(
+        &toolchain,
+        &specification,
+        sources.iter().map(|path| path.clone().into()).collect(),
+        &file,
+        &|| false,
+    )
+    .expect_err("the sound cannot be made");
+    assert!(problem.to_string().contains("not_a_file"), "{problem}");
+}
+
+#[test]
+fn the_sound_of_an_export_that_is_stopped_is_not_finished_and_the_stop_is_said() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let kinds = Kinds {
+        sped_up: false,
+        changing_volume: false,
+        wrong_lengths: false,
+    };
+    let specification = a_specification(3, FrameRate::new(30, 1).unwrap(), kinds, SpedUpClipSound::MaintainPitch);
+    let file = folder.path().join("sound.f32");
+    let blocks_asked = std::sync::atomic::AtomicUsize::new(0);
+    let result = render_sound_to_file(
+        &toolchain,
+        &specification,
+        sources.iter().map(|path| path.clone().into()).collect(),
+        &file,
+        &|| blocks_asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 5,
+    );
+    assert!(
+        matches!(result, Err(fastforwardrs::media::SoundRenderError::Cancelled)),
+        "{result:?}"
+    );
+    assert!(
+        fs::metadata(&file).unwrap().len() <= 5 * 2048 * 8,
+        "no more than five blocks were written before it was stopped"
+    );
+}
+
+#[test]
+fn speakers_that_want_another_kind_of_sound_are_given_it_by_a_conversion_and_it_is_the_sound_the_filter_graph_gives_them()
+ {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let kinds = Kinds {
+        sped_up: true,
+        changing_volume: false,
+        wrong_lengths: true,
+    };
+    let formats = [
+        AudioFormat {
+            sample_rate: 44_100,
+            channel_count: 2,
+        },
+        AudioFormat {
+            sample_rate: 48_000,
+            channel_count: 1,
+        },
+        AudioFormat {
+            sample_rate: 96_000,
+            channel_count: 2,
+        },
+        AudioFormat {
+            sample_rate: 44_100,
+            channel_count: 6,
+        },
+    ];
+    for format in formats {
+        for seed in 0..3_u64 {
+            let specification = a_specification(
+                seed + 70,
+                FrameRate::new(30, 1).unwrap(),
+                kinds,
+                SpedUpClipSound::MaintainPitch,
+            );
+            let oracle = by_the_filter_graph_as(&toolchain, &specification, &sources, format);
+            let ours = by_the_engine_stream_as(&toolchain, &specification, &sources, format);
+            let channels = usize::from(format.channel_count);
+            assert_eq!(oracle.len() % channels, 0);
+            // The moments are counted in the kind of sound the speakers want. The two conversions are done by ffmpeg's resampler on sound that is the same, in the same
+            // order, so they are the same sound, to the rounding of a float.
+            let moments_oracle = oracle.len() / channels;
+            let moments_ours = ours.len() / channels;
+            assert!(
+                moments_oracle == moments_ours,
+                "{format:?} seed {seed}: {moments_oracle} moments and {moments_ours}"
+            );
+            let common = oracle.len().min(ours.len());
+            let largest = oracle[..common]
+                .iter()
+                .zip(&ours[..common])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(
+                largest <= ONE_ROUNDING_OF_A_SAMPLE,
+                "{format:?} seed {seed}: the sounds differ by {largest}"
+            );
+            eprintln!(
+                "{format:?} seed {seed}: {moments_oracle} and {moments_ours} moments, the largest difference {largest}"
+            );
+        }
     }
 }

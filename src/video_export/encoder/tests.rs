@@ -16,7 +16,7 @@ fn as_text(arguments: Vec<OsString>) -> Vec<String> {
 }
 
 fn sound_of(files: &[&str]) -> SoundForTheEncoder {
-    SoundForTheEncoder {
+    SoundForTheEncoder::FilterGraph {
         files: files.iter().map(|name| MediaLocation::from(*name)).collect(),
         graph_file: PathBuf::from("graph.txt"),
         output_label: "finished_audio",
@@ -254,4 +254,39 @@ fn the_sound_graph_for_the_encoder_is_the_one_of_the_plan_with_every_input_one_f
         .replace("[0:a:0]", "[1:a:0]");
     assert_eq!(for_the_encoder.text, moved_by_hand, "nothing else differs");
     assert_eq!(for_the_encoder.output_label, for_the_plan.output_label);
+}
+
+#[test]
+fn sound_that_is_made_already_is_the_second_input_as_raw_samples_and_is_what_is_mapped_and_the_graph_is_not_used() {
+    let sound = Some(SoundForTheEncoder::RawFile {
+        path: PathBuf::from("sound.f32"),
+    });
+    let arguments = arguments_for(
+        &OutputTags::default(),
+        sound,
+        VideoEncoder::Libx264,
+        "out.mp4",
+        thirty(),
+    );
+    let position = |wanted: &str| arguments.iter().position(|argument| argument == wanted).unwrap();
+    // The picture is input 0 and the sound input 1, read as the kind of sound the sound engine writes.
+    let picture = position("pipe:0");
+    let sound_file = position("sound.f32");
+    assert!(sound_file > picture);
+    assert_eq!(
+        &arguments[sound_file - 7..=sound_file],
+        ["-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "sound.f32"],
+        "the format is said before the input it is about"
+    );
+    let map = arguments.iter().rposition(|argument| argument == "-map").unwrap();
+    assert_eq!(
+        arguments[map + 1],
+        "1:a",
+        "the sound is mapped from input 1, and not from a graph"
+    );
+    assert!(!arguments.iter().any(|argument| argument == "-/filter_complex"));
+    assert!(
+        arguments.contains(&"aac".to_owned()),
+        "and it is compressed as a sound is"
+    );
 }

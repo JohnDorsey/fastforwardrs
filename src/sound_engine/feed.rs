@@ -25,6 +25,10 @@ pub struct ClipRequest<'specification> {
 /// What gives the graph the feed of a clip, when the clip begins to be heard. (Who is asked decides how far ahead the sound is got ready: the graph asks at the last moment.)
 pub trait ClipFeeds {
     fn open(&mut self, request: &ClipRequest<'_>) -> Box<dyn ClipFeed>;
+
+    /// Called before each block is made, with the number of the first sample of it, so that whoever gives the feeds can get the ones that will be needed soon ready (an ffmpeg
+    /// takes tens of milliseconds to start). Nothing has to be done.
+    fn about_to_render(&mut self, _first_sample: u64) {}
 }
 
 /// Sound that is all in memory.

@@ -1185,3 +1185,18 @@ fn skipping_late_sound_never_splits_a_moment_so_the_channels_stay_together() {
         );
     }
 }
+
+// --- which makes the sound ---
+
+#[test]
+fn the_sound_engine_makes_the_sound_unless_the_environment_asks_for_the_filter_graph_of_ffmpeg() {
+    assert_eq!(WhichSound::asked_for(None), WhichSound::Engine);
+    assert_eq!(WhichSound::asked_for(Some("engine")), WhichSound::Engine);
+    assert_eq!(WhichSound::asked_for(Some("")), WhichSound::Engine);
+    assert_eq!(WhichSound::asked_for(Some("ffmpeg")), WhichSound::FilterGraph);
+    assert_eq!(
+        WhichSound::asked_for(Some("FFMPEG")),
+        WhichSound::Engine,
+        "the name is exactly ffmpeg"
+    );
+}

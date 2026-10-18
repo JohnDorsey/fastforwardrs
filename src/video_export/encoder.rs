@@ -28,13 +28,19 @@ const HOW_OFTEN_TO_LOOK_AT_THE_END: Duration = Duration::from_millis(20);
 
 /// The sound as the encoder is given it.
 #[derive(Clone, Debug)]
-pub struct SoundForTheEncoder {
-    /// The files the sound is made from, which are the encoder's inputs 1, 2, ... (input 0 is the picture), in the order the graph refers to them.
-    pub files: Vec<MediaLocation>,
-    /// The file that has the text of the filter graph (it is far longer than a command line allows for a project with many clips).
-    pub graph_file: PathBuf,
-    /// What the graph's output is called.
-    pub output_label: &'static str,
+pub enum SoundForTheEncoder {
+    /// The encoder makes the sound itself, from the files, with a filter graph (how the sound was made before the sound engine, and is if `FASTFORWARDRS_SOUND` is `ffmpeg`).
+    FilterGraph {
+        /// The files the sound is made from, which are the encoder's inputs 1, 2, ... (input 0 is the picture), in the order the graph refers to them.
+        files: Vec<MediaLocation>,
+        /// The file that has the text of the filter graph (it is far longer than a command line allows for a project with many clips).
+        graph_file: PathBuf,
+        /// What the graph's output is called.
+        output_label: &'static str,
+    },
+    /// The sound has been made already, by the sound engine: a file of raw samples, 32-bit floating point (little-endian), 48000 a second, stereo, as long as the video. It is
+    /// the encoder's input 1.
+    RawFile { path: PathBuf },
 }
 
 /// What an encoder is started with.
@@ -95,19 +101,33 @@ pub fn encoder_arguments(specification: &EncoderSpecification<'_>) -> Vec<OsStri
         ]
         .map(OsString::from),
     );
-    if let Some(sound) = &specification.sound {
-        for file in &sound.files {
-            arguments.push("-i".into());
-            arguments.push(file.ffmpeg_input());
+    match &specification.sound {
+        Some(SoundForTheEncoder::FilterGraph { files, graph_file, .. }) => {
+            for file in files {
+                arguments.push("-i".into());
+                arguments.push(file.ffmpeg_input());
+            }
+            arguments.push(FILTER_GRAPH_FILE_OPTION.into());
+            arguments.push(graph_file.clone().into());
         }
-        arguments.push(FILTER_GRAPH_FILE_OPTION.into());
-        arguments.push(sound.graph_file.clone().into());
+        Some(SoundForTheEncoder::RawFile { path }) => {
+            arguments.extend(["-f", "f32le", "-ar", "48000", "-ac", "2", "-i"].map(OsString::from));
+            arguments.push(path.clone().into());
+        }
+        None => {}
     }
 
     arguments.extend(["-map", "0:v"].map(OsString::from));
-    if let Some(sound) = &specification.sound {
-        arguments.push("-map".into());
-        arguments.push(format!("[{}]", sound.output_label).into());
+    match &specification.sound {
+        Some(SoundForTheEncoder::FilterGraph { output_label, .. }) => {
+            arguments.push("-map".into());
+            arguments.push(format!("[{output_label}]").into());
+        }
+        Some(SoundForTheEncoder::RawFile { .. }) => {
+            arguments.push("-map".into());
+            arguments.push("1:a".into());
+        }
+        None => {}
     }
     if let Some(filter) = specification.tags.setparams_filter() {
         arguments.push("-vf".into());

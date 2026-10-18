@@ -199,7 +199,7 @@ fn sound_made_from_a_file_by_a_graph_is_in_the_file_and_as_long_as_the_picture()
     .unwrap();
     let output = scratch.path().join("with_sound.mp4");
     let tags = OutputTags::default();
-    let sound = SoundForTheEncoder {
+    let sound = SoundForTheEncoder::FilterGraph {
         files: vec![MediaLocation::from(tone)],
         graph_file,
         output_label: "finished_audio",
@@ -268,7 +268,7 @@ fn an_encoder_that_is_dropped_without_being_finished_does_not_stay_running() {
     .unwrap();
     let output = scratch.path().join("dropped.mp4");
     let tags = OutputTags::default();
-    let sound = SoundForTheEncoder {
+    let sound = SoundForTheEncoder::FilterGraph {
         files: Vec::new(),
         graph_file,
         output_label: "finished_audio",

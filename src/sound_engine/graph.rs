@@ -124,6 +124,7 @@ impl SoundGraph {
     /// and then none.
     pub fn render(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
         let wanted = left.len().min(right.len());
+        self.feeds.about_to_render(self.position);
         let count = (self.total_samples - self.position).min(wanted as u64) as usize;
         left[..count].fill(0.0);
         right[..count].fill(0.0);

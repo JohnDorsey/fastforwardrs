@@ -741,3 +741,156 @@ fn the_graph_makes_as_many_samples_as_the_shorter_of_two_buffers_that_are_not_as
     );
     assert_eq!(right[39], -value_of(0, 0, 39));
 }
+
+// --- feeds that are got ready ahead ---
+
+use std::sync::Mutex;
+
+/// Makes the same feeds `Ramps` does, and says which were made and in what order.
+#[derive(Clone)]
+struct RampSpawner {
+    ramps: Ramps,
+    spawned: Arc<Mutex<Vec<(usize, usize)>>>,
+}
+
+impl RampSpawner {
+    fn new() -> Self {
+        Self {
+            ramps: Ramps::default(),
+            spawned: Arc::default(),
+        }
+    }
+
+    fn spawned(&self) -> Vec<(usize, usize)> {
+        self.spawned.lock().unwrap().clone()
+    }
+}
+
+impl ClipSpawner for RampSpawner {
+    fn spawn(&mut self, request: &ClipRequest<'_>) -> Box<dyn ClipFeed> {
+        self.spawned.lock().unwrap().push((request.strip, request.item));
+        self.ramps.open(request)
+    }
+}
+
+/// Clips of one second each (30 frames) one after another on strip 0, and `second_strip` clips of a second each on strip 1 beginning at the given seconds.
+fn clips_one_after_another(count: usize) -> SoundGraphSpecification {
+    specification(
+        thirty(),
+        30 * count as u64,
+        vec![(0..count).map(|_| clip(30, LoudnessToExport::UNCHANGED)).collect()],
+    )
+}
+
+fn request_for<'a>(specification: &'a SoundGraphSpecification, strip: usize, item: usize) -> ClipRequest<'a> {
+    let SoundItemToExport::Clip(clip) = &specification.strips[strip].items[item] else {
+        panic!("a clip")
+    };
+    ClipRequest { strip, item, clip }
+}
+
+#[test]
+fn nothing_is_started_until_the_graph_says_where_it_is_and_then_the_clips_that_begin_within_the_look_ahead_are_started_earliest_first()
+ {
+    let spawner = RampSpawner::new();
+    let mut feeds = LookAheadFeeds::new(clips_one_after_another(10), spawner.clone());
+    assert_eq!(
+        spawner.spawned(),
+        Vec::<(usize, usize)>::new(),
+        "nothing before the graph says"
+    );
+
+    feeds.about_to_render(0);
+    // Two seconds ahead: the clips that begin at 0 s and at 1 s (not the one at 2 s, which begins when the look-ahead ends).
+    assert_eq!(spawner.spawned(), vec![(0, 0), (0, 1)]);
+    assert_eq!(feeds.open_count(), 2);
+
+    feeds.about_to_render(0);
+    assert_eq!(spawner.spawned().len(), 2, "asking again starts nothing again");
+
+    feeds.about_to_render(48_000);
+    assert_eq!(
+        spawner.spawned(),
+        vec![(0, 0), (0, 1), (0, 2)],
+        "a second on, the clip at 2 s is within reach"
+    );
+}
+
+#[test]
+fn a_clip_whose_feed_was_started_is_opened_with_that_feed_and_one_that_was_not_is_started_at_once() {
+    let spawner = RampSpawner::new();
+    let specification = clips_one_after_another(6);
+    let mut feeds = LookAheadFeeds::new(specification.clone(), spawner.clone());
+    feeds.about_to_render(0);
+    assert_eq!(spawner.spawned().len(), 2);
+
+    let mut first = feeds.open(&request_for(&specification, 0, 0));
+    assert_eq!(
+        spawner.spawned().len(),
+        2,
+        "the feed that was started is the one it gets"
+    );
+    let (mut left, mut right) = ([0.0; 3], [0.0; 3]);
+    assert_eq!(first.read(&mut left, &mut right), 3);
+    assert_eq!(left[0], value_of(0, 0, 0));
+
+    let _late = feeds.open(&request_for(&specification, 0, 5));
+    assert_eq!(
+        spawner.spawned().len(),
+        3,
+        "a clip that nothing was ready for is started when it is asked for"
+    );
+    assert_eq!(spawner.spawned()[2], (0, 5));
+}
+
+#[test]
+fn no_more_feeds_are_started_ahead_than_the_most_there_may_be_and_one_that_ends_makes_room() {
+    let spawner = RampSpawner::new();
+    // Six clips begin together on six strips.
+    let strips = (0..6).map(|_| vec![clip(30, LoudnessToExport::UNCHANGED)]).collect();
+    let specification = specification(thirty(), 30, strips);
+    let mut feeds = LookAheadFeeds::with_limits(specification.clone(), spawner.clone(), 2.0, 4);
+    feeds.about_to_render(0);
+    assert_eq!(spawner.spawned().len(), 4, "four at most are started ahead");
+    assert_eq!(feeds.open_count(), 4);
+
+    // One is let go of (its clip ended): there is room for the next.
+    drop(feeds.open(&request_for(&specification, 0, 0)));
+    assert_eq!(feeds.open_count(), 3);
+    feeds.about_to_render(0);
+    assert_eq!(spawner.spawned().len(), 5);
+    assert_eq!(feeds.open_count(), 4);
+}
+
+#[test]
+fn the_sound_is_the_same_with_feeds_that_are_got_ready_ahead_and_every_clip_is_started_once() {
+    let make = || {
+        specification(
+            thirty(),
+            12,
+            vec![
+                vec![
+                    clip(3, LoudnessToExport::UNCHANGED),
+                    silence(2),
+                    clip(4, LoudnessToExport::Constant(0.5)),
+                    clip(3, LoudnessToExport::UNCHANGED),
+                ],
+                vec![silence(1), clip(9, changing(&[(0, 0.0), (9, -12.0)]))],
+            ],
+        )
+    };
+    let direct = graph_of(make(), &Ramps::default()).render_to_the_end(512);
+    for block in [64, 512, 5000] {
+        let spawner = RampSpawner::new();
+        let ahead = LookAheadFeeds::with_limits(make(), spawner.clone(), 0.1, 2);
+        let mut graph = SoundGraph::new(make(), Box::new(ahead), Box::new(NoInsertions));
+        assert_eq!(graph.render_to_the_end(block), direct, "blocks of {block}");
+        let mut spawned = spawner.spawned();
+        spawned.sort_unstable();
+        assert_eq!(
+            spawned,
+            vec![(0, 0), (0, 2), (0, 3), (1, 1)],
+            "each clip once, and no silence"
+        );
+    }
+}

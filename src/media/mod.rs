@@ -17,6 +17,7 @@ mod finer_thumbnails;
 mod frame_stream;
 mod location;
 mod picture_decoder;
+mod sound_feeds;
 mod source_colour;
 mod source_probe;
 mod thumbnail_library;
@@ -37,6 +38,7 @@ pub use frame_stream::{
 };
 pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
+pub use sound_feeds::{EngineAudioStream, FfmpegClipSpawner, SoundRenderError, render_sound_to_file};
 pub use source_colour::{Assumption, VideoColour, matrix_assumed_for, matrix_name};
 pub use source_probe::{
     NativeYuv420p, ProbeError, VideoStreamFormat, probe_source_media, probe_video, probe_video_stream_format,

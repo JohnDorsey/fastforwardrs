@@ -28,9 +28,10 @@ mod wanted;
 pub use audio_device::{DeviceAudioSink, opener_of_the_default_speakers};
 pub use audio_splice::splice_waiting_sound;
 pub use audio_supplier::{
-    AudioContent, AudioSink, AudioSinkOpener, AudioSource, AudioStreamStarter, AudioSupplier, ClockReading,
-    FfmpegAudioStreamStarter, LARGEST_DIFFERENCE_TO_CORRECT_IN_SECONDS, MINIMUM_TIME_BETWEEN_FAILED_ATTEMPTS,
-    SECONDS_OF_SOUND_KEPT_WAITING, SMALLEST_DIFFERENCE_TO_CORRECT_IN_SECONDS,
+    AudioContent, AudioSink, AudioSinkOpener, AudioSource, AudioStreamStarter, AudioSupplier, ChosenAudioStream,
+    ClockReading, FfmpegAudioStreamStarter, LARGEST_DIFFERENCE_TO_CORRECT_IN_SECONDS,
+    MINIMUM_TIME_BETWEEN_FAILED_ATTEMPTS, SECONDS_OF_SOUND_KEPT_WAITING, SMALLEST_DIFFERENCE_TO_CORRECT_IN_SECONDS,
+    WhichSound,
 };
 pub use clock::PlaybackClock;
 pub use output_stream::AudioDeviceError;

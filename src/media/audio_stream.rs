@@ -135,7 +135,7 @@ impl AudioStream {
 /// Reads sound from `standard_output` and sends it on in sets of whole moments, until the data
 /// ends. Then sends [`AudioStreamEvent::Finished`] with whatever `error_output_when_finished`
 /// returns.
-fn read_samples(
+pub(super) fn read_samples(
     mut standard_output: impl Read,
     channel_count: usize,
     sender: &SyncSender<AudioStreamEvent>,

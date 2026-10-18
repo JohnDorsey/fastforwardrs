@@ -32,8 +32,8 @@ use std::time::{Duration, Instant};
 use crate::composition::plan_sound;
 use crate::media::export::{sound_graph_specification, sources_of_sound};
 use crate::media::{
-    AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, FfmpegToolchain, MediaLocation,
-    UserInterfaceWakeUp,
+    AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, EngineAudioStream,
+    FfmpegToolchain, MediaLocation, UserInterfaceWakeUp,
 };
 use crate::project::{
     AnimationTarget, Clip, Project, PropertyId, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex,
@@ -112,6 +112,50 @@ impl AudioSource for AudioStream {
     }
 }
 
+impl AudioSource for EngineAudioStream {
+    fn try_next_event(&self) -> Option<AudioStreamEvent> {
+        EngineAudioStream::try_next_event(self)
+    }
+}
+
+/// Which makes the sound of the preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WhichSound {
+    /// The sound engine's block graph (`sound_engine`), with an ffmpeg for each clip: how the sound is made unless it is asked for the other way (since 2026-10-18, phase 7).
+    Engine,
+    /// `FASTFORWARDRS_SOUND=ffmpeg`: the one filter graph that ffmpeg runs, which made the sound before the engine did and which the engine is held to (`tests/sound_engine_null_test.rs`).
+    FilterGraph,
+}
+
+impl WhichSound {
+    /// What `FASTFORWARDRS_SOUND` (its value, if it is set) asks for: `ffmpeg` is the filter graph, and anything else (or nothing) the engine.
+    pub fn asked_for(value: Option<&str>) -> Self {
+        match value {
+            Some("ffmpeg") => Self::FilterGraph,
+            _ => Self::Engine,
+        }
+    }
+
+    pub fn from_the_environment() -> Self {
+        Self::asked_for(std::env::var("FASTFORWARDRS_SOUND").ok().as_deref())
+    }
+}
+
+/// A stream of either kind.
+pub enum ChosenAudioStream {
+    FilterGraph(AudioStream),
+    Engine(EngineAudioStream),
+}
+
+impl AudioSource for ChosenAudioStream {
+    fn try_next_event(&self) -> Option<AudioStreamEvent> {
+        match self {
+            Self::FilterGraph(stream) => stream.try_next_event(),
+            Self::Engine(stream) => stream.try_next_event(),
+        }
+    }
+}
+
 /// Starts streams of sound.
 pub trait AudioStreamStarter {
     type Stream: AudioSource;
@@ -124,23 +168,43 @@ pub trait AudioStreamStarter {
 pub struct FfmpegAudioStreamStarter {
     toolchain: Option<Arc<FfmpegToolchain>>,
     wake_up: UserInterfaceWakeUp,
+    which: WhichSound,
 }
 
 impl FfmpegAudioStreamStarter {
+    /// A starter that makes the sound the way the environment asks for (see [`WhichSound`]).
     pub fn new(toolchain: Option<Arc<FfmpegToolchain>>, wake_up: UserInterfaceWakeUp) -> Self {
-        Self { toolchain, wake_up }
+        Self::making_sound_by(toolchain, wake_up, WhichSound::from_the_environment())
+    }
+
+    pub fn making_sound_by(
+        toolchain: Option<Arc<FfmpegToolchain>>,
+        wake_up: UserInterfaceWakeUp,
+        which: WhichSound,
+    ) -> Self {
+        Self {
+            toolchain,
+            wake_up,
+            which,
+        }
     }
 }
 
 impl AudioStreamStarter for FfmpegAudioStreamStarter {
-    type Stream = AudioStream;
+    type Stream = ChosenAudioStream;
 
-    fn start(&self, request: &AudioStreamRequest) -> Result<AudioStream, AudioStreamError> {
-        match &self.toolchain {
-            Some(toolchain) => AudioStream::start(toolchain, request, Arc::clone(&self.wake_up)),
-            None => Err(AudioStreamError::CouldNotStart(std::io::Error::other(
+    fn start(&self, request: &AudioStreamRequest) -> Result<ChosenAudioStream, AudioStreamError> {
+        let Some(toolchain) = &self.toolchain else {
+            return Err(AudioStreamError::CouldNotStart(std::io::Error::other(
                 "ffmpeg could not be found",
-            ))),
+            )));
+        };
+        let wake_up = Arc::clone(&self.wake_up);
+        match self.which {
+            WhichSound::FilterGraph => {
+                AudioStream::start(toolchain, request, wake_up).map(ChosenAudioStream::FilterGraph)
+            }
+            WhichSound::Engine => EngineAudioStream::start(toolchain, request, wake_up).map(ChosenAudioStream::Engine),
         }
     }
 }

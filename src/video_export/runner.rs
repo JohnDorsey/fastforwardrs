@@ -32,10 +32,10 @@ use crate::engine::{AdapterChoice, Engine, EngineEvent, EngineSettings, PictureD
 use crate::frame_scene::TextPictures;
 use crate::media::export::VideoEncoder;
 use crate::media::{
-    FfmpegToolchain, MediaLocation, NativeYuv420p, UserInterfaceWakeUp, VideoStreamFormat, decode_picture,
-    probe_video_stream_format, size_to_decode_at,
+    FfmpegToolchain, MediaLocation, NativeYuv420p, SoundRenderError, UserInterfaceWakeUp, VideoStreamFormat,
+    decode_picture, probe_video_stream_format, render_sound_to_file, size_to_decode_at,
 };
-use crate::playback::{VideoReading, reading_of_a_video};
+use crate::playback::{VideoReading, WhichSound, reading_of_a_video};
 use crate::project::{SourceMediaIdentifier, TextObject};
 use crate::rgba_picture::RgbaPicture;
 use crate::text_rendering::LazyTextRenderer;
@@ -406,20 +406,42 @@ fn produce(job: Job) -> Result<(), Ending> {
         images.insert(source, picture);
     }
 
-    // The sound: its graph is saved in a file, which is far longer than a command line allows for a project with many clips.
+    // The sound: made by the sound engine into a file before the video is encoded (and given to the encoder as its second input), or, if `FASTFORWARDRS_SOUND` is `ffmpeg`,
+    // by the filter graph of the encoder itself, whose text is saved in a file, which is far longer than a command line allows for a project with many clips.
     let working_directory = tempfile::Builder::new()
         .prefix("fastforwardrs-export-")
         .tempdir()
         .map_err(|error| Ending::failed(format!("the export's working files could not be prepared: {error}")))?;
     let sound = match &plan.sound {
         None => None,
+        Some(sound) if WhichSound::from_the_environment() == WhichSound::Engine => {
+            let sound_file = working_directory.path().join("sound.f32");
+            let sources = sound
+                .source_files
+                .iter()
+                .map(|source| locations[source].clone())
+                .collect();
+            let rendered = render_sound_to_file(&toolchain, &sound.specification, sources, &sound_file, &|| {
+                shared.is_cancelled()
+            });
+            match rendered {
+                Ok(()) => {}
+                Err(SoundRenderError::Cancelled) => return Err(Ending::Cancelled),
+                Err(problem) => {
+                    return Err(Ending::failed(format!(
+                        "the sound of the video could not be made: {problem}"
+                    )));
+                }
+            }
+            Some(SoundForTheEncoder::RawFile { path: sound_file })
+        }
         Some(sound) => {
             let graph = sound_graph_for_the_encoder(sound);
             let graph_file = working_directory.path().join("sound_graph.txt");
             fs::write(&graph_file, &graph.text).map_err(|error| {
                 Ending::failed(format!("the export's working files could not be prepared: {error}"))
             })?;
-            Some(SoundForTheEncoder {
+            Some(SoundForTheEncoder::FilterGraph {
                 files: sound
                     .source_files
                     .iter()

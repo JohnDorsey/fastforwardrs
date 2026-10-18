@@ -73,6 +73,11 @@ impl<Event: Send + 'static> StreamingTool<Event> {
         Ok(Self { child, events })
     }
 
+    /// The tool's standard input, if the command made it a pipe (the command's own setting is kept: `background_command` makes it nothing). It can be taken once.
+    pub(super) fn take_standard_input(&mut self) -> Option<std::process::ChildStdin> {
+        self.child.stdin.take()
+    }
+
     /// The next event, if one is ready. Never waits.
     pub(super) fn try_next_event(&self) -> Option<Event> {
         self.events.try_recv().ok()
