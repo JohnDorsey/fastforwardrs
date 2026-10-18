@@ -46,6 +46,13 @@ pub enum Dialog {
         embed: Box<Command>,
         link: Box<Command>,
     },
+    /// Tables of colours cannot be included in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked where to save it as one, and if the
+    /// user agrees the tables called `names` are included as it is.
+    MustSaveAsAnArchiveToIncludeTables {
+        names: Vec<String>,
+        /// Whether the project has a project file (a plain one), and has not just never been saved.
+        has_a_plain_project_file: bool,
+    },
     /// A file cannot be embedded in a project file unless it is a `.ffrs` file, and the project is not saved as one: it is asked
     /// where to save it as one, and if the user agrees it is, and then the file to embed is asked for.
     MustSaveAsAnArchiveToEmbedAFile {
@@ -96,6 +103,35 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui.button("Discard changes").clicked() {
+                        answer = DialogAnswer::Confirmed;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = DialogAnswer::Dismissed;
+                    }
+                });
+            }
+            Dialog::MustSaveAsAnArchiveToIncludeTables {
+                names,
+                has_a_plain_project_file,
+            } => {
+                ui.heading(if names.len() == 1 {
+                    "Save as a .ffrs file to include the table"
+                } else {
+                    "Save as a .ffrs file to include the tables"
+                });
+                ui.add_space(6.0);
+                ui.label(format!(
+                    "Tables can only be included in a project file that is a .ffrs file, and this project is {}.                      Save it as a .ffrs file to include {}?",
+                    if *has_a_plain_project_file {
+                        "saved as a plain .json file"
+                    } else {
+                        "not saved yet"
+                    },
+                    if names.len() == 1 { "it" } else { "them" },
+                ));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Choose where to save it").clicked() {
                         answer = DialogAnswer::Confirmed;
                     }
                     if ui.button("Cancel").clicked() {

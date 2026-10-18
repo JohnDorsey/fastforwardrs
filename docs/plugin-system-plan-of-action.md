@@ -237,7 +237,7 @@ within a tolerance (PH-04); conformance tests for each built-in; a project with 
 **Progress (2026-10-18): built, all pieces 4.1 to 4.8** (design `engine-phase-4-design.md`; report `engine-phase-4-report.md`). Eight built-in effects (hue shift, saturation, brightness and contrast, exposure, opacity, blur, crop, look-up
 table) as descriptors and as passes of the engine in two colour domains with one conversion between neighbours; resources embedded or linked by a setting; the `.cube` host (1-D, 3-D, Resolve variant read), tetrahedral on the
 card, held to ffmpeg's `lut3d` to 1 level; the + menu with search and categories, controls from descriptors, bypass, duplicate, *Add effect from file...*; project file format 13. 362 planted mistakes: all read, the gaps closed
-with tests, 43 left that change nothing a person could see. **Not built:** the limit of 64 effects on one object, RS-04, DS-01 to DS-03 (no folder is scanned), PH-05. **Waiting on the maintainer:** trying the effects on a real card
+with tests, 43 left that change nothing a person could see. RS-04 and the limit of 64 effects on one object were built afterwards (2026-10-18, at the maintainer's word). **Not built:** DS-01 to DS-03 (no folder is scanned), PH-05. **Waiting on the maintainer:** trying the effects on a real card
 and the benchmark (nothing has run on one), and the questions at the end of the report. **Next in the order: phase 7 (the sound engine and LADSPA).**
 
 ### Phase 5 — Group effects, adjustment clips and generator clips (size M)

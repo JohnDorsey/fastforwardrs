@@ -52,8 +52,8 @@ use std::collections::HashMap;
 use super::{Group, GroupId, Member};
 use crate::project::tracks::{ClipId, ClipKind, Track};
 use crate::project::{
-    AnimationTarget, Badge, ChainItem, ChainItemKey, EditError, Effect, EffectInstanceId, EffectKind, Effects, Project,
-    PropertyId, PropertyValue,
+    AnimationTarget, Badge, ChainItem, ChainItemKey, EditError, Effect, EffectInstanceId, EffectKind, Effects,
+    MOST_EFFECTS_ON_ONE_THING, Project, PropertyId, PropertyValue,
 };
 
 /// What has a chain of effects: a clip, a track or a group.
@@ -257,6 +257,11 @@ impl Project {
         if !kind.applies_to_a_group_of_kind(found.kind()) {
             return Err(EditError::NotAnEffectOfTheGroup { group, kind });
         }
+        if found.effects_mut().is_full() {
+            return Err(EditError::TooManyEffects {
+                limit: MOST_EFFECTS_ON_ONE_THING,
+            });
+        }
         Ok(found.effects_mut().add(kind))
     }
 
@@ -331,6 +336,11 @@ impl Project {
                 item: ChainItemKey::Effect(instance),
             });
         };
+        if chain.is_full() {
+            return Err(EditError::TooManyEffects {
+                limit: MOST_EFFECTS_ON_ONE_THING,
+            });
+        }
         let keys = chain.keys(has_the_track_badge);
         let after_it = keys
             .iter()

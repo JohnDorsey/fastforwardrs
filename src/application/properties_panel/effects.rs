@@ -45,6 +45,79 @@ pub const SEARCH_EFFECTS_HINT: &str = "Search effects";
 pub const ADD_EFFECT_FROM_FILE_LABEL: &str = "Add effect from file...";
 pub const NO_EFFECT_FOUND_NOTE: &str = "No effect matches";
 
+/// What the items of the menu of a box of a look-up table effect that keep its table in the project file or link it say (RS-04).
+pub const INCLUDE_TABLE_LABEL: &str = "Include table in project file";
+pub const TAKE_TABLE_OUT_LABEL: &str = "Take table out of project file";
+
+/// What the items that do the same for every table of the project say, when there are several.
+pub fn include_all_tables_label(how_many: usize) -> String {
+    format!("Include all {how_many} tables in project file")
+}
+
+pub fn take_all_tables_out_label(how_many: usize) -> String {
+    format!("Take all {how_many} tables out of project file")
+}
+
+/// The items of the menu of the box of the look-up table effect `effect` that say where its table is kept, with the command each is: to include the table (if it is linked) or
+/// to take it out (if it is included); and when the project has several tables that the same could be done to, to do it to all of them. A table that the project has no bytes
+/// of (a linked file that is gone) has none: there is nothing to include or to put back.
+pub(super) fn items_for_where_the_tables_are_kept(project: &Project, effect: &Effect) -> Vec<(String, Command)> {
+    let mut items = Vec::new();
+    let Some(slot) = effect
+        .kind()
+        .parameters()
+        .iter()
+        .position(|parameter| matches!(parameter.control, ParameterControl::Resource(_)))
+    else {
+        return items;
+    };
+    let Some(PropertyValue::Words(name)) = effect.values().get(slot) else {
+        return items;
+    };
+    let can_be_moved = |name: &String| {
+        project
+            .resources()
+            .get(name)
+            .filter(|resource| !resource.is_missing())
+            .map(Resource::is_included)
+    };
+    match can_be_moved(name) {
+        Some(false) => items.push((
+            INCLUDE_TABLE_LABEL.to_owned(),
+            Command::IncludeTablesInTheProjectFile(vec![name.clone()]),
+        )),
+        Some(true) => items.push((
+            TAKE_TABLE_OUT_LABEL.to_owned(),
+            Command::TakeTablesOutOfTheProjectFile(vec![name.clone()]),
+        )),
+        None => {}
+    }
+    let in_use: Vec<String> = project.resources_in_use().into_iter().collect();
+    let linked: Vec<String> = in_use
+        .iter()
+        .filter(|name| can_be_moved(name) == Some(false))
+        .cloned()
+        .collect();
+    let included: Vec<String> = in_use
+        .iter()
+        .filter(|name| can_be_moved(name) == Some(true))
+        .cloned()
+        .collect();
+    if linked.len() > 1 {
+        items.push((
+            include_all_tables_label(linked.len()),
+            Command::IncludeTablesInTheProjectFile(linked),
+        ));
+    }
+    if included.len() > 1 {
+        items.push((
+            take_all_tables_out_label(included.len()),
+            Command::TakeTablesOutOfTheProjectFile(included),
+        ));
+    }
+    items
+}
+
 /// The headings of the menu of effects, in the order they are listed in; a category that is not here (one that a project file brought) comes after them, in the order its
 /// first effect is offered in.
 const CATEGORIES_IN_ORDER: [&str; 5] = ["Colour", "Light", "Blur and sharpen", "Transform", "Looks"];

@@ -165,6 +165,8 @@ impl FastForwardApplication {
             }
             Command::RelinkSource(identifier) => self.relink_source(identifier),
             Command::IncludeFilesInTheProjectFile(files) => self.include_files_in_the_project_file(&files),
+            Command::IncludeTablesInTheProjectFile(names) => self.include_tables_in_the_project_file(&names),
+            Command::TakeTablesOutOfTheProjectFile(names) => self.take_tables_out_of_the_project_file(&names),
             Command::TakeFilesOutOfTheProjectFile(files) => self.take_files_out_of_the_project_file(&files),
 
             Command::AddTrack => {
@@ -198,7 +200,9 @@ impl FastForwardApplication {
             }
 
             Command::AddEffect { target, kind } => {
-                let _ = self.document.project.add_effect(target, kind);
+                if let Err(error) = self.document.project.add_effect(target, kind) {
+                    self.say_why_an_effect_was_refused("The effect cannot be added", &error);
+                }
             }
             Command::RemoveEffect { target, instance } => {
                 let _ = self.document.project.remove_effect(target, instance);
@@ -212,7 +216,9 @@ impl FastForwardApplication {
                 let _ = self.document.project.set_effect_enabled(owner, instance, enabled);
             }
             Command::DuplicateEffect { owner, instance } => {
-                let _ = self.document.project.duplicate_effect(owner, instance);
+                if let Err(error) = self.document.project.duplicate_effect(owner, instance) {
+                    self.say_why_an_effect_was_refused("The effect cannot be copied", &error);
+                }
             }
             Command::AddEffectFromFile { owner } => self.add_an_effect_from_a_file(owner, now, context),
             Command::ChooseTableFile { owner, instance } => self.choose_the_table_of(owner, instance, now, context),

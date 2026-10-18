@@ -6,7 +6,7 @@
 
 use super::tests::{assert_same_content, project_with_everything, saved};
 use super::*;
-use crate::project::{AnimationTarget, EffectKind, GroupKind, PropertyId};
+use crate::project::{AnimationTarget, EffectKind, GroupKind, MOST_EFFECTS_ON_ONE_THING, PropertyId};
 use crate::test_support::{make_a_keyframe, put_an_effect_on};
 
 /// Values that are not what the effect begins with, for each value of `kind`: a third of the way from the least to the most of a range, the last of the options of a choice,
@@ -155,6 +155,47 @@ fn a_tag_can_have_an_opacity_in_a_file_and_a_clip_group_or_a_track_group_cannot(
     };
     assert!(
         reason.contains("group number 1") && reason.contains("opacity"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn a_file_with_sixty_four_effects_on_a_clip_is_read_and_one_with_sixty_five_is_refused_with_the_number() {
+    let mut project = project_with_everything();
+    let clip = the_first_video(&project);
+    while !project.effects_of(AnimationTarget::Clip(clip)).unwrap().is_full() {
+        project
+            .add_effect(AnimationTarget::Clip(clip), EffectKind::EXPOSURE)
+            .unwrap();
+    }
+    assert_eq!(
+        project.effects_of(AnimationTarget::Clip(clip)).unwrap().len(),
+        MOST_EFFECTS_ON_ONE_THING
+    );
+    assert_same_content(&project_from_json_text(&saved(&project)).unwrap(), &project);
+
+    let mut file: serde_json::Value = serde_json::from_str(&saved(&project)).unwrap();
+    let effects = file["tracks"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .flat_map(|track| track["clips"].as_array_mut().into_iter().flatten())
+        .find_map(|clip| {
+            clip.get_mut("effects")
+                .and_then(|effects| effects.as_array_mut())
+                .filter(|effects| effects.len() == 64)
+        })
+        .expect("the clip with the effects is in the file");
+    let mut one_more = effects[0].clone();
+    one_more["instance"] = serde_json::json!(64);
+    effects.push(one_more);
+    let text = serde_json::to_string_pretty(&file).unwrap();
+    let reason = match project_from_json_text(&text) {
+        Err(ProjectFileError::InvalidProject { reason }) => reason,
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        reason.contains("65 effects") && reason.contains("the most one can have is 64"),
         "{reason}"
     );
 }

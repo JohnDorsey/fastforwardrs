@@ -208,7 +208,7 @@ impl FastForwardApplication {
 
     /// Asks where to save the project as an archive: only the kind of file that is one is offered, and it has the ending of one
     /// whatever name is chosen.
-    fn ask_where_to_save_an_archive(&self, title: &str) -> Option<PathBuf> {
+    pub(super) fn ask_where_to_save_an_archive(&self, title: &str) -> Option<PathBuf> {
         let suggested_file_name = self.suggested_name_for_a_project_file(ARCHIVE_FILE_EXTENSION);
         let path = self.environment.file_chooser.choose_where_to_save(&FileQuestion {
             title,
@@ -300,7 +300,7 @@ impl FastForwardApplication {
 
 /// The places that a file that is included was at, in the order to try them: where it was, and then where the same place is from
 /// the folder that the project file is in now (if it is not where it was, because the project was moved).
-fn places_it_was_at(link: &SourceMediaLink, project_directory: Option<&Path>) -> Vec<PathBuf> {
+pub(super) fn places_it_was_at(link: &SourceMediaLink, project_directory: Option<&Path>) -> Vec<PathBuf> {
     let mut places = vec![link.absolute_path.clone()];
     if let (Some(relative_path), Some(folder)) = (&link.relative_path, project_directory) {
         let resolved = folder.join(relative_path);
@@ -317,8 +317,21 @@ fn places_it_was_at(link: &SourceMediaLink, project_directory: Option<&Path>) ->
 /// folder it is to be in is there.
 fn put_back(bytes_at: impl Into<MediaLocation>, places: &[PathBuf]) -> Result<PathBuf, String> {
     let bytes_at = bytes_at.into();
+    put_back_where(
+        places,
+        |place| have_the_same_contents(&bytes_at, place).unwrap_or(false),
+        |file| copy_bytes_of(&bytes_at, file).map(|_| ()),
+    )
+}
+
+/// [`put_back`] for any contents: `is_there_already` says whether the file at a place has them, and `write` writes them into a file that is made.
+pub(super) fn put_back_where(
+    places: &[PathBuf],
+    is_there_already: impl Fn(&Path) -> bool,
+    write: impl Fn(&mut fs::File) -> std::io::Result<()>,
+) -> Result<PathBuf, String> {
     for place in places {
-        if place.is_file() && have_the_same_contents(&bytes_at, place.as_path()).unwrap_or(false) {
+        if place.is_file() && is_there_already(place.as_path()) {
             return Ok(place.clone());
         }
     }
@@ -329,7 +342,7 @@ fn put_back(bytes_at: impl Into<MediaLocation>, places: &[PathBuf]) -> Result<Pa
         if fs::symlink_metadata(place).is_ok() || !folder_is_there {
             continue;
         }
-        let copied = replace_file_atomically(place, |file| copy_bytes_of(&bytes_at, file).map(|_| ()));
+        let copied = replace_file_atomically(place, &write);
         match copied {
             Ok(()) => return Ok(place.clone()),
             Err(error) => return Err(format!("it could not be put back at {}: {error}", place.display())),

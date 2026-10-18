@@ -48,8 +48,8 @@ pub use animation::{
 pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
     Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, LutOperation, LutSpace, MOST_VALUES_OF_AN_EFFECT,
-    ParameterControl, ParameterDescriptor, PictureOperation, UnknownFields, ValueScale,
+    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, LutOperation, LutSpace, MOST_EFFECTS_ON_ONE_THING,
+    MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor, PictureOperation, UnknownFields, ValueScale,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
@@ -251,6 +251,8 @@ pub enum EditError {
     NotAPropertyOfTheGroup { group: GroupId, property: PropertyId },
     #[error("{item:?} is not in the chain of effects of {owner}")]
     NotInTheChain { owner: Member, item: ChainItemKey },
+    #[error("a clip, a track or a group can have at most {limit} effects, and this one has them")]
+    TooManyEffects { limit: usize },
 }
 
 /// How many seconds a picture is shown for when it is put on a track, until it is changed.

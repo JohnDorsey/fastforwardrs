@@ -9,7 +9,7 @@
 
 use super::animating::AnimationTarget;
 use super::animation::PropertyId;
-use super::effects::{EffectInstanceId, EffectKind, Effects};
+use super::effects::{EffectInstanceId, EffectKind, Effects, MOST_EFFECTS_ON_ONE_THING};
 use super::tracks::{ClipEditError, KeyframeId, RackKeyframe};
 use super::{EditError, Project};
 
@@ -38,8 +38,13 @@ impl Project {
 
     /// Puts the effect `kind` on the clip or the track `target`, last, with the values it begins with, and gives the name it has in the chain
     /// of what has it. (There may be effects of that kind on it already: it is one more.) It is an error, and nothing is changed, if
-    /// there is no such clip or track, or it cannot have that effect (a sound cannot have one that changes pictures).
+    /// there is no such clip or track, or it cannot have that effect (a sound cannot have one that changes pictures), or it has [`MOST_EFFECTS_ON_ONE_THING`] already.
     pub fn add_effect(&mut self, target: AnimationTarget, kind: EffectKind) -> Result<EffectInstanceId, EditError> {
+        if self.effects_of_or_error(target)?.is_full() {
+            return Err(EditError::TooManyEffects {
+                limit: MOST_EFFECTS_ON_ONE_THING,
+            });
+        }
         match target {
             AnimationTarget::Clip(clip) => Ok(self
                 .track_holding_mut_or_error(clip)?

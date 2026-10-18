@@ -24,7 +24,7 @@ use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
     ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
-    ParameterControl, ParameterDescriptor, Project, UnknownFields, ValueKind, ValueScale,
+    MOST_EFFECTS_ON_ONE_THING, ParameterControl, ParameterDescriptor, Project, UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -402,6 +402,12 @@ pub(super) fn effects_from_documents(
     kinds: &KindsOfEffects,
     can_have: impl Fn(EffectKind) -> bool,
 ) -> Result<Vec<Effect>, String> {
+    if documents.len() > MOST_EFFECTS_ON_ONE_THING {
+        return Err(format!(
+            "it has {} effects, and the most one can have is {MOST_EFFECTS_ON_ONE_THING}",
+            documents.len()
+        ));
+    }
     let named = documents.iter().filter(|document| document.instance.is_some()).count();
     if named != 0 && named != documents.len() {
         return Err("some of its effects have a name in its chain and some have not".to_owned());

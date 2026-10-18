@@ -22,8 +22,8 @@ use crate::application::dialogs::Dialog;
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::cube_table::parse_cube;
 use crate::project::{
-    AnimationTarget, EffectInstanceId, EffectKind, HowToKeepAResource, Member, ParameterControl, ProjectFileKind,
-    PropertyId, PropertyValue, ResourceKind, SourceMediaLink,
+    AnimationTarget, EditError, EffectInstanceId, EffectKind, HowToKeepAResource, Member, ParameterControl,
+    ProjectFileKind, PropertyId, PropertyValue, ResourceKind, SourceMediaLink,
 };
 use crate::project_file::{link_of_a_new_resource, read_a_resource_file};
 
@@ -40,6 +40,13 @@ impl FastForwardApplication {
             None => ProjectFileKind::NotSavedYet,
             Some(_) if self.project_file_is_an_archive() => ProjectFileKind::Archive,
             Some(_) => ProjectFileKind::PlainJson,
+        }
+    }
+
+    /// Tells the user why an effect could not be put on something (when it is a reason a person can do something about: it has the most effects there can be).
+    pub(super) fn say_why_an_effect_was_refused(&mut self, title: &str, error: &EditError) {
+        if matches!(error, EditError::TooManyEffects { .. }) {
+            self.show_message(title, error.to_string());
         }
     }
 
@@ -191,10 +198,13 @@ impl FastForwardApplication {
                     Member::Track(track) => self.document.project.add_effect(AnimationTarget::Track(track), kind),
                     Member::Group(group) => self.document.project.add_effect_to_the_group(group, kind),
                 };
-                let Ok(instance) = added else {
-                    return;
-                };
-                instance
+                match added {
+                    Ok(instance) => instance,
+                    Err(error) => {
+                        self.say_why_an_effect_was_refused("The effect cannot be added", &error);
+                        return;
+                    }
+                }
             }
         };
         let property = PropertyId::effect_value(kind, instance, u8::try_from(slot).unwrap_or(0));

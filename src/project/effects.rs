@@ -278,6 +278,9 @@ pub struct Effects {
     links: Vec<Link>,
 }
 
+/// The most effects that one clip, track or group can have (SF-11). A person who wants more is making a chain no card will run; a project file that has more is refused.
+pub const MOST_EFFECTS_ON_ONE_THING: usize = 64;
+
 /// The effects of a chain, one after another: what [`Effects::iter`] gives.
 pub struct EffectsIter<'chain> {
     links: std::slice::Iter<'chain, Link>,
@@ -372,6 +375,11 @@ impl Effects {
     /// Whether there is no effect. (There may be badges.)
     pub fn is_empty(&self) -> bool {
         !self.links.iter().any(|link| matches!(link, Link::Effect(_)))
+    }
+
+    /// Whether there are [`MOST_EFFECTS_ON_ONE_THING`] effects, and no more can be put on.
+    pub fn is_full(&self) -> bool {
+        self.len() >= MOST_EFFECTS_ON_ONE_THING
     }
 
     /// How many effects there are. (The badges are not counted.)

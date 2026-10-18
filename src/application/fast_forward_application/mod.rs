@@ -133,6 +133,9 @@ mod state;
 #[cfg(test)]
 mod still_window_tests;
 mod table_flow;
+mod table_keeping_flow;
+#[cfg(test)]
+mod table_keeping_tests;
 #[cfg(test)]
 mod table_tests;
 #[cfg(test)]

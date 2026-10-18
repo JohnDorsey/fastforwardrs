@@ -70,6 +70,9 @@ impl FastForwardApplication {
                         Dialog::MustSaveAsAnArchiveToIncludeFiles { files, .. } => {
                             self.save_as_an_archive_with_files_included(&files);
                         }
+                        Dialog::MustSaveAsAnArchiveToIncludeTables { names, .. } => {
+                            self.save_as_an_archive_with_tables_included(&names);
+                        }
                         Dialog::MustSaveAsAnArchiveToEmbedAFile { .. } => {
                             self.save_as_an_archive_and_ask_for_a_file_to_embed();
                         }

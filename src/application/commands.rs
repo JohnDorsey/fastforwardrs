@@ -136,6 +136,11 @@ pub enum Command {
     /// Take the files of these source files out of the project file again, from the menu of a clip: each is put back where it was
     /// when it was included, if that can be done.
     TakeFilesOutOfTheProjectFile(Vec<SourceMediaIdentifier>),
+    /// Put the tables of colours called so in the project file, from the menu of the box of a look-up table effect (RS-04). Like the files of videos, it needs a `.ffrs` file
+    /// and is not an edit that can be undone.
+    IncludeTablesInTheProjectFile(Vec<String>),
+    /// Take the tables of colours called so out of the project file again, each put back where it was when it was included, if that can be done.
+    TakeTablesOutOfTheProjectFile(Vec<String>),
 
     // The tracks.
     /// Add an empty track in front of the others.
@@ -474,6 +479,8 @@ impl Command {
             | Self::RelinkSource(_)
             | Self::IncludeFilesInTheProjectFile(_)
             | Self::TakeFilesOutOfTheProjectFile(_)
+            | Self::IncludeTablesInTheProjectFile(_)
+            | Self::TakeTablesOutOfTheProjectFile(_)
             | Self::AddEffectFromFile { .. }
             | Self::ChooseTableFile { .. }
             | Self::ShowTheColoursOfAFile(_) => false,
@@ -526,6 +533,8 @@ impl Command {
             | Self::RelinkSource(_)
             | Self::IncludeFilesInTheProjectFile(_)
             | Self::TakeFilesOutOfTheProjectFile(_)
+            | Self::IncludeTablesInTheProjectFile(_)
+            | Self::TakeTablesOutOfTheProjectFile(_)
             | Self::AddTrack
             | Self::SetTrackTitle { .. }
             | Self::SetTrackGain { .. }

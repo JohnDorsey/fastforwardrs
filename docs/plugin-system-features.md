@@ -36,9 +36,10 @@ blur, crop, look-up table), UI-01 to UI-07 (the + menu with a search field and c
 from file...*, the embedding setting in both settings windows), PH-01 to PH-04 and PH-20 (the `.cube` reader, with the Resolve variant read only; tetrahedral and trilinear interpolation; intensity, input space, output space;
 held to ffmpeg's `lut3d` to 1 level at the worst of 4096 colours; the built-in effects run as passes of the engine), MG-02, LG-02 and LG-08 (five sample tables of our own, CC0, made by a formula), Q-12 (the export asks first
 and lists the effects and the tables that are missing).
-**Partly:** SF-11 (the size and number of resources and the size of a table are limited; **the limit of 64 effects on one object is not built**), SF-03 (names of resources are checked as the names of media are), DS-01 to DS-03
+**Also built, 2026-10-18:** RS-04 (*Include table in project file* and *Take table out of project file* in the menu of the box of a look-up table effect, and for all tables at once) and the rest of SF-11 (64 effects on one clip, track or group: refused when added or copied, and in a file).
+**Partly:** SF-03 (names of resources are checked as the names of media are), DS-01 to DS-03
 (the sample tables are in the program's `assets/luts` and are chosen with *Add effect from file...*; **no folder is scanned** and there is no list of what was found: that waits for the plugin manager).
-**Not built:** RS-04 (switching a resource between embedded and linked afterwards), RS-09 and SF-02 (they are about shaders: phase 6), ID-07 (handles on the picture), UI-11 (the controls of EN-14: phase 6),
+**Not built:** RS-09 and SF-02 (they are about shaders: phase 6), ID-07 (handles on the picture), UI-11 (the controls of EN-14: phase 6),
 PH-05 (other table formats).
 
 Words used with one meaning: an **effect type** is what a plugin or a built-in provides (its descriptor); an **effect instance** is one

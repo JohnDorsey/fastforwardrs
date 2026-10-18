@@ -19,7 +19,8 @@ use super::badge::{self, BadgeLook};
 use super::effects::{
     ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE,
     NOT_INSTALLED_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE,
-    effects_that_match, effects_to_offer, grouped_by_category, show_the_control_of, show_the_control_of_a_group_effect,
+    effects_that_match, effects_to_offer, grouped_by_category, items_for_where_the_tables_are_kept,
+    show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -137,6 +138,7 @@ fn show_an_effect(
     let mut to_be_deleted = false;
     let mut to_be_switched = false;
     let mut to_be_duplicated = false;
+    let mut from_the_menu = Vec::new();
     let title = chain.map_or_else(
         || what_an_effect_is_called(kind),
         |chain| what_an_effect_in_a_chain_is_called(chain, effect),
@@ -157,6 +159,12 @@ fn show_an_effect(
             if ui.button(DUPLICATE_EFFECT_LABEL).clicked() {
                 to_be_duplicated = true;
                 ui.close();
+            }
+            for (label, command) in items_for_where_the_tables_are_kept(content.project, effect) {
+                if ui.button(label).clicked() {
+                    from_the_menu.push(command);
+                    ui.close();
+                }
             }
             if ui.button(DELETE_EFFECT_LABEL).clicked() {
                 to_be_deleted = true;
@@ -188,6 +196,7 @@ fn show_an_effect(
     if to_be_deleted {
         commands.push(command_that_takes_off(owner, effect.instance()));
     }
+    commands.extend(from_the_menu);
     if to_be_duplicated {
         commands.push(Command::DuplicateEffect {
             owner,

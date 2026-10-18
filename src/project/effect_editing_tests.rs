@@ -1038,3 +1038,54 @@ fn whatever_effects_are_put_on_and_taken_off_and_whatever_is_done_to_the_clips_a
         "only {effects_taken_off} effects were taken off"
     );
 }
+
+#[test]
+fn a_clip_or_a_track_has_at_most_sixty_four_effects_and_the_sixty_fifth_is_refused_with_nothing_changed() {
+    assert_eq!(MOST_EFFECTS_ON_ONE_THING, 64);
+    let mut made = one_of_each();
+    for target in [clip(made.video), track(made.video_track)] {
+        for _ in 0..MOST_EFFECTS_ON_ONE_THING {
+            made.project.add_effect(target, EffectKind::EXPOSURE).unwrap();
+        }
+        assert_eq!(made.project.effects_of(target).unwrap().len(), 64);
+        assert_eq!(
+            made.project.add_effect(target, EffectKind::HUE_SHIFT),
+            Err(EditError::TooManyEffects { limit: 64 })
+        );
+        assert_eq!(made.project.effects_of(target).unwrap().len(), 64, "nothing was put on");
+        // (And taking one off makes room for one.)
+        let first = made
+            .project
+            .effects_of(target)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .instance();
+        made.project.remove_effect(target, first).unwrap();
+        assert!(made.project.add_effect(target, EffectKind::HUE_SHIFT).is_ok());
+    }
+}
+
+#[test]
+fn a_copy_of_an_effect_is_refused_when_there_are_sixty_four_already() {
+    let mut made = one_of_each();
+    let owner = Member::Clip(made.video);
+    for _ in 0..MOST_EFFECTS_ON_ONE_THING - 1 {
+        made.project.add_effect(clip(made.video), EffectKind::BLUR).unwrap();
+    }
+    let any = made
+        .project
+        .effects_of(clip(made.video))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .instance();
+    assert!(made.project.duplicate_effect(owner, any).is_ok(), "the 64th");
+    assert_eq!(
+        made.project.duplicate_effect(owner, any),
+        Err(EditError::TooManyEffects { limit: 64 })
+    );
+    assert_eq!(made.project.effects_of(clip(made.video)).unwrap().len(), 64);
+}

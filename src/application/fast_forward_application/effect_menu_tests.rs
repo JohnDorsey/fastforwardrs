@@ -514,3 +514,53 @@ fn a_copy_of_an_effect_is_a_step_of_the_history_and_has_no_keyframes_of_the_orig
             .has_the_effect(AnimationTarget::Clip(clip), EffectInstanceId::new(1))
     );
 }
+
+// --- the most effects there can be ---
+
+fn a_clip_with_all_the_effects_it_can_have() -> (Window, ClipId) {
+    let (mut window, clip) = window_with_the_video_selected();
+    for _ in 0..crate::project::MOST_EFFECTS_ON_ONE_THING {
+        window.do_this(Command::AddEffect {
+            target: AnimationTarget::Clip(clip),
+            kind: EffectKind::EXPOSURE,
+        });
+    }
+    assert_eq!(the_effects(&window, clip).len(), 64);
+    assert!(window.application().interface.dialog.is_none(), "all 64 fit");
+    (window, clip)
+}
+
+#[test]
+fn an_effect_that_is_added_to_a_thing_that_has_the_most_there_can_be_is_not_added_and_the_user_is_told() {
+    let (mut window, clip) = a_clip_with_all_the_effects_it_can_have();
+
+    window.do_this(Command::AddEffect {
+        target: AnimationTarget::Clip(clip),
+        kind: EffectKind::BLUR,
+    });
+
+    assert_eq!(the_effects(&window, clip).len(), 64, "nothing was added");
+    match &window.application().interface.dialog {
+        Some(crate::application::dialogs::Dialog::Message { title, text }) => {
+            assert_eq!(title, "The effect cannot be added");
+            assert!(text.contains("at most 64 effects"), "{text}");
+        }
+        other => panic!("the user is told: {other:?}"),
+    }
+}
+
+#[test]
+fn a_copy_of_an_effect_of_a_thing_that_has_the_most_there_can_be_is_not_made_and_the_user_is_told() {
+    let (mut window, clip) = a_clip_with_all_the_effects_it_can_have();
+
+    window.do_this(Command::DuplicateEffect {
+        owner: Member::Clip(clip),
+        instance: EffectInstanceId::FIRST,
+    });
+
+    assert_eq!(the_effects(&window, clip).len(), 64);
+    assert!(matches!(
+        &window.application().interface.dialog,
+        Some(crate::application::dialogs::Dialog::Message { title, .. }) if title == "The effect cannot be copied"
+    ));
+}

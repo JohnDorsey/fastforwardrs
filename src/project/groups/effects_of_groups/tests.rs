@@ -1290,3 +1290,33 @@ fn a_track_and_a_group_can_have_an_effect_duplicated_too_and_what_is_not_there_i
     );
     assert_eq!(laid.project, before, "nothing is changed by a refusal");
 }
+
+#[test]
+fn a_group_has_at_most_sixty_four_effects_and_the_sixty_fifth_is_refused_to_add_and_to_copy() {
+    let mut laid = four_tracks();
+    let tag = laid
+        .project
+        .create_group(GroupKind::Tag, &[laid.clip_member(0, 0)])
+        .unwrap();
+    for _ in 0..MOST_EFFECTS_ON_ONE_THING {
+        laid.project.add_effect_to_the_group(tag, EffectKind::EXPOSURE).unwrap();
+    }
+    assert_eq!(
+        laid.project.add_effect_to_the_group(tag, EffectKind::EXPOSURE),
+        Err(EditError::TooManyEffects { limit: 64 })
+    );
+    let any = laid
+        .project
+        .group(tag)
+        .unwrap()
+        .effects()
+        .iter()
+        .next()
+        .unwrap()
+        .instance();
+    assert_eq!(
+        laid.project.duplicate_effect(Member::Group(tag), any),
+        Err(EditError::TooManyEffects { limit: 64 })
+    );
+    assert_eq!(laid.project.group(tag).unwrap().effects().len(), 64);
+}
