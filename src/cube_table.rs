@@ -330,13 +330,10 @@ pub fn parse_cube(text: &str) -> Result<CubeTable, CubeProblem> {
         }
         let (keyword, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
         let rest = rest.trim();
-        if first_row_line.is_some() {
+        if let Some(first_row) = first_row_line {
             return Err(problem(
                 number,
-                format!(
-                    "\"{keyword}\" comes after the table has begun (at line {})",
-                    first_row_line.unwrap_or(0)
-                ),
+                format!("\"{keyword}\" comes after the table has begun (at line {first_row})"),
             ));
         }
         match keyword {

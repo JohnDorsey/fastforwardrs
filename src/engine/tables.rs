@@ -31,8 +31,13 @@ pub const MOST_TABLES_ON_THE_CARD: usize = 16;
 
 /// Puts `table` on the shelf for the engine to take, and gives the id that frames name it by (its serial number: the same table is the same id, always).
 pub fn publish_table(table: &Arc<CubeTable>) -> TableId {
-    let id = table.serial_number();
     let mut shelf = PUBLISHED.lock().unwrap_or_else(PoisonError::into_inner);
+    put_on_the_shelf(&mut shelf, table)
+}
+
+/// Puts `table` on `shelf`, after sweeping off it the tables that nobody has any more if there are [`SWEEP_WHEN_THERE_ARE_MORE`] of them or more.
+fn put_on_the_shelf(shelf: &mut HashMap<u64, Weak<CubeTable>>, table: &Arc<CubeTable>) -> TableId {
+    let id = table.serial_number();
     if shelf.len() >= SWEEP_WHEN_THERE_ARE_MORE {
         shelf.retain(|_, weak| weak.strong_count() > 0);
     }
@@ -193,6 +198,31 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn the_shelf_is_swept_of_the_tables_nobody_has_when_it_has_sixty_four_and_not_before() {
+        assert_eq!(SWEEP_WHEN_THERE_ARE_MORE, 64);
+        assert_eq!(MOST_TABLES_ON_THE_CARD, 16);
+        let kept = a_table();
+        let dead_entries = |how_many: u64| -> HashMap<u64, Weak<CubeTable>> {
+            (0..how_many)
+                .map(|number| (u64::MAX - number, Arc::downgrade(&a_table())))
+                .collect()
+        };
+        let mut shelf = dead_entries(63);
+        put_on_the_shelf(&mut shelf, &kept);
+        assert_eq!(shelf.len(), 64, "(63 and the new one: nothing is swept yet)");
+        let mut shelf = dead_entries(64);
+        put_on_the_shelf(&mut shelf, &kept);
+        assert_eq!(shelf.len(), 1, "(64 were there: the dead ones went)");
+        // (And one somebody has stays.)
+        let alive = a_table();
+        let mut shelf = dead_entries(70);
+        shelf.insert(alive.serial_number(), Arc::downgrade(&alive));
+        put_on_the_shelf(&mut shelf, &kept);
+        assert_eq!(shelf.len(), 2);
+        assert!(shelf.contains_key(&alive.serial_number()));
     }
 
     #[test]

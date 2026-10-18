@@ -27,7 +27,7 @@ pub enum WorkingSpace {
 
 impl WorkingSpace {
     /// The light of `primaries` in the numbers of this working space, as a matrix on light (the identity for the compatibility mode, which has no primaries).
-    fn matrix_from(self, primaries: StandardPrimaries) -> matrix::Matrix3 {
+    pub(super) fn matrix_from(self, primaries: StandardPrimaries) -> matrix::Matrix3 {
         match self {
             Self::DisplayReferred => matrix::IDENTITY,
             Self::Linear(working) => primaries.conversion_to(working),
@@ -35,7 +35,7 @@ impl WorkingSpace {
     }
 
     /// The matrix on light that takes the numbers of this working space to the light of `primaries` (the identity for the compatibility mode).
-    fn matrix_to(self, primaries: StandardPrimaries) -> matrix::Matrix3 {
+    pub(super) fn matrix_to(self, primaries: StandardPrimaries) -> matrix::Matrix3 {
         match self {
             Self::DisplayReferred => matrix::IDENTITY,
             Self::Linear(working) => working.conversion_to(primaries),
@@ -219,14 +219,6 @@ pub struct MixingParts {
 }
 
 impl MixingParts {
-    /// The usual pass: the conversions and the mixing, with offsets of nothing.
-    pub const ALL: Self = Self {
-        offsets: [0.0; 3],
-        converts_into_the_domain: true,
-        converts_out_of_the_domain: true,
-        mixes: true,
-    };
-
     /// The number that says which parts are left out (`parts` in `colour_matrix.wgsl`).
     pub fn left_out(&self) -> u32 {
         u32::from(!self.converts_into_the_domain)

@@ -420,3 +420,40 @@ fn what_a_resource_is_read_as_does_not_make_two_resources_different() {
     let _ = first.get("a.cube").unwrap().cube_table();
     assert_eq!(first, second);
 }
+
+#[test]
+fn the_limits_are_the_numbers_the_documents_give() {
+    assert_eq!(MOST_BYTES_OF_A_RESOURCE, 64 * 1024 * 1024, "64 MiB");
+    assert_eq!(MOST_RESOURCES, 256);
+    assert_eq!(MOST_CHARACTERS_IN_THE_NAME_OF_A_RESOURCE, 120);
+    // (And a name of exactly that many characters is a name, and one more is not.)
+    assert!(why_not_the_name_of_a_resource(&"n".repeat(120)).is_none());
+    assert_eq!(why_not_the_name_of_a_resource(&"n".repeat(121)), Some("it is too long"));
+}
+
+#[test]
+fn an_ending_of_sixteen_characters_with_its_dot_is_an_ending_and_one_of_seventeen_is_not() {
+    let mut resources = Resources::default();
+    let sixteen = format!("a.{}", "e".repeat(15));
+    resources
+        .add(&sixteen, ResourceKind::Cube, bytes("one"), linked("/x"))
+        .unwrap();
+    assert_eq!(
+        resources
+            .add(&sixteen, ResourceKind::Cube, bytes("two"), linked("/x"))
+            .unwrap(),
+        format!("a (2).{}", "e".repeat(15)),
+        "the number goes before the ending"
+    );
+    let seventeen = format!("b.{}", "e".repeat(16));
+    resources
+        .add(&seventeen, ResourceKind::Cube, bytes("three"), linked("/x"))
+        .unwrap();
+    assert_eq!(
+        resources
+            .add(&seventeen, ResourceKind::Cube, bytes("four"), linked("/x"))
+            .unwrap(),
+        format!("{seventeen} (2)"),
+        "a longer ending is not one: the number goes at the end"
+    );
+}

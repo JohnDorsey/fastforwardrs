@@ -619,3 +619,64 @@ fn an_archive_with_an_included_resource_still_has_it_after_it_is_written_again_w
     let loaded = read_project_file(&destination).unwrap();
     assert_eq!(bytes_of(&loaded, "grade.cube"), Some(second_table.into_bytes()));
 }
+
+#[test]
+fn the_relative_path_of_a_resource_is_worked_out_again_only_for_a_linked_file_that_is_there() {
+    let folder = TempDir::new().unwrap();
+    let there = folder.path().join("there.cube");
+    fs::write(&there, "LUT_3D_SIZE 2\n").unwrap();
+    let mut project = project_using("linked-gone.cube");
+    // (A second effect, for the included resource: only resources that an effect uses are saved.)
+    let clip = AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
+    let kind = a_kind_of_effect_that_uses_a_resource();
+    let instance = project.add_effect(clip, kind).unwrap();
+    project
+        .set_property_at(
+            clip,
+            crate::project::PropertyId::effect_value(kind, instance, 0),
+            PropertyValue::Words("included.cube".to_owned()),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    let kept_for_a_file_that_is_gone = PathBuf::from("kept/gone.cube");
+    project
+        .add_resource(
+            "linked-gone.cube",
+            ResourceKind::Cube,
+            bytes("gone"),
+            SourceMediaLink {
+                absolute_path: folder.path().join("not-there.cube"),
+                relative_path: Some(kept_for_a_file_that_is_gone.clone()),
+                included_as: None,
+            },
+        )
+        .unwrap();
+    let entry = project_resource_entry_name(crc32fast::hash(b"inside"), "included.cube");
+    project
+        .add_resource(
+            "included.cube",
+            ResourceKind::Cube,
+            bytes("inside"),
+            SourceMediaLink {
+                absolute_path: there,
+                relative_path: Some(PathBuf::from("kept/included.cube")),
+                included_as: Some(entry),
+            },
+        )
+        .unwrap();
+    let documents = resources::documents_of(&project, folder.path()).unwrap();
+    let relative_of = |name: &str| {
+        documents
+            .iter()
+            .find(|document| document.name == name)
+            .unwrap()
+            .relative_path
+            .clone()
+    };
+    assert_eq!(relative_of("linked-gone.cube"), Some("kept/gone.cube".to_owned()));
+    assert_eq!(
+        relative_of("included.cube"),
+        Some("kept/included.cube".to_owned()),
+        "(the paths of an included resource are kept as they were, even if its file is there)"
+    );
+}

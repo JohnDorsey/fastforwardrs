@@ -27,6 +27,20 @@ and a sentence that can be checked.
 | **C** | could be there |
 | **L** | later: a release after that one; the design must not make it impossible |
 
+**Status after phase 4 (2026-10-18; [V] means run, on the software adapters and the real ffmpeg 9.0.2; the report is `docs/engine-phase-4-report.md`).**
+**Built:** SC-04 (the word is *effect* everywhere in the window), ID-01 to ID-06 and ID-08 (the descriptor has a category, and each value a scale, a control and a unit; the kinds of control are slider, whole number,
+switch, choice and resource, and a number, a pair, a colour, a flag and words are the kinds of value; all eight built-in effects are descriptors, with snapshots in the file, and an effect that is not installed is kept whole),
+MD-01 to MD-10 (the file is format 13), RS-01 to RS-03, RS-05 to RS-08 (resources, included or linked by a setting of the project or the global one, embedded as the default; two with one content are one resource; one
+that is gone is *missing* and the effect passes the picture; read at open; 64 MiB and 256 resources and the checks of names), EF-01 and EF-07 (hue shift, saturation, brightness and contrast, exposure, opacity,
+blur, crop, look-up table), UI-01 to UI-07 (the + menu with a search field and categories, controls made from the descriptor, the badge and note of a missing effect, bypass, drag to reorder, *Duplicate effect*, *Add effect
+from file...*, the embedding setting in both settings windows), PH-01 to PH-04 and PH-20 (the `.cube` reader, with the Resolve variant read only; tetrahedral and trilinear interpolation; intensity, input space, output space;
+held to ffmpeg's `lut3d` to 1 level at the worst of 4096 colours; the built-in effects run as passes of the engine), MG-02, LG-02 and LG-08 (five sample tables of our own, CC0, made by a formula), Q-12 (the export asks first
+and lists the effects and the tables that are missing).
+**Partly:** SF-11 (the size and number of resources and the size of a table are limited; **the limit of 64 effects on one object is not built**), SF-03 (names of resources are checked as the names of media are), DS-01 to DS-03
+(the sample tables are in the program's `assets/luts` and are chosen with *Add effect from file...*; **no folder is scanned** and there is no list of what was found: that waits for the plugin manager).
+**Not built:** RS-04 (switching a resource between embedded and linked afterwards), RS-09 and SF-02 (they are about shaders: phase 6), ID-07 (handles on the picture), UI-11 (the controls of EN-14: phase 6),
+PH-05 (other table formats).
+
 Words used with one meaning: an **effect type** is what a plugin or a built-in provides (its descriptor); an **effect instance** is one
 use of it on a clip, a track or a group; a **host** is the part of the program that can run effect types of one family (the built-in
 host, the LUT host, the ISF host, the LADSPA host, the CLAP host); a **resource** is a file an effect needs (a `.cube` table, a shader

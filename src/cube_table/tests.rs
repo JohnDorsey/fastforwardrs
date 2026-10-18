@@ -85,7 +85,9 @@ fn the_most_points_a_side_there_is_for_now_is_read_and_one_more_is_refused_witho
     let refused = problem_of("LUT_3D_SIZE 66\n0 0 0\n");
     assert_eq!(refused.line, 1);
     assert!(
-        refused.message.contains("66 points a side is not used yet") && refused.message.contains("the most is 65"),
+        refused.message.contains("66 points a side is not used yet")
+            && refused.message.contains("the most is 65")
+            && refused.message.contains("has 274625 rows"),
         "{refused}"
     );
     assert!(problem_of("LUT_3D_SIZE 256\n").message.contains("not used yet"));

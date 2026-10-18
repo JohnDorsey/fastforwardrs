@@ -648,6 +648,8 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
 #[cfg(test)]
 mod animation_tests;
 #[cfg(test)]
+mod conformance_tests;
+#[cfg(test)]
 mod effects_tests;
 #[cfg(test)]
 mod group_effects_tests;

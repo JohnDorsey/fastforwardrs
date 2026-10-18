@@ -619,8 +619,17 @@ fn the_card_keeps_the_tables_of_the_frames_in_use_and_lets_go_of_the_least_recen
                 let wanted = what_the_reference_makes_of(&tables[number], &picture, Interpolation::Tetrahedral);
                 let (largest, _) = the_largest_difference(&frame, &wanted);
                 assert!(largest <= 1, "round {round}, table {number}: {largest} levels");
+                assert!(
+                    renderer.tables_on_the_card() <= super::MOST_TABLES_ON_THE_CARD,
+                    "round {round}, table {number}"
+                );
             }
         }
+        assert_eq!(
+            renderer.tables_on_the_card(),
+            super::MOST_TABLES_ON_THE_CARD,
+            "(as many as it keeps, not one fewer)"
+        );
     });
 }
 
@@ -636,4 +645,154 @@ fn a_frame_that_asks_for_a_table_is_another_frame_than_one_that_asks_for_another
     };
     assert_ne!(frame(a).fingerprint(), frame(b).fingerprint());
     assert_eq!(frame(a).fingerprint(), frame(a).fingerprint());
+}
+
+/// A picture of 3 by 3 blocks of colours, some of them see-through, as straight (not premultiplied) 8-bit colours.
+fn a_picture_of_colours_some_see_through() -> Vec<u8> {
+    let colours: [[u8; 4]; 9] = [
+        [200, 60, 30, 255],
+        [10, 220, 90, 255],
+        [40, 40, 250, 255],
+        [200, 100, 50, 128],
+        [30, 160, 220, 64],
+        [255, 255, 255, 200],
+        [200, 100, 50, 0],
+        [0, 0, 0, 0],
+        [250, 20, 140, 255],
+    ];
+    let block = (SIDE / 3) as usize;
+    let mut rgba = Vec::new();
+    for row in 0..SIDE as usize {
+        for column in 0..SIDE as usize {
+            rgba.extend(colours[(row / block).min(2) * 3 + (column / block).min(2)]);
+        }
+    }
+    rgba
+}
+
+#[test]
+fn the_identity_table_changes_no_colour_that_is_not_grey_in_any_space_or_working_space_and_none_that_is_see_through() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let table = the_identity_3d(17);
+        let id = published(&table);
+        for working in [
+            WorkingSpace::DisplayReferred,
+            LINEAR_REC709,
+            WorkingSpace::Linear(StandardPrimaries::AcesCg),
+        ] {
+            upload(
+                &mut renderer,
+                1,
+                &picture_for(working, SIDE, SIDE, a_picture_of_colours_some_see_through()),
+            );
+            let (plain, _) = render(&mut renderer, working, vec![with(Vec::new())]);
+            for space in LutSpace::ALL {
+                let (looked_up, _) = render(
+                    &mut renderer,
+                    working,
+                    vec![with(vec![the_lut(
+                        id,
+                        1.0,
+                        space,
+                        space,
+                        LutInterpolation::Tetrahedral,
+                    )])],
+                );
+                for (x, y) in [
+                    (5, 5),
+                    (30, 5),
+                    (50, 5),
+                    (5, 30),
+                    (30, 30),
+                    (50, 30),
+                    (5, 50),
+                    (30, 50),
+                    (50, 50),
+                ] {
+                    let (a, b) = (looked_up.pixel(x, y), plain.pixel(x, y));
+                    assert!(
+                        (0..3).all(|place| a[place].abs_diff(b[place]) <= 3),
+                        "{working:?}, {space:?}, at {x},{y}: {a:?} where it was {b:?}"
+                    );
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn the_spaces_of_a_table_are_converted_with_the_matrices_that_go_to_the_space_and_come_back_from_it() {
+    let working = WorkingSpace::Linear(StandardPrimaries::AcesCg);
+    let conversion = super::colour::LutSpaceConversion::of(working, LutSpace::Screen, LutSpace::Screen);
+    let to_rec709 = working.matrix_to(StandardPrimaries::Rec709);
+    let from_rec709 = working.matrix_from(StandardPrimaries::Rec709);
+    assert_eq!(conversion.to_input, crate::colour_space::matrix::to_f32(&to_rec709));
+    assert_eq!(
+        conversion.from_output,
+        crate::colour_space::matrix::to_f32(&from_rec709)
+    );
+    assert_ne!(conversion.to_input, conversion.from_output);
+    // (A table of linear light is in the working space: nothing to convert.)
+    let identity = crate::colour_space::matrix::to_f32(&crate::colour_space::matrix::IDENTITY);
+    let linear = super::colour::LutSpaceConversion::of(working, LutSpace::Linear, LutSpace::Linear);
+    assert_eq!((linear.to_input, linear.from_output), (identity, identity));
+}
+
+#[test]
+fn the_output_of_a_table_is_cut_off_where_it_is_codes_and_not_where_it_is_light_in_the_working_space() {
+    use super::colour::LutSpaceConversion;
+    let linear_working = LINEAR_REC709;
+    let clamps = |working, input, output| LutSpaceConversion::of(working, input, output).clamps_the_output;
+    assert!(clamps(linear_working, LutSpace::Screen, LutSpace::Screen));
+    assert!(clamps(linear_working, LutSpace::Linear, LutSpace::Video));
+    assert!(!clamps(linear_working, LutSpace::Screen, LutSpace::Linear));
+    assert!(
+        clamps(WorkingSpace::DisplayReferred, LutSpace::Screen, LutSpace::Linear),
+        "(the compatibility mode has only codes)"
+    );
+}
+
+#[test]
+fn only_a_whole_table_of_screen_codes_into_screen_codes_works_in_the_domain_of_the_screen() {
+    use super::plan::{CallDomain, KindOfEffect};
+    let id = published(&the_identity_3d(2));
+    let domain_of = |intensity: f32, input: LutSpace, output: LutSpace| {
+        let call = the_lut(id, intensity, input, output, LutInterpolation::Tetrahedral);
+        (
+            KindOfEffect::Lut.domain_of_a_call(&call),
+            KindOfEffect::Lut.converts_itself_for_a_call(&call),
+        )
+    };
+    assert_eq!(
+        domain_of(1.0, LutSpace::Screen, LutSpace::Screen),
+        (CallDomain::DisplayReferred, true)
+    );
+    for (intensity, input, output) in [
+        (0.99, LutSpace::Screen, LutSpace::Screen),
+        (1.0, LutSpace::Video, LutSpace::Screen),
+        (1.0, LutSpace::Screen, LutSpace::Linear),
+    ] {
+        assert_eq!(
+            domain_of(intensity, input, output),
+            (CallDomain::SceneLinear, false),
+            "{intensity} {input:?} {output:?}"
+        );
+    }
+}
+
+#[test]
+fn the_number_of_passes_of_each_kind_of_effect_is_what_each_takes() {
+    use super::plan::KindOfEffect;
+    for (kind, passes) in [
+        (KindOfEffect::Blur, 2),
+        (KindOfEffect::ColourMatrix, 1),
+        (KindOfEffect::Shader, 1),
+        (KindOfEffect::Exposure, 1),
+        (KindOfEffect::Opacity, 1),
+        (KindOfEffect::Crop, 1),
+        (KindOfEffect::Lut, 1),
+    ] {
+        assert_eq!(kind.passes(), passes, "{kind:?}");
+    }
 }

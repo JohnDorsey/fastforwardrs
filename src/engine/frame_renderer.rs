@@ -215,6 +215,12 @@ impl FrameRenderer {
         }
     }
 
+    /// How many tables of colours the card has now.
+    #[cfg(test)]
+    pub(super) fn tables_on_the_card(&self) -> usize {
+        self.tables.len()
+    }
+
     /// From now on a frame is made and then said not to have finished in time, as a frame is that the card does not finish.
     #[cfg(test)]
     pub fn pretend_the_card_never_finishes(&mut self) {

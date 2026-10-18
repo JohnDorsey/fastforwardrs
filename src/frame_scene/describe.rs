@@ -446,3 +446,39 @@ fn describe_symbol(
         effects: Vec::new(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_picture_that_is_srgb_in_the_compatibility_mode_has_no_colour_tag_and_every_other_has_one_that_is_not_nought() {
+        assert_eq!(colour_tag_of(PictureColour::SRGB, WorkingSpace::DisplayReferred), 0);
+        let other_working = WorkingSpace::Linear(crate::colour_space::StandardPrimaries::Rec709);
+        assert_ne!(colour_tag_of(PictureColour::SRGB, other_working), 0);
+        assert!(colour_tag_of(PictureColour::SRGB, other_working) <= 0xFFFF);
+        let acescg = WorkingSpace::Linear(crate::colour_space::StandardPrimaries::AcesCg);
+        assert_ne!(
+            colour_tag_of(PictureColour::SRGB, other_working),
+            colour_tag_of(PictureColour::SRGB, acescg),
+            "(another working space is another picture to the engine)"
+        );
+    }
+
+    #[test]
+    fn the_id_of_a_video_picture_is_its_serial_number_with_the_colour_tag_above_the_bits_of_the_number() {
+        assert_eq!(id_of_a_video_picture(5, 0), PictureId(5));
+        assert_eq!(id_of_a_video_picture(5, 3), PictureId(5 | (3 << 44)));
+        assert_eq!(
+            id_of_a_video_picture((1 << 44) - 1, 1),
+            PictureId(((1 << 44) - 1) | (1 << 44)),
+            "(the most the serial number can be)"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "has no room for the colour")]
+    fn a_serial_number_that_has_no_room_for_the_colour_is_found_out() {
+        let _ = id_of_a_video_picture(1 << 44, 1);
+    }
+}
