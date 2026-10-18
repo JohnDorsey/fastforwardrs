@@ -11,7 +11,7 @@ use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 
 /// How many moments of sound a second the sound is made into before it is cut up. Everything
 /// after that can then rely on it, and sound from different sources can be joined together.
-const SAMPLE_RATE: u32 = 48_000;
+pub const SAMPLE_RATE: u32 = 48_000;
 
 /// The kind of sound everything is made into: 32-bit floating point, [`SAMPLE_RATE`] moments a
 /// second, two channels (a mono source is played on both, a source with more channels is mixed
@@ -241,11 +241,35 @@ fn clip_statements(
     ]
 }
 
-/// The filters that cut the sound of `clip` out of its file and change it as the clip says.
-fn clip_filters(frame_rate: FrameRate, clip: &SoundClipToExport, sped_up_clip_sound: SpedUpClipSound) -> String {
+/// The filters that make the sound of `clip` from the first audio stream of its file, as it is **before the clip's volume**: the file's sound made into the one kind of sound,
+/// cut out as the clip says and sped up as the setting says. The block graph of the sound (`sound_engine`) is given exactly this, by an ffmpeg that runs for each clip, and
+/// does the volume, the length and the joining itself; the filter graph of the sound makes the same thing in the middle of its own statements.
+pub fn clip_feed_filters(
+    frame_rate: FrameRate,
+    clip: &SoundClipToExport,
+    sped_up_clip_sound: SpedUpClipSound,
+) -> String {
+    format!(
+        "{SAMPLE_FORMAT_FILTER},{}",
+        cut_and_sped_up_filters(frame_rate, clip, sped_up_clip_sound)
+    )
+}
+
+/// The filters that cut the sound of `clip` out of its file (already made into the one kind of sound) and speed it up as the setting says.
+fn cut_and_sped_up_filters(
+    frame_rate: FrameRate,
+    clip: &SoundClipToExport,
+    sped_up_clip_sound: SpedUpClipSound,
+) -> String {
     let (sound_start, sound_end) = audio_cut_times(frame_rate, clip);
     let mut filters = format!("atrim=start={sound_start}:end={sound_end},asetpts=PTS-STARTPTS");
     filters.push_str(&treatment_of(frame_rate, clip, sped_up_clip_sound).filters());
+    filters
+}
+
+/// The filters that cut the sound of `clip` out of its file and change it as the clip says.
+fn clip_filters(frame_rate: FrameRate, clip: &SoundClipToExport, sped_up_clip_sound: SpedUpClipSound) -> String {
+    let mut filters = cut_and_sped_up_filters(frame_rate, clip, sped_up_clip_sound);
     match &clip.loudness {
         LoudnessToExport::Constant(factor) if *factor == 1.0 => {}
         LoudnessToExport::Constant(factor) => filters.push_str(&format!(",volume={}", format_number(*factor))),

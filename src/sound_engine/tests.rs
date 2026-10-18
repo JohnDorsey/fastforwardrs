@@ -1,0 +1,743 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! The block graph with sound that is made up: positions to the sample, lengths, the volume at every sample, the sum, that any size of block gives the same sound, that
+//! feeds are opened when they are first heard, and where the effects go. (The graph against the filter graph of ffmpeg, which is what its sound is meant to be, is
+//! `tests/sound_engine_null_test.rs`.)
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use super::*;
+use crate::media::export::{
+    LoudnessToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
+};
+use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
+use crate::test_support::check_every_case_at_once;
+
+fn thirty() -> FrameRate {
+    FrameRate::new(30, 1).unwrap()
+}
+
+fn clip(frames: u64, loudness: LoudnessToExport) -> SoundItemToExport {
+    SoundItemToExport::Clip(SoundClipToExport {
+        source_input: 0,
+        first_source_frame: 0,
+        end_source_frame: frames,
+        speed_factor: SpeedFactor::new(1).unwrap(),
+        timeline_frame_count: frames,
+        loudness,
+    })
+}
+
+fn silence(frames: u64) -> SoundItemToExport {
+    SoundItemToExport::Silence { frame_count: frames }
+}
+
+fn specification(
+    frame_rate: FrameRate,
+    total_frames: u64,
+    strips: Vec<Vec<SoundItemToExport>>,
+) -> SoundGraphSpecification {
+    SoundGraphSpecification {
+        frame_rate,
+        total_frame_count: total_frames,
+        strips: strips.into_iter().map(|items| SoundStripToExport { items }).collect(),
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+    }
+}
+
+/// What sample number `index` of the feed of item `item` of strip `strip` is: a different number for every sample of every clip, so that a sample in the wrong place cannot be
+/// taken for the right one. The right channel is the left with the sign changed.
+fn value_of(strip: usize, item: usize, index: usize) -> f32 {
+    (strip + 1) as f32 * 100.0 + item as f32 + index as f32 * 0.001
+}
+
+/// Feeds that give `value_of`, for as many samples as they are told (a clip that is not told has more than it can use), and count the feeds that are open.
+#[derive(Clone, Default)]
+struct Ramps {
+    lengths: HashMap<(usize, usize), usize>,
+    opened: Arc<AtomicUsize>,
+    open_now: Arc<AtomicUsize>,
+    most_open_at_once: Arc<AtomicUsize>,
+}
+
+impl Ramps {
+    fn with_length(mut self, strip: usize, item: usize, samples: usize) -> Self {
+        self.lengths.insert((strip, item), samples);
+        self
+    }
+}
+
+struct Ramp {
+    strip: usize,
+    item: usize,
+    length: usize,
+    next: usize,
+    open_now: Arc<AtomicUsize>,
+}
+
+impl Drop for Ramp {
+    fn drop(&mut self) {
+        self.open_now.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl ClipFeed for Ramp {
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        let count = left.len().min(self.length - self.next);
+        for place in 0..count {
+            left[place] = value_of(self.strip, self.item, self.next + place);
+            right[place] = -left[place];
+        }
+        self.next += count;
+        count
+    }
+}
+
+impl ClipFeeds for Ramps {
+    fn open(&mut self, request: &ClipRequest<'_>) -> Box<dyn ClipFeed> {
+        self.opened.fetch_add(1, Ordering::SeqCst);
+        let now = self.open_now.fetch_add(1, Ordering::SeqCst) + 1;
+        self.most_open_at_once.fetch_max(now, Ordering::SeqCst);
+        let length = self
+            .lengths
+            .get(&(request.strip, request.item))
+            .copied()
+            .unwrap_or(usize::MAX);
+        Box::new(Ramp {
+            strip: request.strip,
+            item: request.item,
+            length,
+            next: 0,
+            open_now: self.open_now.clone(),
+        })
+    }
+}
+
+fn graph_of(specification: SoundGraphSpecification, ramps: &Ramps) -> SoundGraph {
+    SoundGraph::new(specification, Box::new(ramps.clone()), Box::new(NoInsertions))
+}
+
+/// Whether `a` and `b` are as long as each other and each sample is within `tolerance` of the other, relative to its size (but not to less than 1).
+fn equal_within(a: &[f32], b: &[f32], tolerance: f32) -> Result<(), String> {
+    if a.len() != b.len() {
+        return Err(format!("{} samples and {}", a.len(), b.len()));
+    }
+    for (place, (a, b)) in a.iter().zip(b).enumerate() {
+        if (a - b).abs() > tolerance * b.abs().max(1.0) {
+            return Err(format!("sample {place}: {a} and {b}"));
+        }
+    }
+    Ok(())
+}
+
+// --- where a frame is ---
+
+#[test]
+fn a_frame_is_where_its_moment_is_in_samples_exactly_where_that_is_a_whole_number() {
+    for (rate, samples_a_frame) in [(24, 2000), (25, 1920), (30, 1600), (50, 960), (60, 800)] {
+        let rate = FrameRate::new(rate, 1).unwrap();
+        for frame in [0, 1, 2, 7, 1000, 123_456] {
+            assert_eq!(
+                sample_at_frame(rate, frame),
+                frame * samples_a_frame,
+                "{rate:?} {frame}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_frame_rate_that_is_not_a_whole_number_of_samples_a_frame_does_not_drift() {
+    let rate = FrameRate::new(30000, 1001).unwrap();
+    // 30000 frames are exactly 1001 seconds, whatever number of items they are cut into.
+    assert_eq!(sample_at_frame(rate, 30_000), 1001 * 48_000);
+    assert_eq!(sample_at_frame(rate, 15_000), 1001 * 24_000);
+    let mut earlier = 0;
+    for frame in 0..5000_u64 {
+        let sample = sample_at_frame(rate, frame);
+        let ideal = frame as f64 * 1001.0 / 30000.0 * 48000.0;
+        assert!(
+            (sample as f64 - ideal).abs() <= 0.5 + 1e-9,
+            "frame {frame}: {sample} and {ideal}"
+        );
+        assert!(sample >= earlier, "frame {frame}");
+        earlier = sample;
+    }
+    // Half a sample is rounded up: frame 5 of 48000/... is at 5 * 1600.0 = exact, so use a rate where it is a half: 1 frame a 96000th of a second.
+    let odd = FrameRate::new(96_000, 1).unwrap();
+    assert_eq!(sample_at_frame(odd, 1), 1, "half a sample is a sample");
+    assert_eq!(sample_at_frame(odd, 2), 1);
+    assert_eq!(sample_at_frame(odd, 3), 2);
+}
+
+// --- how loud, at every sample ---
+
+fn changing(points: &[(u64, f32)]) -> LoudnessToExport {
+    LoudnessToExport::Changing(points.to_vec())
+}
+
+#[test]
+fn a_constant_loudness_is_one_number_and_one_of_one_changes_nothing() {
+    let curve = GainCurve::new(&LoudnessToExport::Constant(0.25), thirty());
+    assert!(!curve.changes_nothing());
+    let (mut left, mut right) = (vec![1.0, -2.0, 4.0], vec![0.5, 0.0, 8.0]);
+    let mut curve = curve;
+    curve.apply(0, &mut left, &mut right);
+    assert_eq!((left, right), (vec![0.25, -0.5, 1.0], vec![0.125, 0.0, 2.0]));
+    assert!(GainCurve::new(&LoudnessToExport::UNCHANGED, thirty()).changes_nothing());
+}
+
+#[test]
+fn a_changing_loudness_goes_evenly_in_decibels_between_its_points_and_is_the_first_before_and_the_last_after() {
+    // 0 dB at frame 30 (one second), -20 dB at frame 90 (three seconds).
+    let curve = GainCurve::new(&changing(&[(30, 0.0), (90, -20.0)]), thirty());
+    let at = |seconds: f64| curve.factor_at_sample((seconds * 48_000.0) as u64);
+    assert_eq!(at(0.0), 1.0, "before the first point it is as at the first");
+    assert_eq!(at(1.0), 1.0);
+    assert!(
+        (at(2.0) - 10f64.powf(-10.0 / 20.0)).abs() < 1e-12,
+        "halfway is -10 dB: {}",
+        at(2.0)
+    );
+    assert!((at(3.0) - 0.1).abs() < 1e-12);
+    assert!((at(100.0) - 0.1).abs() < 1e-12, "after the last it is as at the last");
+}
+
+#[test]
+fn a_loudness_with_three_points_has_a_segment_for_each_and_a_corner_where_they_meet() {
+    // 0 dB at 0, -6 dB at one second, +6 dB at two seconds.
+    let curve = GainCurve::new(&changing(&[(0, 0.0), (30, -6.0), (60, 6.0)]), thirty());
+    let decibels = |seconds: f64| 20.0 * curve.factor_at_sample((seconds * 48_000.0) as u64).log10();
+    assert!((decibels(0.5) - -3.0).abs() < 1e-9);
+    assert!((decibels(1.0) - -6.0).abs() < 1e-9);
+    assert!((decibels(1.5) - 0.0).abs() < 1e-9);
+    assert!((decibels(2.0) - 6.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_gain_applied_to_a_stretch_is_the_gain_of_each_of_its_samples_whatever_the_stretches_are() {
+    let curve = GainCurve::new(&changing(&[(0, -3.0), (10, 0.0), (25, -40.0), (60, 6.0)]), thirty());
+    let total = 2 * 48_000_usize;
+    let ones = vec![1.0_f32; total];
+    for stretch in [1_usize, 5, 255, 512, 7000, total] {
+        let (mut left, mut right) = (ones.clone(), ones.clone());
+        let mut working = curve.clone();
+        let mut first = 0;
+        while first < total {
+            let end = (first + stretch).min(total);
+            working.apply(first as u64, &mut left[first..end], &mut right[first..end]);
+            first = end;
+        }
+        for sample in (0..total).step_by(97) {
+            let wanted = curve.factor_at_sample(sample as u64) as f32;
+            assert_eq!(left[sample], wanted, "stretches of {stretch}, sample {sample}");
+            assert_eq!(right[sample], wanted);
+        }
+    }
+}
+
+// --- the graph ---
+
+#[test]
+fn a_clip_is_heard_from_the_sample_its_frame_is_at_with_silence_before_it() {
+    // Two frames of silence, then a clip of three frames: at 30 frames a second, 1600 samples a frame.
+    let ramps = Ramps::default();
+    let mut graph = graph_of(
+        specification(
+            thirty(),
+            6,
+            vec![vec![silence(2), clip(3, LoudnessToExport::UNCHANGED), silence(1)]],
+        ),
+        &ramps,
+    );
+    assert_eq!(graph.total_samples(), 6 * 1600);
+    let (left, right) = graph.render_to_the_end(512);
+    assert_eq!(left.len(), 6 * 1600);
+    assert!(left[..3200].iter().all(|sample| *sample == 0.0));
+    for index in [0, 1, 1599, 1600, 4799] {
+        assert_eq!(left[3200 + index], value_of(0, 1, index), "sample {index} of the clip");
+        assert_eq!(right[3200 + index], -value_of(0, 1, index));
+    }
+    assert!(left[8000..].iter().all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn a_clip_is_cut_off_where_its_place_on_the_timeline_ends_and_followed_by_silence_where_its_file_ends_early() {
+    let long = Ramps::default().with_length(0, 0, 100_000);
+    let (left, _) = graph_of(
+        specification(
+            thirty(),
+            2,
+            vec![vec![
+                clip(1, LoudnessToExport::UNCHANGED),
+                clip(1, LoudnessToExport::UNCHANGED),
+            ]],
+        ),
+        &long,
+    )
+    .render_to_the_end(512);
+    assert_eq!(left.len(), 3200);
+    assert_eq!(left[1599], value_of(0, 0, 1599));
+    assert_eq!(
+        left[1600],
+        value_of(0, 1, 0),
+        "the next clip begins where it should, however long the first one's sound was"
+    );
+
+    let short = Ramps::default().with_length(0, 0, 1000);
+    let (left, _) = graph_of(
+        specification(thirty(), 1, vec![vec![clip(1, LoudnessToExport::UNCHANGED)]]),
+        &short,
+    )
+    .render_to_the_end(512);
+    assert_eq!(left[999], value_of(0, 0, 999));
+    assert!(
+        left[1000..].iter().all(|sample| *sample == 0.0),
+        "silence follows the sound that ran out"
+    );
+    assert_eq!(left.len(), 1600);
+}
+
+#[test]
+fn the_tracks_are_added_and_a_track_that_ends_early_is_silent_after_its_end() {
+    let ramps = Ramps::default();
+    let (left, right) = graph_of(
+        specification(
+            thirty(),
+            3,
+            vec![
+                vec![clip(3, LoudnessToExport::UNCHANGED)],
+                vec![silence(1), clip(1, LoudnessToExport::UNCHANGED)],
+            ],
+        ),
+        &ramps,
+    )
+    .render_to_the_end(512);
+    assert_eq!(left.len(), 4800);
+    assert_eq!(left[10], value_of(0, 0, 10), "the first track alone");
+    let at = 1600 + 10;
+    assert_eq!(left[at], value_of(0, 0, at) + value_of(1, 1, 10), "both");
+    assert_eq!(right[at], -(value_of(0, 0, at) + value_of(1, 1, 10)));
+    assert_eq!(left[3200 + 10], value_of(0, 0, 3200 + 10), "the second track has ended");
+}
+
+#[test]
+fn the_volume_of_a_clip_is_applied_at_every_sample_from_the_start_of_the_clip() {
+    let ramps = Ramps::default();
+    let loudness = changing(&[(0, 0.0), (2, -20.0)]);
+    let (left, _) = graph_of(
+        specification(thirty(), 3, vec![vec![silence(1), clip(2, loudness.clone())]]),
+        &ramps,
+    )
+    .render_to_the_end(333);
+    let curve = GainCurve::new(&loudness, thirty());
+    for index in [0_usize, 1, 800, 1599, 1600, 3199] {
+        let wanted = value_of(0, 1, index) * curve.factor_at_sample(index as u64) as f32;
+        assert_eq!(left[1600 + index], wanted, "sample {index} of the clip");
+    }
+}
+
+#[test]
+fn the_sound_is_the_same_for_any_size_of_block() {
+    let ramps = Ramps::default().with_length(0, 1, 4000);
+    let make = || {
+        specification(
+            FrameRate::new(30000, 1001).unwrap(),
+            14,
+            vec![
+                vec![
+                    clip(3, LoudnessToExport::Constant(0.7)),
+                    silence(2),
+                    clip(4, changing(&[(0, -6.0), (4, 3.0)])),
+                    clip(5, LoudnessToExport::UNCHANGED),
+                ],
+                vec![silence(1), clip(9, changing(&[(0, 0.0), (3, -9.0), (9, 0.0)]))],
+            ],
+        )
+    };
+    let (whole_left, whole_right) = graph_of(make(), &ramps).render_to_the_end(10_000_000);
+    assert_eq!(
+        whole_left.len() as u64,
+        sample_at_frame(FrameRate::new(30000, 1001).unwrap(), 14)
+    );
+    for block in [1, 7, 100, 512, 1601, 4096] {
+        let (left, right) = graph_of(make(), &ramps).render_to_the_end(block);
+        assert_eq!(left, whole_left, "blocks of {block}");
+        assert_eq!(right, whole_right, "blocks of {block}");
+    }
+}
+
+#[test]
+fn the_sound_ends_at_the_end_and_a_sound_with_no_tracks_is_silence_as_long_as_the_sound() {
+    let ramps = Ramps::default();
+    let mut graph = graph_of(
+        specification(thirty(), 2, vec![vec![clip(2, LoudnessToExport::UNCHANGED)]]),
+        &ramps,
+    );
+    let (mut left, mut right) = (vec![9.0; 5000], vec![9.0; 5000]);
+    assert_eq!(graph.render(&mut left, &mut right), 3200, "no more than there is");
+    assert_eq!(graph.position(), 3200);
+    assert_eq!(graph.render(&mut left, &mut right), 0, "and then none");
+
+    let (left, right) = graph_of(specification(thirty(), 2, Vec::new()), &ramps).render_to_the_end(512);
+    assert_eq!((left.len(), right.len()), (3200, 3200));
+    assert!(left.iter().chain(&right).all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn a_feed_is_opened_when_its_clip_is_first_heard_and_let_go_of_when_the_clip_ends() {
+    let ramps = Ramps::default();
+    let mut graph = graph_of(
+        specification(
+            thirty(),
+            8,
+            vec![vec![
+                clip(2, LoudnessToExport::UNCHANGED),
+                silence(1),
+                clip(2, LoudnessToExport::UNCHANGED),
+                clip(3, LoudnessToExport::UNCHANGED),
+            ]],
+        ),
+        &ramps,
+    );
+    let (mut left, mut right) = (vec![0.0; 1600], vec![0.0; 1600]);
+    assert_eq!(
+        ramps.opened.load(Ordering::SeqCst),
+        0,
+        "nothing is opened before sound is asked for"
+    );
+    graph.render(&mut left, &mut right);
+    assert_eq!(
+        (
+            ramps.opened.load(Ordering::SeqCst),
+            ramps.open_now.load(Ordering::SeqCst)
+        ),
+        (1, 1)
+    );
+    graph.render(&mut left, &mut right);
+    assert_eq!(
+        ramps.open_now.load(Ordering::SeqCst),
+        0,
+        "the first clip ended with the block that ended it"
+    );
+    graph.render_to_the_end(1600);
+    assert_eq!(ramps.opened.load(Ordering::SeqCst), 3);
+    assert_eq!(ramps.open_now.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        ramps.most_open_at_once.load(Ordering::SeqCst),
+        1,
+        "one strip, one feed at a time"
+    );
+}
+
+// --- the effects ---
+
+/// Adds a number to every sample, in the order it is given them.
+struct Adds(f32);
+
+impl BlockProcessor for Adds {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for sample in left.iter_mut().chain(right.iter_mut()) {
+            *sample += self.0;
+        }
+    }
+
+    fn reset(&mut self) {}
+}
+
+/// Counts the samples it is given and writes the count into them: so what it makes does not depend on the size of the blocks only if it is given every sample once, in order.
+#[derive(Default)]
+struct Counts(u64);
+
+impl BlockProcessor for Counts {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for (left, right) in left.iter_mut().zip(right.iter_mut()) {
+            *left += self.0 as f32;
+            *right += self.0 as f32;
+            self.0 += 1;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
+struct FixedInsertions {
+    for_clips: fn() -> Vec<Box<dyn BlockProcessor>>,
+    for_strips: fn(usize) -> Vec<Box<dyn BlockProcessor>>,
+}
+
+impl Insertions for FixedInsertions {
+    fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        (self.for_clips)()
+    }
+
+    fn for_strip(&mut self, strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+        (self.for_strips)(strip)
+    }
+}
+
+#[test]
+fn the_effects_of_a_clip_are_applied_before_its_volume_and_the_effects_of_a_track_after_the_clips_are_together() {
+    let ramps = Ramps::default();
+    let make = |insertions: FixedInsertions| {
+        SoundGraph::new(
+            specification(
+                thirty(),
+                2,
+                vec![
+                    vec![silence(1), clip(1, LoudnessToExport::Constant(0.5))],
+                    vec![clip(2, LoudnessToExport::UNCHANGED)],
+                ],
+            ),
+            Box::new(ramps.clone()),
+            Box::new(insertions),
+        )
+    };
+    // A clip's effect adds 1 and then the volume halves: (x + 1) / 2, not x / 2 + 1.
+    let (left, _) = make(FixedInsertions {
+        for_clips: || vec![Box::new(Adds(1.0))],
+        for_strips: |_| Vec::new(),
+    })
+    .render_to_the_end(512);
+    let (plain, _) = graph_of(
+        specification(
+            thirty(),
+            2,
+            vec![
+                vec![silence(1), clip(1, LoudnessToExport::Constant(0.5))],
+                vec![clip(2, LoudnessToExport::UNCHANGED)],
+            ],
+        ),
+        &ramps,
+    )
+    .render_to_the_end(512);
+    let first_strip_clip = 1600 + 5;
+    let second_strip_clips = [5, 1600 + 5];
+    assert_eq!(
+        left[first_strip_clip],
+        (value_of(0, 1, 5) + 1.0) * 0.5 + (value_of(1, 0, 1605) + 1.0)
+    );
+    assert_eq!(
+        left[second_strip_clips[0]],
+        value_of(1, 0, 5) + 1.0,
+        "an effect on every clip: the other strip's clip has it too"
+    );
+    assert_ne!(left[first_strip_clip], plain[first_strip_clip]);
+
+    // A track's effect adds 100 to the sound of its strip, silence included, once, before the strips are added: two strips make 200.
+    let (left, _) = make(FixedInsertions {
+        for_clips: Vec::new,
+        for_strips: |_| vec![Box::new(Adds(100.0))],
+    })
+    .render_to_the_end(512);
+    assert_eq!(
+        left[0],
+        value_of(1, 0, 0) + 200.0,
+        "the first strip is silent here, and has its 100 all the same"
+    );
+    assert_eq!(
+        left[first_strip_clip],
+        (value_of(0, 1, 5) * 0.5 + 100.0) + (value_of(1, 0, 1605) + 100.0)
+    );
+}
+
+#[test]
+fn an_effect_is_given_every_sample_of_its_clip_once_and_in_order_whatever_the_blocks_are_and_past_the_end_of_the_sound_of_the_file()
+ {
+    let ramps = Ramps::default().with_length(0, 0, 1000);
+    let make = || {
+        SoundGraph::new(
+            specification(thirty(), 2, vec![vec![clip(2, LoudnessToExport::UNCHANGED)]]),
+            Box::new(ramps.clone()),
+            Box::new(FixedInsertions {
+                for_clips: || vec![Box::<Counts>::default()],
+                for_strips: |_| Vec::new(),
+            }),
+        )
+    };
+    let (whole, _) = make().render_to_the_end(1_000_000);
+    // The file has 1000 samples; the effect is given 3200 all the same, the last 2200 of them silent (its tail would be heard).
+    assert_eq!(whole[1000], 1000.0, "sample 1000 of the clip: silence plus the count");
+    assert_eq!(whole[3199], 3199.0);
+    for block in [1, 13, 512, 1600] {
+        assert_eq!(make().render_to_the_end(block).0, whole, "blocks of {block}");
+    }
+}
+
+// --- the arithmetic against a plain evaluation ---
+
+/// The sound of `specification` worked out in the plainest way: each item whole, then the strips added.
+fn plainly(specification: &SoundGraphSpecification, ramps: &Ramps) -> Vec<f32> {
+    let total = sample_at_frame(specification.frame_rate, specification.total_frame_count) as usize;
+    let mut sum = vec![0.0_f32; total];
+    for (strip_number, strip) in specification.strips.iter().enumerate() {
+        let mut frames = 0;
+        for (item_number, item) in strip.items.iter().enumerate() {
+            let start = sample_at_frame(specification.frame_rate, frames) as usize;
+            let SoundItemToExport::Clip(clip) = item else {
+                if let SoundItemToExport::Silence { frame_count } = item {
+                    frames += frame_count;
+                }
+                continue;
+            };
+            frames += clip.timeline_frame_count;
+            let end = sample_at_frame(specification.frame_rate, frames) as usize;
+            let curve = GainCurve::new(&clip.loudness, specification.frame_rate);
+            let sound_length = ramps
+                .lengths
+                .get(&(strip_number, item_number))
+                .copied()
+                .unwrap_or(usize::MAX);
+            for index in 0..(end - start).min(sound_length) {
+                if start + index < total {
+                    sum[start + index] += (f64::from(value_of(strip_number, item_number, index))
+                        * curve.factor_at_sample(index as u64)) as f32;
+                }
+            }
+        }
+    }
+    sum
+}
+
+#[test]
+fn the_graph_is_the_plain_arithmetic_on_many_made_up_specifications() {
+    let rates = [(24, 1), (30, 1), (30000, 1001), (25, 1), (60, 1)];
+    let seeds: Vec<u64> = (0..60).collect();
+    let failures: Vec<String> = check_every_case_at_once(&seeds, |&seed| {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        let mut next = |most: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % most
+        };
+        let (numerator, denominator) = rates[next(rates.len() as u64) as usize];
+        let frame_rate = FrameRate::new(numerator, denominator).unwrap();
+        let strip_count = 1 + next(3) as usize;
+        let mut ramps = Ramps::default();
+        let mut longest = 0;
+        let strips: Vec<Vec<SoundItemToExport>> = (0..strip_count)
+            .map(|strip| {
+                let mut frames = 0;
+                let items: Vec<SoundItemToExport> = (0..next(6))
+                    .map(|item| {
+                        let length = 1 + next(12);
+                        frames += length;
+                        if next(3) == 0 {
+                            silence(length)
+                        } else {
+                            if next(4) == 0 {
+                                ramps = ramps.clone().with_length(strip, item as usize, next(20_000) as usize);
+                            }
+                            let loudness = match next(3) {
+                                0 => LoudnessToExport::UNCHANGED,
+                                1 => LoudnessToExport::Constant(0.1 + next(20) as f64 / 10.0),
+                                _ => changing(&[(0, next(20) as f32 - 15.0), (length, next(20) as f32 - 15.0)]),
+                            };
+                            clip(length, loudness)
+                        }
+                    })
+                    .collect();
+                longest = longest.max(frames);
+                items
+            })
+            .collect();
+        let total = longest + next(3);
+        let specification = specification(frame_rate, total, strips);
+        let wanted = plainly(&specification, &ramps);
+        let block = [1, 100, 512, 2000][next(4) as usize];
+        let (left, right) = graph_of(specification, &ramps).render_to_the_end(block);
+        equal_within(&left, &wanted, 2e-6).map_err(|why| format!("seed {seed}, blocks of {block}: {why}"))?;
+        equal_within(&right, &wanted.iter().map(|sample| -sample).collect::<Vec<_>>(), 2e-6)
+            .map_err(|why| format!("seed {seed}, right channel: {why}"))
+    })
+    .into_iter()
+    .filter_map(Result::err)
+    .collect();
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+// --- sound that is in memory, and buffers of different lengths ---
+
+#[test]
+fn sound_in_memory_is_read_in_pieces_in_order_and_runs_out_where_it_ends() {
+    let left: Vec<f32> = (0..10).map(|number| number as f32).collect();
+    let right: Vec<f32> = left.iter().map(|sample| -sample - 100.0).collect();
+    let mut sound = SoundInMemory::new(left.clone(), right.clone());
+    assert_eq!((sound.len(), sound.is_empty()), (10, false));
+    let (mut a, mut b) = ([9.0; 4], [9.0; 4]);
+    assert_eq!(sound.read(&mut a, &mut b), 4);
+    assert_eq!((&a[..], &b[..]), (&left[0..4], &right[0..4]));
+    assert_eq!(sound.read(&mut a, &mut b), 4);
+    assert_eq!((&a[..], &b[..]), (&left[4..8], &right[4..8]));
+    let (mut c, mut d) = ([9.0; 4], [9.0; 4]);
+    assert_eq!(sound.read(&mut c, &mut d), 2, "only two are left");
+    assert_eq!((&c[..2], &d[..2]), (&left[8..10], &right[8..10]));
+    assert_eq!((c[2], d[2]), (9.0, 9.0), "what it did not give is not touched");
+    assert_eq!(sound.read(&mut c, &mut d), 0, "and then none");
+    assert!(SoundInMemory::new(Vec::new(), Vec::new()).is_empty());
+}
+
+#[test]
+fn sound_in_memory_that_is_given_interleaved_is_split_into_its_channels_and_a_half_moment_is_left_out() {
+    let mut sound = SoundInMemory::from_interleaved(&[1.0, -1.0, 2.0, -2.0, 3.0]);
+    assert_eq!(sound.len(), 2);
+    let (mut left, mut right) = ([0.0; 3], [0.0; 3]);
+    assert_eq!(sound.read(&mut left, &mut right), 2);
+    assert_eq!((&left[..2], &right[..2]), (&[1.0, 2.0][..], &[-1.0, -2.0][..]));
+}
+
+#[test]
+fn a_gain_whose_first_point_is_after_the_start_of_the_clip_is_the_first_point_before_it() {
+    // 6 dB at one second (frame 30), -6 dB at two seconds; the clip begins at 0.
+    let curve = GainCurve::new(&changing(&[(30, 6.0), (60, -6.0)]), thirty());
+    let total = 3 * 48_000_usize;
+    for stretch in [1_usize, 4096, total] {
+        let (mut left, mut right) = (vec![1.0_f32; total], vec![1.0_f32; total]);
+        let mut working = curve.clone();
+        let mut first = 0;
+        while first < total {
+            let end = (first + stretch).min(total);
+            working.apply(first as u64, &mut left[first..end], &mut right[first..end]);
+            first = end;
+        }
+        for sample in (0..total).step_by(113) {
+            assert_eq!(
+                left[sample],
+                curve.factor_at_sample(sample as u64) as f32,
+                "stretches of {stretch}, sample {sample}"
+            );
+        }
+        assert_eq!(
+            left[0],
+            10f64.powf(6.0 / 20.0) as f32,
+            "before the first point: as at the first"
+        );
+        assert_eq!(
+            left[total - 1],
+            10f64.powf(-6.0 / 20.0) as f32,
+            "after the last: as at the last"
+        );
+    }
+}
+
+#[test]
+fn the_graph_makes_as_many_samples_as_the_shorter_of_two_buffers_that_are_not_as_long_as_each_other() {
+    let mut graph = graph_of(
+        specification(thirty(), 2, vec![vec![clip(2, LoudnessToExport::UNCHANGED)]]),
+        &Ramps::default(),
+    );
+    let (mut left, mut right) = (vec![9.0; 100], vec![9.0; 40]);
+    assert_eq!(graph.render(&mut left, &mut right), 40);
+    assert_eq!(graph.position(), 40);
+    assert!(
+        left[40..].iter().all(|sample| *sample == 9.0),
+        "the longer one is not touched past that"
+    );
+    assert_eq!(right[39], -value_of(0, 0, 39));
+}

@@ -23,6 +23,7 @@
 //! * [`playback`] runs the live preview: the clock, and getting the right picture for each frame.
 //! * [`frame_scene`] says what a frame of the finished picture shows and what the engine is asked to draw for it, for the preview and the export alike.
 //! * [`video_export`] makes the finished video: ffmpeg decodes and encodes, and the engine draws every frame from the very description the preview is drawn from.
+//! * [`sound_engine`] makes the sound of a project, a block at a time, for the preview and the export alike (phase 7).
 //! * [`engine`] makes the finished picture of the preview on the graphics card, on a thread and a device of its own, from messages
 //!   (what is on a frame) and gives it back as pixels.
 
@@ -42,6 +43,7 @@ pub mod project;
 pub mod project_file;
 pub mod rgba_picture;
 pub mod settings_file;
+pub mod sound_engine;
 pub mod speed_indicator;
 pub mod text_rendering;
 pub mod video_export;

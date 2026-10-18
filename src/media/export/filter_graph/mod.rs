@@ -16,7 +16,9 @@ mod sound;
 
 use crate::project::{FrameRate, SpedUpClipSound};
 
-pub use sound::{LoudnessToExport, SoundClipToExport, SoundItemToExport, SoundStripToExport};
+pub use sound::{
+    LoudnessToExport, SAMPLE_RATE, SoundClipToExport, SoundItemToExport, SoundStripToExport, clip_feed_filters,
+};
 
 /// The ffmpeg option that reads a filter graph from the file named after it. A graph for a project with many clips is far longer than a command line allows, so it
 /// is always given in a file.
