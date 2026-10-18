@@ -76,10 +76,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        # (The whole workspace: the editor, and beside it `ladspa-host`, the only crate with unsafe code in it, and the plugin library written for the tests.)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Every test step goes through tools/ci/run_tests_and_report.sh, which also writes the names of the tests that failed (and what they said) as an annotation of
       # the job: annotations can be read without signing in to GitHub, the log cannot.
@@ -89,7 +90,12 @@ jobs:
           # The tests of the picture engine draw on a software graphics adapter (WARP on Windows, lavapipe on Ubuntu, which is installed above). Where there
           # is one they must run: a missing adapter is a failure there and not a quiet skip. (A Mac has none.)
           FASTFORWARDRS_REQUIRE_SOFTWARE_ADAPTER: ${{ runner.os == 'macOS' && '0' || '1' }}
-        run: bash tools/ci/run_tests_and_report.sh error "Library tests that failed" cargo test --lib --no-fail-fast
+        run: bash tools/ci/run_tests_and_report.sh error "Library tests that failed" cargo test --workspace --lib --no-fail-fast
+
+      # The host of LADSPA plugins loads the plugin library that is written for the tests (it is built beside the tests), and a copy of it that is made bad in four ways.
+      - name: Plugin host tests
+        shell: bash
+        run: bash tools/ci/run_tests_and_report.sh error "Plugin host tests that failed" cargo test -p ladspa-host --no-fail-fast
 
       # The integration tests need ffmpeg 9 or newer (the version the program is tested against); on a runner whose ffmpeg is older they say so and do not run.
       - name: Integration tests
@@ -164,7 +170,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --document-private-items
+        run: cargo doc --workspace --no-deps --document-private-items
 
   tools:
     name: tools (python)

@@ -27,6 +27,8 @@ allow = [
     "BSL-1.0",
     "Unlicense",
     "Unicode-3.0",
+    # The plugin library that is written for the tests (crates/ladspa-test-plugins): ours, and public domain.
+    "CC0-1.0",
     # File-level copyleft that GPLv3 allows (MPL-2.0, section 3.3, lists the GPL as a licence it can be combined with).
     "MPL-2.0",
     # The fonts of egui (epaint_default_fonts): separate font files, not code.

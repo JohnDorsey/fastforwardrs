@@ -23,6 +23,7 @@
 //! * [`playback`] runs the live preview: the clock, and getting the right picture for each frame.
 //! * [`frame_scene`] says what a frame of the finished picture shows and what the engine is asked to draw for it, for the preview and the export alike.
 //! * [`video_export`] makes the finished video: ffmpeg decodes and encodes, and the engine draws every frame from the very description the preview is drawn from.
+//! * [`plugin_scan`] finds the sound plugins that are installed, in a program of its own, so that a library that crashes does not take the editor with it (phase 7).
 //! * [`sound_engine`] makes the sound of a project, a block at a time, for the preview and the export alike (phase 7).
 //! * [`engine`] makes the finished picture of the preview on the graphics card, on a thread and a device of its own, from messages
 //!   (what is on a frame) and gives it back as pixels.
@@ -40,6 +41,7 @@ pub mod engine;
 pub mod frame_scene;
 pub mod media;
 pub mod playback;
+pub mod plugin_scan;
 pub mod plugin_trust;
 pub mod project;
 pub mod project_file;

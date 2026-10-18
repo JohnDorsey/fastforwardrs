@@ -10,6 +10,7 @@ path = [
     ".gitignore",
     ".github/**",
     "Cargo.toml",
+    "crates/*/Cargo.toml",
     "Cargo.lock",
     "README.md",
     "REUSE.toml",

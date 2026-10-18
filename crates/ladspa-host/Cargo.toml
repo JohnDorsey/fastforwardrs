@@ -1,0 +1,22 @@
+[package]
+name = "ladspa-host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/JohnDorsey/fastforwardrs"
+description = "Loads LADSPA sound plugins: the only part of fastforwardrs that has unsafe code in it"
+publish = false
+
+[dependencies]
+# (Already in the tree, through the graphics libraries.)
+libloading = "0.8.9"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+serde_json = "1.0.152"
+ladspa-test-plugins = { path = "../ladspa-test-plugins", version = "0.1.0" }
+tempfile = "3.27.0"
+# (Reads the counts that the test plugin keeps of what the host does to it, through a second handle on the same library.)
+libloading = "0.8.9"

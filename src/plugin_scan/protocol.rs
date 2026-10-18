@@ -1,0 +1,83 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! What the scan program and the editor say to each other: the scan program writes lines on its standard output, and the editor reads them.
+//!
+//! A library that is being scanned is free to write to the standard output too (some plugins print), so **only lines that begin with a fixed word count**; the others are
+//! noise and are thrown away. A line that begins with [`STEP_PREFIX`] says what the scan is about to do (the last of them says what it was doing if it crashes or is stopped), and
+//! a line that begins with [`RESULT_PREFIX`] is the answer, in JSON, and is the last thing the scan program says.
+
+use ladspa_host::{LibraryScan, OpenError};
+use serde::{Deserialize, Serialize};
+
+/// What a line that says what the scan is about to do begins with.
+pub const STEP_PREFIX: &str = "ffrs-scan-step: ";
+
+/// What the line with the answer begins with.
+pub const RESULT_PREFIX: &str = "ffrs-scan-result: ";
+
+/// What is in the cache of scans as well as on the wire. **Raise it when the scan finds something it did not (or means something else by what it finds)**, so that the answers
+/// that were kept are not believed any more.
+pub const SCAN_FORMAT: u32 = 1;
+
+/// The answer of the scan program.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ScanAnswer {
+    Scanned(LibraryScan),
+    CouldNotBeLoaded(String),
+    NotALadspaLibrary(String),
+}
+
+impl From<OpenError> for ScanAnswer {
+    fn from(error: OpenError) -> Self {
+        match error {
+            OpenError::CouldNotBeLoaded(reason) => Self::CouldNotBeLoaded(reason),
+            OpenError::NotALadspaLibrary(reason) => Self::NotALadspaLibrary(reason),
+        }
+    }
+}
+
+/// The line that says the scan is about to do `step` (a step is one line: anything that would end it is made a space).
+pub fn step_line(step: &str) -> String {
+    format!("{STEP_PREFIX}{}", on_one_line(step))
+}
+
+/// The line with the answer.
+pub fn answer_line(answer: &ScanAnswer) -> String {
+    format!(
+        "{RESULT_PREFIX}{}",
+        serde_json::to_string(answer).expect("an answer can be written as JSON (it has only text, numbers and lists)")
+    )
+}
+
+fn on_one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect()
+}
+
+/// What the scan program said, as far as it can be understood.
+#[derive(Debug, PartialEq)]
+pub struct WhatWasSaid {
+    /// The last step that it said it was about to do.
+    pub last_step: Option<String>,
+    /// The last answer line: the answer, or why the line is not one.
+    pub answer: Option<Result<ScanAnswer, String>>,
+}
+
+/// Reads the standard output of the scan program: the steps and the answer are found among the lines, and the rest is thrown away.
+pub fn read_what_was_said(output: &str) -> WhatWasSaid {
+    let mut said = WhatWasSaid {
+        last_step: None,
+        answer: None,
+    };
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(step) = line.strip_prefix(STEP_PREFIX) {
+            said.last_step = Some(step.to_owned());
+        } else if let Some(json) = line.strip_prefix(RESULT_PREFIX) {
+            said.answer = Some(serde_json::from_str(json).map_err(|error| error.to_string()));
+        }
+    }
+    said
+}

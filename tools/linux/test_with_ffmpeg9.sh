@@ -7,4 +7,4 @@ set -e
 rm -rf target/test_fixtures
 export PATH="$HOME/ffmpeg9/bin:$PATH"
 ffmpeg -version | head -n 1
-FASTFORWARDRS_REQUIRE_FFMPEG=1 cargo test --no-fail-fast "$@"
+FASTFORWARDRS_REQUIRE_FFMPEG=1 cargo test --workspace --no-fail-fast "$@"

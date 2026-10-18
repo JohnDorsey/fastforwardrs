@@ -8,6 +8,11 @@ repository = "https://github.com/JohnDorsey/fastforwardrs"
 # (The editor is the program that `cargo run` starts; the export from the command line is `cargo run --bin fastforwardrs-export`.)
 default-run = "fastforwardrs"
 
+# The editor is a package of a workspace with two small crates beside it. `ladspa-host` is the only place with `unsafe` code in it (the editor itself keeps
+# `#![forbid(unsafe_code)]`): it loads LADSPA plugins. `ladspa-test-plugins` is a plugin written for the tests. See docs/engine-phase-7-design.md, G1 and G2.
+[workspace]
+members = [".", "crates/ladspa-host", "crates/ladspa-test-plugins"]
+
 [dependencies]
 ab_glyph = "0.2.32"
 cosmic-text = "0.19.0"
@@ -36,8 +41,13 @@ wgpu = "30.0.1"
 naga = { version = "30.0.1", features = ["wgsl-in", "wgsl-out"] }
 pollster = "0.4.0"
 sha2 = "0.11.1"
+# Loads LADSPA plugins (the only crate with `unsafe` code in it; the scan of a plugin library is done by a program of its own, so that a library that crashes does not
+# take the editor with it).
+ladspa-host = { path = "crates/ladspa-host", version = "0.1.0" }
 
 [dev-dependencies]
+# A plugin library written for the tests (see docs/engine-phase-7-design.md, G2); `cargo` builds its library beside the tests.
+ladspa-test-plugins = { path = "crates/ladspa-test-plugins", version = "0.1.0" }
 egui_kittest = { version = "0.36.2", features = ["wgpu"] }
 # The tests of the picture engine draw the same triangles with the window's own renderer, as the oracle (default features of egui-wgpu are the
 # window's anyway: they are on already).

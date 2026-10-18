@@ -1,0 +1,650 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! The parts of the scan that do not need a library: the words between the scan program and the editor, the reading of how the program ended, the folders, the cache and the
+//! breadcrumb. (The scan program itself, and libraries that crash it, are in `tests/plugin_scan.rs`.)
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
+use std::time::Duration;
+
+use ladspa_host::{
+    DefaultHint, LibraryScan, PluginDescription, PluginProperties, PortDescription, PortDirection, PortHint, PortKind,
+    ScannedPlugin,
+};
+
+use super::breadcrumb::recover;
+use super::child::{HowItEnded, WhatItDid, outcome_of};
+use super::protocol::{RESULT_PREFIX, STEP_PREFIX, ScanAnswer, answer_line, read_what_was_said, step_line};
+use super::*;
+
+fn a_scan() -> LibraryScan {
+    LibraryScan {
+        plugins: vec![ScannedPlugin {
+            description: PluginDescription {
+                index: 0,
+                unique_id: 901,
+                label: "gain".to_owned(),
+                name: "Gain".to_owned(),
+                maker: "Somebody".to_owned(),
+                copyright: "None".to_owned(),
+                properties: PluginProperties::default(),
+                ports: vec![PortDescription {
+                    name: "Gain".to_owned(),
+                    direction: PortDirection::Input,
+                    kind: PortKind::Control,
+                    hint: PortHint {
+                        lower: Some(0.0),
+                        upper: Some(4.0),
+                        toggled: false,
+                        relative_to_sample_rate: false,
+                        logarithmic: false,
+                        integer: false,
+                        default: DefaultHint::One,
+                    },
+                }],
+            },
+            problem: None,
+        }],
+        problems: vec!["plugin number 1: it has no ports".to_owned()],
+    }
+}
+
+// --- the words between the programs ---
+
+#[test]
+fn a_step_is_one_line_and_an_answer_is_read_back_as_it_was_written() {
+    assert_eq!(
+        step_line("making plugin\r\nnumber 3"),
+        format!("{STEP_PREFIX}making plugin  number 3")
+    );
+    let answer = ScanAnswer::Scanned(a_scan());
+    let line = answer_line(&answer);
+    assert!(line.starts_with(RESULT_PREFIX));
+    assert!(!line.contains('\n'));
+    let said = read_what_was_said(&line);
+    assert_eq!(said.answer, Some(Ok(answer)));
+    assert_eq!(said.last_step, None);
+}
+
+#[test]
+fn only_the_lines_that_begin_with_the_words_count_and_the_last_step_and_the_last_answer_win() {
+    let answer = ScanAnswer::CouldNotBeLoaded("no".to_owned());
+    let output = format!(
+        "noise from a library\n{}\nmore noise: {RESULT_PREFIX} is not at the start\n\n{}\r\n{}\nnoise after\n",
+        step_line("loading the library"),
+        step_line("making plugin number 2"),
+        answer_line(&answer)
+    );
+    let said = read_what_was_said(&output);
+    assert_eq!(said.last_step.as_deref(), Some("making plugin number 2"));
+    assert_eq!(said.answer, Some(Ok(answer)));
+    let nothing = read_what_was_said("hello\nworld\n");
+    assert_eq!((nothing.last_step, nothing.answer), (None, None));
+}
+
+#[test]
+fn an_answer_that_is_not_json_is_said_so_and_does_not_hide_the_steps() {
+    let said = read_what_was_said(&format!(
+        "{}\n{RESULT_PREFIX}{{not json\n",
+        step_line("running plugin number 1")
+    ));
+    assert_eq!(said.last_step.as_deref(), Some("running plugin number 1"));
+    assert!(matches!(said.answer, Some(Err(_))));
+    let wrong_shape = read_what_was_said(&format!("{RESULT_PREFIX}{{\"Something\":1}}\n"));
+    assert!(matches!(wrong_shape.answer, Some(Err(_))));
+}
+
+// --- how the program ended ---
+
+#[cfg(windows)]
+fn status(code: u32) -> ExitStatus {
+    use std::os::windows::process::ExitStatusExt;
+    ExitStatus::from_raw(code)
+}
+
+/// (A signal on Unix is the low bits of the raw status; an exit code is shifted up by 8.)
+#[cfg(unix)]
+fn status(code: u32) -> ExitStatus {
+    use std::os::unix::process::ExitStatusExt;
+    ExitStatus::from_raw(if code & 0x8000_0000 != 0 {
+        (code & 0x7F) as i32
+    } else {
+        (code as i32) << 8
+    })
+}
+
+/// An exit that is a success, and one that is a crash with the number a segmentation fault has on this system.
+fn ended_well() -> ExitStatus {
+    status(0)
+}
+
+fn crashed() -> ExitStatus {
+    if cfg!(windows) {
+        status(0xC000_0005)
+    } else {
+        status(0x8000_0000 | 11)
+    }
+}
+
+fn said_by_a_scan(steps: &[&str], answer: Option<&ScanAnswer>) -> String {
+    let mut said = String::from("noise\n");
+    for step in steps {
+        said.push_str(&format!("{}\n", step_line(step)));
+    }
+    if let Some(answer) = answer {
+        said.push_str(&format!("{}\n", answer_line(answer)));
+    }
+    said
+}
+
+fn outcome(how_it_ended: HowItEnded, said: String) -> LibraryOutcome {
+    outcome_of(&WhatItDid { how_it_ended, said }, Duration::from_secs(5))
+}
+
+#[test]
+fn a_program_that_answered_gives_the_scan_or_the_reason_the_library_was_refused() {
+    let scanned = ScanAnswer::Scanned(a_scan());
+    assert_eq!(
+        outcome(HowItEnded::Exited(ended_well()), said_by_a_scan(&["a"], Some(&scanned))),
+        LibraryOutcome::Scanned(a_scan())
+    );
+    let refused = ScanAnswer::CouldNotBeLoaded("the specified module could not be found".to_owned());
+    assert_eq!(
+        outcome(HowItEnded::Exited(ended_well()), said_by_a_scan(&["a"], Some(&refused))),
+        LibraryOutcome::Failed(ScanFailure::CouldNotBeLoaded(
+            "the specified module could not be found".to_owned()
+        ))
+    );
+    let not_ladspa = ScanAnswer::NotALadspaLibrary("no symbol".to_owned());
+    assert_eq!(
+        outcome(HowItEnded::Exited(ended_well()), said_by_a_scan(&[], Some(&not_ladspa))),
+        LibraryOutcome::Failed(ScanFailure::NotALadspaLibrary("no symbol".to_owned()))
+    );
+}
+
+#[test]
+fn an_answer_that_was_given_counts_even_if_the_program_crashed_afterwards() {
+    let scanned = ScanAnswer::Scanned(a_scan());
+    assert_eq!(
+        outcome(HowItEnded::Exited(crashed()), said_by_a_scan(&["a"], Some(&scanned))),
+        LibraryOutcome::Scanned(a_scan())
+    );
+}
+
+#[test]
+fn a_program_that_crashed_is_a_failure_that_says_how_and_what_it_was_doing() {
+    let outcome = outcome(
+        HowItEnded::Exited(crashed()),
+        said_by_a_scan(&["loading the library", "making plugin number 4 (x)"], None),
+    );
+    let LibraryOutcome::Failed(ScanFailure::Crashed { how, during }) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(during.as_deref(), Some("making plugin number 4 (x)"));
+    if cfg!(windows) {
+        assert_eq!(how, "0xC0000005: access violation");
+    } else {
+        assert_eq!(how, "signal 11 (segmentation fault)");
+    }
+}
+
+#[test]
+fn the_exits_of_a_crash_are_told_apart() {
+    let how = |code: u32| {
+        let LibraryOutcome::Failed(ScanFailure::Crashed { how, .. }) =
+            outcome(HowItEnded::Exited(status(code)), String::new())
+        else {
+            panic!("not a crash");
+        };
+        how
+    };
+    if cfg!(windows) {
+        assert_eq!(how(0xC000_00FD), "0xC00000FD: stack overflow");
+        assert_eq!(
+            how(0xC000_0409),
+            "0xC0000409: the program stopped itself after finding memory damaged"
+        );
+        assert_eq!(how(0xC000_001D), "0xC000001D: illegal instruction");
+        assert_eq!(how(0xC000_0094), "0xC0000094: division by zero");
+        assert_eq!(how(0xC123_4567), "exit code 0xC1234567");
+        assert_eq!(how(3), "exit code 3");
+    } else {
+        assert_eq!(how(0x8000_0000 | 4), "signal 4 (illegal instruction)");
+        assert_eq!(how(0x8000_0000 | 6), "signal 6 (abort)");
+        assert_eq!(how(0x8000_0000 | 7), "signal 7 (bus error)");
+        assert_eq!(how(0x8000_0000 | 8), "signal 8 (arithmetic error)");
+        assert_eq!(how(0x8000_0000 | 9), "signal 9 (killed)");
+        assert_eq!(how(0x8000_0000 | 15), "signal 15 (terminated)");
+        assert_eq!(how(0x8000_0000 | 12), "signal 12");
+        assert_eq!(how(3), "exit code 3");
+    }
+}
+
+#[test]
+fn a_program_that_ended_well_and_said_nothing_and_one_that_said_nonsense_are_failures() {
+    assert_eq!(
+        outcome(
+            HowItEnded::Exited(ended_well()),
+            said_by_a_scan(&["loading the library"], None)
+        ),
+        LibraryOutcome::Failed(ScanFailure::GaveNoAnswer {
+            during: Some("loading the library".to_owned())
+        })
+    );
+    let nonsense = format!("{RESULT_PREFIX}this is not json\n");
+    let LibraryOutcome::Failed(ScanFailure::AnswerWasNotInTheFormat(reason)) =
+        outcome(HowItEnded::Exited(ended_well()), nonsense)
+    else {
+        panic!("not a failure of the format");
+    };
+    assert!(!reason.is_empty());
+}
+
+#[test]
+fn a_program_that_was_stopped_is_a_failure_that_says_how_long_it_was_given_and_what_it_was_doing() {
+    let outcome = outcome(
+        HowItEnded::StoppedAfterTheTimeLimit,
+        said_by_a_scan(
+            &[
+                "loading the library",
+                "running plugin number 2 (reverb) on 512 moments of silence",
+            ],
+            None,
+        ),
+    );
+    assert_eq!(
+        outcome,
+        LibraryOutcome::Failed(ScanFailure::TookTooLong {
+            seconds: 5,
+            during: Some("running plugin number 2 (reverb) on 512 moments of silence".to_owned())
+        })
+    );
+    // (Even an answer that is there does not save a program that did not end.)
+    let late = ScanAnswer::Scanned(a_scan());
+    assert!(matches!(
+        self::outcome(HowItEnded::StoppedAfterTheTimeLimit, said_by_a_scan(&[], Some(&late))),
+        LibraryOutcome::Failed(ScanFailure::TookTooLong { .. })
+    ));
+}
+
+#[test]
+fn each_failure_is_said_in_words_that_name_what_matters() {
+    let said = |failure: ScanFailure| failure.to_string();
+    assert!(said(ScanFailure::CouldNotBeLoaded("module missing".to_owned())).contains("module missing"));
+    assert!(said(ScanFailure::NotALadspaLibrary("no symbol".to_owned())).contains("not a LADSPA library"));
+    let long = said(ScanFailure::TookTooLong {
+        seconds: 5,
+        during: Some("making plugin number 1".to_owned()),
+    });
+    assert!(
+        long.contains("5 seconds") && long.contains("while it was making plugin number 1"),
+        "{long}"
+    );
+    assert!(
+        !said(ScanFailure::TookTooLong {
+            seconds: 5,
+            during: None
+        })
+        .contains("while")
+    );
+    let crash = said(ScanFailure::Crashed {
+        how: "signal 11".to_owned(),
+        during: Some("running".to_owned()),
+    });
+    assert!(
+        crash.contains("crashed") && crash.contains("signal 11") && crash.contains("while it was running"),
+        "{crash}"
+    );
+    assert!(said(ScanFailure::GaveNoAnswer { during: None }).contains("said nothing"));
+    assert!(said(ScanFailure::AnswerWasNotInTheFormat("eof".to_owned())).contains("eof"));
+    assert!(said(ScanFailure::WasInUseWhenTheProgramEndedBadly { others: 0 }).ends_with("using this library"));
+    assert!(said(ScanFailure::WasInUseWhenTheProgramEndedBadly { others: 1 }).contains("1 other library"));
+    assert!(said(ScanFailure::WasInUseWhenTheProgramEndedBadly { others: 2 }).contains("2 other libraries"));
+}
+
+// --- the folders ---
+
+fn touch(folder: &Path, name: &str) -> PathBuf {
+    let path = folder.join(name);
+    fs::write(&path, b"x").unwrap();
+    path
+}
+
+#[test]
+fn the_folders_are_the_ones_a_person_added_then_ladspa_path_then_the_usual_without_repeats() {
+    let added = vec![PathBuf::from("/mine"), PathBuf::from("/shared")];
+    let variable = std::env::join_paths(["/shared", "/from/variable", ""]).unwrap();
+    let usual = vec![PathBuf::from("/usr/lib/ladspa"), PathBuf::from("/from/variable")];
+    let folders = folders_to_scan(&added, Some(&variable), &usual);
+    assert_eq!(
+        folders,
+        [
+            PathBuf::from("/mine"),
+            PathBuf::from("/shared"),
+            PathBuf::from("/from/variable"),
+            PathBuf::from("/usr/lib/ladspa")
+        ]
+    );
+    assert_eq!(folders_to_scan(&[], None, &[]), Vec::<PathBuf>::new());
+    assert_eq!(
+        folders_to_scan(&[PathBuf::new()], None, &[]),
+        Vec::<PathBuf>::new(),
+        "an empty path is no folder"
+    );
+}
+
+#[test]
+fn the_usual_folders_are_those_of_ladspa_h_and_the_home_folder_and_windows_has_none() {
+    let usual = usual_folders(Some(Path::new("/home/someone")));
+    if cfg!(windows) {
+        assert!(usual.is_empty());
+    } else {
+        assert_eq!(
+            usual,
+            [
+                PathBuf::from("/usr/lib/ladspa"),
+                PathBuf::from("/usr/local/lib/ladspa"),
+                PathBuf::from("/home/someone/.ladspa")
+            ]
+        );
+        assert_eq!(usual_folders(None).len(), 2);
+    }
+}
+
+#[test]
+fn the_libraries_in_a_folder_are_the_files_with_the_ending_of_this_system_in_the_order_of_their_names() {
+    let folder = tempfile::tempdir().unwrap();
+    let ending = library_file_extension();
+    let b = touch(folder.path(), &format!("b.{ending}"));
+    let a = touch(folder.path(), &format!("a.{ending}"));
+    let upper = touch(folder.path(), &format!("C.{}", ending.to_uppercase()));
+    touch(folder.path(), "notes.txt");
+    touch(folder.path(), "no_ending");
+    // A folder with the ending of a library is not a library, and what is inside a folder is not looked at.
+    let inside = folder.path().join(format!("folder.{ending}"));
+    fs::create_dir(&inside).unwrap();
+    touch(&inside, &format!("inside.{ending}"));
+    assert_eq!(libraries_in(folder.path()).unwrap(), [a, b, upper]);
+    assert_eq!(
+        libraries_in(&folder.path().join("not_there")).unwrap(),
+        Vec::<PathBuf>::new()
+    );
+}
+
+// --- the cache ---
+
+fn a_library_file(folder: &Path, bytes: &[u8]) -> PathBuf {
+    let path = folder.join(format!("library.{}", library_file_extension()));
+    fs::write(&path, bytes).unwrap();
+    path
+}
+
+#[test]
+fn a_scan_is_believed_while_the_file_is_the_same_size_and_time_and_not_after() {
+    let folder = tempfile::tempdir().unwrap();
+    let library = a_library_file(folder.path(), b"first");
+    let mut cache = ScanCache::in_memory();
+    let before = FileFingerprint::of(&library).unwrap();
+    cache.record(&library, before, CachedOutcome::Scanned(a_scan()));
+    assert_eq!(
+        cache.lookup(&library, &FileFingerprint::of(&library).unwrap()),
+        Some(&CachedOutcome::Scanned(a_scan()))
+    );
+    // Another size.
+    fs::write(&library, b"a longer file").unwrap();
+    assert_eq!(cache.lookup(&library, &FileFingerprint::of(&library).unwrap()), None);
+    // The same size and another time.
+    let same_size_later = FileFingerprint {
+        modified_seconds: before.modified_seconds + 1,
+        ..before
+    };
+    assert_eq!(cache.lookup(&library, &same_size_later), None);
+    let same_seconds_later_nanoseconds = FileFingerprint {
+        modified_nanoseconds: before.modified_nanoseconds.wrapping_add(1),
+        ..before
+    };
+    assert_eq!(cache.lookup(&library, &same_seconds_later_nanoseconds), None);
+    assert_eq!(cache.lookup(&folder.path().join("other"), &before), None);
+}
+
+#[test]
+fn the_cache_is_written_and_read_back_failures_and_all() {
+    let folder = tempfile::tempdir().unwrap();
+    let library = a_library_file(folder.path(), b"x");
+    let other = touch(folder.path(), &format!("other.{}", library_file_extension()));
+    let file = folder.path().join("settings").join("scan_cache.json");
+    let mut cache = ScanCache::at(file.clone());
+    let (fingerprint, other_fingerprint) = (
+        FileFingerprint::of(&library).unwrap(),
+        FileFingerprint::of(&other).unwrap(),
+    );
+    cache.record(&library, fingerprint, CachedOutcome::Scanned(a_scan()));
+    cache.record(
+        &other,
+        other_fingerprint,
+        CachedOutcome::Failed(ScanFailure::Crashed {
+            how: "signal 11".to_owned(),
+            during: Some("making plugin number 0".to_owned()),
+        }),
+    );
+    assert_eq!(cache.len(), 2);
+    cache.save();
+    assert_eq!(cache.last_problem(), None);
+    let again = ScanCache::at(file.clone());
+    assert_eq!(again.len(), 2);
+    assert_eq!(
+        again.lookup(&library, &fingerprint),
+        Some(&CachedOutcome::Scanned(a_scan()))
+    );
+    assert!(matches!(
+        again.lookup(&other, &other_fingerprint),
+        Some(CachedOutcome::Failed(ScanFailure::Crashed { .. }))
+    ));
+    // Writing the same cache again gives the same text.
+    let text = fs::read_to_string(&file).unwrap();
+    let mut rewritten = ScanCache::at(file.clone());
+    rewritten.save();
+    assert_eq!(fs::read_to_string(&file).unwrap(), text);
+}
+
+#[test]
+fn a_cache_file_that_cannot_be_read_is_an_empty_cache_that_says_so_and_one_of_another_format_is_not_believed() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("scan_cache.json");
+    fs::write(&file, "this is not json").unwrap();
+    let cache = ScanCache::at(file.clone());
+    assert!(cache.is_empty());
+    assert!(
+        cache.last_problem().unwrap().contains("scanned again"),
+        "{:?}",
+        cache.last_problem()
+    );
+    // Another format: not an error, only not believed.
+    fs::write(&file, "{\"format\": 0, \"libraries\": []}").unwrap();
+    let cache = ScanCache::at(file.clone());
+    assert!(cache.is_empty());
+    assert_eq!(cache.last_problem(), None);
+    let library = a_library_file(folder.path(), b"x");
+    let mut writer = ScanCache::at(file.clone());
+    writer.record(
+        &library,
+        FileFingerprint::of(&library).unwrap(),
+        CachedOutcome::Scanned(a_scan()),
+    );
+    writer.save();
+    let text = fs::read_to_string(&file).unwrap().replace(
+        &format!("\"format\": {}", super::protocol::SCAN_FORMAT),
+        &format!("\"format\": {}", super::protocol::SCAN_FORMAT + 1),
+    );
+    fs::write(&file, text).unwrap();
+    assert!(
+        ScanCache::at(file).is_empty(),
+        "the answers of another version of the scan are not believed"
+    );
+}
+
+#[test]
+fn a_cache_that_cannot_be_written_says_so_and_keeps_what_it_has() {
+    let folder = tempfile::tempdir().unwrap();
+    // The place for the file is below a file, so no folder can be made for it.
+    let blocker = touch(folder.path(), "blocker");
+    let mut cache = ScanCache::at(blocker.join("inside").join("scan_cache.json"));
+    let library = a_library_file(folder.path(), b"x");
+    cache.record(
+        &library,
+        FileFingerprint::of(&library).unwrap(),
+        CachedOutcome::Scanned(a_scan()),
+    );
+    cache.save();
+    assert!(
+        cache.last_problem().unwrap().contains("cannot be written"),
+        "{:?}",
+        cache.last_problem()
+    );
+    assert_eq!(cache.len(), 1);
+}
+
+#[test]
+fn a_cache_forgets_the_libraries_that_are_not_found_any_more() {
+    let folder = tempfile::tempdir().unwrap();
+    let kept = a_library_file(folder.path(), b"x");
+    let gone = touch(folder.path(), &format!("gone.{}", library_file_extension()));
+    let mut cache = ScanCache::in_memory();
+    for library in [&kept, &gone] {
+        cache.record(
+            library,
+            FileFingerprint::of(library).unwrap(),
+            CachedOutcome::Scanned(a_scan()),
+        );
+    }
+    cache.forget_all_but(std::slice::from_ref(&kept));
+    assert_eq!(cache.len(), 1);
+    assert!(cache.lookup(&kept, &FileFingerprint::of(&kept).unwrap()).is_some());
+}
+
+// --- the breadcrumb ---
+
+fn a_scanner() -> PluginScanner {
+    // (No library is scanned here, so the program is never run.)
+    PluginScanner::new(PathBuf::from("not-a-program"), ScanCache::in_memory())
+}
+
+#[test]
+fn a_library_is_written_in_the_breadcrumb_before_it_is_used_and_once() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("breadcrumb").join("in_use.json");
+    let mut breadcrumb = Breadcrumb::at(file.clone());
+    assert!(!file.exists());
+    breadcrumb.note_use_of(Path::new("/plugins/one.so")).unwrap();
+    let after_one = fs::read_to_string(&file).unwrap();
+    assert!(after_one.contains("/plugins/one.so"), "{after_one}");
+    breadcrumb.note_use_of(Path::new("/plugins/two.so")).unwrap();
+    breadcrumb.note_use_of(Path::new("/plugins/one.so")).unwrap();
+    assert_eq!(
+        breadcrumb.used(),
+        [PathBuf::from("/plugins/one.so"), PathBuf::from("/plugins/two.so")]
+    );
+    let after_two = fs::read_to_string(&file).unwrap();
+    assert!(
+        after_two.find("one.so").unwrap() < after_two.find("two.so").unwrap(),
+        "in the order of first use: {after_two}"
+    );
+    assert_eq!(after_two.matches("one.so").count(), 1);
+    breadcrumb.ended_well();
+    assert!(!file.exists(), "a run that ended well leaves nothing");
+    assert!(breadcrumb.used().is_empty());
+}
+
+#[test]
+fn a_breadcrumb_that_cannot_be_written_is_an_error_for_the_caller_to_decide_about() {
+    let folder = tempfile::tempdir().unwrap();
+    let blocker = touch(folder.path(), "blocker");
+    let mut breadcrumb = Breadcrumb::at(blocker.join("inside").join("in_use.json"));
+    assert!(breadcrumb.note_use_of(Path::new("/plugins/one.so")).is_err());
+    assert!(
+        breadcrumb.used().is_empty(),
+        "a library that was not written down is not said to have been"
+    );
+}
+
+#[test]
+fn a_run_that_ended_badly_fails_the_library_it_started_last_and_names_the_others() {
+    let folder = tempfile::tempdir().unwrap();
+    let ending = library_file_extension();
+    let libraries: Vec<PathBuf> = ["one", "two", "three"]
+        .iter()
+        .map(|name| touch(folder.path(), &format!("{name}.{ending}")))
+        .collect();
+    let file = folder.path().join("in_use.json");
+    let mut breadcrumb = Breadcrumb::at(file.clone());
+    for library in &libraries {
+        breadcrumb.note_use_of(library).unwrap();
+    }
+    // (The run ended: nobody called `ended_well`.)
+    drop(breadcrumb);
+    let mut scanner = a_scanner();
+    let recovery = recover(&file, &mut scanner).expect("the last run left a breadcrumb");
+    assert_eq!(recovery.failed, libraries[2]);
+    assert_eq!(recovery.also_in_use, [libraries[0].clone(), libraries[1].clone()]);
+    assert!(!file.exists(), "the breadcrumb is taken");
+    let fingerprint = FileFingerprint::of(&libraries[2]).unwrap();
+    assert_eq!(
+        scanner.cache().lookup(&libraries[2], &fingerprint),
+        Some(&CachedOutcome::Failed(ScanFailure::WasInUseWhenTheProgramEndedBadly {
+            others: 2
+        }))
+    );
+    assert_eq!(scanner.cache().len(), 1, "only that one is failed");
+    // And it is not found again.
+    assert_eq!(recover(&file, &mut scanner), None);
+}
+
+#[test]
+fn a_breadcrumb_with_one_library_names_no_others_and_one_with_nothing_in_it_or_that_is_nonsense_is_nothing() {
+    let folder = tempfile::tempdir().unwrap();
+    let library = touch(folder.path(), &format!("one.{}", library_file_extension()));
+    let file = folder.path().join("in_use.json");
+    let mut breadcrumb = Breadcrumb::at(file.clone());
+    breadcrumb.note_use_of(&library).unwrap();
+    let recovery = recover(&file, &mut a_scanner()).unwrap();
+    assert_eq!((recovery.failed, recovery.also_in_use), (library, Vec::new()));
+    fs::write(&file, "{\"libraries\": []}").unwrap();
+    assert_eq!(recover(&file, &mut a_scanner()), None);
+    assert!(!file.exists());
+    fs::write(&file, "this is not json").unwrap();
+    assert_eq!(recover(&file, &mut a_scanner()), None);
+    assert!(
+        !file.exists(),
+        "a file that is only there to help is not kept if it cannot"
+    );
+}
+
+#[test]
+fn a_library_that_was_failed_by_the_breadcrumb_is_believed_failed_until_it_changes() {
+    let folder = tempfile::tempdir().unwrap();
+    let library = a_library_file(folder.path(), b"x");
+    let mut scanner = a_scanner();
+    scanner.fail_library(&library, ScanFailure::GaveNoAnswer { during: None });
+    assert!(
+        scanner
+            .cache()
+            .lookup(&library, &FileFingerprint::of(&library).unwrap())
+            .is_some()
+    );
+    fs::write(&library, b"changed").unwrap();
+    assert!(
+        scanner
+            .cache()
+            .lookup(&library, &FileFingerprint::of(&library).unwrap())
+            .is_none()
+    );
+    // A file that is not there cannot be failed: there is nothing to say it is the same file.
+    let mut scanner = a_scanner();
+    scanner.fail_library(
+        &folder.path().join("not_there"),
+        ScanFailure::GaveNoAnswer { during: None },
+    );
+    assert!(scanner.cache().is_empty());
+}
