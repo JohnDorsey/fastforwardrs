@@ -96,6 +96,8 @@ fn the_key_is_the_library_file_without_its_ending_and_the_label() {
         key_of(Path::new("/plugins/amp_1181.so"), "amp_1181"),
         "ladspa:amp_1181:amp_1181"
     );
+    // (A path of Windows is a path on Windows only: on the other systems a backslash is a letter of a name.)
+    #[cfg(windows)]
     assert_eq!(key_of(Path::new("C:\\ladspa\\caps.dll"), "Plate"), "ladspa:caps:Plate");
     assert_eq!(
         key_of(Path::new("/a/b:c.so"), "x:y"),
