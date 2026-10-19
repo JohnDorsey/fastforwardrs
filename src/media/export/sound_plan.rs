@@ -63,6 +63,8 @@ pub fn sound_graph_specification(
                                     points.iter().map(|point| (point.frame, point.decibels)).collect(),
                                 ),
                             },
+                            first_timeline_frame: clip.first_timeline_frame,
+                            effects: clip.effects.clone(),
                         }),
                     })
                     .collect(),

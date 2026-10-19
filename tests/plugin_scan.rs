@@ -401,6 +401,69 @@ fn the_editor_finds_the_scan_program_beside_itself() {
 }
 
 #[test]
+fn the_test_plugins_that_were_found_are_effects_with_the_values_their_ports_make_and_two_are_left_out_with_the_reason()
+{
+    let folder = tempfile::tempdir().unwrap();
+    good_library_in(folder.path());
+    let mut scanner = scanner();
+    let scan = scanner.scan_folders(&[folder.path().to_owned()]);
+    let found = fastforwardrs::plugin_scan::plugins_found_in(&scan.libraries);
+    let keys: Vec<String> = found
+        .effects
+        .iter()
+        .map(|effect| effect.descriptor.key.to_string())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "ladspa:good:ffrs_test_gain",
+            "ladspa:good:ffrs_test_one_pole",
+            "ladspa:good:ffrs_test_swap",
+            "ladspa:good:ffrs_test_switches",
+            "ladspa:good:ffrs_test_mono_to_both",
+            "ladspa:good:ffrs_test_mix_down",
+            "ladspa:good:ffrs_test_counted",
+        ]
+    );
+    let left_out: Vec<(&str, bool)> = found
+        .not_used
+        .iter()
+        .map(|left_out| (left_out.label.as_str(), left_out.reason.contains("no audio input")))
+        .collect();
+    assert_eq!(left_out, [("ffrs_test_no_ports", true), ("ffrs_test_sine", true)]);
+
+    let gain = &found.effects[0];
+    assert_eq!(gain.descriptor.category, "fastforwardrs tests");
+    assert_eq!(gain.descriptor.parameters.len(), 1);
+    assert_eq!(gain.descriptor.parameters[0].id, "port0_gain");
+    assert_eq!(gain.descriptor.parameters[0].range, Some((0.0, 4.0)));
+    assert_eq!(
+        gain.descriptor.parameters[0].default,
+        fastforwardrs::project::PropertyValue::Number(1.0)
+    );
+    let filter = &found.effects[1];
+    let cutoff = &filter.descriptor.parameters[0];
+    assert_eq!(cutoff.scale, fastforwardrs::project::ValueScale::Logarithmic);
+    let (low, high) = cutoff.range.unwrap();
+    assert!((low - 48.0).abs() < 1e-3 && (high - 21_600.0).abs() < 1e-2);
+    let switches = &found.effects[3];
+    let ids: Vec<&str> = switches
+        .descriptor
+        .parameters
+        .iter()
+        .map(|value| value.id.as_ref())
+        .collect();
+    assert_eq!(
+        ids,
+        ["port0_invert", "port1_multiplier"],
+        "the meter is a control output: not a value"
+    );
+    assert_eq!(switches.value_ports, [0, 1]);
+    assert_eq!((found.effects[4].audio_inputs, found.effects[4].audio_outputs), (1, 2));
+    assert_eq!((found.effects[5].audio_inputs, found.effects[5].audio_outputs), (2, 1));
+}
+
+#[test]
 fn what_the_cache_keeps_of_a_scan_is_what_the_scan_gave() {
     let folder = tempfile::tempdir().unwrap();
     let library = good_library_in(folder.path());
@@ -422,7 +485,14 @@ fn a_look_at_the_plugins_that_are_installed_in_a_folder() {
         std::env::var_os("FASTFORWARDRS_LADSPA_FOLDER")
             .expect("set FASTFORWARDRS_LADSPA_FOLDER to a folder of LADSPA libraries"),
     );
-    let mut scanner = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory());
+    // (`FASTFORWARDRS_DEPENDENCY_FOLDER` is a folder with the libraries the plugin libraries need, and `FASTFORWARDRS_SEARCH_PARENTS=1` looks in the folders above them too.)
+    let dependency_folders: Vec<PathBuf> = std::env::var_os("FASTFORWARDRS_DEPENDENCY_FOLDER")
+        .map(PathBuf::from)
+        .into_iter()
+        .collect();
+    let search_parents = std::env::var("FASTFORWARDRS_SEARCH_PARENTS").is_ok_and(|value| value == "1");
+    let mut scanner = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory())
+        .looking_for_dependencies_in(dependency_folders, search_parents);
     let began = Instant::now();
     let scan = scanner.scan_folders(&[folder]);
     let (mut good, mut plugins, mut plugins_with_problems) = (0, 0, 0);

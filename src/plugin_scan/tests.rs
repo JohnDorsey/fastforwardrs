@@ -387,6 +387,61 @@ fn a_scan_is_given_five_seconds_unless_the_scanner_is_told_otherwise() {
     );
 }
 
+// --- what a person said of where to look ---
+
+#[test]
+fn where_to_look_is_written_and_read_back_and_a_file_that_is_not_there_is_the_usual_places_with_no_complaint() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings").join("plugin_search.json");
+    assert_eq!(
+        PluginSearchSettings::read(&file),
+        (PluginSearchSettings::default(), None)
+    );
+    let settings = PluginSearchSettings {
+        folders: vec![PathBuf::from("/mine/plugins"), PathBuf::from("/other")],
+        dependency_folders: vec![PathBuf::from("/mine/libraries")],
+        search_parent_folders: false,
+    };
+    settings.write(&file).unwrap();
+    assert_eq!(PluginSearchSettings::read(&file), (settings.clone(), None));
+    // (Written again, it is the same text.)
+    let text = fs::read_to_string(&file).unwrap();
+    settings.write(&file).unwrap();
+    assert_eq!(fs::read_to_string(&file).unwrap(), text);
+}
+
+#[test]
+fn looking_in_the_folders_above_a_plugin_library_is_on_unless_it_was_turned_off_even_in_a_file_that_does_not_say() {
+    assert!(PluginSearchSettings::default().search_parent_folders);
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("plugin_search.json");
+    fs::write(&file, "{\"folders\": [\"/a\"]}").unwrap();
+    let (settings, problem) = PluginSearchSettings::read(&file);
+    assert_eq!(problem, None);
+    assert!(
+        settings.search_parent_folders,
+        "a file with no word about it leaves it on"
+    );
+    assert_eq!(settings.folders, [PathBuf::from("/a")]);
+    assert!(settings.dependency_folders.is_empty());
+    fs::write(&file, "{\"search_parent_folders\": false}").unwrap();
+    assert!(!PluginSearchSettings::read(&file).0.search_parent_folders);
+}
+
+#[test]
+fn a_file_of_places_that_cannot_be_read_gives_the_usual_places_and_says_what_is_wrong() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("plugin_search.json");
+    fs::write(&file, "this is not json").unwrap();
+    let (settings, problem) = PluginSearchSettings::read(&file);
+    assert_eq!(settings, PluginSearchSettings::default());
+    assert!(problem.unwrap().contains("cannot be read"));
+    // A folder where the file should be cannot be read as one either.
+    let (settings, problem) = PluginSearchSettings::read(folder.path());
+    assert_eq!(settings, PluginSearchSettings::default());
+    assert!(problem.is_some());
+}
+
 // --- the folders ---
 
 fn touch(folder: &Path, name: &str) -> PathBuf {

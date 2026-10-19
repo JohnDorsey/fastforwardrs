@@ -1324,3 +1324,41 @@ fn write_screenshots_of_the_names_of_groups_and_moving_the_edge_of_a_clip_group(
         .application_mut()
         .save_project_to(folder.join("demo_group_names_and_edges.fastforwardrs.json"));
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_the_sound_plugins_window_and_a_plugin_on_a_clip() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let plugins = folder.join("sound_plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    std::fs::copy(
+        ladspa_test_plugins::library_file_for_tests(),
+        plugins.join(format!("good.{}", fastforwardrs::plugin_scan::library_file_extension())),
+    )
+    .unwrap();
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.application_mut().use_this_plugin_scanner(
+        PathBuf::from(env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan")),
+        None,
+        false,
+    );
+    journey.application_mut().add_plugin_folder(plugins);
+    while journey.application().is_scanning_plugins() {
+        journey.keep_drawing_for(std::time::Duration::from_millis(50));
+    }
+
+    journey.select_the_clip_at(0);
+    let plus = journey.rectangle_of("Add an effect").center();
+    journey.click(plus);
+    save(&mut journey, &folder, "11_a_plugin_in_the_menu_of_the_plus_button");
+    journey.harness.get_by_label("Test plugin ffrs_test_one_pole").click();
+    save(&mut journey, &folder, "12_a_plugin_on_a_clip");
+
+    journey.harness.get_by_label("Edit").click();
+    journey.settle();
+    journey.harness.get_by_label("Sound plugins...").click();
+    save(&mut journey, &folder, "10_sound_plugins_window");
+}

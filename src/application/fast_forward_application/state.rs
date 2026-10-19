@@ -173,6 +173,8 @@ pub(super) struct Interface {
     /// Where the preview panel was in the last frame, for the keys that mean something else when the pointer is over it.
     pub(super) preview_panel_in_the_last_frame: Option<egui::Rect>,
     pub(super) settings_windows_open: SettingsWindowsOpen,
+    /// Whether the window of sound plugins is open.
+    pub(super) sound_plugins_window_open: bool,
     /// The source file whose colours the window of its colour space is open for, if there is one.
     pub(super) colours_of_a_file_window_open_for: Option<SourceMediaIdentifier>,
     pub(super) dialog: Option<Dialog>,
@@ -208,6 +210,7 @@ impl Interface {
             preview_view: PreviewView::default(),
             preview_panel_in_the_last_frame: None,
             settings_windows_open: SettingsWindowsOpen::default(),
+            sound_plugins_window_open: false,
             colours_of_a_file_window_open_for: None,
             dialog: startup_dialog,
             missing_sources_warning_open: false,
@@ -243,4 +246,6 @@ pub(super) struct Environment {
     pub(super) global_settings_path: Option<PathBuf>,
     /// Who may run which plugin (see `plugin_flow`).
     pub(super) plugin_trust: super::plugin_flow::PluginTrust,
+    /// Where plugins are looked for, and what the scan of them found (see `sound_plugins_flow`).
+    pub(super) plugin_search: super::sound_plugins_flow::PluginSearch,
 }

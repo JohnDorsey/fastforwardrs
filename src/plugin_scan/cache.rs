@@ -57,6 +57,9 @@ pub enum CachedOutcome {
 struct CacheDocument {
     /// (`SCAN_FORMAT` when it was written: a file with another one is not believed.)
     format: u32,
+    /// Where the libraries that plugin libraries need were looked for when the scans were made (see [`ScanCache::set_search_signature`]).
+    #[serde(default)]
+    search: String,
     #[serde(default)]
     libraries: Vec<LibraryDocument>,
 }
@@ -76,6 +79,7 @@ struct LibraryDocument {
 pub struct ScanCache {
     file: Option<PathBuf>,
     entries: BTreeMap<PathBuf, (FileFingerprint, CachedOutcome)>,
+    search_signature: String,
     last_problem: Option<String>,
 }
 
@@ -95,6 +99,7 @@ impl ScanCache {
             Ok(text) => match serde_json::from_str::<CacheDocument>(&text) {
                 // (A file of another format is from another version of the scan: its answers mean something else.)
                 Ok(document) if document.format == SCAN_FORMAT => {
+                    cache.search_signature = document.search;
                     for library in document.libraries {
                         cache
                             .entries
@@ -132,6 +137,22 @@ impl ScanCache {
         (then == now).then_some(outcome)
     }
 
+    /// Says where the libraries that plugin libraries need are looked for now (a text that is different when the folders or the choice to look in the parent folders are). **The
+    /// scans that failed because a library could not be loaded or was not a plugin library are not believed any more if it is not what it was when they were made**: the
+    /// library that was not found may be found now. (The scans that went well, and those that failed in the library's own doing, a crash or a wrong answer, stay.)
+    pub fn set_search_signature(&mut self, signature: &str) {
+        if self.search_signature == signature {
+            return;
+        }
+        self.entries.retain(|_, (_, outcome)| {
+            !matches!(
+                outcome,
+                CachedOutcome::Failed(ScanFailure::CouldNotBeLoaded(_) | ScanFailure::NotALadspaLibrary(_))
+            )
+        });
+        self.search_signature = signature.to_owned();
+    }
+
     /// Remembers what the scan of the library at `path`, which was like `fingerprint`, came to. (In memory: [`Self::save`] writes the file.)
     pub fn record(&mut self, path: &Path, fingerprint: FileFingerprint, outcome: CachedOutcome) {
         self.entries.insert(path.to_owned(), (fingerprint, outcome));
@@ -156,6 +177,7 @@ impl ScanCache {
         let Some(file) = &self.file else { return };
         let document = CacheDocument {
             format: SCAN_FORMAT,
+            search: self.search_signature.clone(),
             libraries: self
                 .entries
                 .iter()

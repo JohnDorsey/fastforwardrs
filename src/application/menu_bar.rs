@@ -7,6 +7,7 @@ use egui::{Button, MenuBar, Ui};
 
 use super::commands::Command;
 use super::keyboard::{DESELECT_KEY, REDO_SHORTCUT, UNDO_SHORTCUT};
+use super::sound_plugins_window::SoundPluginsCommand;
 
 /// What decides which menu items can be used.
 pub struct MenuAvailability {
@@ -79,6 +80,9 @@ pub fn show(ui: &mut Ui, availability: &MenuAvailability, commands: &mut Vec<Com
             }
             if ui.add_enabled(idle, Button::new("Global settings")).clicked() {
                 commands.push(Command::ShowGlobalSettings);
+            }
+            if ui.add_enabled(idle, Button::new("Sound plugins...")).clicked() {
+                commands.push(Command::SoundPlugins(SoundPluginsCommand::Show));
             }
         });
     });

@@ -11,10 +11,13 @@
 
 use std::collections::BTreeSet;
 
+use std::collections::HashMap;
+
+use super::pictures::{LayerEffect, layer_effect_of};
 use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, Track, TrackId};
 use crate::project::{
-    AnimationTarget, FrameRate, Project, PropertyId, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor,
-    TimelineFrameIndex,
+    AnimationTarget, AppliedEffect, EffectDomain, FrameRate, Project, PropertyId, ResolvedAnimations,
+    SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
 };
 
 /// How loud a stretch of sound is at a frame of it: the loudness of the clip and of its track together.
@@ -64,6 +67,8 @@ impl Loudness {
 pub struct SoundClip {
     pub clip: ClipId,
     pub source: SourceMediaIdentifier,
+    /// The frame of the timeline at which this stretch of the clip is first heard. (The frames of the keyframes of its effects are frames of the timeline.)
+    pub first_timeline_frame: u64,
     /// The source frame whose sound is heard first. (The sound has no frames: a frame stands for
     /// the stretch of sound as long as a frame of the video.)
     pub first_source_frame: u64,
@@ -76,6 +81,10 @@ pub struct SoundClip {
     pub timeline_frame_count: u64,
     /// How loud it is: the clip's volume and its track's.
     pub loudness: Loudness,
+    /// What is done to the sound of the clip before it is made as loud as `loudness` says, one after another: the sound effects that are applied to the clip, in the order
+    /// they are applied in (see `Project::effects_applied_to_the_clip`), with their values and the keyframes of them. An effect that is not installed is here too: it is the
+    /// one that makes the sound pass through unchanged, and it is kept in the plan so that the sound knows it was there.
+    pub effects: Vec<LayerEffect>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,10 +142,11 @@ pub fn plan_sound(
     let from = from.value();
     let total_frame_count = project.total_frame_count().saturating_sub(from);
     let animations = project.resolved_animations();
+    let effects = project.effects_applied_to_every_clip();
     let strips = project
         .tracks()
         .iter()
-        .filter_map(|track| strip_of(project, &animations, track, from, &is_usable))
+        .filter_map(|track| strip_of(project, &animations, &effects, track, from, &is_usable))
         .collect();
     SoundPlan {
         frame_rate: project.frame_rate(),
@@ -148,6 +158,7 @@ pub fn plan_sound(
 fn strip_of(
     project: &Project,
     animations: &ResolvedAnimations,
+    effects: &HashMap<ClipId, Vec<AppliedEffect<'_>>>,
     track: &Track,
     from: u64,
     is_usable: &impl Fn(SourceMediaIdentifier) -> bool,
@@ -174,6 +185,7 @@ fn strip_of(
                 if stretch.is_heard {
                     items.push(SoundItem::Clip(sound_clip_over(
                         animations,
+                        sound_effects_of_the_clip(project, animations, effects, placement.id),
                         track,
                         &placement,
                         media,
@@ -197,6 +209,22 @@ fn strip_of(
         track: track.id(),
         items,
     })
+}
+
+/// The sound effects that are applied to the clip `clip`, with their values and keyframes, in the order they are applied in. (Its picture effects are not here.)
+fn sound_effects_of_the_clip(
+    project: &Project,
+    animations: &ResolvedAnimations,
+    effects: &HashMap<ClipId, Vec<AppliedEffect<'_>>>,
+    clip: ClipId,
+) -> Vec<LayerEffect> {
+    effects
+        .get(&clip)
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
+        .map(|applied| layer_effect_of(project, animations, applied))
+        .collect()
 }
 
 /// A stretch of a clip, from `first_frame` up to `end_frame` of the timeline, over which it is heard, or is not
@@ -260,6 +288,7 @@ fn stretches_heard_or_not(
 /// The sound of the clip `placement` (a clip of `track`) that is heard from `first_frame` up to `end_frame` of the timeline.
 fn sound_clip_over(
     animations: &ResolvedAnimations,
+    effects: Vec<LayerEffect>,
     track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
@@ -272,6 +301,7 @@ fn sound_clip_over(
     SoundClip {
         clip: placement.id,
         source: media.source(),
+        first_timeline_frame: first_frame,
         first_source_frame,
         end_source_frame: media
             .end_source_frame()
@@ -280,6 +310,7 @@ fn sound_clip_over(
         speed: placement.effective_speed,
         timeline_frame_count: end_frame - first_frame,
         loudness: loudness_over(animations, track, placement, media, first_frame, end_frame),
+        effects,
     }
 }
 
@@ -343,5 +374,7 @@ fn push_silence(items: &mut Vec<SoundItem>, frame_count: u64) {
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod effects_tests;
 #[cfg(test)]
 mod tests;

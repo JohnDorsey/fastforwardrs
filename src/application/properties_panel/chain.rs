@@ -449,10 +449,11 @@ fn show_the_plus_button(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Mem
         return;
     }
     let can_have = kinds_that_can_be_put_on(content, owner);
-    if !EffectKind::BUILT_IN.into_iter().any(&can_have) {
+    let offered = EffectKind::offered();
+    if !offered.iter().copied().any(&can_have) {
         return;
     }
-    let to_offer = effects_to_offer(EffectKind::BUILT_IN, &can_have);
+    let to_offer = effects_to_offer(offered, &can_have);
     let room = vec2(
         ui.available_width(),
         plus_button::DIAMETER + 2.0 * SPACE_ROUND_THE_PLUS_BUTTON,

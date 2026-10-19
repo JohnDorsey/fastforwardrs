@@ -18,19 +18,28 @@
 pub mod breadcrumb;
 pub mod cache;
 pub mod child;
+pub mod effects;
 pub mod failure;
 pub mod folders;
 pub mod program;
 pub mod protocol;
 pub mod scanner;
+pub mod settings;
 
 pub use breadcrumb::{Breadcrumb, Recovery, recover};
 pub use cache::{CachedOutcome, FileFingerprint, ScanCache};
 pub use child::{SCAN_TIME_LIMIT, scanner_program_beside_this_program};
+pub use effects::{NotUsed, PluginsFound, effect_of_a_plugin, key_of, plugins_found_in};
 pub use failure::ScanFailure;
-pub use folders::{folders_to_scan, libraries_in, library_file_extension, library_file_extensions, usual_folders};
+pub use folders::{
+    dependency_search_folders, folders_to_scan, libraries_in, library_file_extension, library_file_extensions,
+    library_search_variable, usual_folders,
+};
 pub use ladspa_host::{LibraryScan, ScannedPlugin};
 pub use scanner::{FolderScan, LibraryOutcome, LibraryReport, PluginScanner, ScannerProblem};
+pub use settings::PluginSearchSettings;
 
+#[cfg(test)]
+mod effects_tests;
 #[cfg(test)]
 mod tests;

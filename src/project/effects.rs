@@ -28,6 +28,7 @@ use super::groups::GroupId;
 
 mod built_in;
 mod descriptor;
+mod installed;
 mod kind;
 
 pub use built_in::{HUE_SHIFT_KEY, LutOperation, LutSpace, PictureOperation};
@@ -35,6 +36,7 @@ pub use descriptor::{
     ChoiceOption, EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
     UnknownFields, ValueScale,
 };
+pub use installed::{InstalledPlugin, installed_plugin_for, installed_plugins, set_installed_plugins};
 pub use kind::EffectKind;
 
 use std::fmt;
@@ -601,6 +603,8 @@ impl Effects {
 
 #[cfg(test)]
 mod chain_tests;
+#[cfg(test)]
+mod installed_tests;
 #[cfg(test)]
 mod kind_tests;
 #[cfg(test)]

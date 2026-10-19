@@ -41,6 +41,8 @@ pub enum Command {
     Deselect,
     ShowProjectSettings,
     ShowGlobalSettings,
+    /// Something about the sound plugins: open their window, or what was done in it.
+    SoundPlugins(super::sound_plugins_window::SoundPluginsCommand),
 
     /// The project's own settings were changed in the project settings window.
     SetProjectSettings(ProjectSettings),
@@ -464,6 +466,7 @@ impl Command {
             | Self::Deselect
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
+            | Self::SoundPlugins(_)
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
             | Self::Pause
@@ -512,6 +515,7 @@ impl Command {
             | Self::Deselect
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
+            | Self::SoundPlugins(_)
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
             | Self::Pause

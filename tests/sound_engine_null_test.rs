@@ -245,6 +245,8 @@ fn a_specification(
                         speed_factor: SpeedFactor::new(speed).unwrap(),
                         timeline_frame_count,
                         loudness,
+                        first_timeline_frame: 0,
+                        effects: Vec::new(),
                     })
                 })
                 .collect();
@@ -390,6 +392,8 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
                 speed_factor: SpeedFactor::new(1).unwrap(),
                 timeline_frame_count: 60,
                 loudness: LoudnessToExport::Changing(vec![(0, 0.0), (60, -40.0)]),
+                first_timeline_frame: 0,
+                effects: Vec::new(),
             })],
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
@@ -609,6 +613,8 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     speed_factor: SpeedFactor::new(1).unwrap(),
                     timeline_frame_count: 30,
                     loudness: LoudnessToExport::UNCHANGED,
+                    first_timeline_frame: 0,
+                    effects: Vec::new(),
                 }),
                 SoundItemToExport::Clip(SoundClipToExport {
                     source_input: 1,
@@ -617,6 +623,8 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     speed_factor: SpeedFactor::new(1).unwrap(),
                     timeline_frame_count: 30,
                     loudness: LoudnessToExport::UNCHANGED,
+                    first_timeline_frame: 0,
+                    effects: Vec::new(),
                 }),
             ],
         }],
@@ -835,6 +843,8 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
                 speed_factor: SpeedFactor::new(1).unwrap(),
                 timeline_frame_count: 30,
                 loudness: LoudnessToExport::UNCHANGED,
+                first_timeline_frame: 0,
+                effects: Vec::new(),
             })],
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,

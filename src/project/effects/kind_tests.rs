@@ -450,11 +450,16 @@ fn what_a_kind_can_be_put_on_follows_its_domain_and_whether_it_changes_each_pixe
     blur.changes_each_pixel_by_itself = false;
     let blur = EffectKind::from_snapshot(blur).unwrap();
 
+    // (Rewritten on purpose in phase 7: a video has a soundtrack, so a sound effect can be put on a video as well as on a sound. Before, only on a sound.)
     for clip in [ClipKind::Video, ClipKind::Image, ClipKind::Text] {
         assert!(picture.applies_to_a_clip_of_kind(clip), "{clip:?}");
+    }
+    for clip in [ClipKind::Image, ClipKind::Text] {
         assert!(!sound.applies_to_a_clip_of_kind(clip), "{clip:?}");
     }
     assert!(sound.applies_to_a_clip_of_kind(ClipKind::Audio));
+    assert!(sound.applies_to_a_clip_of_kind(ClipKind::Video));
+    assert!(!picture.applies_to_a_clip_of_kind(ClipKind::Audio));
     for kind in [picture, sound, blur] {
         assert!(!kind.applies_to_a_clip_of_kind(ClipKind::Crate), "{kind:?}");
         assert!(kind.applies_to_a_track(), "{kind:?}");
@@ -560,8 +565,10 @@ fn a_sound_effect_is_for_sounds_and_for_no_picture_and_its_values_are_the_proper
     let sound = EffectKind::from_snapshot(descriptor).unwrap();
     let property = PropertyId::effect_value(sound, EffectInstanceId::FIRST, 0);
 
+    // (Rewritten on purpose in phase 7: the soundtrack of a video can have a sound effect.)
     assert!(property.applies_to_a_clip_of_kind(ClipKind::Audio));
-    for seen in [ClipKind::Video, ClipKind::Image, ClipKind::Text, ClipKind::Crate] {
+    assert!(property.applies_to_a_clip_of_kind(ClipKind::Video));
+    for seen in [ClipKind::Image, ClipKind::Text, ClipKind::Crate] {
         assert!(!property.applies_to_a_clip_of_kind(seen), "{seen:?}");
     }
     assert!(property.applies_to_a_track());

@@ -179,3 +179,41 @@ fn a_file_that_is_not_one_of_the_inputs_is_a_mistake_of_the_program() {
     let plan = sound_of(&project);
     let _ = sound_graph_specification(&plan, &[], SpedUpClipSound::Mute);
 }
+
+#[test]
+fn the_sound_effects_of_a_clip_and_the_frame_it_begins_at_are_in_the_graph_for_the_sound_engine_to_do() {
+    use crate::project::{AnimationTarget, EffectKind, PropertyValue};
+    use crate::test_support::{an_installed_sound_plugin, put_an_effect_on};
+
+    let mut project = project_with_video(320, 180, true);
+    project.split_at(frame(100), None);
+    let second = clip_location(&project, 0, 1);
+    let kind = EffectKind::from_snapshot(
+        an_installed_sound_plugin("ladspa:a:in_the_graph", "M", &[("gain", 1.0, None)]).descriptor,
+    )
+    .unwrap();
+    put_an_effect_on(
+        &mut project,
+        AnimationTarget::Clip(second),
+        kind,
+        &[PropertyValue::Number(3.0)],
+    );
+    let plan = sound_of(&project);
+    let specification = sound_graph_specification(&plan, &[SourceMediaIdentifier::new(1)], SpedUpClipSound::Mute);
+    let clips: Vec<&SoundClipToExport> = specification
+        .strips
+        .iter()
+        .flat_map(|strip| &strip.items)
+        .filter_map(|item| match item {
+            SoundItemToExport::Clip(clip) => Some(clip),
+            SoundItemToExport::Silence { .. } => None,
+        })
+        .collect();
+    assert_eq!(clips.len(), 2);
+    assert!(clips[0].effects.is_empty());
+    assert_eq!(clips[0].first_timeline_frame, 0);
+    assert_eq!(clips[1].first_timeline_frame, 100);
+    assert_eq!(clips[1].effects.len(), 1);
+    assert_eq!(clips[1].effects[0].values, [PropertyValue::Number(3.0)]);
+    assert_eq!(clips[1].effects[0].kind, kind);
+}

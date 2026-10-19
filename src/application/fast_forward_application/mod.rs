@@ -131,6 +131,9 @@ mod selection_tests;
 mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
+mod sound_plugins_flow;
+#[cfg(test)]
+mod sound_plugins_tests;
 mod source_media_flow;
 mod state;
 #[cfg(test)]
@@ -401,6 +404,7 @@ impl FastForwardApplication {
         if let Some(approvals_file) = crate::plugin_trust::ApprovalStore::default_file() {
             application.keep_plugin_approvals_in(approvals_file);
         }
+        application.find_plugins_the_way_a_person_uses_the_editor();
         application.use_the_default_speakers();
         application.environment.export_adapter = creation_context
             .wgpu_render_state
@@ -543,6 +547,7 @@ impl FastForwardApplication {
                 global_settings: Settings::DEFAULT,
                 global_settings_path: None,
                 plugin_trust: plugin_flow::PluginTrust::default(),
+                plugin_search: sound_plugins_flow::PluginSearch::default(),
                 wake_up,
             },
         }
@@ -566,6 +571,7 @@ impl FastForwardApplication {
         self.go_back_to_the_old_drawing_if_the_engine_has_stopped();
         self.say_what_the_picture_engine_has_done_and_gone_on_after();
         self.collect_finished_background_work();
+        self.take_what_the_plugin_scan_found();
         self.forget_what_is_gone_from_the_project();
         self.synchronise_the_preview_with_the_project();
 
@@ -758,6 +764,7 @@ impl FastForwardApplication {
             self.environment.global_settings,
             &mut commands,
         );
+        self.show_the_window_of_sound_plugins(&context, &mut commands);
         colour_of_a_file_window::show(
             &context,
             &mut self.interface.colours_of_a_file_window_open_for,

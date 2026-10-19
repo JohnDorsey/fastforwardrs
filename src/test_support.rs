@@ -320,6 +320,49 @@ impl DeterministicRandomNumbers {
     }
 }
 
+/// Held by every test that puts plugins in the list of the installed ones (see `project::set_installed_plugins`), which is a list for the whole program: the tests that look at
+/// what is installed would otherwise see what the others put there. A test that holds it also clears the list when it begins.
+pub fn the_installed_plugins_to_myself() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    crate::project::set_installed_plugins(Vec::new());
+    guard
+}
+
+/// A value of a sound plugin for [`an_installed_sound_plugin`]: its id, what it begins as, and its range if it has one.
+pub type ValueOfAPlugin<'a> = (&'a str, f32, Option<(f32, f32)>);
+
+/// A sound plugin that is installed, as the scan makes one (see `plugin_scan::effects`): the key `key`, the version 1.0, a sound effect in the category `category` with these
+/// values, each a number that begins as the one given and has the range given, if one is; one audio input and one output; the library `library`.
+pub fn an_installed_sound_plugin(
+    key: &str,
+    category: &str,
+    values: &[ValueOfAPlugin<'_>],
+) -> crate::project::InstalledPlugin {
+    let mut descriptor = the_descriptor_of_an_effect_the_program_does_not_have(
+        key,
+        &values
+            .iter()
+            .map(|(id, default, _)| (*id, PropertyValue::Number(*default)))
+            .collect::<Vec<_>>(),
+    );
+    descriptor.domain = EffectDomain::Sound;
+    descriptor.changes_each_pixel_by_itself = false;
+    descriptor.category = Cow::Owned(category.to_owned());
+    for (parameter, (_, _, range)) in descriptor.parameters.to_mut().iter_mut().zip(values) {
+        parameter.range = *range;
+    }
+    crate::project::InstalledPlugin {
+        descriptor,
+        library: std::path::PathBuf::from(format!("/plugins/{}.so", key.replace(':', "_"))),
+        plugin_index: 0,
+        unique_id: 900,
+        audio_inputs: 1,
+        audio_outputs: 1,
+        value_ports: (0..values.len()).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

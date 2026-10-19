@@ -19,6 +19,7 @@ use std::sync::{Mutex, PoisonError};
 use super::built_in::{
     self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, LUT, OPACITY, PictureOperation, SATURATION,
 };
+use super::installed::{InstalledPlugin, installed_plugin_for, installed_plugins};
 use super::{EffectDescriptor, EffectDomain, ParameterDescriptor};
 use crate::colour_effects::ColourMatrix;
 use crate::project::animation::{PropertyValue, ValueKind};
@@ -70,8 +71,8 @@ impl EffectKind {
     ];
 
     /// The kind of effect that a snapshot of a descriptor, which a project file kept, says one is: the effect of the program that can stand in for
-    /// it (see [`EffectDescriptor::can_stand_in_for`]) if there is one, and otherwise a kind of effect of its own, which the program does not
-    /// have (it is *not installed*: see [`Self::is_installed`]). Nothing is lost either way: the descriptor is what says what the effect's
+    /// it (see [`EffectDescriptor::can_stand_in_for`]) if there is one, or a plugin that is installed and can, and otherwise a kind of effect of its own, which the program
+    /// does not have (it is *not installed*: see [`Self::is_installed`]). Nothing is lost either way: the descriptor is what says what the effect's
     /// values are. The error says what is wrong with a descriptor that cannot be used.
     pub fn from_snapshot(snapshot: EffectDescriptor) -> Result<Self, String> {
         if let Some(problem) = snapshot.problem() {
@@ -82,6 +83,9 @@ impl EffectKind {
             .find(|own| own.descriptor().can_stand_in_for(&snapshot))
         {
             return Ok(own);
+        }
+        if let Some(plugin) = installed_plugin_for(&snapshot) {
+            return Ok(Self(&plugin.descriptor));
         }
         let mut brought = BROUGHT_BY_FILES.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(already) = brought.iter().find(|already| ***already == snapshot) {
@@ -126,10 +130,31 @@ impl EffectKind {
         self.0.domain
     }
 
-    /// Whether the program has this effect in itself, so that it does what it says. An effect that a file brought and that the program does
-    /// not have is *not installed*: it is kept, with its values and keyframes, and does nothing to a picture.
+    /// Whether the program has this effect in itself, or a plugin that is installed now can stand in for it, so that it does what it says. An effect that a file brought and that
+    /// the program does not have is *not installed*: it is kept, with its values and keyframes, and does nothing to a picture or a sound. (This can change while the program
+    /// runs: the plugins are found in the background.)
     pub fn is_installed(self) -> bool {
-        Self::BUILT_IN.contains(&self)
+        Self::BUILT_IN.contains(&self) || self.installed_plugin().is_some()
+    }
+
+    /// The plugin that is installed now and does what this effect says, if this is the type of effect of a plugin.
+    pub fn installed_plugin(self) -> Option<&'static InstalledPlugin> {
+        installed_plugin_for(self.0)
+    }
+
+    /// The kinds of effect that are plugins and are installed now, in the order of the folders they were found in.
+    pub fn installed_plugin_kinds() -> Vec<EffectKind> {
+        installed_plugins()
+            .into_iter()
+            .map(|plugin| Self(&plugin.descriptor))
+            .collect()
+    }
+
+    /// The effects that a thing can be offered: those the program has in itself, then the plugins that are installed now.
+    pub fn offered() -> Vec<EffectKind> {
+        let mut kinds = Self::BUILT_IN.to_vec();
+        kinds.extend(Self::installed_plugin_kinds());
+        kinds
     }
 
     /// The values that the effect has, in the order they are kept and shown in.
@@ -162,11 +187,11 @@ impl EffectKind {
     }
 
     /// Whether a clip of this kind can have the effect: a picture effect can be on what is seen (a video, a picture, a text object), and a
-    /// sound effect on a sound.
+    /// sound effect on what is heard (a sound, **and a video, which has a soundtrack**: it was only a sound until phase 7).
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self.0.domain {
             EffectDomain::Picture => matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text),
-            EffectDomain::Sound => kind == ClipKind::Audio,
+            EffectDomain::Sound => matches!(kind, ClipKind::Audio | ClipKind::Video),
         }
     }
 

@@ -63,6 +63,11 @@ pub struct SoundClipToExport {
     /// How many frames of the timeline the clip lasts, which is how long its sound is made.
     pub timeline_frame_count: u64,
     pub loudness: LoudnessToExport,
+    /// The frame of the timeline at which this stretch of the clip is first heard.
+    pub first_timeline_frame: u64,
+    /// The sound effects that are done to the sound of the clip before its loudness is, one after another, with their values and keyframes (whose frames are frames of the
+    /// timeline). **The filter graph of ffmpeg does not do them** (it cannot); the sound engine does.
+    pub effects: Vec<crate::composition::LayerEffect>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

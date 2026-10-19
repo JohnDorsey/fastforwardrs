@@ -32,6 +32,8 @@ fn clip_of_the_long_file(frames: u64) -> SoundItemToExport {
         speed_factor: SpeedFactor::new(1).unwrap(),
         timeline_frame_count: frames,
         loudness: LoudnessToExport::Constant(0.5),
+        first_timeline_frame: 0,
+        effects: Vec::new(),
     })
 }
 

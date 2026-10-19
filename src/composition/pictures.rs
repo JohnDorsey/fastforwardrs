@@ -360,7 +360,11 @@ impl Candidate<'_> {
 
 /// An effect that is applied to a clip, as a layer has it: with the keyframes of its values. (The values of an effect of a clip or of a track are
 /// animated by that clip's or track's keyframes; those of the effect of a group are not animated.)
-fn layer_effect_of(project: &Project, animations: &ResolvedAnimations, applied: &AppliedEffect<'_>) -> LayerEffect {
+pub(crate) fn layer_effect_of(
+    project: &Project,
+    animations: &ResolvedAnimations,
+    applied: &AppliedEffect<'_>,
+) -> LayerEffect {
     let kind = applied.effect.kind();
     let animation = match applied.owner {
         Member::Clip(clip) => Some(AnimationTarget::Clip(clip)),

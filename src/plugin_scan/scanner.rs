@@ -13,7 +13,7 @@ use thiserror::Error;
 use super::cache::{CachedOutcome, FileFingerprint, ScanCache};
 use super::child::{SCAN_TIME_LIMIT, scan_in_a_program};
 use super::failure::ScanFailure;
-use super::folders::libraries_in;
+use super::folders::{dependency_search_folders, libraries_in, library_search_variable};
 use ladspa_host::LibraryScan;
 
 /// What the scan of a library came to.
@@ -75,6 +75,9 @@ pub struct PluginScanner {
     time_limit: Duration,
     cache: ScanCache,
     environment: Vec<(String, String)>,
+    /// The folders a person said have the libraries that plugin libraries need, and whether the parent folders of a plugin library are looked in too.
+    dependency_folders: Vec<PathBuf>,
+    search_parent_folders: bool,
 }
 
 impl PluginScanner {
@@ -85,7 +88,10 @@ impl PluginScanner {
             time_limit: SCAN_TIME_LIMIT,
             cache,
             environment: Vec::new(),
+            dependency_folders: Vec::new(),
+            search_parent_folders: false,
         }
+        .looking_for_dependencies_in(Vec::new(), false)
     }
 
     /// The same, with another time limit for the scan of one library (for the tests, which do not want to wait five seconds).
@@ -93,6 +99,45 @@ impl PluginScanner {
     pub fn with_time_limit(mut self, time_limit: Duration) -> Self {
         self.time_limit = time_limit;
         self
+    }
+
+    /// The same, with these folders to look in for the libraries that a plugin library needs (a plugin library that needs one that is in none of them, or beside it, fails
+    /// to load), and with `search_parent_folders` the folders above the plugin library too, after them. The scans that failed for want of a library are not believed any more
+    /// if this is not what it was when they were made.
+    #[must_use]
+    pub fn looking_for_dependencies_in(mut self, folders: Vec<PathBuf>, search_parent_folders: bool) -> Self {
+        let signature = format!(
+            "{}|parents={search_parent_folders}",
+            folders
+                .iter()
+                .map(|folder| folder.display().to_string())
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+        self.cache.set_search_signature(&signature);
+        self.dependency_folders = folders;
+        self.search_parent_folders = search_parent_folders;
+        self
+    }
+
+    /// The environment variables the scan program is started with for `library`: those that were asked for, and the variable that lists where libraries are looked for with
+    /// the folders to look in put before what it has already.
+    pub(super) fn environment_for(&self, library: &Path) -> Vec<(String, String)> {
+        let mut environment = self.environment.clone();
+        let folders = dependency_search_folders(library, &self.dependency_folders, self.search_parent_folders);
+        if !folders.is_empty() {
+            let variable = library_search_variable();
+            let existing = std::env::var_os(variable).map(|value| std::env::split_paths(&value).collect::<Vec<_>>());
+            let all = folders.into_iter().chain(existing.into_iter().flatten());
+            if let Some(value) = std::env::join_paths(all)
+                .ok()
+                .and_then(|value| value.into_string().ok())
+            {
+                environment.retain(|(name, _)| name != variable);
+                environment.push((variable.to_owned(), value));
+            }
+        }
+        environment
     }
 
     /// The same, with an environment variable that the scan program is started with, besides those of the editor. (For the tests: the test plugins are asked to misbehave
@@ -126,12 +171,13 @@ impl PluginScanner {
                 from_cache: true,
             });
         }
-        let outcome = scan_in_a_program(&self.program, path, self.time_limit, &self.environment).map_err(|error| {
-            ScannerProblem::CouldNotRunTheScanner {
-                program: self.program.clone(),
-                error,
-            }
-        })?;
+        let outcome =
+            scan_in_a_program(&self.program, path, self.time_limit, &self.environment_for(path)).map_err(|error| {
+                ScannerProblem::CouldNotRunTheScanner {
+                    program: self.program.clone(),
+                    error,
+                }
+            })?;
         self.cache.record(path, fingerprint, outcome.clone().into());
         Ok(LibraryReport {
             path: path.to_owned(),

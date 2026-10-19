@@ -56,6 +56,45 @@ pub fn folders_to_scan(added_by_a_person: &[PathBuf], ladspa_path: Option<&OsStr
     folders
 }
 
+/// Where the system's loader looks for the libraries that a library needs, besides the folder of the library itself, besides the system's own folders: the name of the
+/// variable of the environment that lists them. (`PATH` on Windows, `LD_LIBRARY_PATH` on Linux, `DYLD_FALLBACK_LIBRARY_PATH` on macOS.)
+pub fn library_search_variable() -> &'static str {
+    if cfg!(windows) {
+        "PATH"
+    } else if cfg!(target_os = "macos") {
+        "DYLD_FALLBACK_LIBRARY_PATH"
+    } else {
+        "LD_LIBRARY_PATH"
+    }
+}
+
+/// The folders that the libraries a plugin library needs are looked for in, besides its own folder (which the loader looks in first): `extra` (the folders a person said have
+/// them), and then, if `parent_folders` says so, the folder the library's folder is in, and the one that is in, and so on up to the top, nearest first. (LMMS keeps `libfftw3f-3.dll` two
+/// folders above its LADSPA plugins.) A folder that is not there is left out, and a folder is in the list once.
+pub fn dependency_search_folders(library: &Path, extra: &[PathBuf], parent_folders: bool) -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = Vec::new();
+    let mut add = |folder: &Path| {
+        if !folder.as_os_str().is_empty() && folder.is_dir() && !folders.iter().any(|already| already == folder) {
+            folders.push(folder.to_owned());
+        }
+    };
+    for folder in extra {
+        add(folder);
+    }
+    if parent_folders {
+        // (The first parent of the file is its own folder, which is looked in anyway.)
+        // (Not the top of the file system: a folder that every program can write to is no place to find libraries in.)
+        for ancestor in library
+            .ancestors()
+            .skip(2)
+            .filter(|ancestor| ancestor.parent().is_some())
+        {
+            add(ancestor);
+        }
+    }
+    folders
+}
+
 /// The files in `folder` that are libraries of this system (by their endings), in the order of their names (without regard to case). Only the folder itself is looked in, as `LADSPA_PATH` is. A folder
 /// that is not there has none.
 pub fn libraries_in(folder: &Path) -> io::Result<Vec<PathBuf>> {

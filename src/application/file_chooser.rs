@@ -40,6 +40,9 @@ pub trait FileChooser {
 
     /// Asks where to save a file, which need not exist yet. `None` if the person chose nowhere.
     fn choose_where_to_save(&self, question: &FileQuestion<'_>) -> Option<PathBuf>;
+
+    /// Asks which existing folder to use. `None` if the person chose none.
+    fn choose_a_folder(&self, question: &FileQuestion<'_>) -> Option<PathBuf>;
 }
 
 /// Asks with the file dialog of the operating system.
@@ -69,6 +72,10 @@ impl FileChooser for NativeFileChooser {
     fn choose_where_to_save(&self, question: &FileQuestion<'_>) -> Option<PathBuf> {
         Self::dialog_for(question).save_file()
     }
+
+    fn choose_a_folder(&self, question: &FileQuestion<'_>) -> Option<PathBuf> {
+        Self::dialog_for(question).pick_folder()
+    }
 }
 
 /// Fails at once when asked anything. What an editor that is not for a person to use (a test's)
@@ -81,6 +88,10 @@ impl FileChooser for RefusingFileChooser {
     }
 
     fn choose_where_to_save(&self, question: &FileQuestion<'_>) -> Option<PathBuf> {
+        refuse(question)
+    }
+
+    fn choose_a_folder(&self, question: &FileQuestion<'_>) -> Option<PathBuf> {
         refuse(question)
     }
 }
@@ -175,6 +186,10 @@ mod scripted {
 
         fn choose_where_to_save(&self, question: &FileQuestion<'_>) -> Option<PathBuf> {
             self.answer(true, question)
+        }
+
+        fn choose_a_folder(&self, question: &FileQuestion<'_>) -> Option<PathBuf> {
+            self.answer(false, question)
         }
     }
 }

@@ -593,3 +593,90 @@ fn a_value_that_a_snapshot_does_not_name_or_label_is_named_by_its_id_and_labelle
         ]
     );
 }
+
+// --- an effect that is a sound plugin (phase 7, piece 7.5) ---
+
+#[test]
+fn a_sound_plugin_on_a_video_with_keyframes_is_written_with_its_snapshot_read_back_whole_and_installed_when_the_plugin_is()
+ {
+    use crate::project::{AnimationTarget, EffectKind, set_installed_plugins};
+    use crate::test_support::{
+        an_installed_sound_plugin, make_a_keyframe, put_an_effect_on, the_installed_plugins_to_myself,
+    };
+
+    let _alone = the_installed_plugins_to_myself();
+    let plugin = an_installed_sound_plugin(
+        "ladspa:tap_reverb:tap_reverb",
+        "Tom Szilagyi",
+        &[("decay_time", 2500.0, Some((0.0, 10_000.0))), ("dry_level", -2.0, None)],
+    );
+    set_installed_plugins(vec![plugin.clone()]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let instance = put_an_effect_on(
+        &mut project,
+        video,
+        kind,
+        &[PropertyValue::Number(1200.0), PropertyValue::Number(-6.0)],
+    );
+    let decay = PropertyId::effect_value(kind, instance, 0);
+    make_a_keyframe(&mut project, video, decay, 10, PropertyValue::Number(100.0));
+    make_a_keyframe(&mut project, video, decay, 50, PropertyValue::Number(900.0));
+
+    let text = saved(&project);
+    let file = as_json(&text);
+    let snapshot = file["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|snapshot| snapshot["key"] == "ladspa:tap_reverb:tap_reverb")
+        .expect("the type of effect has its snapshot in the file");
+    assert_eq!(snapshot["domain"], "sound");
+    assert_eq!(snapshot["category"], "Tom Szilagyi");
+    assert!(
+        snapshot["changes_each_pixel_by_itself"] != true,
+        "a sound effect changes no pixel"
+    );
+    assert_eq!(snapshot["params"][0]["id"], "decay_time");
+    assert_eq!(snapshot["params"][0]["range"], json!([0.0, 10_000.0]));
+
+    // The plugin is not here when the file is read: the effect is kept whole, with its keyframes, and the file is what it was.
+    set_installed_plugins(Vec::new());
+    let loaded = project_from_json_text(&text).unwrap();
+    let there = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let chain = loaded.effects_of(there).unwrap();
+    let effect = chain.instance(instance).unwrap();
+    assert_eq!(effect.kind().key(), "ladspa:tap_reverb:tap_reverb");
+    assert!(!effect.kind().is_installed());
+    assert_eq!(
+        effect.values(),
+        [PropertyValue::Number(1200.0), PropertyValue::Number(-6.0)]
+    );
+    let decay_there = effect.property_with_id("decay_time").unwrap();
+    assert_eq!(
+        loaded.property_value_at(there, decay_there, TimelineFrameIndex::new(30)),
+        Some(PropertyValue::Number(500.0)),
+        "the keyframes are the project's"
+    );
+    assert_eq!(as_json(&saved(&loaded)), file, "nothing is lost, and nothing is added");
+
+    // The plugin is found: the same effect works.
+    set_installed_plugins(vec![plugin]);
+    assert!(effect.kind().is_installed());
+    let loaded_with_the_plugin = project_from_json_text(&text).unwrap();
+    let again = loaded_with_the_plugin
+        .effects_of(AnimationTarget::Clip(
+            loaded_with_the_plugin.tracks()[2].entries()[0].id(),
+        ))
+        .unwrap()
+        .instance(instance)
+        .unwrap()
+        .kind();
+    assert!(again.is_installed());
+    assert_eq!(
+        again,
+        EffectKind::installed_plugin_kinds()[0],
+        "the plugin itself is the kind when it is found first"
+    );
+}

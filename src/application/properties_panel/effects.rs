@@ -19,7 +19,7 @@ use super::controls::labelled_row;
 use crate::application::commands::Command;
 use crate::project::{
     AnimationTarget, Effect, EffectKind, GroupId, Member, ParameterControl, Project, PropertyId, PropertyValue,
-    Resource,
+    Resource, ValueScale,
 };
 
 /// What the plus button that puts an effect on is called, which it says when the pointer rests on it, and to screen readers.
@@ -347,12 +347,22 @@ fn control_for(
                     if let Some(decimals) = parameter.decimals {
                         slider = slider.max_decimals(usize::from(decimals));
                     }
+                    // (Equal steps are equal ratios, for what spans orders of magnitude, such as a frequency: the descriptor only says so for a range that is above zero.)
+                    if parameter.scale == ValueScale::Logarithmic {
+                        slider = slider.logarithmic(true);
+                    }
+                    if parameter.control == ParameterControl::Integer {
+                        slider = slider.integer();
+                    }
                     ui.add(slider).labelled_by(label.id).changed()
                 }
                 None => {
                     let mut drag = DragValue::new(&mut number).suffix(&*parameter.unit);
                     if let Some(decimals) = parameter.decimals {
                         drag = drag.max_decimals(usize::from(decimals));
+                    }
+                    if parameter.control == ParameterControl::Integer {
+                        drag = drag.fixed_decimals(0).speed(1.0);
                     }
                     ui.add(drag).labelled_by(label.id).changed()
                 }

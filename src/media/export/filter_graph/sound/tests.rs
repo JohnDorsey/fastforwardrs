@@ -20,6 +20,8 @@ fn clip(first: u64, end: u64, factor: u32) -> SoundClipToExport {
         speed_factor: speed(factor),
         timeline_frame_count: (end - first).div_ceil(u64::from(factor)),
         loudness: LoudnessToExport::UNCHANGED,
+        first_timeline_frame: 0,
+        effects: Vec::new(),
     }
 }
 

@@ -28,6 +28,8 @@ fn clip(frames: u64, loudness: LoudnessToExport) -> SoundItemToExport {
         speed_factor: SpeedFactor::new(1).unwrap(),
         timeline_frame_count: frames,
         loudness,
+        first_timeline_frame: 0,
+        effects: Vec::new(),
     })
 }
 
