@@ -77,6 +77,7 @@ fn middle_of(window: &Window, label: &str) -> egui::Pos2 {
 
 #[test]
 fn a_clip_that_is_in_a_tag_has_the_badge_of_the_tag_in_its_chain_with_the_effects_in_the_order_they_are_applied_in() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
 
     assert_eq!(the_chain_of(&window, Member::Clip(clip)), ["tag Tag 1", "hue shift"]);
@@ -93,6 +94,7 @@ fn a_clip_that_is_in_a_tag_has_the_badge_of_the_tag_in_its_chain_with_the_effect
 
 #[test]
 fn the_badge_of_a_tag_is_in_the_colour_of_the_tag_and_has_the_dots_that_say_it_can_be_taken_hold_of() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (window, _, tag) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let colour = colour_of(&window, tag);
     let colour = egui::Color32::from_rgb(colour.red, colour.green, colour.blue);
@@ -122,6 +124,7 @@ fn the_badge_of_a_tag_is_in_the_colour_of_the_tag_and_has_the_dots_that_say_it_c
 
 #[test]
 fn a_click_on_a_badge_selects_nothing_and_a_double_click_selects_what_it_stands_for() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, tag) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let badge = middle_of(&window, "Tag: Tag 1");
 
@@ -141,6 +144,7 @@ fn a_click_on_a_badge_selects_nothing_and_a_double_click_selects_what_it_stands_
 
 #[test]
 fn dragging_a_badge_down_past_an_effect_puts_it_after_the_effect_as_one_step_of_the_history() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let owner = Member::Clip(clip);
     let from = middle_of(&window, "Tag: Tag 1");
@@ -170,6 +174,7 @@ fn dragging_a_badge_down_past_an_effect_puts_it_after_the_effect_as_one_step_of_
 
 #[test]
 fn dragging_the_box_of_an_effect_by_its_heading_puts_it_before_a_badge_it_is_dragged_above() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let owner = Member::Clip(clip);
     let from = middle_of(&window, HUE_SHIFT);
@@ -182,6 +187,7 @@ fn dragging_the_box_of_an_effect_by_its_heading_puts_it_before_a_badge_it_is_dra
 
 #[test]
 fn a_row_that_is_let_go_of_where_it_was_changes_nothing_and_is_not_an_edit() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let owner = Member::Clip(clip);
     let badge = middle_of(&window, "Tag: Tag 1");
@@ -208,6 +214,7 @@ fn lines_that_show_where_a_row_will_go(window: &Window) -> Vec<f32> {
 
 #[test]
 fn the_line_that_shows_where_a_row_will_go_is_in_the_room_between_the_rows_it_goes_between() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let effect = middle_of(&window, HUE_SHIFT);
     let badge = middle_of(&window, "Tag: Tag 1");
@@ -229,6 +236,7 @@ fn the_line_that_shows_where_a_row_will_go_is_in_the_room_between_the_rows_it_go
 
 #[test]
 fn while_a_row_is_dragged_it_is_dimmed_and_a_line_shows_where_it_will_go_and_neither_is_there_after() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let from = middle_of(&window, "Tag: Tag 1");
     let below_the_effect = middle_of(&window, HUE_SHIFT) + egui::vec2(0.0, 60.0);
@@ -275,6 +283,7 @@ fn while_a_row_is_dragged_it_is_dimmed_and_a_line_shows_where_it_will_go_and_nei
 
 #[test]
 fn a_double_click_soon_after_a_click_somewhere_else_still_selects_what_the_badge_stands_for() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     // (egui counts the second click of such a double click as a triple click, because of the click before it, and a badge must not care.)
     let (mut window, _, tag) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let somewhere_else = middle_of(&window, HUE_SHIFT);
@@ -293,6 +302,7 @@ fn a_double_click_soon_after_a_click_somewhere_else_still_selects_what_the_badge
 
 #[test]
 fn a_double_click_soon_after_a_click_somewhere_else_still_selects_a_member_of_a_group_from_its_list() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, tag, clips) = super::group_box_tests::window_with_a_tag_of_the_first_two_clips_selected();
     let somewhere_else = middle_of(&window, "Tag");
     window.click(somewhere_else);
@@ -330,6 +340,7 @@ const THE_TRACK_BADGE: &str = "Track: track 0 (1 effect)";
 
 #[test]
 fn a_clip_on_a_track_that_has_effects_has_a_grey_badge_that_names_the_track_and_says_how_many_effects_apply() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (window, clip, _) = window_with_a_track_that_has_an_effect_and_a_clip_of_it_selected();
 
     assert!(is_shown(&window, THE_TRACK_BADGE));
@@ -348,6 +359,7 @@ fn a_clip_on_a_track_that_has_effects_has_a_grey_badge_that_names_the_track_and_
 
 #[test]
 fn a_clip_on_a_track_that_has_no_effects_has_no_badge_of_its_track_and_a_track_has_none_of_itself() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let window = window_with_three_clips();
     let clips = the_three_clips(&window);
     let mut window = window;
@@ -368,6 +380,7 @@ fn a_clip_on_a_track_that_has_no_effects_has_no_badge_of_its_track_and_a_track_h
 
 #[test]
 fn a_click_on_the_badge_of_the_track_selects_nothing_and_a_double_click_selects_the_track() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, track) = window_with_a_track_that_has_an_effect_and_a_clip_of_it_selected();
     let badge = middle_of(&window, THE_TRACK_BADGE);
 
@@ -381,6 +394,7 @@ fn a_click_on_the_badge_of_the_track_selects_nothing_and_a_double_click_selects_
 
 #[test]
 fn the_badge_of_the_track_can_be_dragged_above_the_effects_of_the_clip_and_is_kept_there() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_track_that_has_an_effect_and_a_clip_of_it_selected();
     window
         .application_mut()
@@ -431,6 +445,7 @@ const THE_CLIP_GROUP_BADGE: &str = "Clip group: Clip group 1";
 
 #[test]
 fn the_clip_group_a_clip_is_in_has_its_badge_last_in_the_chain_with_no_dots_because_it_is_not_moved() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, group) = window_with_a_clip_that_is_in_a_clip_group();
     window
         .application_mut()
@@ -472,6 +487,7 @@ fn the_clip_group_a_clip_is_in_has_its_badge_last_in_the_chain_with_no_dots_beca
 
 #[test]
 fn the_badge_of_the_clip_group_cannot_be_dragged_and_nothing_can_be_dragged_past_it() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_clip_group();
     window
         .application_mut()
@@ -506,6 +522,7 @@ fn the_badge_of_the_clip_group_cannot_be_dragged_and_nothing_can_be_dragged_past
 
 #[test]
 fn a_double_click_on_the_badge_of_the_clip_group_selects_the_clip_group() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, group) = window_with_a_clip_that_is_in_a_clip_group();
     let badge = middle_of(&window, THE_CLIP_GROUP_BADGE);
 
@@ -519,6 +536,7 @@ fn a_double_click_on_the_badge_of_the_clip_group_selects_the_clip_group() {
 
 #[test]
 fn a_track_that_is_in_a_track_group_has_the_badge_of_the_group_last_in_its_chain() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let mut window = Window::showing(project_of_tracks(&[&[(20, 30)], &[(20, 30)]]));
     let tracks: Vec<TrackId> = window
         .application()
@@ -584,6 +602,7 @@ fn put_the_hue_shift_on_the_selected_group_with_the_plus_button(window: &mut Win
 
 #[test]
 fn a_group_has_a_plus_button_that_puts_an_effect_on_it_with_a_box_of_its_own_and_a_value_that_is_not_animated() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, tag, _) = super::group_box_tests::window_with_a_tag_of_the_first_two_clips_selected();
     assert!(is_shown(&window, "Add an effect"));
     assert!(!is_shown(&window, "Turn"), "no effect, no controls");
@@ -622,6 +641,7 @@ fn a_group_has_a_plus_button_that_puts_an_effect_on_it_with_a_box_of_its_own_and
 
 #[test]
 fn the_menu_of_the_box_of_an_effect_of_a_group_deletes_the_effect() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, tag, _) = super::group_box_tests::window_with_a_tag_of_the_first_two_clips_selected();
     put_the_hue_shift_on_the_selected_group_with_the_plus_button(&mut window);
     let heading = middle_of(&window, HUE_SHIFT);
@@ -636,6 +656,7 @@ fn the_menu_of_the_box_of_an_effect_of_a_group_deletes_the_effect() {
 
 #[test]
 fn a_clip_group_and_a_track_group_have_the_plus_button_too() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, group) = window_with_a_clip_that_is_in_a_clip_group();
     select_only(&mut window, SelectionItem::Group(group));
     put_the_hue_shift_on_the_selected_group_with_the_plus_button(&mut window);
@@ -656,6 +677,7 @@ fn a_clip_group_and_a_track_group_have_the_plus_button_too() {
 #[test]
 fn an_effect_of_a_group_is_dragged_by_its_heading_like_any_other_and_a_group_in_a_tag_has_the_badge_of_the_tag_in_its_chain()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, group) = window_with_a_clip_that_is_in_a_clip_group();
     let clips = the_three_clips(&window);
     let tag = window
@@ -703,6 +725,7 @@ fn tab_ever_stops_at_what_has(window: &mut Window, point: egui::Pos2) -> bool {
 #[test]
 fn the_tab_key_does_not_stop_at_a_badge_or_at_the_heading_of_the_box_of_an_effect_which_have_nothing_to_do_for_the_keyboard()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let track = window.application().project().tracks()[0].id();
     window
@@ -733,6 +756,7 @@ fn the_tab_key_does_not_stop_at_a_badge_or_at_the_heading_of_the_box_of_an_effec
 
 #[test]
 fn the_tab_key_does_not_stop_at_the_badge_of_a_clip_group_which_is_not_moved_either() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, _) = window_with_a_clip_that_is_in_a_clip_group();
     let badge = middle_of(&window, THE_CLIP_GROUP_BADGE);
 
@@ -741,6 +765,7 @@ fn the_tab_key_does_not_stop_at_the_badge_of_a_clip_group_which_is_not_moved_eit
 
 #[test]
 fn the_tab_key_does_not_stop_at_the_bar_of_the_box_of_a_group_either() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, _) = super::group_box_tests::window_with_a_tag_of_the_first_two_clips_selected();
     let on_the_bar = middle_of(&window, "Tag");
 
@@ -750,6 +775,7 @@ fn the_tab_key_does_not_stop_at_the_bar_of_the_box_of_a_group_either() {
 #[test]
 fn dragging_the_second_of_two_hue_shifts_above_the_first_puts_it_first_with_the_values_it_has_and_is_one_step_of_the_history()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, _) = window_with_a_clip_that_is_in_a_tag_and_has_an_effect();
     let target = AnimationTarget::Clip(clip);
     let second = window

@@ -91,6 +91,7 @@ fn the_effects(window: &Window, clip: ClipId) -> Vec<EffectKind> {
 #[test]
 fn the_menu_has_a_field_to_search_the_effects_the_effects_under_the_headings_of_their_categories_and_an_item_for_a_file()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
 
     open_the_menu(&mut window);
@@ -124,6 +125,7 @@ fn the_menu_has_a_field_to_search_the_effects_the_effects_under_the_headings_of_
 
 #[test]
 fn what_is_typed_in_the_search_field_narrows_the_menu_to_the_effects_that_match_by_name_description_or_category() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
     open_the_menu(&mut window);
 
@@ -143,6 +145,7 @@ fn what_is_typed_in_the_search_field_narrows_the_menu_to_the_effects_that_match_
 
 #[test]
 fn the_search_is_by_the_description_and_the_category_and_not_by_the_case_of_the_letters() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
     open_the_menu(&mut window);
 
@@ -154,6 +157,7 @@ fn the_search_is_by_the_description_and_the_category_and_not_by_the_case_of_the_
 
 #[test]
 fn what_nothing_matches_is_said_and_the_menu_has_no_effect_to_choose() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
     open_the_menu(&mut window);
 
@@ -167,6 +171,7 @@ fn what_nothing_matches_is_said_and_the_menu_has_no_effect_to_choose() {
 
 #[test]
 fn enter_adds_the_first_effect_that_matches_and_closes_the_menu() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     open_the_menu(&mut window);
 
@@ -180,6 +185,7 @@ fn enter_adds_the_first_effect_that_matches_and_closes_the_menu() {
 
 #[test]
 fn enter_with_nothing_that_matches_adds_nothing() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     open_the_menu(&mut window);
 
@@ -192,6 +198,7 @@ fn enter_with_nothing_that_matches_adds_nothing() {
 
 #[test]
 fn the_menu_opens_with_the_field_empty_whatever_was_typed_the_last_time() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
     open_the_menu(&mut window);
     type_in_the_search(&mut window, "blur");
@@ -205,6 +212,7 @@ fn the_menu_opens_with_the_field_empty_whatever_was_typed_the_last_time() {
 
 #[test]
 fn choosing_an_effect_with_the_pointer_still_adds_it() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     open_the_menu(&mut window);
 
@@ -216,6 +224,7 @@ fn choosing_an_effect_with_the_pointer_still_adds_it() {
 
 #[test]
 fn the_item_for_a_file_asks_for_one_and_a_menu_that_cannot_have_a_look_up_table_has_no_such_item() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
     let chooser = ScriptedFileChooser::default();
     chooser.will_answer(None);
@@ -264,6 +273,7 @@ fn value_of_the_look_up_table(window: &Window, clip: ClipId, slot: u8) -> Proper
 
 #[test]
 fn the_look_up_table_has_a_control_for_each_value_made_from_what_the_effect_says_of_it() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     put_a_look_up_table_on(&mut window, clip);
 
@@ -298,6 +308,7 @@ fn the_look_up_table_has_a_control_for_each_value_made_from_what_the_effect_says
 
 #[test]
 fn choosing_an_option_from_the_list_sets_the_value_to_the_id_of_the_option() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     put_a_look_up_table_on(&mut window, clip);
 
@@ -328,6 +339,7 @@ fn choosing_an_option_from_the_list_sets_the_value_to_the_id_of_the_option() {
 
 #[test]
 fn a_value_that_is_a_choice_has_no_buttons_of_keyframes_and_a_number_still_has() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     put_a_look_up_table_on(&mut window, clip);
 
@@ -350,6 +362,7 @@ fn a_value_that_is_a_choice_has_no_buttons_of_keyframes_and_a_number_still_has()
 
 #[test]
 fn the_button_of_the_table_asks_for_a_file_for_that_effect() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     put_a_look_up_table_on(&mut window, clip);
     let folder = tempfile::tempdir().unwrap();
@@ -373,6 +386,7 @@ fn the_button_of_the_table_asks_for_a_file_for_that_effect() {
 
 #[test]
 fn a_table_the_project_does_not_have_or_cannot_read_says_so_in_the_box_of_the_effect() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     put_a_look_up_table_on(&mut window, clip);
     let table = PropertyId::effect_value(EffectKind::LUT, EffectInstanceId::FIRST, 0);
@@ -425,6 +439,7 @@ fn a_table_the_project_does_not_have_or_cannot_read_says_so_in_the_box_of_the_ef
 
 #[test]
 fn duplicate_effect_in_the_menu_of_a_box_puts_a_copy_with_the_same_values_right_after_it() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     for kind in [EffectKind::HUE_SHIFT, EffectKind::EXPOSURE, EffectKind::SATURATION] {
         window.do_this(Command::AddEffect {
@@ -476,6 +491,7 @@ fn duplicate_effect_in_the_menu_of_a_box_puts_a_copy_with_the_same_values_right_
 
 #[test]
 fn a_copy_of_an_effect_is_a_step_of_the_history_and_has_no_keyframes_of_the_original() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: AnimationTarget::Clip(clip),
@@ -532,6 +548,7 @@ fn a_clip_with_all_the_effects_it_can_have() -> (Window, ClipId) {
 
 #[test]
 fn an_effect_that_is_added_to_a_thing_that_has_the_most_there_can_be_is_not_added_and_the_user_is_told() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = a_clip_with_all_the_effects_it_can_have();
 
     window.do_this(Command::AddEffect {
@@ -551,6 +568,7 @@ fn an_effect_that_is_added_to_a_thing_that_has_the_most_there_can_be_is_not_adde
 
 #[test]
 fn a_copy_of_an_effect_of_a_thing_that_has_the_most_there_can_be_is_not_made_and_the_user_is_told() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = a_clip_with_all_the_effects_it_can_have();
 
     window.do_this(Command::DuplicateEffect {

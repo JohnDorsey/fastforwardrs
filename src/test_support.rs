@@ -320,13 +320,58 @@ impl DeterministicRandomNumbers {
     }
 }
 
-/// Held by every test that puts plugins in the list of the installed ones (see `project::set_installed_plugins`), which is a list for the whole program: the tests that look at
-/// what is installed would otherwise see what the others put there. A test that holds it also clears the list when it begins.
-pub fn the_installed_plugins_to_myself() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+/// The list of the plugins that are installed (see `project::set_installed_plugins`) is a list for the whole program, and the tests run at the same time. **Tests that put
+/// plugins in it hold [`the_installed_plugins_to_myself`], tests whose menus or rules would be different with plugins in it hold [`the_installed_plugins_in_peace`]:** any
+/// number of the second kind run together, and never with the first. (A CI run found the lack of this: a test that says a sound has no plus button, which is true only with
+/// no sound plugin installed, ran while another test had a plugin installed.)
+static THE_INSTALLED_PLUGINS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+thread_local! {
+    /// Whether this thread holds the list to itself, so that the windows it opens do not wait for themselves.
+    static HOLDS_THE_LIST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// What [`the_installed_plugins_to_myself`] gives: the list is empty while it is held, and is emptied again when it is let go of.
+pub struct TheInstalledPluginsToMyself {
+    _guard: std::sync::RwLockWriteGuard<'static, ()>,
+}
+
+impl Drop for TheInstalledPluginsToMyself {
+    fn drop(&mut self) {
+        crate::project::set_installed_plugins(Vec::new());
+        HOLDS_THE_LIST.with(|holds| holds.set(false));
+    }
+}
+
+/// What [`the_installed_plugins_in_peace`] gives (nothing, where the thread holds the list itself).
+pub struct TheInstalledPluginsInPeace {
+    _guard: Option<std::sync::RwLockReadGuard<'static, ()>>,
+}
+
+/// Held by every test that puts plugins in the list of the installed ones: the list is emptied when it is taken and when it is let go of, and no other test sees it in
+/// between.
+pub fn the_installed_plugins_to_myself() -> TheInstalledPluginsToMyself {
+    let guard = THE_INSTALLED_PLUGINS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     crate::project::set_installed_plugins(Vec::new());
-    guard
+    HOLDS_THE_LIST.with(|holds| holds.set(true));
+    TheInstalledPluginsToMyself { _guard: guard }
+}
+
+/// Held by every test whose menus or rules would be different if a plugin were installed (a sound has an effect to be given only then): no test that installs one runs while
+/// it is held, and the list is empty.
+pub fn the_installed_plugins_in_peace() -> TheInstalledPluginsInPeace {
+    if HOLDS_THE_LIST.with(std::cell::Cell::get) {
+        return TheInstalledPluginsInPeace { _guard: None };
+    }
+    TheInstalledPluginsInPeace {
+        _guard: Some(
+            THE_INSTALLED_PLUGINS
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ),
+    }
 }
 
 /// The plugins of the library written for the tests (`crates/ladspa-test-plugins`) that can be effects, as the scan makes them (the library is scanned in this process, which
@@ -382,6 +427,43 @@ pub fn an_installed_sound_plugin(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_in_peace_never_sees_a_plugin_that_a_test_installed_not_while_it_runs_and_not_after() {
+        let (tell_main, installed) = std::sync::mpsc::channel();
+        let installer = std::thread::spawn(move || {
+            let _alone = the_installed_plugins_to_myself();
+            crate::project::set_installed_plugins(vec![an_installed_sound_plugin("ladspa:peace:peace", "Peace", &[])]);
+            tell_main.send(()).unwrap();
+            // (Long enough for the other thread to be waiting.)
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert_eq!(
+                crate::project::EffectKind::installed_plugin_kinds().len(),
+                1,
+                "it still has it"
+            );
+        });
+        installed.recv().unwrap();
+
+        let _in_peace = the_installed_plugins_in_peace();
+
+        assert!(
+            crate::project::EffectKind::installed_plugin_kinds().is_empty(),
+            "the plugin was taken out when its test was done, and not seen before"
+        );
+        installer.join().unwrap();
+    }
+
+    #[test]
+    fn a_test_that_holds_the_list_can_open_what_wants_it_in_peace_and_many_in_peace_run_together() {
+        {
+            let _alone = the_installed_plugins_to_myself();
+            let _and_in_peace = the_installed_plugins_in_peace();
+        }
+        let first = the_installed_plugins_in_peace();
+        let second = the_installed_plugins_in_peace();
+        drop((first, second));
+    }
 
     #[test]
     fn the_same_seed_gives_the_same_sequence_and_different_seeds_differ() {

@@ -74,6 +74,7 @@ fn the_message(window: &Window) -> Option<(String, String)> {
 
 #[test]
 fn adding_an_effect_from_a_file_asks_for_a_cube_file_and_puts_a_look_up_table_with_the_table_embedded_on_the_clip() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -114,6 +115,7 @@ fn adding_an_effect_from_a_file_asks_for_a_cube_file_and_puts_a_look_up_table_wi
 
 #[test]
 fn undoing_it_takes_the_effect_and_the_table_back_and_redoing_brings_both_back_in_one_step() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -130,6 +132,7 @@ fn undoing_it_takes_the_effect_and_the_table_back_and_redoing_brings_both_back_i
 
 #[test]
 fn a_file_that_the_person_does_not_choose_changes_nothing() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip, chooser) = window_that_asks();
     chooser.will_answer(None);
 
@@ -143,6 +146,7 @@ fn a_file_that_the_person_does_not_choose_changes_nothing() {
 
 #[test]
 fn the_setting_to_link_keeps_the_table_where_it_is() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -157,6 +161,7 @@ fn the_setting_to_link_keeps_the_table_where_it_is() {
 
 #[test]
 fn the_setting_of_the_project_beats_the_global_one() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -181,6 +186,7 @@ fn the_setting_of_the_project_beats_the_global_one() {
 
 #[test]
 fn the_setting_to_ask_asks_and_each_answer_does_what_it_says() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     for (button, embedded) in [(HOW_TO_KEEP_A_TABLE_EMBED, true), (HOW_TO_KEEP_A_TABLE_LINK, false)] {
         let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
@@ -211,6 +217,7 @@ fn the_setting_to_ask_asks_and_each_answer_does_what_it_says() {
 
 #[test]
 fn cancelling_the_question_about_how_to_keep_the_table_changes_nothing() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -227,6 +234,7 @@ fn cancelling_the_question_about_how_to_keep_the_table_changes_nothing() {
 
 #[test]
 fn a_project_that_is_plain_json_links_the_table_and_says_so_once() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let first = a_table_in(folder.path(), "first.cube", A_TABLE);
     let second = a_table_in(
@@ -271,6 +279,7 @@ fn a_project_that_is_plain_json_links_the_table_and_says_so_once() {
 
 #[test]
 fn a_project_that_is_an_archive_embeds_the_table() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -292,6 +301,7 @@ fn a_project_that_is_an_archive_embeds_the_table() {
 
 #[test]
 fn when_asked_in_a_project_that_is_plain_json_only_linking_is_offered() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -310,6 +320,7 @@ fn when_asked_in_a_project_that_is_plain_json_only_linking_is_offered() {
 
 #[test]
 fn a_file_that_is_not_a_table_is_refused_with_the_line_that_is_wrong_and_the_project_is_left_as_it_was() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let (mut window, clip, chooser) = window_that_asks();
     for (name, text, wanted) in [
@@ -356,6 +367,7 @@ fn a_file_that_is_not_a_table_is_refused_with_the_line_that_is_wrong_and_the_pro
 
 #[test]
 fn a_file_that_is_missing_or_far_too_big_is_refused_and_says_why() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let (mut window, clip, chooser) = window_that_asks();
     add_from_a_file(&mut window, &chooser, clip, &folder.path().join("gone.cube"));
@@ -375,6 +387,7 @@ fn a_file_that_is_missing_or_far_too_big_is_refused_and_says_why() {
 
 #[test]
 fn the_same_table_added_twice_is_one_resource_with_two_effects_using_it() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let copy = a_table_in(folder.path(), "copy of grade.cube", A_TABLE);
@@ -395,6 +408,7 @@ fn the_same_table_added_twice_is_one_resource_with_two_effects_using_it() {
 
 #[test]
 fn choosing_a_file_for_the_table_of_an_effect_that_is_on_changes_its_table_and_nothing_else() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let first = a_table_in(folder.path(), "first.cube", A_TABLE);
     let second = a_table_in(
@@ -433,6 +447,7 @@ fn choosing_a_file_for_the_table_of_an_effect_that_is_on_changes_its_table_and_n
 
 #[test]
 fn a_table_cannot_be_chosen_for_an_effect_that_is_not_a_look_up_table_or_is_not_there() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();
@@ -456,6 +471,7 @@ fn a_table_cannot_be_chosen_for_an_effect_that_is_not_a_look_up_table_or_is_not_
 
 #[test]
 fn a_tag_and_a_track_can_have_a_look_up_table_effect_added_from_a_file() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let folder = tempfile::tempdir().unwrap();
     let table = a_table_in(folder.path(), "grade.cube", A_TABLE);
     let (mut window, clip, chooser) = window_that_asks();

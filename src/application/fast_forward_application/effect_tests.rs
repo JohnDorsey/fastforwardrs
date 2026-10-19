@@ -88,6 +88,7 @@ fn the_stopwatch_of_the_hue_shift() -> String {
 
 #[test]
 fn what_is_seen_has_a_plus_button_that_adds_an_effect_and_a_sound_has_none() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (window, _) = window_with_the_video_selected();
     assert!(is_shown(&window, ADD_EFFECT_LABEL), "a video");
 
@@ -117,6 +118,7 @@ fn what_is_seen_has_a_plus_button_that_adds_an_effect_and_a_sound_has_none() {
 
 #[test]
 fn a_track_has_a_plus_button_and_so_does_nothing_that_is_not_selected_or_a_keyframe_crate() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_a_video();
     assert!(!is_shown(&window, ADD_EFFECT_LABEL), "nothing is selected");
 
@@ -144,6 +146,7 @@ fn a_track_has_a_plus_button_and_so_does_nothing_that_is_not_selected_or_a_keyfr
 
 #[test]
 fn the_menu_of_the_plus_button_has_each_effect_that_the_clip_can_have_and_choosing_one_puts_it_on() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     click_the_plus_button(&mut window);
     for kind in EffectKind::BUILT_IN {
@@ -169,6 +172,7 @@ fn the_menu_of_the_plus_button_has_each_effect_that_the_clip_can_have_and_choosi
 
 #[test]
 fn the_effect_that_is_put_on_has_a_box_with_its_name_and_the_controls_of_its_values_under_the_box_of_the_clip() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     assert!(!is_shown(&window, TURN), "no effect, no controls");
     let box_of_the_clip = window.rectangle_of("Video clip");
@@ -199,6 +203,7 @@ fn the_effect_that_is_put_on_has_a_box_with_its_name_and_the_controls_of_its_val
 
 #[test]
 fn the_plus_button_is_not_dimmed_by_an_effect_that_is_on_because_there_may_be_several_of_one_kind() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     assert!(
         !window
@@ -224,6 +229,7 @@ fn the_plus_button_is_not_dimmed_by_an_effect_that_is_on_because_there_may_be_se
 
 #[test]
 fn an_effect_is_put_on_a_track_from_the_panel_of_the_track_and_is_the_track_s_and_not_the_clip_s() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_a_video();
     window.select_the_track_at(0);
     let track = window.application().project().tracks()[0].id();
@@ -244,6 +250,7 @@ fn an_effect_is_put_on_a_track_from_the_panel_of_the_track_and_is_the_track_s_an
 
 #[test]
 fn the_slider_of_a_value_that_is_not_animated_changes_it_for_the_whole_clip_and_is_one_step_of_undo() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -269,6 +276,7 @@ fn the_slider_of_a_value_that_is_not_animated_changes_it_for_the_whole_clip_and_
 
 #[test]
 fn the_slider_can_be_given_more_than_half_a_turn_either_way_and_keeps_what_it_is_given() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -283,6 +291,7 @@ fn the_slider_can_be_given_more_than_half_a_turn_either_way_and_keeps_what_it_is
 
 #[test]
 fn the_stopwatch_of_the_value_starts_its_keyframes_and_the_slider_then_changes_the_keyframe_at_the_playhead() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -327,6 +336,7 @@ fn the_stopwatch_of_the_value_starts_its_keyframes_and_the_slider_then_changes_t
 
 #[test]
 fn the_slider_of_an_animated_value_shows_what_it_is_at_the_playhead_and_is_dimmed_beyond_the_clip() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     // The video lasts 100 frames and a sound in front of it 300, so that the playhead can be past the video.
     let mut window = Window::showing(project_with_a_video_and_a_sound(100, 10));
     let video = window.clip(1, 0);
@@ -374,6 +384,7 @@ fn the_slider_of_an_animated_value_shows_what_it_is_at_the_playhead_and_is_dimme
 
 #[test]
 fn the_menu_of_the_box_deletes_the_effect_with_its_keyframes_and_undo_brings_them_all_back() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -426,6 +437,7 @@ fn the_menu_of_the_box_deletes_the_effect_with_its_keyframes_and_undo_brings_the
 
 #[test]
 fn deleting_an_effect_leaves_what_was_selected_that_is_still_there_and_forgets_the_keyframes_that_went() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -479,6 +491,7 @@ fn deleting_an_effect_leaves_what_was_selected_that_is_still_there_and_forgets_t
 
 #[test]
 fn putting_an_effect_on_and_changing_its_value_and_deleting_it_are_edits_that_are_undone_one_at_a_time() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_a_video();
     assert!(!window.application().can_undo());
 
@@ -518,6 +531,7 @@ fn putting_an_effect_on_and_changing_its_value_and_deleting_it_are_edits_that_ar
 
 #[test]
 fn commands_that_cannot_be_done_leave_the_project_as_it_is_and_are_not_edits_to_undo() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_a_video();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -559,6 +573,7 @@ fn commands_that_cannot_be_done_leave_the_project_as_it_is_and_are_not_edits_to_
 
 #[test]
 fn a_project_with_effects_is_saved_and_opened_again_with_them() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -578,6 +593,7 @@ fn a_project_with_effects_is_saved_and_opened_again_with_them() {
 #[test]
 fn changing_the_value_of_an_effect_again_and_again_is_one_edit_and_the_value_of_the_effect_of_another_thing_is_another()
 {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_a_video();
     let track = AnimationTarget::Track(window.application().project().tracks()[0].id());
     window.do_this(Command::AddEffect {
@@ -626,6 +642,7 @@ fn changing_the_value_of_an_effect_again_and_again_is_one_edit_and_the_value_of_
 
 #[test]
 fn changing_an_animated_value_at_another_frame_is_another_edit_however_soon_it_comes() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_a_video();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -699,6 +716,7 @@ fn value_of_the_hue_shift_at(window: &Window, video: ClipId, number: u32, at: u6
 
 #[test]
 fn the_plus_button_puts_a_second_hue_shift_on_and_the_boxes_say_which_of_the_hue_shifts_each_is_once_there_are_two() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
 
     put_the_hue_shift_on_with_the_plus_button(&mut window);
@@ -723,6 +741,7 @@ fn the_plus_button_puts_a_second_hue_shift_on_and_the_boxes_say_which_of_the_hue
 
 #[test]
 fn each_of_two_hue_shifts_has_a_slider_of_its_own_that_changes_its_own_value_and_is_one_step_of_undo() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_two_hue_shifts();
     assert_eq!(window.how_many_are_called(TURN), 2);
     let shown = |window: &Window, number: usize| {
@@ -756,6 +775,7 @@ fn each_of_two_hue_shifts_has_a_slider_of_its_own_that_changes_its_own_value_and
 
 #[test]
 fn the_stopwatch_of_the_second_hue_shift_starts_the_keyframes_of_the_second_and_not_those_of_the_first() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_two_hue_shifts();
     window.move_current_frame_to(40);
     let stopwatch_of_the_second = keyframe_button_label("hue shift 2", KeyframeButton::Stopwatch, false);
@@ -787,6 +807,7 @@ fn the_stopwatch_of_the_second_hue_shift_starts_the_keyframes_of_the_second_and_
 #[test]
 fn deleting_one_of_two_hue_shifts_takes_it_with_its_keyframes_and_the_other_stays_as_it_was_and_is_called_by_its_name_alone_again()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_two_hue_shifts();
     for (number, at, degrees) in [(0, 10, 15.0), (1, 30, 25.0)] {
         window.move_current_frame_to(at);
@@ -845,6 +866,7 @@ fn deleting_one_of_two_hue_shifts_takes_it_with_its_keyframes_and_the_other_stay
 
 #[test]
 fn deleting_the_second_of_two_hue_shifts_takes_the_second_and_leaves_the_first_with_its_values() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_two_hue_shifts();
 
     let heading = window.rectangle_of("Hue shift 2").center();
@@ -874,6 +896,7 @@ fn deleting_the_second_of_two_hue_shifts_takes_the_second_and_leaves_the_first_w
 
 #[test]
 fn putting_a_second_hue_shift_on_is_an_edit_of_its_own_that_is_undone_and_done_again() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_a_video();
     window.do_this(Command::AddEffect {
         target: clip(video),
@@ -927,6 +950,7 @@ fn window_with_an_effect_the_program_does_not_have() -> (Window, ClipId, EffectK
 #[test]
 fn an_effect_the_program_does_not_have_has_a_box_with_its_name_a_note_that_it_does_nothing_and_a_control_for_each_value()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (window, _, _) = window_with_an_effect_the_program_does_not_have();
 
     assert!(
@@ -954,6 +978,7 @@ fn an_effect_the_program_does_not_have_has_a_box_with_its_name_a_note_that_it_do
 
 #[test]
 fn the_effects_of_the_program_do_not_say_that_they_are_not_installed() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _) = window_with_the_video_selected();
     put_the_hue_shift_on_with_the_plus_button(&mut window);
 
@@ -963,6 +988,7 @@ fn the_effects_of_the_program_do_not_say_that_they_are_not_installed() {
 
 #[test]
 fn the_menu_of_the_plus_button_offers_the_effects_of_the_program_and_not_one_that_a_file_brought() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, _) = window_with_an_effect_the_program_does_not_have();
     assert!(
         !window
@@ -989,6 +1015,7 @@ fn the_menu_of_the_plus_button_offers_the_effects_of_the_program_and_not_one_tha
 #[test]
 fn the_number_of_an_effect_the_program_does_not_have_is_changed_with_its_slider_and_animated_as_any_and_is_one_step_of_undo()
  {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video, kind) = window_with_an_effect_the_program_does_not_have();
     let amount = Effect::new(kind).property(0).unwrap();
     let value = |window: &Window| {
@@ -1021,6 +1048,7 @@ fn the_number_of_an_effect_the_program_does_not_have_is_changed_with_its_slider_
 
 #[test]
 fn an_effect_the_program_does_not_have_is_deleted_with_its_keyframes_and_undo_brings_it_all_back() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video, kind) = window_with_an_effect_the_program_does_not_have();
     let amount = Effect::new(kind).property(0).unwrap();
     window.move_current_frame_to(10);
@@ -1047,6 +1075,7 @@ fn an_effect_the_program_does_not_have_is_deleted_with_its_keyframes_and_undo_br
 
 #[test]
 fn an_effect_the_program_does_not_have_is_saved_with_the_project_and_opened_again_as_it_was() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (window, video, _) = window_with_an_effect_the_program_does_not_have();
     let project = window.application().project().clone();
 
@@ -1063,6 +1092,7 @@ fn an_effect_the_program_does_not_have_is_saved_with_the_project_and_opened_agai
 
 #[test]
 fn a_value_that_is_not_a_number_has_no_stopwatch_and_a_number_that_has_a_unit_shows_it() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, _, _) = window_with_an_effect_the_program_does_not_have();
     let middle_of_the_row = window.rectangle_of("Amount").center();
     window.move_pointer_to(middle_of_the_row);
@@ -1107,6 +1137,7 @@ fn a_value_that_is_not_a_number_has_no_stopwatch_and_a_number_that_has_a_unit_sh
 #[test]
 fn the_menu_of_the_box_of_an_effect_switches_it_off_and_on_each_a_step_of_the_history_and_the_box_says_when_it_is_off()
 {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, video) = window_with_the_video_selected();
     window.do_this(Command::AddEffect {
         target: clip(video),
