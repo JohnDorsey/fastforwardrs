@@ -1640,6 +1640,7 @@ fn a_hue_shift_put_on_with_the_plus_button_and_turned_with_its_slider_is_saved_w
     journey.select_the_clip_at(10);
     let plus = journey.rectangle_of("Add an effect");
     journey.click(plus.center());
+    journey.open_the_smaller_menu("Built-in");
     let item = journey.rectangle_of("Hue shift");
     journey.click(item.center());
     journey.set_slider("Turn", 120.0);
@@ -1699,6 +1700,7 @@ fn an_exposure_and_a_brightness_put_on_with_the_plus_button_are_exported_as_the_
     ] {
         let plus = journey.rectangle_of("Add an effect");
         journey.click(plus.center());
+        journey.open_the_smaller_menu("Built-in");
         let item = journey.rectangle_of(menu_item);
         journey.click(item.center());
         journey.set_slider(slider, value);
@@ -1747,6 +1749,7 @@ fn a_crop_put_on_with_the_plus_button_is_exported_with_the_left_half_cut_off() {
     journey.select_the_clip_at(10);
     let plus = journey.rectangle_of("Add an effect");
     journey.click(plus.center());
+    journey.open_the_smaller_menu("Built-in");
     let item = journey.rectangle_of("Crop");
     journey.click(item.center());
     journey.set_slider("Left", 0.5);

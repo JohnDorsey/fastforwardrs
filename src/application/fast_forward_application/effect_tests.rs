@@ -64,9 +64,11 @@ fn the_plus_button(window: &Window) -> egui::Rect {
     window.rectangle_of(ADD_EFFECT_LABEL)
 }
 
+/// Opens the menu of the plus button and the smaller menu of the effects of the program (the menu has one for each place effects come from).
 fn click_the_plus_button(window: &mut Window) {
     let middle = the_plus_button(window).center();
     window.click(middle);
+    window.open_the_smaller_menu("Built-in");
 }
 
 /// Puts the hue shift on `target` with the menu of the plus button, as a person does. (The menu is under the boxes of the effects that are

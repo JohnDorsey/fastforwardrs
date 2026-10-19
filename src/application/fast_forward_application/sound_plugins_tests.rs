@@ -29,7 +29,14 @@ fn window_with_the_video_selected() -> (Window, ClipId) {
     (window, clip)
 }
 
+/// Opens the menu of the plus button and the smaller menu of the plugins that are LADSPA.
 fn open_the_menu(window: &mut Window) {
+    open_the_menu_of_the_plus_button(window);
+    window.open_the_smaller_menu("LADSPA");
+}
+
+/// Opens the menu of the plus button alone.
+fn open_the_menu_of_the_plus_button(window: &mut Window) {
     let plus = window.rectangle_of(ADD_EFFECT_LABEL).center();
     window.click(plus);
 }
@@ -70,23 +77,73 @@ fn the_menu_of_the_plus_button_offers_an_installed_plugin_under_the_heading_of_i
     set_installed_plugins(vec![plugin]);
     let (mut window, _) = window_with_the_video_selected();
 
-    open_the_menu(&mut window);
+    open_the_menu_of_the_plus_button(&mut window);
+    assert!(is_shown(&window, "LADSPA \u{23f5}"), "a smaller menu for the plugins");
+    assert!(
+        window.rectangle_of("Built-in \u{23f5}").top() < window.rectangle_of("LADSPA \u{23f5}").top(),
+        "the one for the effects of the program comes first"
+    );
+    window.open_the_smaller_menu("LADSPA");
     assert!(is_shown(&window, "Tom Szilagyi"), "the heading is the maker");
     assert!(is_shown(&window, "Tap reverb"));
-    assert!(
-        window.rectangle_of("Light").top() < window.rectangle_of("Tom Szilagyi").top(),
-        "the headings the program has come first"
-    );
     assert!(window.rectangle_of("Tom Szilagyi").top() < window.rectangle_of("Tap reverb").top());
+    assert!(
+        !is_shown(&window, "Hue shift"),
+        "the effects of the program are in their own smaller menu"
+    );
 
-    // (The plugin is taken out of the list: the menu, opened again, does not have it.)
+    // (The plugin is taken out of the list: the menu, opened again, does not have it, and has no smaller menu for plugins.)
     window.press_key(egui::Key::Escape);
     window.settle();
     set_installed_plugins(Vec::new());
     window.settle();
-    open_the_menu(&mut window);
+    open_the_menu_of_the_plus_button(&mut window);
+    assert!(is_shown(&window, "Built-in \u{23f5}"));
+    assert!(!is_shown(&window, "LADSPA \u{23f5}"));
     assert!(!is_shown(&window, "Tap reverb"));
     assert!(!is_shown(&window, "Tom Szilagyi"));
+}
+
+#[test]
+fn a_smaller_menu_that_is_taller_than_the_window_has_a_scroll_bar_and_a_shorter_one_is_not_cut() {
+    let _alone = the_installed_plugins_to_myself();
+    let many: Vec<_> = (0..60)
+        .map(|number| {
+            let mut plugin = an_installed_sound_plugin(&format!("ladspa:many:plugin{number:03}"), "Many", &[]);
+            plugin.descriptor.name = format!("plugin {number:03}").into();
+            plugin
+        })
+        .collect();
+    set_installed_plugins(many);
+    let (mut window, _) = window_with_the_video_selected();
+    open_the_menu_of_the_plus_button(&mut window);
+    window.open_the_smaller_menu("LADSPA");
+
+    let window_bottom = window.harness.ctx.content_rect().bottom();
+    let first = window.rectangle_of("Plugin 000");
+    assert!(
+        first.top() >= 0.0 && first.bottom() <= window_bottom,
+        "the first plugin is in the window: {first:?}"
+    );
+    let last_is_in_the_window = |window: &Window| {
+        window
+            .harness
+            .query_by_label("Plugin 059")
+            .is_some_and(|last| last.rect().bottom() <= window_bottom && last.rect().top() >= 0.0)
+    };
+    assert!(
+        !last_is_in_the_window(&window),
+        "the last one is out of the window, to be scrolled to"
+    );
+
+    for _ in 0..10 {
+        window.scroll_the_wheel(first.center(), egui::vec2(0.0, -600.0), egui::Modifiers::NONE);
+    }
+
+    assert!(
+        last_is_in_the_window(&window),
+        "scrolling brings the last plugin into the window"
+    );
 }
 
 #[test]

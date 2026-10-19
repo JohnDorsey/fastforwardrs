@@ -12,14 +12,14 @@
 //!
 //! What a badge stands for is selected with a **double click**, so that taking hold of a badge to move it does not select anything.
 
-use egui::{CornerRadius, Key, Popup, Rect, Response, RichText, Stroke, TextEdit, Ui, pos2, vec2};
+use egui::{CornerRadius, Key, Popup, Rect, Response, RichText, ScrollArea, Stroke, TextEdit, Ui, pos2, vec2};
 
 use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
     ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE,
     NOT_INSTALLED_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE,
-    effects_that_match, effects_to_offer, grouped_by_category, items_for_where_the_tables_are_kept,
+    effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept,
     show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
@@ -371,8 +371,9 @@ fn kinds_that_can_be_put_on(content: &PropertiesContent<'_>, owner: Member) -> i
     }
 }
 
-/// Shows the menu of the plus button: a field to search the effects (which has the keyboard at once, and Enter adds the first that matches), the effects that match
-/// listed under the heading of their categories, and at the bottom *Add effect from file...*.
+/// Shows the menu of the plus button: a field to search the effects (which has the keyboard at once, and Enter adds the first that matches), a smaller menu for each place the
+/// effects that match come from (*Built-in*, *LADSPA*...), in which they are listed under the heading of their categories, and at the bottom *Add effect from file...*. A
+/// smaller menu that is taller than the window has a scroll bar.
 fn show_the_menu_of_effects(
     ui: &mut Ui,
     to_offer: &[EffectKind],
@@ -409,17 +410,26 @@ fn show_the_menu_of_effects(
     if matching.is_empty() {
         ui.label(RichText::new(NO_EFFECT_FOUND_NOTE).weak());
     }
-    for (heading, members) in grouped_by_category(&matching) {
-        ui.label(RichText::new(heading).weak().small());
-        for kind in members {
-            if ui
-                .button(what_an_effect_is_called(kind))
-                .on_hover_text(kind.description())
-                .clicked()
-            {
-                chosen = Some(kind);
-            }
-        }
+    for (source, from_there) in grouped_by_source(&matching) {
+        ui.menu_button(source, |ui| {
+            ui.set_min_width(MENU_OF_EFFECTS_WIDTH);
+            let most_tall = (ui.ctx().content_rect().height() - ROOM_LEFT_ROUND_A_SMALLER_MENU)
+                .max(MOST_TALL_A_SMALLER_MENU_IS_AT_LEAST);
+            ScrollArea::vertical().max_height(most_tall).show(ui, |ui| {
+                for (heading, members) in grouped_by_category(&from_there) {
+                    ui.label(RichText::new(heading).weak().small());
+                    for kind in members {
+                        if ui
+                            .button(what_an_effect_is_called(kind))
+                            .on_hover_text(kind.description())
+                            .clicked()
+                        {
+                            chosen = Some(kind);
+                        }
+                    }
+                }
+            });
+        });
     }
     let mut from_a_file = false;
     if offers_a_file {
@@ -441,6 +451,10 @@ fn show_the_menu_of_effects(
 
 /// How wide the menu of effects is at least, in points.
 const MENU_OF_EFFECTS_WIDTH: f32 = 220.0;
+
+/// How much of the height of the window a smaller menu of effects leaves for the room round it, in points, and how tall it may be at the least (a window that is very low).
+const ROOM_LEFT_ROUND_A_SMALLER_MENU: f32 = 60.0;
+const MOST_TALL_A_SMALLER_MENU_IS_AT_LEAST: f32 = 120.0;
 
 /// Shows the plus button under the effects, which opens the menu of the effects that can be put on, and adds a command when one is chosen. A
 /// thing that no effect can be put on is not given a plus button, as it would have nothing to put on.

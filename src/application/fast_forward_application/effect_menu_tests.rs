@@ -33,9 +33,15 @@ fn window_with_the_video_selected() -> (Window, ClipId) {
     (window, clip)
 }
 
+/// Opens the menu of the plus button. (It has a smaller menu for each place effects come from: see [`open_the_smaller_menu_of_the_program`].)
 fn open_the_menu(window: &mut Window) {
     let plus = window.rectangle_of(ADD_EFFECT_LABEL).center();
     window.click(plus);
+}
+
+/// Opens the smaller menu of the effects of the program, in the menu of the plus button, which is open.
+fn open_the_smaller_menu_of_the_program(window: &mut Window) {
+    window.open_the_smaller_menu("Built-in");
 }
 
 fn is_shown(window: &Window, label: &str) -> bool {
@@ -97,6 +103,12 @@ fn the_menu_has_a_field_to_search_the_effects_the_effects_under_the_headings_of_
     open_the_menu(&mut window);
 
     assert!(search_field_is_shown(&window), "the search field");
+    assert!(
+        is_shown(&window, "Built-in \u{23f5}"),
+        "a smaller menu for the effects of the program"
+    );
+    assert!(!is_shown(&window, "Colour"), "and the effects are in it, not here");
+    open_the_smaller_menu_of_the_program(&mut window);
     let tops: Vec<f32> = HEADINGS
         .iter()
         .map(|heading| {
@@ -118,8 +130,8 @@ fn the_menu_has_a_field_to_search_the_effects_the_effects_under_the_headings_of_
     assert!(top("Transform") < top("Crop") && top("Looks") < top("Look-up table"));
     assert!(is_shown(&window, "Add effect from file..."));
     assert!(
-        top("Look-up table") < top("Add effect from file..."),
-        "(it is at the bottom)"
+        top("Built-in \u{23f5}") < top("Add effect from file..."),
+        "(it is at the bottom of the menu, under the smaller menus)"
     );
 }
 
@@ -130,6 +142,7 @@ fn what_is_typed_in_the_search_field_narrows_the_menu_to_the_effects_that_match_
     open_the_menu(&mut window);
 
     type_in_the_search(&mut window, "blur");
+    open_the_smaller_menu_of_the_program(&mut window);
     assert!(is_shown(&window, "Blur"));
     assert!(!is_shown(&window, "Hue shift") && !is_shown(&window, "Crop"));
     assert!(is_shown(&window, "Blur and sharpen"), "its heading stays");
@@ -151,6 +164,7 @@ fn the_search_is_by_the_description_and_the_category_and_not_by_the_case_of_the_
 
     // "LUT" is in the description of the look-up table and in no name.
     type_in_the_search(&mut window, "LUT");
+    open_the_smaller_menu_of_the_program(&mut window);
     assert!(is_shown(&window, "Look-up table"));
     assert!(!is_shown(&window, "Hue shift") && !is_shown(&window, "Blur"));
 }
@@ -164,6 +178,10 @@ fn what_nothing_matches_is_said_and_the_menu_has_no_effect_to_choose() {
     type_in_the_search(&mut window, "zzzz");
 
     assert!(is_shown(&window, "No effect matches"));
+    assert!(
+        !is_shown(&window, "Built-in \u{23f5}"),
+        "no smaller menu is left: nothing is in it"
+    );
     for kind in EffectKind::BUILT_IN {
         assert!(!is_shown(&window, &what_an_effect_is_called(kind)), "{kind}");
     }
@@ -206,6 +224,7 @@ fn the_menu_opens_with_the_field_empty_whatever_was_typed_the_last_time() {
     window.click(egui::pos2(900.0, 600.0));
     window.settle();
     open_the_menu(&mut window);
+    open_the_smaller_menu_of_the_program(&mut window);
 
     assert!(is_shown(&window, "Hue shift"), "everything is offered again");
 }
@@ -215,6 +234,7 @@ fn choosing_an_effect_with_the_pointer_still_adds_it() {
     let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let (mut window, clip) = window_with_the_video_selected();
     open_the_menu(&mut window);
+    open_the_smaller_menu_of_the_program(&mut window);
 
     let item = window.rectangle_of("Exposure").center();
     window.click(item);

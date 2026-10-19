@@ -138,6 +138,38 @@ pub(super) fn effects_that_match(kinds: &[EffectKind], typed: &str) -> Vec<Effec
         .collect()
 }
 
+/// The sources that effects come from, in the order the menu of effects lists them in; a source that is not here comes after them, in the order its first effect is offered in.
+const SOURCES_IN_ORDER: [&str; 4] = ["Built-in", "ISF", "LADSPA", "CLAP"];
+
+/// What the menu of effects calls the place the effect `kind` comes from: the part of its key before the colon (`builtin:hue_shift`, `ladspa:caps:Eq`), said as a person says it.
+pub(super) fn source_of(kind: EffectKind) -> String {
+    let namespace = kind.key().split(':').next().unwrap_or_default();
+    match namespace {
+        "builtin" => "Built-in".to_owned(),
+        "isf" | "ladspa" | "clap" => namespace.to_uppercase(),
+        other => other.to_uppercase(),
+    }
+}
+
+/// The kinds of `kinds` grouped by the place they come from ([`source_of`]), the sources in [`SOURCES_IN_ORDER`] first, each with its effects in the order they are in.
+pub(super) fn grouped_by_source(kinds: &[EffectKind]) -> Vec<(String, Vec<EffectKind>)> {
+    let mut groups: Vec<(String, Vec<EffectKind>)> = Vec::new();
+    for kind in kinds {
+        let source = source_of(*kind);
+        match groups.iter_mut().find(|(name, _)| *name == source) {
+            Some((_, members)) => members.push(*kind),
+            None => groups.push((source, vec![*kind])),
+        }
+    }
+    groups.sort_by_key(|(name, _)| {
+        SOURCES_IN_ORDER
+            .iter()
+            .position(|known| known == name)
+            .unwrap_or(SOURCES_IN_ORDER.len())
+    });
+    groups
+}
+
 /// The kinds of `kinds` grouped by their categories: the headings in [`CATEGORIES_IN_ORDER`] first, then the others, each with its effects in the order they are in.
 pub(super) fn grouped_by_category(kinds: &[EffectKind]) -> Vec<(String, Vec<EffectKind>)> {
     let mut groups: Vec<(String, Vec<EffectKind>)> = Vec::new();
@@ -394,6 +426,26 @@ fn what_a_value_says(value: &PropertyValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effects_are_grouped_by_the_place_they_come_from_with_the_program_first_and_an_unknown_place_last() {
+        let _alone = crate::test_support::the_installed_plugins_to_myself();
+        let plugin = crate::test_support::an_installed_sound_plugin("ladspa:caps:eq", "C* Audio Plugin Suite", &[]);
+        crate::project::set_installed_plugins(vec![plugin]);
+        let plugin_kind = EffectKind::installed_plugin_kinds()[0];
+        assert_eq!(source_of(EffectKind::HUE_SHIFT), "Built-in");
+        assert_eq!(source_of(plugin_kind), "LADSPA");
+        // (A plugin comes before the program in the list given, and the groups still begin with the program.)
+        let groups = grouped_by_source(&[plugin_kind, EffectKind::HUE_SHIFT, EffectKind::BLUR]);
+        assert_eq!(
+            groups,
+            [
+                ("Built-in".to_owned(), vec![EffectKind::HUE_SHIFT, EffectKind::BLUR]),
+                ("LADSPA".to_owned(), vec![plugin_kind]),
+            ]
+        );
+        assert!(grouped_by_source(&[]).is_empty());
+    }
 
     #[test]
     fn the_menu_offers_the_effects_the_thing_can_have_in_the_order_they_are_in_and_what_it_has_already_too() {

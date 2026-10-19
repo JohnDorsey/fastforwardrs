@@ -429,6 +429,12 @@ impl Journey {
         self.settle();
     }
 
+    /// Opens the smaller menu of the menu of the plus button for the effects that come from `source` ("Built-in", "LADSPA"...). The menu is open already.
+    pub fn open_the_smaller_menu(&mut self, source: &str) {
+        self.harness.get_by_label(&format!("{source} \u{23f5}")).click();
+        self.settle();
+    }
+
     /// Presses one of the buttons next to the time ("Pause", "Play" or "Stop").
     pub fn press_button(&mut self, label: &str) {
         self.harness.get_by_label(label).click();

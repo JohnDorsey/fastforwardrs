@@ -100,6 +100,7 @@ fn plugins_found_in_the_background_are_offered_put_on_a_clip_saved_and_kept_whol
     let plus = journey.rectangle_of("Add an effect").center();
     journey.click(plus);
     journey.settle();
+    journey.open_the_smaller_menu("LADSPA");
     journey.harness.get_by_label("Test plugin ffrs_test_gain").click();
     journey.settle();
     let kinds = effects_of_the_first_clip(&journey);
@@ -218,6 +219,7 @@ fn put_the_multiplier_on_the_clip(journey: &mut Journey) -> f32 {
     let plus = journey.rectangle_of("Add an effect").center();
     journey.click(plus);
     journey.settle();
+    journey.open_the_smaller_menu("LADSPA");
     journey.harness.get_by_label("Test plugin ffrs_test_switches").click();
     journey.settle();
     let clip = journey.application().project().tracks()[0]

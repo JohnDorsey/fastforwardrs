@@ -359,6 +359,12 @@ impl Window {
         self.viewport_commands_of_the_last_frame()
     }
 
+    /// Opens the smaller menu of the menu of the plus button for the effects that come from `source` ("Built-in", "LADSPA"...). The menu is open already.
+    pub(super) fn open_the_smaller_menu(&mut self, source: &str) {
+        self.harness.get_by_label(&format!("{source} \u{23f5}")).click();
+        self.settle();
+    }
+
     pub(super) fn rectangle_of(&self, label: &str) -> Rect {
         self.harness.get_by_label(label).rect()
     }

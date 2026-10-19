@@ -54,6 +54,7 @@ fn the_folder_of(plugin: &InstalledPlugin) -> std::path::PathBuf {
 fn add_to_the_clip(window: &mut Window, name_in_the_menu: &str) {
     let plus = window.rectangle_of(ADD_EFFECT_LABEL).center();
     window.click(plus);
+    window.open_the_smaller_menu("LADSPA");
     window.harness.get_by_label(name_in_the_menu).click();
     window.settle();
 }

@@ -596,6 +596,7 @@ fn the_value_of_the_hue_shift_of_the_group(window: &Window, group: GroupId) -> O
 fn put_the_hue_shift_on_the_selected_group_with_the_plus_button(window: &mut Window) {
     let plus = middle_of(window, "Add an effect");
     window.click(plus);
+    window.open_the_smaller_menu("Built-in");
     let item = middle_of(window, HUE_SHIFT);
     window.click(item);
 }

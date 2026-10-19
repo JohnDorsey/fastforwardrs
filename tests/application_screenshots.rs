@@ -1085,10 +1085,16 @@ fn write_screenshots_of_the_plus_button_that_puts_an_effect_on_and_the_hue_shift
         "118_a_clip_selected_with_the_plus_button_for_effects",
     );
 
-    // The menu of the button: one row for each effect there is.
+    // The menu of the button: a smaller menu for each place effects come from, and in the one of the program a row for each effect there is.
     let plus = journey.rectangle_of("Add an effect");
     journey.click(plus.center());
     save_what_is_drawn(&mut journey, &folder, "119_the_menu_of_the_plus_button");
+    journey.open_the_smaller_menu("Built-in");
+    save_what_is_drawn(
+        &mut journey,
+        &folder,
+        "119b_the_smaller_menu_of_the_effects_of_the_program",
+    );
 
     // The effect is put on: its box, with the slider of its one value.
     let item = journey.rectangle_of("Hue shift");
@@ -1353,6 +1359,7 @@ fn write_screenshots_of_the_sound_plugins_window_and_a_plugin_on_a_clip() {
     journey.select_the_clip_at(0);
     let plus = journey.rectangle_of("Add an effect").center();
     journey.click(plus);
+    journey.open_the_smaller_menu("LADSPA");
     save(&mut journey, &folder, "11_a_plugin_in_the_menu_of_the_plus_button");
     journey.harness.get_by_label("Test plugin ffrs_test_one_pole").click();
     save(&mut journey, &folder, "12_a_plugin_on_a_clip");
