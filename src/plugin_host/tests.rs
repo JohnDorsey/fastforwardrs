@@ -1,0 +1,1252 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Plugins as effects of the sound, with the real test plugins (`crates/ladspa-test-plugins`, loaded in this process: they do nothing but arithmetic): each channel layout, the
+//! values and their keyframes at the frames they say, a plugin that remembers, the sound that is not a number, a plugin that is too slow, and what the host does about folders
+//! that nobody has said anything about.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use super::*;
+use crate::composition::LayerEffect;
+use crate::media::export::{LoudnessToExport, SoundClipToExport};
+use crate::plugin_trust::FolderStanding;
+use crate::plugin_trust::folder_of;
+use crate::project::{
+    Animation, EffectInstanceId, EffectKind, FrameRate, InstalledPlugin, Keyframe, Keyframes, PropertyId,
+    PropertyValue, SpeedFactor, set_installed_plugins,
+};
+use crate::sound_engine::{BlockProcessor, ClipRequest, Insertions, Notes, PluginInsertions, PluginRunner};
+use crate::test_support::{the_installed_plugins_to_myself, the_plugins_of_the_test_library};
+
+fn thirty() -> FrameRate {
+    FrameRate::new(30, 1).unwrap()
+}
+
+/// The plugins of the test library, as the scan makes them effects, by their labels.
+fn the_test_plugins() -> Vec<InstalledPlugin> {
+    the_plugins_of_the_test_library()
+}
+
+/// The kind of the plugin `label` of the test library, with the list of what is installed made of the test plugins.
+fn the_kind_of(label: &str) -> EffectKind {
+    set_installed_plugins(the_test_plugins());
+    EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key().ends_with(&format!(":{label}")))
+        .unwrap_or_else(|| panic!("no plugin called {label}"))
+}
+
+fn the_effect(kind: EffectKind, values: &[f32]) -> LayerEffect {
+    LayerEffect {
+        instance: EffectInstanceId::FIRST,
+        kind,
+        values: values.iter().map(|value| PropertyValue::Number(*value)).collect(),
+        animation: Animation::default(),
+        tables: Vec::new(),
+    }
+}
+
+fn a_clip_at(first_timeline_frame: u64, effects: Vec<LayerEffect>) -> SoundClipToExport {
+    SoundClipToExport {
+        source_input: 0,
+        first_source_frame: 0,
+        end_source_frame: 1000,
+        speed_factor: SpeedFactor::new(1).unwrap(),
+        timeline_frame_count: 1000,
+        loudness: LoudnessToExport::UNCHANGED,
+        first_timeline_frame,
+        effects,
+    }
+}
+
+/// A host that lets everything be run, and the processor it makes for `effect` on a clip that begins at the frame `first_frame`.
+fn processor_of(effect: &LayerEffect, first_frame: u64) -> (Box<dyn BlockProcessor>, Notes) {
+    let host = PluginHost::new();
+    host.allow_everything();
+    let notes = Notes::default();
+    let clip = a_clip_at(first_frame, vec![effect.clone()]);
+    let processor = host
+        .processor_for(effect, &clip, thirty(), &notes, false)
+        .expect("the plugin is run");
+    (processor, notes)
+}
+
+fn ramp(count: usize, offset: f32) -> Vec<f32> {
+    (0..count).map(|moment| offset + moment as f32 * 0.001).collect()
+}
+
+// --- the arithmetic ---
+
+#[test]
+fn a_sample_is_in_the_frame_that_its_time_is_in_counted_from_the_frame_the_clip_begins_at() {
+    assert_eq!(frame_of_a_sample(thirty(), 10, 0), 10);
+    assert_eq!(
+        frame_of_a_sample(thirty(), 10, 1599),
+        10,
+        "a frame is 1600 samples at 30 a second"
+    );
+    assert_eq!(frame_of_a_sample(thirty(), 10, 1600), 11);
+    assert_eq!(frame_of_a_sample(thirty(), 0, 48_000), 30);
+    let ntsc = FrameRate::new(30_000, 1001).unwrap();
+    assert_eq!(
+        frame_of_a_sample(ntsc, 0, 1601),
+        0,
+        "a frame is 1601.6 samples at 29.97 a second"
+    );
+    assert_eq!(frame_of_a_sample(ntsc, 0, 1602), 1);
+    assert_eq!(
+        frame_of_a_sample(thirty(), 0, u64::MAX / 4),
+        u64::MAX / 4 / 1600,
+        "no overflow"
+    );
+}
+
+#[test]
+fn the_layouts_that_can_be_effects_are_four_and_each_says_how_many_instances_it_needs() {
+    assert_eq!(Layout::of(1, 1), Some(Layout::EachChannelOnItsOwn));
+    assert_eq!(Layout::of(2, 2), Some(Layout::Stereo));
+    assert_eq!(Layout::of(1, 2), Some(Layout::MonoToStereo));
+    assert_eq!(Layout::of(2, 1), Some(Layout::StereoToMono));
+    for (inputs, outputs) in [(0, 1), (1, 0), (3, 3), (2, 3)] {
+        assert_eq!(Layout::of(inputs, outputs), None);
+    }
+    assert_eq!(Layout::EachChannelOnItsOwn.instances(), 2);
+    assert_eq!(Layout::Stereo.instances(), 1);
+    assert_eq!(Layout::MonoToStereo.instances(), 1);
+    assert_eq!(Layout::StereoToMono.instances(), 1);
+}
+
+#[test]
+fn a_plugin_that_is_too_slow_for_two_seconds_of_sound_in_a_row_is_to_be_left_out_and_a_good_block_starts_the_count_again()
+ {
+    let mut guard = SlownessGuard::default();
+    let block = 512.0 / 48_000.0;
+    let blocks_in_two_seconds = (SECONDS_TOO_SLOW / block).ceil() as usize;
+    for number in 0..blocks_in_two_seconds - 1 {
+        assert!(!guard.is_it_too_slow(block, block * 2.0), "block {number}: not yet");
+    }
+    assert!(
+        guard.is_it_too_slow(block, block * 2.0),
+        "two seconds of sound that took too long"
+    );
+
+    let mut guard = SlownessGuard::default();
+    for _ in 0..blocks_in_two_seconds - 1 {
+        assert!(!guard.is_it_too_slow(block, block * 2.0));
+    }
+    assert!(
+        !guard.is_it_too_slow(block, block * 0.5),
+        "one that kept up: begin again"
+    );
+    for _ in 0..blocks_in_two_seconds - 1 {
+        assert!(
+            !guard.is_it_too_slow(block, block * 2.0),
+            "and it takes two seconds all over again"
+        );
+    }
+    // Taking exactly as long as the block lasts is keeping up.
+    let mut guard = SlownessGuard::default();
+    for _ in 0..blocks_in_two_seconds * 2 {
+        assert!(!guard.is_it_too_slow(block, block));
+    }
+}
+
+// --- the layouts, with the plugins that have them ---
+
+#[test]
+fn a_plugin_of_one_input_and_one_output_is_run_on_each_channel_on_its_own_with_the_values_of_its_controls() {
+    let _alone = the_installed_plugins_to_myself();
+    let effect = the_effect(the_kind_of("ffrs_test_gain"), &[0.5]);
+    let (mut processor, notes) = processor_of(&effect, 0);
+    let (mut left, mut right) = (ramp(512, 1.0), ramp(512, -3.0));
+    let (expected_left, expected_right): (Vec<f32>, Vec<f32>) = (
+        left.iter().map(|sample| sample * 0.5).collect(),
+        right.iter().map(|sample| sample * 0.5).collect(),
+    );
+    processor.process(&mut left, &mut right);
+    assert_eq!((left, right), (expected_left, expected_right));
+    assert!(notes.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_plugin_of_two_inputs_and_two_outputs_is_given_both_channels_and_gives_both() {
+    let _alone = the_installed_plugins_to_myself();
+    let effect = the_effect(the_kind_of("ffrs_test_swap"), &[]);
+    let (mut processor, _) = processor_of(&effect, 0);
+    let (mut left, mut right) = (ramp(300, 1.0), ramp(300, -1.0));
+    let (was_left, was_right) = (left.clone(), right.clone());
+    processor.process(&mut left, &mut right);
+    assert_eq!((left, right), (was_right, was_left), "swapped");
+}
+
+#[test]
+fn a_plugin_of_one_input_and_two_outputs_is_given_the_mix_and_a_plugin_of_two_inputs_and_one_output_gives_both_channels_its_output()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut left, mut right) = (ramp(200, 1.0), ramp(200, 3.0));
+    let (was_left, was_right) = (left.clone(), right.clone());
+
+    let (mut mono_to_both, _) = processor_of(&the_effect(the_kind_of("ffrs_test_mono_to_both"), &[]), 0);
+    mono_to_both.process(&mut left, &mut right);
+    let mix: Vec<f32> = was_left.iter().zip(&was_right).map(|(l, r)| (l + r) * 0.5).collect();
+    assert_eq!(left, mix, "the left is the mix");
+    assert_eq!(right, mix, "and so is the right");
+
+    let (mut mix_down, _) = processor_of(&the_effect(the_kind_of("ffrs_test_mix_down"), &[]), 0);
+    let (mut left, mut right) = (was_left.clone(), was_right.clone());
+    mix_down.process(&mut left, &mut right);
+    let sum: Vec<f32> = was_left.iter().zip(&was_right).map(|(l, r)| l + r).collect();
+    assert_eq!(left, sum);
+    assert_eq!(right, sum, "both channels have the one output");
+}
+
+#[test]
+fn a_plugin_that_remembers_gives_the_same_sound_in_blocks_of_any_size_and_each_channel_has_a_memory_of_its_own() {
+    let _alone = the_installed_plugins_to_myself();
+    let effect = the_effect(the_kind_of("ffrs_test_one_pole"), &[1000.0]);
+    let (left_in, right_in) = (ramp(1024, 1.0), vec![0.25_f32; 1024]);
+
+    let (mut whole, _) = processor_of(&effect, 0);
+    let (mut whole_left, mut whole_right) = (left_in.clone(), right_in.clone());
+    whole.process(&mut whole_left, &mut whole_right);
+
+    let (mut pieces, _) = processor_of(&effect, 0);
+    let (mut pieces_left, mut pieces_right) = (left_in.clone(), right_in.clone());
+    for start in (0..1024).step_by(100) {
+        let end = (start + 100).min(1024);
+        pieces.process(&mut pieces_left[start..end], &mut pieces_right[start..end]);
+    }
+    assert_eq!(
+        pieces_left, whole_left,
+        "blocks of 100 are one block of 1024, on the left"
+    );
+    assert_eq!(pieces_right, whole_right, "and on the right");
+    assert_ne!(whole_left, left_in, "(it does filter)");
+    // A step on the right alone: the left is not touched by the right's memory.
+    let (mut each, _) = processor_of(&effect, 0);
+    let (mut left, mut right) = (vec![0.0_f32; 64], vec![1.0_f32; 64]);
+    each.process(&mut left, &mut right);
+    assert!(left.iter().all(|sample| *sample == 0.0), "{left:?}");
+    assert!(right[0] > 0.0 && right[63] > right[0]);
+}
+
+#[test]
+fn a_reset_makes_a_plugin_that_remembers_forget() {
+    let _alone = the_installed_plugins_to_myself();
+    let effect = the_effect(the_kind_of("ffrs_test_one_pole"), &[500.0]);
+    let (mut processor, _) = processor_of(&effect, 0);
+    let (mut first_left, mut first_right) = (vec![1.0_f32; 128], vec![1.0_f32; 128]);
+    processor.process(&mut first_left, &mut first_right);
+    let (mut second_left, mut second_right) = (vec![1.0_f32; 128], vec![1.0_f32; 128]);
+    processor.process(&mut second_left, &mut second_right);
+    assert_ne!(first_left, second_left, "it remembered");
+    processor.reset();
+    let (mut third_left, mut third_right) = (vec![1.0_f32; 128], vec![1.0_f32; 128]);
+    processor.process(&mut third_left, &mut third_right);
+    assert_eq!((third_left, third_right), (first_left, first_right), "and forgot");
+}
+
+// --- the values ---
+
+#[test]
+fn a_value_is_kept_to_the_range_the_plugin_says_though_a_person_can_type_one_past_it() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_kind_of("ffrs_test_gain");
+    let (mut past_the_top, _) = processor_of(&the_effect(kind, &[10.0]), 0);
+    let (mut left, mut right) = (vec![1.0_f32; 8], vec![1.0_f32; 8]);
+    past_the_top.process(&mut left, &mut right);
+    assert_eq!(left, vec![4.0; 8], "the gain goes from 0 to 4: 10 is 4");
+    let (mut below, _) = processor_of(&the_effect(kind, &[-3.0]), 0);
+    let (mut left, mut right) = (vec![1.0_f32; 8], vec![1.0_f32; 8]);
+    below.process(&mut left, &mut right);
+    assert_eq!(left, vec![0.0; 8]);
+    let (mut not_a_number, _) = processor_of(&the_effect(kind, &[f32::NAN]), 0);
+    let (mut left, mut right) = (vec![1.0_f32; 8], vec![1.0_f32; 8]);
+    not_a_number.process(&mut left, &mut right);
+    assert!(
+        left.iter().all(|sample| sample.is_finite()),
+        "a value that is not a number does not reach the speakers: {left:?}"
+    );
+}
+
+#[test]
+fn a_flag_is_one_or_zero_and_a_whole_number_is_given_as_it_is() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_kind_of("ffrs_test_switches");
+    let mut effect = the_effect(kind, &[]);
+    effect.values = vec![PropertyValue::Flag(true), PropertyValue::Number(3.0)];
+    let (mut processor, _) = processor_of(&effect, 0);
+    let (mut left, mut right) = (vec![0.5_f32; 4], vec![0.5_f32; 4]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, vec![-1.5; 4], "inverted and times three");
+    effect.values = vec![PropertyValue::Flag(false), PropertyValue::Number(3.0)];
+    let (mut processor, _) = processor_of(&effect, 0);
+    let (mut left, mut right) = (vec![0.5_f32; 4], vec![0.5_f32; 4]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, vec![1.5; 4]);
+}
+
+#[test]
+fn a_value_that_is_animated_is_what_the_keyframes_say_at_the_frame_each_stretch_of_32_samples_is_in() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_kind_of("ffrs_test_gain");
+    let mut effect = the_effect(kind, &[1.0]);
+    let gain = PropertyId::effect_value(kind, EffectInstanceId::FIRST, 0);
+    let keyframe = |frame, value| Keyframe {
+        frame,
+        value: PropertyValue::Number(value),
+    };
+    // The gain goes from 0 at the frame 10 to 4 at the frame 40, on a clip that begins at the frame 10: it rises through 30 frames, which are 48000 samples.
+    effect.animation =
+        Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(10, 0.0), keyframe(40, 4.0)]))]);
+    let (mut processor, _) = processor_of(&effect, 10);
+
+    let samples = 48_000;
+    let (mut left, mut right) = (vec![1.0_f32; samples], vec![1.0_f32; samples]);
+    // (In blocks of 512, as the preview asks.)
+    for start in (0..samples).step_by(512) {
+        let end = (start + 512).min(samples);
+        processor.process(&mut left[start..end], &mut right[start..end]);
+    }
+    for index in [0, 31, 32, 1599, 1600, 1601, 24_000, 40_000, 47_999] {
+        let stretch_begins_at = (index / 32) * 32;
+        let frame = 10 + stretch_begins_at as u64 * 30 / 48_000;
+        let expected = ((frame - 10) as f32 / 30.0 * 4.0).clamp(0.0, 4.0);
+        assert!(
+            (left[index] - expected).abs() < 1e-4,
+            "sample {index}: the gain is {} and the keyframes say {expected} at frame {frame}",
+            left[index]
+        );
+        assert_eq!(left[index], right[index], "both channels have the same values");
+    }
+    assert_eq!(left[0], 0.0);
+    assert!(left[47_999] > 3.8, "{}", left[47_999]);
+}
+
+#[test]
+fn a_value_that_is_not_animated_is_given_once_and_the_plugin_keeps_it() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut processor, _) = processor_of(&the_effect(the_kind_of("ffrs_test_gain"), &[2.0]), 0);
+    for _ in 0..5 {
+        let (mut left, mut right) = (vec![1.0_f32; 512], vec![1.0_f32; 512]);
+        processor.process(&mut left, &mut right);
+        assert!(left.iter().all(|sample| *sample == 2.0));
+    }
+}
+
+// --- what a plugin gives ---
+
+#[test]
+fn sound_that_is_not_a_number_is_silence() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut processor, _) = processor_of(&the_effect(the_kind_of("ffrs_test_gain"), &[1.0]), 0);
+    let mut left = vec![1.0, f32::NAN, f32::INFINITY, -f32::INFINITY, 0.5];
+    let mut right = vec![f32::NAN, 1.0, 1.0, 1.0, 1.0];
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, vec![1.0, 0.0, 0.0, 0.0, 0.5]);
+    assert_eq!(right, vec![0.0, 1.0, 1.0, 1.0, 1.0]);
+}
+
+#[test]
+fn a_block_of_nothing_changes_nothing_and_a_block_of_one_sample_works() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut processor, _) = processor_of(&the_effect(the_kind_of("ffrs_test_gain"), &[3.0]), 0);
+    processor.process(&mut [], &mut []);
+    let (mut left, mut right) = (vec![1.0_f32], vec![2.0_f32]);
+    processor.process(&mut left, &mut right);
+    assert_eq!((left, right), (vec![3.0], vec![6.0]));
+}
+
+// --- the host: who may be run ---
+
+fn the_gain_effect() -> (LayerEffect, &'static InstalledPlugin) {
+    let kind = the_kind_of("ffrs_test_gain");
+    (the_effect(kind, &[0.5]), kind.installed_plugin().unwrap())
+}
+
+fn the_folder_of(plugin: &InstalledPlugin) -> PathBuf {
+    folder_of(&plugin.library)
+}
+
+fn ask(host: &PluginHost, effect: &LayerEffect, notes: &Notes) -> Option<Box<dyn BlockProcessor>> {
+    host.processor_for(effect, &a_clip_at(0, vec![effect.clone()]), thirty(), notes, true)
+}
+
+#[test]
+fn a_folder_that_nobody_has_said_anything_about_is_wanted_once_and_the_sound_goes_through_unchanged() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let host = PluginHost::new();
+    let notes = Notes::default();
+    assert!(
+        ask(&host, &effect, &notes).is_none(),
+        "not run: nobody has said it may be"
+    );
+    assert!(ask(&host, &effect, &notes).is_none());
+    assert!(host.loaded_libraries().is_empty(), "and not loaded");
+    let wanted = host.take_wanted();
+    assert_eq!(
+        wanted,
+        [Wanted {
+            folder: the_folder_of(plugin),
+            libraries: vec![plugin.library.file_name().unwrap().to_string_lossy().into_owned()],
+            plugins: vec![plugin.descriptor.name.to_string()]
+        }],
+        "the folder, once, with the library and the plugin that are wanted"
+    );
+    assert!(host.take_wanted().is_empty(), "and it is given once");
+    assert!(notes.lock().unwrap().is_empty(), "(asking a person is not a note)");
+}
+
+#[test]
+fn the_plugins_that_are_wanted_from_a_folder_are_listed_once_each() {
+    let _alone = the_installed_plugins_to_myself();
+    let swap = the_effect(the_kind_of("ffrs_test_swap"), &[]);
+    let gain = the_effect(the_kind_of("ffrs_test_gain"), &[1.0]);
+    let host = PluginHost::new();
+    let notes = Notes::default();
+    for effect in [&gain, &swap, &gain, &swap] {
+        let _ = ask(&host, effect, &notes);
+    }
+    let wanted = host.take_wanted();
+    assert_eq!(wanted.len(), 1, "one folder");
+    assert_eq!(wanted[0].plugins.len(), 2, "{:?}", wanted[0].plugins);
+}
+
+#[test]
+fn a_folder_that_was_approved_is_run_and_the_library_is_loaded_once_and_the_generation_changed() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let host = PluginHost::new();
+    let before = host.generation();
+    host.approve_folder(&the_folder_of(plugin));
+    assert_ne!(
+        host.generation(),
+        before,
+        "what may be run changed: the sound is made again"
+    );
+    let notes = Notes::default();
+    let (mut first, mut second) = (
+        ask(&host, &effect, &notes).unwrap(),
+        ask(&host, &effect, &notes).unwrap(),
+    );
+    assert_eq!(
+        host.loaded_libraries().len(),
+        1,
+        "one library for two plugins made of it"
+    );
+    let (mut left, mut right) = (vec![1.0_f32; 4], vec![1.0_f32; 4]);
+    first.process(&mut left, &mut right);
+    second.process(&mut left, &mut right);
+    assert_eq!(left, vec![0.25; 4], "both are run");
+    assert!(host.take_wanted().is_empty());
+}
+
+#[test]
+fn a_folder_that_was_declined_is_not_run_and_is_not_asked_about_again_and_what_was_wanted_is_forgotten() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let host = PluginHost::new();
+    let notes = Notes::default();
+    let _ = ask(&host, &effect, &notes);
+    host.decline_folder(&the_folder_of(plugin));
+    assert!(host.take_wanted().is_empty(), "an answer is an answer");
+    assert!(ask(&host, &effect, &notes).is_none());
+    assert!(host.take_wanted().is_empty(), "and it is not asked about again");
+    host.forget_what_was_declined();
+    assert!(ask(&host, &effect, &notes).is_none());
+    assert_eq!(host.take_wanted().len(), 1, "another project: asked again");
+}
+
+#[test]
+fn every_folder_is_run_when_everything_is_allowed_and_the_approved_folders_can_be_set_all_at_once() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let notes = Notes::default();
+    let host = PluginHost::new();
+    host.set_approved_folders([the_folder_of(plugin)]);
+    assert!(ask(&host, &effect, &notes).is_some());
+    let generation = host.generation();
+    host.set_approved_folders([the_folder_of(plugin)]);
+    assert_eq!(host.generation(), generation, "the same: nothing changed");
+    host.set_approved_folders(Vec::<PathBuf>::new());
+    assert!(ask(&host, &effect, &notes).is_none(), "replaced");
+    host.allow_everything();
+    assert!(ask(&host, &effect, &notes).is_some());
+}
+
+#[test]
+fn a_plugin_that_is_not_installed_is_not_run_and_a_library_that_cannot_be_loaded_is_said_once() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, _) = the_gain_effect();
+    let host = PluginHost::new();
+    host.allow_everything();
+    let notes = Notes::default();
+    set_installed_plugins(Vec::new());
+    assert!(ask(&host, &effect, &notes).is_none(), "the plugin is gone");
+    assert!(
+        notes.lock().unwrap().is_empty(),
+        "(a plugin that is not installed is no news)"
+    );
+
+    let mut broken = the_test_plugins().remove(0);
+    broken.library = std::env::temp_dir().join("a_library_that_is_not_there.dll");
+    set_installed_plugins(vec![broken]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let effect = the_effect(kind, &[1.0]);
+    assert!(ask(&host, &effect, &notes).is_none());
+    assert!(ask(&host, &effect, &notes).is_none());
+    let notes = notes.lock().unwrap().clone();
+    assert_eq!(notes.len(), 1, "said once: {notes:?}");
+    assert!(
+        notes[0].contains("could not be loaded") && notes[0].contains("unchanged"),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_library_that_is_not_what_it_was_when_it_was_scanned_is_not_run_and_says_to_scan_again() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugins = the_test_plugins();
+    // The gain is installed as a plugin that the library has at another place, with a label that is another plugin's.
+    let mut impostor = plugins.remove(0);
+    impostor.plugin_index = 2; // the stereo swap
+    set_installed_plugins(vec![impostor]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let effect = the_effect(kind, &[0.5]);
+    let host = PluginHost::new();
+    host.allow_everything();
+    let notes = Notes::default();
+    assert!(ask(&host, &effect, &notes).is_none());
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("scan again"), "{said:?}");
+}
+
+#[test]
+fn a_breadcrumb_is_written_before_a_library_is_loaded_and_taken_away_when_the_editor_ends_well() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("in_use.json");
+    let host = PluginHost::new();
+    host.allow_everything();
+    host.keep_a_breadcrumb(crate::plugin_scan::Breadcrumb::at(file.clone()));
+    assert!(!file.exists());
+    let _ = ask(&host, &effect, &Notes::default()).unwrap();
+    let written = std::fs::read_to_string(&file).expect("the breadcrumb says which library is in use");
+    let file_name = plugin.library.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(written.contains(&file_name), "{written}");
+    host.ended_well();
+    assert!(!file.exists(), "it ended well");
+}
+
+// --- the graph with plugins in it ---
+
+/// A runner that doubles the sound of any plugin effect it is asked for, and counts the questions.
+struct Doubler {
+    asked: Mutex<usize>,
+}
+
+struct Double;
+
+impl BlockProcessor for Double {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for sample in left.iter_mut().chain(right.iter_mut()) {
+            *sample *= 2.0;
+        }
+    }
+
+    fn reset(&mut self) {}
+}
+
+impl PluginRunner for Doubler {
+    fn processor_for(
+        &self,
+        _: &LayerEffect,
+        _: &SoundClipToExport,
+        _: FrameRate,
+        _: &Notes,
+        _: bool,
+    ) -> Option<Box<dyn BlockProcessor>> {
+        *self.asked.lock().unwrap() += 1;
+        Some(Box::new(Double))
+    }
+}
+
+#[test]
+fn the_insertions_of_a_graph_ask_the_runner_for_the_plugin_effects_of_a_clip_and_only_for_those() {
+    let _alone = the_installed_plugins_to_myself();
+    let installed = the_effect(the_kind_of("ffrs_test_gain"), &[1.0]);
+    let swap = the_effect(the_kind_of("ffrs_test_swap"), &[]);
+    // Only the gain is installed now: the swap is a plugin effect that nothing stands in for.
+    set_installed_plugins(the_test_plugins().into_iter().take(1).collect());
+    assert!(installed.kind.installed_plugin().is_some());
+    assert!(
+        swap.kind.installed_plugin().is_none(),
+        "the swap is not in the list now"
+    );
+
+    let runner = Arc::new(Doubler { asked: Mutex::new(0) });
+    let mut insertions = PluginInsertions::new(runner.clone(), thirty(), Notes::default(), true);
+    let clip = a_clip_at(0, vec![installed, swap]);
+    let request = ClipRequest {
+        strip: 0,
+        item: 0,
+        clip: &clip,
+    };
+    let processors = insertions.for_clip(&request);
+    assert_eq!(processors.len(), 1, "one of the two is a plugin that is installed");
+    assert_eq!(*runner.asked.lock().unwrap(), 1, "and the runner was asked for it only");
+    assert!(insertions.for_strip(0).is_empty());
+}
+
+// --- the whole graph, with the real test plugins and sound made in memory ---
+
+use crate::media::export::{SoundGraphSpecification, SoundItemToExport, SoundStripToExport};
+use crate::project::SpedUpClipSound;
+use crate::sound_engine::{ClipFeed, ClipFeeds, SoundGraph, sample_at_frame};
+
+/// The sound of a source file that has, at sample number `n` of it, `1 + n / 100000` on the left and the same with the sign changed on the right: a different number at every
+/// sample, so that a sample out of place cannot be taken for the right one.
+struct SourceRamp {
+    next: u64,
+}
+
+impl ClipFeed for SourceRamp {
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        for place in 0..left.len() {
+            left[place] = 1.0 + (self.next + place as u64) as f32 / 100_000.0;
+            right[place] = -left[place];
+        }
+        self.next += left.len() as u64;
+        left.len()
+    }
+}
+
+struct SourceRamps {
+    frame_rate: FrameRate,
+}
+
+impl ClipFeeds for SourceRamps {
+    fn open(&mut self, request: &ClipRequest<'_>) -> Box<dyn ClipFeed> {
+        Box::new(SourceRamp {
+            next: sample_at_frame(self.frame_rate, request.clip.first_source_frame),
+        })
+    }
+}
+
+/// The sound of a strip of the one clip `clip`, made by the graph in blocks of `block`, with `runner` making the plugins.
+fn sound_of(
+    clip: SoundClipToExport,
+    runner: Arc<dyn PluginRunner>,
+    is_for_the_preview: bool,
+    block: usize,
+) -> (Vec<f32>, Vec<f32>, Notes) {
+    let notes = Notes::default();
+    let specification = SoundGraphSpecification {
+        frame_rate: thirty(),
+        total_frame_count: clip.timeline_frame_count,
+        strips: vec![SoundStripToExport {
+            items: vec![SoundItemToExport::Clip(clip)],
+        }],
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+    };
+    let mut graph = SoundGraph::new(
+        specification,
+        Box::new(SourceRamps { frame_rate: thirty() }),
+        Box::new(PluginInsertions::new(
+            runner,
+            thirty(),
+            Arc::clone(&notes),
+            is_for_the_preview,
+        )),
+    );
+    let (left, right) = graph.render_to_the_end(block);
+    (left, right, notes)
+}
+
+fn a_host_that_runs_everything() -> Arc<PluginHost> {
+    let host = Arc::new(PluginHost::new());
+    host.allow_everything();
+    host
+}
+
+fn the_clip(
+    first_source_frame: u64,
+    frame_count: u64,
+    first_timeline_frame: u64,
+    effects: Vec<LayerEffect>,
+) -> SoundClipToExport {
+    SoundClipToExport {
+        source_input: 0,
+        first_source_frame,
+        end_source_frame: first_source_frame + frame_count,
+        speed_factor: SpeedFactor::new(1).unwrap(),
+        timeline_frame_count: frame_count,
+        loudness: LoudnessToExport::UNCHANGED,
+        first_timeline_frame,
+        effects,
+    }
+}
+
+fn an_animated_gain(first: (u64, f32), last: (u64, f32)) -> LayerEffect {
+    let kind = the_kind_of("ffrs_test_gain");
+    let mut effect = the_effect(kind, &[1.0]);
+    let gain = PropertyId::effect_value(kind, EffectInstanceId::FIRST, 0);
+    let keyframe = |(frame, value): (u64, f32)| Keyframe {
+        frame,
+        value: PropertyValue::Number(value),
+    };
+    effect.animation =
+        Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(first), keyframe(last)]))]);
+    effect
+}
+
+#[test]
+fn a_gain_plugin_on_a_clip_in_the_graph_gives_the_arithmetic_exactly_for_blocks_of_any_size() {
+    let _alone = the_installed_plugins_to_myself();
+    let gain = the_effect(the_kind_of("ffrs_test_gain"), &[0.5]);
+    let (plain_left, plain_right, _) = sound_of(
+        the_clip(0, 45, 0, Vec::new()),
+        a_host_that_runs_everything(),
+        false,
+        512,
+    );
+    assert_eq!(plain_left.len(), 45 * 1600);
+    let half = |plain: &[f32]| plain.iter().map(|sample| sample * 0.5).collect::<Vec<f32>>();
+    for block in [512, 100, 4096] {
+        let (left, right, notes) = sound_of(
+            the_clip(0, 45, 0, vec![gain.clone()]),
+            a_host_that_runs_everything(),
+            false,
+            block,
+        );
+        assert_eq!(left, half(&plain_left), "blocks of {block}, left");
+        assert_eq!(right, half(&plain_right), "blocks of {block}, right");
+        assert!(notes.lock().unwrap().is_empty());
+    }
+    // And blocks of one sample, for a sound of a frame.
+    let (plain_left, _, _) = sound_of(the_clip(0, 1, 0, Vec::new()), a_host_that_runs_everything(), false, 512);
+    let (left, _, _) = sound_of(the_clip(0, 1, 0, vec![gain]), a_host_that_runs_everything(), false, 1);
+    assert_eq!(left, half(&plain_left), "blocks of one sample");
+}
+
+#[test]
+fn the_effects_of_a_clip_are_done_before_its_volume() {
+    let _alone = the_installed_plugins_to_myself();
+    let gain = the_effect(the_kind_of("ffrs_test_gain"), &[0.5]);
+    let mut clip = the_clip(0, 3, 0, vec![gain]);
+    clip.loudness = LoudnessToExport::Constant(0.25);
+    let (left, _, _) = sound_of(clip, a_host_that_runs_everything(), false, 512);
+    let (plain, _, _) = sound_of(the_clip(0, 3, 0, Vec::new()), a_host_that_runs_everything(), false, 512);
+    assert_eq!(left.len(), plain.len());
+    for (place, (made, was)) in left.iter().zip(&plain).enumerate() {
+        assert!(
+            (made - was * 0.125).abs() <= 1e-6 * was.abs(),
+            "sample {place}: {made} and {was} * 0.125"
+        );
+    }
+}
+
+#[test]
+fn a_seek_gives_the_same_samples_as_playing_through_where_the_plugin_has_no_memory_though_its_value_is_animated() {
+    let _alone = the_installed_plugins_to_myself();
+    // A clip from the timeline frame 10, for 90 frames, with a gain that rises from 0 at the frame 10 to 4 at the frame 100.
+    let effect = an_animated_gain((10, 0.0), (100, 4.0));
+    let (whole_left, whole_right, _) = sound_of(
+        the_clip(0, 90, 10, vec![effect.clone()]),
+        a_host_that_runs_everything(),
+        false,
+        512,
+    );
+    assert!(
+        whole_left[0].abs() < 1e-6 && whole_left[whole_left.len() - 1] > 3.0,
+        "it does rise"
+    );
+    // The same sound from the timeline frame 40: what the preview makes when it is started there (see `plan_sound`: the clip begins at the frame it is heard from, and the
+    // frames of the keyframes are still those of the timeline).
+    let (seeked_left, seeked_right, _) = sound_of(
+        the_clip(30, 60, 40, vec![effect]),
+        a_host_that_runs_everything(),
+        false,
+        512,
+    );
+    let from = sample_at_frame(thirty(), 30) as usize;
+    assert_eq!(seeked_left.len(), whole_left.len() - from);
+    assert_eq!(seeked_left, whole_left[from..], "the left, to the sample");
+    assert_eq!(seeked_right, whole_right[from..], "and the right");
+}
+
+#[test]
+fn the_preview_and_the_export_make_the_same_samples_when_the_plugin_keeps_up() {
+    let _alone = the_installed_plugins_to_myself();
+    let effect = an_animated_gain((0, 0.5), (60, 2.0));
+    let (preview, _, _) = sound_of(
+        the_clip(0, 60, 0, vec![effect.clone()]),
+        a_host_that_runs_everything(),
+        true,
+        512,
+    );
+    let (export, _, _) = sound_of(
+        the_clip(0, 60, 0, vec![effect]),
+        a_host_that_runs_everything(),
+        false,
+        512,
+    );
+    assert_eq!(preview, export);
+}
+
+#[test]
+fn the_effects_of_a_clip_are_asked_for_in_the_order_they_are_applied_in() {
+    let _alone = the_installed_plugins_to_myself();
+    struct Recording {
+        asked_in_this_order: Mutex<Vec<u32>>,
+    }
+    impl PluginRunner for Recording {
+        fn processor_for(
+            &self,
+            effect: &LayerEffect,
+            _: &SoundClipToExport,
+            _: FrameRate,
+            _: &Notes,
+            _: bool,
+        ) -> Option<Box<dyn BlockProcessor>> {
+            self.asked_in_this_order.lock().unwrap().push(effect.instance.number());
+            None
+        }
+    }
+    let kind = the_kind_of("ffrs_test_gain");
+    let mut effects = Vec::new();
+    for number in [7, 3, 9] {
+        let mut effect = the_effect(kind, &[1.0]);
+        effect.instance = EffectInstanceId::new(number);
+        effects.push(effect);
+    }
+    let runner = Arc::new(Recording {
+        asked_in_this_order: Mutex::new(Vec::new()),
+    });
+    let _ = sound_of(the_clip(0, 1, 0, effects), runner.clone(), false, 512);
+    assert_eq!(*runner.asked_in_this_order.lock().unwrap(), [7, 3, 9]);
+}
+
+// --- a plugin that is too slow (the test plugin "counted" takes as long as its control says) ---
+
+fn a_plugin_effect_of(
+    label: &str,
+    values: &[f32],
+    for_the_preview: bool,
+    patience: Option<f64>,
+) -> (PluginEffect, Notes) {
+    let kind = the_kind_of(label);
+    let plugin = kind.installed_plugin().unwrap();
+    let library = ladspa_host::Library::open(&plugin.library).unwrap();
+    let instances = (0..Layout::of(plugin.audio_inputs, plugin.audio_outputs)
+        .unwrap()
+        .instances())
+        .map(|_| {
+            library
+                .instantiate(plugin.plugin_index, crate::sound_engine::SAMPLE_RATE)
+                .unwrap()
+        })
+        .collect();
+    let notes = Notes::default();
+    let mut effect = PluginEffect::new(
+        instances,
+        plugin,
+        the_effect(kind, values),
+        thirty(),
+        0,
+        for_the_preview,
+        Arc::clone(&notes),
+    )
+    .unwrap();
+    if let Some(patience) = patience {
+        effect = effect.with_patience(patience);
+    }
+    (effect, notes)
+}
+
+fn run_blocks(effect: &mut PluginEffect, count: usize) {
+    for _ in 0..count {
+        let (mut left, mut right) = (vec![0.25_f32; 512], vec![-0.25_f32; 512]);
+        effect.process(&mut left, &mut right);
+    }
+}
+
+#[test]
+fn a_plugin_that_takes_longer_than_the_sound_for_the_patience_it_is_given_is_left_out_of_the_preview_and_said_once() {
+    let _alone = the_installed_plugins_to_myself();
+    // A block of 512 samples is 10.7 ms of sound, and this plugin takes 10 ms for each of the two channels.
+    let (mut effect, notes) = a_plugin_effect_of("ffrs_test_counted", &[0.1], true, Some(0.05));
+    run_blocks(&mut effect, 4);
+    assert!(!effect.is_left_out(), "four blocks are 43 ms of sound: not yet");
+    assert!(notes.lock().unwrap().is_empty());
+    run_blocks(&mut effect, 1);
+    assert!(
+        effect.is_left_out(),
+        "five blocks are 53 ms of sound that took too long"
+    );
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("too slow") && said[0].contains("0.05 seconds") && said[0].contains("unchanged"),
+        "{said:?}"
+    );
+    // From then on the plugin is not run (a hundred blocks would take two seconds if it were) and the sound is as it was given.
+    let began = std::time::Instant::now();
+    let (mut left, mut right) = (vec![0.25_f32; 512], vec![-0.25_f32; 512]);
+    for _ in 0..100 {
+        effect.process(&mut left, &mut right);
+    }
+    assert!(began.elapsed() < Duration::from_millis(500), "{:?}", began.elapsed());
+    assert_eq!((left[0], right[0]), (0.25, -0.25));
+    assert_eq!(notes.lock().unwrap().len(), 1, "and it is not said again");
+}
+
+#[test]
+fn the_export_waits_for_a_plugin_that_is_too_slow_and_never_leaves_it_out() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut effect, notes) = a_plugin_effect_of("ffrs_test_counted", &[0.1], false, Some(0.05));
+    run_blocks(&mut effect, 8);
+    assert!(!effect.is_left_out());
+    assert!(notes.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_plugin_that_keeps_up_is_not_left_out_of_the_preview() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut effect, notes) = a_plugin_effect_of("ffrs_test_gain", &[1.0], true, Some(0.05));
+    run_blocks(&mut effect, 300);
+    assert!(!effect.is_left_out());
+    assert!(notes.lock().unwrap().is_empty());
+}
+
+// --- what the mutation campaign found missing ---
+
+fn assert_changed(host: &PluginHost, last: &mut u64, what: &str) {
+    let now = host.generation();
+    assert_ne!(now, *last, "{what} changes what may be run: the sound is made again");
+    *last = now;
+}
+
+#[test]
+fn every_change_of_what_may_be_run_changes_the_generation_and_a_repeat_or_a_taking_back_changes_nothing() {
+    let host = PluginHost::new();
+    let (a, b, c, d) = (
+        PathBuf::from("/a"),
+        PathBuf::from("/b"),
+        PathBuf::from("/c"),
+        PathBuf::from("/d"),
+    );
+    let mut last = host.generation();
+    host.set_approved_folders([a.clone()]);
+    assert_changed(&host, &mut last, "saying which folders were approved");
+    host.set_approved_folders([a]);
+    assert_eq!(host.generation(), last, "the same folders again: nothing changed");
+    host.set_approved_folders([b]);
+    assert_changed(&host, &mut last, "other folders");
+    host.decline_folder(&c);
+    assert_changed(&host, &mut last, "a no");
+    host.forget_what_was_declined();
+    assert_changed(&host, &mut last, "forgetting a no");
+    host.forget_what_was_declined();
+    assert_eq!(host.generation(), last, "nothing to forget: nothing changed");
+    host.approve_folder(&c);
+    assert_changed(&host, &mut last, "a yes");
+    // A no that a yes took back is not there to be forgotten, and forgetting it makes no difference to the sound.
+    host.decline_folder(&d);
+    host.approve_folder(&d);
+    last = host.generation();
+    host.forget_what_was_declined();
+    assert_eq!(host.generation(), last, "the no was taken back by the yes");
+    host.allow_everything();
+    assert_changed(&host, &mut last, "allowing everything");
+}
+
+#[test]
+fn what_the_host_does_about_a_folder_is_approved_declined_or_not_asked_and_everything_allowed_approves_all() {
+    let host = PluginHost::new();
+    let (yes, no, nobody) = (PathBuf::from("/yes"), PathBuf::from("/no"), PathBuf::from("/nobody"));
+    host.approve_folder(&yes);
+    host.decline_folder(&no);
+    assert_eq!(host.standing_of(&yes), FolderStanding::Approved);
+    assert_eq!(host.standing_of(&no), FolderStanding::Declined);
+    assert_eq!(host.standing_of(&nobody), FolderStanding::NotAsked);
+    host.allow_everything();
+    assert_eq!(host.standing_of(&nobody), FolderStanding::Approved);
+    assert_eq!(host.standing_of(&no), FolderStanding::Approved);
+}
+
+#[test]
+fn the_folders_above_a_plugin_library_are_looked_in_for_the_libraries_it_needs_until_a_person_says_not() {
+    let host = PluginHost::new();
+    assert_eq!(host.where_dependencies_are_looked_for(), (Vec::new(), true));
+    host.look_for_dependencies_in(vec![PathBuf::from("/needed")], false);
+    assert_eq!(
+        host.where_dependencies_are_looked_for(),
+        (vec![PathBuf::from("/needed")], false)
+    );
+}
+
+#[test]
+fn a_folder_that_was_wanted_and_is_then_approved_is_not_wanted_any_more() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let host = PluginHost::new();
+    let _ = ask(&host, &effect, &Notes::default());
+    host.approve_folder(&the_folder_of(plugin));
+    assert!(host.take_wanted().is_empty());
+}
+
+/// Copies of the test library, with the names `names`, in a folder of their own, and the plugin `plugin` as the plugin of each.
+fn plugins_in_libraries_of_one_folder(
+    folder: &std::path::Path,
+    plugin: &InstalledPlugin,
+    names: &[&str],
+) -> Vec<InstalledPlugin> {
+    names
+        .iter()
+        .map(|name| {
+            let library = folder.join(name);
+            std::fs::copy(&plugin.library, &library).unwrap();
+            let mut copy = plugin.clone();
+            copy.library = library;
+            copy.descriptor.key = format!("ladspa:{name}:ffrs_test_gain").into();
+            copy.descriptor.name = format!("gain of {name}").into();
+            copy
+        })
+        .collect()
+}
+
+#[test]
+fn two_libraries_of_one_folder_are_wanted_each_once_with_their_plugins_and_the_folder_once() {
+    let _alone = the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    let plugins = plugins_in_libraries_of_one_folder(folder.path(), &the_test_plugins()[0], &["one.dll", "two.dll"]);
+    set_installed_plugins(plugins);
+    let host = PluginHost::new();
+    let notes = Notes::default();
+    for _ in 0..2 {
+        for kind in EffectKind::installed_plugin_kinds() {
+            let _ = ask(&host, &the_effect(kind, &[1.0]), &notes);
+        }
+    }
+    let wanted = host.take_wanted();
+    assert_eq!(wanted.len(), 1, "{wanted:?}");
+    assert_eq!(wanted[0].libraries, ["one.dll", "two.dll"]);
+    assert_eq!(wanted[0].plugins, ["gain of one.dll", "gain of two.dll"]);
+}
+
+#[test]
+fn a_library_that_cannot_be_loaded_is_in_the_breadcrumb_all_the_same() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = the_test_plugins().remove(0);
+    let folder = tempfile::tempdir().unwrap();
+    plugin.library = folder.path().join("nope.dll");
+    set_installed_plugins(vec![plugin]);
+    let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
+    let host = PluginHost::new();
+    host.allow_everything();
+    let breadcrumb = folder.path().join("in_use.json");
+    host.keep_a_breadcrumb(crate::plugin_scan::Breadcrumb::at(breadcrumb.clone()));
+
+    assert!(ask(&host, &effect, &Notes::default()).is_none());
+
+    let written = std::fs::read_to_string(&breadcrumb).expect("the library was written down before it was loaded");
+    assert!(written.contains("nope.dll"), "{written}");
+}
+
+fn notes_when_the_plugin_is_changed_by(change: impl FnOnce(&mut InstalledPlugin)) -> Vec<String> {
+    let mut plugin = the_test_plugins().remove(0);
+    change(&mut plugin);
+    set_installed_plugins(vec![plugin]);
+    let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
+    let host = PluginHost::new();
+    host.allow_everything();
+    let notes = Notes::default();
+    assert!(
+        ask(&host, &effect, &notes).is_none(),
+        "a plugin that is not the one scanned is not run"
+    );
+    notes.lock().unwrap().clone()
+}
+
+#[test]
+fn a_plugin_that_has_another_label_or_other_ports_than_the_one_that_was_scanned_is_not_run() {
+    let _alone = the_installed_plugins_to_myself();
+    for (what, said) in [
+        (
+            "another label",
+            notes_when_the_plugin_is_changed_by(|plugin| {
+                plugin.descriptor.key = "ladspa:good:ffrs_test_gain_of_another_time".into()
+            }),
+        ),
+        (
+            "other audio ports",
+            notes_when_the_plugin_is_changed_by(|plugin| {
+                plugin.audio_inputs = 2;
+                plugin.audio_outputs = 2;
+            }),
+        ),
+        (
+            "a value on a port that is not a control",
+            notes_when_the_plugin_is_changed_by(|plugin| plugin.value_ports = vec![1]),
+        ),
+    ] {
+        assert_eq!(said.len(), 1, "{what}: {said:?}");
+        assert!(said[0].contains("scan again"), "{what}: {said:?}");
+    }
+}
+
+#[test]
+fn a_plugin_that_fails_to_run_is_left_out_for_the_rest_of_the_play_and_said_once_and_the_sound_is_as_it_was() {
+    let _alone = the_installed_plugins_to_myself();
+    // The gain plugin, said to have two audio inputs and two outputs: it is made once and given two buffers where it has one port, which it refuses.
+    let kind = the_kind_of("ffrs_test_gain");
+    let mut plugin = kind.installed_plugin().unwrap().clone();
+    plugin.audio_inputs = 2;
+    plugin.audio_outputs = 2;
+    let plugin: &'static InstalledPlugin = Box::leak(Box::new(plugin));
+    let library = ladspa_host::Library::open(&plugin.library).unwrap();
+    let instances = vec![
+        library
+            .instantiate(plugin.plugin_index, crate::sound_engine::SAMPLE_RATE)
+            .unwrap(),
+    ];
+    let notes = Notes::default();
+    let mut effect = PluginEffect::new(
+        instances,
+        plugin,
+        the_effect(kind, &[0.5]),
+        thirty(),
+        0,
+        false,
+        Arc::clone(&notes),
+    )
+    .unwrap();
+
+    run_blocks(&mut effect, 3);
+
+    assert!(effect.is_left_out());
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "said once, though three blocks came: {said:?}");
+    assert!(
+        said[0].contains("could not be run") && said[0].contains("unchanged"),
+        "{said:?}"
+    );
+    let (mut left, mut right) = (vec![0.25_f32; 8], vec![-0.25_f32; 8]);
+    effect.process(&mut left, &mut right);
+    assert_eq!((left[0], right[0]), (0.25, -0.25), "the sound goes through as it is");
+}
+
+#[test]
+fn channels_of_different_lengths_are_made_as_far_as_the_shorter_goes() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut processor, _) = processor_of(&the_effect(the_kind_of("ffrs_test_gain"), &[2.0]), 0);
+    let (mut left, mut right) = (vec![1.0_f32; 4], vec![1.0_f32; 2]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, [2.0, 2.0, 1.0, 1.0], "only as far as the right channel goes");
+    assert_eq!(right, [2.0, 2.0]);
+}
+
+#[test]
+fn a_plugin_is_too_slow_after_two_seconds_as_the_design_says() {
+    assert_eq!(SECONDS_TOO_SLOW, 2.0);
+}
+
+#[test]
+fn the_frame_of_a_sample_is_exact_at_the_end_of_a_frame_whatever_the_blocks_are() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_kind_of("ffrs_test_gain");
+    let mut effect = the_effect(kind, &[1.0]);
+    let gain = PropertyId::effect_value(kind, EffectInstanceId::FIRST, 0);
+    let keyframe = |frame, value| Keyframe {
+        frame,
+        value: PropertyValue::Number(value),
+    };
+    // The gain is the number of the frame.
+    effect.animation =
+        Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(0, 0.0), keyframe(4, 4.0)]))]);
+    let (mut processor, _) = processor_of(&effect, 0);
+
+    // The first block ends one sample before the end of the frame 0 (1600 samples); the next begins with the last sample of it, and a look at the values is made there.
+    let (mut left, mut right) = (vec![1.0_f32; 1599], vec![1.0_f32; 1599]);
+    processor.process(&mut left, &mut right);
+    let (mut left, mut right) = (vec![1.0_f32; 64], vec![1.0_f32; 64]);
+    processor.process(&mut left, &mut right);
+
+    assert_eq!(left[0], 0.0, "the sample 1599 is in the frame 0, where the gain is 0");
+    assert_eq!(
+        left[31], 0.0,
+        "and so is the rest of the 32 that are looked at together"
+    );
+    assert_eq!(left[32], 1.0, "the next 32 begin at the sample 1631, in the frame 1");
+}
+
+// --- what the sound of a project needs from the folders ---
+
+#[test]
+fn the_folders_that_the_sound_of_a_project_needs_have_each_library_and_plugin_once_whatever_the_number_of_effects() {
+    use crate::video_export::test_projects::{clip_location, project_with_video};
+    let _alone = the_installed_plugins_to_myself();
+    let gain = the_kind_of("ffrs_test_gain");
+    let swap = the_kind_of("ffrs_test_swap");
+    let mut project = project_with_video(320, 180, false);
+    let clip = clip_location(&project, 0, 0);
+    for kind in [swap, gain, gain, EffectKind::HUE_SHIFT] {
+        project
+            .add_effect(crate::project::AnimationTarget::Clip(clip), kind)
+            .unwrap();
+    }
+
+    let needed = folders_the_sound_of_a_project_needs(&project);
+
+    assert_eq!(needed.len(), 1, "{needed:?}");
+    let library = the_test_plugins()[0]
+        .library
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        needed[0].libraries,
+        [library],
+        "one library, though two plugins of it and three effects"
+    );
+    assert_eq!(
+        needed[0].plugins,
+        ["test plugin ffrs_test_gain", "test plugin ffrs_test_swap"],
+        "each plugin once, in the order of their names"
+    );
+    assert_eq!(needed[0].folder, the_folder_of(&the_test_plugins()[0]));
+}
+
+// --- the search path of the system, where the editor can change it ---
+
+#[cfg(windows)]
+#[test]
+fn the_folders_for_libraries_are_put_before_the_search_path_of_the_system_and_the_system_folders_stay_in_it() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let folder = tempfile::tempdir().unwrap();
+    let host = PluginHost::new();
+    host.allow_everything();
+    host.look_for_dependencies_in(vec![folder.path().to_owned()], false);
+
+    assert!(ask(&host, &effect, &Notes::default()).is_some(), "{:?}", plugin.library);
+
+    let path = std::env::var_os("PATH").unwrap();
+    let entries: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    // (Other tests of this program put their own folders there at the same time, so what is looked at is what must always be there.)
+    let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.to_string_lossy().eq_ignore_ascii_case(&system.to_string_lossy())),
+        "the folders of Windows are still in the search path: {entries:?}"
+    );
+}

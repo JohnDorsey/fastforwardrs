@@ -14,7 +14,11 @@ fn arguments(list: &[&str]) -> Vec<OsString> {
 
 fn export_of(list: &[&str]) -> ExportRequest {
     match parse_arguments(arguments(list)).unwrap() {
-        CommandLine::Export(request) => request,
+        // (Plugins are not looked for on the computer that runs the tests, unless a test says where.)
+        CommandLine::Export(request) => ExportRequest {
+            plugin_search: None,
+            ..request
+        },
         other => panic!("expected an export, got {other:?}"),
     }
 }
@@ -531,13 +535,13 @@ fn a_plugin_file_that_has_not_been_approved_is_refused_and_one_that_has_is_not()
 
     let refused = export_project(&request, &mut |_| {}).unwrap_err();
     assert!(
-        refused.contains("tap_reverb.so") && refused.contains("has not been approved"),
+        refused.contains("tap_reverb.so") && refused.contains("not been approved"),
         "{refused}"
     );
 
-    // Approved in the editor (the same file, by path and contents): the command line no longer refuses it. (The export then goes on to look for ffmpeg and the video, which
+    // The folder of the file was approved in the editor: the command line no longer refuses it. (The export then goes on to look for ffmpeg and the video, which
     // may not be there: what is checked is that it is not the plugin that stops it.)
-    ApprovalStore::at(approvals).approve(&file, crate::digest::Sha256Digest::of_bytes(b"bytes"));
+    ApprovalStore::at(approvals).approve_folder(file.parent().unwrap());
     let result = export_project(&request, &mut |_| {});
     if let Err(reason) = result {
         assert!(!reason.contains("a command line cannot ask"), "{reason}");
@@ -587,4 +591,236 @@ fn a_refusal_is_told_on_the_error_stream_and_the_status_says_the_export_failed()
     assert_eq!(status, 1);
     let text = String::from_utf8_lossy(&said);
     assert!(text.contains("amp_1181.dll"), "{text}");
+}
+
+// --- the plugins of the sound ---
+
+/// A project of one video with the gain plugin of the test library on its clip, with the plugins of the test library installed.
+fn project_with_a_plugin_on_its_clip() -> (Project, crate::project::InstalledPlugin) {
+    let plugins = crate::test_support::the_plugins_of_the_test_library();
+    crate::project::set_installed_plugins(plugins.clone());
+    let kind = crate::project::EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key().ends_with(":ffrs_test_gain"))
+        .unwrap();
+    let mut project = project_with_video(320, 180, false);
+    let clip = crate::video_export::test_projects::clip_location(&project, 0, 0);
+    project
+        .add_effect(crate::project::AnimationTarget::Clip(clip), kind)
+        .unwrap();
+    (project, kind.installed_plugin().unwrap().clone())
+}
+
+fn a_request_for_the_plugins_of(allow: bool, approvals: Option<PathBuf>) -> ExportRequest {
+    ExportRequest {
+        allow_plugins: allow,
+        plugin_approvals_file: approvals,
+        ..export_of(&["--adapter", "software", "trip.json", "out.mp4"])
+    }
+}
+
+#[test]
+fn a_plugin_on_a_clip_in_a_folder_nobody_has_approved_refuses_the_export_and_names_the_folder_and_the_plugin() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, plugin) = project_with_a_plugin_on_its_clip();
+
+    let refused = find_and_check_the_plugins_of_the_sound(&a_request_for_the_plugins_of(false, None), &project)
+        .err()
+        .expect("refused");
+
+    assert!(refused.contains("a command line cannot ask"), "{refused}");
+    assert!(refused.contains("test plugin ffrs_test_gain"), "{refused}");
+    assert!(refused.contains("has not been approved"), "{refused}");
+    assert!(
+        refused.contains(&crate::plugin_trust::folder_for_a_person(
+            &crate::plugin_trust::folder_of(&plugin.library)
+        )),
+        "{refused}"
+    );
+    assert!(refused.contains("--allow-plugins"), "{refused}");
+}
+
+#[test]
+fn an_approved_folder_lets_the_plugins_in_it_be_run_and_other_folders_stay_refused() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, plugin) = project_with_a_plugin_on_its_clip();
+    let folder = tempfile::tempdir().unwrap();
+    let approvals = folder.path().join("plugin_approvals.json");
+    let elsewhere = folder.path().join("a_folder_with_other_plugins");
+    ApprovalStore::at(approvals.clone()).approve_folder(&elsewhere);
+    assert!(
+        find_and_check_the_plugins_of_the_sound(
+            &a_request_for_the_plugins_of(false, Some(approvals.clone())),
+            &project
+        )
+        .is_err(),
+        "a folder that is approved is not this one"
+    );
+
+    ApprovalStore::at(approvals.clone()).approve_folder(&crate::plugin_trust::folder_of(&plugin.library));
+    let host = find_and_check_the_plugins_of_the_sound(&a_request_for_the_plugins_of(false, Some(approvals)), &project)
+        .expect("not refused");
+
+    assert_eq!(
+        host.standing_of(&crate::plugin_trust::folder_of(&plugin.library)),
+        crate::plugin_trust::FolderStanding::Approved
+    );
+    assert_eq!(
+        host.standing_of(&elsewhere),
+        crate::plugin_trust::FolderStanding::NotAsked,
+        "only the folder that was approved"
+    );
+}
+
+#[test]
+fn with_allow_plugins_every_folder_is_run() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, plugin) = project_with_a_plugin_on_its_clip();
+
+    let host = find_and_check_the_plugins_of_the_sound(&a_request_for_the_plugins_of(true, None), &project)
+        .expect("not refused");
+
+    assert_eq!(
+        host.standing_of(&crate::plugin_trust::folder_of(&plugin.library)),
+        crate::plugin_trust::FolderStanding::Approved
+    );
+}
+
+#[test]
+fn a_project_with_no_plugin_on_a_clip_is_not_refused_and_runs_nothing() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let plugin = crate::test_support::the_plugins_of_the_test_library().remove(0);
+    crate::project::set_installed_plugins(vec![plugin.clone()]);
+    let project = project_with_video(320, 180, false);
+
+    let host = find_and_check_the_plugins_of_the_sound(&a_request_for_the_plugins_of(false, None), &project)
+        .expect("not refused");
+
+    assert_eq!(
+        host.standing_of(&crate::plugin_trust::folder_of(&plugin.library)),
+        crate::plugin_trust::FolderStanding::NotAsked
+    );
+}
+
+#[test]
+fn a_plugin_that_is_not_installed_is_not_a_reason_to_refuse_the_export() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, _) = project_with_a_plugin_on_its_clip();
+    crate::project::set_installed_plugins(Vec::new());
+
+    let result = find_and_check_the_plugins_of_the_sound(&a_request_for_the_plugins_of(false, None), &project);
+
+    assert!(
+        result.is_ok(),
+        "nothing runs it, and the export warns that the video does not have it"
+    );
+}
+
+#[test]
+fn the_folders_and_the_scans_are_kept_beside_the_settings_file_that_was_asked_for() {
+    let search = PluginSearch::beside_the_settings_file(
+        PathBuf::from("/programs/fastforwardrs-plugin-scan"),
+        Some(Path::new("/somewhere/else/settings.json")),
+    );
+    assert_eq!(
+        search.scanner_program,
+        PathBuf::from("/programs/fastforwardrs-plugin-scan")
+    );
+    assert_eq!(
+        search.settings_file,
+        Some(PathBuf::from("/somewhere/else/plugin_search.json"))
+    );
+    assert_eq!(
+        search.cache_file,
+        Some(PathBuf::from("/somewhere/else/plugin_scan_cache.json"))
+    );
+    assert!(search.look_in_the_usual_places);
+
+    let none = PluginSearch::beside_the_settings_file(PathBuf::from("scan"), None);
+    assert_eq!((none.settings_file, none.cache_file), (None, None));
+}
+
+#[test]
+fn the_command_line_looks_for_plugins_beside_the_settings_file_it_is_given() {
+    let request =
+        match parse_arguments(arguments(&["--settings", "/elsewhere/s.json", "trip.json", "out.mp4"])).unwrap() {
+            CommandLine::Export(request) => request,
+            other => panic!("{other:?}"),
+        };
+    // (There is a scan program beside the tests only when the whole package has been built.)
+    if let Some(search) = request.plugin_search {
+        assert_eq!(
+            search.settings_file,
+            Some(PathBuf::from("/elsewhere/plugin_search.json"))
+        );
+    }
+}
+
+// --- what the mutation campaign found missing ---
+
+/// A way to look for plugins that has no scan program (so that nothing is found, and nothing on the computer that runs the test is looked at), with the folders for libraries
+/// that the file `settings_file` says.
+fn a_search_that_finds_nothing(settings_file: PathBuf) -> Option<Box<PluginSearch>> {
+    Some(Box::new(PluginSearch {
+        scanner_program: PathBuf::from("/no/such/program/fastforwardrs-plugin-scan"),
+        settings_file: Some(settings_file),
+        cache_file: None,
+        look_in_the_usual_places: false,
+    }))
+}
+
+#[test]
+fn the_plugins_are_looked_for_only_when_a_clip_has_an_effect_that_is_not_installed() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    let request = ExportRequest {
+        plugin_search: a_search_that_finds_nothing(folder.path().join("plugin_search.json")),
+        ..a_request_for_the_plugins_of(true, None)
+    };
+
+    // An effect of a plugin that is not installed (another plugin is): the plugins are looked for, and the list is what the scan found, which is nothing.
+    let (project, _) = project_with_a_plugin_on_its_clip();
+    let others = crate::test_support::the_plugins_of_the_test_library();
+    crate::project::set_installed_plugins(vec![others[1].clone()]);
+    find_and_check_the_plugins_of_the_sound(&request, &project).expect("not refused");
+    assert!(
+        crate::project::EffectKind::installed_plugin_kinds().is_empty(),
+        "the plugins were looked for, and none was found"
+    );
+
+    // Nothing on a clip is missing: the list of what is installed is left as it was.
+    crate::project::set_installed_plugins(vec![others[1].clone()]);
+    find_and_check_the_plugins_of_the_sound(&request, &project_with_video(320, 180, false)).expect("not refused");
+    assert_eq!(
+        crate::project::EffectKind::installed_plugin_kinds().len(),
+        1,
+        "nothing needed them, so they were not looked for"
+    );
+}
+
+#[test]
+fn the_places_for_libraries_that_the_file_beside_the_settings_says_are_told_to_the_host_that_runs_the_plugins() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    let settings = folder.path().join("plugin_search.json");
+    crate::plugin_scan::PluginSearchSettings {
+        folders: Vec::new(),
+        dependency_folders: vec![folder.path().to_owned()],
+        search_parent_folders: false,
+    }
+    .write(&settings)
+    .unwrap();
+    let request = ExportRequest {
+        plugin_search: a_search_that_finds_nothing(settings),
+        ..a_request_for_the_plugins_of(true, None)
+    };
+    let (project, _) = project_with_a_plugin_on_its_clip();
+    crate::project::set_installed_plugins(Vec::new());
+
+    let host = find_and_check_the_plugins_of_the_sound(&request, &project).expect("not refused");
+
+    assert_eq!(
+        host.where_dependencies_are_looked_for(),
+        (vec![folder.path().to_owned()], false)
+    );
 }

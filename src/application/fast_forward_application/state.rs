@@ -34,6 +34,7 @@ use crate::playback::{
     AudioSupplier, ClockReading, FfmpegAudioStreamStarter, FfmpegPictureStreamStarter, PlaybackClock, PreviewPictures,
     SoundEffects,
 };
+use crate::plugin_host::PluginHost;
 use crate::project::{Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
 use crate::text_rendering::LazyTextRenderer;
 
@@ -246,6 +247,8 @@ pub(super) struct Environment {
     pub(super) global_settings_path: Option<PathBuf>,
     /// Who may run which plugin (see `plugin_flow`).
     pub(super) plugin_trust: super::plugin_flow::PluginTrust,
+    /// What runs the plugins in the sound of the preview and of the export (see `plugin_host`): the folders it may load from are those that `plugin_trust` says yes to.
+    pub(super) plugin_host: Arc<PluginHost>,
     /// Where plugins are looked for, and what the scan of them found (see `sound_plugins_flow`).
     pub(super) plugin_search: super::sound_plugins_flow::PluginSearch,
 }

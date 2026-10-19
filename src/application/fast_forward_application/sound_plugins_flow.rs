@@ -16,8 +16,8 @@ use super::FastForwardApplication;
 use crate::application::commands::Command;
 use crate::application::sound_plugins_window::{SoundPluginsCommand, SoundPluginsView};
 use crate::plugin_scan::{
-    LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache, folders_to_scan, plugins_found_in,
-    scanner_program_beside_this_program, usual_folders,
+    Breadcrumb, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache, folders_to_scan,
+    plugins_found_in, recover, scanner_program_beside_this_program, usual_folders,
 };
 use crate::project::set_installed_plugins;
 
@@ -81,6 +81,7 @@ impl FastForwardApplication {
         let (settings, problem) = PluginSearchSettings::read(&file);
         self.environment.plugin_search.settings = settings;
         self.environment.plugin_search.settings_file = Some(file);
+        self.tell_the_host_where_to_look_for_libraries();
         if let Some(problem) = problem {
             self.add_to_message(
                 "Where to look for sound plugins could not be read",
@@ -111,6 +112,9 @@ impl FastForwardApplication {
         match scanner_program_beside_this_program() {
             Some(program) => {
                 self.use_this_plugin_scanner(program, ScanCache::default_file(), true);
+                if let Some(file) = Breadcrumb::default_file() {
+                    self.keep_a_breadcrumb_of_the_plugins_in_use_in(file);
+                }
                 self.start_scanning_plugins();
             }
             None => {
@@ -119,6 +123,47 @@ impl FastForwardApplication {
                 );
             }
         }
+    }
+
+    /// Looks at what the last run left in `file`: if it ended while it was using a plugin library, that library is failed (it is not loaded again until it changes) and a message
+    /// says so; then the libraries that this run uses are written there, each before it is loaded, until the editor ends well. (Needs the scan program, which is the one that keeps
+    /// what is known of libraries: call it after [`Self::use_this_plugin_scanner`].)
+    pub fn keep_a_breadcrumb_of_the_plugins_in_use_in(&mut self, file: PathBuf) {
+        let search = &self.environment.plugin_search;
+        if let Some(program) = search.scanner_program.clone() {
+            let cache = search
+                .cache_file
+                .clone()
+                .map_or_else(ScanCache::in_memory, ScanCache::at);
+            let mut scanner = PluginScanner::new(program, cache);
+            if let Some(recovery) = recover(&file, &mut scanner) {
+                let others = if recovery.also_in_use.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (it was using {} other librar{} too, which are named in the file of scans)",
+                        recovery.also_in_use.len(),
+                        if recovery.also_in_use.len() == 1 { "y" } else { "ies" }
+                    )
+                };
+                self.add_to_message(
+                    "The editor ended badly",
+                    format!(
+                        "The last time the editor ran, it ended while it was using the sound plugin library {}{others}. That library will not be loaded again until the file changes; the Sound plugins window says so.",
+                        recovery.failed.display()
+                    ),
+                );
+            }
+        }
+        self.environment.plugin_host.keep_a_breadcrumb(Breadcrumb::at(file));
+    }
+
+    /// Tells what runs the plugins where the libraries that plugin libraries need are looked for.
+    fn tell_the_host_where_to_look_for_libraries(&self) {
+        let settings = &self.environment.plugin_search.settings;
+        self.environment
+            .plugin_host
+            .look_for_dependencies_in(settings.dependency_folders.clone(), settings.search_parent_folders);
     }
 
     /// Starts a scan of the folders on a thread of its own, if there is a scan program and none is going on (if one is, another follows it).
@@ -197,6 +242,8 @@ impl FastForwardApplication {
         };
         search.has_scanned = true;
         set_installed_plugins(found.effects);
+        // (Effects of plugins that were not installed before are now: their folders are asked about, and the sound is made with them if the answer is yes.)
+        self.ask_about_the_folders_the_sound_needs();
     }
 
     /// For the tests: as if a scan had found these libraries.
@@ -297,6 +344,7 @@ impl FastForwardApplication {
 
     /// Writes where to look to its file and looks again.
     fn the_places_to_look_for_plugins_changed(&mut self) {
+        self.tell_the_host_where_to_look_for_libraries();
         if let Some(file) = self.environment.plugin_search.settings_file.clone()
             && let Err(error) = self.environment.plugin_search.settings.write(&file)
         {

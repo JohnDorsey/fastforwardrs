@@ -24,6 +24,7 @@ pub mod folders;
 pub mod program;
 pub mod protocol;
 pub mod scanner;
+pub mod search;
 pub mod settings;
 
 pub use breadcrumb::{Breadcrumb, Recovery, recover};
@@ -37,6 +38,7 @@ pub use folders::{
 };
 pub use ladspa_host::{LibraryScan, ScannedPlugin};
 pub use scanner::{FolderScan, LibraryOutcome, LibraryReport, PluginScanner, ScannerProblem};
+pub use search::{PluginSearch, WhatTheScanFound};
 pub use settings::PluginSearchSettings;
 
 #[cfg(test)]

@@ -27,7 +27,7 @@ pub use description::{
 };
 pub use instance::{ControlError, Instance, InstantiateError, RunError};
 pub use library::{Library, LibraryDescription, OpenError};
-pub use process::prepare_to_crash_quietly;
+pub use process::{prepare_to_crash_quietly, put_folders_before_the_search_path};
 pub use scan::{LibraryScan, PROBE_BLOCK_MOMENTS, PROBE_SAMPLE_RATE, ScannedPlugin, scan_library};
 
 #[cfg(test)]

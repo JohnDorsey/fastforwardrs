@@ -86,12 +86,25 @@ pub enum DialogAnswer {
 pub const PLUGIN_DONT_LOAD_LABEL: &str = "Don't load";
 pub const PLUGIN_LOAD_LABEL: &str = "Load it";
 
-/// What the question about a plugin that is a file somewhere says, for the plugin called `library` that is the file `path`.
-pub fn warning_about_a_linked_plugin(library: &str, path: &std::path::Path) -> String {
+/// What the question about plugins that are files in a folder says: `libraries` are the plugins that are asked about (the first is named, and how many others), `folder` the
+/// folder. **It is asked once for a folder**: a yes is remembered for the folder and for everything in it, now and later.
+pub fn warning_about_the_plugins_of_a_folder(libraries: &[String], folder: &std::path::Path) -> String {
+    let which = match libraries {
+        [] => "plugins".to_owned(),
+        [only] => format!("the plugin \u{ab}{only}\u{bb}"),
+        [first, others @ ..] => format!(
+            "the plugin \u{ab}{first}\u{bb} and {} other{}",
+            others.len(),
+            if others.len() == 1 { "" } else { "s" }
+        ),
+    };
     format!(
-        "The project uses the plugin \u{ab}{library}\u{bb}, which is the file {}. A plugin is a program: it runs with all your rights, and nothing checks what it does. \
-         Load it only if you know where it came from. If you say yes, that is remembered for this file as it is now; if the file changes you will be asked again.",
-        path.display()
+        "The project uses {which}, which {} in the folder {}. A plugin is a program: it runs with all your rights, and nothing checks what it does. \
+         Load plugins from this folder only if you know where they came from. If you say yes, you are not asked again about this folder: it is remembered for the folder and for \
+         everything that is in it, now and later, and it includes the libraries that these plugins need from the folders you named in Sound plugins... (and from the folders above them, \
+         if that is on).",
+        if libraries.len() == 1 { "is" } else { "are" },
+        crate::plugin_trust::folder_for_a_person(folder)
     )
 }
 
@@ -273,15 +286,11 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
             }
             Dialog::AskAboutAPlugin {
                 question:
-                    Question::Linked {
-                        library,
-                        path,
-                        digest: _,
-                    },
+                    Question::Linked { folder, libraries },
             } => {
-                ui.heading("Run this plugin?");
+                ui.heading("Run plugins from this folder?");
                 ui.add_space(6.0);
-                ui.label(warning_about_a_linked_plugin(library, path));
+                ui.label(warning_about_the_plugins_of_a_folder(libraries, folder));
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui.button(PLUGIN_DONT_LOAD_LABEL).clicked() {

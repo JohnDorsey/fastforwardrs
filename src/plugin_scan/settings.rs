@@ -54,7 +54,12 @@ fn yes() -> bool {
 impl PluginSearchSettings {
     /// Where the file is kept: beside the settings file. `None` if this system has no settings folder.
     pub fn default_file() -> Option<PathBuf> {
-        crate::settings_file::default_settings_file_path().and_then(|settings| Some(settings.parent()?.join(FILE_NAME)))
+        crate::settings_file::default_settings_file_path().and_then(|settings| Self::file_beside(&settings))
+    }
+
+    /// Where the file is kept when the settings file is `settings_file`: beside it.
+    pub fn file_beside(settings_file: &std::path::Path) -> Option<PathBuf> {
+        Some(settings_file.parent()?.join(FILE_NAME))
     }
 
     /// What is in the file at `file`: nothing there (or no file) is the defaults; a file that cannot be read is the defaults and the problem is given, so that the person is told

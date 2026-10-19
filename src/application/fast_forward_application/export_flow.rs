@@ -38,6 +38,15 @@ fn export_finished_text(destination: &std::path::Path, frames_missing_a_picture:
     text
 }
 
+/// The end of the message, about the plugins of the sound: the ones that were not run (a folder that was said no to), and what the plugins said while the sound was made.
+fn with_what_the_sound_plugins_said(mut text: String, plugins_not_run: &[String], sound_notes: &[String]) -> String {
+    for line in plugins_not_run.iter().chain(sound_notes) {
+        text.push_str("\n\n");
+        text.push_str(line);
+    }
+    text
+}
+
 /// The effects that the program does not have (a project file brought them) that are applied to the clips of `project`, so that the video would not have what
 /// they do: each once, by its name, its key and its version, in the order of their keys.
 pub(crate) fn effects_the_export_would_leave_out(project: &Project) -> Vec<String> {
@@ -108,6 +117,11 @@ impl FastForwardApplication {
 
     /// Asks where to save the finished video and starts exporting it.
     pub(super) fn ask_where_to_export_and_export(&mut self) {
+        // (The folders that the plugins of the sound are in are asked about first, and the export goes on when they are answered.)
+        if self.ask_about_the_folders_the_sound_needs() {
+            self.environment.plugin_trust.export_is_waiting = true;
+            return;
+        }
         if let Some(destination) = self.ask_where_to_export() {
             self.export_video_to(destination);
         }
@@ -143,12 +157,14 @@ impl FastForwardApplication {
             .iter()
             .filter_map(|identifier| Some(self.sources.files.get(identifier)?.location_if_available()?.clone()))
             .collect();
+        let plugins_not_run = self.plugins_that_an_export_would_not_run();
         match VideoExport::start(
             &toolchain,
             &plan,
             &source_file_locations,
             &destination,
-            ExportOptions::new(adapter),
+            ExportOptions::new(adapter)
+                .with_plugins(Arc::clone(&self.environment.plugin_host) as Arc<dyn crate::sound_engine::PluginRunner>),
             Arc::clone(&self.environment.wake_up),
         ) {
             Ok(export) => {
@@ -158,6 +174,7 @@ impl FastForwardApplication {
                     total_frames: plan.total_frame_count,
                     frames_missing_a_picture: plan.frames_missing_a_picture,
                     destination,
+                    plugins_not_run,
                 });
             }
             Err(error) => self.show_message("The export could not be started", error.to_string()),
@@ -207,12 +224,18 @@ impl FastForwardApplication {
         let destination = running.destination.clone();
         let frames_missing_a_picture = running.frames_missing_a_picture;
         let pictures_held = running.export.pictures_held();
+        let plugins_not_run = std::mem::take(&mut running.plugins_not_run);
+        let sound_notes = running.export.sound_notes();
         self.jobs.export = None;
         match result {
             ExportResult::Completed => {
                 self.show_message(
                     "Export finished",
-                    export_finished_text(&destination, frames_missing_a_picture, pictures_held),
+                    with_what_the_sound_plugins_said(
+                        export_finished_text(&destination, frames_missing_a_picture, pictures_held),
+                        &plugins_not_run,
+                        &sound_notes,
+                    ),
                 );
             }
             ExportResult::Cancelled => {}
@@ -252,6 +275,21 @@ mod tests {
         let some = export_finished_text(Path::new("/videos/holiday_fastforward.mp4"), 0, 210);
         assert!(some.starts_with("The video was saved to "), "{some}");
         assert!(some.contains("210 pictures of videos were not there"), "{some}");
+    }
+
+    #[test]
+    fn the_message_ends_with_the_plugins_that_were_not_run_and_what_the_plugins_said_each_in_a_paragraph_of_its_own() {
+        let text = with_what_the_sound_plugins_said(
+            "The video was saved to out.mp4".to_owned(),
+            &["Not run: one.".to_owned()],
+            &["Said: two.".to_owned(), "Said: three.".to_owned()],
+        );
+        assert_eq!(
+            text,
+            "The video was saved to out.mp4\n\nNot run: one.\n\nSaid: two.\n\nSaid: three."
+        );
+        let nothing = with_what_the_sound_plugins_said("The video was saved to out.mp4".to_owned(), &[], &[]);
+        assert_eq!(nothing, "The video was saved to out.mp4");
     }
 
     #[test]

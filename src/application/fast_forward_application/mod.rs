@@ -131,6 +131,8 @@ mod selection_tests;
 mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
+#[cfg(test)]
+mod sound_plugin_folder_tests;
 mod sound_plugins_flow;
 #[cfg(test)]
 mod sound_plugins_tests;
@@ -249,6 +251,8 @@ struct RunningExport {
     /// project is made from has fewer pictures than its clips need.
     frames_missing_a_picture: u64,
     destination: PathBuf,
+    /// What a person said no to that the sound of the video would have had: the plugins that were not run because of it (one line each).
+    plugins_not_run: Vec<String>,
 }
 
 /// The thumbnail pictures of a source video, and the work of making them.
@@ -519,16 +523,17 @@ impl FastForwardApplication {
 
         let project = Project::empty();
         let video_format_prober = ffprobe_as_the_video_format_prober(toolchain.clone());
+        let plugin_host = Arc::new(crate::plugin_host::PluginHost::new());
         Self {
             playback: Playback {
                 preview_pictures: PreviewPictures::new(FfmpegPictureStreamStarter::new(
                     toolchain.clone(),
                     Arc::clone(&wake_up),
                 )),
-                audio_supplier: AudioSupplier::new(FfmpegAudioStreamStarter::new(
-                    toolchain.clone(),
-                    Arc::clone(&wake_up),
-                )),
+                audio_supplier: AudioSupplier::new(
+                    FfmpegAudioStreamStarter::new(toolchain.clone(), Arc::clone(&wake_up))
+                        .with_plugins(Arc::clone(&plugin_host) as Arc<dyn crate::sound_engine::PluginRunner>),
+                ),
                 sound_effects: SoundEffects::default(),
                 clock: PlaybackClock::new(project.frame_rate()),
                 planes_wanted: false,
@@ -547,6 +552,7 @@ impl FastForwardApplication {
                 global_settings: Settings::DEFAULT,
                 global_settings_path: None,
                 plugin_trust: plugin_flow::PluginTrust::default(),
+                plugin_host,
                 plugin_search: sound_plugins_flow::PluginSearch::default(),
                 wake_up,
             },
@@ -595,6 +601,8 @@ impl FastForwardApplication {
             context.request_repaint();
         }
         self.update_the_sound(now, total_frames);
+        self.ask_about_the_folders_that_plugins_are_wanted_from();
+        self.tell_what_the_sound_plugins_said();
 
         FrameState {
             current_frame,

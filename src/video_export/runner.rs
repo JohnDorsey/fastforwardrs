@@ -33,11 +33,12 @@ use crate::frame_scene::TextPictures;
 use crate::media::export::VideoEncoder;
 use crate::media::{
     FfmpegToolchain, MediaLocation, NativeYuv420p, SoundRenderError, UserInterfaceWakeUp, VideoStreamFormat,
-    decode_picture, probe_video_stream_format, render_sound_to_file, size_to_decode_at,
+    decode_picture, probe_video_stream_format, render_sound_to_file_with_plugins, size_to_decode_at,
 };
 use crate::playback::{VideoReading, WhichSound, reading_of_a_video};
 use crate::project::{SourceMediaIdentifier, TextObject};
 use crate::rgba_picture::RgbaPicture;
+use crate::sound_engine::PluginRunner;
 use crate::text_rendering::LazyTextRenderer;
 
 /// How the colours of each video of the export are read: by the very function that the preview asks (`reading_of_a_video`), from the format of the file, the size of its
@@ -116,6 +117,8 @@ pub struct ExportOptions {
     pub adapter: AdapterChoice,
     /// What draws the text objects. `None`: the fonts of the computer, as the preview draws them.
     pub text_pictures: Option<Box<dyn TextPictures + Send>>,
+    /// What makes the effects of the clips that are plugins. `None`: the sound goes through them unchanged. **An export never leaves a plugin out for being slow.**
+    pub plugins: Option<Arc<dyn PluginRunner>>,
 }
 
 impl ExportOptions {
@@ -124,7 +127,15 @@ impl ExportOptions {
         Self {
             adapter,
             text_pictures: None,
+            plugins: None,
         }
+    }
+
+    /// The same, with the effects of the clips that are plugins made by `plugins`.
+    #[must_use]
+    pub fn with_plugins(mut self, plugins: Arc<dyn PluginRunner>) -> Self {
+        self.plugins = Some(plugins);
+        self
     }
 
     /// The same, with the text objects drawn by `text_pictures` (for a test that must not depend on the fonts of a computer).
@@ -140,6 +151,8 @@ struct Shared {
     cancel_requested: AtomicBool,
     /// How many pictures of videos were made by holding the last picture that a video gave, so far (see [`VideoExport::pictures_held`]).
     pictures_held: AtomicU64,
+    /// What the plugins said that a person should be told, once the sound is made (see [`VideoExport::sound_notes`]).
+    sound_notes: Mutex<Vec<String>>,
     /// What stops the encoder, once there is one: a write to an encoder that is busy waits, and cancelling must end the wait.
     encoder: Mutex<Option<EncoderKiller>>,
 }
@@ -195,6 +208,7 @@ impl VideoExport {
         let shared = Arc::new(Shared {
             cancel_requested: AtomicBool::new(false),
             pictures_held: AtomicU64::new(0),
+            sound_notes: Mutex::new(Vec::new()),
             encoder: Mutex::new(None),
         });
         let (sender, events) = mpsc::channel();
@@ -235,6 +249,16 @@ impl VideoExport {
     /// frame is still made, with the last picture the video gave in the place of the ones it did not (see [`words_about_held_pictures`]).
     pub fn pictures_held(&self) -> u64 {
         self.shared.pictures_held.load(Ordering::SeqCst)
+    }
+
+    /// What the plugins said that a person should be told about the sound of the video (a plugin that could not be loaded, so that the sound went through it unchanged), as
+    /// far as the sound is made: after the end of the export it is all of it.
+    pub fn sound_notes(&self) -> Vec<String> {
+        self.shared
+            .sound_notes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// Stops the export. An [`ExportResult::Cancelled`] event follows once everything has stopped and the temporary file has been removed.
@@ -357,7 +381,11 @@ fn produce(job: Job) -> Result<(), Ending> {
         wake_up,
         ..
     } = job;
-    let ExportOptions { adapter, text_pictures } = options;
+    let ExportOptions {
+        adapter,
+        text_pictures,
+        plugins,
+    } = options;
     let stop_if_cancelled = || {
         if shared.is_cancelled() {
             Err(Ending::Cancelled)
@@ -421,11 +449,22 @@ fn produce(job: Job) -> Result<(), Ending> {
                 .iter()
                 .map(|source| locations[source].clone())
                 .collect();
-            let rendered = render_sound_to_file(&toolchain, &sound.specification, sources, &sound_file, &|| {
-                shared.is_cancelled()
-            });
+            let rendered = render_sound_to_file_with_plugins(
+                &toolchain,
+                &sound.specification,
+                sources,
+                &sound_file,
+                &|| shared.is_cancelled(),
+                plugins,
+            );
             match rendered {
-                Ok(()) => {}
+                Ok(notes) => {
+                    shared
+                        .sound_notes
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .extend(notes);
+                }
                 Err(SoundRenderError::Cancelled) => return Err(Ending::Cancelled),
                 Err(problem) => {
                     return Err(Ending::failed(format!(

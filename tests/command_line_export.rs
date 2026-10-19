@@ -12,11 +12,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use fastforwardrs::media::MediaLocation;
-use fastforwardrs::project::{SourceMediaIdentifier, SourceMediaLink};
+use fastforwardrs::plugin_scan::{PluginSearchSettings, effect_of_a_plugin};
+use fastforwardrs::plugin_trust::ApprovalStore;
+use fastforwardrs::project::{
+    AnimationTarget, EffectKind, PropertyId, PropertyValue, SourceMediaIdentifier, SourceMediaLink, TimelineFrameIndex,
+    set_installed_plugins,
+};
 use fastforwardrs::project_file::archive::resource_entry_name;
 use fastforwardrs::project_file::{HowToWrite, write_project_file, write_project_file_including};
 use support::{
-    TestVideoSpecification, decode_video, expected_source_frames, project_for, scratch_directory, test_video,
+    TestVideoSpecification, decode_video, decoded_sound, expected_source_frames, loudness, project_for,
+    scratch_directory, test_video,
 };
 
 /// The program, which Cargo builds for the tests of this package.
@@ -281,4 +287,114 @@ fn the_video_cannot_overwrite_a_file_the_project_is_made_from() {
     assert_eq!(output.status.code(), Some(1), "{words}");
     assert!(words.contains("overwrite"), "{words}");
     assert_eq!(std::fs::read(&copy).unwrap(), original_bytes, "the video is as it was");
+}
+
+// --- plugins on the clips ---
+
+/// Runs the program on a software adapter with the settings (and so the folders for plugins and the scans) beside `settings_file`, and `more_arguments` besides.
+fn run_with_plugin_folders(project: &Path, video: &Path, settings_file: &Path, more_arguments: &[&Path]) -> Output {
+    let mut command = Command::new(PROGRAM);
+    command
+        .arg("--adapter")
+        .arg("software")
+        .arg("--settings")
+        .arg(settings_file)
+        .args(more_arguments)
+        .arg(project)
+        .arg(video);
+    command.output().expect("the program starts")
+}
+
+#[test]
+fn a_project_with_a_plugin_on_a_clip_is_refused_until_its_folder_is_approved_and_then_the_sound_of_the_video_has_the_plugin_in_it()
+ {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let scratch = scratch_directory();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+
+    // The plugins of the test library are in a folder of their own, which the file beside the settings says to look in.
+    let plugins = scratch.path().join("plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    let library = plugins.join(format!("good.{}", fastforwardrs::plugin_scan::library_file_extension()));
+    std::fs::copy(ladspa_test_plugins::library_file_for_tests(), &library).unwrap();
+    let settings_file = scratch.path().join("settings.json");
+    PluginSearchSettings {
+        folders: vec![plugins.clone()],
+        ..PluginSearchSettings::default()
+    }
+    .write(&settings_file.with_file_name("plugin_search.json"))
+    .unwrap();
+
+    // A project with the gain plugin at 0.5 on its clip, made here and written to its file (the plugin is installed in this program for that).
+    let scan = ladspa_host::scan_library(&library, |_| {}).unwrap();
+    set_installed_plugins(
+        scan.plugins
+            .iter()
+            .filter_map(|plugin| effect_of_a_plugin(&library, plugin).ok())
+            .collect(),
+    );
+    let kind = EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key().ends_with(":ffrs_test_gain"))
+        .expect("the gain plugin");
+    let plain = project_for(&toolchain, &video);
+    let mut project = plain.clone();
+    let clip = support::clip_number(&project, 0);
+    let effect = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            PropertyId::effect_value(kind, effect, 0),
+            PropertyValue::Number(0.5),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    set_installed_plugins(Vec::new());
+    let project_file = scratch.path().join("with_a_plugin.fastforwardrs.json");
+    write_project_file(&project, &project_file).unwrap();
+    let plain_file = scratch.path().join("plain.fastforwardrs.json");
+    write_project_file(&plain, &plain_file).unwrap();
+    let approvals = scratch.path().join("plugin_approvals.json");
+
+    // Nobody has approved the folder: refused, and nothing is exported.
+    let destination = scratch.path().join("with_a_plugin.mp4");
+    let refused = run_with_plugin_folders(
+        &project_file,
+        &destination,
+        &settings_file,
+        &[Path::new("--plugin-approvals"), &approvals],
+    );
+    let words = said(&refused);
+    assert_eq!(refused.status.code(), Some(1), "{words}");
+    assert!(
+        words.contains("a command line cannot ask") && words.contains("has not been approved"),
+        "{words}"
+    );
+    assert!(words.contains("test plugin ffrs_test_gain"), "{words}");
+    assert!(!destination.exists());
+
+    // The folder is approved (as the editor does it, in the file): the plugin is found, run, and heard.
+    ApprovalStore::at(approvals.clone()).approve_folder(&plugins);
+    let allowed = run_with_plugin_folders(
+        &project_file,
+        &destination,
+        &settings_file,
+        &[Path::new("--plugin-approvals"), &approvals],
+    );
+    let words = said(&allowed);
+    assert_eq!(allowed.status.code(), Some(0), "{words}");
+    assert!(!words.contains("warning"), "nothing was left out: {words}");
+    let plain_destination = scratch.path().join("plain.mp4");
+    let unchanged = run_with_plugin_folders(&plain_file, &plain_destination, &settings_file, &[]);
+    assert_eq!(unchanged.status.code(), Some(0), "{}", said(&unchanged));
+
+    let with = loudness(&decoded_sound(&toolchain, &destination, 2, 48_000));
+    let without = loudness(&decoded_sound(&toolchain, &plain_destination, 2, 48_000));
+    assert!(without > 0.02, "the test video has a tone to be changed: {without}");
+    let ratio = with / without;
+    assert!(
+        (ratio - 0.5).abs() < 0.03,
+        "the plugin halves the sound: {with} against {without} is {ratio}"
+    );
 }

@@ -16,7 +16,7 @@
 //! | `ffrs_test_sine` | no audio input (a generator): a sine wave of the frequency of a control |
 //! | `ffrs_test_mono_to_both` | one audio input and two audio outputs |
 //! | `ffrs_test_mix_down` | two audio inputs and one audio output |
-//! | `ffrs_test_counted` | passes the sound through, and counts what the host does to it (instances made and cleaned up, activations, deactivations, blocks run, ports not connected when it was activated): `ffrs_test_counts` gives the numbers |
+//! | `ffrs_test_counted` | passes the sound through (taking as many tenths of a second to do it as its control, which is 0 to 1 and begins at 0, says), and counts what the host does to it (instances made and cleaned up, activations, deactivations, blocks run, ports not connected when it was activated): `ffrs_test_counts` gives the numbers |
 //!
 //! **It misbehaves on request**: the environment variable `FFRS_TEST_PLUGIN` makes the library crash, never return, print noise, say nothing, or fail in a place the tests ask
 //! for: see `Misbehaviour` below. (The tests that use it run the library in a child process, which is what the scan is for.)
@@ -586,6 +586,11 @@ unsafe extern "C" fn run(handle: *mut c_void, sample_count: c_ulong) {
             }
             Kind::Counted => {
                 BLOCKS_RUN.fetch_add(1, Ordering::SeqCst);
+                // (Its one control is how slow it is: a block takes that many tenths of a second. At its default, 0, it takes no time.)
+                let tenths_of_a_second = *ports[0];
+                if tenths_of_a_second > 0.0 {
+                    std::thread::sleep(Duration::from_secs_f32(tenths_of_a_second / 10.0));
+                }
                 instance.last_input = ports[1];
                 for moment in 0..count {
                     *ports[2].add(moment) = *ports[1].add(moment);

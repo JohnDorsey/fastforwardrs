@@ -329,6 +329,22 @@ pub fn the_installed_plugins_to_myself() -> std::sync::MutexGuard<'static, ()> {
     guard
 }
 
+/// The plugins of the library written for the tests (`crates/ladspa-test-plugins`) that can be effects, as the scan makes them (the library is scanned in this process, which
+/// is what the scan program is for with libraries that are not known to be good: this one is). They are not installed: see `project::set_installed_plugins`.
+pub fn the_plugins_of_the_test_library() -> Vec<crate::project::InstalledPlugin> {
+    static SCANNED: std::sync::OnceLock<Vec<crate::project::InstalledPlugin>> = std::sync::OnceLock::new();
+    SCANNED
+        .get_or_init(|| {
+            let path = ladspa_test_plugins::library_file_for_tests();
+            let scan = ladspa_host::scan_library(&path, |_| {}).expect("the test library is scanned");
+            scan.plugins
+                .iter()
+                .filter_map(|plugin| crate::plugin_scan::effect_of_a_plugin(&path, plugin).ok())
+                .collect()
+        })
+        .clone()
+}
+
 /// A value of a sound plugin for [`an_installed_sound_plugin`]: its id, what it begins as, and its range if it has one.
 pub type ValueOfAPlugin<'a> = (&'a str, f32, Option<(f32, f32)>);
 

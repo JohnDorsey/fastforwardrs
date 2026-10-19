@@ -26,7 +26,8 @@ use super::ffmpeg_toolchain::FfmpegToolchain;
 use super::location::MediaLocation;
 use crate::project::{FrameRate, SpedUpClipSound};
 use crate::sound_engine::{
-    ClipFeed, ClipRequest, ClipSpawner, LookAheadFeeds, NoInsertions, SAMPLE_RATE, SoundGraph, SoundInMemory,
+    ClipFeed, ClipRequest, ClipSpawner, Insertions, LookAheadFeeds, NoInsertions, Notes, PluginInsertions,
+    PluginRunner, SAMPLE_RATE, SoundGraph, SoundInMemory,
 };
 
 /// How many sets of samples a clip's ffmpeg may have waiting before it pauses. (A clip's sound is read at the pace of the graph; the rest waits in the pipe.)
@@ -248,6 +249,8 @@ pub struct EngineAudioStream {
     resources: Option<Resources>,
     stop: Arc<AtomicBool>,
     problems: Problems,
+    /// What the plugins say that a person should be told, as it is said (see [`Self::take_notes`]).
+    plugin_notes: Notes,
     running_programs: Arc<AtomicUsize>,
 }
 
@@ -300,6 +303,16 @@ impl EngineAudioStream {
         request: &AudioStreamRequest,
         wake_up: UserInterfaceWakeUp,
     ) -> Result<Self, AudioStreamError> {
+        Self::start_with_plugins(toolchain, request, wake_up, None)
+    }
+
+    /// The same, with `plugins` to make the effects of the clips that are plugins (the sound goes through them unchanged where there is none, or where it says nothing).
+    pub fn start_with_plugins(
+        toolchain: &FfmpegToolchain,
+        request: &AudioStreamRequest,
+        wake_up: UserInterfaceWakeUp,
+        plugins: Option<Arc<dyn PluginRunner>>,
+    ) -> Result<Self, AudioStreamError> {
         if request.sound.strips.is_empty() {
             return Err(AudioStreamError::NoSound);
         }
@@ -312,6 +325,8 @@ impl EngineAudioStream {
         );
         let problems = spawner.problems();
         let running_programs = spawner.running_programs();
+        let plugin_notes = Notes::default();
+        let insertions = insertions_for(&request.sound, plugins, &plugin_notes, true);
         let specification = request.sound.clone();
         let stop_for_the_thread = Arc::clone(&stop);
         let is_what_the_engine_makes = request.format.sample_rate == SAMPLE_RATE && request.format.channel_count == 2;
@@ -319,7 +334,7 @@ impl EngineAudioStream {
             let (sender, events) = mpsc::sync_channel(CHUNKS_BUFFERED_AHEAD);
             let graph_thread = thread::spawn(move || {
                 let mut first_chunk = true;
-                make_the_sound(specification, spawner, &stop_for_the_thread, |samples| {
+                make_the_sound(specification, spawner, insertions, &stop_for_the_thread, |samples| {
                     // A full channel makes this wait, which keeps the graph from racing ahead of the speakers; an error means nobody wants the sound.
                     let sent = sender.send(AudioStreamEvent::Samples(samples)).is_ok();
                     if sent && std::mem::take(&mut first_chunk) {
@@ -337,6 +352,7 @@ impl EngineAudioStream {
                 }),
                 stop,
                 problems,
+                plugin_notes,
                 running_programs,
             });
         }
@@ -372,7 +388,7 @@ impl EngineAudioStream {
             )));
         };
         let graph_thread = thread::spawn(move || {
-            make_the_sound(specification, spawner, &stop_for_the_thread, |samples| {
+            make_the_sound(specification, spawner, insertions, &stop_for_the_thread, |samples| {
                 // (If the converter is gone, nobody wants the sound: the write fails and the graph stops.)
                 let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_le_bytes()).collect();
                 into_the_converter.write_all(&bytes).is_ok()
@@ -387,8 +403,19 @@ impl EngineAudioStream {
             }),
             stop,
             problems,
+            plugin_notes,
             running_programs,
         })
+    }
+
+    /// What the plugins have said since this was last asked, that a person should be told (a plugin that could not be loaded, one that was too slow and was left out).
+    pub fn take_notes(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .plugin_notes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
     }
 
     /// How many ffmpeg of clips are running now (a count that stays up to date after this stream is gone, which is how to tell that they all have been stopped).
@@ -445,11 +472,12 @@ impl Drop for EngineAudioStream {
 fn make_the_sound(
     specification: SoundGraphSpecification,
     spawner: FfmpegClipSpawner,
+    insertions: Box<dyn Insertions + Send>,
     stop: &AtomicBool,
     mut deliver: impl FnMut(Vec<f32>) -> bool,
 ) {
     let feeds = LookAheadFeeds::new(specification.clone(), spawner);
-    let mut graph = SoundGraph::new(specification, Box::new(feeds), Box::new(NoInsertions));
+    let mut graph = SoundGraph::new(specification, Box::new(feeds), insertions);
     let (mut left, mut right) = (vec![0.0; MOMENTS_PER_CHUNK], vec![0.0; MOMENTS_PER_CHUNK]);
     let mut interleaved = Vec::with_capacity(MOMENTS_PER_CHUNK * 2);
     while !stop.load(Ordering::Relaxed) {
@@ -461,6 +489,24 @@ fn make_the_sound(
         if !deliver(interleaved.clone()) {
             return;
         }
+    }
+}
+
+/// What is done to the clips: their plugin effects, made by `plugins`, or nothing.
+fn insertions_for(
+    specification: &SoundGraphSpecification,
+    plugins: Option<Arc<dyn PluginRunner>>,
+    notes: &Notes,
+    is_for_the_preview: bool,
+) -> Box<dyn Insertions + Send> {
+    match plugins {
+        Some(runner) => Box::new(PluginInsertions::new(
+            runner,
+            specification.frame_rate,
+            Arc::clone(notes),
+            is_for_the_preview,
+        )),
+        None => Box::new(NoInsertions),
     }
 }
 
@@ -491,11 +537,26 @@ pub fn render_sound_to_file(
     path: &Path,
     is_cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<(), SoundRenderError> {
+    render_sound_to_file_with_plugins(toolchain, specification, sources, path, is_cancelled, None).map(|_| ())
+}
+
+/// The same, with `plugins` to make the effects of the clips that are plugins. **A plugin is never left out of an export for being slow.** Gives what the plugins said that a
+/// person should be told.
+pub fn render_sound_to_file_with_plugins(
+    toolchain: &FfmpegToolchain,
+    specification: &SoundGraphSpecification,
+    sources: Vec<MediaLocation>,
+    path: &Path,
+    is_cancelled: &(dyn Fn() -> bool + Sync),
+    plugins: Option<Arc<dyn PluginRunner>>,
+) -> Result<Vec<String>, SoundRenderError> {
     let stop = Arc::new(AtomicBool::new(false));
     let spawner = FfmpegClipSpawner::new(toolchain, sources, specification, Arc::clone(&stop));
     let problems = spawner.problems();
+    let plugin_notes = Notes::default();
+    let insertions = insertions_for(specification, plugins, &plugin_notes, false);
     let feeds = LookAheadFeeds::new(specification.clone(), spawner);
-    let mut graph = SoundGraph::new(specification.clone(), Box::new(feeds), Box::new(NoInsertions));
+    let mut graph = SoundGraph::new(specification.clone(), Box::new(feeds), insertions);
     let mut file = BufWriter::new(std::fs::File::create(path).map_err(SoundRenderError::CouldNotWrite)?);
     let everything_is_made = AtomicBool::new(false);
     let result = thread::scope(|scope| {
@@ -516,7 +577,9 @@ pub fn render_sound_to_file(
     file.flush().map_err(SoundRenderError::CouldNotWrite)?;
     match what_the_clips_complained_of(&problems) {
         Some(problem) => Err(SoundRenderError::FfmpegSaid(problem)),
-        None => Ok(()),
+        None => Ok(std::mem::take(
+            &mut *plugin_notes.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )),
     }
 }
 

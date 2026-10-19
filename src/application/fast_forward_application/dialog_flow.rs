@@ -22,6 +22,7 @@ impl FastForwardApplication {
         if self.interface.close_when_not_busy && self.jobs.running_save.is_none() && self.interface.dialog.is_none() {
             // (The window was kept open to write the project file again, which is done, or was stopped, or went wrong.)
             self.interface.close_when_not_busy = false;
+            self.environment.plugin_host.ended_well();
             context.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
@@ -38,6 +39,9 @@ impl FastForwardApplication {
             });
         } else if self.tidy_the_project_file_before_closing() == WhatToDoAboutClosing::KeepTheWindowOpen {
             context.send_viewport_cmd(ViewportCommand::CancelClose);
+        } else {
+            // (The window closes: the breadcrumb of the plugin libraries that were in use is taken away, which is how the next run knows that this one ended well.)
+            self.environment.plugin_host.ended_well();
         }
     }
 

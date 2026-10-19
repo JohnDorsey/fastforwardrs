@@ -45,3 +45,25 @@ pub fn prepare_to_crash_quietly() {
 /// (See above: there is nothing to do on this system.)
 #[cfg(not(any(windows, all(unix, target_pointer_width = "64"))))]
 pub fn prepare_to_crash_quietly() {}
+
+/// Puts `folders` before the others in the places where the system looks for the libraries that a library needs, for the libraries that are loaded from now on, **where that
+/// can be done after the program has started: on Windows**, where it is the `PATH` of the program (`original` is what the search path was before; this is given it each time, so
+/// that it does not grow). Gives whether it was done. The other systems read their search path when the program starts: a library that needs one that is not beside it
+/// has to be loaded by a program that was started with the folder in `LD_LIBRARY_PATH`.
+#[cfg(windows)]
+pub fn put_folders_before_the_search_path(folders: &[std::path::PathBuf], original: &std::ffi::OsStr) -> bool {
+    let all = folders.iter().cloned().chain(std::env::split_paths(original));
+    let Ok(value) = std::env::join_paths(all) else {
+        return false;
+    };
+    // SAFETY: `set_var` is unsafe because on some systems another thread that reads the environment at the same time can see it half changed. On Windows the environment of the
+    // program is kept by the system, and this is a call of the system that is made one variable at a time, from any thread.
+    unsafe { std::env::set_var("PATH", value) };
+    true
+}
+
+/// (See above: the search path of this system is read when the program starts.)
+#[cfg(not(windows))]
+pub fn put_folders_before_the_search_path(_folders: &[std::path::PathBuf], _original: &std::ffi::OsStr) -> bool {
+    false
+}

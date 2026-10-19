@@ -19,7 +19,9 @@ use std::time::Duration;
 use super::archive_cache::ArchiveCache;
 use crate::engine::AdapterChoice;
 use crate::media::{FfmpegToolchain, MediaLocation};
-use crate::plugin_trust::{ApprovalStore, this_platform, what_the_command_line_refuses};
+use crate::plugin_host::{PluginHost, folders_the_sound_of_a_project_needs};
+use crate::plugin_scan::{PluginSearch, scanner_program_beside_this_program};
+use crate::plugin_trust::{ApprovalStore, folder_for_a_person, this_platform, what_the_command_line_refuses};
 use crate::project::{Project, Settings, SourceMedia};
 use crate::project_file::archive::entry_place;
 use crate::project_file::read_project_file;
@@ -46,12 +48,13 @@ progress is told on the error stream.
   --settings <file>     read the settings that are the same for every
                         project from this file and not from the editor's own
                         (a file that is not there means the settings were
-                        never changed)
+                        never changed); the folders that sound plugins are
+                        looked for in are read from the file beside it
   --allow-plugins       let the project's plugins (programs that run with all
                         your rights) be run. A command line cannot ask, so
                         without this a project that needs a plugin that is
-                        inside the project file, or one that is a file that
-                        has not been approved, is refused, and they are listed
+                        inside the project file, or one in a folder that has
+                        not been approved, is refused, and they are listed
   --plugin-approvals <file>
                         read the plugins that were approved from this file and
                         not from the editor's own
@@ -92,6 +95,8 @@ pub struct ExportRequest {
     pub allow_plugins: bool,
     /// The file the plugins that were approved are read from (`None`: none were).
     pub plugin_approvals_file: Option<PathBuf>,
+    /// How plugins are looked for when the project has effects that are plugins (`None`: they are not looked for, and those effects pass the sound through).
+    pub plugin_search: Option<Box<PluginSearch>>,
 }
 
 /// What the arguments of a command line come to.
@@ -150,10 +155,16 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             project_file,
             video_file,
             adapter,
-            global_settings_file: settings_file,
+            global_settings_file: settings_file.clone(),
             archive_cache_folder: None,
             allow_plugins,
             plugin_approvals_file,
+            plugin_search: scanner_program_beside_this_program().map(|program| {
+                Box::new(PluginSearch::beside_the_settings_file(
+                    program,
+                    settings_file.as_deref(),
+                ))
+            }),
         })),
         Err(files) => Err(match files.len() {
             0 | 1 => "the project file and the video file are both needed".to_owned(),
@@ -233,6 +244,7 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
     let project = read_project_file(&request.project_file).map_err(|error| error.to_string())?;
     // (Before ffmpeg is looked for: a project that is refused is refused wherever it is asked.)
     refuse_plugins_that_nobody_has_said_yes_to(request, &project)?;
+    let plugins = find_and_check_the_plugins_of_the_sound(request, &project)?;
     let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
     let plan = plan_export(&project, settings_of_the_export(request, &project)?).map_err(|error| error.to_string())?;
     for words in warnings_about(&project) {
@@ -248,7 +260,7 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
         &plan,
         &locations,
         &request.video_file,
-        export_options_of(request),
+        export_options_of(request).with_plugins(plugins),
         Arc::new(|| {}),
     )
     .map_err(|error| error.to_string())?;
@@ -262,6 +274,9 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
                 // (The video is made, all of its frames: what is told is that some pictures in it are not the video's own.)
                 if let Some(words) = words_about_held_pictures(export.pictures_held()) {
                     report(Report::Warning(words));
+                }
+                for note in export.sound_notes() {
+                    report(Report::Warning(note));
                 }
                 return Ok(());
             }
@@ -304,6 +319,54 @@ fn refuse_plugins_that_nobody_has_said_yes_to(request: &ExportRequest, project: 
             .map(|line| format!("  - {line}"))
             .collect::<Vec<_>>()
             .join("\n")
+    ))
+}
+
+/// Finds the plugins that the effects of the sound need, if there are effects that are not installed (the editor scans when it starts; a program with no window scans when it
+/// is asked to make a sound that needs them), and makes the host that runs them: **a folder that nobody has approved refuses the export and is listed**, as the plugins inside
+/// a project file are, unless the command line says `--allow-plugins`.
+fn find_and_check_the_plugins_of_the_sound(
+    request: &ExportRequest,
+    project: &Project,
+) -> Result<Arc<PluginHost>, String> {
+    let host = Arc::new(PluginHost::new());
+    let has_effects_to_find = !super::fast_forward_application::effects_the_export_would_leave_out(project).is_empty();
+    if has_effects_to_find && let Some(search) = &request.plugin_search {
+        let found = search.scan_and_install();
+        host.look_for_dependencies_in(
+            found.settings.dependency_folders.clone(),
+            found.settings.search_parent_folders,
+        );
+    }
+    if request.allow_plugins {
+        host.allow_everything();
+        return Ok(host);
+    }
+    let approvals = request
+        .plugin_approvals_file
+        .clone()
+        .map_or_else(ApprovalStore::in_memory, ApprovalStore::at);
+    let (approved, refused): (Vec<_>, Vec<_>) = folders_the_sound_of_a_project_needs(project)
+        .into_iter()
+        .partition(|wanted| approvals.is_folder_approved(&wanted.folder));
+    host.set_approved_folders(approved.into_iter().map(|wanted| wanted.folder));
+    if refused.is_empty() {
+        return Ok(host);
+    }
+    Err(format!(
+        "the sound of the project needs plugins, which are programs that run with all your rights, and a command line cannot ask whether they may be run, so nothing was exported:
+{}
+         To export it anyway, say --allow-plugins; to approve the folders, open the project in the editor and say yes to them.",
+        refused
+            .iter()
+            .map(|wanted| format!(
+                "  - {} (in the folder {}, which has not been approved)",
+                wanted.plugins.join(", "),
+                folder_for_a_person(&wanted.folder)
+            ))
+            .collect::<Vec<_>>()
+            .join("
+")
     ))
 }
 

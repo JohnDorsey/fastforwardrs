@@ -150,50 +150,87 @@ fn this_platform_is_named_as_a_build_names_one() {
 }
 
 // --- the approvals ---
+//
+// (Rewritten on purpose on 2026-10-19: a plugin used to be approved by its path and what was in it, and a file that changed was asked about again. The maintainer does not want a
+// question for every locally installed plugin: **a folder is approved, once, and what is in it is approved with it.**)
 
 fn digest_of(text: &str) -> Sha256Digest {
     Sha256Digest::of_bytes(text.as_bytes())
 }
 
 #[test]
-fn a_plugin_is_approved_by_its_path_and_its_contents_and_by_nothing_less() {
+fn a_folder_is_approved_for_what_is_in_it_and_not_for_the_folders_in_it_or_beside_it() {
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    let inside = plugins.join("more");
+    let beside = root.path().join("others");
+    for folder in [&plugins, &inside, &beside] {
+        fs::create_dir_all(folder).unwrap();
+    }
     let mut store = ApprovalStore::in_memory();
-    let path = Path::new("/plugins/amp.so");
-    assert!(!store.is_approved(path, digest_of("one")));
-    store.approve(path, digest_of("one"));
-    assert!(store.is_approved(path, digest_of("one")));
+    assert!(!store.is_folder_approved(&plugins));
+    store.approve_folder(&plugins);
+    assert!(store.is_folder_approved(&plugins));
     assert!(
-        !store.is_approved(path, digest_of("changed")),
-        "the file has changed: it is another file"
+        !store.is_folder_approved(&inside),
+        "a folder in it is another folder, asked about on its own"
     );
+    assert!(!store.is_folder_approved(&beside));
     assert!(
-        !store.is_approved(Path::new("/elsewhere/amp.so"), digest_of("one")),
-        "the same file somewhere else is asked about"
+        !store.is_folder_approved(root.path()),
+        "and the folder it is in is not approved by it"
     );
     assert_eq!((store.len(), store.is_empty()), (1, false));
     assert_eq!(store.last_problem(), None);
 }
 
 #[test]
+fn a_folder_reached_in_another_way_is_the_same_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    fs::create_dir_all(plugins.join("more")).unwrap();
+    let mut store = ApprovalStore::in_memory();
+    store.approve_folder(&plugins);
+    assert!(store.is_folder_approved(&plugins.join("more").join("..")));
+    assert!(store.is_folder_approved(&plugins.join(".")));
+    store.approve_folder(&plugins.join("more").join(".."));
+    assert_eq!(store.len(), 1, "it was one folder all the time");
+    // The folder of a file is the folder it is in.
+    let file = a_file_with(&plugins, "amp.so", "bytes");
+    assert_eq!(folder_of(&file), folder_key(&plugins));
+}
+
+#[test]
+fn a_folder_that_is_not_there_is_a_folder_all_the_same_by_the_way_it_was_named() {
+    let mut store = ApprovalStore::in_memory();
+    store.approve_folder(Path::new("/not/there/plugins"));
+    assert!(store.is_folder_approved(Path::new("/not/there/plugins")));
+    assert!(!store.is_folder_approved(Path::new("/not/there/other")));
+}
+
+#[test]
 fn approvals_are_kept_in_a_file_and_read_back_by_the_next_run_and_the_file_is_the_same_text_each_time() {
-    let folder = tempfile::tempdir().unwrap();
-    let file = folder.path().join("settings folder").join("plugin_approvals.json");
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("settings folder").join("plugin_approvals.json");
+    let (first, second) = (root.path().join("a_first"), root.path().join("b_second"));
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
     let mut store = ApprovalStore::at(file.clone());
-    store.approve(Path::new("/b/second.so"), digest_of("two"));
-    store.approve(Path::new("/a/first.so"), digest_of("one"));
+    store.approve_folder(&second);
+    store.approve_folder(&first);
     assert_eq!(store.last_problem(), None);
     let text = fs::read_to_string(&file).unwrap();
     assert!(
-        text.find("/a/first.so").unwrap() < text.find("/b/second.so").unwrap(),
+        text.find("a_first").unwrap() < text.find("b_second").unwrap(),
         "in order, so that the file is the same text for the same approvals"
     );
 
     let next_run = ApprovalStore::at(file.clone());
-    assert!(next_run.is_approved(Path::new("/a/first.so"), digest_of("one")));
-    assert!(next_run.is_approved(Path::new("/b/second.so"), digest_of("two")));
+    assert!(next_run.is_folder_approved(&first));
+    assert!(next_run.is_folder_approved(&second));
     assert_eq!(next_run.len(), 2);
     let mut again = ApprovalStore::at(file.clone());
-    again.approve(Path::new("/a/first.so"), digest_of("one"));
+    again.approve_folder(&first);
     assert_eq!(
         fs::read_to_string(&file).unwrap(),
         text,
@@ -203,8 +240,8 @@ fn approvals_are_kept_in_a_file_and_read_back_by_the_next_run_and_the_file_is_th
 
 #[test]
 fn a_file_of_approvals_that_cannot_be_read_is_no_approvals_and_says_so_and_does_not_stop_a_new_one() {
-    let folder = tempfile::tempdir().unwrap();
-    let file = folder.path().join("plugin_approvals.json");
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("plugin_approvals.json");
     fs::write(&file, "this is not json").unwrap();
     let mut store = ApprovalStore::at(file.clone());
     assert!(store.is_empty());
@@ -213,32 +250,47 @@ fn a_file_of_approvals_that_cannot_be_read_is_no_approvals_and_says_so_and_does_
             .last_problem()
             .is_some_and(|problem| problem.contains("will be asked about again"))
     );
-    store.approve(Path::new("/p.so"), digest_of("x"));
+    let plugins = root.path().join("plugins");
+    fs::create_dir(&plugins).unwrap();
+    store.approve_folder(&plugins);
     assert_eq!(store.last_problem(), None, "writing it made it a file that can be read");
-    assert!(ApprovalStore::at(file).is_approved(Path::new("/p.so"), digest_of("x")));
+    assert!(ApprovalStore::at(file).is_folder_approved(&plugins));
+}
 
-    // An entry that is no digest is left out; the others are read.
-    let other = folder.path().join("other.json");
-    fs::write(&other, r#"{"approved":[{"path":"/a","sha256":"nonsense"},{"path":"/b","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}"#).unwrap();
-    let store = ApprovalStore::at(other);
-    assert_eq!(store.len(), 1);
-    assert!(store.is_approved(Path::new("/b"), digest_of("abc")));
+#[test]
+fn the_approvals_of_the_first_version_which_were_files_by_path_and_hash_are_not_read_and_are_no_complaint() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("plugin_approvals.json");
+    fs::write(
+        &file,
+        r#"{"approved":[{"path":"/b","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}"#,
+    )
+    .unwrap();
+    let store = ApprovalStore::at(file);
+    assert!(store.is_empty(), "a person is asked about the folder instead");
+    assert_eq!(store.last_problem(), None);
 }
 
 #[test]
 fn a_file_of_approvals_that_cannot_be_written_is_said_and_the_approval_holds_until_the_program_ends() {
-    let folder = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
     // The place for the file is a folder.
-    let in_the_way = folder.path().join("plugin_approvals.json");
+    let in_the_way = root.path().join("plugin_approvals.json");
     fs::create_dir(&in_the_way).unwrap();
     let mut store = ApprovalStore::at(in_the_way);
-    store.approve(Path::new("/p.so"), digest_of("x"));
+    store.approve_folder(root.path());
     assert!(
         store
             .last_problem()
             .is_some_and(|problem| problem.contains("kept only until the program ends"))
     );
-    assert!(store.is_approved(Path::new("/p.so"), digest_of("x")));
+    assert!(store.is_folder_approved(root.path()));
+}
+
+#[test]
+fn a_folder_is_said_to_a_person_without_the_prefix_that_windows_gives_a_long_path() {
+    assert_eq!(folder_for_a_person(Path::new(r"\\?\C:\plugins")), r"C:\plugins");
+    assert_eq!(folder_for_a_person(Path::new("/usr/lib/ladspa")), "/usr/lib/ladspa");
 }
 
 // --- the libraries and the files ---
@@ -413,23 +465,21 @@ fn an_embedded_plugin_is_asked_about_with_the_build_for_this_computer_and_a_miss
 }
 
 #[test]
-fn a_linked_plugin_is_asked_about_until_it_is_approved_and_asked_about_again_when_the_file_changes() {
+fn the_plugins_of_a_folder_are_asked_about_once_and_not_again_when_the_files_change_or_another_is_put_in_the_folder() {
     let folder = tempfile::tempdir().unwrap();
     let path = a_file_with(folder.path(), "amp.so", "version one");
-    let libraries = libraries_of(vec![linked("amp.so", &path, None)]);
+    let other = a_file_with(folder.path(), "reverb.so", "reverb");
+    let libraries = libraries_of(vec![linked("amp.so", &path, None), linked("reverb.so", &other, None)]);
     let (mut approvals, mut session) = nothing_answered();
     let needed = what_is_needed(&libraries, None, THIS, &approvals, &session);
     let [question] = &needed.questions[..] else {
-        panic!("{needed:?}")
+        panic!("one question for the folder, whatever is in it: {needed:?}")
     };
     assert_eq!(
         *question,
-        Question::Linked {
-            library: "amp.so".to_owned(),
-            path: path.clone(),
-            digest: digest_of("version one"),
-        }
+        Question::linked(folder.path(), vec!["amp.so".to_owned(), "reverb.so".to_owned()])
     );
+    assert_eq!(question.library(), "amp.so");
 
     session.answer(question, Answer::Load, &mut approvals);
     assert!(
@@ -437,18 +487,49 @@ fn a_linked_plugin_is_asked_about_until_it_is_approved_and_asked_about_again_whe
             .questions
             .is_empty()
     );
-    // A later run has the approval but not the session: still not asked, because the file is the same.
+    // A later run has the approval but not the session: still not asked.
     assert!(
         what_is_needed(&libraries, None, THIS, &approvals, &TrustSession::default())
             .questions
             .is_empty()
     );
 
-    // The file changes: it is another file.
+    // The file changes, and another is put in the folder: the folder was said yes to, so it is not asked about again.
     fs::write(&path, "version two").unwrap();
-    let again = what_is_needed(&libraries, None, THIS, &approvals, &TrustSession::default());
-    assert_eq!(again.questions.len(), 1, "asked again");
-    assert!(matches!(&again.questions[0], Question::Linked { digest, .. } if *digest == digest_of("version two")));
+    let third = a_file_with(folder.path(), "new.so", "something new");
+    let with_the_new_one = libraries_of(vec![
+        linked("amp.so", &path, None),
+        linked("reverb.so", &other, None),
+        linked("new.so", &third, None),
+    ]);
+    assert!(
+        what_is_needed(&with_the_new_one, None, THIS, &approvals, &TrustSession::default())
+            .questions
+            .is_empty(),
+        "(this is what the maintainer asked for)"
+    );
+}
+
+#[test]
+fn plugins_in_two_folders_are_asked_about_once_for_each_folder_in_the_order_of_the_libraries() {
+    let root = tempfile::tempdir().unwrap();
+    let (one, two) = (root.path().join("one"), root.path().join("two"));
+    fs::create_dir_all(&one).unwrap();
+    fs::create_dir_all(&two).unwrap();
+    let libraries = libraries_of(vec![
+        linked("a.so", &a_file_with(&one, "a.so", "a"), None),
+        linked("b.so", &a_file_with(&two, "b.so", "b"), None),
+        linked("c.so", &a_file_with(&one, "c.so", "c"), None),
+    ]);
+    let (approvals, session) = nothing_answered();
+    let questions = what_is_needed(&libraries, None, THIS, &approvals, &session).questions;
+    assert_eq!(
+        questions,
+        [
+            Question::linked(&one, vec!["a.so".to_owned(), "c.so".to_owned()]),
+            Question::linked(&two, vec!["b.so".to_owned()]),
+        ]
+    );
 }
 
 #[test]
@@ -473,9 +554,10 @@ fn a_linked_plugin_that_is_not_there_is_unavailable_and_one_that_moved_with_the_
 
     let with_a_relative_path = libraries_of(vec![linked("amp.so", &gone, Some("amp.so"))]);
     let needed = what_is_needed(&with_a_relative_path, Some(folder.path()), THIS, &approvals, &session);
-    assert!(
-        matches!(&needed.questions[..], [Question::Linked { path: found, .. }] if *found == path),
-        "{needed:?}"
+    assert_eq!(
+        needed.questions,
+        [Question::linked(path.parent().unwrap(), vec!["amp.so".to_owned()])],
+        "asked about the folder it is in now"
     );
     assert!(needed.unavailable.is_empty());
 }
@@ -512,7 +594,7 @@ fn what_a_person_answered_is_not_asked_again_in_the_same_session_and_is_forgotte
 }
 
 #[test]
-fn a_yes_to_an_embedded_plugin_is_never_written_down_and_a_yes_to_a_linked_one_is() {
+fn a_yes_to_an_embedded_plugin_is_never_written_down_and_a_yes_to_the_folder_of_a_linked_one_is() {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("plugin_approvals.json");
     let path = a_file_with(folder.path(), "amp.so", "bytes");
@@ -534,6 +616,10 @@ fn a_yes_to_an_embedded_plugin_is_never_written_down_and_a_yes_to_a_linked_one_i
 
     session.answer(&questions[1], Answer::Load, &mut approvals);
     assert_eq!(approvals.len(), 1);
+    assert!(
+        approvals.is_folder_approved(folder.path()),
+        "it is the folder that was written down"
+    );
     let next_run = ApprovalStore::at(file);
     let next = what_is_needed(&libraries, None, THIS, &next_run, &TrustSession::default());
     assert_eq!(
@@ -598,7 +684,8 @@ fn a_plugin_that_the_person_declined_is_not_loaded_and_is_said_to_have_been_decl
 }
 
 #[test]
-fn a_linked_plugin_that_was_approved_is_loaded_where_it_is_and_not_once_it_has_changed() {
+fn a_linked_plugin_in_an_approved_folder_is_loaded_where_it_is_even_after_it_has_changed_and_one_in_another_folder_is_not()
+ {
     let folder = tempfile::tempdir().unwrap();
     let path = a_file_with(folder.path(), "amp.so", "bytes");
     let library = linked("amp.so", &path, None);
@@ -617,6 +704,7 @@ fn a_linked_plugin_that_was_approved_is_loaded_where_it_is_and_not_once_it_has_c
     );
     assert_eq!(loader.asked, std::slice::from_ref(&path));
 
+    // The file is changed: the folder was said yes to.
     fs::write(&path, "bytes that somebody changed").unwrap();
     assert_eq!(
         load_library(
@@ -628,10 +716,56 @@ fn a_linked_plugin_that_was_approved_is_loaded_where_it_is_and_not_once_it_has_c
             &cache,
             &mut loader
         ),
-        Err(WhyNot::NotAsked),
-        "a file that has changed is asked about again, and is not loaded until it is"
+        Ok(path.clone())
     );
-    assert_eq!(loader.asked.len(), 1);
+    // A plugin in a folder that was not said yes to is not loaded.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let other_path = a_file_with(elsewhere.path(), "other.so", "bytes");
+    assert_eq!(
+        load_library(
+            &linked("other.so", &other_path, None),
+            None,
+            THIS,
+            &approvals,
+            &TrustSession::default(),
+            &cache,
+            &mut loader
+        ),
+        Err(WhyNot::NotAsked)
+    );
+    assert_eq!(loader.asked.len(), 2);
+}
+
+#[test]
+fn what_is_known_of_a_folder_is_that_it_is_approved_declined_or_not_asked_and_a_no_is_for_the_session() {
+    let folder = tempfile::tempdir().unwrap();
+    let (mut approvals, mut session) = nothing_answered();
+    assert_eq!(
+        session.standing_of_folder(&approvals, folder.path()),
+        FolderStanding::NotAsked
+    );
+    let question = Question::linked(folder.path(), vec!["amp.so".to_owned()]);
+    session.answer(&question, Answer::DontLoad, &mut approvals);
+    assert_eq!(
+        session.standing_of_folder(&approvals, folder.path()),
+        FolderStanding::Declined
+    );
+    assert!(approvals.is_empty(), "a no is not written down");
+    assert_eq!(
+        TrustSession::default().standing_of_folder(&approvals, folder.path()),
+        FolderStanding::NotAsked,
+        "and is forgotten with the project"
+    );
+    session.answer(&question, Answer::Load, &mut approvals);
+    assert_eq!(
+        session.standing_of_folder(&approvals, folder.path()),
+        FolderStanding::Approved
+    );
+    assert_eq!(
+        TrustSession::default().standing_of_folder(&approvals, folder.path()),
+        FolderStanding::Approved,
+        "a yes is written down"
+    );
 }
 
 #[test]
@@ -736,25 +870,34 @@ fn a_loader_that_cannot_load_a_plugin_that_was_allowed_says_why() {
 // --- the command line ---
 
 #[test]
-fn the_command_line_refuses_the_embedded_plugins_for_this_computer_and_the_linked_ones_that_are_not_approved() {
-    let folder = tempfile::tempdir().unwrap();
-    let approved_path = a_file_with(folder.path(), "approved.so", "fine");
-    let unapproved_path = a_file_with(folder.path(), "unapproved.so", "not yet");
+fn the_command_line_refuses_the_embedded_plugins_for_this_computer_and_the_linked_ones_whose_folder_is_not_approved() {
+    let root = tempfile::tempdir().unwrap();
+    let (approved, unapproved) = (root.path().join("approved"), root.path().join("unapproved"));
+    fs::create_dir_all(&approved).unwrap();
+    fs::create_dir_all(&unapproved).unwrap();
+    let approved_path = a_file_with(&approved, "approved.so", "fine");
+    let also_approved = a_file_with(&approved, "new_in_the_same_folder.so", "never seen");
+    let unapproved_path = a_file_with(&unapproved, "unapproved.so", "not yet");
     let libraries = libraries_of(vec![
         embedded("embedded.dll", vec![build(THIS, "e")]),
         embedded("for_linux.dll", vec![build(ANOTHER, "e")]),
         linked("approved.so", &approved_path, None),
+        linked("new_in_the_same_folder.so", &also_approved, None),
         linked("unapproved.so", &unapproved_path, None),
-        linked("missing.so", &folder.path().join("missing.so"), None),
+        linked("missing.so", &root.path().join("missing.so"), None),
     ]);
     let mut approvals = ApprovalStore::in_memory();
-    approvals.approve(&approved_path, digest_of("fine"));
+    approvals.approve_folder(&approved);
 
     let refused = what_the_command_line_refuses(&libraries, None, THIS, &approvals);
 
     assert_eq!(refused.len(), 3, "{refused:#?}");
     assert!(refused[0].starts_with("embedded.dll") && refused[0].contains("inside the project file"));
-    assert!(refused[1].starts_with("unapproved.so") && refused[1].contains("not been approved"));
+    assert!(
+        refused[1].starts_with("unapproved.so")
+            && refused[1].contains("folder")
+            && refused[1].contains("not been approved")
+    );
     assert!(refused[2].starts_with("missing.so") && refused[2].contains("cannot be read"));
     assert!(what_the_command_line_refuses(&PluginLibraries::default(), None, THIS, &approvals).is_empty());
 }

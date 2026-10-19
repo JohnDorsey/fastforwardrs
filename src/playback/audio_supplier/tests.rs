@@ -90,6 +90,8 @@ struct StreamState {
     finishes_with: RefCell<Option<Option<String>>>,
     was_stopped: Cell<bool>,
     channel_count: usize,
+    /// What the plugins of the stream have said that nobody has taken.
+    notes: RefCell<Vec<String>>,
 }
 
 struct FakeStream {
@@ -97,6 +99,10 @@ struct FakeStream {
 }
 
 impl AudioSource for FakeStream {
+    fn take_notes(&self) -> Vec<String> {
+        std::mem::take(&mut *self.state.notes.borrow_mut())
+    }
+
     fn try_next_event(&self) -> Option<AudioStreamEvent> {
         let state = &self.state;
         let first = state.delivered_moments.get();
@@ -134,10 +140,16 @@ struct FakeStarter {
     decoded_at_the_start: Rc<Cell<u64>>,
     attempts: Rc<Cell<usize>>,
     fails: Rc<Cell<bool>>,
+    /// What the starter says its `generation` is (which plugins may be run, in the real one).
+    generation: Rc<Cell<u64>>,
 }
 
 impl AudioStreamStarter for FakeStarter {
     type Stream = FakeStream;
+
+    fn generation(&self) -> u64 {
+        self.generation.get()
+    }
 
     fn start(&self, request: &AudioStreamRequest) -> Result<FakeStream, AudioStreamError> {
         self.attempts.set(self.attempts.get() + 1);
@@ -153,6 +165,7 @@ impl AudioStreamStarter for FakeStarter {
             finishes_with: RefCell::new(None),
             was_stopped: Cell::new(false),
             channel_count: usize::from(request.format.channel_count),
+            notes: RefCell::default(),
         });
         self.streams.borrow_mut().push(Rc::clone(&state));
         Ok(FakeStream { state })
@@ -236,6 +249,7 @@ impl Bench {
             decoded_at_the_start: Rc::new(Cell::new(u64::MAX / 4)),
             attempts: Rc::default(),
             fails: Rc::default(),
+            generation: Rc::default(),
         };
         let speakers = Rc::new(RefCell::new(SpeakerState::default()));
         let mut supplier = AudioSupplier::new(starter.clone());
@@ -749,6 +763,173 @@ fn an_edit_while_playing_leaves_the_old_sound_playing_until_the_new_is_ready_and
 }
 
 #[test]
+fn what_the_plugins_of_the_sound_that_plays_and_of_the_one_that_is_being_made_have_said_is_taken_once() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let clock = bench.play_steadily(3.0, 1.0);
+    // A change, and the sound for it takes a while: there are two streams.
+    bench.starter.decoded_at_the_start.set(0);
+    bench.project = project_with_a_clip_that_is_louder_by(6.0);
+    bench.play_steadily(clock, 0.25);
+    assert_eq!(bench.streams_started(), 2);
+    bench
+        .stream(0)
+        .notes
+        .borrow_mut()
+        .push("said by the sound that plays".to_owned());
+    bench
+        .stream(1)
+        .notes
+        .borrow_mut()
+        .push("said by the sound that is being made".to_owned());
+
+    let taken = bench.supplier.take_notes();
+
+    assert_eq!(
+        taken,
+        ["said by the sound that plays", "said by the sound that is being made"]
+    );
+    assert!(bench.supplier.take_notes().is_empty(), "taken once");
+}
+
+#[test]
+fn a_change_in_which_plugins_may_be_run_makes_the_sound_again_while_it_plays_and_the_same_number_does_not() {
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let mut clock = bench.play_steadily(3.0, 1.0);
+    assert_eq!(bench.streams_started(), 1);
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 1, "nothing changed: the sound goes on");
+
+    // A person said yes to a folder: what the plugins would make of the sound is different, with the project and its files the same.
+    bench.starter.generation.set(1);
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(
+        bench.streams_started(),
+        2,
+        "the sound is made again, with the plugin in it"
+    );
+    assert!(bench.stream(0).was_stopped.get(), "and the new takes over");
+    bench.play_steadily(clock, 0.5);
+    assert_eq!(
+        bench.streams_started(),
+        2,
+        "and it is not made again for the same number"
+    );
+}
+
+/// A project of the clip of `project_of_clips(&[(0, 600, 1)])` with a sound plugin on it, and what to change it with.
+fn project_with_a_plugin_on_its_clip(
+    value: f32,
+) -> (Project, crate::project::EffectKind, crate::project::EffectInstanceId) {
+    let plugin =
+        crate::test_support::an_installed_sound_plugin("ladspa:amp:amp", "Steve Harris", &[("gain", 0.0, None)]);
+    crate::project::set_installed_plugins(vec![plugin]);
+    let kind = crate::project::EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_of_clips(&[(0, 600, 1)]);
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    let instance = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            PropertyId::effect_value(kind, instance, 0),
+            crate::project::PropertyValue::Number(value),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    (project, kind, instance)
+}
+
+#[test]
+fn a_change_to_the_value_of_a_plugin_effect_or_its_keyframes_or_the_plugin_being_found_or_gone_makes_the_sound_again() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, kind, instance) = project_with_a_plugin_on_its_clip(1.0);
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    let mut bench = Bench::with(project, 1);
+    bench.update_playing_at(3.0);
+    let mut clock = bench.play_steadily(3.0, 1.0);
+    assert_eq!(bench.streams_started(), 1);
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 1, "nothing changed");
+
+    // The value is another.
+    let property = PropertyId::effect_value(kind, instance, 0);
+    bench
+        .project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            property,
+            crate::project::PropertyValue::Number(2.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 2, "the value of the effect is heard");
+
+    // The value is animated (a keyframe at a frame, and another).
+    bench
+        .project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            property,
+            crate::project::PropertyValue::Number(3.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    clock = bench.play_steadily(clock, 0.5);
+    let before_keyframes = bench.streams_started();
+    assert_eq!(before_keyframes, 3);
+    bench
+        .project
+        .add_keyframe(AnimationTarget::Clip(clip), property, TimelineFrameIndex::new(30))
+        .unwrap();
+    bench
+        .project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            property,
+            crate::project::PropertyValue::Number(0.5),
+            TimelineFrameIndex::new(30),
+        )
+        .unwrap();
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 4, "a keyframe of the value is heard");
+
+    // The plugin is gone: the effect passes the sound through, which is another sound than the plugin makes. And it is found again.
+    crate::project::set_installed_plugins(Vec::new());
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 5, "a plugin that is gone is heard to be");
+    let plugin =
+        crate::test_support::an_installed_sound_plugin("ladspa:amp:amp", "Steve Harris", &[("gain", 0.0, None)]);
+    crate::project::set_installed_plugins(vec![plugin]);
+    bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 6, "and a plugin that is found is");
+}
+
+#[test]
+fn a_picture_effect_changing_does_not_make_the_sound_again() {
+    let mut project = project_of_clips(&[(0, 600, 1)]);
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    let hue = crate::project::EffectKind::HUE_SHIFT;
+    let instance = project.add_effect(AnimationTarget::Clip(clip), hue).unwrap();
+    let mut bench = Bench::with(project, 1);
+    bench.update_playing_at(3.0);
+    let mut clock = bench.play_steadily(3.0, 1.0);
+    bench
+        .project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            PropertyId::effect_value(hue, instance, 0),
+            crate::project::PropertyValue::Number(90.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    clock = bench.play_steadily(clock, 0.5);
+    bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 1, "what is seen is not what is heard");
+}
+
+#[test]
 fn edits_that_keep_coming_make_the_sound_catch_up_every_so_often_and_it_never_has_a_gap() {
     let mut bench = Bench::new();
     bench.update_playing_at(3.0);
@@ -1124,6 +1305,7 @@ fn without_any_speakers_given_there_is_no_sound_and_no_complaint() {
         decoded_at_the_start: Rc::new(Cell::new(u64::MAX / 4)),
         attempts: Rc::default(),
         fails: Rc::default(),
+        generation: Rc::default(),
     };
     let mut supplier = AudioSupplier::new(starter.clone());
     let project = project_of_clips(&[(0, 600, 1)]);

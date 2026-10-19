@@ -29,7 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::composition::plan_sound;
+use crate::composition::{hash_the_sound_effects_into, plan_sound};
 use crate::media::export::{sound_graph_specification, sources_of_sound};
 use crate::media::{
     AudioFormat, AudioStream, AudioStreamError, AudioStreamEvent, AudioStreamRequest, EngineAudioStream,
@@ -38,6 +38,7 @@ use crate::media::{
 use crate::project::{
     AnimationTarget, Clip, Project, PropertyId, SourceMediaIdentifier, SpedUpClipSound, TimelineFrameIndex,
 };
+use crate::sound_engine::PluginRunner;
 
 /// How much sound is kept waiting at the speakers, in seconds. Enough to ride out a late frame of
 /// the window without a gap, and little enough that a change (pausing, say) is heard at once.
@@ -104,6 +105,11 @@ pub type AudioSinkOpener = Box<dyn FnMut() -> Result<Box<dyn AudioSink>, String>
 pub trait AudioSource {
     /// The next thing the stream has to report, if anything is ready. Never waits.
     fn try_next_event(&self) -> Option<AudioStreamEvent>;
+
+    /// What the plugins have said since this was last asked, that a person should be told. (Most sources have no plugins.)
+    fn take_notes(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 impl AudioSource for AudioStream {
@@ -115,6 +121,10 @@ impl AudioSource for AudioStream {
 impl AudioSource for EngineAudioStream {
     fn try_next_event(&self) -> Option<AudioStreamEvent> {
         EngineAudioStream::try_next_event(self)
+    }
+
+    fn take_notes(&self) -> Vec<String> {
+        EngineAudioStream::take_notes(self)
     }
 }
 
@@ -154,6 +164,13 @@ impl AudioSource for ChosenAudioStream {
             Self::Engine(stream) => stream.try_next_event(),
         }
     }
+
+    fn take_notes(&self) -> Vec<String> {
+        match self {
+            Self::FilterGraph(_) => Vec::new(),
+            Self::Engine(stream) => stream.take_notes(),
+        }
+    }
 }
 
 /// Starts streams of sound.
@@ -161,6 +178,12 @@ pub trait AudioStreamStarter {
     type Stream: AudioSource;
 
     fn start(&self, request: &AudioStreamRequest) -> Result<Self::Stream, AudioStreamError>;
+
+    /// A number that is different whenever the sound that this makes from the same request has changed for a reason that is not in the request (which plugins may be run):
+    /// it is part of what the sound is made of, so that the sound is made again when it changes.
+    fn generation(&self) -> u64 {
+        0
+    }
 }
 
 /// The starter that runs ffmpeg. Without ffmpeg (`None`) every start fails, so that the rest of the
@@ -169,6 +192,8 @@ pub struct FfmpegAudioStreamStarter {
     toolchain: Option<Arc<FfmpegToolchain>>,
     wake_up: UserInterfaceWakeUp,
     which: WhichSound,
+    /// What makes the effects of clips that are plugins (the sound passes through them unchanged where there is none).
+    plugins: Option<Arc<dyn PluginRunner>>,
 }
 
 impl FfmpegAudioStreamStarter {
@@ -186,7 +211,15 @@ impl FfmpegAudioStreamStarter {
             toolchain,
             wake_up,
             which,
+            plugins: None,
         }
+    }
+
+    /// The same, with `plugins` making the effects of the clips that are plugins.
+    #[must_use]
+    pub fn with_plugins(mut self, plugins: Arc<dyn PluginRunner>) -> Self {
+        self.plugins = Some(plugins);
+        self
     }
 }
 
@@ -204,8 +237,15 @@ impl AudioStreamStarter for FfmpegAudioStreamStarter {
             WhichSound::FilterGraph => {
                 AudioStream::start(toolchain, request, wake_up).map(ChosenAudioStream::FilterGraph)
             }
-            WhichSound::Engine => EngineAudioStream::start(toolchain, request, wake_up).map(ChosenAudioStream::Engine),
+            WhichSound::Engine => {
+                EngineAudioStream::start_with_plugins(toolchain, request, wake_up, self.plugins.clone())
+                    .map(ChosenAudioStream::Engine)
+            }
         }
+    }
+
+    fn generation(&self) -> u64 {
+        self.plugins.as_ref().map_or(0, |plugins| plugins.generation())
     }
 }
 
@@ -223,9 +263,12 @@ impl AudioContent<'_> {
     /// playhead is. (Equal numbers for different content are possible but astronomically unlikely,
     /// and would only keep the old sound until the playhead is moved.) Only what is heard counts:
     /// a change to text, or to where the picture is, leaves the sound as it is.
-    fn signature(&self) -> u64 {
+    fn signature(&self, plugins_generation: u64) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.sped_up_clip_sound.hash(&mut hasher);
+        // (Which plugins may be run: a plugin begins to be heard when a person says yes to its folder.)
+        plugins_generation.hash(&mut hasher);
+        hash_the_sound_effects_into(self.project, &mut hasher);
         let frame_rate = self.project.frame_rate();
         frame_rate.numerator().hash(&mut hasher);
         frame_rate.denominator().hash(&mut hasher);
@@ -373,6 +416,16 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         self.last_problem.as_deref()
     }
 
+    /// What the plugins of the sounds that are being made have said since this was last asked, that a person should be told (a plugin that could not be loaded, one that was too
+    /// slow and was left out of the play). Each line is said by the sound that said it, so a line may come again with the next sound: whoever shows them keeps what it showed.
+    pub fn take_notes(&self) -> Vec<String> {
+        self.running
+            .iter()
+            .chain(self.replacement.iter())
+            .flat_map(|running| running.stream.take_notes())
+            .collect()
+    }
+
     /// Does what the sound needs this frame of the window. `content` is `None` when there is no
     /// sound to play (no video, or a video without sound, or one that cannot be read).
     pub fn update(&mut self, content: Option<AudioContent<'_>>, clock: ClockReading, now: Instant) {
@@ -389,7 +442,7 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
         if !self.make_sure_there_are_speakers(now) {
             return;
         }
-        let signature = content.signature();
+        let signature = content.signature(self.starter.generation());
         match &self.running {
             None => {
                 if let StartOutcome::Started(stream) = self.start_stream(&content, signature, clock, now) {

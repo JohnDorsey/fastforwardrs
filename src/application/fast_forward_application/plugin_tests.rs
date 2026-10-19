@@ -88,6 +88,10 @@ fn is_shown(window: &Window, label: &str) -> bool {
     window.harness.query_by_label(label).is_some()
 }
 
+fn is_shown_containing(window: &Window, text: &str) -> bool {
+    window.harness.query_by_label_contains(text).is_some()
+}
+
 fn press_on(window: &mut Window, label: &str) {
     let at = window.rectangle_of(label).center();
     window.press(at, PointerButton::Primary);
@@ -315,8 +319,11 @@ fn a_yes_to_a_plugin_inside_the_project_is_for_this_time_only_and_it_is_asked_ag
     assert_eq!(would_be_loaded(&window, "amp_1181.dll"), Err(WhyNot::NotAsked));
 }
 
+// (Rewritten on purpose on 2026-10-19: a yes to a plugin that is a file used to be for that file as it was, and a changed file was asked about again. It is a yes to the
+// folder now, and what is in the folder, or comes to be, is not asked about.)
 #[test]
-fn a_yes_to_a_plugin_that_is_a_file_is_remembered_for_that_file_and_asked_again_when_the_file_changes() {
+fn a_yes_to_the_plugins_of_a_folder_is_remembered_for_the_folder_and_not_asked_again_even_when_a_file_changes_or_another_comes()
+ {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("tap_reverb.so");
     fs::write(&file, "version one").unwrap();
@@ -329,7 +336,11 @@ fn a_yes_to_a_plugin_that_is_a_file_is_remembered_for_that_file_and_asked_again_
 
     let question = the_question_shown(&window);
     assert!(matches!(question, Some(Question::Linked { .. })), "{question:?}");
-    assert!(is_shown(&window, "Run this plugin?"));
+    assert!(is_shown(&window, "Run plugins from this folder?"));
+    assert!(is_shown_containing(
+        &window,
+        "you are not asked again about this folder"
+    ));
     let at = window.rectangle_of(PLUGIN_LOAD_LABEL).center();
     window.click(at);
     assert!(
@@ -342,17 +353,60 @@ fn a_yes_to_a_plugin_that_is_a_file_is_remembered_for_that_file_and_asked_again_
     window.show_another_project(project.clone());
     assert!(
         window.application().interface.dialog.is_none(),
-        "not asked again: the same file"
+        "not asked again: the same folder"
     );
     assert_eq!(would_be_loaded(&window, "tap_reverb.so"), Ok(()));
 
     fs::write(&file, "version two, which somebody changed").unwrap();
-    window.show_another_project(project);
+    let another = folder.path().join("another_in_the_same_folder.so");
+    fs::write(&another, "something new").unwrap();
+    window.show_another_project(project_with(vec![
+        a_linked_plugin("tap_reverb.so", &file),
+        a_linked_plugin("another_in_the_same_folder.so", &another),
+    ]));
     assert!(
-        the_question_shown(&window).is_some(),
-        "the file has changed: asked again"
+        window.application().interface.dialog.is_none(),
+        "the file has changed and another is there, in a folder that was said yes to: not asked"
     );
-    assert_eq!(would_be_loaded(&window, "tap_reverb.so"), Err(WhyNot::NotAsked));
+    assert_eq!(would_be_loaded(&window, "tap_reverb.so"), Ok(()));
+    assert_eq!(would_be_loaded(&window, "another_in_the_same_folder.so"), Ok(()));
+}
+
+#[test]
+fn two_plugins_in_one_folder_are_one_question_that_names_both_and_a_plugin_in_another_folder_is_another() {
+    let root = tempfile::tempdir().unwrap();
+    let (one, two) = (root.path().join("one"), root.path().join("two"));
+    fs::create_dir_all(&one).unwrap();
+    fs::create_dir_all(&two).unwrap();
+    let files = [one.join("a.so"), one.join("b.so"), two.join("c.so")];
+    for file in &files {
+        fs::write(file, "bytes").unwrap();
+    }
+    let mut window = window_showing(project_with(vec![
+        a_linked_plugin("a.so", &files[0]),
+        a_linked_plugin("c.so", &files[2]),
+        a_linked_plugin("b.so", &files[1]),
+    ]));
+
+    assert!(
+        is_shown_containing(&window, "the plugin \u{ab}a.so\u{bb} and 1 other"),
+        "the first folder, with both its plugins"
+    );
+    let at = window.rectangle_of(PLUGIN_LOAD_LABEL).center();
+    window.click(at);
+    assert!(
+        is_shown_containing(&window, "the plugin \u{ab}c.so\u{bb}, which is in the folder"),
+        "then the other folder"
+    );
+    let at = window.rectangle_of(PLUGIN_DONT_LOAD_LABEL).center();
+    window.click(at);
+    assert!(
+        window.application().interface.dialog.is_none(),
+        "two questions, for two folders"
+    );
+    assert_eq!(would_be_loaded(&window, "a.so"), Ok(()));
+    assert_eq!(would_be_loaded(&window, "b.so"), Ok(()));
+    assert_eq!(would_be_loaded(&window, "c.so"), Err(WhyNot::Declined));
 }
 
 #[test]

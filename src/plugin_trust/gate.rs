@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::approvals::ApprovalStore;
+use super::approvals::{ApprovalStore, folder_key, folder_of};
 use super::extraction::{ExtractionError, MOST_BYTES_OF_A_PLUGIN, PluginCache};
 use crate::digest::Sha256Digest;
 use crate::project::{LinkedLibrary, PluginLibraries, PluginLibrary, PluginLibrarySource};
@@ -21,22 +21,20 @@ pub trait LibraryLoader {
     fn load(&mut self, file: &Path) -> Result<Self::Loaded, String>;
 }
 
-/// What was approved or declined: a linked file as it is (its path and what is in it), an embedded one by its name and what is in it.
+/// What was approved or declined: a folder that plugin files are in (**one question for a folder**, whatever is in it: the maintainer's word of 2026-10-19), an embedded plugin
+/// by its name and what is in it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Subject {
-    Linked { path: PathBuf, digest: Sha256Digest },
+    Linked { folder: PathBuf },
     Embedded { library: String, digest: Sha256Digest },
 }
 
 /// What the person is asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Question {
-    /// A plugin that is a file somewhere is about to be run for the first time (the warning).
-    Linked {
-        library: String,
-        path: PathBuf,
-        digest: Sha256Digest,
-    },
+    /// Plugins that are files in a folder are about to be run for the first time (the warning, **once for each folder**). `libraries` are the names of those that are asked
+    /// about now (there may be many in a folder: the question is one).
+    Linked { folder: PathBuf, libraries: Vec<String> },
     /// A plugin that is inside the project file is about to be run (the severe one, asked every time the project is opened). `platform` is the build that would be loaded.
     Embedded {
         library: String,
@@ -47,12 +45,17 @@ pub enum Question {
 }
 
 impl Question {
+    /// The question about the plugins of `libraries` that are files in `folder`.
+    pub fn linked(folder: &Path, libraries: Vec<String>) -> Self {
+        Self::Linked {
+            folder: folder_key(folder),
+            libraries,
+        }
+    }
+
     fn subject(&self) -> Subject {
         match self {
-            Self::Linked { path, digest, .. } => Subject::Linked {
-                path: path.clone(),
-                digest: *digest,
-            },
+            Self::Linked { folder, .. } => Subject::Linked { folder: folder.clone() },
             Self::Embedded { library, digest, .. } => Subject::Embedded {
                 library: library.clone(),
                 digest: *digest,
@@ -60,10 +63,11 @@ impl Question {
         }
     }
 
-    /// The name of the library that is asked about.
+    /// The name of the library that is asked about (the first, for a folder).
     pub fn library(&self) -> &str {
         match self {
-            Self::Linked { library, .. } | Self::Embedded { library, .. } => library,
+            Self::Linked { libraries, .. } => libraries.first().map_or("", String::as_str),
+            Self::Embedded { library, .. } => library,
         }
     }
 }
@@ -84,14 +88,14 @@ pub struct TrustSession {
 }
 
 impl TrustSession {
-    /// Records `answer` to `question`. A *yes* to a linked plugin is also written to `approvals`, which remembers it by the path and the hash of the file; a *yes* to an
-    /// embedded plugin is **only** for this session.
+    /// Records `answer` to `question`. A *yes* to the plugins of a folder is also written to `approvals`, which remembers the folder; a *yes* to an embedded plugin is **only** for
+    /// this session.
     pub fn answer(&mut self, question: &Question, answer: Answer, approvals: &mut ApprovalStore) {
         let subject = question.subject();
         match answer {
             Answer::Load => {
-                if let Question::Linked { path, digest, .. } = question {
-                    approvals.approve(path, *digest);
+                if let Question::Linked { folder, .. } = question {
+                    approvals.approve_folder(folder);
                 }
                 self.declined.remove(&subject);
                 self.allowed.insert(subject);
@@ -109,6 +113,21 @@ impl TrustSession {
         self.declined.clear();
     }
 
+    /// What is known of the plugins that are files in `folder`: whether it has been approved (for always, or in this session), declined (in this session), or nobody has been
+    /// asked.
+    pub fn standing_of_folder(&self, approvals: &ApprovalStore, folder: &Path) -> FolderStanding {
+        let subject = Subject::Linked {
+            folder: folder_key(folder),
+        };
+        if self.is_declined(&subject) {
+            FolderStanding::Declined
+        } else if approvals.is_folder_approved(folder) || self.is_allowed(&subject) {
+            FolderStanding::Approved
+        } else {
+            FolderStanding::NotAsked
+        }
+    }
+
     fn is_allowed(&self, subject: &Subject) -> bool {
         self.allowed.contains(subject)
     }
@@ -116,6 +135,14 @@ impl TrustSession {
     fn is_declined(&self, subject: &Subject) -> bool {
         self.declined.contains(subject)
     }
+}
+
+/// What is known of a folder that plugins are files in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderStanding {
+    Approved,
+    Declined,
+    NotAsked,
 }
 
 /// Why a library cannot be used at all, whatever the person says.
@@ -148,11 +175,9 @@ pub struct WhatIsNeeded {
     pub unavailable: Vec<(String, Unavailable)>,
 }
 
-/// Where a linked library is now and what is in it. The places it is looked for are the one it was at, and the one that is the same from the folder of the project file.
-fn find_the_linked_file(
-    link: &LinkedLibrary,
-    project_directory: Option<&Path>,
-) -> Result<(PathBuf, Sha256Digest), Unavailable> {
+/// Where a linked library is now. The places it is looked for are the one it was at, and the one that is the same from the folder of the project file. (What is in the file
+/// is not looked at: it is the folder that is approved.)
+fn find_the_linked_file(link: &LinkedLibrary, project_directory: Option<&Path>) -> Result<PathBuf, Unavailable> {
     let mut tried = vec![link.absolute_path.clone()];
     if let (Some(relative), Some(directory)) = (&link.relative_path, project_directory) {
         let there = directory.join(relative);
@@ -163,12 +188,12 @@ fn find_the_linked_file(
     let Some(path) = tried.iter().find(|candidate| candidate.is_file()).cloned() else {
         return Err(Unavailable::FileNotFound { tried });
     };
-    let bytes = fs::metadata(&path).map_or(0, |metadata| metadata.len());
-    if bytes > MOST_BYTES_OF_A_PLUGIN as u64 {
-        return Err(Unavailable::FileTooBig { path, bytes });
-    }
-    match Sha256Digest::of_file(&path) {
-        Ok(digest) => Ok((path, digest)),
+    match fs::metadata(&path) {
+        Ok(metadata) if metadata.len() > MOST_BYTES_OF_A_PLUGIN as u64 => Err(Unavailable::FileTooBig {
+            bytes: metadata.len(),
+            path,
+        }),
+        Ok(_) => Ok(path),
         Err(error) => Err(Unavailable::FileUnreadable {
             path,
             reason: error.to_string(),
@@ -176,8 +201,9 @@ fn find_the_linked_file(
     }
 }
 
-/// What has to be asked of the person before the libraries of a project may be used, and which cannot be used. **Each library that is not answered for already** is asked about
-/// once: a linked one that was approved (by this path and this file) is not, nor one that was answered in this session.
+/// What has to be asked of the person before the libraries of a project may be used, and which cannot be used. **Each folder that linked libraries are in, and that is not
+/// answered for already, is asked about once** (with the names of the project's libraries in it): a folder that was approved is not, nor one that was answered in this session.
+/// An embedded library is asked about every time.
 pub fn what_is_needed(
     libraries: &PluginLibraries,
     project_directory: Option<&Path>,
@@ -189,20 +215,19 @@ pub fn what_is_needed(
     for library in libraries {
         match library.source() {
             PluginLibrarySource::Linked(link) => match find_the_linked_file(link, project_directory) {
-                Ok((path, digest)) => {
-                    let subject = Subject::Linked {
-                        path: path.clone(),
-                        digest,
-                    };
-                    if !approvals.is_approved(&path, digest)
-                        && !session.is_allowed(&subject)
-                        && !session.is_declined(&subject)
-                    {
-                        needed.questions.push(Question::Linked {
-                            library: library.name().to_owned(),
-                            path,
-                            digest,
-                        });
+                Ok(path) => {
+                    let folder = folder_of(&path);
+                    if session.standing_of_folder(approvals, &folder) != FolderStanding::NotAsked {
+                        continue;
+                    }
+                    let already_asked = needed.questions.iter_mut().find(
+                        |question| matches!(question, Question::Linked { folder: asked, .. } if *asked == folder),
+                    );
+                    match already_asked {
+                        Some(Question::Linked { libraries, .. }) => libraries.push(library.name().to_owned()),
+                        _ => needed
+                            .questions
+                            .push(Question::linked(&folder, vec![library.name().to_owned()])),
                     }
                 }
                 Err(why) => needed.unavailable.push((library.name().to_owned(), why)),
@@ -235,7 +260,8 @@ pub fn what_is_needed(
 }
 
 /// The libraries that the command line has to **refuse** to run a project with, unless it is told that plugins are allowed: it cannot ask. These are the embedded ones that have
-/// a build for this computer, and the linked ones that are not approved (or cannot be found: they cannot be approved). Each is a line that says which and why, for the message.
+/// a build for this computer, and the linked ones whose folder is not approved (or that cannot be found: they cannot be approved). Each is a line that says which and why, for the
+/// message.
 pub fn what_the_command_line_refuses(
     libraries: &PluginLibraries,
     project_directory: Option<&Path>,
@@ -254,12 +280,14 @@ pub fn what_the_command_line_refuses(
                 }
             }
             PluginLibrarySource::Linked(link) => match find_the_linked_file(link, project_directory) {
-                Ok((path, digest)) => {
-                    if !approvals.is_approved(&path, digest) {
+                Ok(path) => {
+                    let folder = folder_of(&path);
+                    if !approvals.is_folder_approved(&folder) {
                         lines.push(format!(
-                            "{} (the file {}, which has not been approved)",
+                            "{} (the file {}, in the folder {}, which has not been approved)",
                             library.name(),
-                            path.display()
+                            path.display(),
+                            super::approvals::folder_for_a_person(&folder)
                         ));
                     }
                 }
@@ -288,7 +316,7 @@ pub enum WhyNot {
     LoaderFailed(String),
 }
 
-/// Loads `library` with `loader` **if the person has said yes, and not otherwise.** A linked library is loaded where it is, if its path and what is in it have been approved; an
+/// Loads `library` with `loader` **if the person has said yes, and not otherwise.** A linked library is loaded where it is, if its folder has been approved; an
 /// embedded one is written out by `cache` (checked against its recorded digest) and loaded from there, if this session has said yes to it.
 pub fn load_library<Loader: LibraryLoader>(
     library: &PluginLibrary,
@@ -301,16 +329,11 @@ pub fn load_library<Loader: LibraryLoader>(
 ) -> Result<Loader::Loaded, WhyNot> {
     let path = match library.source() {
         PluginLibrarySource::Linked(link) => {
-            let (path, digest) = find_the_linked_file(link, project_directory).map_err(WhyNot::Unavailable)?;
-            let subject = Subject::Linked {
-                path: path.clone(),
-                digest,
-            };
-            if session.is_declined(&subject) {
-                return Err(WhyNot::Declined);
-            }
-            if !approvals.is_approved(&path, digest) && !session.is_allowed(&subject) {
-                return Err(WhyNot::NotAsked);
+            let path = find_the_linked_file(link, project_directory).map_err(WhyNot::Unavailable)?;
+            match session.standing_of_folder(approvals, &folder_of(&path)) {
+                FolderStanding::Declined => return Err(WhyNot::Declined),
+                FolderStanding::NotAsked => return Err(WhyNot::NotAsked),
+                FolderStanding::Approved => {}
             }
             path
         }

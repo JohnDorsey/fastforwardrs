@@ -7,8 +7,8 @@
 //! a project from somebody else could, if nothing stood in the way, run anything. Everything that stands in the way is here, and **none of it loads anything**: it decides, and a
 //! [`LibraryLoader`] (which phase 7.4 makes; the tests have a fake that records what it was asked) does what was decided.
 //!
-//! * A **linked** plugin (named by a path) is asked about **the first time it is needed**, and the answer is remembered by **the path and a hash of the file** ([`ApprovalStore`]):
-//!   a file that has changed is another file, and is asked about again.
+//! * A **linked** plugin (a file somewhere) is asked about **the first time one from its folder is needed, and once for the folder** ([`ApprovalStore`] remembers folders: the
+//!   maintainer does not want a question for every locally installed plugin). A yes to a folder is a yes to what is in it, and to what is put in it.
 //! * An **embedded** plugin (inside the project file) is asked about **every time the project is opened**, and never remembered ([`TrustSession`] lasts as long as the project
 //!   is open). The question is the severe one: *Don't load* is the default, and *Load it* can only be said by holding it down for five seconds ([`HoldToConfirm`]).
 //! * An embedded plugin has **one build for each kind of computer**; the one for this computer is the one that is asked about, and a project that has none says which it has.
@@ -25,11 +25,11 @@ mod gate;
 mod hold;
 mod platform;
 
-pub use approvals::ApprovalStore;
+pub use approvals::{ApprovalStore, folder_for_a_person, folder_key, folder_of};
 pub use extraction::{ExtractionError, MOST_BYTES_OF_A_PLUGIN, PluginCache};
 pub use gate::{
-    Answer, LibraryLoader, Question, TrustSession, Unavailable, WhatIsNeeded, WhyNot, load_library, what_is_needed,
-    what_the_command_line_refuses,
+    Answer, FolderStanding, LibraryLoader, Question, TrustSession, Unavailable, WhatIsNeeded, WhyNot, load_library,
+    what_is_needed, what_the_command_line_refuses,
 };
 pub use hold::{HoldToConfirm, SECONDS_TO_HOLD};
 pub use platform::this_platform;

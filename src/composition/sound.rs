@@ -155,6 +155,44 @@ pub fn plan_sound(
     }
 }
 
+/// Feeds everything that is heard of the sound effects of the clips of `project` into `hasher`, so that a number made from it is different whenever it is: for each clip that
+/// has sound effects, which they are (the kind and version, which plugin of which library stands in for it now, if one does, so that a plugin that is found by the scan is a
+/// change), their values and the keyframes of them. A project with no sound effects feeds nothing.
+pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    let applied = project.effects_applied_to_every_clip();
+    let animations = (!applied.is_empty()).then(|| project.resolved_animations());
+    let Some(animations) = animations else {
+        return;
+    };
+    for track in project.tracks() {
+        for entry in track.entries() {
+            let Some(effects) = applied.get(&entry.id()) else {
+                continue;
+            };
+            for effect in effects
+                .iter()
+                .filter(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
+            {
+                let layer = layer_effect_of(project, &animations, effect);
+                entry.id().hash(hasher);
+                layer.instance.number().hash(hasher);
+                layer.kind.key().hash(hasher);
+                layer.kind.version().hash(hasher);
+                layer
+                    .kind
+                    .installed_plugin()
+                    .map(|plugin| (&plugin.library, plugin.plugin_index))
+                    .hash(hasher);
+                for value in &layer.values {
+                    value.hash_into(hasher);
+                }
+                layer.animation.hash_properties_into(hasher, |_| true);
+            }
+        }
+    }
+}
+
 fn strip_of(
     project: &Project,
     animations: &ResolvedAnimations,

@@ -13,7 +13,9 @@ mod pictures;
 mod sound;
 
 pub use pictures::{Layer, LayerContent, LayerEffect, PicturePlan, PictureSection, VisibleVideo, plan_pictures};
-pub use sound::{DecibelsAt, Loudness, SoundClip, SoundItem, SoundPlan, SoundStrip, plan_sound};
+pub use sound::{
+    DecibelsAt, Loudness, SoundClip, SoundItem, SoundPlan, SoundStrip, hash_the_sound_effects_into, plan_sound,
+};
 
 #[cfg(test)]
 pub(crate) mod test_projects;

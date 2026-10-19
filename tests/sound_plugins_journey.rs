@@ -209,3 +209,109 @@ fn a_scan_with_no_program_to_scan_with_finds_nothing_and_a_plugin_folder_is_stil
     );
     assert!(EffectKind::installed_plugin_kinds().is_empty());
 }
+
+// --- the sound of a plugin in an export made by the editor ---
+
+/// Puts the plugin `Test plugin ffrs_test_switches` on the first clip (it multiplies the sound by a whole number: its value, which the project says) and gives the number.
+fn put_the_multiplier_on_the_clip(journey: &mut Journey) -> f32 {
+    journey.select_the_clip_at(0);
+    let plus = journey.rectangle_of("Add an effect").center();
+    journey.click(plus);
+    journey.settle();
+    journey.harness.get_by_label("Test plugin ffrs_test_switches").click();
+    journey.settle();
+    let clip = journey.application().project().tracks()[0]
+        .placement_at_index(0)
+        .unwrap()
+        .id;
+    let values = journey
+        .application()
+        .project()
+        .effects_of(AnimationTarget::Clip(clip))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .values()
+        .to_vec();
+    match values.as_slice() {
+        [PropertyValue::Flag(false), PropertyValue::Number(multiplier)] => *multiplier,
+        other => panic!("the values of the plugin: {other:?}"),
+    }
+}
+
+fn export_and_take_the_words(journey: &mut Journey, destination: &Path) -> String {
+    journey.application_mut().export_video_to(destination.to_owned());
+    journey.wait_until_idle();
+    let (title, text) = journey
+        .application()
+        .message_showing()
+        .expect("a message says how the export ended");
+    assert_eq!(title, "Export finished", "{text}");
+    text.to_owned()
+}
+
+#[test]
+fn an_export_from_the_editor_has_the_plugin_in_its_sound_when_the_folder_is_approved_and_says_which_plugins_were_not_run_when_it_is_not()
+ {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    let scratch = scratch_directory();
+    let video = counter_video(&toolchain);
+    let plugins = folder_with_the_test_plugins(scratch.path());
+
+    // The sound of the video as it is.
+    let mut plain = Journey::importing(&toolchain, &video.path);
+    let plain_words = export_and_take_the_words(&mut plain, &scratch.path().join("plain.mp4"));
+    assert!(!plain_words.contains("were not run"), "{plain_words}");
+    let plain_loudness = support::loudness(&support::decoded_sound(
+        &toolchain,
+        &scratch.path().join("plain.mp4"),
+        2,
+        48_000,
+    ));
+    assert!(plain_loudness > 0.02, "there is a tone to be changed: {plain_loudness}");
+
+    // The plugin is on the clip and its folder is approved (as the editor's file of approvals says).
+    let mut approved = Journey::importing(&toolchain, &video.path);
+    look_for_plugins_in(&mut approved, &plugins);
+    let multiplier = put_the_multiplier_on_the_clip(&mut approved);
+    assert!(multiplier >= 2.0, "the plugin makes the sound louder: {multiplier}");
+    let approvals = scratch.path().join("plugin_approvals.json");
+    fastforwardrs::plugin_trust::ApprovalStore::at(approvals.clone()).approve_folder(&plugins);
+    approved.application_mut().keep_plugin_approvals_in(approvals);
+    let words = export_and_take_the_words(&mut approved, &scratch.path().join("with_the_plugin.mp4"));
+    assert!(!words.contains("were not run"), "everything was run: {words}");
+    let louder = support::loudness(&support::decoded_sound(
+        &toolchain,
+        &scratch.path().join("with_the_plugin.mp4"),
+        2,
+        48_000,
+    ));
+    let ratio = louder / plain_loudness;
+    assert!(
+        (ratio - multiplier).abs() < 0.05 * multiplier,
+        "the plugin multiplies the sound by {multiplier}: {louder} against {plain_loudness} is {ratio}"
+    );
+
+    // Nobody has approved the folder: the sound is as it was, and the message at the end says so.
+    let mut asked_nobody = Journey::importing(&toolchain, &video.path);
+    look_for_plugins_in(&mut asked_nobody, &plugins);
+    put_the_multiplier_on_the_clip(&mut asked_nobody);
+    let words = export_and_take_the_words(&mut asked_nobody, &scratch.path().join("not_run.mp4"));
+    assert!(
+        words.contains("were not run, because nobody has said yes") && words.contains("test plugin ffrs_test_switches"),
+        "{words}"
+    );
+    let unchanged = support::loudness(&support::decoded_sound(
+        &toolchain,
+        &scratch.path().join("not_run.mp4"),
+        2,
+        48_000,
+    ));
+    assert!(
+        (unchanged / plain_loudness - 1.0).abs() < 0.05,
+        "the sound went through the plugin unchanged: {unchanged} against {plain_loudness}"
+    );
+}

@@ -7,7 +7,7 @@
 //! clips and silences, with how loud each clip is) and **the sound of each clip as it comes out of its file** (cut out and sped up: ffmpeg does that, see
 //! [`clip_feed_filters`](crate::media::export::clip_feed_filters)), and makes the finished sound a block at a time:
 //!
-//! * a clip's sound is changed by the **insertions** it has (effects: none yet, see [`Insertions`]), then made as loud as the clip says, **at every sample** (the filter graph
+//! * a clip's sound is changed by the **insertions** it has (its sound effects: plugins, made by a [`PluginRunner`]; see [`Insertions`]), then made as loud as the clip says, **at every sample** (the filter graph
 //!   changes the volume once for every chunk of sound it handles, which is a staircase; this is the curve it means);
 //! * a clip is made **exactly as long as its place on the timeline**: its sound is cut off if it is longer, and silence follows it if it is shorter;
 //! * the clips and silences of a track are put one after another, where each item begins at **the sample that its frame is at, worked out from the frame and not by
@@ -24,6 +24,7 @@ mod gain;
 mod graph;
 mod insertions;
 mod lookahead;
+mod plugins;
 mod position;
 
 pub use crate::media::export::SAMPLE_RATE;
@@ -32,6 +33,7 @@ pub use gain::GainCurve;
 pub use graph::SoundGraph;
 pub use insertions::{BlockProcessor, Insertions, NoInsertions};
 pub use lookahead::{ClipSpawner, LookAheadFeeds, MOST_FEEDS_OPEN, SECONDS_OF_LOOK_AHEAD};
+pub use plugins::{Notes, PluginInsertions, PluginRunner};
 pub use position::sample_at_frame;
 
 /// How many samples the preview and the export ask the graph for at a time. (The graph gives the same sound for any number: this is a size, not a rule.)
