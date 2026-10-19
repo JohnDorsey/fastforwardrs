@@ -258,6 +258,20 @@ fn ports_of(kind: Kind) -> Vec<PortSpecification> {
     }
 }
 
+/// The properties of each plugin (`LADSPA_Properties`: 1 real time, 2 broken if the input and the output are one buffer, 4 never waits), different from each other so that a
+/// host that reads one flag for another shows.
+fn properties_of(kind: Kind) -> c_int {
+    match kind {
+        Kind::Gain | Kind::MonoToBoth => 4,
+        Kind::OnePole => 1,
+        Kind::Swap => 2,
+        Kind::Switches | Kind::NoPorts => 0,
+        Kind::Sine => 1 | 4,
+        Kind::MixDown => 2 | 4,
+        Kind::Counted => 1 | 2 | 4,
+    }
+}
+
 fn label_of(kind: Kind) -> &'static str {
     match kind {
         Kind::Gain => "ffrs_test_gain\0",
@@ -296,7 +310,7 @@ fn c_string(text: &str) -> *const c_char {
     Box::leak(bytes.into_boxed_slice()).as_ptr().cast()
 }
 
-fn descriptor_of(id: c_ulong, label: &str, ports: &[PortSpecification]) -> Descriptor {
+fn descriptor_of(id: c_ulong, label: &str, properties: c_int, ports: &[PortSpecification]) -> Descriptor {
     let bits: Vec<c_int> = ports.iter().map(|port| port.bits).collect();
     let names: Vec<*const c_char> = ports.iter().map(|port| c_string(port.name)).collect();
     let hints: Vec<PortRangeHint> = ports
@@ -310,7 +324,7 @@ fn descriptor_of(id: c_ulong, label: &str, ports: &[PortSpecification]) -> Descr
     Descriptor {
         unique_id: id,
         label: c_string(label),
-        properties: 4,
+        properties,
         name: c_string(&format!("Test plugin {label}")),
         maker: c_string("fastforwardrs tests"),
         copyright: c_string("CC0-1.0"),
@@ -335,14 +349,21 @@ fn table() -> &'static Table {
         let plugins: Vec<Descriptor> = KINDS
             .iter()
             .enumerate()
-            .map(|(number, &kind)| descriptor_of(FIRST_ID + number as c_ulong, label_of(kind), &ports_of(kind)))
+            .map(|(number, &kind)| {
+                descriptor_of(
+                    FIRST_ID + number as c_ulong,
+                    label_of(kind),
+                    properties_of(kind),
+                    &ports_of(kind),
+                )
+            })
             .collect();
         // The plugins that are only there on request. The first says it has three ports and does not say what they are...
-        let mut broken = descriptor_of(BROKEN_ID, "ffrs_test_broken\0", &[]);
+        let mut broken = descriptor_of(BROKEN_ID, "ffrs_test_broken\0", 0, &[]);
         broken.port_count = 3;
         broken.port_descriptors = std::ptr::null();
         // ...and the second lists three ports and says it has a million.
-        let mut absurd = descriptor_of(BROKEN_ID + 1, "ffrs_test_absurd\0", &ports_of(Kind::Gain));
+        let mut absurd = descriptor_of(BROKEN_ID + 1, "ffrs_test_absurd\0", 0, &ports_of(Kind::Gain));
         absurd.port_count = 1_000_000;
         Table {
             plugins,
@@ -393,9 +414,13 @@ static ACTIVATIONS: AtomicUsize = AtomicUsize::new(0);
 static DEACTIVATIONS: AtomicUsize = AtomicUsize::new(0);
 static BLOCKS_RUN: AtomicUsize = AtomicUsize::new(0);
 static PORTS_NOT_CONNECTED_WHEN_ACTIVATED: AtomicUsize = AtomicUsize::new(0);
+static BUFFERS_OF_THE_HOST_STILL_CONNECTED_WHEN_DEACTIVATED: AtomicUsize = AtomicUsize::new(0);
+static INPUTS_NOT_SILENT_WHEN_ACTIVATED: AtomicUsize = AtomicUsize::new(0);
 
 /// What the plugin `ffrs_test_counted` has been through, in this process: 0 instances that are made and not cleaned up, 1 activations, 2 deactivations, 3 blocks run, 4 ports that
-/// were not connected when an instance was activated. (Any other number gives 0.)
+/// were not connected when an instance was activated, 5 instances that were deactivated while their input was still connected to the buffer that the host lent for the last
+/// block (which the host may have freed by then), 6 instances whose input was not silence (all moments zero, for the first 64) when they were activated. (Any other
+/// number gives 0.)
 #[unsafe(no_mangle)]
 pub extern "C" fn ffrs_test_counts(which: c_int) -> usize {
     match which {
@@ -404,6 +429,8 @@ pub extern "C" fn ffrs_test_counts(which: c_int) -> usize {
         2 => DEACTIVATIONS.load(Ordering::SeqCst),
         3 => BLOCKS_RUN.load(Ordering::SeqCst),
         4 => PORTS_NOT_CONNECTED_WHEN_ACTIVATED.load(Ordering::SeqCst),
+        5 => BUFFERS_OF_THE_HOST_STILL_CONNECTED_WHEN_DEACTIVATED.load(Ordering::SeqCst),
+        6 => INPUTS_NOT_SILENT_WHEN_ACTIVATED.load(Ordering::SeqCst),
         _ => 0,
     }
 }
@@ -414,6 +441,8 @@ struct Instance {
     kind: Kind,
     sample_rate: f32,
     ports: [*mut f32; 8],
+    /// Where the input was at the last block that was run (for the plugin that counts).
+    last_input: *mut f32,
     /// What a plugin remembers: the last output of the filter, and the phase of the sine.
     memory: f32,
 }
@@ -437,6 +466,7 @@ unsafe extern "C" fn instantiate(descriptor: *const Descriptor, sample_rate: c_u
         kind,
         sample_rate: sample_rate as f32,
         ports: [std::ptr::null_mut(); 8],
+        last_input: std::ptr::null_mut(),
         memory: 0.0,
     }))
     .cast()
@@ -462,6 +492,13 @@ unsafe extern "C" fn activate(handle: *mut c_void) {
             .filter(|location| location.is_null())
             .count();
         PORTS_NOT_CONNECTED_WHEN_ACTIVATED.fetch_add(not_connected, Ordering::SeqCst);
+        // SAFETY: the host has connected the input to memory of at least 64 moments (the host of these tests connects the ports to 8192 moments of silence before there is a
+        // block). Where the input is not connected, nothing is read.
+        let loud =
+            !instance.ports[1].is_null() && (0..64).any(|moment| unsafe { *instance.ports[1].add(moment) } != 0.0);
+        if loud {
+            INPUTS_NOT_SILENT_WHEN_ACTIVATED.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -470,6 +507,9 @@ unsafe extern "C" fn deactivate(handle: *mut c_void) {
     let instance = unsafe { &mut *handle.cast::<Instance>() };
     if matches!(instance.kind, Kind::Counted) {
         DEACTIVATIONS.fetch_add(1, Ordering::SeqCst);
+        if !instance.last_input.is_null() && instance.ports[1] == instance.last_input {
+            BUFFERS_OF_THE_HOST_STILL_CONNECTED_WHEN_DEACTIVATED.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -546,6 +586,7 @@ unsafe extern "C" fn run(handle: *mut c_void, sample_count: c_ulong) {
             }
             Kind::Counted => {
                 BLOCKS_RUN.fetch_add(1, Ordering::SeqCst);
+                instance.last_input = ports[1];
                 for moment in 0..count {
                     *ports[2].add(moment) = *ports[1].add(moment);
                 }

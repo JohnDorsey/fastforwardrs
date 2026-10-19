@@ -80,12 +80,12 @@ impl Library {
         // SAFETY: loading a library runs the initialisation code that it has, which can do anything (this is the reason for everything in `plugin_trust` and for the scan being
         // done by a program of its own). The caller has been allowed to do it, which is the only condition this function has.
         let library = unsafe { libloading::Library::new(path) }
-            .map_err(|error| OpenError::CouldNotBeLoaded(error.to_string()))?;
+            .map_err(|error| OpenError::CouldNotBeLoaded(whole_message(&error)))?;
         // SAFETY: the type is the one `ladspa.h` gives the function (`abi::DescriptorFunction`). The pointer that is copied out of the symbol is good for as long as the library
         // is loaded, and `Loaded` keeps it loaded for as long as the pointer is kept.
         let descriptor_function = unsafe { library.get::<DescriptorFunction>(abi::DESCRIPTOR_FUNCTION_NAME) }
             .map(|symbol| *symbol)
-            .map_err(|error| OpenError::NotALadspaLibrary(error.to_string()))?;
+            .map_err(|error| OpenError::NotALadspaLibrary(whole_message(&error)))?;
         Ok(Self {
             loaded: Arc::new(Loaded {
                 descriptor_function,
@@ -128,6 +128,19 @@ impl Library {
     ) -> Result<Instance, crate::instance::InstantiateError> {
         Instance::new(&self.loaded, plugin_index, sample_rate)
     }
+}
+
+/// What an error says, and what it says was the cause, and so on: the loader's own words are in the cause (`LoadLibraryExW failed` is all that the error says by itself, and the
+/// system's "The specified module could not be found" is what it was caused by).
+fn whole_message(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut cause = error.source();
+    while let Some(next) = cause {
+        message.push_str(": ");
+        message.push_str(&next.to_string());
+        cause = next.source();
+    }
+    message
 }
 
 /// Reads a descriptor.

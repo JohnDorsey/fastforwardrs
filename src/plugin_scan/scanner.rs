@@ -103,6 +103,11 @@ impl PluginScanner {
         self
     }
 
+    /// How long the scan of one library may take.
+    pub fn time_limit(&self) -> Duration {
+        self.time_limit
+    }
+
     pub fn cache(&self) -> &ScanCache {
         &self.cache
     }

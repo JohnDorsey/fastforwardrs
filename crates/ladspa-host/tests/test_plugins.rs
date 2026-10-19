@@ -67,7 +67,32 @@ fn the_library_describes_its_nine_plugins_in_order() {
     assert_eq!(gain.name, "Test plugin ffrs_test_gain");
     assert_eq!(gain.maker, "fastforwardrs tests");
     assert_eq!(gain.copyright, "CC0-1.0");
-    assert!(gain.properties.hard_realtime_capable && !gain.properties.realtime && !gain.properties.inplace_broken);
+    // The flags are read one by one: the plugins have them in different combinations.
+    let flags: Vec<(bool, bool, bool)> = description
+        .plugins
+        .iter()
+        .map(|plugin| {
+            (
+                plugin.properties.realtime,
+                plugin.properties.inplace_broken,
+                plugin.properties.hard_realtime_capable,
+            )
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        [
+            (false, false, true),  // gain: 4
+            (true, false, false),  // one pole: 1
+            (false, true, false),  // swap: 2
+            (false, false, false), // switches: none
+            (false, false, false), // no ports: none
+            (true, false, true),   // sine: 1 and 4
+            (false, false, true),  // mono to both: 4
+            (false, true, true),   // mix down: 2 and 4
+            (true, true, true),    // counted: all three
+        ]
+    );
 }
 
 #[test]
@@ -406,6 +431,8 @@ struct Counts {
     deactivations: usize,
     blocks_run: usize,
     ports_not_connected_when_activated: usize,
+    buffers_of_the_host_still_connected_when_deactivated: usize,
+    inputs_not_silent_when_activated: usize,
 }
 
 /// The counts that the test library keeps, read through a second handle on the library (the same one that the host has loaded: a library that is loaded twice is loaded once).
@@ -423,6 +450,8 @@ fn counts() -> Counts {
         deactivations: count(2),
         blocks_run: count(3),
         ports_not_connected_when_activated: count(4),
+        buffers_of_the_host_still_connected_when_deactivated: count(5),
+        inputs_not_silent_when_activated: count(6),
     }
 }
 
@@ -450,6 +479,10 @@ fn the_host_activates_at_the_first_block_deactivates_when_reset_or_dropped_and_c
     let mut output = vec![0.0_f32; 32];
     first.run(&mut [&mut input], &mut [&mut output], 32).unwrap();
     let ran = counts();
+    assert_eq!(
+        ran.inputs_not_silent_when_activated, before.inputs_not_silent_when_activated,
+        "before there is sound, the ports are connected to silence"
+    );
     assert_eq!(ran.activations, before.activations + 1, "the first block activates");
     assert_eq!(ran.blocks_run, before.blocks_run + 1);
     assert_eq!(
@@ -468,6 +501,11 @@ fn the_host_activates_at_the_first_block_deactivates_when_reset_or_dropped_and_c
 
     first.reset();
     let reset = counts();
+    assert_eq!(
+        reset.buffers_of_the_host_still_connected_when_deactivated,
+        before.buffers_of_the_host_still_connected_when_deactivated,
+        "after a block the plugin is not left holding the buffers that the host lent it"
+    );
     assert_eq!(reset.deactivations, before.deactivations + 1);
     assert_eq!(
         reset.activations,
@@ -570,6 +608,15 @@ fn a_library_that_needs_a_library_that_is_not_there_is_not_loaded() {
     let file = bad_libraries::needing_a_library_that_is_not_there(folder.path());
     let error = Library::open(&file).err().expect("it is refused");
     assert!(matches!(error, OpenError::CouldNotBeLoaded(_)), "{error}");
+    // The message has what the system said and not only what the loader of the crate says (`LoadLibraryExW failed`), which would not help a person.
+    if cfg!(windows) {
+        assert!(
+            error.to_string().contains("The specified module could not be found"),
+            "{error}"
+        );
+    } else if cfg!(target_os = "linux") {
+        assert!(error.to_string().contains("libc.so.7"), "{error}");
+    }
 }
 
 #[test]

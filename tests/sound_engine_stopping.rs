@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Stopping the sound of the preview (phase 7): when the stream is dropped, **the ffmpeg of every clip has been stopped and waited for before the drop returns**. On Windows a
-//! program that is still running has its file open, and the editor writes the project file again when its window is closed (found by the CI: "Access is denied", when the
-//! first version of the sound engine only told its thread to stop).
+//! Stopping the sound of the preview (phase 7): when the stream is dropped, **the ffmpeg of every clip is stopped and waited for, in the background, and
+//! `wait_for_sound_that_was_stopped` says when that is done**. On Windows a program that is still running has its file open, and the editor writes the project file again when
+//! its window is closed (found by the CI: "Access is denied", when the first version of the sound engine only told its thread to stop). The editor waits for it before it does.
+//! (The first version of the mend waited in the drop itself, which the real-time tests of the sound on Ubuntu found to put a gap of 60 ms in the sound each time a stream was
+//! replaced by another: so the drop does not wait.)
 
 mod support;
 
@@ -14,7 +16,9 @@ use std::time::{Duration, Instant};
 use fastforwardrs::media::export::{
     LoudnessToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
 };
-use fastforwardrs::media::{AudioFormat, AudioStreamEvent, AudioStreamRequest, EngineAudioStream};
+use fastforwardrs::media::{
+    AudioFormat, AudioStreamEvent, AudioStreamRequest, EngineAudioStream, wait_for_sound_that_was_stopped,
+};
 use fastforwardrs::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 use support::scratch_directory;
 use support::sound_files::the_sources;
@@ -70,6 +74,10 @@ fn programs_running_just_after_dropping_the_stream(format: AudioFormat) -> Optio
     std::thread::sleep(Duration::from_millis(300));
     let before = running.load(Ordering::SeqCst);
     drop(stream);
+    assert!(
+        wait_for_sound_that_was_stopped(Duration::from_secs(20)),
+        "the sound that was stopped was let go of within 20 seconds"
+    );
     Some((running.load(Ordering::SeqCst), before))
 }
 
@@ -134,5 +142,9 @@ fn a_stream_that_was_read_to_its_end_is_dropped_with_no_program_left() {
         }
     }
     drop(stream);
+    assert!(
+        wait_for_sound_that_was_stopped(Duration::from_secs(20)),
+        "the sound that was stopped was let go of within 20 seconds"
+    );
     assert_eq!(running.load(Ordering::SeqCst), 0);
 }

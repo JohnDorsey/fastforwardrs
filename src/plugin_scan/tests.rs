@@ -15,7 +15,7 @@ use ladspa_host::{
 };
 
 use super::breadcrumb::recover;
-use super::child::{HowItEnded, WhatItDid, outcome_of};
+use super::child::{HowItEnded, WhatItDid, outcome_of, read_until_the_end, wait_until_finished};
 use super::protocol::{RESULT_PREFIX, STEP_PREFIX, ScanAnswer, answer_line, read_what_was_said, step_line};
 use super::*;
 
@@ -304,6 +304,89 @@ fn each_failure_is_said_in_words_that_name_what_matters() {
     assert!(said(ScanFailure::WasInUseWhenTheProgramEndedBadly { others: 2 }).contains("2 other libraries"));
 }
 
+// --- reading what the program said ---
+
+/// A pipe that gives a few bytes at a time, as a real one does.
+struct SlowPipe<'a> {
+    bytes: &'a [u8],
+    at: usize,
+    most_at_a_time: usize,
+}
+
+impl std::io::Read for SlowPipe<'_> {
+    fn read(&mut self, into: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.most_at_a_time.min(into.len()).min(self.bytes.len() - self.at);
+        into[..count].copy_from_slice(&self.bytes[self.at..self.at + count]);
+        self.at += count;
+        Ok(count)
+    }
+}
+
+#[test]
+fn what_the_program_says_is_kept_up_to_the_limit_and_read_to_the_end_all_the_same() {
+    let bytes: Vec<u8> = (0..=99).collect();
+    for most_at_a_time in [1, 7, 100] {
+        for most in [0, 1, 3, 99, 100, 101] {
+            let mut pipe = SlowPipe {
+                bytes: &bytes,
+                at: 0,
+                most_at_a_time,
+            };
+            let kept = std::sync::Mutex::new(Vec::new());
+            read_until_the_end(&mut pipe, &kept, most);
+            assert_eq!(
+                pipe.at, 100,
+                "all of it is read, so that the program is never stopped by a full pipe"
+            );
+            assert_eq!(
+                *kept.lock().unwrap(),
+                bytes[..most.min(100)],
+                "the first {most} bytes are kept ({most_at_a_time} at a time)"
+            );
+        }
+    }
+}
+
+#[test]
+fn reading_ends_when_the_pipe_fails() {
+    struct Broken;
+    impl std::io::Read for Broken {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("the pipe broke"))
+        }
+    }
+    let kept = std::sync::Mutex::new(Vec::new());
+    read_until_the_end(Broken, &kept, 100);
+    assert!(kept.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_thread_is_waited_for_until_it_finishes_but_not_for_longer_than_it_is_given() {
+    let quick = std::thread::spawn(|| ());
+    assert!(wait_until_finished(&quick, Duration::from_secs(10)));
+    let slow = std::thread::spawn(|| std::thread::sleep(Duration::from_secs(3)));
+    let began = std::time::Instant::now();
+    assert!(!wait_until_finished(&slow, Duration::from_millis(100)));
+    assert!(
+        began.elapsed() < Duration::from_secs(2),
+        "it waited {:?}",
+        began.elapsed()
+    );
+    assert!(began.elapsed() >= Duration::from_millis(100));
+    let _ = slow.join();
+}
+
+#[test]
+fn a_scan_is_given_five_seconds_unless_the_scanner_is_told_otherwise() {
+    assert_eq!(SCAN_TIME_LIMIT, Duration::from_secs(5));
+    let scanner = PluginScanner::new(PathBuf::from("not-a-program"), ScanCache::in_memory());
+    assert_eq!(scanner.time_limit(), Duration::from_secs(5));
+    assert_eq!(
+        scanner.with_time_limit(Duration::from_millis(250)).time_limit(),
+        Duration::from_millis(250)
+    );
+}
+
 // --- the folders ---
 
 fn touch(folder: &Path, name: &str) -> PathBuf {
@@ -461,6 +544,10 @@ fn a_cache_file_that_cannot_be_read_is_an_empty_cache_that_says_so_and_one_of_an
         "{:?}",
         cache.last_problem()
     );
+    // A file that is not there is not a problem either.
+    let missing = ScanCache::at(folder.path().join("never_written.json"));
+    assert!(missing.is_empty());
+    assert_eq!(missing.last_problem(), None);
     // Another format: not an error, only not believed.
     fs::write(&file, "{\"format\": 0, \"libraries\": []}").unwrap();
     let cache = ScanCache::at(file.clone());
@@ -618,6 +705,20 @@ fn a_breadcrumb_with_one_library_names_no_others_and_one_with_nothing_in_it_or_t
     assert!(
         !file.exists(),
         "a file that is only there to help is not kept if it cannot"
+    );
+}
+
+#[test]
+fn a_library_that_was_failed_is_written_to_the_cache_file_at_once() {
+    let folder = tempfile::tempdir().unwrap();
+    let library = a_library_file(folder.path(), b"x");
+    let file = folder.path().join("scans.json");
+    let mut scanner = PluginScanner::new(PathBuf::from("not-a-program"), ScanCache::at(file.clone()));
+    scanner.fail_library(&library, ScanFailure::GaveNoAnswer { during: None });
+    let read_back = ScanCache::at(file);
+    assert_eq!(
+        read_back.lookup(&library, &FileFingerprint::of(&library).unwrap()),
+        Some(&CachedOutcome::Failed(ScanFailure::GaveNoAnswer { during: None }))
     );
 }
 

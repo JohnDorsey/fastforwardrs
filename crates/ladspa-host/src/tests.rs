@@ -439,3 +439,156 @@ fn find_the_word_unsafe(code: &str) -> Option<usize> {
     }
     None
 }
+
+// --- reading a descriptor that is built here (so that the lists can be missing, wrong or too long) ---
+
+use std::ffi::{CString, c_char, c_int};
+
+/// What a descriptor points to, kept alive for as long as the descriptor is used.
+struct Lists {
+    label: CString,
+    names: Vec<CString>,
+    name_pointers: Vec<*const c_char>,
+    bits: Vec<c_int>,
+    hints: Vec<RawPortRangeHint>,
+}
+
+impl Lists {
+    /// `count` ports, each an audio input, called "Port 0", "Port 1"..., whose hints have the bounds `number` and `number + 1`.
+    fn of(count: usize) -> Self {
+        let names: Vec<CString> = (0..count)
+            .map(|number| CString::new(format!("Port {number}")).unwrap())
+            .collect();
+        Self {
+            label: CString::new("a_label").unwrap(),
+            name_pointers: names.iter().map(|name| name.as_ptr()).collect(),
+            names,
+            bits: vec![abi::PORT_INPUT | abi::PORT_AUDIO; count],
+            hints: (0..count)
+                .map(|number| RawPortRangeHint {
+                    hint_descriptor: abi::HINT_BOUNDED_BELOW | abi::HINT_BOUNDED_ABOVE,
+                    lower_bound: number as f32,
+                    upper_bound: number as f32 + 1.0,
+                })
+                .collect(),
+        }
+    }
+
+    fn descriptor(&self, port_count: usize) -> RawDescriptor {
+        RawDescriptor {
+            unique_id: 901,
+            label: self.label.as_ptr(),
+            properties: 0,
+            name: std::ptr::null(),
+            maker: std::ptr::null(),
+            copyright: std::ptr::null(),
+            port_count: port_count as c_ulong,
+            port_descriptors: self.bits.as_ptr(),
+            port_names: self.name_pointers.as_ptr(),
+            port_range_hints: self.hints.as_ptr(),
+            implementation_data: std::ptr::null_mut(),
+            instantiate: None,
+            connect_port: None,
+            activate: None,
+            run: None,
+            run_adding: None,
+            set_run_adding_gain: None,
+            deactivate: None,
+            cleanup: None,
+        }
+    }
+}
+
+/// Reads a descriptor that is built in these tests.
+#[allow(unsafe_code)]
+fn read(descriptor: &RawDescriptor) -> Result<crate::description::PluginDescription, String> {
+    // SAFETY: the descriptor is a valid one as far as its lists go, or the test says that it is not and the function does not read what is missing (that is what is tested). Its
+    // strings are C strings that end, or null.
+    unsafe { crate::library::read_descriptor(descriptor, 7) }
+}
+
+#[test]
+fn a_descriptor_with_no_ports_may_have_no_lists_at_all() {
+    let lists = Lists::of(0);
+    let mut descriptor = lists.descriptor(0);
+    descriptor.port_descriptors = std::ptr::null();
+    descriptor.port_names = std::ptr::null();
+    descriptor.port_range_hints = std::ptr::null();
+    let plugin = read(&descriptor).expect("a plugin with no ports needs no lists");
+    assert!(plugin.ports.is_empty());
+    assert_eq!(
+        (plugin.index, plugin.unique_id, plugin.label.as_str()),
+        (7, 901, "a_label")
+    );
+}
+
+#[test]
+fn a_descriptor_that_lists_its_ports_is_read_port_by_port_and_missing_text_is_no_text() {
+    let lists = Lists::of(3);
+    let plugin = read(&lists.descriptor(3)).expect("it is a good descriptor");
+    let names: Vec<&str> = plugin.ports.iter().map(|port| port.name.as_str()).collect();
+    assert_eq!(names, ["Port 0", "Port 1", "Port 2"]);
+    let bounds: Vec<(Option<f32>, Option<f32>)> = plugin
+        .ports
+        .iter()
+        .map(|port| (port.hint.lower, port.hint.upper))
+        .collect();
+    assert_eq!(
+        bounds,
+        [(Some(0.0), Some(1.0)), (Some(1.0), Some(2.0)), (Some(2.0), Some(3.0))]
+    );
+    // The text that the descriptor does not have (null) is empty.
+    assert_eq!(
+        (plugin.name.as_str(), plugin.maker.as_str(), plugin.copyright.as_str()),
+        ("", "", "")
+    );
+    assert_eq!(lists.names.len(), 3);
+}
+
+#[test]
+fn text_that_is_not_utf_8_is_read_as_well_as_it_can_be() {
+    let mut lists = Lists::of(0);
+    lists.label = CString::new(vec![b'a', 0xE9, b'b']).unwrap();
+    let plugin = read(&lists.descriptor(0)).unwrap();
+    assert_eq!(plugin.label, "a\u{FFFD}b");
+}
+
+#[test]
+fn a_descriptor_that_has_ports_and_is_missing_any_of_its_lists_is_refused_before_anything_is_read() {
+    let lists = Lists::of(3);
+    for missing in 0..3 {
+        let mut descriptor = lists.descriptor(3);
+        match missing {
+            0 => descriptor.port_descriptors = std::ptr::null(),
+            1 => descriptor.port_names = std::ptr::null(),
+            _ => descriptor.port_range_hints = std::ptr::null(),
+        }
+        let problem = read(&descriptor).expect_err("a list is missing");
+        assert!(
+            problem.contains("does not say what they are"),
+            "list {missing}: {problem}"
+        );
+    }
+}
+
+#[test]
+fn a_descriptor_may_have_four_thousand_and_ninety_six_ports_and_not_one_more() {
+    let lists = Lists::of(4097);
+    assert_eq!(
+        read(&lists.descriptor(4096)).expect("4096 are allowed").ports.len(),
+        4096
+    );
+    let problem = read(&lists.descriptor(4097)).expect_err("4097 are not");
+    assert!(problem.contains("4097 ports") && problem.contains("4096"), "{problem}");
+}
+
+#[test]
+fn a_descriptor_with_a_port_that_is_not_one_says_which() {
+    let mut lists = Lists::of(3);
+    lists.bits[1] = abi::PORT_INPUT | abi::PORT_OUTPUT | abi::PORT_AUDIO;
+    let problem = read(&lists.descriptor(3)).expect_err("the second port is both an input and an output");
+    assert!(
+        problem.starts_with("port number 1:") && problem.contains("both an input and an output"),
+        "{problem}"
+    );
+}

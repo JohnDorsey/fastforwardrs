@@ -349,6 +349,26 @@ fn the_scan_of_a_folder_goes_through_every_library_and_a_bad_one_costs_the_other
 }
 
 #[test]
+fn a_library_that_is_gone_from_the_folders_is_forgotten_by_the_scanner() {
+    let folder = tempfile::tempdir().unwrap();
+    let kept = good_library_in(folder.path());
+    let other = bad_libraries::damaged(folder.path());
+    let mut scanner = scanner();
+    scanner.scan_folders(&[folder.path().to_owned()]);
+    assert_eq!(scanner.cache().len(), 2);
+    fs::remove_file(&other).unwrap();
+    let scan = scanner.scan_folders(&[folder.path().to_owned()]);
+    assert_eq!(scan.libraries.len(), 1);
+    assert_eq!(scanner.cache().len(), 1, "the one that is gone is not kept");
+    assert!(
+        scanner
+            .cache()
+            .lookup(&kept, &FileFingerprint::of(&kept).unwrap())
+            .is_some()
+    );
+}
+
+#[test]
 fn a_scan_program_that_cannot_be_run_is_the_editors_problem_and_not_the_librarys() {
     let folder = tempfile::tempdir().unwrap();
     let library = good_library_in(folder.path());
@@ -390,4 +410,62 @@ fn what_the_cache_keeps_of_a_scan_is_what_the_scan_gave() {
         .cache()
         .lookup(&library, &FileFingerprint::of(&library).unwrap());
     assert_eq!(kept, Some(&CachedOutcome::Scanned(scanned(report.outcome))));
+}
+
+/// Scans the plugins that are really installed on a computer, and says what came of each: not a check (what is installed is not ours), a look at how the scan fares with
+/// plugins that other people wrote. Run it with `--ignored --nocapture`, with `FASTFORWARDRS_LADSPA_FOLDER` set to a folder of LADSPA libraries (the folder `plugins\ladspa` of an
+/// installation of LMMS, say). The scan program is run on every library in it; nothing is changed.
+#[test]
+#[ignore = "looks at plugins that are installed on this computer; run with --ignored --nocapture and FASTFORWARDRS_LADSPA_FOLDER set"]
+fn a_look_at_the_plugins_that_are_installed_in_a_folder() {
+    let folder = PathBuf::from(
+        std::env::var_os("FASTFORWARDRS_LADSPA_FOLDER")
+            .expect("set FASTFORWARDRS_LADSPA_FOLDER to a folder of LADSPA libraries"),
+    );
+    let mut scanner = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory());
+    let began = Instant::now();
+    let scan = scanner.scan_folders(&[folder]);
+    let (mut good, mut plugins, mut plugins_with_problems) = (0, 0, 0);
+    for report in &scan.libraries {
+        let name = report.path.file_name().unwrap().to_string_lossy();
+        match &report.outcome {
+            LibraryOutcome::Scanned(library) => {
+                good += 1;
+                plugins += library.plugins.len();
+                let broken: Vec<String> = library
+                    .plugins
+                    .iter()
+                    .filter_map(|plugin| {
+                        plugin
+                            .problem
+                            .as_ref()
+                            .map(|problem| format!("{}: {problem}", plugin.description.label))
+                    })
+                    .collect();
+                plugins_with_problems += broken.len();
+                println!(
+                    "{name}: {} plugins{}",
+                    library.plugins.len(),
+                    if broken.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", with problems: {}", broken.join("; "))
+                    }
+                );
+                for problem in &library.problems {
+                    println!("    {problem}");
+                }
+            }
+            LibraryOutcome::Failed(failure) => println!("{name}: FAILED: {failure}"),
+        }
+    }
+    println!(
+        "{} libraries: {good} scanned, {} failed; {plugins} plugins, {plugins_with_problems} of them could not be made or run; {:?} in all",
+        scan.libraries.len(),
+        scan.libraries.len() - good,
+        began.elapsed()
+    );
+    for problem in &scan.problems {
+        println!("PROBLEM: {problem}");
+    }
 }

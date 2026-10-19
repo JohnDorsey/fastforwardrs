@@ -7,9 +7,8 @@
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::failure::ScanFailure;
@@ -77,13 +76,9 @@ pub fn scan_in_a_program(
     let standard_output = child.stdout.take().expect("the output was piped");
     let standard_error = child.stderr.take().expect("the error output was piped");
     let said = Arc::new(Mutex::new(Vec::<u8>::new()));
-    let reader_is_done = Arc::new(AtomicBool::new(false));
     let reader = {
-        let (said, reader_is_done) = (Arc::clone(&said), Arc::clone(&reader_is_done));
-        thread::spawn(move || {
-            read_until_the_end(standard_output, &said);
-            reader_is_done.store(true, Ordering::SeqCst);
-        })
+        let said = Arc::clone(&said);
+        thread::spawn(move || read_until_the_end(standard_output, &said, MOST_TO_READ))
     };
     let error_reader = collect_error_output_in_background(standard_error);
 
@@ -100,11 +95,7 @@ pub fn scan_in_a_program(
         }
     };
     // (What it said before it ended is in the pipe, and is read in a moment: wait for the end of the pipe, but not for ever.)
-    let waited_from = Instant::now();
-    while !reader_is_done.load(Ordering::SeqCst) && waited_from.elapsed() < LONGEST_WAIT_FOR_THE_READERS {
-        thread::sleep(HOW_OFTEN_TO_LOOK);
-    }
-    if reader_is_done.load(Ordering::SeqCst) {
+    if wait_until_finished(&reader, LONGEST_WAIT_FOR_THE_READERS) {
         let _ = reader.join();
         let _ = error_reader.join();
     }
@@ -112,15 +103,24 @@ pub fn scan_in_a_program(
     Ok(outcome_of(&WhatItDid { how_it_ended, said }, time_limit))
 }
 
-/// Reads everything the program writes into `into`, up to a limit; what is past the limit is read and thrown away, so that the program is never stopped by a full pipe.
-fn read_until_the_end(mut pipe: impl Read, into: &Mutex<Vec<u8>>) {
+/// Waits until the thread has finished, but no longer than `longest`. Whether it has.
+pub(super) fn wait_until_finished<T>(thread: &JoinHandle<T>, longest: Duration) -> bool {
+    let waited_from = Instant::now();
+    while !thread.is_finished() && waited_from.elapsed() < longest {
+        thread::sleep(HOW_OFTEN_TO_LOOK);
+    }
+    thread.is_finished()
+}
+
+/// Reads everything the program writes into `into`, up to `most` bytes; what is past the limit is read and thrown away, so that the program is never stopped by a full pipe.
+pub(super) fn read_until_the_end(mut pipe: impl Read, into: &Mutex<Vec<u8>>, most: usize) {
     let mut buffer = [0_u8; 16 * 1024];
     let mut kept = 0;
     loop {
         match pipe.read(&mut buffer) {
             Ok(0) | Err(_) => return,
             Ok(count) => {
-                let room = MOST_TO_READ.saturating_sub(kept).min(count);
+                let room = most.saturating_sub(kept).min(count);
                 if room > 0 {
                     into.lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())

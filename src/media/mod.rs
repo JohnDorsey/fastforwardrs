@@ -38,7 +38,9 @@ pub use frame_stream::{
 };
 pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};
-pub use sound_feeds::{EngineAudioStream, FfmpegClipSpawner, SoundRenderError, render_sound_to_file};
+pub use sound_feeds::{
+    EngineAudioStream, FfmpegClipSpawner, SoundRenderError, render_sound_to_file, wait_for_sound_that_was_stopped,
+};
 pub use source_colour::{Assumption, VideoColour, matrix_assumed_for, matrix_name};
 pub use source_probe::{
     NativeYuv420p, ProbeError, VideoStreamFormat, probe_source_media, probe_video, probe_video_stream_format,

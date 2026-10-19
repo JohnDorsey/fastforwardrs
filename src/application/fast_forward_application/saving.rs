@@ -393,6 +393,9 @@ impl FastForwardApplication {
         let total_frames = self.document.project.total_frame_count();
         let clock = self.playback.reading(now, total_frames);
         self.playback.audio_supplier.update(None, clock, now);
+        // (The sound that was playing is stopped in the background: the programs that decoded it may have the project file open still, and on Windows it cannot be replaced
+        // while they do.)
+        crate::media::wait_for_sound_that_was_stopped(std::time::Duration::from_secs(10));
     }
 
     fn say_that_a_save_did_not_work(&mut self, error: &ProjectFileError) {

@@ -235,18 +235,44 @@ fn interleave_into(left: &[f32], right: &[f32], into: &mut Vec<f32>) {
 }
 
 /// The sound of the live preview, made by the sound engine: it runs the block graph on a thread of its own, with the ffmpeg of each clip, and delivers the samples as
-/// [`AudioStream`](super::AudioStream) does (the same events, from the playhead on), so that whatever plays one plays the other. Dropping it stops everything it started.
+/// [`AudioStream`](super::AudioStream) does (the same events, from the playhead on), so that whatever plays one plays the other. Dropping it stops everything it started:
+/// **in the background**, because stopping the ffmpeg of the clips and waiting for the thread of the graph takes tens of milliseconds (more on Linux), and the preview drops a
+/// stream in the middle of the sound that takes over from it (found by the real-time tests of the sound on Ubuntu: a gap of 60 ms in the sound each time a volume was changed,
+/// which was the time that the first version of the drop that waited took). Whoever needs the programs to be gone (the editor, before it writes the project file, which on
+/// Windows cannot be replaced while a program has it open) calls [`wait_for_sound_that_was_stopped`].
 ///
 /// The engine makes stereo sound at 48000 moments a second. **If the speakers want another kind** (a device that takes 44100, or one channel, or eight) the sound is passed through an
 /// ffmpeg that changes it to what they want, which is how the filter graph did it at its end too.
 pub struct EngineAudioStream {
-    source: Source,
+    /// (Taken when the stream is dropped, to be let go of in the background.)
+    resources: Option<Resources>,
     stop: Arc<AtomicBool>,
     problems: Problems,
     running_programs: Arc<AtomicUsize>,
+}
+
+/// What a stream has that has to be let go of: where the sound comes from, and the thread that makes it.
+struct Resources {
+    source: Source,
     /// (Last: fields are dropped in order, so by the time this waits for the thread, the end of the channel the thread sends the sound into, or the converter it writes it
     /// into, is gone and the thread cannot be stuck giving sound away.)
     _graph_thread: WaitedForWhenDropped,
+}
+
+/// How many streams are being let go of in the background now.
+static BEING_LET_GO_OF: AtomicUsize = AtomicUsize::new(0);
+
+/// Waits until every stream that was dropped has been let go of: the thread of its graph has ended, and so have the ffmpeg of its clips. Gives whether that happened within
+/// `longest`.
+pub fn wait_for_sound_that_was_stopped(longest: Duration) -> bool {
+    let began = std::time::Instant::now();
+    while BEING_LET_GO_OF.load(Ordering::SeqCst) > 0 {
+        if began.elapsed() >= longest {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    true
 }
 
 /// A thread that is waited for when this is dropped.
@@ -305,11 +331,13 @@ impl EngineAudioStream {
                 wake_up();
             });
             return Ok(Self {
-                source: Source::Direct(events),
+                resources: Some(Resources {
+                    source: Source::Direct(events),
+                    _graph_thread: WaitedForWhenDropped(Some(graph_thread)),
+                }),
                 stop,
                 problems,
                 running_programs,
-                _graph_thread: WaitedForWhenDropped(Some(graph_thread)),
             });
         }
         // The sound goes through an ffmpeg that changes its kind: it reads what the engine makes on its standard input and writes what the speakers want.
@@ -353,11 +381,13 @@ impl EngineAudioStream {
             drop(into_the_converter);
         });
         Ok(Self {
-            source: Source::Converted(converter),
+            resources: Some(Resources {
+                source: Source::Converted(converter),
+                _graph_thread: WaitedForWhenDropped(Some(graph_thread)),
+            }),
             stop,
             problems,
             running_programs,
-            _graph_thread: WaitedForWhenDropped(Some(graph_thread)),
         })
     }
 
@@ -368,7 +398,7 @@ impl EngineAudioStream {
 
     /// The next event, if one is ready. Never waits.
     pub fn try_next_event(&self) -> Option<AudioStreamEvent> {
-        let event = match &self.source {
+        let event = match &self.resources.as_ref()?.source {
             Source::Direct(events) => events.try_recv().ok()?,
             Source::Converted(tool) => tool.try_next_event()?,
         };
@@ -389,10 +419,24 @@ impl EngineAudioStream {
 }
 
 impl Drop for EngineAudioStream {
-    /// Stops everything: when this has returned (and the fields have been dropped, the thread being the last), **the ffmpeg of every clip has been stopped and waited for**, as
-    /// that of the filter graph was. (A program that is still running has its file open: on Windows the editor could not write the project file when its window was closed.)
+    /// Tells everything to stop and returns at once: the ffmpeg of the clips are stopped and waited for, and the thread of the graph is waited for, by a thread of its own
+    /// ([`wait_for_sound_that_was_stopped`] is how to know that it is done).
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        let Some(resources) = self.resources.take() else {
+            return;
+        };
+        BEING_LET_GO_OF.fetch_add(1, Ordering::SeqCst);
+        let letting_go = thread::Builder::new()
+            .name("letting go of sound".to_owned())
+            .spawn(move || {
+                drop(resources);
+                BEING_LET_GO_OF.fetch_sub(1, Ordering::SeqCst);
+            });
+        if letting_go.is_err() {
+            // (No thread could be made: the closure was dropped with the resources in it, here and now, which is the same thing done slowly.)
+            BEING_LET_GO_OF.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 
