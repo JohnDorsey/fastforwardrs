@@ -16,7 +16,7 @@ use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::plugin_scan::{Breadcrumb, dependency_search_folders};
 use crate::plugin_trust::{FolderStanding, folder_of};
-use crate::project::{FrameRate, InstalledPlugin};
+use crate::project::{FrameRate, InstalledPlugin, PluginAddress};
 use crate::sound_engine::{BlockProcessor, Notes, PluginRunner, SAMPLE_RATE};
 
 /// A folder that plugins are wanted from and nobody has said anything about yet: the editor asks, and the sound is made again when it has been answered.
@@ -269,9 +269,12 @@ impl PluginHost {
         library: &Library,
         notes: &Notes,
     ) -> Option<Vec<ladspa_host::Instance>> {
+        let PluginAddress::Ladspa { index, .. } = plugin.address else {
+            return None;
+        };
         let mut instances = Vec::new();
         for _ in 0..layout.instances() {
-            match library.instantiate(plugin.plugin_index, SAMPLE_RATE) {
+            match library.instantiate(index, SAMPLE_RATE) {
                 Ok(instance) => {
                     if !this_is_the_plugin_that_was_scanned(&instance, plugin) {
                         say(
@@ -318,10 +321,10 @@ fn this_is_the_plugin_that_was_scanned(instance: &ladspa_host::Instance, plugin:
     let key_label = plugin.descriptor.key.rsplit(':').next().unwrap_or_default();
     description.label.replace(':', "_") == key_label
         && (inputs, outputs) == (plugin.audio_inputs, plugin.audio_outputs)
-        && plugin.value_ports.iter().all(|&port| {
+        && plugin.value_handles.iter().all(|&port| {
             description
                 .ports
-                .get(port)
+                .get(port as usize)
                 .is_some_and(|port| port.direction == PortDirection::Input && port.kind == PortKind::Control)
         })
 }
@@ -340,6 +343,17 @@ impl PluginRunner for PluginHost {
         is_for_the_preview: bool,
     ) -> Option<Box<dyn BlockProcessor>> {
         let plugin = effect.kind.installed_plugin()?;
+        if matches!(plugin.address, PluginAddress::Clap { .. }) {
+            // (Piece 7.8.4 runs them. Until then the folder is not asked about either: nothing of the plugin is loaded.)
+            say(
+                notes,
+                format!(
+                    "The sound plugin \u{ab}{}\u{bb} is a CLAP plugin, and CLAP plugins are found but not run yet. The sound goes through it unchanged.",
+                    plugin.descriptor.name
+                ),
+            );
+            return None;
+        }
         let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs)?;
         let folder = folder_of(&plugin.library);
         let library_name = plugin

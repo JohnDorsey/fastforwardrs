@@ -12,11 +12,13 @@ use ladspa_host::{
 };
 
 use super::cache::{CachedOutcome, FileFingerprint, ScanCache};
-use super::effects::{effect_of_a_plugin, id_of_a_value, key_of, plugins_found_in};
+use super::effects::{
+    effect_of_a_clap_plugin, effect_of_a_plugin, id_of_a_value, key_of, key_of_a_clap_plugin, plugins_found_in,
+};
 use super::failure::ScanFailure;
 use super::scanner::{LibraryOutcome, LibraryReport, PluginScanner};
 use super::*;
-use crate::project::{EffectDomain, ParameterControl, PropertyValue, ValueScale};
+use crate::project::{EffectDomain, ParameterControl, PluginAddress, PropertyValue, ValueScale};
 
 fn hint() -> PortHint {
     PortHint {
@@ -128,7 +130,13 @@ fn a_plugin_with_a_control_an_input_and_an_output_is_a_sound_effect_in_the_categ
     assert_eq!(descriptor.domain, EffectDomain::Sound);
     assert!(!descriptor.changes_each_pixel_by_itself);
     assert_eq!(descriptor.problem(), None);
-    assert_eq!((effect.plugin_index, effect.unique_id), (3, 1234));
+    assert_eq!(
+        effect.address,
+        PluginAddress::Ladspa {
+            index: 3,
+            unique_id: 1234
+        }
+    );
     assert_eq!((effect.audio_inputs, effect.audio_outputs), (1, 1));
     assert_eq!(effect.library, PathBuf::from("/plugins/amp_1181.so"));
     assert_eq!(descriptor.parameters.len(), 1);
@@ -140,7 +148,7 @@ fn a_plugin_with_a_control_an_input_and_an_output_is_a_sound_effect_in_the_categ
     assert_eq!(gain.range, Some((-70.0, 70.0)));
     assert_eq!(gain.scale, ValueScale::Linear);
     assert_eq!(gain.control, ParameterControl::Automatic);
-    assert_eq!(effect.value_ports, [0]);
+    assert_eq!(effect.value_handles, [0]);
 }
 
 #[test]
@@ -175,7 +183,7 @@ fn only_the_control_inputs_are_values_and_the_value_ports_are_their_ports_in_ord
         ["port1_cutoff", "port4_resonance"],
         "a control output is not a value"
     );
-    assert_eq!(effect.value_ports, [1, 4]);
+    assert_eq!(effect.value_handles, [1, 4]);
 }
 
 #[test]
@@ -599,4 +607,443 @@ fn a_scanner_is_told_where_to_look_when_it_is_made_so_that_its_cache_is_never_be
     let scanner = scanner.looking_for_dependencies_in(vec![folder.path().to_owned()], false);
     assert_eq!(scanner.cache().len(), 3);
     assert!(paths.len() == 5);
+}
+
+// --- CLAP plugins as effects (piece 7.8.3) ---
+
+use clap_host::scan::{AudioPort, Parameter, ScannedPlugin as ScannedClapPlugin};
+
+const STEPPED: u32 = 1;
+const HIDDEN: u32 = 1 << 2;
+const READ_ONLY: u32 = 1 << 3;
+const BYPASS: u32 = 1 << 4;
+const AUTOMATABLE: u32 = 1 << 5;
+const ENUM: u32 = 1 << 16;
+
+fn a_port(channels: u32, kind: Option<&str>) -> AudioPort {
+    AudioPort {
+        id: 0,
+        name: "Main".to_owned(),
+        channel_count: channels,
+        port_type: kind.map(str::to_owned),
+        is_main: true,
+    }
+}
+
+fn a_parameter(id: u32, name: &str, minimum: f64, maximum: f64, default: f64, flags: u32) -> Parameter {
+    Parameter {
+        id,
+        name: name.to_owned(),
+        module: String::new(),
+        minimum,
+        maximum,
+        default,
+        flags,
+        texts: Vec::new(),
+    }
+}
+
+/// A stereo effect with these parameters, made by `vendor`.
+fn a_clap_plugin(id: &str, parameters: Vec<Parameter>) -> ScannedClapPlugin {
+    ScannedClapPlugin {
+        description: clap_host::PluginDescription {
+            id: id.to_owned(),
+            name: "Big Reverb".to_owned(),
+            vendor: "Some Maker".to_owned(),
+            description: "A reverb".to_owned(),
+            ..clap_host::PluginDescription::default()
+        },
+        audio_inputs: vec![a_port(2, Some("stereo"))],
+        audio_outputs: vec![a_port(2, Some("stereo"))],
+        parameters,
+        latency: 0,
+        tail: None,
+        has_state: false,
+        problem: None,
+    }
+}
+
+fn the_effect(plugin: &ScannedClapPlugin) -> crate::project::InstalledPlugin {
+    effect_of_a_clap_plugin(Path::new("/clap/maker.clap"), plugin).expect("the plugin can be an effect")
+}
+
+#[test]
+fn a_clap_plugin_is_an_effect_with_a_key_made_of_its_id_the_category_of_its_maker_and_a_parameter_for_each_value() {
+    let plugin = a_clap_plugin(
+        "com.example.reverb",
+        vec![a_parameter(7, "Decay Time", 0.0, 10.0, 2.5, AUTOMATABLE)],
+    );
+
+    let effect = the_effect(&plugin);
+
+    let descriptor = &effect.descriptor;
+    assert_eq!(descriptor.key, "clap:com.example.reverb");
+    assert_eq!(descriptor.version, (1, 0));
+    assert_eq!(descriptor.name, "big reverb");
+    assert_eq!(descriptor.category, "Some Maker");
+    assert_eq!(descriptor.domain, EffectDomain::Sound);
+    assert_eq!(descriptor.description, "A reverb (com.example.reverb, in maker.clap)");
+    assert_eq!(
+        effect.address,
+        PluginAddress::Clap {
+            id: "com.example.reverb".to_owned()
+        }
+    );
+    assert_eq!((effect.audio_inputs, effect.audio_outputs), (2, 2));
+    assert_eq!(effect.value_handles, [7]);
+    let value = &descriptor.parameters[0];
+    assert_eq!(
+        value.id, "param7",
+        "the id of a value is the id the plugin gave the parameter"
+    );
+    assert_eq!(value.name, "decay time");
+    assert_eq!(value.label, "Decay Time");
+    assert_eq!(value.default, PropertyValue::Number(2.5));
+    assert_eq!(value.range, Some((0.0, 10.0)));
+    assert_eq!(
+        (value.control.clone(), value.scale),
+        (ParameterControl::Automatic, ValueScale::Linear)
+    );
+}
+
+#[test]
+fn the_key_does_not_name_the_file_so_the_same_plugin_in_two_folders_is_one_effect_and_the_first_wins() {
+    assert_eq!(key_of_a_clap_plugin("a:b.c"), "clap:a_b.c");
+    let plugin = a_clap_plugin("com.example.reverb", Vec::new());
+    let reports = |paths: &[&str]| -> Vec<LibraryReport> {
+        paths
+            .iter()
+            .map(|path| LibraryReport {
+                path: PathBuf::from(path),
+                outcome: LibraryOutcome::ScannedClap(clap_host::scan::LibraryScan {
+                    plugins: vec![plugin.clone()],
+                    problems: Vec::new(),
+                }),
+                from_cache: false,
+            })
+            .collect()
+    };
+
+    let found = plugins_found_in(&reports(&["/first/reverb.clap", "/second/other_name.clap"]));
+
+    assert_eq!(found.effects.len(), 1);
+    assert_eq!(found.effects[0].library, PathBuf::from("/first/reverb.clap"));
+    assert_eq!(found.not_used.len(), 1);
+    assert_eq!(found.not_used[0].library, PathBuf::from("/second/other_name.clap"));
+    assert_eq!(
+        found.not_used[0].label, "com.example.reverb",
+        "a CLAP plugin is named by its id"
+    );
+    assert!(found.not_used[0].reason.contains("same key"));
+}
+
+#[test]
+fn clap_and_ladspa_plugins_found_together_are_all_there_in_the_order_of_the_libraries() {
+    let ladspa = LibraryReport {
+        path: PathBuf::from("/ladspa/lib.so"),
+        outcome: LibraryOutcome::Scanned(LibraryScan {
+            plugins: vec![a_simple_amp()],
+            problems: Vec::new(),
+        }),
+        from_cache: false,
+    };
+    let clap = LibraryReport {
+        path: PathBuf::from("/clap/lib.clap"),
+        outcome: LibraryOutcome::ScannedClap(clap_host::scan::LibraryScan {
+            plugins: vec![a_clap_plugin("com.example.reverb", Vec::new())],
+            problems: Vec::new(),
+        }),
+        from_cache: false,
+    };
+
+    let found = plugins_found_in(&[ladspa, clap]);
+
+    let keys: Vec<&str> = found
+        .effects
+        .iter()
+        .map(|effect| effect.descriptor.key.as_ref())
+        .collect();
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    assert!(keys[0].starts_with("ladspa:") && keys[1] == "clap:com.example.reverb");
+}
+
+#[test]
+fn stepped_parameters_are_whole_numbers_enums_are_choices_by_number_and_a_bypass_is_a_switch() {
+    let mut mode = a_parameter(2, "Mode", 1.0, 3.0, 2.0, AUTOMATABLE | STEPPED | ENUM);
+    mode.texts = vec!["off".to_owned(), String::new(), "triple".to_owned()];
+    let plugin = a_clap_plugin(
+        "com.example.multi",
+        vec![
+            a_parameter(1, "Steps", 0.0, 8.0, 3.6, AUTOMATABLE | STEPPED),
+            mode,
+            a_parameter(3, "Bypass", 0.0, 1.0, 1.0, STEPPED | BYPASS),
+            a_parameter(4, "Broken Enum", 0.0, 2.0, 7.0, STEPPED | ENUM),
+        ],
+    );
+
+    let parameters = the_effect(&plugin).descriptor.parameters.into_owned();
+
+    assert_eq!(parameters[0].control, ParameterControl::Integer);
+    assert_eq!(parameters[0].default, PropertyValue::Number(4.0));
+    assert_eq!(parameters[0].range, Some((0.0, 8.0)));
+    let ParameterControl::Choice(options) = &parameters[1].control else {
+        panic!("an enum is a choice");
+    };
+    let shown: Vec<(&str, &str)> = options
+        .iter()
+        .map(|option| (option.id.as_ref(), option.label.as_ref()))
+        .collect();
+    assert_eq!(
+        shown,
+        [("1", "off"), ("2", "2"), ("3", "triple")],
+        "the id is the number, a blank text is the number"
+    );
+    assert_eq!(parameters[1].default, PropertyValue::Words("2".to_owned()));
+    assert_eq!(parameters[2].control, ParameterControl::Toggle);
+    assert_eq!(parameters[2].default, PropertyValue::Flag(true));
+    assert_eq!(
+        (parameters[3].control.clone(), parameters[3].default.clone()),
+        (ParameterControl::Integer, PropertyValue::Number(2.0)),
+        "an enum with no texts is a whole number, and a default past the range is the most"
+    );
+}
+
+#[test]
+fn an_enum_whose_default_is_not_one_of_its_values_begins_as_the_first() {
+    let mut mode = a_parameter(2, "Mode", 0.0, 1.0, 5.0, STEPPED | ENUM);
+    mode.texts = vec!["a".to_owned(), "b".to_owned()];
+    let plugin = a_clap_plugin("com.example.mode", vec![mode]);
+
+    let parameters = the_effect(&plugin).descriptor.parameters.into_owned();
+
+    assert_eq!(
+        parameters[0].default,
+        PropertyValue::Words("1".to_owned()),
+        "5 is clamped to the most, 1"
+    );
+    let mut odd = a_parameter(2, "Mode", 0.0, 1.0, f64::NAN, STEPPED | ENUM);
+    odd.texts = vec!["a".to_owned(), "b".to_owned()];
+    let parameters = the_effect(&a_clap_plugin("com.example.mode", vec![odd]))
+        .descriptor
+        .parameters
+        .into_owned();
+    assert_eq!(
+        parameters[0].default,
+        PropertyValue::Words("0".to_owned()),
+        "a default that is not a number is the least"
+    );
+}
+
+#[test]
+fn hidden_and_read_only_parameters_are_not_values_and_the_others_keep_their_order() {
+    let plugin = a_clap_plugin(
+        "com.example.hidden",
+        vec![
+            a_parameter(1, "First", 0.0, 1.0, 0.0, AUTOMATABLE),
+            a_parameter(2, "Hidden", 0.0, 1.0, 0.0, HIDDEN),
+            a_parameter(3, "Meter", 0.0, 1.0, 0.0, READ_ONLY),
+            a_parameter(4, "Last", 0.0, 1.0, 0.0, AUTOMATABLE),
+        ],
+    );
+
+    let effect = the_effect(&plugin);
+
+    assert_eq!(effect.value_handles, [1, 4]);
+    let ids: Vec<&str> = effect
+        .descriptor
+        .parameters
+        .iter()
+        .map(|value| value.id.as_ref())
+        .collect();
+    assert_eq!(ids, ["param1", "param4"]);
+}
+
+#[test]
+fn a_range_of_a_thousand_times_above_zero_is_laid_out_along_a_logarithmic_slider_and_no_other_is() {
+    let scale_of = |minimum: f64, maximum: f64| {
+        let plugin = a_clap_plugin(
+            "com.example.scale",
+            vec![a_parameter(1, "Frequency", minimum, maximum, minimum, 0)],
+        );
+        the_effect(&plugin).descriptor.parameters[0].scale
+    };
+
+    assert_eq!(scale_of(20.0, 20_000.0), ValueScale::Logarithmic);
+    assert_eq!(scale_of(20.0, 19_999.0), ValueScale::Linear);
+    assert_eq!(
+        scale_of(0.0, 20_000.0),
+        ValueScale::Linear,
+        "a range that begins at zero has no logarithm"
+    );
+    assert_eq!(scale_of(-20.0, 20_000.0), ValueScale::Linear);
+}
+
+#[test]
+fn a_parameter_range_that_is_not_one_makes_the_plugin_not_an_effect_and_says_which_parameter() {
+    for (minimum, maximum) in [
+        (f64::NEG_INFINITY, 1.0),
+        (0.0, f64::INFINITY),
+        (f64::NAN, 1.0),
+        (2.0, 1.0),
+    ] {
+        let plugin = a_clap_plugin(
+            "com.example.range",
+            vec![a_parameter(1, "Odd One", minimum, maximum, 0.0, 0)],
+        );
+
+        let reason = effect_of_a_clap_plugin(Path::new("/x.clap"), &plugin).unwrap_err();
+
+        assert!(reason.contains("Odd One") && reason.contains("range"), "{reason}");
+    }
+    // A hidden parameter is not looked at.
+    let hidden = a_clap_plugin(
+        "com.example.range",
+        vec![a_parameter(1, "Odd One", 2.0, 1.0, 0.0, HIDDEN)],
+    );
+    assert!(effect_of_a_clap_plugin(Path::new("/x.clap"), &hidden).is_ok());
+}
+
+#[test]
+fn the_module_of_a_parameter_is_in_its_label_and_a_blank_name_is_made_up() {
+    let mut in_a_module = a_parameter(1, "Attack", 0.0, 1.0, 0.0, 0);
+    in_a_module.module = "filter/envelope".to_owned();
+    let plugin = a_clap_plugin(
+        "com.example.module",
+        vec![in_a_module, a_parameter(9, "  ", 0.0, 1.0, 0.0, 0)],
+    );
+
+    let parameters = the_effect(&plugin).descriptor.parameters.into_owned();
+
+    assert_eq!(parameters[0].label, "filter/envelope: Attack");
+    assert_eq!(parameters[0].name, "attack");
+    assert_eq!(parameters[1].label, "parameter 9");
+}
+
+#[test]
+fn the_layouts_of_the_main_ports_decide_whether_a_clap_plugin_can_be_an_effect_and_the_reasons_are_said() {
+    let with_ports = |inputs: Vec<AudioPort>, outputs: Vec<AudioPort>| {
+        let mut plugin = a_clap_plugin("com.example.ports", Vec::new());
+        plugin.audio_inputs = inputs;
+        plugin.audio_outputs = outputs;
+        effect_of_a_clap_plugin(Path::new("/x.clap"), &plugin)
+    };
+    for (inputs, outputs) in [(1, 1), (2, 2), (1, 2), (2, 1)] {
+        let effect = with_ports(vec![a_port(inputs, None)], vec![a_port(outputs, None)]).unwrap();
+        assert_eq!(
+            (effect.audio_inputs, effect.audio_outputs),
+            (inputs as usize, outputs as usize)
+        );
+    }
+    // (The ports after the main one are given silence and are not looked at.)
+    assert!(
+        with_ports(
+            vec![a_port(2, Some("stereo")), a_port(6, Some("surround"))],
+            vec![a_port(1, Some("mono"))]
+        )
+        .is_ok()
+    );
+
+    let reason = |inputs: Vec<AudioPort>, outputs: Vec<AudioPort>| with_ports(inputs, outputs).unwrap_err();
+    assert!(reason(Vec::new(), vec![a_port(2, None)]).contains("no audio input"));
+    assert!(reason(vec![a_port(2, None)], Vec::new()).contains("no audio output"));
+    let surround = reason(vec![a_port(6, Some("surround"))], vec![a_port(2, None)]);
+    assert!(
+        surround.contains("input") && surround.contains("surround") && surround.contains("6 channels"),
+        "{surround}"
+    );
+    let odd_output = reason(vec![a_port(2, None)], vec![a_port(2, Some("ambisonic"))]);
+    assert!(
+        odd_output.contains("output") && odd_output.contains("ambisonic"),
+        "{odd_output}"
+    );
+    let wrong_count = reason(vec![a_port(1, Some("stereo"))], vec![a_port(2, None)]);
+    assert!(
+        wrong_count.contains("1 channel,") && wrong_count.contains("stereo"),
+        "{wrong_count}"
+    );
+    assert!(reason(vec![a_port(0, None)], vec![a_port(2, None)]).contains("0 channels"));
+}
+
+#[test]
+fn a_clap_plugin_that_could_not_be_made_or_run_or_has_no_name_is_not_an_effect() {
+    let mut broken = a_clap_plugin("com.example.broken", Vec::new());
+    broken.problem = Some("the plugin said that processing failed".to_owned());
+    let reason = effect_of_a_clap_plugin(Path::new("/x.clap"), &broken).unwrap_err();
+    assert!(
+        reason.contains("could not be made or run") && reason.contains("processing failed"),
+        "{reason}"
+    );
+
+    let mut nameless = a_clap_plugin("com.example.nameless", Vec::new());
+    nameless.description.name = "   ".to_owned();
+    let reason = effect_of_a_clap_plugin(Path::new("/x.clap"), &nameless).unwrap_err();
+    assert!(
+        reason.contains("cannot be used") && reason.contains("no name"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn a_plugin_that_keeps_a_state_and_shows_few_parameters_says_that_only_its_window_can_change_it() {
+    let mut plugin = a_clap_plugin("com.example.state", vec![a_parameter(1, "Only", 0.0, 1.0, 0.0, 0)]);
+    plugin.has_state = true;
+    assert!(
+        the_effect(&plugin)
+            .descriptor
+            .description
+            .contains("only its own window can change")
+    );
+
+    let many: Vec<Parameter> = (0..3)
+        .map(|number| a_parameter(number, "P", 0.0, 1.0, 0.0, 0))
+        .collect();
+    let mut with_many = a_clap_plugin("com.example.state", many);
+    with_many.has_state = true;
+    assert!(!the_effect(&with_many).descriptor.description.contains("window"));
+    plugin.has_state = false;
+    assert!(!the_effect(&plugin).descriptor.description.contains("window"));
+    // A plugin that says nothing of itself is described by its id and the file.
+    plugin.description.description = String::new();
+    assert_eq!(
+        the_effect(&plugin).descriptor.description,
+        "com.example.state, in maker.clap"
+    );
+}
+
+#[test]
+fn a_plugin_with_more_parameters_than_an_effect_can_have_values_keeps_the_first_ones() {
+    let parameters: Vec<Parameter> = (0..300)
+        .map(|number| a_parameter(number, "P", 0.0, 1.0, 0.0, 0))
+        .collect();
+    let plugin = a_clap_plugin("com.example.big", parameters);
+
+    let effect = the_effect(&plugin);
+
+    assert_eq!(effect.value_handles.len(), crate::project::MOST_VALUES_OF_AN_EFFECT);
+    assert_eq!(effect.value_handles[0], 0);
+    assert_eq!(*effect.value_handles.last().unwrap(), 254);
+}
+
+#[test]
+fn the_edges_of_what_a_clap_plugin_says_are_kept_as_they_are() {
+    // A range of one number is a range; a bypass at one half is on; the vendor is trimmed; a stereo input that is a surround port of two channels is not stereo.
+    let plugin = a_clap_plugin(
+        "com.example.edges",
+        vec![
+            a_parameter(1, "Fixed", 3.0, 3.0, 3.0, 0),
+            a_parameter(2, "Bypass", 0.0, 1.0, 0.5, STEPPED | BYPASS),
+        ],
+    );
+    let mut padded = plugin.clone();
+    padded.description.vendor = "  Some Maker  ".to_owned();
+
+    let effect = the_effect(&padded);
+
+    assert_eq!(effect.descriptor.parameters[0].range, Some((3.0, 3.0)));
+    assert_eq!(effect.descriptor.parameters[1].default, PropertyValue::Flag(true));
+    assert_eq!(effect.descriptor.category, "Some Maker");
+    let mut surround = plugin;
+    surround.audio_inputs = vec![a_port(2, Some("surround"))];
+    let reason = effect_of_a_clap_plugin(Path::new("/x.clap"), &surround).unwrap_err();
+    assert!(reason.contains("surround") && reason.contains("2 channels"), "{reason}");
 }

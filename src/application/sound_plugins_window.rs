@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The window of sound plugins, opened from the Edit menu (G17 of `docs/engine-phase-7-design.md`): where plugins are looked for (the folders a person adds; those of
-//! `LADSPA_PATH` and the usual ones are shown and cannot be removed), where the libraries that plugins need are looked for, and what the scan found and what failed. It is a
+//! `LADSPA_PATH`, `CLAP_PATH` and the usual ones are shown and cannot be removed), where the libraries that plugins need are looked for, and what the scan found and what failed. It is a
 //! window that is opened, not a control that is always there. It changes nothing itself: it hands back commands.
 
 use std::path::{Path, PathBuf};
@@ -44,7 +44,7 @@ pub enum SoundPluginsCommand {
 /// What the window shows.
 pub struct SoundPluginsView<'a> {
     pub settings: &'a PluginSearchSettings,
-    /// The folders that are looked in besides those a person added: those of `LADSPA_PATH`, and the usual ones.
+    /// The folders that are looked in besides those a person added: those of `LADSPA_PATH` and `CLAP_PATH`, and the usual ones.
     pub other_folders: &'a [PathBuf],
     pub is_scanning: bool,
     pub has_scanned: bool,

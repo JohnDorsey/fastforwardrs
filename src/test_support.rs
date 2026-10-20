@@ -421,11 +421,13 @@ pub fn an_installed_sound_plugin(
     crate::project::InstalledPlugin {
         descriptor,
         library: std::path::PathBuf::from(format!("/plugins/{}.so", key.replace(':', "_"))),
-        plugin_index: 0,
-        unique_id: 900,
+        address: crate::project::PluginAddress::Ladspa {
+            index: 0,
+            unique_id: 900,
+        },
         audio_inputs: 1,
         audio_outputs: 1,
-        value_ports: (0..values.len()).collect(),
+        value_handles: (0..values.len() as u32).collect(),
     }
 }
 

@@ -264,3 +264,46 @@ fn a_random_project_with_sound_effects_has_effects_in_the_plan_only_on_the_clips
         assert!(clips[1 - with].effects.is_empty());
     }
 }
+
+fn hash_of_the_sound_effects(project: &Project) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_the_sound_effects_into(project, &mut hasher);
+    hasher.finish()
+}
+
+#[test]
+fn what_is_heard_of_the_effects_changes_when_another_plugin_of_the_same_library_stands_in_for_the_kind() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut project = project_with_a_video_and_a_sound();
+    let target = AnimationTarget::Clip(clip_id(&project, 0));
+    let gain = plugin("ladspa:a:first");
+    let kind = kind_of(&gain);
+    put_an_effect_on(
+        &mut project,
+        target,
+        kind,
+        &[PropertyValue::Number(2.0), PropertyValue::Number(0.25)],
+    );
+    let heard_first = hash_of_the_sound_effects(&project);
+
+    // The same key, in the same library file, but the place of the plugin in it is another (the library was changed, and scanned again).
+    let mut moved = gain.clone();
+    moved.address = crate::project::PluginAddress::Ladspa {
+        index: 1,
+        unique_id: 900,
+    };
+    set_installed_plugins(vec![moved]);
+    let heard_moved = hash_of_the_sound_effects(&project);
+    // And a CLAP plugin with that key, in the same file.
+    let mut clap = gain.clone();
+    clap.address = crate::project::PluginAddress::Clap {
+        id: "a.first".to_owned(),
+    };
+    set_installed_plugins(vec![clap]);
+    let heard_clap = hash_of_the_sound_effects(&project);
+
+    assert_ne!(heard_first, heard_moved);
+    assert_ne!(heard_first, heard_clap);
+    assert_ne!(heard_moved, heard_clap);
+}

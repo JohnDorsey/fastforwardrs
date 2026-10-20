@@ -460,7 +460,7 @@ fn the_test_plugins_that_were_found_are_effects_with_the_values_their_ports_make
         ["port0_invert", "port1_multiplier"],
         "the meter is a control output: not a value"
     );
-    assert_eq!(switches.value_ports, [0, 1]);
+    assert_eq!(switches.value_handles, [0, 1]);
     assert_eq!((found.effects[4].audio_inputs, found.effects[4].audio_outputs), (1, 2));
     assert_eq!((found.effects[5].audio_inputs, found.effects[5].audio_outputs), (2, 1));
 }

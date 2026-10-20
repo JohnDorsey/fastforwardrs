@@ -182,7 +182,7 @@ pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::has
                 layer
                     .kind
                     .installed_plugin()
-                    .map(|plugin| (&plugin.library, plugin.plugin_index))
+                    .map(|plugin| (&plugin.library, &plugin.address))
                     .hash(hasher);
                 for value in &layer.values {
                     value.hash_into(hasher);

@@ -46,6 +46,40 @@ pub struct Parameter {
     pub texts: Vec<String>,
 }
 
+/// The `CLAP_PARAM_*` flags that the program looks at (`ext/params.h`).
+const IS_STEPPED: u32 = 1 << 0;
+const IS_HIDDEN: u32 = 1 << 2;
+const IS_READONLY: u32 = 1 << 3;
+const IS_BYPASS: u32 = 1 << 4;
+const IS_ENUM: u32 = 1 << 16;
+
+impl Parameter {
+    /// A whole number (the plugin truncates what it is given).
+    pub fn is_stepped(&self) -> bool {
+        self.flags & IS_STEPPED != 0
+    }
+
+    /// Not to be shown to a person.
+    pub fn is_hidden(&self) -> bool {
+        self.flags & IS_HIDDEN != 0
+    }
+
+    /// Cannot be set: the plugin gives it.
+    pub fn is_read_only(&self) -> bool {
+        self.flags & IS_READONLY != 0
+    }
+
+    /// The plugin's own bypass: a stepped value, 0 off and 1 on.
+    pub fn is_bypass(&self) -> bool {
+        self.flags & IS_BYPASS != 0
+    }
+
+    /// Stepped, and every whole value from the minimum to the maximum has a text.
+    pub fn is_enum(&self) -> bool {
+        self.flags & IS_ENUM != 0
+    }
+}
+
 /// A plugin that was found, and whether it could be made and run.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScannedPlugin {

@@ -36,7 +36,7 @@ pub use descriptor::{
     ChoiceOption, EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
     UnknownFields, ValueScale,
 };
-pub use installed::{InstalledPlugin, installed_plugin_for, installed_plugins, set_installed_plugins};
+pub use installed::{InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, set_installed_plugins};
 pub use kind::EffectKind;
 
 use std::fmt;

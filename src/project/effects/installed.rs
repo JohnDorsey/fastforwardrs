@@ -17,21 +17,42 @@ use std::sync::{Mutex, PoisonError, RwLock};
 
 use super::EffectDescriptor;
 
+/// Which plugin of a library a plugin is, in the way its format says (C14 of `docs/engine-phase-7-clap-design.md`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PluginAddress {
+    /// A LADSPA plugin is the one at a place in the list of its library.
+    Ladspa {
+        index: usize,
+        /// The number the maker gave it (kept; it is not the key, because plugins in the wild share them).
+        unique_id: u64,
+    },
+    /// A CLAP plugin is the one with an id (a reverse-domain string that is unique in the world) in the factory of its library.
+    Clap { id: String },
+}
+
+impl PluginAddress {
+    /// The place of a LADSPA plugin in the list of its library (`None` for a plugin of another format).
+    pub fn ladspa_index(&self) -> Option<usize> {
+        match self {
+            Self::Ladspa { index, .. } => Some(*index),
+            Self::Clap { .. } => None,
+        }
+    }
+}
+
 /// A plugin that is installed, as a type of effect, and where and how to find it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstalledPlugin {
-    /// The type of effect it is. Its values are the control inputs of the plugin, in the order of the ports.
+    /// The type of effect it is. Its values are the parameters of the plugin (the control inputs of a LADSPA one, in the order of the ports).
     pub descriptor: EffectDescriptor,
-    /// The library file the plugin is in.
+    /// The library file the plugin is in (a bundle, a folder, for a CLAP plugin on macOS).
     pub library: PathBuf,
     /// Which plugin of the library it is.
-    pub plugin_index: usize,
-    /// The number the maker gave it (kept; it is not the key, because plugins in the wild share them).
-    pub unique_id: u64,
+    pub address: PluginAddress,
     pub audio_inputs: usize,
     pub audio_outputs: usize,
-    /// For each value of the descriptor, in order, the number of the port of the plugin that it is the value of.
-    pub value_ports: Vec<usize>,
+    /// For each value of the descriptor, in order, what the plugin calls it: the number of its port (LADSPA) or the id of its parameter (CLAP).
+    pub value_handles: Vec<u32>,
 }
 
 /// The plugins that are installed now, in the order of the folders they were found in.

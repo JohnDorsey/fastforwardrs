@@ -218,12 +218,12 @@ impl PluginEffect {
             if self.given.get(slot) == Some(value) {
                 continue;
             }
-            let Some(&port) = self.plugin.value_ports.get(slot) else {
+            let Some(&port) = self.plugin.value_handles.get(slot) else {
                 continue;
             };
             for instance in &mut self.instances {
                 // (A value that is not a number is refused by the host, and the plugin keeps the one it had.)
-                let _ = instance.set_control(port, *value);
+                let _ = instance.set_control(port as usize, *value);
             }
         }
         self.given = wanted;

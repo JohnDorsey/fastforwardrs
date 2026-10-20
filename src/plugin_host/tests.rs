@@ -513,7 +513,11 @@ fn a_library_that_is_not_what_it_was_when_it_was_scanned_is_not_run_and_says_to_
     let mut plugins = the_test_plugins();
     // The gain is installed as a plugin that the library has at another place, with a label that is another plugin's.
     let mut impostor = plugins.remove(0);
-    impostor.plugin_index = 2; // the stereo swap
+    // (The stereo swap.)
+    let crate::project::PluginAddress::Ladspa { index, .. } = &mut impostor.address else {
+        panic!("the test plugins are LADSPA ones");
+    };
+    *index = 2;
     set_installed_plugins(vec![impostor]);
     let kind = EffectKind::installed_plugin_kinds()[0];
     let effect = the_effect(kind, &[0.5]);
@@ -849,7 +853,7 @@ fn a_plugin_effect_of(
         .instances())
         .map(|_| {
             library
-                .instantiate(plugin.plugin_index, crate::sound_engine::SAMPLE_RATE)
+                .instantiate(plugin.address.ladspa_index().unwrap(), crate::sound_engine::SAMPLE_RATE)
                 .unwrap()
         })
         .collect();
@@ -1094,7 +1098,7 @@ fn a_plugin_that_has_another_label_or_other_ports_than_the_one_that_was_scanned_
         ),
         (
             "a value on a port that is not a control",
-            notes_when_the_plugin_is_changed_by(|plugin| plugin.value_ports = vec![1]),
+            notes_when_the_plugin_is_changed_by(|plugin| plugin.value_handles = vec![1]),
         ),
     ] {
         assert_eq!(said.len(), 1, "{what}: {said:?}");
@@ -1114,7 +1118,7 @@ fn a_plugin_that_fails_to_run_is_left_out_for_the_rest_of_the_play_and_said_once
     let library = ladspa_host::Library::open(&plugin.library).unwrap();
     let instances = vec![
         library
-            .instantiate(plugin.plugin_index, crate::sound_engine::SAMPLE_RATE)
+            .instantiate(plugin.address.ladspa_index().unwrap(), crate::sound_engine::SAMPLE_RATE)
             .unwrap(),
     ];
     let notes = Notes::default();
@@ -1273,4 +1277,29 @@ fn sound_more_than_a_thousand_times_as_loud_as_the_loudest_is_silence_and_said_o
     processor.process(&mut left, &mut right);
     assert_eq!(left, [0.0]);
     assert_eq!(notes.lock().unwrap().len(), 1, "said once, though it happened again");
+}
+
+#[test]
+fn a_clap_plugin_is_found_but_not_run_yet_the_sound_goes_through_it_and_the_note_says_so_once() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = the_test_plugins().remove(0);
+    plugin.descriptor.key = "clap:org.example.gain".into();
+    plugin.address = crate::project::PluginAddress::Clap {
+        id: "org.example.gain".to_owned(),
+    };
+    set_installed_plugins(vec![plugin]);
+    let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
+    let host = PluginHost::new();
+    host.allow_everything();
+    let notes = Notes::default();
+
+    assert!(ask(&host, &effect, &notes).is_none(), "nothing is made of it");
+    assert!(ask(&host, &effect, &notes).is_none());
+
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("CLAP") && said[0].contains("not run yet") && said[0].contains("unchanged"),
+        "{said:?}"
+    );
 }

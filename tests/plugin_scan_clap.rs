@@ -331,3 +331,59 @@ fn a_clap_library_that_is_a_bundle_is_found_and_scanned_on_macos() {
     assert_eq!(scan.libraries[0].path, bundle);
     assert_eq!(scanned(scan.libraries[0].outcome.clone()).plugins.len(), PLUGINS);
 }
+
+#[test]
+fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_are_listed_with_the_reason() {
+    let folder = tempfile::tempdir().unwrap();
+    let library = good_library_in(folder.path());
+
+    let scan = scanner().scan_folders(&[folder.path().to_owned()]);
+    let found = fastforwardrs::plugin_scan::plugins_found_in(&scan.libraries);
+
+    let keys: Vec<&str> = found
+        .effects
+        .iter()
+        .map(|effect| effect.descriptor.key.as_ref())
+        .collect();
+    assert_eq!(keys.len(), 11, "{keys:?}");
+    assert!(keys.iter().all(|key| key.starts_with("clap:org.fastforwardrs.test.")));
+    assert!(found.effects.iter().all(|effect| effect.library == library));
+    let reason_of = |id: &str| {
+        found
+            .not_used
+            .iter()
+            .find(|not_used| not_used.label == id)
+            .unwrap_or_else(|| panic!("{id} is not listed: {:?}", found.not_used))
+            .reason
+            .clone()
+    };
+    assert_eq!(found.not_used.len(), 4, "{:?}", found.not_used);
+    assert!(reason_of(clap_test_plugins::INSTRUMENT).contains("no audio input"));
+    assert!(reason_of(FAILS_TO_ACTIVATE).contains("could not be made or run"));
+    assert!(reason_of(clap_test_plugins::FAILS_TO_PROCESS).contains("could not be made or run"));
+    assert!(reason_of(clap_test_plugins::PANICS).contains("could not be made or run"));
+    // The side chain is not looked at; the choice has its enum; the mono plugin is one channel in and out.
+    let effect = |id: &str| {
+        found
+            .effects
+            .iter()
+            .find(|effect| effect.descriptor.key == format!("clap:{id}"))
+            .unwrap()
+    };
+    assert_eq!(
+        (
+            effect(clap_test_plugins::SIDE_CHAIN).audio_inputs,
+            effect(clap_test_plugins::SIDE_CHAIN).audio_outputs
+        ),
+        (2, 2)
+    );
+    assert_eq!(
+        (
+            effect(clap_test_plugins::MONO_HALF).audio_inputs,
+            effect(clap_test_plugins::MONO_HALF).audio_outputs
+        ),
+        (1, 1)
+    );
+    assert_eq!(effect(CHOICE).value_handles, [1, 2]);
+    assert_eq!(effect(CHOICE).descriptor.parameters.len(), 2);
+}
