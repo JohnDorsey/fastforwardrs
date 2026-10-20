@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use ladspa_host::Library;
 
 use super::effect::{Layout, PluginEffect, ProblemBoard};
-use super::instance::{ClapCopy, ClapMaker, LadspaCopy, PluginInstance};
+use super::instance::{ClapCopy, ClapMaker, LadspaCopy, Lives, PluginInstance};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::plugin_scan::{Breadcrumb, dependency_search_folders};
@@ -71,7 +71,14 @@ pub struct PluginHost {
     generation: AtomicU64,
     /// What is wrong with the plugins that were wanted, by their keys (see [`Self::problem_with`]).
     problems: ProblemBoard,
+    /// Which CLAP plugins are alive, and for which streams, and which streams are being stopped.
+    lives: std::sync::Arc<Mutex<Lives>>,
+    /// How long a plugin that is made waits for the plugins of the same library that are being let go of (see [`Self::the_clap_instances_of`]).
+    longest_wait_for_what_is_being_let_go_of: std::time::Duration,
 }
+
+/// How long a CLAP plugin that is made waits, at the most, for the plugins of its library that are being let go of by a stream that is being stopped.
+pub const LONGEST_WAIT_FOR_WHAT_IS_BEING_LET_GO_OF: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Default for PluginHost {
     fn default() -> Self {
@@ -90,6 +97,8 @@ impl PluginHost {
             breadcrumb: Mutex::new(None),
             generation: AtomicU64::new(0),
             problems: ProblemBoard::default(),
+            lives: std::sync::Arc::default(),
+            longest_wait_for_what_is_being_let_go_of: LONGEST_WAIT_FOR_WHAT_IS_BEING_LET_GO_OF,
         }
     }
 
@@ -165,6 +174,13 @@ impl PluginHost {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
             .cloned()
+    }
+
+    /// The same, waiting no longer than `longest` for the plugins that are being let go of (for a test, which does not want to wait two seconds).
+    #[must_use]
+    pub fn waiting_no_longer_than(mut self, longest: std::time::Duration) -> Self {
+        self.longest_wait_for_what_is_being_let_go_of = longest;
+        self
     }
 
     /// Says why the plugin whose effect has the key `key` does nothing (for the window of the effect). The host says it itself when a plugin that was wanted went wrong.
@@ -380,8 +396,22 @@ impl PluginHost {
         voice: &Voice<'_>,
     ) -> Option<Vec<Box<dyn PluginInstance>>> {
         let worker = self.the_clap_worker();
+        let stream = stream_of(voice.notes);
+        // A stream that is being stopped makes no more plugins (it is about to let go of those it has, and a plugin made now would be alive with the ones of the stream that took its
+        // place): the sound of it is not wanted.
+        if self
+            .lives
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_stopping(stream)
+        {
+            return None;
+        }
+        self.wait_for_what_is_being_let_go_of(&plugin.library, stream);
         let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
         for _ in 0..layout.instances() {
+            // (Alive from the moment it begins to be made, so that a stream that begins to be made while it is is made to wait for it.)
+            let alive = Lives::is_alive(&self.lives, &plugin.library, stream);
             let maker = ClapMaker {
                 worker: std::sync::Arc::clone(&worker),
                 library: library.clone(),
@@ -399,7 +429,7 @@ impl PluginHost {
                         );
                         return None;
                     }
-                    instances.push(Box::new(ClapCopy::new(instance, maker)));
+                    instances.push(Box::new(ClapCopy::new(instance, maker, alive)));
                 }
                 Err(error) => {
                     voice.problem(
@@ -413,6 +443,33 @@ impl PluginHost {
             }
         }
         Some(instances)
+    }
+}
+
+/// What names a stream to the host: where the notes of its plugins are kept, which is one for each stream.
+fn stream_of(notes: &Notes) -> usize {
+    std::sync::Arc::as_ptr(notes) as *const () as usize
+}
+
+impl PluginHost {
+    /// Waits, for no longer than [`Self::waiting_no_longer_than`] says, until no plugin of `library` is alive for a stream that is being stopped (other than `stream`, which is the
+    /// one that wants the plugin). **A plugin may not allow two of itself to be alive at once**, whatever CLAP says: a reverb of the maintainer's began to roar, loud and fading as a
+    /// reverb does, when a plugin was made while the one before it, of the stream of a seek, was still being let go of in the background; and it did so for 10% of the seeks. The
+    /// stream that is being stopped lets go of its plugins within a few blocks, so this is a wait of milliseconds. Plugins of streams that are not being stopped (two clips that
+    /// are heard together) are not waited for: they are meant to be alive together.
+    fn wait_for_what_is_being_let_go_of(&self, library: &Path, stream: usize) {
+        let deadline = std::time::Instant::now() + self.longest_wait_for_what_is_being_let_go_of;
+        loop {
+            let waiting = self
+                .lives
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_something_of_a_stopping_stream_alive(library, stream);
+            if !waiting || std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 }
 
@@ -472,6 +529,13 @@ fn this_is_the_plugin_that_was_scanned(instance: &ladspa_host::Instance, plugin:
 impl PluginRunner for PluginHost {
     fn generation(&self) -> u64 {
         PluginHost::generation(self)
+    }
+
+    fn stream_is_stopping(&self, notes: &Notes) {
+        self.lives
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stream_is_stopping(stream_of(notes), notes);
     }
 
     fn processor_for(

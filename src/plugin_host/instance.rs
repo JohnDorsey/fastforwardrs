@@ -5,7 +5,7 @@
 //! that the layouts, the 32-sample looks at the keyframes, the range, the silence for sound that is not fit to be heard, the patience for a slow plugin and the notes are written
 //! once, in [`super::PluginEffect`].
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::effect::SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED;
 use crate::sound_engine::SAMPLE_RATE;
@@ -105,9 +105,73 @@ impl ClapMaker {
 /// sound would be a gap after a gap.
 pub const MOST_RESTARTS_OF_A_COPY: usize = 5;
 
+/// Which plugins are alive, by library and by the stream whose effects they are, and which of those streams are being stopped: what a plugin that cannot have two of itself alive at
+/// once needs to be waited for (see [`PluginHost`](super::PluginHost)).
+#[derive(Default)]
+pub struct Lives {
+    /// For each plugin that is alive: its number, the library it is of, and the stream it is for.
+    alive: Vec<(u64, std::path::PathBuf, usize)>,
+    /// The streams that are being stopped, by what names them, with something that says whether they are still there: their plugins are about to be let go of. (A stream
+    /// that is being stopped may not have made its plugins yet: it will, in the block it is in.)
+    stopping: Vec<(usize, std::sync::Weak<Mutex<Vec<String>>>)>,
+    next: u64,
+}
+
+impl Lives {
+    /// Says that a plugin of `library` is alive for `stream`. Dropping what is given says that it is not.
+    pub fn is_alive(lives: &Arc<Mutex<Self>>, library: &std::path::Path, stream: usize) -> LiveGuard {
+        let mut inside = lives.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let number = inside.next;
+        inside.next += 1;
+        inside.alive.push((number, library.to_owned(), stream));
+        LiveGuard {
+            lives: Arc::clone(lives),
+            number,
+        }
+    }
+
+    /// Says that the plugins of the stream that `notes` are of, which `stream` names, are about to be let go of (or will be, as soon as it has made them: it may not have).
+    pub fn stream_is_stopping(&mut self, stream: usize, notes: &Arc<Mutex<Vec<String>>>) {
+        self.stopping.retain(|(_, still_there)| still_there.strong_count() > 0);
+        self.stopping.push((stream, Arc::downgrade(notes)));
+    }
+
+    /// Whether the stream that `stream` names is being stopped.
+    pub fn is_stopping(&self, stream: usize) -> bool {
+        self.stopping
+            .iter()
+            .any(|(of, still_there)| *of == stream && still_there.strong_count() > 0)
+    }
+
+    /// Whether a plugin of `library` is alive for a stream that is being stopped, **and is not `except`** (the streams are told apart by what the host is given with them).
+    pub fn is_something_of_a_stopping_stream_alive(&self, library: &std::path::Path, except: usize) -> bool {
+        self.alive
+            .iter()
+            .any(|(_, of_library, stream)| of_library == library && *stream != except && self.is_stopping(*stream))
+    }
+}
+
+/// What says, for as long as it is kept, that a plugin is alive (see [`Lives`]).
+pub struct LiveGuard {
+    lives: Arc<Mutex<Lives>>,
+    number: u64,
+}
+
+impl Drop for LiveGuard {
+    fn drop(&mut self) {
+        let mut inside = self.lives.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(place) = inside.alive.iter().position(|(number, _, _)| *number == self.number) else {
+            return;
+        };
+        inside.alive.remove(place);
+    }
+}
+
 /// A copy of a CLAP plugin.
 pub struct ClapCopy {
     instance: clap_host::Instance,
+    /// (After the instance, which is dropped first: the plugin is gone when it is said to be.)
+    _alive: LiveGuard,
     maker: ClapMaker,
     /// The values to be applied in the next run, in order of time.
     pending: Vec<clap_host::ParameterChange>,
@@ -115,9 +179,10 @@ pub struct ClapCopy {
 }
 
 impl ClapCopy {
-    pub fn new(instance: clap_host::Instance, maker: ClapMaker) -> Self {
+    pub fn new(instance: clap_host::Instance, maker: ClapMaker, alive: LiveGuard) -> Self {
         Self {
             instance,
+            _alive: alive,
             maker,
             pending: Vec::new(),
             restarts: 0,

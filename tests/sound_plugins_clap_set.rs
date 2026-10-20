@@ -182,6 +182,7 @@ fn one_clap_plugin_of_a_library_on_a_clip_for_the_driver() {
                     timeline_frame_count: frames,
                     loudness: LoudnessToExport::UNCHANGED,
                     first_timeline_frame: 0,
+                    frames_of_the_clip_before: 0,
                     effects,
                 })],
             }],

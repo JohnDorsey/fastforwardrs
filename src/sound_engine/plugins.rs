@@ -36,6 +36,10 @@ pub trait PluginRunner: Send + Sync {
         is_for_the_preview: bool,
     ) -> Option<Box<dyn BlockProcessor>>;
 
+    /// Said when the stream whose effects were asked for with `notes` is being stopped (a seek, a stop): its effects are about to be let go of. A runner that cannot have
+    /// plugins of the same library alive at once, one made while another is being let go of, waits for them (see `PluginHost`).
+    fn stream_is_stopping(&self, _notes: &Notes) {}
+
     /// A number that is different whenever what this would do for the same effect has changed (a folder was approved or declined): the preview makes the sound again when it
     /// is, which is how a plugin begins to be heard when a person has said yes. A runner that never changes its mind says 0.
     fn generation(&self) -> u64 {

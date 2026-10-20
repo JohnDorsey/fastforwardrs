@@ -40,6 +40,7 @@ fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_neve
                 timeline_frame_count: 6,
                 loudness: LoudnessToExport::Constant(0.5),
                 first_timeline_frame: 0,
+                frames_of_the_clip_before: 0,
                 effects: Vec::new(),
             })
         })

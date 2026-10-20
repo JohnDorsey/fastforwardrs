@@ -108,6 +108,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 timeline_frame_count: frames,
                 loudness: LoudnessToExport::UNCHANGED,
                 first_timeline_frame: 0,
+                frames_of_the_clip_before: 0,
                 effects,
             })],
         }],

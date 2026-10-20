@@ -109,6 +109,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 timeline_frame_count: frames,
                 loudness: LoudnessToExport::UNCHANGED,
                 first_timeline_frame: 0,
+                frames_of_the_clip_before: 0,
                 effects,
             })],
         }],
@@ -342,6 +343,8 @@ fn specification_from_frame(
         unreachable!("the strip is one clip");
     };
     clip.first_source_frame = first_source_frame;
+    // (The clip begins at the start of its file: the stretch begins `first_source_frame` frames into it.)
+    clip.frames_of_the_clip_before = first_source_frame;
     clip.end_source_frame = first_source_frame + frames;
     specification
 }
@@ -408,4 +411,53 @@ fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_
         .map(|(made, was)| (made - was).abs())
         .fold(0.0_f32, f32::max);
     assert!(worst_at_the_start > 0.05, "{worst_at_the_start}");
+}
+
+/// A runner that makes nothing and writes down when a stream tells it that it is being stopped.
+#[derive(Default)]
+struct WritesDownWhenAStreamStops {
+    told: std::sync::Mutex<Vec<fastforwardrs::sound_engine::Notes>>,
+}
+
+impl PluginRunner for WritesDownWhenAStreamStops {
+    fn processor_for(
+        &self,
+        _effect: &LayerEffect,
+        _clip: &SoundClipToExport,
+        _frame_rate: FrameRate,
+        _notes: &fastforwardrs::sound_engine::Notes,
+        _is_for_the_preview: bool,
+    ) -> Option<Box<dyn fastforwardrs::sound_engine::BlockProcessor>> {
+        None
+    }
+
+    fn stream_is_stopping(&self, notes: &fastforwardrs::sound_engine::Notes) {
+        self.told.lock().unwrap().push(Arc::clone(notes));
+    }
+}
+
+#[test]
+fn a_stream_of_the_preview_tells_the_runner_of_its_plugins_when_it_is_stopped_with_the_notes_that_name_it() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let runner = Arc::new(WritesDownWhenAStreamStops::default());
+    let request = AudioStreamRequest {
+        source_files: sources.iter().map(|path| path.clone().into()).collect(),
+        sound: specification_of_a_second_with(Vec::new()),
+        format: STEREO_AT_48000,
+    };
+    let stream = EngineAudioStream::start_with_plugins(
+        &toolchain,
+        &request,
+        Arc::new(|| {}),
+        Some(Arc::clone(&runner) as Arc<dyn PluginRunner>),
+    )
+    .expect("the stream starts");
+    assert!(runner.told.lock().unwrap().is_empty(), "not while it plays");
+
+    drop(stream);
+
+    let told = runner.told.lock().unwrap();
+    assert_eq!(told.len(), 1, "once, when it is stopped");
 }

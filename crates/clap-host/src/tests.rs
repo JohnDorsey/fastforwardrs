@@ -57,7 +57,7 @@ fn the_library_says_what_plugins_it_has_and_what_each_says_of_itself() {
     assert_eq!(described.problems, Vec::<String>::new());
     let ids: Vec<&str> = described.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
     assert!(ids.contains(&THREADS));
-    assert_eq!(ids.len(), 16, "{ids:?}");
+    assert_eq!(ids.len(), 17, "{ids:?}");
     assert!(ids.contains(&GAIN) && ids.contains(&INSTRUMENT));
     let gain = described.plugins.iter().find(|plugin| plugin.id == GAIN).unwrap();
     assert_eq!((gain.name.as_str(), gain.vendor.as_str()), ("Gain", "fastforwardrs"));

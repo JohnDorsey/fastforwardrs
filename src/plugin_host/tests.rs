@@ -58,6 +58,7 @@ fn a_clip_at(first_timeline_frame: u64, effects: Vec<LayerEffect>) -> SoundClipT
         timeline_frame_count: 1000,
         loudness: LoudnessToExport::UNCHANGED,
         first_timeline_frame,
+        frames_of_the_clip_before: 0,
         effects,
     }
 }
@@ -695,6 +696,7 @@ fn the_clip(
         timeline_frame_count: frame_count,
         loudness: LoudnessToExport::UNCHANGED,
         first_timeline_frame,
+        frames_of_the_clip_before: 0,
         effects,
     }
 }
@@ -1670,7 +1672,12 @@ fn a_clap_copy_that_asks_to_be_made_again_is_made_again_when_the_blocks_are_betw
         library: library.clone(),
         id: clap_test_plugins::CALLBACKS.to_owned(),
     };
-    let mut copy = ClapCopy::new(maker().make().unwrap(), maker());
+    let lives = Arc::new(Mutex::new(super::Lives::default()));
+    let mut copy = ClapCopy::new(
+        maker().make().unwrap(),
+        maker(),
+        super::Lives::is_alive(&lives, library.path(), 0),
+    );
     assert_eq!(copy.between_blocks(), BetweenBlocks::default(), "nothing was asked for");
     let (mut input, mut output) = ([vec![1.0_f32; 8], vec![1.0; 8]], [vec![0.0_f32; 8], vec![0.0; 8]]);
     let [in_left, in_right] = &mut input;
@@ -1832,6 +1839,8 @@ fn the_echo_on(first_source_frame: u64, frames: u64, pre_roll_samples: usize, bl
     let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[]);
     let mut clip = the_clip(first_source_frame, frames, 0, vec![effect]);
     clip.first_timeline_frame = 0;
+    // (The clip begins at the start of its file, and the stretch that is made begins `first_source_frame` frames into it.)
+    clip.frames_of_the_clip_before = first_source_frame;
     sound_of(clip, a_host_that_runs_everything(), false, block).0
 }
 
@@ -1908,12 +1917,10 @@ fn the_keyframes_of_a_value_are_those_of_the_clip_and_the_sound_from_before_it_d
     effect.animation =
         Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(10, 0.0), keyframe(40, 4.0)]))]);
     let host = a_host_that_runs_everything();
-    let (made, _, _) = sound_of(
-        the_clip(30, 30, 10, vec![effect]),
-        Arc::clone(&host) as Arc<dyn PluginRunner>,
-        false,
-        512,
-    );
+    // (A stretch that begins 30 frames into a clip that begins at the start of its file: it has the 15 frames that the gain asks for.)
+    let mut seeked = the_clip(30, 30, 10, vec![effect]);
+    seeked.frames_of_the_clip_before = 30;
+    let (made, _, _) = sound_of(seeked, Arc::clone(&host) as Arc<dyn PluginRunner>, false, 512);
     let (plain, _, _) = sound_of(the_clip(30, 30, 10, Vec::new()), host, false, 512);
 
     assert_eq!(made.len(), 30 * 1600);
@@ -1927,4 +1934,180 @@ fn the_keyframes_of_a_value_are_those_of_the_clip_and_the_sound_from_before_it_d
             made[index]
         );
     }
+}
+
+// --- plugins that cannot be alive together: a stream that is being stopped, and the one that takes its place (a seek) ---
+
+/// The processor that `host` makes for the `single_instance` test plugin for the stream whose notes are `notes`, and what it gives for a block of ones: 1 if it was made when it was
+/// the only one of its plugin alive, and -1 if another was alive.
+fn a_single_instance_for(host: &PluginHost, notes: &Notes) -> Option<Box<dyn BlockProcessor>> {
+    let effect = the_clap_effect(clap_test_plugins::SINGLE_INSTANCE, Vec::new());
+    host.processor_for(&effect, &a_clip_at(0, vec![effect.clone()]), thirty(), notes, true)
+}
+
+fn what_it_gives(processor: &mut dyn BlockProcessor) -> f32 {
+    let (mut left, mut right) = (vec![1.0_f32; 64], vec![1.0_f32; 64]);
+    processor.process(&mut left, &mut right);
+    left[63]
+}
+
+fn a_host_that_runs_everything_and_waits_no_longer_than(longest: Duration) -> PluginHost {
+    let host = PluginHost::new().waiting_no_longer_than(longest);
+    host.allow_everything();
+    host
+}
+
+#[test]
+fn a_plugin_made_for_a_stream_waits_for_the_plugins_of_the_stream_that_is_being_stopped_and_so_is_not_made_while_one_is_alive()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let host = a_host_that_runs_everything_and_waits_no_longer_than(Duration::from_secs(10));
+    let (old, new) = (Notes::default(), Notes::default());
+    let mut earlier = a_single_instance_for(&host, &old).expect("the plugin of the stream that is stopped");
+    assert_eq!(what_it_gives(&mut *earlier), 1.0, "alone");
+    host.stream_is_stopping(&old);
+    let began = std::time::Instant::now();
+    let lets_go = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(250));
+        drop(earlier);
+    });
+
+    let mut later = a_single_instance_for(&host, &new).expect("the plugin of the stream that takes its place");
+
+    assert!(
+        began.elapsed() >= Duration::from_millis(200),
+        "it waited until the other was let go of: {:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        what_it_gives(&mut *later),
+        1.0,
+        "so it was the only one alive when it was made"
+    );
+    lets_go.join().unwrap();
+}
+
+#[test]
+fn the_plugins_of_streams_that_are_not_being_stopped_are_not_waited_for_two_clips_are_heard_together() {
+    let _alone = the_installed_plugins_to_myself();
+    let host = a_host_that_runs_everything_and_waits_no_longer_than(Duration::from_secs(10));
+    let (first, second) = (Notes::default(), Notes::default());
+    let _earlier = a_single_instance_for(&host, &first).unwrap();
+    let began = std::time::Instant::now();
+
+    let mut later = a_single_instance_for(&host, &second).unwrap();
+
+    assert!(began.elapsed() < Duration::from_millis(500), "{:?}", began.elapsed());
+    assert_eq!(
+        what_it_gives(&mut *later),
+        -1.0,
+        "it was made while another was alive (a plugin like this one cannot be helped then)"
+    );
+}
+
+#[test]
+fn a_stream_that_is_being_stopped_makes_no_more_plugins_and_the_sound_of_it_goes_through() {
+    let _alone = the_installed_plugins_to_myself();
+    let host = a_host_that_runs_everything_and_waits_no_longer_than(Duration::from_secs(10));
+    let notes = Notes::default();
+    host.stream_is_stopping(&notes);
+
+    assert!(a_single_instance_for(&host, &notes).is_none());
+    assert!(
+        host.problem_with("clap:org.fastforwardrs.test.single_instance")
+            .is_none(),
+        "it is not a problem of the plugin"
+    );
+    let another = Notes::default();
+    assert!(
+        a_single_instance_for(&host, &another).is_some(),
+        "a stream that is not being stopped has its plugins"
+    );
+}
+
+#[test]
+fn the_wait_for_a_plugin_that_is_not_let_go_of_ends_at_the_time_it_is_given() {
+    let _alone = the_installed_plugins_to_myself();
+    let host = a_host_that_runs_everything_and_waits_no_longer_than(Duration::from_millis(300));
+    let (old, new) = (Notes::default(), Notes::default());
+    let _held = a_single_instance_for(&host, &old).unwrap();
+    host.stream_is_stopping(&old);
+    let began = std::time::Instant::now();
+
+    let later = a_single_instance_for(&host, &new);
+
+    assert!(later.is_some(), "it is made all the same when the time is up");
+    let waited = began.elapsed();
+    assert!(
+        waited >= Duration::from_millis(250) && waited < Duration::from_secs(5),
+        "{waited:?}"
+    );
+}
+
+#[test]
+fn a_stream_that_is_gone_is_not_waited_for_even_if_it_was_said_to_be_stopping() {
+    use super::Lives;
+    let lives = Arc::new(Mutex::new(Lives::default()));
+    let library = std::path::Path::new("/plugins/a.clap");
+    let notes: Notes = Notes::default();
+    let guard = Lives::is_alive(&lives, library, 1);
+    lives.lock().unwrap().stream_is_stopping(1, &notes);
+    assert!(
+        lives
+            .lock()
+            .unwrap()
+            .is_something_of_a_stopping_stream_alive(library, 2)
+    );
+    assert!(
+        !lives
+            .lock()
+            .unwrap()
+            .is_something_of_a_stopping_stream_alive(library, 1),
+        "not for itself"
+    );
+    assert!(
+        !lives
+            .lock()
+            .unwrap()
+            .is_something_of_a_stopping_stream_alive(std::path::Path::new("/plugins/b.clap"), 2),
+        "not for another library"
+    );
+
+    drop(notes);
+    assert!(
+        !lives
+            .lock()
+            .unwrap()
+            .is_something_of_a_stopping_stream_alive(library, 2),
+        "the stream is gone (what names it is not there any more)"
+    );
+    drop(guard);
+}
+
+#[test]
+fn a_plugin_that_is_let_go_of_is_not_waited_for_even_if_its_stream_is_still_being_stopped() {
+    use super::Lives;
+    let lives = Arc::new(Mutex::new(Lives::default()));
+    let library = std::path::Path::new("/plugins/a.clap");
+    let notes: Notes = Notes::default();
+    let (first, second) = (Lives::is_alive(&lives, library, 1), Lives::is_alive(&lives, library, 1));
+    lives.lock().unwrap().stream_is_stopping(1, &notes);
+    drop(first);
+    assert!(
+        lives
+            .lock()
+            .unwrap()
+            .is_something_of_a_stopping_stream_alive(library, 2),
+        "one of the two is still alive"
+    );
+
+    drop(second);
+
+    assert!(
+        !lives
+            .lock()
+            .unwrap()
+            .is_something_of_a_stopping_stream_alive(library, 2),
+        "both are let go of: there is nothing to wait for, though the stream is still said to be stopping"
+    );
 }

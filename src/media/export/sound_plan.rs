@@ -64,6 +64,7 @@ pub fn sound_graph_specification(
                                 ),
                             },
                             first_timeline_frame: clip.first_timeline_frame,
+                            frames_of_the_clip_before: clip.frames_of_the_clip_before,
                             effects: clip.effects.clone(),
                         }),
                     })

@@ -29,6 +29,7 @@ fn clip(frames: u64, loudness: LoudnessToExport) -> SoundItemToExport {
         timeline_frame_count: frames,
         loudness,
         first_timeline_frame: 0,
+        frames_of_the_clip_before: 0,
         effects: Vec::new(),
     })
 }
@@ -1200,6 +1201,7 @@ fn clip_that_has_sound_from_before(
         timeline_frame_count: frames,
         loudness: LoudnessToExport::UNCHANGED,
         first_timeline_frame: 0,
+        frames_of_the_clip_before: first_source_frame,
         effects: vec![crate::composition::LayerEffect {
             instance: EffectInstanceId::FIRST,
             kind: crate::project::EffectKind::installed_plugin_kinds()[0],

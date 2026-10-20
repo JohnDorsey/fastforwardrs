@@ -357,6 +357,7 @@ mod tests {
                         timeline_frame_count: 90,
                         loudness: LoudnessToExport::UNCHANGED,
                         first_timeline_frame: 0,
+                        frames_of_the_clip_before: 0,
                         effects: Vec::new(),
                     })],
                 }],

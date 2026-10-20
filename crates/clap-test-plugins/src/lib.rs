@@ -63,6 +63,9 @@ pub const TAIL_FOREVER: &str = "org.fastforwardrs.test.tail_forever";
 pub const RATE: &str = "org.fastforwardrs.test.rate";
 /// Like `latency`, and at its first block it asks for a call on the main thread, in which it says that its latency changed (so the host makes it again).
 pub const LATENCY_CHANGES: &str = "org.fastforwardrs.test.latency_changes";
+/// A plugin that does not allow two of itself to be alive at once (as a plugin may that keeps something for all its instances): **one that is activated while another is alive gives its
+/// sound with the sign changed**, for as long as it lives. (Found with a reverb that began to roar when a new instance was made while the one before was still being let go of.)
+pub const SINGLE_INSTANCE: &str = "org.fastforwardrs.test.single_instance";
 
 /// What the library is asked to do wrong, if anything: the value of the environment variable `FFRS_TEST_PLUGIN`, read once, when the library is first asked. It is for the
 /// tests of the scan, which run the scan program (a process of its own) with the variable set; **in a test program the variable is never set**.
@@ -117,9 +120,13 @@ const KIND_SIDE_CHAIN: u8 = 12;
 const KIND_TAIL_FOREVER: u8 = 13;
 const KIND_RATE: u8 = 14;
 const KIND_LATENCY_CHANGES: u8 = 15;
+const KIND_SINGLE_INSTANCE: u8 = 16;
+
+/// How many `single_instance` plugins are alive.
+static SINGLE_INSTANCES_ALIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The ids of the plugins, in the order of the kinds.
-const IDS: [&str; 16] = [
+const IDS: [&str; 17] = [
     GAIN,
     SWAP,
     MONO_HALF,
@@ -136,8 +143,9 @@ const IDS: [&str; 16] = [
     TAIL_FOREVER,
     RATE,
     LATENCY_CHANGES,
+    SINGLE_INSTANCE,
 ];
-const NAMES: [&str; 16] = [
+const NAMES: [&str; 17] = [
     "Gain",
     "Swap",
     "Mono half",
@@ -154,6 +162,7 @@ const NAMES: [&str; 16] = [
     "Tail forever",
     "Rate",
     "Latency changes",
+    "Single instance",
 ];
 
 /// What the parameters of a plugin are, as `(id, name, minimum, maximum, default, flags)`.
@@ -368,6 +377,8 @@ pub struct Processor<'a, const KIND: u8> {
     threads_were_right: bool,
     /// Whether the plugin has asked the host for its restart and its call (`callbacks` only).
     asked: bool,
+    /// Whether another `single_instance` was alive when this one was activated (`single_instance` only).
+    crowded: bool,
     /// The sample rate it was activated at.
     sample_rate: f64,
     /// The most frames it was activated for: a host that gives it more breaks the contract, and the plugin says so.
@@ -407,6 +418,7 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
             host,
             threads_were_right,
             asked: false,
+            crowded: KIND == KIND_SINGLE_INSTANCE && SINGLE_INSTANCES_ALIVE.fetch_add(1, Ordering::SeqCst) > 0,
             sample_rate: audio_config.sample_rate,
             most_frames: audio_config.max_frames_count,
             values: [shared.get(0), shared.get(1)],
@@ -494,6 +506,14 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
     }
 }
 
+impl<const KIND: u8> Drop for Processor<'_, KIND> {
+    fn drop(&mut self) {
+        if KIND == KIND_SINGLE_INSTANCE {
+            SINGLE_INSTANCES_ALIVE.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
 impl<const KIND: u8> PluginAudioProcessorParams for Processor<'_, KIND> {
     fn flush(&mut self, _input: &InputEvents, _output: &mut OutputEvents) {}
 }
@@ -506,6 +526,7 @@ impl<const KIND: u8> Processor<'_, KIND> {
             KIND_MONO_HALF => 0.5,
             KIND_CHOICE => ((self.values[0] as i64 + 1) * (self.values[1] as i64 + 1)) as f32,
             KIND_THREADS if !self.threads_were_right => -1.0,
+            KIND_SINGLE_INSTANCE if self.crowded => -1.0,
             KIND_RATE => (self.sample_rate / 1000.0) as f32,
             _ => 1.0,
         };
@@ -634,6 +655,7 @@ impl PluginFactoryImpl for Factory {
             KIND_MONO_HALF => made!(KIND_MONO_HALF),
             KIND_LATENCY => made!(KIND_LATENCY),
             KIND_LATENCY_CHANGES => made!(KIND_LATENCY_CHANGES),
+            KIND_SINGLE_INSTANCE => made!(KIND_SINGLE_INSTANCE),
             KIND_TAIL => made!(KIND_TAIL),
             KIND_CHOICE => made!(KIND_CHOICE),
             KIND_INSTRUMENT => made!(KIND_INSTRUMENT),

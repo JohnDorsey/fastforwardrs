@@ -21,6 +21,7 @@ fn clip(first: u64, end: u64, factor: u32) -> SoundClipToExport {
         timeline_frame_count: (end - first).div_ceil(u64::from(factor)),
         loudness: LoudnessToExport::UNCHANGED,
         first_timeline_frame: 0,
+        frames_of_the_clip_before: 0,
         effects: Vec::new(),
     }
 }
@@ -555,6 +556,8 @@ fn clip_with_plugins_that_ask_for(first: u64, end: u64, factor: u32, pre_rolls: 
         .collect();
     set_installed_plugins(plugins);
     let mut with_effects = clip(first, end, factor);
+    // (The clip began at the start of its file, and has been heard for `first` frames when this stretch of it begins.)
+    with_effects.frames_of_the_clip_before = first;
     with_effects.effects = crate::project::EffectKind::installed_plugin_kinds()
         .into_iter()
         .map(|kind| crate::composition::LayerEffect {
@@ -663,5 +666,35 @@ fn the_feed_of_a_clip_with_sound_from_before_it_is_cut_out_of_the_file_that_many
         super::super::build_audio_graph(&specification(vec![strip(vec![SoundItemToExport::Clip(with)])]))
             .text
             .contains("atrim=start=3.333333333:end=6.333333333")
+    );
+}
+
+#[test]
+fn the_sound_of_the_file_from_before_the_first_frame_of_a_clip_is_not_given_to_a_plugin_and_that_of_the_clip_heard_before_the_stretch_is()
+ {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    // A clip cut to begin 100 frames into its file (the file has something before it that was cut off), seen from a stretch that begins 10 frames into the clip.
+    let mut clip = clip_with_plugins_that_ask_for(110, 200, 1, &[96_000]);
+
+    clip.frames_of_the_clip_before = 10;
+    assert_eq!(
+        pre_roll_frames_of(frame_rate_30(), &clip),
+        10,
+        "the 10 frames of the clip that were heard before: and not the 60 that the plugin asks for, nor the 110 that the file has"
+    );
+    assert!(
+        clip_feed_filters(frame_rate_30(), &clip, SpedUpClipSound::MaintainPitch).contains("atrim=start=3.333333333:"),
+        "the feed begins at the frame 100 of the file, where the clip begins"
+    );
+
+    clip.frames_of_the_clip_before = 0;
+    assert_eq!(
+        pre_roll_frames_of(frame_rate_30(), &clip),
+        0,
+        "a clip played from its beginning has no sound of its own from before, whatever the file has before it"
+    );
+    assert!(
+        clip_feed_filters(frame_rate_30(), &clip, SpedUpClipSound::MaintainPitch).contains("atrim=start=3.666666667:"),
+        "the feed begins at the frame 110 of the file, as it did before sound from before a clip was a thing"
     );
 }

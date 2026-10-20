@@ -69,6 +69,10 @@ pub struct SoundClip {
     pub source: SourceMediaIdentifier,
     /// The frame of the timeline at which this stretch of the clip is first heard. (The frames of the keyframes of its effects are frames of the timeline.)
     pub first_timeline_frame: u64,
+    /// How many frames of the timeline the clip was heard for before this stretch of it begins: the stretches of it that came before, or the part that a seek skipped. **It is
+    /// as much of the clip's own sound as there is to be given to the effects that remember** (see `pre_roll_frames_of`): the file has more before the clip's first frame, which
+    /// the clip was cut to leave out, and that is not heard.
+    pub frames_of_the_clip_before: u64,
     /// The source frame whose sound is heard first. (The sound has no frames: a frame stands for
     /// the stretch of sound as long as a frame of the video.)
     pub first_source_frame: u64,
@@ -340,6 +344,7 @@ fn sound_clip_over(
         clip: placement.id,
         source: media.source(),
         first_timeline_frame: first_frame,
+        frames_of_the_clip_before: frames_cut_off_the_start,
         first_source_frame,
         end_source_frame: media
             .end_source_frame()

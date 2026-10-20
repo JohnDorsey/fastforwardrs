@@ -33,6 +33,7 @@ fn clip_of_the_long_file(frames: u64) -> SoundItemToExport {
         timeline_frame_count: frames,
         loudness: LoudnessToExport::Constant(0.5),
         first_timeline_frame: 0,
+        frames_of_the_clip_before: 0,
         effects: Vec::new(),
     })
 }

@@ -251,6 +251,8 @@ pub struct EngineAudioStream {
     problems: Problems,
     /// What the plugins say that a person should be told, as it is said (see [`Self::take_notes`]).
     plugin_notes: Notes,
+    /// What made the plugins of this stream: told when the stream stops.
+    plugins: Option<Arc<dyn PluginRunner>>,
     running_programs: Arc<AtomicUsize>,
 }
 
@@ -326,7 +328,7 @@ impl EngineAudioStream {
         let problems = spawner.problems();
         let running_programs = spawner.running_programs();
         let plugin_notes = Notes::default();
-        let insertions = insertions_for(&request.sound, plugins, &plugin_notes, true);
+        let insertions = insertions_for(&request.sound, plugins.clone(), &plugin_notes, true);
         let specification = request.sound.clone();
         let stop_for_the_thread = Arc::clone(&stop);
         let is_what_the_engine_makes = request.format.sample_rate == SAMPLE_RATE && request.format.channel_count == 2;
@@ -353,6 +355,7 @@ impl EngineAudioStream {
                 stop,
                 problems,
                 plugin_notes,
+                plugins,
                 running_programs,
             });
         }
@@ -404,6 +407,7 @@ impl EngineAudioStream {
             stop,
             problems,
             plugin_notes,
+            plugins,
             running_programs,
         })
     }
@@ -450,6 +454,9 @@ impl Drop for EngineAudioStream {
     /// ([`wait_for_sound_that_was_stopped`] is how to know that it is done).
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(plugins) = &self.plugins {
+            plugins.stream_is_stopping(&self.plugin_notes);
+        }
         let Some(resources) = self.resources.take() else {
             return;
         };

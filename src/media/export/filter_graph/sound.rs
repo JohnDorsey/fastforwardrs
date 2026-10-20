@@ -65,6 +65,9 @@ pub struct SoundClipToExport {
     pub loudness: LoudnessToExport,
     /// The frame of the timeline at which this stretch of the clip is first heard.
     pub first_timeline_frame: u64,
+    /// How many frames of the timeline the clip was heard for before this stretch (see `SoundClip::frames_of_the_clip_before`): the most sound from before that the effects that
+    /// remember are given. The file has more before the first frame of the clip, which was cut off and is not heard.
+    pub frames_of_the_clip_before: u64,
     /// The sound effects that are done to the sound of the clip before its loudness is, one after another, with their values and keyframes (whose frames are frames of the
     /// timeline). **The filter graph of ffmpeg does not do them** (it cannot); the sound engine does.
     pub effects: Vec<crate::composition::LayerEffect>,
@@ -266,7 +269,9 @@ pub fn clip_feed_filters(
 /// How many frames of sound from **before** `clip` its feed has at its start (C10 of `docs/engine-phase-7-clap-design.md`): for the plugins that remember, the sound from before
 /// the clip's first sample, to be run through them and thrown away, so that a clip that begins in the middle of a reverb (a seek, a cut) begins as it would have played. It is
 /// what the plugins on the clip ask for (the greatest of what they each need), rounded up to a whole frame, and no more than the file has before the clip. **None for a clip that
-/// is sped up** (its sound is made again by the speed, and where the pre-roll ends would not be a sample that can be told), and none where no plugin asks.
+/// is sped up** (its sound is made again by the speed, and where the pre-roll ends would not be a sample that can be told), none where no plugin asks, and **none of what the
+/// clip does not have: the sound of the file from before the clip's first frame is what the clip was cut to leave out, and is not given to a plugin (found with a reverb that
+/// roared at the start of a clip when the file had a noise just before it)**.
 pub fn pre_roll_frames_of(frame_rate: FrameRate, clip: &SoundClipToExport) -> u64 {
     if clip.speed_factor.is_accelerated() {
         return 0;
@@ -280,7 +285,10 @@ pub fn pre_roll_frames_of(frame_rate: FrameRate, clip: &SoundClipToExport) -> u6
         .unwrap_or(0) as u128;
     let samples_a_frame_times_the_numerator = u128::from(frame_rate.denominator()) * u128::from(SAMPLE_RATE);
     let frames = (samples * u128::from(frame_rate.numerator())).div_ceil(samples_a_frame_times_the_numerator);
-    u64::try_from(frames).unwrap_or(u64::MAX).min(clip.first_source_frame)
+    u64::try_from(frames)
+        .unwrap_or(u64::MAX)
+        .min(clip.first_source_frame)
+        .min(clip.frames_of_the_clip_before)
 }
 
 /// The filters that cut the sound of `clip` out of its file (already made into the one kind of sound) and speed it up as the setting says.
