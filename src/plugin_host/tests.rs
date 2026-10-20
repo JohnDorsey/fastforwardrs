@@ -887,8 +887,11 @@ fn run_blocks(effect: &mut PluginEffect, count: usize) {
 fn a_plugin_that_takes_longer_than_the_sound_for_the_patience_it_is_given_is_left_out_of_the_preview_and_said_once() {
     let _alone = the_installed_plugins_to_myself();
     // A block of 512 samples is 10.7 ms of sound, and this plugin takes 10 ms for each of the two channels.
-    let (mut effect, notes) = a_plugin_effect_of("ffrs_test_counted", &[0.1], true, Some(0.05));
+    let (effect, notes) = a_plugin_effect_of("ffrs_test_counted", &[0.1], true, Some(0.05));
+    let board = super::effect::ProblemBoard::default();
+    let mut effect = effect.reporting_problems_on(Arc::clone(&board));
     run_blocks(&mut effect, 4);
+    assert!(board.lock().unwrap().is_empty(), "nothing is wrong yet");
     assert!(!effect.is_left_out(), "four blocks are 43 ms of sound: not yet");
     assert!(notes.lock().unwrap().is_empty());
     run_blocks(&mut effect, 1);
@@ -911,6 +914,12 @@ fn a_plugin_that_takes_longer_than_the_sound_for_the_patience_it_is_given_is_lef
     assert!(began.elapsed() < Duration::from_millis(500), "{:?}", began.elapsed());
     assert_eq!((left[0], right[0]), (0.25, -0.25));
     assert_eq!(notes.lock().unwrap().len(), 1, "and it is not said again");
+    let on_the_board: Vec<String> = board.lock().unwrap().values().cloned().collect();
+    assert_eq!(on_the_board.len(), 1, "{on_the_board:?}");
+    assert!(
+        on_the_board[0].contains("too slow"),
+        "the window can say why: {on_the_board:?}"
+    );
 }
 
 #[test]
@@ -1734,4 +1743,75 @@ fn the_places_where_the_keyframes_are_looked_at_in_a_piece_are_its_start_and_eve
         "values that are not animated are looked at once"
     );
     assert_eq!(places_to_look_in(5, 1, true), [0]);
+}
+
+#[test]
+fn what_is_wrong_with_a_plugin_is_on_the_board_for_the_window_until_it_is_wanted_again_and_nothing_is_wrong() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = the_clap_kind_of(clap_test_plugins::GAIN)
+        .installed_plugin()
+        .unwrap()
+        .clone();
+    let good_library = plugin.library.clone();
+    let key = plugin.descriptor.key.to_string();
+    plugin.library = PathBuf::from("/nowhere/at/all/gone.clap");
+    set_installed_plugins(vec![plugin.clone()]);
+    let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
+    let host = PluginHost::new();
+    host.allow_everything();
+    assert_eq!(host.problem_with(&key), None, "nothing has been wanted yet");
+
+    assert!(ask(&host, &effect, &Notes::default()).is_none());
+
+    let said = host
+        .problem_with(&key)
+        .expect("the library could not be loaded, and the board says so");
+    assert!(
+        said.contains("could not be loaded") && said.contains("gone.clap"),
+        "{said}"
+    );
+
+    // The library is there now: the plugin is wanted again, and it works, and the board is clean.
+    plugin.library = good_library;
+    set_installed_plugins(vec![plugin]);
+    let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
+    assert!(ask(&host, &effect, &Notes::default()).is_some());
+    assert_eq!(host.problem_with(&key), None);
+}
+
+#[test]
+fn a_plugin_that_is_left_out_while_it_runs_says_why_on_the_board() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = the_clap_kind_of(clap_test_plugins::GAIN)
+        .installed_plugin()
+        .unwrap()
+        .clone();
+    plugin.descriptor.key = format!("clap:{}", clap_test_plugins::FAILS_TO_PROCESS).into();
+    plugin.descriptor.parameters = std::borrow::Cow::Owned(Vec::new());
+    plugin.address = crate::project::PluginAddress::Clap {
+        id: clap_test_plugins::FAILS_TO_PROCESS.to_owned(),
+    };
+    plugin.value_handles = Vec::new();
+    let key = plugin.descriptor.key.to_string();
+    set_installed_plugins(vec![plugin]);
+    let effect = LayerEffect {
+        instance: EffectInstanceId::FIRST,
+        kind: EffectKind::installed_plugin_kinds()[0],
+        values: Vec::new(),
+        animation: Animation::default(),
+        tables: Vec::new(),
+    };
+    let host = a_host_that_runs_everything();
+
+    sound_of(
+        the_clip(0, 3, 0, vec![effect]),
+        Arc::clone(&host) as Arc<dyn PluginRunner>,
+        false,
+        512,
+    );
+
+    let said = host
+        .problem_with(&key)
+        .expect("it could not be run, and the board says so");
+    assert!(said.contains("could not be run"), "{said}");
 }

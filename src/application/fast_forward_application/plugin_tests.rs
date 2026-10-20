@@ -15,7 +15,10 @@ use egui::{Key, PointerButton};
 use egui_kittest::kittest::Queryable;
 
 use super::test_window::Window;
-use crate::application::dialogs::{Dialog, PLUGIN_DONT_LOAD_LABEL, PLUGIN_LOAD_LABEL};
+use crate::application::dialogs::{
+    Dialog, PLUGIN_DONT_LOAD_LABEL, PLUGIN_DONT_TRUST_LABEL, PLUGIN_LOAD_LABEL, PLUGIN_TRUST_LABEL,
+    TRUST_THE_FOLDER_HEADING, TRUST_THE_FOLDER_WARNING,
+};
 use crate::plugin_trust::{LibraryLoader, PluginCache, Question, WhyNot, load_library, this_platform};
 use crate::project::{EmbeddedBuild, LinkedLibrary, PluginLibrary, PluginLibraryKind, PluginLibrarySource, Project};
 
@@ -86,10 +89,6 @@ fn the_question_shown(window: &Window) -> Option<Question> {
 
 fn is_shown(window: &Window, label: &str) -> bool {
     window.harness.query_by_label(label).is_some()
-}
-
-fn is_shown_containing(window: &Window, text: &str) -> bool {
-    window.harness.query_by_label_contains(text).is_some()
 }
 
 fn press_on(window: &mut Window, label: &str) {
@@ -336,12 +335,13 @@ fn a_yes_to_the_plugins_of_a_folder_is_remembered_for_the_folder_and_not_asked_a
 
     let question = the_question_shown(&window);
     assert!(matches!(question, Some(Question::Linked { .. })), "{question:?}");
-    assert!(is_shown(&window, "Run plugins from this folder?"));
-    assert!(is_shown_containing(
+    assert!(is_shown(&window, TRUST_THE_FOLDER_HEADING));
+    assert!(is_shown(&window, TRUST_THE_FOLDER_WARNING));
+    assert!(is_shown(
         &window,
-        "you are not asked again about this folder"
+        &crate::plugin_trust::folder_for_a_person(&crate::plugin_trust::folder_of(&file))
     ));
-    let at = window.rectangle_of(PLUGIN_LOAD_LABEL).center();
+    let at = window.rectangle_of(PLUGIN_TRUST_LABEL).center();
     window.click(at);
     assert!(
         window.application().interface.dialog.is_none(),
@@ -373,7 +373,7 @@ fn a_yes_to_the_plugins_of_a_folder_is_remembered_for_the_folder_and_not_asked_a
 }
 
 #[test]
-fn two_plugins_in_one_folder_are_one_question_that_names_both_and_a_plugin_in_another_folder_is_another() {
+fn two_plugins_in_one_folder_are_one_question_that_names_the_folder_and_a_plugin_in_another_folder_is_another() {
     let root = tempfile::tempdir().unwrap();
     let (one, two) = (root.path().join("one"), root.path().join("two"));
     fs::create_dir_all(&one).unwrap();
@@ -388,17 +388,20 @@ fn two_plugins_in_one_folder_are_one_question_that_names_both_and_a_plugin_in_an
         a_linked_plugin("b.so", &files[1]),
     ]));
 
+    let shown_folder = |window: &Window, folder: &Path| {
+        is_shown(
+            window,
+            &crate::plugin_trust::folder_for_a_person(&crate::plugin_trust::folder_of(&folder.join("x"))),
+        )
+    };
     assert!(
-        is_shown_containing(&window, "the plugin \u{ab}a.so\u{bb} and 1 other"),
-        "the first folder, with both its plugins"
+        shown_folder(&window, &one),
+        "the first folder, with both its plugins in one question"
     );
-    let at = window.rectangle_of(PLUGIN_LOAD_LABEL).center();
+    let at = window.rectangle_of(PLUGIN_TRUST_LABEL).center();
     window.click(at);
-    assert!(
-        is_shown_containing(&window, "the plugin \u{ab}c.so\u{bb}, which is in the folder"),
-        "then the other folder"
-    );
-    let at = window.rectangle_of(PLUGIN_DONT_LOAD_LABEL).center();
+    assert!(shown_folder(&window, &two), "then the other folder");
+    let at = window.rectangle_of(PLUGIN_DONT_TRUST_LABEL).center();
     window.click(at);
     assert!(
         window.application().interface.dialog.is_none(),
@@ -416,7 +419,7 @@ fn saying_no_to_a_plugin_that_is_a_file_remembers_nothing() {
     fs::write(&file, "bytes").unwrap();
     let mut window = window_showing(project_with(vec![a_linked_plugin("tap_reverb.so", &file)]));
 
-    let at = window.rectangle_of(PLUGIN_DONT_LOAD_LABEL).center();
+    let at = window.rectangle_of(PLUGIN_DONT_TRUST_LABEL).center();
     window.click(at);
 
     assert!(window.application().plugin_trust().approvals.is_empty());
@@ -439,7 +442,13 @@ fn several_plugins_are_asked_about_one_after_another_in_the_order_of_the_librari
     let mut asked = Vec::new();
     while let Some(question) = the_question_shown(&window) {
         asked.push(question.library().to_owned());
-        let at = window.rectangle_of(PLUGIN_DONT_LOAD_LABEL).center();
+        // (The question about a folder says "Don't trust"; the severe one about a program inside the project says "Don't load".)
+        let no = if matches!(question, Question::Linked { .. }) {
+            PLUGIN_DONT_TRUST_LABEL
+        } else {
+            PLUGIN_DONT_LOAD_LABEL
+        };
+        let at = window.rectangle_of(no).center();
         window.click(at);
         assert!(asked.len() <= 3);
     }

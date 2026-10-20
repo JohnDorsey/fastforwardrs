@@ -86,27 +86,11 @@ pub enum DialogAnswer {
 pub const PLUGIN_DONT_LOAD_LABEL: &str = "Don't load";
 pub const PLUGIN_LOAD_LABEL: &str = "Load it";
 
-/// What the question about plugins that are files in a folder says: `libraries` are the plugins that are asked about (the first is named, and how many others), `folder` the
-/// folder. **It is asked once for a folder**: a yes is remembered for the folder and for everything in it, now and later.
-pub fn warning_about_the_plugins_of_a_folder(libraries: &[String], folder: &std::path::Path) -> String {
-    let which = match libraries {
-        [] => "plugins".to_owned(),
-        [only] => format!("the plugin \u{ab}{only}\u{bb}"),
-        [first, others @ ..] => format!(
-            "the plugin \u{ab}{first}\u{bb} and {} other{}",
-            others.len(),
-            if others.len() == 1 { "" } else { "s" }
-        ),
-    };
-    format!(
-        "The project uses {which}, which {} in the folder {}. A plugin is a program: it runs with all your rights, and nothing checks what it does. \
-         Load plugins from this folder only if you know where they came from. If you say yes, you are not asked again about this folder: it is remembered for the folder and for \
-         everything that is in it, now and later, and it includes the libraries that these plugins need from the folders you named in Sound plugins... (and from the folders above them, \
-         if that is on).",
-        if libraries.len() == 1 { "is" } else { "are" },
-        crate::plugin_trust::folder_for_a_person(folder)
-    )
-}
+/// What the question about plugins that are files in a folder says. **It is asked once for a folder**: a yes is remembered for the folder and for everything in it, now and later.
+pub const TRUST_THE_FOLDER_HEADING: &str = "Trust plugins from this folder?";
+pub const TRUST_THE_FOLDER_WARNING: &str = "Plugins from the internet could contain viruses. Only trust this folder if you trust the provider of the plugins in it.";
+pub const PLUGIN_DONT_TRUST_LABEL: &str = "Don't trust";
+pub const PLUGIN_TRUST_LABEL: &str = "Trust";
 
 /// What the severe question about a plugin that is inside the project file says (the words of SF-06 of the features list).
 pub fn warning_about_an_embedded_plugin(library: &str, platform: &str) -> String {
@@ -285,18 +269,19 @@ pub fn show_dialog(context: &Context, dialog: &Dialog) -> DialogAnswer {
                 });
             }
             Dialog::AskAboutAPlugin {
-                question:
-                    Question::Linked { folder, libraries },
+                question: Question::Linked { folder, .. },
             } => {
-                ui.heading("Run plugins from this folder?");
+                ui.heading(TRUST_THE_FOLDER_HEADING);
                 ui.add_space(6.0);
-                ui.label(warning_about_the_plugins_of_a_folder(libraries, folder));
+                ui.label(crate::plugin_trust::folder_for_a_person(folder));
+                ui.add_space(6.0);
+                ui.label(TRUST_THE_FOLDER_WARNING);
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    if ui.button(PLUGIN_DONT_LOAD_LABEL).clicked() {
+                    if ui.button(PLUGIN_DONT_TRUST_LABEL).clicked() {
                         answer = DialogAnswer::Dismissed;
                     }
-                    if ui.button(PLUGIN_LOAD_LABEL).clicked() {
+                    if ui.button(PLUGIN_TRUST_LABEL).clicked() {
                         answer = DialogAnswer::Confirmed;
                     }
                 });

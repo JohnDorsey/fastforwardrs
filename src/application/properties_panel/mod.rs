@@ -42,8 +42,8 @@ mod track_properties;
 #[cfg(test)]
 pub use effects::{
     ADD_EFFECT_LABEL, CHOOSE_A_TABLE_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, INCLUDE_TABLE_LABEL,
-    NO_TABLE_CHOSEN_NOTE, SWITCH_EFFECT_OFF_LABEL, SWITCHED_OFF_NOTE, TABLE_NOT_IN_THE_PROJECT_NOTE,
-    TAKE_TABLE_OUT_LABEL, include_all_tables_label, take_all_tables_out_label,
+    NO_TABLE_CHOSEN_NOTE, NOT_RUNNING_NOTE, SWITCH_EFFECT_OFF_LABEL, SWITCHED_OFF_NOTE, TABLE_NOT_IN_THE_PROJECT_NOTE,
+    TAKE_TABLE_OUT_LABEL, VALUES_ARE_KEPT_NOTE, include_all_tables_label, take_all_tables_out_label,
 };
 #[cfg(test)]
 pub use keyframe_buttons::{KeyframeButton, keyframe_button_label};
@@ -73,6 +73,9 @@ pub struct PropertiesContent<'a> {
     pub font_families: Option<&'a [String]>,
     /// Whether the properties may be changed now: not while a message is up, or an export is running.
     pub can_edit: bool,
+    /// Why an effect does nothing, for an effect that is a sound plugin that is not run (not installed, a folder that is not trusted, a plugin that went wrong...); the panel says
+    /// it where the effect is.
+    pub why_an_effect_does_nothing: &'a dyn Fn(crate::project::EffectKind) -> Option<String>,
 }
 
 /// Shows the panel's contents, and adds a command for each change made in it.

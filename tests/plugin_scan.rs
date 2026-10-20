@@ -544,3 +544,83 @@ fn a_look_at_the_plugins_that_are_installed_in_a_folder() {
         println!("PROBLEM: {problem}");
     }
 }
+
+#[test]
+fn the_scan_program_says_which_code_it_was_built_from_and_it_is_the_code_of_this_editor() {
+    let output = Command::new(SCANNER)
+        .arg(fastforwardrs::plugin_scan::protocol::BUILD_ID_REQUEST)
+        .output()
+        .expect("the scan program is run");
+
+    assert!(output.status.success());
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        fastforwardrs::plugin_scan::protocol::build_id_in(&said).as_deref(),
+        Some(fastforwardrs::plugin_scan::protocol::BUILD_ID),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_scan_program_that_was_not_built_from_the_code_of_the_editor_is_refused_once_and_the_scans_that_were_kept_are_kept()
+{
+    let folder = tempfile::tempdir().unwrap();
+    let known = good_library_in(folder.path());
+    let cache_file = folder.path().join("settings").join("scans.json");
+    // The library `known` was scanned by a program that is the editor's.
+    let mut first = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::at(cache_file.clone()))
+        .with_time_limit(Duration::from_secs(4));
+    let primed = first.scan_folders(&[folder.path().to_owned()]);
+    assert_eq!(primed.libraries.len(), 1);
+    drop(first);
+    let another = folder.path().join(format!(
+        "another.{}",
+        fastforwardrs::plugin_scan::library_file_extension()
+    ));
+    fs::copy(library_file_for_tests(), &another).unwrap();
+    let a_third = folder.path().join(format!(
+        "third.{}",
+        fastforwardrs::plugin_scan::library_file_extension()
+    ));
+    fs::copy(library_file_for_tests(), &a_third).unwrap();
+    let kept = ScanCache::at(cache_file.clone()).len();
+    assert_eq!(kept, 1);
+
+    // A program that is not the editor's scan program (it does not say which code it was built from, as a scan program of before it could does not).
+    let mut stale = PluginScanner::new(
+        PathBuf::from(env!("CARGO_BIN_EXE_fastforwardrs-export")),
+        ScanCache::at(cache_file.clone()),
+    );
+    let scan = stale.scan_folders(&[folder.path().to_owned()]);
+
+    assert_eq!(
+        scan.problems.len(),
+        1,
+        "said once, though two libraries were to be scanned: {:?}",
+        scan.problems
+    );
+    assert!(
+        scan.problems[0].contains("not built from the same code as this editor")
+            && scan.problems[0].contains("cargo build --release --bins"),
+        "{:?}",
+        scan.problems
+    );
+    assert!(
+        stale
+            .scan_library(&another)
+            .is_err_and(|problem| matches!(problem, ScannerProblem::TheScanProgramIsNotThisEditors(_))),
+        "the library that was not scanned is not scanned"
+    );
+    assert_eq!(scan.libraries.len(), 1, "only what was kept is reported");
+    assert!(
+        scan.libraries
+            .iter()
+            .all(|report| report.from_cache && report.path == known),
+        "nothing was scanned"
+    );
+    assert_eq!(
+        ScanCache::at(cache_file).len(),
+        kept,
+        "and nothing that was kept is forgotten"
+    );
+}

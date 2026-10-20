@@ -1134,3 +1134,20 @@ fn what_a_clap_library_says_when_it_is_refused_is_not_confused_with_what_a_ladsp
         ScanAnswer::CouldNotBeLoaded("no file".to_owned())
     );
 }
+
+#[test]
+fn the_build_identity_is_read_from_what_a_program_wrote_and_the_last_line_that_says_it_wins() {
+    use super::protocol::{BUILD_ID, build_id_in, build_id_line};
+    assert_eq!(build_id_in(&build_id_line()).as_deref(), Some(BUILD_ID));
+    assert_eq!(
+        build_id_in("noise\nffrs-scan-build: 1234\r\nmore noise\n").as_deref(),
+        Some("1234")
+    );
+    assert_eq!(
+        build_id_in("ffrs-scan-build: old\nffrs-scan-build: new\n").as_deref(),
+        Some("new")
+    );
+    assert_eq!(build_id_in("a message that is not it: ffrs-scan-build: 99"), None);
+    assert_eq!(build_id_in(""), None);
+    assert_eq!(BUILD_ID.len(), 16, "the identity is sixteen hexadecimal digits");
+}

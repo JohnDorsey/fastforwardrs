@@ -12,7 +12,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::failure::ScanFailure;
-use super::protocol::{ScanAnswer, read_what_was_said};
+use super::protocol::{BUILD_ID_REQUEST, ScanAnswer, build_id_in, read_what_was_said};
 use super::scanner::LibraryOutcome;
 use crate::media::{background_command, collect_error_output_in_background};
 
@@ -57,6 +57,42 @@ pub(super) struct WhatItDid {
     pub(super) how_it_ended: HowItEnded,
     pub(super) said: String,
 }
+
+/// Asks the scan program `program` which code it was built from (see `build.rs`): `None` if it does not say, as a program that is not a scan program, or one that was built before it
+/// could, does not, or if it does not answer in a few seconds. An error is for when it could not be run at all.
+pub fn build_id_of_a_program(program: &Path) -> io::Result<Option<String>> {
+    let mut child = background_command(program)
+        .arg(BUILD_ID_REQUEST)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut standard_output = child.stdout.take().expect("the output was piped");
+    let said = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let reader = {
+        let said = Arc::clone(&said);
+        thread::spawn(move || read_until_the_end(&mut standard_output, &said, 64 * 1024))
+    };
+    let deadline = Instant::now() + LONGEST_WAIT_FOR_THE_BUILD_ID;
+    loop {
+        match child.try_wait()? {
+            Some(_) => break,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            None => thread::sleep(HOW_OFTEN_TO_LOOK),
+        }
+    }
+    if wait_until_finished(&reader, LONGEST_WAIT_FOR_THE_READERS) {
+        let _ = reader.join();
+    }
+    let said = String::from_utf8_lossy(&said.lock().unwrap_or_else(|poisoned| poisoned.into_inner())).into_owned();
+    Ok(build_id_in(&said))
+}
+
+/// How long a scan program has to tell which code it was built from.
+const LONGEST_WAIT_FOR_THE_BUILD_ID: Duration = Duration::from_secs(10);
 
 /// Runs the scan program `program` on `library`, and says what came of it. An error is for when the program **could not be run at all**, which is not the library's fault
 /// (it is not a reason to fail the library).

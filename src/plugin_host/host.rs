@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use ladspa_host::Library;
 
-use super::effect::{Layout, PluginEffect};
+use super::effect::{Layout, PluginEffect, ProblemBoard};
 use super::instance::{ClapCopy, ClapMaker, LadspaCopy, PluginInstance};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
@@ -69,6 +69,8 @@ pub struct PluginHost {
     breadcrumb: Mutex<Option<Breadcrumb>>,
     /// A number that is different whenever what may be run changed: what the sound is made of changes with it.
     generation: AtomicU64,
+    /// What is wrong with the plugins that were wanted, by their keys (see [`Self::problem_with`]).
+    problems: ProblemBoard,
 }
 
 impl Default for PluginHost {
@@ -87,6 +89,7 @@ impl PluginHost {
             search: Mutex::new(Search::default()),
             breadcrumb: Mutex::new(None),
             generation: AtomicU64::new(0),
+            problems: ProblemBoard::default(),
         }
     }
 
@@ -152,6 +155,24 @@ impl PluginHost {
     /// The folders that plugins have been wanted from and nobody has answered for, once each; they are not given again.
     pub fn take_wanted(&self) -> Vec<Wanted> {
         std::mem::take(&mut self.trust().wanted)
+    }
+
+    /// Why the plugin whose effect has the key `key` did nothing the last time it was wanted in the sound (it could not be loaded, it is not what was scanned, it could not be
+    /// made or run, it was too slow), if it did not: what the window of the effect says. Taken away when the plugin is wanted again and nothing is wrong.
+    pub fn problem_with(&self, key: &str) -> Option<String> {
+        self.problems
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .cloned()
+    }
+
+    /// Says why the plugin whose effect has the key `key` does nothing (for the window of the effect). The host says it itself when a plugin that was wanted went wrong.
+    pub fn note_a_problem_with(&self, key: &str, why: &str) {
+        self.problems
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key.to_owned(), why.to_owned());
     }
 
     /// A number that is different whenever what may be run changed.
@@ -312,7 +333,7 @@ impl PluginHost {
         plugin: &'static InstalledPlugin,
         layout: Layout,
         library: &Library,
-        notes: &Notes,
+        voice: &Voice<'_>,
     ) -> Option<Vec<Box<dyn PluginInstance>>> {
         let PluginAddress::Ladspa { index, .. } = plugin.address else {
             return None;
@@ -322,8 +343,7 @@ impl PluginHost {
             match library.instantiate(index, SAMPLE_RATE) {
                 Ok(instance) => {
                     if !this_is_the_plugin_that_was_scanned(&instance, plugin) {
-                        say(
-                            notes,
+                        voice.problem(
                             format!(
                                 "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the library {} has changed): scan again.",
                                 plugin.descriptor.name,
@@ -335,8 +355,7 @@ impl PluginHost {
                     instances.push(Box::new(LadspaCopy(instance)) as Box<dyn PluginInstance>);
                 }
                 Err(error) => {
-                    say(
-                        notes,
+                    voice.problem(
                         format!(
                             "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
                             plugin.descriptor.name
@@ -358,7 +377,7 @@ impl PluginHost {
         id: &str,
         layout: Layout,
         library: &clap_host::Library,
-        notes: &Notes,
+        voice: &Voice<'_>,
     ) -> Option<Vec<Box<dyn PluginInstance>>> {
         let worker = self.the_clap_worker();
         let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
@@ -371,8 +390,7 @@ impl PluginHost {
             match maker.make() {
                 Ok(instance) => {
                     if !this_clap_plugin_is_the_one_that_was_scanned(&instance, plugin) {
-                        say(
-                            notes,
+                        voice.problem(
                             format!(
                                 "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the library {} has changed): scan again.",
                                 plugin.descriptor.name,
@@ -384,8 +402,7 @@ impl PluginHost {
                     instances.push(Box::new(ClapCopy::new(instance, maker)));
                 }
                 Err(error) => {
-                    say(
-                        notes,
+                    voice.problem(
                         format!(
                             "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
                             plugin.descriptor.name
@@ -409,6 +426,23 @@ fn this_clap_plugin_is_the_one_that_was_scanned(instance: &clap_host::Instance, 
             .value_handles
             .iter()
             .all(|handle| instance.parameters().iter().any(|parameter| parameter.id == *handle))
+}
+
+/// Where a plugin says what is wrong with it: in the notes of the play, and on the board that the window reads.
+struct Voice<'a> {
+    notes: &'a Notes,
+    board: &'a ProblemBoard,
+    key: &'a str,
+}
+
+impl Voice<'_> {
+    fn problem(&self, line: String) {
+        self.board
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(self.key.to_owned(), line.clone());
+        say(self.notes, line);
+    }
 }
 
 fn say(notes: &Notes, line: String) {
@@ -449,6 +483,16 @@ impl PluginRunner for PluginHost {
         is_for_the_preview: bool,
     ) -> Option<Box<dyn BlockProcessor>> {
         let plugin = effect.kind.installed_plugin()?;
+        let voice = Voice {
+            notes,
+            board: &self.problems,
+            key: &plugin.descriptor.key,
+        };
+        // (What was wrong the last time is not known to be wrong now: it is said again if it is.)
+        self.problems
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&*plugin.descriptor.key);
         let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs)?;
         let folder = folder_of(&plugin.library);
         let library_name = plugin
@@ -459,8 +503,7 @@ impl PluginRunner for PluginHost {
             return None;
         }
         let could_not_be_loaded = |error: String| {
-            say(
-                notes,
+            voice.problem(
                 format!(
                     "The sound plugin \u{ab}{}\u{bb} could not be loaded from {}: {error}. The sound goes through it unchanged.",
                     plugin.descriptor.name,
@@ -474,14 +517,14 @@ impl PluginRunner for PluginHost {
                     .library(&plugin.library)
                     .inspect_err(|error| could_not_be_loaded(error.clone()))
                     .ok()?;
-                self.the_instances_of(plugin, layout, &library, notes)?
+                self.the_instances_of(plugin, layout, &library, &voice)?
             }
             PluginAddress::Clap { id } => {
                 let library = self
                     .clap_library(&plugin.library)
                     .inspect_err(|error| could_not_be_loaded(error.clone()))
                     .ok()?;
-                self.the_clap_instances_of(plugin, id, layout, &library, notes)?
+                self.the_clap_instances_of(plugin, id, layout, &library, &voice)?
             }
         };
         PluginEffect::new(
@@ -493,6 +536,8 @@ impl PluginRunner for PluginHost {
             is_for_the_preview,
             std::sync::Arc::clone(notes),
         )
-        .map(|made| Box::new(made) as Box<dyn BlockProcessor>)
+        .map(|made| {
+            Box::new(made.reporting_problems_on(std::sync::Arc::clone(&self.problems))) as Box<dyn BlockProcessor>
+        })
     }
 }

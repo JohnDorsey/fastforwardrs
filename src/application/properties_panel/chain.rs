@@ -18,9 +18,9 @@ use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
     ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE,
-    NOT_INSTALLED_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE,
-    effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept,
-    show_the_control_of, show_the_control_of_a_group_effect,
+    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
+    SWITCHED_OFF_NOTE, VALUES_ARE_KEPT_NOTE, effects_that_match, effects_to_offer, grouped_by_category,
+    grouped_by_source, items_for_where_the_tables_are_kept, show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -172,7 +172,13 @@ fn show_an_effect(
             }
         },
         |ui| {
-            if !kind.is_installed() {
+            // A sound plugin that does nothing says why, in words of its own; any other effect that is not installed says that it is not.
+            if let Some(why) = (content.why_an_effect_does_nothing)(kind) {
+                ui.label(
+                    RichText::new(format!("{NOT_RUNNING_NOTE} {why} {VALUES_ARE_KEPT_NOTE}"))
+                        .color(ui.visuals().warn_fg_color),
+                );
+            } else if !kind.is_installed() {
                 ui.label(RichText::new(NOT_INSTALLED_NOTE).weak());
             }
             if !effect.is_enabled() {

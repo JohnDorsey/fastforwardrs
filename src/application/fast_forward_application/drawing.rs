@@ -98,6 +98,11 @@ impl FastForwardApplication {
                         source_looks: &source_looks,
                         font_families: self.environment.font_families.as_deref(),
                         can_edit,
+                        why_an_effect_does_nothing: &|kind| {
+                            self.environment
+                                .plugin_search
+                                .why_a_plugin_effect_does_nothing(kind, &self.environment.plugin_host)
+                        },
                     },
                     commands,
                 );

@@ -11,7 +11,7 @@ use egui_kittest::kittest::Queryable;
 use super::keyframe_tests::window_with_a_video;
 use super::preview_layer_tests::select;
 use super::test_window::Window;
-use crate::application::dialogs::{Dialog, PLUGIN_DONT_LOAD_LABEL, PLUGIN_LOAD_LABEL};
+use crate::application::dialogs::{Dialog, PLUGIN_DONT_TRUST_LABEL, PLUGIN_TRUST_LABEL};
 use crate::application::file_chooser::ScriptedFileChooser;
 use crate::application::properties_panel::ADD_EFFECT_LABEL;
 use crate::composition::LayerEffect;
@@ -114,12 +114,12 @@ fn the_sound_comes_to(window: &Window, kind: EffectKind, notes: &Notes) {
 }
 
 fn say_yes(window: &mut Window) {
-    let at = window.rectangle_of(PLUGIN_LOAD_LABEL).center();
+    let at = window.rectangle_of(PLUGIN_TRUST_LABEL).center();
     window.click(at);
 }
 
 fn say_no(window: &mut Window) {
-    let at = window.rectangle_of(PLUGIN_DONT_LOAD_LABEL).center();
+    let at = window.rectangle_of(PLUGIN_DONT_TRUST_LABEL).center();
     window.click(at);
 }
 

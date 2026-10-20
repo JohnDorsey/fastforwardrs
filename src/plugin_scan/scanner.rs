@@ -11,9 +11,10 @@ use std::time::Duration;
 use thiserror::Error;
 
 use super::cache::{CachedOutcome, FileFingerprint, ScanCache};
-use super::child::{SCAN_TIME_LIMIT, scan_in_a_program};
+use super::child::{SCAN_TIME_LIMIT, build_id_of_a_program, scan_in_a_program};
 use super::failure::ScanFailure;
 use super::folders::{clap_libraries_in, dependency_search_folders, libraries_in, library_search_variable};
+use super::protocol::BUILD_ID;
 use ladspa_host::LibraryScan;
 
 /// What the scan of a library came to.
@@ -61,6 +62,9 @@ pub enum ScannerProblem {
     CouldNotRunTheScanner { program: PathBuf, error: io::Error },
     #[error("the library {path} could not be looked at: {error}")]
     CouldNotLookAtTheLibrary { path: PathBuf, error: io::Error },
+    /// The scan program was built from other code than this editor (it is older, most likely: `cargo run` builds the editor and not the program beside it), and is not used.
+    #[error("{0}")]
+    TheScanProgramIsNotThisEditors(String),
 }
 
 /// What the scan of some folders found.
@@ -82,6 +86,8 @@ pub struct PluginScanner {
     /// The folders a person said have the libraries that plugin libraries need, and whether the parent folders of a plugin library are looked in too.
     dependency_folders: Vec<PathBuf>,
     search_parent_folders: bool,
+    /// What was found out, the first time a library had to be scanned, about whether the scan program was built from the same code as this editor: `Err` is what to say.
+    the_program_was_checked: Option<Result<(), String>>,
 }
 
 impl PluginScanner {
@@ -94,6 +100,7 @@ impl PluginScanner {
             environment: Vec::new(),
             dependency_folders: Vec::new(),
             search_parent_folders: false,
+            the_program_was_checked: None,
         }
         .looking_for_dependencies_in(Vec::new(), false)
     }
@@ -175,6 +182,7 @@ impl PluginScanner {
                 from_cache: true,
             });
         }
+        self.check_that_the_program_is_this_editors()?;
         let outcome =
             scan_in_a_program(&self.program, path, self.time_limit, &self.environment_for(path)).map_err(|error| {
                 ScannerProblem::CouldNotRunTheScanner {
@@ -188,6 +196,31 @@ impl PluginScanner {
             outcome,
             from_cache: false,
         })
+    }
+
+    /// Asks the scan program, the first time it is to be used, which code it was built from, and refuses it if that is not the code of this editor: a scan program that is older
+    /// than the editor does not know what the editor knows (a `.clap` file is a library it does not read as one), and says so in words that blame the library. An error of
+    /// not being able to run it at all is the same as for a scan.
+    fn check_that_the_program_is_this_editors(&mut self) -> Result<(), ScannerProblem> {
+        if self.the_program_was_checked.is_none() {
+            let found =
+                build_id_of_a_program(&self.program).map_err(|error| ScannerProblem::CouldNotRunTheScanner {
+                    program: self.program.clone(),
+                    error,
+                })?;
+            self.the_program_was_checked = Some(if found.as_deref() == Some(BUILD_ID) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "The program that scans plugin libraries, {}, was not built from the same code as this editor (it is older, most likely), so it is not used and no plugin libraries are scanned. Build all of the program again: cargo build --release --bins",
+                    self.program.display()
+                ))
+            });
+        }
+        match self.the_program_was_checked.clone() {
+            Some(Err(message)) => Err(ScannerProblem::TheScanProgramIsNotThisEditors(message)),
+            _ => Ok(()),
+        }
     }
 
     /// Scans every library in `folders` (each is looked in alone), and writes the cache. A library whose scan could not be run is a problem and not a failure.
@@ -211,7 +244,13 @@ impl PluginScanner {
                 found.push(library.clone());
                 match self.scan_library(&library) {
                     Ok(report) => scan.libraries.push(report),
-                    Err(problem) => scan.problems.push(problem.to_string()),
+                    Err(problem) => {
+                        // (The problem of the program is the same for every library: it is said once.)
+                        let problem = problem.to_string();
+                        if !scan.problems.contains(&problem) {
+                            scan.problems.push(problem);
+                        }
+                    }
                 }
             }
         }

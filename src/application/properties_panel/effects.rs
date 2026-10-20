@@ -40,6 +40,10 @@ pub const SWITCHED_OFF_NOTE: &str = "Switched off: it is not done, and its value
 /// lost.
 pub const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";
 
+/// What the placeholder of a sound plugin that is not run begins with, and ends with: between them is why.
+pub const NOT_RUNNING_NOTE: &str = "Not running:";
+pub const VALUES_ARE_KEPT_NOTE: &str = "It does nothing until then, and its values are kept.";
+
 /// What the search field of the menu of the plus button says while it is empty, and what the item that adds an effect from a file is called.
 pub const SEARCH_EFFECTS_HINT: &str = "Search effects";
 pub const ADD_EFFECT_FROM_FILE_LABEL: &str = "Add effect from file...";

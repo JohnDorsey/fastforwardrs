@@ -29,6 +29,10 @@ pub const MOST_A_PLUGIN_MAY_GIVE: f32 = 1000.0;
 /// How many seconds of sound a plugin may be slower than the sound, one after another, before it is left out of the preview.
 pub const SECONDS_TOO_SLOW: f64 = 2.0;
 
+/// What is wrong with the plugins that were wanted in the sound, by their keys: what a window shows of an effect that does nothing (a plugin that could not be loaded, that is
+/// not what was scanned, that could not be run, that was too slow). An entry is taken away when the plugin is wanted again and nothing is wrong.
+pub type ProblemBoard = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>;
+
 /// How a plugin is given the sound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
@@ -126,6 +130,8 @@ pub struct PluginEffect {
     /// Whether a note has been made of sound that was not fit to be heard (it is said once).
     has_said_it_gave_too_much: bool,
     notes: Notes,
+    /// Where a plugin that is left out says why, for the window.
+    problems: Option<ProblemBoard>,
 }
 
 impl PluginEffect {
@@ -160,6 +166,7 @@ impl PluginEffect {
             left_out: false,
             has_said_it_gave_too_much: false,
             notes,
+            problems: None,
         })
     }
 
@@ -171,6 +178,23 @@ impl PluginEffect {
             self.guard = Some(SlownessGuard::with_patience(seconds));
         }
         self
+    }
+
+    /// The same, saying on `board` why it does nothing when it is left out.
+    #[must_use]
+    pub fn reporting_problems_on(mut self, board: ProblemBoard) -> Self {
+        self.problems = Some(board);
+        self
+    }
+
+    /// Says on the board, if there is one, why this plugin does nothing now.
+    fn put_on_the_board(&self, line: &str) {
+        if let Some(board) = &self.problems {
+            board
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(self.plugin.descriptor.key.to_string(), line.to_owned());
+        }
     }
 
     /// Whether the sound goes through the plugin unchanged because it was too slow.
@@ -290,10 +314,12 @@ impl PluginEffect {
         };
         if let Err(error) = result {
             self.left_out = true;
-            self.say(format!(
+            let line = format!(
                 "The sound plugin \u{ab}{}\u{bb} could not be run ({error}), so the sound goes through it unchanged.",
                 self.plugin.descriptor.name
-            ));
+            );
+            self.put_on_the_board(&line);
+            self.say(line);
             return;
         }
         // (A sample that is not a number, or is louder than any sound should be, is silence in its place.)
@@ -389,9 +415,11 @@ impl BlockProcessor for PluginEffect {
             if !self.left_out && guard.is_it_too_slow(block_seconds, began.elapsed().as_secs_f64()) {
                 self.left_out = true;
                 let name = self.plugin.descriptor.name.to_string();
-                self.say(format!(
+                let line = format!(
                     "The sound plugin \u{ab}{name}\u{bb} was too slow to keep up with the sound for {patience} seconds, so the sound goes through it unchanged for the rest of this play."
-                ));
+                );
+                self.put_on_the_board(&line);
+                self.say(line);
             }
         }
     }

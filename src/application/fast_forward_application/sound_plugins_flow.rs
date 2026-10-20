@@ -8,18 +8,22 @@
 //! are installed (see `project::set_installed_plugins`), so that the menu of the plus button offers them and the effects of a project that are of them work. A scan is started
 //! when the editor starts (if it can find its scan program), and when a person asks for it or changes where to look.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
 use super::FastForwardApplication;
 use crate::application::commands::Command;
 use crate::application::sound_plugins_window::{SoundPluginsCommand, SoundPluginsView};
+use crate::plugin_host::PluginHost;
+use crate::plugin_scan::ScanFailure;
+use crate::plugin_scan::is_a_clap_file;
 use crate::plugin_scan::{
-    Breadcrumb, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache, folders_looked_in_by_default,
-    plugins_found_in, recover, scanner_program_beside_this_program,
+    Breadcrumb, LibraryOutcome, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache,
+    folders_looked_in_by_default, plugins_found_in, recover, scanner_program_beside_this_program,
 };
-use crate::project::set_installed_plugins;
+use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
+use crate::project::{EffectKind, set_installed_plugins};
 
 /// What a scan found, for the window to show.
 #[derive(Default)]
@@ -68,6 +72,131 @@ impl PluginSearch {
             }
         }
         all
+    }
+}
+
+impl PluginSearch {
+    /// Why the effect of the kind `kind` does nothing at all now, if it does not, for a sound plugin (a key of a plugin: `ladspa:` or `clap:`): it is not installed (the scan is not done, did not find it, found its library
+    /// failed or found it unfit to be an effect), or it is installed and its folder is not trusted, or it was wanted in the sound and went wrong. `None` for a kind that is not a
+    /// sound plugin and for one that works. **A plugin that is not run is never silent about it.**
+    pub(super) fn why_a_plugin_effect_does_nothing(&self, kind: EffectKind, host: &PluginHost) -> Option<String> {
+        if let Some(plugin) = kind.installed_plugin() {
+            let folder = folder_of(&plugin.library);
+            let folder_for_a_person = folder_for_a_person(&folder);
+            return match host.standing_of(&folder) {
+                FolderStanding::NotAsked => Some(format!(
+                    "You have not said whether to trust the folder {folder_for_a_person}, so the plugin is not run."
+                )),
+                FolderStanding::Declined => Some(format!(
+                    "You did not trust the folder {folder_for_a_person}, so the plugin is not run."
+                )),
+                FolderStanding::Approved => host.problem_with(kind.key()),
+            };
+        }
+        let key = kind.key();
+        let (namespace, rest) = key.split_once(':')?;
+        if namespace != "ladspa" && namespace != "clap" {
+            return None;
+        }
+        Some(self.why_a_plugin_is_not_installed(namespace, rest))
+    }
+
+    /// Why no plugin stands in for the effect whose key is `namespace:rest`.
+    fn why_a_plugin_is_not_installed(&self, namespace: &str, rest: &str) -> String {
+        if self.scanner_program.is_none() {
+            return "The program that scans plugin libraries was not found beside the editor, so no plugins are looked for.".to_owned();
+        }
+        if self.running.is_some() || !self.has_scanned {
+            return "The plugins are still being looked for.".to_owned();
+        }
+        let named = |path: &Path| {
+            path.file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+        };
+        let stem_of = |path: &Path| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().replace(':', "_"))
+                .unwrap_or_default()
+        };
+        // (A LADSPA key is `ladspa:` the file without its ending, a colon and the label; a CLAP key is `clap:` and the id, which names no file.)
+        let (library_stem, label) = match namespace {
+            "ladspa" => match rest.split_once(':') {
+                Some((stem, label)) => (Some(stem), label),
+                None => (None, rest),
+            },
+            _ => (None, rest),
+        };
+        let in_the_library = |path: &Path| library_stem.is_none_or(|stem| stem_of(path) == stem);
+        let own_kind = |path: &Path| is_a_clap_file(path) == (namespace == "clap");
+        // The plugin was found, and cannot be an effect.
+        if let Some(not_used) = self.result.not_used.iter().find(|not_used| {
+            not_used.label.replace(':', "_") == label
+                && in_the_library(&not_used.library)
+                && own_kind(&not_used.library)
+        }) {
+            return format!(
+                "The plugin \u{ab}{}\u{bb} in {} was found, and cannot be put on a clip: {}",
+                not_used.name,
+                named(&not_used.library),
+                not_used.reason
+            );
+        }
+        // Its library failed (it crashed the scan, took too long, ended the editor badly, could not be loaded...).
+        let failed: Vec<(&LibraryReport, &ScanFailure)> = self
+            .result
+            .libraries
+            .iter()
+            .filter(|report| in_the_library(&report.path) && own_kind(&report.path))
+            .filter_map(|report| match &report.outcome {
+                LibraryOutcome::Failed(failure) => Some((report, failure)),
+                _ => None,
+            })
+            .collect();
+        if library_stem.is_some()
+            && let Some((report, failure)) = failed.first()
+        {
+            return format!("Its library {} failed: {failure}.", named(&report.path));
+        }
+        // The library is there and has no such plugin.
+        if library_stem.is_some()
+            && let Some(report) = self
+                .result
+                .libraries
+                .iter()
+                .find(|report| in_the_library(&report.path) && own_kind(&report.path))
+        {
+            return format!(
+                "The library {} is there, and has no plugin called {label}.",
+                named(&report.path)
+            );
+        }
+        if !failed.is_empty() {
+            let mut which: Vec<String> = failed
+                .iter()
+                .take(3)
+                .map(|(report, failure)| format!("{} ({failure})", named(&report.path)))
+                .collect();
+            if failed.len() > 3 {
+                which.push(format!("and {} more", failed.len() - 3));
+            }
+            return format!(
+                "No plugin like it was found, and {} failed in the last scan, which may be where it is: {}.",
+                if failed.len() == 1 {
+                    "a library"
+                } else {
+                    "some libraries"
+                },
+                which.join(", ")
+            );
+        }
+        match library_stem {
+            Some(stem) => {
+                format!("No library called {stem} was found in the folders that are looked in (see Sound plugins...).")
+            }
+            None => {
+                "No plugin with this id was found in the folders that are looked in (see Sound plugins...).".to_owned()
+            }
+        }
     }
 }
 

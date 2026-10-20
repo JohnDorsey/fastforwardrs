@@ -9,6 +9,15 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args_os().skip(1);
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|argument| argument == fastforwardrs::plugin_scan::protocol::BUILD_ID_REQUEST)
+        && std::env::args_os().count() == 2
+    {
+        // The editor asks, before it uses this program, whether it was built from the same code as the editor.
+        println!("{}", fastforwardrs::plugin_scan::protocol::build_id_line());
+        return ExitCode::SUCCESS;
+    }
     let (Some(library), None) = (arguments.next(), arguments.next()) else {
         eprint!("{}", fastforwardrs::plugin_scan::program::USAGE);
         return ExitCode::from(2);

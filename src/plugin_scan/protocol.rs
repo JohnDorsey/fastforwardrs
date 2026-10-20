@@ -16,6 +16,29 @@ pub const STEP_PREFIX: &str = "ffrs-scan-step: ";
 /// What the line with the answer begins with.
 pub const RESULT_PREFIX: &str = "ffrs-scan-result: ";
 
+/// The identity of the code this program was built from (see `build.rs`): the editor and the scan program, built together, have the same one.
+pub const BUILD_ID: &str = env!("FFRS_BUILD_ID");
+
+/// What the scan program is asked to tell instead of scanning a library.
+pub const BUILD_ID_REQUEST: &str = "--build-id";
+
+/// What the line that tells the identity begins with.
+pub const BUILD_ID_PREFIX: &str = "ffrs-scan-build: ";
+
+/// The line the scan program answers [`BUILD_ID_REQUEST`] with.
+pub fn build_id_line() -> String {
+    format!("{BUILD_ID_PREFIX}{BUILD_ID}")
+}
+
+/// The identity a program said it was built from, in what it wrote (`None`: it did not say, as a scan program of before this existed does not).
+pub fn build_id_in(output: &str) -> Option<String> {
+    output
+        .lines()
+        .filter_map(|line| line.trim_end().strip_prefix(BUILD_ID_PREFIX))
+        .next_back()
+        .map(str::to_owned)
+}
+
 /// What is in the cache of scans as well as on the wire. **Raise it when the scan finds something it did not (or means something else by what it finds)**, so that the answers
 /// that were kept are not believed any more. (2: the scan reads CLAP libraries too.)
 pub const SCAN_FORMAT: u32 = 2;

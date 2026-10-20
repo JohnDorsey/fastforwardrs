@@ -11,7 +11,7 @@ use super::preview_layer_tests::select;
 use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::file_chooser::ScriptedFileChooser;
-use crate::application::properties_panel::ADD_EFFECT_LABEL;
+use crate::application::properties_panel::{ADD_EFFECT_LABEL, NOT_RUNNING_NOTE, VALUES_ARE_KEPT_NOTE};
 
 /// What the box of an effect says when the program does not have the effect.
 const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";
@@ -198,8 +198,48 @@ fn a_plugin_chosen_in_the_menu_is_put_on_the_clip_with_the_values_its_ports_begi
     assert!(!is_shown(&window, NOT_INSTALLED_NOTE));
 }
 
+/// Whether the window shows a label that has `text` in it.
+fn shows_containing(window: &Window, text: &str) -> bool {
+    window.harness.query_all_by_label_contains(text).next().is_some()
+}
+
+/// A window with the reverb on the clip, and the reverb then taken out of the list of what is installed: the effect is a placeholder.
+fn window_with_a_reverb_that_is_gone() -> (Window, ClipId, crate::project::InstalledPlugin) {
+    let mut plugin = a_reverb();
+    plugin.descriptor.name = "tap reverb".into();
+    set_installed_plugins(vec![plugin.clone()]);
+    let (mut window, clip) = window_with_the_video_selected();
+    open_the_menu(&mut window);
+    window.harness.get_by_label("Tap reverb").click();
+    window.settle();
+    set_installed_plugins(Vec::new());
+    window.settle();
+    (window, clip, plugin)
+}
+
+/// Says what the scan found: the libraries and the plugins that cannot be effects, and that there is a scan program and the scan is done.
+fn the_scan_found(window: &mut Window, libraries: Vec<LibraryReport>, not_used: Vec<crate::plugin_scan::NotUsed>) {
+    window
+        .application_mut()
+        .use_this_plugin_scanner(std::path::PathBuf::from("a scan program"), None, false);
+    let search = &mut window.application_mut().environment.plugin_search;
+    search.has_scanned = true;
+    search.result.libraries = libraries;
+    search.result.not_used = not_used;
+    window.settle();
+}
+
+fn a_failed_library(name: &str, failure: ScanFailure) -> LibraryReport {
+    LibraryReport {
+        path: std::path::PathBuf::from("/plugins").join(name),
+        outcome: LibraryOutcome::Failed(failure),
+        from_cache: false,
+    }
+}
+
 #[test]
-fn an_effect_of_a_plugin_that_is_gone_is_kept_with_its_values_and_says_it_is_not_installed_until_the_plugin_is_back() {
+fn an_effect_of_a_plugin_that_is_gone_is_kept_with_its_values_and_is_a_placeholder_that_says_why_until_the_plugin_is_back()
+ {
     let _alone = the_installed_plugins_to_myself();
     let mut plugin = a_reverb();
     plugin.descriptor.name = "tap reverb".into();
@@ -208,11 +248,19 @@ fn an_effect_of_a_plugin_that_is_gone_is_kept_with_its_values_and_says_it_is_not
     open_the_menu(&mut window);
     window.harness.get_by_label("Tap reverb").click();
     window.settle();
-    assert!(!is_shown(&window, NOT_INSTALLED_NOTE));
+    assert!(!shows_containing(&window, NOT_RUNNING_NOTE) || shows_containing(&window, "trust the folder"));
 
     set_installed_plugins(Vec::new());
     window.settle();
-    assert!(is_shown(&window, NOT_INSTALLED_NOTE), "the plugin is gone");
+    assert!(
+        shows_containing(&window, NOT_RUNNING_NOTE),
+        "the plugin is gone, and the effect says it is not running"
+    );
+    assert!(shows_containing(&window, VALUES_ARE_KEPT_NOTE));
+    assert!(
+        shows_containing(&window, "program that scans plugin libraries was not found"),
+        "and why: nothing is scanned here"
+    );
     assert!(
         is_shown(&window, "Decay time"),
         "the controls are there, and the values"
@@ -221,7 +269,193 @@ fn an_effect_of_a_plugin_that_is_gone_is_kept_with_its_values_and_says_it_is_not
 
     set_installed_plugins(vec![plugin]);
     window.settle();
-    assert!(!is_shown(&window, NOT_INSTALLED_NOTE), "it was found again");
+    assert!(
+        !shows_containing(&window, "The program that scans plugin libraries was not found"),
+        "it was found again"
+    );
+}
+
+#[test]
+fn the_placeholder_of_a_plugin_that_is_not_installed_says_the_scan_is_not_done_while_it_is_not() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut window, _, _) = window_with_a_reverb_that_is_gone();
+    window
+        .application_mut()
+        .use_this_plugin_scanner(std::path::PathBuf::from("a scan program"), None, false);
+    window.settle();
+
+    assert!(shows_containing(&window, "The plugins are still being looked for."));
+
+    the_scan_found(&mut window, Vec::new(), Vec::new());
+    assert!(!shows_containing(&window, "still being looked for"));
+    assert!(
+        shows_containing(
+            &window,
+            "No library called tap_reverb was found in the folders that are looked in"
+        ),
+        "the scan is done and found nothing of it"
+    );
+}
+
+#[test]
+fn the_placeholder_says_when_the_library_of_the_plugin_failed_and_why() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut window, _, _) = window_with_a_reverb_that_is_gone();
+
+    the_scan_found(
+        &mut window,
+        vec![a_failed_library(
+            "tap_reverb.so",
+            ScanFailure::WasInUseWhenTheProgramEndedBadly { others: 0 },
+        )],
+        Vec::new(),
+    );
+    assert!(shows_containing(&window, "Its library tap_reverb.so failed"));
+    assert!(
+        shows_containing(&window, "ended badly"),
+        "a plugin that ended the program badly says so"
+    );
+
+    the_scan_found(
+        &mut window,
+        vec![a_failed_library(
+            "tap_reverb.so",
+            ScanFailure::Crashed {
+                how: "signal 11".to_owned(),
+                during: Some("making plugin number 0".to_owned()),
+            },
+        )],
+        Vec::new(),
+    );
+    assert!(shows_containing(&window, "it crashed the scanner (signal 11)"));
+    // A library of another name is not this plugin's.
+    the_scan_found(
+        &mut window,
+        vec![a_failed_library(
+            "something_else.so",
+            ScanFailure::GaveNoAnswer { during: None },
+        )],
+        Vec::new(),
+    );
+    assert!(!shows_containing(&window, "Its library"));
+    assert!(shows_containing(&window, "No library called tap_reverb"));
+}
+
+#[test]
+fn the_placeholder_says_when_the_library_is_there_and_has_no_such_plugin_or_the_plugin_cannot_be_an_effect() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut window, _, _) = window_with_a_reverb_that_is_gone();
+    let there = LibraryReport {
+        path: std::path::PathBuf::from("/plugins/tap_reverb.so"),
+        outcome: LibraryOutcome::Scanned(crate::plugin_scan::LibraryScan::default()),
+        from_cache: false,
+    };
+
+    the_scan_found(&mut window, vec![there.clone()], Vec::new());
+    assert!(shows_containing(
+        &window,
+        "The library tap_reverb.so is there, and has no plugin called tap_reverb"
+    ));
+
+    the_scan_found(
+        &mut window,
+        vec![there],
+        vec![crate::plugin_scan::NotUsed {
+            library: std::path::PathBuf::from("/plugins/tap_reverb.so"),
+            label: "tap_reverb".to_owned(),
+            name: "Tap reverb".to_owned(),
+            reason: "it has no audio input".to_owned(),
+        }],
+    );
+    assert!(shows_containing(
+        &window,
+        "was found, and cannot be put on a clip: it has no audio input"
+    ));
+}
+
+#[test]
+fn the_placeholder_of_a_clap_plugin_that_is_not_installed_names_the_libraries_that_failed() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = a_reverb();
+    plugin.descriptor.key = "clap:com.example.reverb".into();
+    plugin.descriptor.name = "example reverb".into();
+    set_installed_plugins(vec![plugin]);
+    let (mut window, _) = window_with_the_video_selected();
+    open_the_menu_of_the_plus_button(&mut window);
+    window.open_the_smaller_menu("CLAP");
+    window.harness.get_by_label("Example reverb").click();
+    window.settle();
+    set_installed_plugins(Vec::new());
+    window.settle();
+
+    the_scan_found(&mut window, Vec::new(), Vec::new());
+    assert!(shows_containing(
+        &window,
+        "No plugin with this id was found in the folders that are looked in"
+    ));
+
+    the_scan_found(
+        &mut window,
+        vec![
+            a_failed_library(
+                "one.clap",
+                ScanFailure::TookTooLong {
+                    seconds: 5,
+                    during: None,
+                },
+            ),
+            a_failed_library("two.clap", ScanFailure::NotAClapLibrary("no factory".to_owned())),
+            a_failed_library("not_a_clap_one.so", ScanFailure::GaveNoAnswer { during: None }),
+        ],
+        Vec::new(),
+    );
+    assert!(shows_containing(&window, "some libraries failed in the last scan"));
+    assert!(shows_containing(&window, "one.clap (it did not finish in 5 seconds"));
+    assert!(
+        !shows_containing(&window, "not_a_clap_one.so"),
+        "only libraries of the kind of the plugin"
+    );
+}
+
+#[test]
+fn the_placeholder_of_an_installed_plugin_says_when_its_folder_is_not_trusted_or_it_went_wrong() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = a_reverb();
+    plugin.descriptor.name = "tap reverb".into();
+    set_installed_plugins(vec![plugin.clone()]);
+    let (mut window, _) = window_with_the_video_selected();
+    open_the_menu(&mut window);
+    window.harness.get_by_label("Tap reverb").click();
+    window.settle();
+    let folder = crate::plugin_trust::folder_of(&plugin.library);
+
+    assert!(
+        shows_containing(&window, "You have not said whether to trust the folder"),
+        "nobody has answered for the folder"
+    );
+
+    window.application().environment.plugin_host.decline_folder(&folder);
+    window.settle();
+    assert!(shows_containing(&window, "You did not trust the folder"));
+    assert!(!shows_containing(&window, "have not said"));
+
+    window.application().environment.plugin_host.approve_folder(&folder);
+    window.settle();
+    assert!(
+        !shows_containing(&window, NOT_RUNNING_NOTE),
+        "trusted, and nothing went wrong"
+    );
+
+    window.application().environment.plugin_host.note_a_problem_with(
+        "ladspa:tap_reverb:tap_reverb",
+        "The sound plugin \u{ab}tap reverb\u{bb} could not be run (it said no).",
+    );
+    window.settle();
+    assert!(
+        shows_containing(&window, "could not be run (it said no)"),
+        "what went wrong when it was wanted"
+    );
+    assert!(shows_containing(&window, NOT_RUNNING_NOTE));
 }
 
 // --- the window ---
