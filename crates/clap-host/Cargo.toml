@@ -1,0 +1,20 @@
+[package]
+name = "clap-host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/JohnDorsey/fastforwardrs"
+description = "Loads CLAP sound plugins (with the clack-host crate): the only part of fastforwardrs that names it"
+publish = false
+
+[dependencies]
+clack-host = "0.2.0"
+clack-extensions = { version = "0.2.0", features = ["clack-host", "audio-ports", "params", "latency", "tail", "state", "note-ports", "thread-check"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+clap-test-plugins = { path = "../clap-test-plugins", version = "0.1.0" }
+serde_json = "1.0.152"
+tempfile = "3.27.0"

@@ -1,0 +1,17 @@
+[package]
+name = "clap-test-plugins"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "CC0-1.0"
+repository = "https://github.com/JohnDorsey/fastforwardrs"
+description = "A CLAP plugin library written for the tests of fastforwardrs: a gain, a swap, a mono one, plugins with latency, tail, a choice, state, no audio input, and some that misbehave on request"
+publish = false
+
+[lib]
+# (A library that is loaded at run time, and a Rust library for the tests that want its names.)
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+clack-plugin = "0.2.0"
+clack-extensions = { version = "0.2.0", features = ["clack-plugin", "audio-ports", "params", "latency", "tail", "state", "note-ports", "thread-check"] }

@@ -427,6 +427,7 @@ menu item or a window opened from one is marked.*
   loaded by the 64-bit program; whether each needs other DLLs of the install (the C runtime) is untested. Most of these collections are GPL (not
   checked file by file): the program **does not bundle them**, it finds them through a folder the user adds (DS-02) or the `LADSPA_PATH` convention. A
   zero-byte or damaged DLL in a folder is a test case for DS-04 (a plugin that fails to load is listed as failed, never fatal).
+* **AU-13 [D] M** (2026-10-20) Today an effect of a plugin works only if the same plugin is **installed from a folder** that was scanned (an embedded plugin is asked about, but nothing makes an installed plugin of it); that is temporary, for LADSPA and for CLAP. **At some point both are to be usable without installing them**: a plugin that comes inside a project file, or with the program, is found, scanned and run without a folder to add. (Bundling plugins with the program needs their licences to allow it: not yet searched.)
 * **AU-02 [P] S** CLAP plugins as well, because LADSPA binaries are almost only found on Linux; CLAP is the format users on all three
   systems have. **Decided 2026-10-13: LADSPA first, then CLAP** (Q-27).
 * **AU-03 [P] M** Sound plugins run **in the program**, in one block graph that the speakers and the export both call (not through
