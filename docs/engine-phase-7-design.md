@@ -106,7 +106,7 @@ Each piece ends with the full suite, clippy, the docs and a commit. The **sugges
 
 ## 7. CLAP (AU-02), not designed here
 
-The plan says CLAP "follows as a second step inside this phase". It needs its own design: the entry point and factory, `clap_plugin` with `process` and **events** (parameter changes as events with sample offsets, which is a better fit for G11 than LADSPA is), latency (AU-06, built then), state save and load (a plugin's own state, which has to be kept in the project: a new kind of value), and a GUI that the program would not host. The block graph and the trust model are the same. I would write that design after you have heard 7.6, so that it is made from what LADSPA taught, and so that the host crate and the null test are not changed in two ways at once.
+The plan says CLAP "follows as a second step inside this phase". It needs its own design: the entry point and factory, `clap_plugin` with `process` and **events** (parameter changes as events with sample offsets, which is a better fit for G11 than LADSPA is), latency (AU-06, built then), state save and load (a plugin's own state, which has to be kept in the project: a new kind of value), and a GUI that the program would not host. The block graph and the trust model are the same. I would write that design after you have heard 7.6, so that it is made from what LADSPA taught, and so that the host crate and the null test are not changed in two ways at once. **It is written (2026-10-20): `docs/engine-phase-7-clap-design.md`.**
 
 ## 8. For the maintainer
 
