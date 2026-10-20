@@ -526,3 +526,67 @@ fn a_file_of_version_13_has_no_libraries_and_is_saved_as_version_14() {
     ));
     let _ = folder;
 }
+
+// --- conformance (phase 7, piece 7.7): a library that is gone, and a build for another computer, are kept, byte for byte ---
+
+#[test]
+fn a_linked_library_whose_file_is_gone_is_kept_with_both_its_paths_and_the_file_is_the_same_after_a_load_and_a_save() {
+    let folder = TempDir::new().unwrap();
+    let mut project = edited_project(link_to_missing_video());
+    project
+        .add_plugin_library(a_linked_library(
+            "tap_reverb.so",
+            &folder.path().join("not_there_any_more").join("tap_reverb.so"),
+            Some("plugins/tap_reverb.so"),
+        ))
+        .unwrap();
+    let text = saved(&project);
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    assert_eq!(
+        loaded.plugin_libraries(),
+        project.plugin_libraries(),
+        "the library is still listed"
+    );
+    assert_eq!(saved(&loaded), text, "byte for byte");
+}
+
+#[test]
+fn an_embedded_library_that_has_a_build_for_another_kind_of_computer_only_is_kept_and_is_the_same_after_a_load_and_a_save()
+ {
+    let folder = TempDir::new().unwrap();
+    let mut project = edited_project(link_to_missing_video());
+    project
+        .add_plugin_library(an_embedded_library(
+            "amp_1181.dll",
+            vec![build(
+                "some-other-platform-aarch64",
+                "a build for a computer that is not this one",
+            )],
+        ))
+        .unwrap();
+    let first = folder.path().join("first.ffrs");
+    write_project_file_including(&project, &first, &IncludedFiles::new(), HowToWrite::Anew).unwrap();
+
+    let loaded = read_project_file(&first).unwrap();
+    let second = folder.path().join("second.ffrs");
+    write_project_file_including(&loaded, &second, &IncludedFiles::new(), HowToWrite::Anew).unwrap();
+
+    assert_eq!(
+        archive::read_project_text(&first).unwrap(),
+        archive::read_project_text(&second).unwrap()
+    );
+    assert_eq!(entries_of(&first), entries_of(&second));
+    for entry in entries_of(&first)
+        .iter()
+        .filter(|name| name.starts_with("plugin-libraries/"))
+    {
+        assert_eq!(
+            archive::read_entry_bytes(&first, entry, 1 << 20).unwrap(),
+            archive::read_entry_bytes(&second, entry, 1 << 20).unwrap(),
+            "{entry}: byte for byte"
+        );
+    }
+    assert_eq!(loaded.plugin_libraries(), project.plugin_libraries());
+}

@@ -42,6 +42,18 @@ and lists the effects and the tables that are missing).
 **Not built:** RS-09 and SF-02 (they are about shaders: phase 6), ID-07 (handles on the picture), UI-11 (the controls of EN-14: phase 6),
 PH-05 (other table formats).
 
+**Status after phase 7 (2026-10-19; [V] means run, on Windows and on Ubuntu in WSL with the real ffmpeg 9; the report is `docs/engine-phase-7-report.md`, the design `docs/engine-phase-7-design.md`).**
+**Built:** AU-01 and AU-03 (LADSPA plugins are sound effects on clips, tracks and tags; the preview and the export make their sound with one block graph in the program, with an ffmpeg for each clip), AU-04 (a value with
+keyframes is looked at every 32 samples; [V] the arithmetic is exact), AU-07 (the four channel layouts), AU-08 (a plugin that is not installed, not approved, not loadable, too slow in the preview or broken passes the sound through and keeps its
+settings), AU-09 (the null test: the new graph is held to the old filter graph, which stays as the oracle; and the preview and the export make the same samples), AU-12 ([V] the 119 libraries of LMMS scan, and the 211 plugins that can be
+effects were each put on a clip, played and exported in a process of their own), DS-04 (the scan is a program of its own, with a time limit, a cache and a breadcrumb), UI-12, SF-04, SF-06 to SF-10 (the severe question with the hold,
+declining is safe, builds per platform, the cache folder with a hash check, the command line refuses), PL-04 (the endings of the libraries and the usual folders), project file format 14 (the plugin libraries).
+**Changed by the maintainer (2026-10-19): SF-05 and SF-09 are by folder** (see SF-05).
+**Partly:** AU-05 (a seek makes the sound again so a plugin begins as it begins; **no pre-roll**), DS-01 to DS-03 and DS-05 (folders to scan are a setting, with *Sound plugins...*; the list of what was found is in that window; **no
+way to disable one type yet**: the plugin manager, phase 8), SC-01 (LADSPA is built; CLAP is not).
+**Not built:** AU-02 (CLAP), AU-06 (latency), AU-10 (generators, a master bus), effects of a clip group or a track group in sound, the effects of an embedded plugin (the severe question is asked, but nothing makes an installed plugin
+of an embedded library).
+
 Words used with one meaning: an **effect type** is what a plugin or a built-in provides (its descriptor); an **effect instance** is one
 use of it on a clip, a track or a group; a **host** is the part of the program that can run effect types of one family (the built-in
 host, the LUT host, the ISF host, the LADSPA host, the CLAP host); a **resource** is a file an effect needs (a `.cube` table, a shader
@@ -477,7 +489,8 @@ menu item or a window opened from one is marked.*
   (embedded)**, and each has its own prompt (SF-05, SF-06). Data (an ISF shader, a `.cube` table, an image) is not native code and has **no prompt**: the
   worst a shader can do is waste time on the GPU, which EN-05 guards against.
 * **SF-05 [D] M** **A linked plugin** (named by a path) gets a **warning prompt** the first time it is needed, **remembered per plugin by its path and a
-  hash of the file**: if the file changes, the program asks again.
+  hash of the file**: if the file changes, the program asks again. **Changed by the maintainer, 2026-10-19: one question for each new folder a plugin or a library comes from, remembered for the folder**; what is in the folder, or comes to be, is not asked about
+  again, and a file that changes is not asked about again. (Not for a plugin inside a project file: SF-06 is unchanged.)
 * **SF-06 [D] M** **An embedded plugin** is **never loaded without a concise, severe prompt**, shown **every time the project is opened** (never
   remembered, also not after a crash recovery of an autosave), with two buttons: *Don't load* (the default) and *Load it*. *Load it* can only be accepted by
   **holding it down for 5 seconds with the mouse, or holding Enter (never Space), while the button visibly fills up**; letting go resets it. The draft

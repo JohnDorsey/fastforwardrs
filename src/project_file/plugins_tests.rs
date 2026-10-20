@@ -680,3 +680,67 @@ fn a_sound_plugin_on_a_video_with_keyframes_is_written_with_its_snapshot_read_ba
         "the plugin itself is the kind when it is found first"
     );
 }
+
+// --- conformance (phase 7, piece 7.7): what a project has of a sound plugin that is not what it was is kept, byte for byte ---
+
+#[test]
+fn an_effect_of_a_plugin_whose_ports_changed_is_kept_whole_and_the_file_is_written_back_as_it_was_and_the_plugin_that_has_not_changed_is_the_kind()
+ {
+    use crate::project::{AnimationTarget, EffectKind, set_installed_plugins};
+    use crate::test_support::{an_installed_sound_plugin, put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    let before = an_installed_sound_plugin(
+        "ladspa:tap_reverb:tap_reverb",
+        "Tom Szilagyi",
+        &[("decay_time", 2500.0, None), ("dry_level", -2.0, None)],
+    );
+    set_installed_plugins(vec![before.clone()]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let instance = put_an_effect_on(
+        &mut project,
+        video,
+        kind,
+        &[PropertyValue::Number(1200.0), PropertyValue::Number(-6.0)],
+    );
+    let text = saved(&project);
+
+    // The plugin of that name is found again, but its ports are not the same (a value was renamed, so the snapshot has one that it has not): it cannot stand in.
+    let after = an_installed_sound_plugin(
+        "ladspa:tap_reverb:tap_reverb",
+        "Tom Szilagyi",
+        &[("decay_time", 2500.0, None), ("wet_level", 0.0, None)],
+    );
+    set_installed_plugins(vec![after]);
+    let loaded = project_from_json_text(&text).unwrap();
+    let there = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let effect = loaded.effects_of(there).unwrap().instance(instance).unwrap().clone();
+    assert!(
+        !effect.kind().is_installed(),
+        "a plugin whose ports changed is another plugin"
+    );
+    assert_eq!(
+        effect.values(),
+        [PropertyValue::Number(1200.0), PropertyValue::Number(-6.0)],
+        "and the effect has its values"
+    );
+    assert_eq!(
+        as_json(&saved(&loaded)),
+        as_json(&text),
+        "nothing is lost, and nothing is added"
+    );
+
+    // The plugin as it was is found: the same file makes the effect work.
+    set_installed_plugins(vec![before]);
+    let loaded_again = project_from_json_text(&text).unwrap();
+    let kind_again = loaded_again
+        .effects_of(AnimationTarget::Clip(loaded_again.tracks()[2].entries()[0].id()))
+        .unwrap()
+        .instance(instance)
+        .unwrap()
+        .kind();
+    assert!(kind_again.is_installed());
+    assert_eq!(as_json(&saved(&loaded_again)), as_json(&text));
+}

@@ -240,6 +240,12 @@ card, held to ffmpeg's `lut3d` to 1 level; the + menu with search and categories
 with tests, 43 left that change nothing a person could see. RS-04 and the limit of 64 effects on one object were built afterwards (2026-10-18, at the maintainer's word). **Not built:** DS-01 to DS-03 (no folder is scanned), PH-05. **Waiting on the maintainer:** trying the effects on a real card
 and the benchmark (nothing has run on one), and the questions at the end of the report. **Next in the order: phase 7 (the sound engine and LADSPA).**
 
+**Progress (2026-10-19): built, all pieces 7.1 to 7.7** (design `engine-phase-7-design.md`; report `engine-phase-7-report.md`). The sound of the preview and of the export is made by one block graph with an ffmpeg for each clip (the old
+filter graph is the oracle of a null test, and `FASTFORWARDRS_SOUND=ffmpeg` selects it); the host of LADSPA plugins is a crate of its own, the only code with `unsafe`; the scan is a program of its own; sound plugins are effects, put on a
+clip, a track or a tag from the + menu (a directory of smaller menus by where effects come from), keyframed, saved (format 14) and heard; who may run a plugin is a question for each folder (a severe one for each plugin inside a project
+file); the command line refuses what nobody approved. The real set of LMMS (119 libraries, 211 plugins that can be effects) was run on the maintainer's computer. **Not built:** CLAP (a design of its own, after the maintainer has heard
+7.6), generators, a master bus, latency, a pre-roll, the effects of a group in sound, the effects of an embedded plugin. **Waiting on the maintainer:** listening (7.6), and the questions at the end of the report. **Next in the order: phase 5.**
+
 ### Phase 5 — Group effects, adjustment clips and generator clips (size M)
 
 GR-02, GR-06 to GR-10, EF-02, EF-03 (the backdrop slot, first use), EF-04, Q-33.

@@ -331,6 +331,11 @@ thread_local! {
     static HOLDS_THE_LIST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Whether this thread holds the list of installed plugins to itself (a test that changes the list must: see [`the_installed_plugins_to_myself`]).
+pub fn this_thread_holds_the_list_of_installed_plugins() -> bool {
+    HOLDS_THE_LIST.with(std::cell::Cell::get)
+}
+
 /// What [`the_installed_plugins_to_myself`] gives: the list is empty while it is held, and is emptied again when it is let go of.
 pub struct TheInstalledPluginsToMyself {
     _guard: std::sync::RwLockWriteGuard<'static, ()>,
@@ -354,8 +359,8 @@ pub fn the_installed_plugins_to_myself() -> TheInstalledPluginsToMyself {
     let guard = THE_INSTALLED_PLUGINS
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    crate::project::set_installed_plugins(Vec::new());
     HOLDS_THE_LIST.with(|holds| holds.set(true));
+    crate::project::set_installed_plugins(Vec::new());
     TheInstalledPluginsToMyself { _guard: guard }
 }
 

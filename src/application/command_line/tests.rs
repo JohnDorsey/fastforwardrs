@@ -288,9 +288,13 @@ fn a_warning_is_said_on_the_error_stream_as_a_line_that_begins_with_warning_befo
         eprintln!("SKIPPED: there is no ffmpeg");
         return;
     }
+    // (The program looks for the plugins that the project needs, and so changes the list of those that are installed: this test holds it to itself, and says where the
+    // settings are, so that nothing of the computer that runs the test is looked at.)
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
     let folder = tempfile::tempdir().unwrap();
     let project_file = folder.path().join("trip.json");
     crate::project_file::write_project_file(&project_with_effects_the_program_does_not_have(), &project_file).unwrap();
+    let settings = folder.path().join("settings.json");
     let mut said = Vec::new();
 
     // (The video is not where the project says, so the export is stopped before any adapter is made.)
@@ -298,6 +302,8 @@ fn a_warning_is_said_on_the_error_stream_as_a_line_that_begins_with_warning_befo
         arguments(&[
             "--adapter",
             "software",
+            "--settings",
+            &settings.to_string_lossy(),
             &project_file.to_string_lossy(),
             &folder.path().join("out.mp4").to_string_lossy(),
         ]),

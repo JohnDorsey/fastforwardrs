@@ -43,6 +43,11 @@ static EVER_INSTALLED: Mutex<Vec<&'static InstalledPlugin>> = Mutex::new(Vec::ne
 /// Makes `plugins` the plugins that are installed, in place of those that were. (A plugin that is the same as one that was put in before is that one: it is the same kind of
 /// effect.)
 pub fn set_installed_plugins(plugins: Vec<InstalledPlugin>) {
+    #[cfg(test)]
+    assert!(
+        crate::test_support::this_thread_holds_the_list_of_installed_plugins(),
+        "a test changed the list of installed plugins without `the_installed_plugins_to_myself`"
+    );
     let mut ever = EVER_INSTALLED.lock().unwrap_or_else(PoisonError::into_inner);
     let list: Vec<&'static InstalledPlugin> = plugins
         .into_iter()
