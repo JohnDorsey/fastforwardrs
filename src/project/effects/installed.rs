@@ -53,6 +53,10 @@ pub struct InstalledPlugin {
     pub audio_outputs: usize,
     /// For each value of the descriptor, in order, what the plugin calls it: the number of its port (LADSPA) or the id of its parameter (CLAP).
     pub value_handles: Vec<u32>,
+    /// How many samples of sound from before a clip the plugin is to be given, and its output thrown away, so that it begins the clip as if the clip had been played through to
+    /// there (C10 of `docs/engine-phase-7-clap-design.md`): the tail it says it has, up to two seconds, or half a second where it says nothing. 0 for a LADSPA plugin, which has no
+    /// way to say how long it remembers (and keeps the behaviour of piece 7.6).
+    pub pre_roll_samples: usize,
 }
 
 /// The plugins that are installed now, in the order of the folders they were found in.

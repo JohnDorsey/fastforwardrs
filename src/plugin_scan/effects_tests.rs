@@ -149,6 +149,10 @@ fn a_plugin_with_a_control_an_input_and_an_output_is_a_sound_effect_in_the_categ
     assert_eq!(gain.scale, ValueScale::Linear);
     assert_eq!(gain.control, ParameterControl::Automatic);
     assert_eq!(effect.value_handles, [0]);
+    assert_eq!(
+        effect.pre_roll_samples, 0,
+        "a LADSPA plugin has no way to say how long it remembers, and is given no sound from before a clip"
+    );
 }
 
 #[test]
@@ -1046,4 +1050,20 @@ fn the_edges_of_what_a_clap_plugin_says_are_kept_as_they_are() {
     surround.audio_inputs = vec![a_port(2, Some("surround"))];
     let reason = effect_of_a_clap_plugin(Path::new("/x.clap"), &surround).unwrap_err();
     assert!(reason.contains("surround") && reason.contains("2 channels"), "{reason}");
+}
+
+#[test]
+fn a_clap_plugin_asks_for_sound_from_before_a_clip_as_long_as_its_tail_up_to_two_seconds_and_half_a_second_where_it_says_nothing()
+ {
+    let asks = |tail: Option<u32>| {
+        let mut plugin = a_clap_plugin("com.example.tail", Vec::new());
+        plugin.tail = tail;
+        the_effect(&plugin).pre_roll_samples
+    };
+
+    assert_eq!(asks(Some(1000)), 1000);
+    assert_eq!(asks(Some(0)), 0, "a plugin that says it has no tail remembers nothing");
+    assert_eq!(asks(Some(200_000)), 96_000, "two seconds at most");
+    assert_eq!(asks(Some(u32::MAX)), 96_000, "a tail for ever is two seconds");
+    assert_eq!(asks(None), 24_000, "nothing said is half a second");
 }

@@ -50,7 +50,7 @@ effects were each put on a clip, played and exported in a process of their own),
 declining is safe, builds per platform, the cache folder with a hash check, the command line refuses), PL-04 (the endings of the libraries and the usual folders), project file format 14 (the plugin libraries).
 **Changed by the maintainer (2026-10-19): SF-05 and SF-09 are by folder** (see SF-05).
 **Partly:** AU-05 (a seek makes the sound again so a plugin begins as it begins; **no pre-roll**), DS-01 to DS-03 and DS-05 (folders to scan are a setting, with *Sound plugins...*; the list of what was found is in that window; **no
-way to disable one type yet**: the plugin manager, phase 8), SC-01 (LADSPA is built; CLAP plugins are **found, offered as effects and run in the preview and the export with sample-accurate values and compensated latency**, pieces 7.8.1 to 7.8.4 of `engine-phase-7-clap-design.md`; the pre-roll of a tail is 7.8.5).
+way to disable one type yet**: the plugin manager, phase 8), SC-01 (LADSPA is built; CLAP plugins are **found, offered as effects and run in the preview and the export with sample-accurate values and compensated latency**, pieces 7.8.1 to 7.8.4 of `engine-phase-7-clap-design.md`; the pre-roll of a tail is 7.8.5, built: a clip is given sound from before it for the plugins that remember, CLAP only).
 **Not built:** AU-02 (CLAP), AU-06 (latency), AU-10 (generators, a master bus), effects of a clip group or a track group in sound, the effects of an embedded plugin (the severe question is asked, but nothing makes an installed plugin
 of an embedded library).
 

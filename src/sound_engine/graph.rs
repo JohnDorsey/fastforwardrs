@@ -6,7 +6,7 @@
 use super::feed::{ClipFeed, ClipFeeds, ClipRequest};
 use super::gain::GainCurve;
 use super::insertions::{BlockProcessor, Insertions};
-use super::position::sample_at_frame;
+use super::position::{pre_roll_samples_of, sample_at_frame};
 use crate::media::export::{SoundGraphSpecification, SoundItemToExport};
 
 /// The sound of a project, made a block at a time (see the top of this module's parent for what it does). It is given the specification once, and asked for the sound from
@@ -58,15 +58,48 @@ struct Live {
     feed_has_ended: bool,
     /// Whether the effects have been given the samples that make up for their latency (see [`BlockProcessor::latency`]).
     has_made_up_for_the_latency: bool,
+    /// How many samples of sound from before the clip the feed begins with (see `pre_roll_frames_of`).
+    pre_roll_samples: usize,
 }
 
 impl Live {
+    /// The feed begins with sound from before the clip, for the effects that remember: it is given to the effects and what comes out is thrown away.
+    fn give_the_effects_the_sound_from_before_the_clip(&mut self) {
+        let mut left_to_give = self.pre_roll_samples;
+        if left_to_give == 0 {
+            return;
+        }
+        for processor in &mut self.processors {
+            processor.about_to_be_given_sound_from_before_the_clip(left_to_give);
+        }
+        let (mut left, mut right) = (
+            vec![0.0_f32; MOST_PRE_ROLL_AT_ONCE],
+            vec![0.0_f32; MOST_PRE_ROLL_AT_ONCE],
+        );
+        while left_to_give > 0 {
+            let length = left_to_give.min(MOST_PRE_ROLL_AT_ONCE);
+            let (left, right) = (&mut left[..length], &mut right[..length]);
+            // (The feed has the sound from before the clip; if it has less, what it does not have is silence.)
+            left.fill(0.0);
+            right.fill(0.0);
+            if !self.feed_has_ended {
+                let given = self.feed.read(left, right);
+                self.feed_has_ended = given < length;
+            }
+            for processor in &mut self.processors {
+                processor.process(left, right);
+            }
+            left_to_give -= length;
+        }
+    }
+
     /// Gives the effects, before the first sample of the clip is made, as many samples of the feed as their latency in all, and throws away what comes out: the sound that comes out
     /// of them from then on is the sound of the clip, where it is. (The effects are given silence after the end of the feed, so the last samples of the clip come out too.)
     fn make_up_for_the_latency(&mut self) {
         if std::mem::replace(&mut self.has_made_up_for_the_latency, true) {
             return;
         }
+        self.give_the_effects_the_sound_from_before_the_clip();
         let latency: usize = self.processors.iter().map(|processor| processor.latency()).sum();
         if latency == 0 {
             return;
@@ -81,6 +114,9 @@ impl Live {
         }
     }
 }
+
+/// The most samples of sound from before a clip that are given to its effects in one block.
+const MOST_PRE_ROLL_AT_ONCE: usize = 4096;
 
 impl SoundGraph {
     pub fn new(
@@ -209,6 +245,7 @@ impl SoundGraph {
                     processors: insertions.for_clip(&request),
                     feed_has_ended: false,
                     has_made_up_for_the_latency: false,
+                    pre_roll_samples: pre_roll_samples_of(specification.frame_rate, clip),
                 });
                 live.make_up_for_the_latency();
                 let offset = (first - from) as usize;

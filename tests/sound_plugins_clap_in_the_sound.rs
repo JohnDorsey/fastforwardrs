@@ -330,3 +330,82 @@ fn a_folder_that_nobody_has_said_yes_to_leaves_the_sound_of_a_clap_plugin_as_it_
     assert_eq!(wanted.len(), 1, "the folder of the library is asked about");
     assert!(host.loaded_libraries().is_empty());
 }
+
+/// The sound of the first file of noise from the source frame `first_source_frame` for `frames` frames, with `effects` done to it.
+fn specification_from_frame(
+    first_source_frame: u64,
+    frames: u64,
+    effects: Vec<LayerEffect>,
+) -> SoundGraphSpecification {
+    let mut specification = specification_of_frames_with(frames, effects);
+    let SoundItemToExport::Clip(clip) = &mut specification.strips[0].items[0] else {
+        unreachable!("the strip is one clip");
+    };
+    clip.first_source_frame = first_source_frame;
+    clip.end_source_frame = first_source_frame + frames;
+    specification
+}
+
+#[test]
+fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_to_it_in_the_export_and_in_the_preview()
+{
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let echo = |pre_roll_samples: usize| {
+        // The echo of the test library says a tail of 1000 samples, which is what it asks for; a test can ask for less.
+        let kind = the_kind_of(clap_test_plugins::TAIL);
+        let mut plugin = kind.installed_plugin().unwrap().clone();
+        plugin.pre_roll_samples = pre_roll_samples;
+        set_installed_plugins(vec![plugin]);
+        LayerEffect {
+            instance: EffectInstanceId::FIRST,
+            kind: EffectKind::installed_plugin_kinds()[0],
+            values: Vec::new(),
+            animation: Animation::default(),
+            tables: Vec::new(),
+        }
+    };
+    let host = || Some(a_host_that_runs_everything());
+    let asked_for = clap_test_plugins::TAIL_SAMPLES as usize;
+
+    // Played through: two seconds of noise through the echo. Then the second second alone, which is where a seek to the middle begins.
+    let (through, _) = by_the_export(
+        &toolchain,
+        &specification_from_frame(0, 60, vec![echo(asked_for)]),
+        &sources,
+        host(),
+    );
+    let second_half = &through[30 * 1600 * 2..];
+    let from_the_middle = specification_from_frame(30, 30, vec![echo(asked_for)]);
+    let (exported, export_notes) = by_the_export(&toolchain, &from_the_middle, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &from_the_middle, &sources, host());
+
+    assert_eq!(exported.len(), second_half.len());
+    let worst = exported
+        .iter()
+        .zip(second_half)
+        .map(|(made, was)| (made - was).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst < 1e-4,
+        "the export from the middle is the second half of playing through: the worst difference is {worst}"
+    );
+    assert_eq!(previewed, exported, "and the preview makes what the export makes");
+    assert!(export_notes.is_empty(), "{export_notes:?}");
+
+    // With no sound from before the clip, the echo begins empty, and the first moments are not what they were (the control: the test can tell).
+    let (without, _) = by_the_export(
+        &toolchain,
+        &specification_from_frame(30, 30, vec![echo(0)]),
+        &sources,
+        host(),
+    );
+    let worst_at_the_start = without[..400]
+        .iter()
+        .zip(&second_half[..400])
+        .map(|(made, was)| (made - was).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(worst_at_the_start > 0.05, "{worst_at_the_start}");
+}

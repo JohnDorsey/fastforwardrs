@@ -34,7 +34,7 @@ pub use graph::SoundGraph;
 pub use insertions::{BlockProcessor, Insertions, NoInsertions};
 pub use lookahead::{ClipSpawner, LookAheadFeeds, MOST_FEEDS_OPEN, SECONDS_OF_LOOK_AHEAD};
 pub use plugins::{Notes, PluginInsertions, PluginRunner};
-pub use position::sample_at_frame;
+pub use position::{pre_roll_samples_of, sample_at_frame};
 
 /// How many samples the preview and the export ask the graph for at a time. (The graph gives the same sound for any number: this is a size, not a rule.)
 pub const BLOCK_SAMPLES: usize = 512;

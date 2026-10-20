@@ -537,3 +537,131 @@ fn the_clips_of_all_the_tracks_are_numbered_in_order_so_that_each_uses_its_own_c
         );
     }
 }
+
+// --- sound from before a clip, for the plugins that remember ---
+
+/// A clip with an effect of a plugin for each of `pre_rolls`, each asking for that many samples of sound from before the clip. **The caller holds the list of installed plugins** (`the_installed_plugins_to_myself`) for as long as it uses the clip.
+fn clip_with_plugins_that_ask_for(first: u64, end: u64, factor: u32, pre_rolls: &[usize]) -> SoundClipToExport {
+    use crate::project::{Animation, EffectInstanceId, set_installed_plugins};
+    use crate::test_support::an_installed_sound_plugin;
+    let plugins: Vec<_> = pre_rolls
+        .iter()
+        .enumerate()
+        .map(|(number, pre_roll)| {
+            let mut plugin = an_installed_sound_plugin(&format!("clap:test.plugin{number}"), "Maker", &[]);
+            plugin.pre_roll_samples = *pre_roll;
+            plugin
+        })
+        .collect();
+    set_installed_plugins(plugins);
+    let mut with_effects = clip(first, end, factor);
+    with_effects.effects = crate::project::EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .map(|kind| crate::composition::LayerEffect {
+            instance: EffectInstanceId::FIRST,
+            kind,
+            values: Vec::new(),
+            animation: Animation::default(),
+            tables: Vec::new(),
+        })
+        .collect();
+    with_effects
+}
+
+#[test]
+fn the_sound_from_before_a_clip_is_what_the_greatest_of_its_plugins_asks_for_in_whole_frames_and_no_more_than_the_file_has()
+ {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    // At 30 frames a second a frame is 1600 samples.
+    let frames = |first: u64, asks: &[usize]| {
+        pre_roll_frames_of(
+            frame_rate_30(),
+            &clip_with_plugins_that_ask_for(first, first + 90, 1, asks),
+        )
+    };
+    assert_eq!(
+        frames(100, &[1]),
+        1,
+        "one sample is a frame, as a part of a frame cannot be cut"
+    );
+    assert_eq!(frames(100, &[1600]), 1);
+    assert_eq!(frames(100, &[1601]), 2);
+    assert_eq!(
+        frames(100, &[1000, 4000, 2500]),
+        3,
+        "the greatest: 4000 samples are 2.5 frames"
+    );
+    assert_eq!(frames(100, &[96_000]), 60, "two seconds");
+    assert_eq!(frames(100, &[0]), 0, "a plugin that remembers nothing");
+    assert_eq!(frames(100, &[]), 0, "no plugin at all");
+    assert_eq!(frames(2, &[96_000]), 2, "no more than the file has before the clip");
+    assert_eq!(
+        frames(0, &[96_000]),
+        0,
+        "a clip that begins at the start of its file has nothing before it"
+    );
+}
+
+#[test]
+fn the_sound_from_before_a_clip_is_counted_in_the_frames_of_the_frame_rate_and_in_samples_by_the_arithmetic_of_the_graph()
+ {
+    let sixty = FrameRate::new(60, 1).unwrap();
+    let ntsc = FrameRate::new(30_000, 1001).unwrap();
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let clip_at = |asks: usize| clip_with_plugins_that_ask_for(1000, 1090, 1, &[asks]);
+    // At 60 frames a second a frame is 800 samples.
+    assert_eq!(pre_roll_frames_of(sixty, &clip_at(1600)), 2);
+    assert_eq!(pre_roll_frames_of(sixty, &clip_at(1601)), 3);
+    // At 29.97 a second a frame is 1601.6 samples: 3200 samples are 2 frames, and 3204 are 3.
+    assert_eq!(pre_roll_frames_of(ntsc, &clip_at(3200)), 2);
+    assert_eq!(pre_roll_frames_of(ntsc, &clip_at(3204)), 3);
+    // The samples are those between the starts of the frames, by the rounding that places everything else.
+    let samples = crate::sound_engine::pre_roll_samples_of(ntsc, &clip_at(3200));
+    assert_eq!(
+        samples as u64,
+        crate::sound_engine::sample_at_frame(ntsc, 1000) - crate::sound_engine::sample_at_frame(ntsc, 998)
+    );
+    assert!((3203..=3204).contains(&samples), "{samples}");
+    assert_eq!(
+        crate::sound_engine::pre_roll_samples_of(sixty, &clip_at(1601)),
+        2400,
+        "three frames of 800 samples"
+    );
+}
+
+#[test]
+fn a_clip_that_is_sped_up_has_no_sound_from_before_it() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    assert_eq!(
+        pre_roll_frames_of(frame_rate_30(), &clip_with_plugins_that_ask_for(100, 190, 2, &[96_000])),
+        0
+    );
+    assert_eq!(
+        pre_roll_frames_of(frame_rate_30(), &clip_with_plugins_that_ask_for(100, 190, 1, &[96_000])),
+        60
+    );
+}
+
+#[test]
+fn the_feed_of_a_clip_with_sound_from_before_it_is_cut_out_of_the_file_that_many_frames_earlier_and_a_feed_with_none_is_as_it_was()
+ {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let with = clip_with_plugins_that_ask_for(100, 190, 1, &[3200]);
+    let plain = clip(100, 190, 1);
+
+    let filters = clip_feed_filters(frame_rate_30(), &with, SpedUpClipSound::MaintainPitch);
+    let as_it_was = clip_feed_filters(frame_rate_30(), &plain, SpedUpClipSound::MaintainPitch);
+
+    // Frame 98 is 3.266666667 seconds into the file; frame 100 is 3.333333333, and the end does not move.
+    assert!(filters.contains("atrim=start=3.266666667:end=6.333333333"), "{filters}");
+    assert!(
+        as_it_was.contains("atrim=start=3.333333333:end=6.333333333"),
+        "{as_it_was}"
+    );
+    // The filter graph of ffmpeg that makes the sound with no plugins in it does not have the sound from before.
+    assert!(
+        super::super::build_audio_graph(&specification(vec![strip(vec![SoundItemToExport::Clip(with)])]))
+            .text
+            .contains("atrim=start=3.333333333:end=6.333333333")
+    );
+}

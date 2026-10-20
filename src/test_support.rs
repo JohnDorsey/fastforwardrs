@@ -428,6 +428,7 @@ pub fn an_installed_sound_plugin(
         audio_inputs: 1,
         audio_outputs: 1,
         value_handles: (0..values.len() as u32).collect(),
+        pre_roll_samples: 0,
     }
 }
 

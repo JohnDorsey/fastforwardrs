@@ -20,6 +20,10 @@ pub trait BlockProcessor: Send {
     fn latency(&self) -> usize {
         0
     }
+
+    /// Said once, before the first sample, to an effect of a clip whose feed begins with `samples` of sound from before the clip (see `pre_roll_frames_of`): they are given to
+    /// it and what comes out is thrown away, and they are not samples of the clip, so the keyframes of its values are those of the clip's first moment while it hears them.
+    fn about_to_be_given_sound_from_before_the_clip(&mut self, _samples: usize) {}
 }
 
 /// What gives the graph the effects of a clip and of a track. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a

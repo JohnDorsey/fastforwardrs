@@ -4,6 +4,7 @@
 //! Where a frame of the timeline is, in samples of sound.
 
 use super::SAMPLE_RATE;
+use crate::media::export::{SoundClipToExport, pre_roll_frames_of};
 use crate::project::FrameRate;
 
 /// The number of the sample that frame number `frame` begins at: the moment the frame starts at, in samples, **rounded to the nearest sample** (half a sample is
@@ -14,4 +15,12 @@ pub fn sample_at_frame(frame_rate: FrameRate, frame: u64) -> u64 {
     let twice_the_samples_times_the_numerator =
         2 * u128::from(frame) * u128::from(frame_rate.denominator()) * u128::from(SAMPLE_RATE);
     ((twice_the_samples_times_the_numerator + numerator) / (2 * numerator)) as u64
+}
+
+/// How many samples of sound from before `clip` its feed begins with (see `pre_roll_frames_of`): the samples between the start of the frame it begins at in the file and the
+/// start of the first frame of the clip, by the same arithmetic as everything else, so that the clip begins where the picture does.
+pub fn pre_roll_samples_of(frame_rate: FrameRate, clip: &SoundClipToExport) -> usize {
+    let frames = pre_roll_frames_of(frame_rate, clip);
+    (sample_at_frame(frame_rate, clip.first_source_frame)
+        - sample_at_frame(frame_rate, clip.first_source_frame - frames)) as usize
 }

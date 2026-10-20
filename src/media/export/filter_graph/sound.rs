@@ -254,10 +254,33 @@ pub fn clip_feed_filters(
     clip: &SoundClipToExport,
     sped_up_clip_sound: SpedUpClipSound,
 ) -> String {
+    // (A feed that has sound from before the clip, for the plugins that remember, begins that many frames earlier in the file: see `pre_roll_frames_of`.)
+    let mut from_before = clip.clone();
+    from_before.first_source_frame -= pre_roll_frames_of(frame_rate, clip);
     format!(
         "{SAMPLE_FORMAT_FILTER},{}",
-        cut_and_sped_up_filters(frame_rate, clip, sped_up_clip_sound)
+        cut_and_sped_up_filters(frame_rate, &from_before, sped_up_clip_sound)
     )
+}
+
+/// How many frames of sound from **before** `clip` its feed has at its start (C10 of `docs/engine-phase-7-clap-design.md`): for the plugins that remember, the sound from before
+/// the clip's first sample, to be run through them and thrown away, so that a clip that begins in the middle of a reverb (a seek, a cut) begins as it would have played. It is
+/// what the plugins on the clip ask for (the greatest of what they each need), rounded up to a whole frame, and no more than the file has before the clip. **None for a clip that
+/// is sped up** (its sound is made again by the speed, and where the pre-roll ends would not be a sample that can be told), and none where no plugin asks.
+pub fn pre_roll_frames_of(frame_rate: FrameRate, clip: &SoundClipToExport) -> u64 {
+    if clip.speed_factor.is_accelerated() {
+        return 0;
+    }
+    let samples = clip
+        .effects
+        .iter()
+        .filter_map(|effect| effect.kind.installed_plugin())
+        .map(|plugin| plugin.pre_roll_samples)
+        .max()
+        .unwrap_or(0) as u128;
+    let samples_a_frame_times_the_numerator = u128::from(frame_rate.denominator()) * u128::from(SAMPLE_RATE);
+    let frames = (samples * u128::from(frame_rate.numerator())).div_ceil(samples_a_frame_times_the_numerator);
+    u64::try_from(frames).unwrap_or(u64::MAX).min(clip.first_source_frame)
 }
 
 /// The filters that cut the sound of `clip` out of its file (already made into the one kind of sound) and speed it up as the setting says.

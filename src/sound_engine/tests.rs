@@ -1103,3 +1103,214 @@ fn an_effect_that_delays_the_sound_and_does_not_say_so_is_heard_late_by_what_it_
         "late by ten samples, because nothing was told"
     );
 }
+
+// --- sound from before a clip ---
+
+/// Feeds that give the number of the sample as the sample: the first samples are the sound from before the clip, if the clip has any.
+#[derive(Clone)]
+struct Counted;
+
+struct CountedFeed(usize);
+
+impl ClipFeed for CountedFeed {
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        for (left, right) in left.iter_mut().zip(right.iter_mut()) {
+            *left = self.0 as f32;
+            *right = -(self.0 as f32);
+            self.0 += 1;
+        }
+        left.len()
+    }
+}
+
+impl ClipFeeds for Counted {
+    fn open(&mut self, _request: &ClipRequest<'_>) -> Box<dyn ClipFeed> {
+        Box::new(CountedFeed(0))
+    }
+}
+
+/// An effect that does nothing to the sound and writes down what it is told and given.
+struct Listens {
+    latency: usize,
+    told_of_sound_from_before: Arc<std::sync::Mutex<Option<usize>>>,
+    given: Arc<std::sync::Mutex<Vec<f32>>>,
+    /// How many samples it was given in each call.
+    calls: Arc<std::sync::Mutex<Vec<usize>>>,
+}
+
+impl BlockProcessor for Listens {
+    fn process(&mut self, left: &mut [f32], _right: &mut [f32]) {
+        self.calls.lock().unwrap().push(left.len());
+        self.given.lock().unwrap().extend_from_slice(left);
+    }
+
+    fn reset(&mut self) {}
+
+    fn latency(&self) -> usize {
+        self.latency
+    }
+
+    fn about_to_be_given_sound_from_before_the_clip(&mut self, samples: usize) {
+        *self.told_of_sound_from_before.lock().unwrap() = Some(samples);
+        assert!(
+            self.given.lock().unwrap().is_empty(),
+            "it is told before it is given anything"
+        );
+    }
+}
+
+struct ListeningInsertions {
+    latency: usize,
+    told: Arc<std::sync::Mutex<Option<usize>>>,
+    given: Arc<std::sync::Mutex<Vec<f32>>>,
+    calls: Arc<std::sync::Mutex<Vec<usize>>>,
+}
+
+impl Insertions for ListeningInsertions {
+    fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        vec![Box::new(Listens {
+            latency: self.latency,
+            told_of_sound_from_before: Arc::clone(&self.told),
+            given: Arc::clone(&self.given),
+            calls: Arc::clone(&self.calls),
+        })]
+    }
+
+    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+        Vec::new()
+    }
+}
+
+/// A clip of `frames` frames at 30 a second that begins `first_source_frame` frames into its file, with an effect of a plugin that asks for `pre_roll_samples` of sound from before.
+fn clip_that_has_sound_from_before(
+    first_source_frame: u64,
+    frames: u64,
+    pre_roll_samples: usize,
+    speed: u32,
+) -> SoundItemToExport {
+    use crate::project::{Animation, EffectInstanceId, set_installed_plugins};
+    let mut plugin = crate::test_support::an_installed_sound_plugin("clap:test.remembers", "Maker", &[]);
+    plugin.pre_roll_samples = pre_roll_samples;
+    set_installed_plugins(vec![plugin]);
+    SoundItemToExport::Clip(SoundClipToExport {
+        source_input: 0,
+        first_source_frame,
+        end_source_frame: first_source_frame + frames * u64::from(speed),
+        speed_factor: SpeedFactor::new(speed).unwrap(),
+        timeline_frame_count: frames,
+        loudness: LoudnessToExport::UNCHANGED,
+        first_timeline_frame: 0,
+        effects: vec![crate::composition::LayerEffect {
+            instance: EffectInstanceId::FIRST,
+            kind: crate::project::EffectKind::installed_plugin_kinds()[0],
+            values: Vec::new(),
+            animation: Animation::default(),
+            tables: Vec::new(),
+        }],
+    })
+}
+
+#[test]
+fn the_effects_of_a_clip_are_given_the_sound_from_before_it_first_and_it_is_not_heard_for_any_blocks_or_latency() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    // The clip is 3 frames, 4800 samples, and begins 10 frames into its file. 2000 samples asked for are 2 frames, 3200 samples; 6000 are 4 frames, 6400, which is more than the
+    // graph gives to the effects at once.
+    for (asked_for, from_before) in [(2000_usize, 3200_usize), (6000, 6400)] {
+        for latency in [0_usize, 64] {
+            for block in [1, 13, 512, 100_000] {
+                let (told, given) = (Arc::default(), Arc::default());
+                let calls: Arc<std::sync::Mutex<Vec<usize>>> = Arc::default();
+                let mut graph = SoundGraph::new(
+                    specification(
+                        thirty(),
+                        3,
+                        vec![vec![clip_that_has_sound_from_before(10, 3, asked_for, 1)]],
+                    ),
+                    Box::new(Counted),
+                    Box::new(ListeningInsertions {
+                        latency,
+                        told: Arc::clone(&told),
+                        given: Arc::clone(&given),
+                        calls: Arc::clone(&calls),
+                    }),
+                );
+
+                let (heard, other) = graph.render_to_the_end(block);
+
+                let what = format!("{asked_for} asked for, latency {latency}, blocks of {block}");
+                assert_eq!(*told.lock().unwrap(), Some(from_before), "{what}");
+                // The calls that make up the sound from before are pieces of at most 4096 samples, whatever the blocks are.
+                let mut so_far = 0;
+                for call in calls.lock().unwrap().iter() {
+                    if so_far >= from_before {
+                        break;
+                    }
+                    assert!(*call <= 4096, "a piece of {call}: {what}");
+                    so_far += call;
+                }
+                assert_eq!(
+                    so_far, from_before,
+                    "the sound from before is made of whole calls: {what}"
+                );
+                // (The effect says it has a latency and does not delay the sound, so the sound that comes out is the latency ahead of the clip: it is not late, and the graph has
+                // taken the samples that make up for the latency off the front, as it does for one that is.)
+                let heard_expected: Vec<f32> = (0..4800).map(|n| (from_before + latency + n) as f32).collect();
+                assert_eq!(
+                    heard, heard_expected,
+                    "what is heard begins after the sound from before the clip and the samples that make up for the latency: {what}"
+                );
+                assert_eq!(other, heard_expected.iter().map(|sample| -sample).collect::<Vec<_>>());
+                let given = given.lock().unwrap();
+                assert_eq!(
+                    given[..from_before],
+                    (0..from_before).map(|n| n as f32).collect::<Vec<_>>()[..],
+                    "the sound from before, first: {what}"
+                );
+                assert_eq!(given[from_before], from_before as f32, "and then the clip: {what}");
+                assert_eq!(
+                    given.len(),
+                    from_before + 4800 + latency,
+                    "all of it once, and what makes up for the latency: {what}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_clip_at_the_start_of_its_file_or_one_that_is_sped_up_or_with_a_plugin_that_remembers_nothing_is_told_of_no_sound_from_before()
+ {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    for (item, why) in [
+        (
+            clip_that_has_sound_from_before(0, 3, 2000, 1),
+            "it begins at the start of its file",
+        ),
+        (clip_that_has_sound_from_before(10, 3, 2000, 2), "it is sped up"),
+        (
+            clip_that_has_sound_from_before(10, 3, 0, 1),
+            "the plugin remembers nothing",
+        ),
+    ] {
+        let (told, given) = (Arc::default(), Arc::default());
+        let mut graph = SoundGraph::new(
+            specification(thirty(), 3, vec![vec![item]]),
+            Box::new(Counted),
+            Box::new(ListeningInsertions {
+                latency: 0,
+                told: Arc::clone(&told),
+                given: Arc::clone(&given),
+                calls: Arc::default(),
+            }),
+        );
+
+        let (heard, _) = graph.render_to_the_end(512);
+
+        assert_eq!(*told.lock().unwrap(), None, "{why}");
+        assert_eq!(
+            heard,
+            (0..4800).map(|n| n as f32).collect::<Vec<_>>(),
+            "{why}: the clip is heard from its first sample"
+        );
+    }
+}

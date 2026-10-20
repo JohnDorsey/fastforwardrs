@@ -232,6 +232,7 @@ pub fn effect_of_a_plugin(library: &Path, plugin: &ScannedPlugin) -> Result<Inst
         audio_inputs: inputs,
         audio_outputs: outputs,
         value_handles: value_ports,
+        pre_roll_samples: 0,
     })
 }
 
@@ -367,6 +368,19 @@ fn channels_of_a_main_port(port: &clap_host::scan::AudioPort, direction: &str) -
     ))
 }
 
+/// The most sound from before a clip that a plugin is given: two seconds at the rate of the sound engine.
+pub const MOST_PRE_ROLL_SAMPLES: usize = 2 * SAMPLE_RATE as usize;
+
+/// How many samples of sound from before a clip a CLAP plugin that says its tail is `tail` samples (`u32::MAX` for ever, `None` for nothing said) is given: the tail, up to
+/// [`MOST_PRE_ROLL_SAMPLES`]; for ever is the most; nothing said is half a second.
+pub fn pre_roll_of_a_clap_plugin(tail: Option<u32>) -> usize {
+    match tail {
+        None => SAMPLE_RATE as usize / 2,
+        Some(u32::MAX) => MOST_PRE_ROLL_SAMPLES,
+        Some(samples) => (samples as usize).min(MOST_PRE_ROLL_SAMPLES),
+    }
+}
+
 /// The type of effect that the CLAP plugin `plugin` of the library file `library` is, or why it is not one.
 pub fn effect_of_a_clap_plugin(
     library: &Path,
@@ -437,5 +451,6 @@ pub fn effect_of_a_clap_plugin(
         audio_inputs: inputs,
         audio_outputs: outputs,
         value_handles,
+        pre_roll_samples: pre_roll_of_a_clap_plugin(plugin.tail),
     })
 }

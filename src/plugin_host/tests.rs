@@ -612,7 +612,7 @@ fn the_insertions_of_a_graph_ask_the_runner_for_the_plugin_effects_of_a_clip_and
 
 use crate::media::export::{SoundGraphSpecification, SoundItemToExport, SoundStripToExport};
 use crate::project::SpedUpClipSound;
-use crate::sound_engine::{ClipFeed, ClipFeeds, SoundGraph, sample_at_frame};
+use crate::sound_engine::{ClipFeed, ClipFeeds, SoundGraph, pre_roll_samples_of, sample_at_frame};
 
 /// The sound of a source file that has, at sample number `n` of it, `1 + n / 100000` on the left and the same with the sign changed on the right: a different number at every
 /// sample, so that a sample out of place cannot be taken for the right one.
@@ -637,8 +637,10 @@ struct SourceRamps {
 
 impl ClipFeeds for SourceRamps {
     fn open(&mut self, request: &ClipRequest<'_>) -> Box<dyn ClipFeed> {
+        // (A feed has the sound from before the clip that the plugins ask for, as the feed of ffmpeg does.)
         Box::new(SourceRamp {
-            next: sample_at_frame(self.frame_rate, request.clip.first_source_frame),
+            next: sample_at_frame(self.frame_rate, request.clip.first_source_frame)
+                - pre_roll_samples_of(self.frame_rate, request.clip) as u64,
         })
     }
 }
@@ -1814,4 +1816,115 @@ fn a_plugin_that_is_left_out_while_it_runs_says_why_on_the_board() {
         .problem_with(&key)
         .expect("it could not be run, and the board says so");
     assert!(said.contains("could not be run"), "{said}");
+}
+
+// --- sound from before a clip: a seek into a tail ---
+
+/// The sound of the CLAP echo (a tail of 1000 samples) on the ramp, for a clip of `frames` frames that begins `first_source_frame` frames into the file, with the plugin asking
+/// for `pre_roll_samples` of sound from before (what the scan says, unless a test says another).
+fn the_echo_on(first_source_frame: u64, frames: u64, pre_roll_samples: usize, block: usize) -> Vec<f32> {
+    let mut plugin = the_clap_kind_of(clap_test_plugins::TAIL)
+        .installed_plugin()
+        .unwrap()
+        .clone();
+    plugin.pre_roll_samples = pre_roll_samples;
+    set_installed_plugins(vec![plugin]);
+    let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[]);
+    let mut clip = the_clip(first_source_frame, frames, 0, vec![effect]);
+    clip.first_timeline_frame = 0;
+    sound_of(clip, a_host_that_runs_everything(), false, block).0
+}
+
+#[test]
+fn a_clap_plugin_with_a_tail_says_how_much_sound_from_before_a_clip_it_wants_and_one_that_says_nothing_wants_half_a_second()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    // The echo says a tail of 1000 samples.
+    let echo = the_clap_kind_of(clap_test_plugins::TAIL)
+        .installed_plugin()
+        .unwrap()
+        .pre_roll_samples;
+    assert_eq!(echo, clap_test_plugins::TAIL_SAMPLES as usize);
+    // The gain says nothing of a tail: half a second.
+    let gain = the_clap_kind_of(clap_test_plugins::GAIN)
+        .installed_plugin()
+        .unwrap()
+        .pre_roll_samples;
+    assert_eq!(gain, 24_000);
+    // A tail for ever is two seconds, and a tail past two seconds is two seconds.
+    assert_eq!(crate::plugin_scan::pre_roll_of_a_clap_plugin(Some(u32::MAX)), 96_000);
+    assert_eq!(crate::plugin_scan::pre_roll_of_a_clap_plugin(Some(500_000)), 96_000);
+    assert_eq!(crate::plugin_scan::pre_roll_of_a_clap_plugin(Some(0)), 0);
+    assert_eq!(crate::plugin_scan::pre_roll_of_a_clap_plugin(None), 24_000);
+}
+
+#[test]
+fn a_clip_that_begins_in_the_middle_of_an_echo_gives_the_samples_of_playing_through_to_it_and_without_the_sound_from_before_it_does_not()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let samples_a_frame = 1600;
+    let whole = the_echo_on(0, 60, clap_test_plugins::TAIL_SAMPLES as usize, 512);
+    let from_the_middle = |pre_roll: usize, block: usize| the_echo_on(30, 30, pre_roll, block);
+    let second_half = &whole[30 * samples_a_frame..];
+
+    for block in [512, 100, 4096] {
+        let with = from_the_middle(clap_test_plugins::TAIL_SAMPLES as usize, block);
+        assert_eq!(with.len(), second_half.len());
+        // The echo of what came more than its tail ago (1000 samples, ten echoes, a thousandth) is not in what is heard; the sound from before is two frames, which is more.
+        let worst = with
+            .iter()
+            .zip(second_half)
+            .map(|(made, was)| (made - was).abs() / was.abs().max(1.0))
+            .fold(0.0_f32, f32::max);
+        assert!(worst < 1e-4, "blocks of {block}: the worst difference is {worst}");
+    }
+
+    // With no sound from before the clip the echo begins empty: the first hundred samples are the sound alone, and the difference is as big as the echo itself.
+    let without = from_the_middle(0, 512);
+    let worst_at_the_start = without[..100]
+        .iter()
+        .zip(&second_half[..100])
+        .map(|(made, was)| (made - was).abs() / was.abs().max(1.0))
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst_at_the_start > 0.2,
+        "{worst_at_the_start}: the control shows that the test can tell"
+    );
+}
+
+#[test]
+fn the_keyframes_of_a_value_are_those_of_the_clip_and_the_sound_from_before_it_does_not_move_them() {
+    let _alone = the_installed_plugins_to_myself();
+    // The gain says no tail, so it asks for half a second (15 frames) of sound from before the clip; this clip begins 30 frames into its file, so it has them.
+    let kind = the_clap_kind_of(clap_test_plugins::GAIN);
+    assert_eq!(kind.installed_plugin().unwrap().pre_roll_samples, 24_000);
+    let mut effect = the_clap_effect(clap_test_plugins::GAIN, numbers(&[1.0]));
+    let gain = PropertyId::effect_value(kind, EffectInstanceId::FIRST, 0);
+    let keyframe = |frame, value| Keyframe {
+        frame,
+        value: PropertyValue::Number(value),
+    };
+    // From 0 at the frame 10 to 4 at the frame 40, on a clip that begins at the frame 10.
+    effect.animation =
+        Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(10, 0.0), keyframe(40, 4.0)]))]);
+    let host = a_host_that_runs_everything();
+    let (made, _, _) = sound_of(
+        the_clip(30, 30, 10, vec![effect]),
+        Arc::clone(&host) as Arc<dyn PluginRunner>,
+        false,
+        512,
+    );
+    let (plain, _, _) = sound_of(the_clip(30, 30, 10, Vec::new()), host, false, 512);
+
+    assert_eq!(made.len(), 30 * 1600);
+    for index in [0_usize, 31, 32, 1_599, 1_600, 1_601, 24_000, 40_000, 47_999] {
+        let stretch_begins_at = (index / 32) * 32;
+        let frame = 10 + stretch_begins_at as u64 / 1600;
+        let expected = ((frame - 10) as f32 / 30.0 * 4.0).clamp(0.0, 4.0) * plain[index];
+        assert!(
+            (made[index] - expected).abs() <= 1e-4 * plain[index].abs().max(1.0),
+            "sample {index}: {} and the keyframes say {expected} at frame {frame}",
+            made[index]
+        );
+    }
 }

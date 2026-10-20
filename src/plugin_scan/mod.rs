@@ -32,6 +32,7 @@ pub use cache::{CachedOutcome, FileFingerprint, ScanCache};
 pub use child::{SCAN_TIME_LIMIT, scanner_program_beside_this_program};
 pub use effects::{
     NotUsed, PluginsFound, effect_of_a_clap_plugin, effect_of_a_plugin, key_of, key_of_a_clap_plugin, plugins_found_in,
+    pre_roll_of_a_clap_plugin,
 };
 pub use failure::ScanFailure;
 pub use folders::{

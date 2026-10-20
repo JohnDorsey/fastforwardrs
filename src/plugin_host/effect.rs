@@ -118,6 +118,8 @@ pub struct PluginEffect {
     first_timeline_frame: u64,
     /// How many samples of the clip have gone through.
     samples_done: u64,
+    /// How many of the samples that went through before the first sample of the clip were from before the clip (see `BlockProcessor::about_to_be_given_sound_from_before_the_clip`).
+    samples_before_the_clip: u64,
     /// Whether the values are looked at often, because some of them have keyframes.
     animated: bool,
     /// The values as they were last given to the plugin, by their places, so that a value that has not changed is not given again.
@@ -158,6 +160,7 @@ impl PluginEffect {
             frame_rate,
             first_timeline_frame,
             samples_done: 0,
+            samples_before_the_clip: 0,
             animated,
             given: Vec::new(),
             input: [Vec::new(), Vec::new()],
@@ -344,6 +347,11 @@ impl PluginEffect {
 }
 
 impl PluginEffect {
+    /// The number of the sample of the clip that the sample `at` of the block being made is: the samples from before the clip are the first moment of it.
+    fn sample_of_the_clip(&self, at: u64) -> u64 {
+        (self.samples_done + at).saturating_sub(self.samples_before_the_clip)
+    }
+
     /// Things a plugin has asked of the host that are done between blocks: a call on its main thread, being made again (it then has to be given its values again).
     fn do_what_the_plugins_asked_between_blocks(&mut self) {
         for number in 0..self.instances.len() {
@@ -367,7 +375,7 @@ impl PluginEffect {
         let mut piece_start = 0;
         while piece_start < total && !self.left_out {
             let piece_end = (piece_start + most).min(total);
-            let first_sample = self.samples_done + piece_start as u64;
+            let first_sample = self.sample_of_the_clip(piece_start as u64);
             for place in places_to_look_in(first_sample, piece_end - piece_start, self.animated) {
                 let frame = frame_of_a_sample(self.frame_rate, self.first_timeline_frame, first_sample + place as u64);
                 self.give_the_values_at(frame, place);
@@ -401,7 +409,7 @@ impl BlockProcessor for PluginEffect {
                 let frame = frame_of_a_sample(
                     self.frame_rate,
                     self.first_timeline_frame,
-                    self.samples_done + at as u64,
+                    self.sample_of_the_clip(at as u64),
                 );
                 self.give_the_values_at(frame, 0);
                 self.run_on(&mut left[at..end], &mut right[at..end]);
@@ -429,6 +437,10 @@ impl BlockProcessor for PluginEffect {
             instance.reset();
         }
         self.given.clear();
+    }
+
+    fn about_to_be_given_sound_from_before_the_clip(&mut self, samples: usize) {
+        self.samples_before_the_clip = samples as u64;
     }
 
     fn latency(&self) -> usize {
