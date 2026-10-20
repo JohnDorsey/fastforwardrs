@@ -565,6 +565,11 @@ menu item or a window opened from one is marked.*
   with no licence are rejected; anything non-commercial or share-alike with non-commercial terms is not bundled (**Boxinator** and the
   Shadertoy-derived shaders of the ISF collection are out; **gl-transitions** are in, with notices). The user can load any shader or table from disk;
   that is not bundling. PH-16, Q-25.
+  **Amended 2026-10-20 (the maintainer's decision, for what ships with the program, plugin binaries included):** content under **GPL and LGPL licences that are compatible with
+  GPLv3** may be bundled as well (GPL-3.0, GPL-3.0-or-later, GPL-2.0-or-later, LGPL-3.0, LGPL-2.1-or-later; **not GPL-2.0-only**, which is not compatible with GPLv3), **on the
+  conditions of LG-03**: the licence text next to it, the copyright notices kept, nothing altered or renamed, the **corresponding source of that exact version** offered with
+  the release, and a line in the manifest (name, author, licence, URL, version, where the source is kept). **AGPL is not bundled** (the maintainer's decision), nor
+  anything non-commercial, share-alike with non-commercial terms, or without a licence.
 * **LG-03 [P] M** ffmpeg: a **GPL build (with `--enable-version3`) may be used and shipped** (it is GPLv3-or-later; **verified for the build on this PC**), never a
   `--enable-nonfree` build; **the corresponding source of the ffmpeg we ship is offered** (hosted by us).
 * **LG-04 [P] M** Hosting plugins that are not GPL (CLAP, LADSPA, LV2, VST3): the formats are all licensed compatibly. Whether the project adds an **explicit

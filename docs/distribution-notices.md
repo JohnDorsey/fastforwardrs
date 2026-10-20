@@ -26,7 +26,13 @@ include, so that it is not found out on the day.
 | `assets/fonts/Hack-Regular.ttf` | the Hack project (Source Foundry), with Bitstream Vera and DejaVu glyphs | MIT, and the Bitstream Vera licence (its licence file is next to it) |
 | the default fonts of egui (`epaint_default_fonts`, inside the program) | the egui project | the crate says `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`; the fonts are data that is only embedded and drawn, not code that is combined with GPL code, and their notices are in `THIRD_PARTY.md` (LG-07 asked for this check; **verdict: acceptable as data, with the notices; to be looked at again if a release ships the font files separately**) |
 
-No shader, LUT or sound ships yet. When some do, each is added here with its author, licence and URL, and only with a licence of the kinds LG-02 allows.
+No shader, LUT, sound or plugin ships yet. When some do, each is added here with its author, licence and URL, and only with a licence of the kinds LG-02 allows.
+
+**Amended 2026-10-20 (the maintainer's decision):** LG-02 now also allows **GPL and LGPL licences that are compatible with GPLv3** (GPL-3.0, GPL-3.0-or-later, GPL-2.0-or-later,
+LGPL-3.0, LGPL-2.1-or-later) for what ships, **plugin binaries included**, on the conditions of the ffmpeg section below: the licence text next to it, the copyright notices
+kept, nothing altered or renamed, and the **corresponding source of that exact version** offered with the release, with a line in the manifest (name, author, licence, URL,
+version, where the source is kept). **Not GPL-2.0-only** (not compatible with GPLv3), and **not AGPL** (the maintainer's decision). The candidates found are in
+`bundleable-clap-plugins.md`.
 
 ## ffmpeg (LG-03)
 

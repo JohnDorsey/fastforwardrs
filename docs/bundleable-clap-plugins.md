@@ -7,12 +7,18 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 You asked (2026-10-20, after Aura Lite): "find me some CLAP plugins that can be legally bundled with this project now". This is the search. **[V]** = I checked it
 myself today, on the project's own pages or release listings (GitHub's API; the listing of the files inside a zip, read from its central directory without downloading the
-zip). **[B]** = I believe it from reading, and did not check it. **Nothing here was downloaded or run in our host yet**, so *"does it load and sound right in our host"* is
-untested for every plugin below.
+zip). **[B]** = I believe it from reading, and did not check it. **The table below was written before anything was downloaded**; the last section says what the downloads showed (they load in our scanner, and how they behaved in the measurements),
+but **nobody has listened to any of them in the editor yet**.
 
 *I am not a lawyer; this is a reading of the licences by someone who has to ship the result, not legal advice.*
 
-## What the program's own rules say today
+## DECIDED 2026-10-20 (the maintainer)
+
+**LG-02 is widened** to GPL and LGPL licences compatible with GPLv3, for what ships including plugin binaries, with the conditions below. **AGPL is not allowed**, so the ZL plugins are out. The
+tier B of this page is therefore allowed; **GPL-2.0-only (Nekobi) is still out** because it is not compatible with GPLv3. The maintainer also allowed me to download every plugin that this
+allows; the results are at the end of the page (*What was downloaded and what was found*).
+
+## What the program's own rules said before
 
 * `LG-02` (plugin-system-features.md): *content that ships with the program* (shaders, tables) may be **MIT, BSD, ISC, Apache-2.0, CC0, Zlib or CC BY**, with a manifest. It was
   written for data files, and says nothing about **binaries of someone else's plugin**.
@@ -59,3 +65,27 @@ Vital, Calf and the x42 plugins I did not search for CLAP builds (Calf and x42 a
 
 Download **Dragonfly Reverb 3.2.10 (win64)** and the **ten effects of DPF-Plugins v1.7**, scan them with our scanner, run them through the same measurements as Aura Lite, and listen.
 Then Surge XT Effects, then the rest. For Linux and Ubuntu CI, the same plugins' Linux builds can be run in WSL.
+
+## What was downloaded and what was found (2026-10-20, after the decision)
+
+Downloaded to the scratch folder (not into the project), **one new folder each**, nothing run from them except by our scanner and our test harness: Dragonfly Reverb 3.2.10 (win64 and
+Linux x86_64), DPF-Plugins v1.7 (win64 and Linux x86_64), Surge XT 1.3.4 plugins-only (win64 and Linux), Airwindows Consolidated 2026-10-17 (Windows and Linux), LSP Plugins 1.2.35
+(Linux x86_64: **a .7z that I could not unpack here, because there is no 7-Zip and Windows' tar has no LZMA; its Windows build needs a registration, see above**). ZL was not downloaded (AGPL).
+
+* **Integrity [V]:** the Surge (both) and Airwindows (both) files match the checksums their projects publish; the others publish none that I found, and the zips pass their own CRC test.
+* **Licence texts [V]:** inside the files, only Airwindows ships a licence file (`LICENSE.gpl3`). The Dragonfly, DPF and Surge archives have **none**: a release would take the texts from
+  their repositories (and the source from the tag or tarball), which is part of the manifest work.
+* **Our scanner loads all of them [V], on Windows and in Ubuntu (WSL), with the same result:** 4 Dragonfly; from DPF 3BandEQ, 3BandSplitter, AmplitudeImposer, CycleShifter, glBars,
+  MaBitcrush, MaFreeverb, MaGigaverb, MaPitchshift, MVerb, PingPongPan, ProM and SoulForce (Kars and Nekobi are synths, not effects); Surge XT Effects (13 parameters, tail 96000 samples)
+  and the Surge XT synth; Airwindows Consolidated (14 parameters, tail 96000 samples). Dragonfly Hall has 18 parameters, Room 17, Plate 9, Early reflections 7.
+* **A real problem in DPF-Plugins v1.7 [V]: four of its plugins share one CLAP id** (`studio.kx.distrho.MVerb`: 3BandEQ, 3BandSplitter, MVerb and PingPongPan). Our scanner keeps the first
+  of two plugins with one key, so **3BandEQ is used and the other three are listed as "not used"; MVerb itself is hidden by 3BandEQ.** The CLAP standard says ids are unique; the fault is
+  DPF's. My recommendation **[B]**: bundle MVerb alone (and the plugins whose ids are unique), and do not make the key depend on the library file (that would change the file format).
+* **The measurements of the Aura investigation, on these plugins [V]:** on seven plugins that sound the same on every run (Dragonfly Hall and Plate, MVerb, MaGigaverb, MaFreeverb,
+  Surge XT Effects, 3BandSplitter) I ran 800 checks each (a new instance made while another is alive, running, being let go of, or after one that ran), and **not one new instance
+  sounded different from the first**. Dragonfly Room Reverb and MaPitchshift make a different sound on every run by themselves (random modulation), so they cannot be compared that way.
+  `reset()` does not make any of the reverbs sound as a new instance does, so an instance cannot be reused after a reset. **Aura Lite, in the same battery (200 checks per mode): 1
+  differing on a lone new instance, 4 when another is alive, 3 when another runs, 0 in the others.**
+* **Why Aura Lite does that [V that it depends on the memory; B that this is the whole of the cause]:** with the memory the plugin is given **cleared**, 0 of 100 new instances differed from
+  the first; after I filled and freed memory with 0xFF bytes, 86 of 100 differed; with 0xCD, 90 of 100; with random bytes, 7 of 100. **Aura Lite's sound at the start depends on what was in the
+  memory before it** (it reads memory it never wrote). The application's memory is full of old pictures and buffers, which a test process is not.
