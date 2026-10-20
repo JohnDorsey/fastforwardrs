@@ -388,19 +388,21 @@ fn two_plugins_in_one_folder_are_one_question_that_names_the_folder_and_a_plugin
         a_linked_plugin("b.so", &files[1]),
     ]));
 
-    let shown_folder = |window: &Window, folder: &Path| {
+    // (The folder as the question names it is that of a file that is there: a path that does not exist is not made absolute in the same way on every system, short names of
+    // Windows and the links of a Mac among them.)
+    let shown_folder = |window: &Window, file_in_it: &Path| {
         is_shown(
             window,
-            &crate::plugin_trust::folder_for_a_person(&crate::plugin_trust::folder_of(&folder.join("x"))),
+            &crate::plugin_trust::folder_for_a_person(&crate::plugin_trust::folder_of(file_in_it)),
         )
     };
     assert!(
-        shown_folder(&window, &one),
+        shown_folder(&window, &files[0]),
         "the first folder, with both its plugins in one question"
     );
     let at = window.rectangle_of(PLUGIN_TRUST_LABEL).center();
     window.click(at);
-    assert!(shown_folder(&window, &two), "then the other folder");
+    assert!(shown_folder(&window, &files[2]), "then the other folder");
     let at = window.rectangle_of(PLUGIN_DONT_TRUST_LABEL).center();
     window.click(at);
     assert!(
