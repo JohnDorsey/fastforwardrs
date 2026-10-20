@@ -848,6 +848,7 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
                 timeline_frame_count: 30,
                 loudness: LoudnessToExport::UNCHANGED,
                 first_timeline_frame: 0,
+                frames_of_the_clip_before: 0,
                 effects: Vec::new(),
             })],
         }],
