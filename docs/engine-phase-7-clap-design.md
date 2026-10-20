@@ -191,3 +191,15 @@ You installed a real reverb, Aura Lite, and heard three things: a roar after som
 Tests added: `a_plugin_made_for_a_stream_waits_for_…`, `the_plugins_of_streams_that_are_not_being_stopped_are_not_waited_for_…`, `a_stream_that_is_being_stopped_makes_no_more_plugins_…`, `the_wait_for_a_plugin_that_is_not_let_go_of_ends_at_the_time_it_is_given`, `a_stream_that_is_gone_is_not_waited_for_…`, `a_plugin_that_is_let_go_of_is_not_waited_for_even_if_its_stream_is_still_being_stopped`, a stream of the preview tells its runner when it is stopped, and the pre-roll one. A test plugin, `single_instance`, gives sign-flipped sound when a second instance is alive (the test library has 17 plugins now). 18 planted mistakes in the new code: all noticed (one survivor, a plugin let go of staying in the list, closed by a test).
 
 Tests rewritten on purpose: the helpers that model a seek into a clip that begins at the start of its file now say `frames_of_the_clip_before` (they said nothing, and the old pre-roll read the file); counts of test plugins 16→17 and effects 12→13.
+
+### 16.1 The first retest (2026-10-20, after 7ac4f28)
+
+You heard the roar as often as before ("maybe even slightly more"), and a new thing: a loudness warble, as if multiplied by a 10 to 30 Hz sine and zeroing out, without pops, sometimes also when a clip just plays. **I could not reproduce the warble anywhere I can measure [V], and the mitigation of 16 is not shown to help in the real application (the 0.7% was in my harness).** What I measured, each with Aura Lite on this computer:
+
+* the export of a 6 s clip of steady noise with Aura: loudness varies by at most 0.2% at 2 to 25 Hz (the dry sound: the same), and a second export is identical;
+* the preview stream of the same clip, read as fast as it comes and paced to real time: **byte for byte the export** (largest difference 0.00000);
+* Aura on its own, run through a steady chord: no modulation at 5 to 40 Hz, identical on six runs;
+* two instances alive at once, run alternately on one thread or on two threads at the same time: each identical to a lone run (so a *running* instance is not disturbed by another; only a *new* one, made while another is made or let go of, was found to start badly);
+* blocks of any size (1 to 512 samples, fixed or random): identical to blocks of 512.
+
+So the engine and the plugin, from the start of a clip, make a clean sound. What the harness lacks and the application has: the video engine and the window competing for the processor, the sound device and the supplier that feeds it, other clips and effects of your project, and the lifecycle overlaps of real seeks. Which of them gives the warble is **unknown**.
