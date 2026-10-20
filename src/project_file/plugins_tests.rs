@@ -744,3 +744,230 @@ fn an_effect_of_a_plugin_whose_ports_changed_is_kept_whole_and_the_file_is_writt
     assert!(kind_again.is_installed());
     assert_eq!(as_json(&saved(&loaded_again)), as_json(&text));
 }
+
+// --- conformance (phase 7, piece 7.8.6): what a project has of a CLAP plugin that is gone or is not what it was is kept, byte for byte ---
+
+/// A CLAP plugin as the scan makes it an effect, with a parameter of each kind that becomes a value of its own kind: a number on a logarithmic slider, a whole number, a choice
+/// (an enum, whose options are named by the numbers) and a switch (a bypass).
+fn a_clap_plugin_with_a_value_of_each_kind(parameter_ids: [u32; 4]) -> crate::project::InstalledPlugin {
+    use clap_host::scan::{AudioPort, Parameter, ScannedPlugin};
+    let port = AudioPort {
+        id: 0,
+        name: "Main".to_owned(),
+        channel_count: 2,
+        port_type: Some("stereo".to_owned()),
+        is_main: true,
+    };
+    let parameter =
+        |id: u32, name: &str, minimum: f64, maximum: f64, default: f64, flags: u32, texts: &[&str]| Parameter {
+            id,
+            name: name.to_owned(),
+            module: String::new(),
+            minimum,
+            maximum,
+            default,
+            flags,
+            texts: texts.iter().map(|text| (*text).to_owned()).collect(),
+        };
+    const STEPPED: u32 = 1;
+    const BYPASS: u32 = 1 << 4;
+    const ENUM: u32 = 1 << 16;
+    let scanned = ScannedPlugin {
+        description: clap_host::PluginDescription {
+            id: "com.example.multi".to_owned(),
+            name: "Multi".to_owned(),
+            vendor: "Example Maker".to_owned(),
+            ..clap_host::PluginDescription::default()
+        },
+        audio_inputs: vec![port.clone()],
+        audio_outputs: vec![port],
+        parameters: vec![
+            parameter(parameter_ids[0], "Cutoff", 20.0, 20_000.0, 1_000.0, 0, &[]),
+            parameter(parameter_ids[1], "Voices", 1.0, 8.0, 2.0, STEPPED, &[]),
+            parameter(
+                parameter_ids[2],
+                "Mode",
+                0.0,
+                2.0,
+                1.0,
+                STEPPED | ENUM,
+                &["soft", "hard", "wild"],
+            ),
+            parameter(parameter_ids[3], "Bypass", 0.0, 1.0, 0.0, STEPPED | BYPASS, &[]),
+        ],
+        latency: 0,
+        tail: Some(48_000),
+        has_state: false,
+        problem: None,
+    };
+    crate::plugin_scan::effect_of_a_clap_plugin(std::path::Path::new("/plugins/multi.clap"), &scanned)
+        .expect("an effect")
+}
+
+#[test]
+fn a_clap_effect_with_a_number_a_whole_number_a_choice_and_a_switch_is_kept_whole_where_the_plugin_is_gone_and_written_back_byte_for_byte()
+ {
+    use crate::project::{AnimationTarget, EffectKind, set_installed_plugins};
+    use crate::test_support::{make_a_keyframe, put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    let plugin = a_clap_plugin_with_a_value_of_each_kind([10, 11, 12, 13]);
+    set_installed_plugins(vec![plugin.clone()]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    assert_eq!(kind.key(), "clap:com.example.multi");
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let values = [
+        PropertyValue::Number(440.0),
+        PropertyValue::Number(4.0),
+        PropertyValue::Words("2".to_owned()),
+        PropertyValue::Flag(true),
+    ];
+    let instance = put_an_effect_on(&mut project, video, kind, &values);
+    let cutoff = PropertyId::effect_value(kind, instance, 0);
+    make_a_keyframe(&mut project, video, cutoff, 10, PropertyValue::Number(100.0));
+    make_a_keyframe(&mut project, video, cutoff, 50, PropertyValue::Number(9_000.0));
+    let text = saved(&project);
+    let file = as_json(&text);
+    let snapshot = file["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|snapshot| snapshot["key"] == "clap:com.example.multi")
+        .expect("the type of effect has its snapshot in the file");
+    assert_eq!(snapshot["category"], "Example Maker");
+    assert_eq!(
+        snapshot["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|parameter| parameter["id"].clone())
+            .collect::<Vec<_>>(),
+        [json!("param10"), json!("param11"), json!("param12"), json!("param13")],
+        "a value is named by the id the plugin gave the parameter, and not by its name"
+    );
+    assert_eq!(
+        snapshot["params"][2]["type"], "words",
+        "a choice is words, an option named by its number"
+    );
+
+    // The plugin is not here when the file is read: the effect is kept whole, and the file is what it was.
+    set_installed_plugins(Vec::new());
+    let loaded = project_from_json_text(&text).unwrap();
+    let there = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let effect = loaded.effects_of(there).unwrap().instance(instance).unwrap().clone();
+    assert_eq!(effect.kind().key(), "clap:com.example.multi");
+    assert!(!effect.kind().is_installed());
+    assert_eq!(effect.values(), values);
+    assert_eq!(as_json(&saved(&loaded)), file, "nothing is lost, and nothing is added");
+    assert_eq!(saved(&loaded), text, "byte for byte");
+
+    // The plugin is found: the same effect works, and the file is the same again.
+    set_installed_plugins(vec![plugin]);
+    let found = project_from_json_text(&text).unwrap();
+    let kind_again = found
+        .effects_of(AnimationTarget::Clip(found.tracks()[2].entries()[0].id()))
+        .unwrap()
+        .instance(instance)
+        .unwrap()
+        .kind();
+    assert!(kind_again.is_installed());
+    assert_eq!(saved(&found), text, "byte for byte");
+}
+
+#[test]
+fn a_clap_effect_of_a_plugin_whose_parameter_ids_changed_is_another_plugin_and_the_effect_is_kept_whole() {
+    use crate::project::{AnimationTarget, EffectKind, set_installed_plugins};
+    use crate::test_support::{put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    let before = a_clap_plugin_with_a_value_of_each_kind([10, 11, 12, 13]);
+    set_installed_plugins(vec![before.clone()]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let values = [
+        PropertyValue::Number(440.0),
+        PropertyValue::Number(4.0),
+        PropertyValue::Words("0".to_owned()),
+        PropertyValue::Flag(false),
+    ];
+    let instance = put_an_effect_on(&mut project, video, kind, &values);
+    let text = saved(&project);
+
+    // The plugin of the same id is found again, but one of its parameters has another id (a new version of it): it cannot stand in, whatever the names are.
+    set_installed_plugins(vec![a_clap_plugin_with_a_value_of_each_kind([10, 11, 99, 13])]);
+    let loaded = project_from_json_text(&text).unwrap();
+    let effect = loaded
+        .effects_of(AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id()))
+        .unwrap()
+        .instance(instance)
+        .unwrap()
+        .clone();
+    assert!(
+        !effect.kind().is_installed(),
+        "a plugin whose parameter ids changed is another plugin"
+    );
+    assert_eq!(effect.values(), values, "and the effect has its values");
+    assert_eq!(
+        saved(&loaded),
+        text,
+        "nothing is lost, and nothing is added: byte for byte"
+    );
+
+    // A plugin that has the same ids and more besides can stand in (the snapshot is a part of it).
+    set_installed_plugins(vec![before]);
+    let again = project_from_json_text(&text).unwrap();
+    assert!(
+        again
+            .effects_of(AnimationTarget::Clip(again.tracks()[2].entries()[0].id()))
+            .unwrap()
+            .instance(instance)
+            .unwrap()
+            .kind()
+            .is_installed()
+    );
+    assert_eq!(saved(&again), text);
+}
+
+#[test]
+fn a_clap_effect_whose_plugin_kind_of_value_changed_is_another_plugin_too() {
+    use crate::project::{AnimationTarget, EffectKind, set_installed_plugins};
+    use crate::test_support::{put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    set_installed_plugins(vec![a_clap_plugin_with_a_value_of_each_kind([10, 11, 12, 13])]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let instance = put_an_effect_on(
+        &mut project,
+        video,
+        kind,
+        &[
+            PropertyValue::Number(440.0),
+            PropertyValue::Number(4.0),
+            PropertyValue::Words("1".to_owned()),
+            PropertyValue::Flag(true),
+        ],
+    );
+    let text = saved(&project);
+
+    // The parameter 12 was an enum (words) and is now a number: the value is not the kind it was.
+    let mut changed = a_clap_plugin_with_a_value_of_each_kind([10, 11, 12, 13]);
+    let parameters = changed.descriptor.parameters.to_mut();
+    parameters[2].default = PropertyValue::Number(1.0);
+    parameters[2].control = crate::project::ParameterControl::Automatic;
+    parameters[2].range = Some((0.0, 2.0));
+    set_installed_plugins(vec![changed]);
+    let loaded = project_from_json_text(&text).unwrap();
+    let effect = loaded
+        .effects_of(AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id()))
+        .unwrap()
+        .instance(instance)
+        .unwrap()
+        .clone();
+
+    assert!(!effect.kind().is_installed());
+    assert_eq!(saved(&loaded), text, "byte for byte");
+}
