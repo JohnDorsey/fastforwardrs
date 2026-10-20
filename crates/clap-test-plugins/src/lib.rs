@@ -53,7 +53,7 @@ pub const THREADS: &str = "org.fastforwardrs.test.threads";
 pub const FAILS_TO_ACTIVATE: &str = "org.fastforwardrs.test.fails_to_activate";
 pub const FAILS_TO_PROCESS: &str = "org.fastforwardrs.test.fails_to_process";
 pub const PANICS: &str = "org.fastforwardrs.test.panics";
-/// Stereo; at its first block it asks the host for a restart and for a call on the main thread, and in that call it says that its parameters changed.
+/// Stereo, with the parameter `Gain` of the gain plugin; at its first block it asks the host for a restart and for a call on the main thread, and in that call it says that its parameters changed.
 pub const CALLBACKS: &str = "org.fastforwardrs.test.callbacks";
 /// A stereo main input and a second input (a side chain); the sound is the main input plus the first channel of the side chain.
 pub const SIDE_CHAIN: &str = "org.fastforwardrs.test.side_chain";
@@ -61,6 +61,8 @@ pub const SIDE_CHAIN: &str = "org.fastforwardrs.test.side_chain";
 pub const TAIL_FOREVER: &str = "org.fastforwardrs.test.tail_forever";
 /// The sound times the sample rate it was activated at, over 1000.
 pub const RATE: &str = "org.fastforwardrs.test.rate";
+/// Like `latency`, and at its first block it asks for a call on the main thread, in which it says that its latency changed (so the host makes it again).
+pub const LATENCY_CHANGES: &str = "org.fastforwardrs.test.latency_changes";
 
 /// What the library is asked to do wrong, if anything: the value of the environment variable `FFRS_TEST_PLUGIN`, read once, when the library is first asked. It is for the
 /// tests of the scan, which run the scan program (a process of its own) with the variable set; **in a test program the variable is never set**.
@@ -114,9 +116,10 @@ const KIND_CALLBACKS: u8 = 11;
 const KIND_SIDE_CHAIN: u8 = 12;
 const KIND_TAIL_FOREVER: u8 = 13;
 const KIND_RATE: u8 = 14;
+const KIND_LATENCY_CHANGES: u8 = 15;
 
 /// The ids of the plugins, in the order of the kinds.
-const IDS: [&str; 15] = [
+const IDS: [&str; 16] = [
     GAIN,
     SWAP,
     MONO_HALF,
@@ -132,8 +135,9 @@ const IDS: [&str; 15] = [
     SIDE_CHAIN,
     TAIL_FOREVER,
     RATE,
+    LATENCY_CHANGES,
 ];
-const NAMES: [&str; 15] = [
+const NAMES: [&str; 16] = [
     "Gain",
     "Swap",
     "Mono half",
@@ -149,6 +153,7 @@ const NAMES: [&str; 15] = [
     "Side chain",
     "Tail forever",
     "Rate",
+    "Latency changes",
 ];
 
 /// What the parameters of a plugin are, as `(id, name, minimum, maximum, default, flags)`.
@@ -176,7 +181,7 @@ fn parameters_of(kind: u8) -> &'static [(u32, &'static str, f64, f64, f64, Param
         ),
     ];
     match kind {
-        KIND_GAIN => &GAIN_PARAMETER,
+        KIND_GAIN | KIND_CALLBACKS => &GAIN_PARAMETER,
         KIND_CHOICE => &CHOICE_PARAMETERS,
         _ => &[],
     }
@@ -227,7 +232,7 @@ impl<const KIND: u8> Plugin for TestPlugin<KIND> {
         if !parameters_of(KIND).is_empty() {
             builder.register::<PluginParams>();
         }
-        if KIND == KIND_LATENCY {
+        if KIND == KIND_LATENCY || KIND == KIND_LATENCY_CHANGES {
             builder.register::<PluginLatency>();
         }
         if KIND == KIND_TAIL || KIND == KIND_TAIL_FOREVER {
@@ -246,8 +251,8 @@ impl<'a, const KIND: u8> PluginMainThread<'a, Shared> for Main<'a, KIND> {
         {
             params.rescan(&self.host, ParamRescanFlags::ALL);
         }
-        // (The `latency` plugin says, in the call it asked for, that its latency changed.)
-        if KIND == KIND_LATENCY
+        // (The `latency_changes` plugin says, in the call it asked for, that its latency changed.)
+        if KIND == KIND_LATENCY_CHANGES
             && let Some(latency) = self.host.get_extension::<HostLatency>()
         {
             latency.changed(&self.host);
@@ -365,6 +370,8 @@ pub struct Processor<'a, const KIND: u8> {
     asked: bool,
     /// The sample rate it was activated at.
     sample_rate: f64,
+    /// The most frames it was activated for: a host that gives it more breaks the contract, and the plugin says so.
+    most_frames: u32,
     /// The values of the parameters, as the last event that was applied says.
     values: [f64; 2],
     /// What the plugin has said, the last `LATENCY_SAMPLES` samples of each channel (`latency`), or the last `ECHO_SAMPLES` samples of what it gave (`tail`).
@@ -380,7 +387,7 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
         audio_config: PluginAudioConfiguration,
     ) -> Result<Self, PluginError> {
         let length = match KIND {
-            KIND_LATENCY => LATENCY_SAMPLES as usize,
+            KIND_LATENCY | KIND_LATENCY_CHANGES => LATENCY_SAMPLES as usize,
             KIND_TAIL => ECHO_SAMPLES,
             _ => 0,
         };
@@ -401,6 +408,7 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
             threads_were_right,
             asked: false,
             sample_rate: audio_config.sample_rate,
+            most_frames: audio_config.max_frames_count,
             values: [shared.get(0), shared.get(1)],
             memory: [vec![0.0; length], vec![0.0; length]],
             position: 0,
@@ -408,6 +416,11 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
     }
 
     fn process(&mut self, _process: Process, mut audio: Audio, events: Events) -> Result<ProcessStatus, PluginError> {
+        if audio.frames_count() > self.most_frames {
+            return Err(PluginError::Message(
+                "it was given more frames than it was activated for",
+            ));
+        }
         // The events are in order of time: the sound is made in stretches, each from one event to the next.
         for how in [
             "crash_when_run",
@@ -417,7 +430,7 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
         ] {
             misbehave_if_asked(how);
         }
-        if (KIND == KIND_CALLBACKS || KIND == KIND_LATENCY) && !self.asked {
+        if (KIND == KIND_CALLBACKS || KIND == KIND_LATENCY_CHANGES) && !self.asked {
             self.asked = true;
             if KIND == KIND_CALLBACKS {
                 self.host.request_restart();
@@ -489,7 +502,7 @@ impl<const KIND: u8> Processor<'_, KIND> {
     /// Makes the samples `from` up to `to` of every channel.
     fn process_stretch(&mut self, audio: &mut Audio, from: usize, to: usize) -> Result<(), PluginError> {
         let multiplier = match KIND {
-            KIND_GAIN => self.values[0] as f32,
+            KIND_GAIN | KIND_CALLBACKS => self.values[0] as f32,
             KIND_MONO_HALF => 0.5,
             KIND_CHOICE => ((self.values[0] as i64 + 1) * (self.values[1] as i64 + 1)) as f32,
             KIND_THREADS if !self.threads_were_right => -1.0,
@@ -556,7 +569,7 @@ impl<const KIND: u8> Processor<'_, KIND> {
                     _ => heard,
                 };
                 let made = match KIND {
-                    KIND_LATENCY => {
+                    KIND_LATENCY | KIND_LATENCY_CHANGES => {
                         let slot = (self.position + moment) % LATENCY_SAMPLES as usize;
                         let earlier = self.memory[channel][slot];
                         self.memory[channel][slot] = source;
@@ -620,6 +633,7 @@ impl PluginFactoryImpl for Factory {
             KIND_SWAP => made!(KIND_SWAP),
             KIND_MONO_HALF => made!(KIND_MONO_HALF),
             KIND_LATENCY => made!(KIND_LATENCY),
+            KIND_LATENCY_CHANGES => made!(KIND_LATENCY_CHANGES),
             KIND_TAIL => made!(KIND_TAIL),
             KIND_CHOICE => made!(KIND_CHOICE),
             KIND_INSTRUMENT => made!(KIND_INSTRUMENT),

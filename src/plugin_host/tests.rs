@@ -852,9 +852,11 @@ fn a_plugin_effect_of(
         .unwrap()
         .instances())
         .map(|_| {
-            library
-                .instantiate(plugin.address.ladspa_index().unwrap(), crate::sound_engine::SAMPLE_RATE)
-                .unwrap()
+            Box::new(super::LadspaCopy(
+                library
+                    .instantiate(plugin.address.ladspa_index().unwrap(), crate::sound_engine::SAMPLE_RATE)
+                    .unwrap(),
+            )) as Box<dyn super::PluginInstance>
         })
         .collect();
     let notes = Notes::default();
@@ -1116,11 +1118,11 @@ fn a_plugin_that_fails_to_run_is_left_out_for_the_rest_of_the_play_and_said_once
     plugin.audio_outputs = 2;
     let plugin: &'static InstalledPlugin = Box::leak(Box::new(plugin));
     let library = ladspa_host::Library::open(&plugin.library).unwrap();
-    let instances = vec![
+    let instances: Vec<Box<dyn super::PluginInstance>> = vec![Box::new(super::LadspaCopy(
         library
             .instantiate(plugin.address.ladspa_index().unwrap(), crate::sound_engine::SAMPLE_RATE)
             .unwrap(),
-    ];
+    ))];
     let notes = Notes::default();
     let mut effect = PluginEffect::new(
         instances,
@@ -1279,27 +1281,457 @@ fn sound_more_than_a_thousand_times_as_loud_as_the_loudest_is_silence_and_said_o
     assert_eq!(notes.lock().unwrap().len(), 1, "said once, though it happened again");
 }
 
+// --- CLAP plugins (piece 7.8.4), with the real test plugins of `crates/clap-test-plugins` loaded in this process ---
+
+/// The plugins of the CLAP test library, as the scan makes them effects.
+fn the_clap_test_plugins() -> Vec<InstalledPlugin> {
+    static SCANNED: std::sync::OnceLock<Vec<InstalledPlugin>> = std::sync::OnceLock::new();
+    SCANNED
+        .get_or_init(|| {
+            let path = clap_test_plugins::library_file_for_tests();
+            let scan = clap_host::scan::scan_library(&path, |_| {}).expect("the CLAP test library is scanned");
+            scan.plugins
+                .iter()
+                .filter_map(|plugin| crate::plugin_scan::effect_of_a_clap_plugin(&path, plugin).ok())
+                .collect()
+        })
+        .clone()
+}
+
+/// The kind of the CLAP test plugin `id`, with the list of what is installed made of the CLAP test plugins.
+fn the_clap_kind_of(id: &str) -> EffectKind {
+    set_installed_plugins(the_clap_test_plugins());
+    let key = format!("clap:{id}");
+    EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key() == key)
+        .unwrap_or_else(|| panic!("no CLAP plugin called {id}"))
+}
+
+fn the_clap_effect(id: &str, values: Vec<PropertyValue>) -> LayerEffect {
+    LayerEffect {
+        instance: EffectInstanceId::FIRST,
+        kind: the_clap_kind_of(id),
+        values,
+        animation: Animation::default(),
+        tables: Vec::new(),
+    }
+}
+
+fn numbers(values: &[f32]) -> Vec<PropertyValue> {
+    values.iter().map(|value| PropertyValue::Number(*value)).collect()
+}
+
+/// The two channels of a sound, and what the plugins said while it was made.
+type SoundAndNotes = (Vec<f32>, Vec<f32>, Notes);
+
+/// The sound of `frames` frames of the ramp, with the effect on it, in blocks of `block`; and the same with no effect.
+fn with_and_without(effect: LayerEffect, frames: u64, block: usize) -> (SoundAndNotes, (Vec<f32>, Vec<f32>)) {
+    let with = sound_of(
+        the_clip(0, frames, 0, vec![effect]),
+        a_host_that_runs_everything(),
+        false,
+        block,
+    );
+    let (left, right, _) = sound_of(
+        the_clip(0, frames, 0, Vec::new()),
+        a_host_that_runs_everything(),
+        false,
+        block,
+    );
+    (with, (left, right))
+}
+
 #[test]
-fn a_clap_plugin_is_found_but_not_run_yet_the_sound_goes_through_it_and_the_note_says_so_once() {
+fn a_clap_gain_plugin_on_a_clip_in_the_graph_gives_the_arithmetic_exactly_for_blocks_of_any_size() {
     let _alone = the_installed_plugins_to_myself();
-    let mut plugin = the_test_plugins().remove(0);
-    plugin.descriptor.key = "clap:org.example.gain".into();
-    plugin.address = crate::project::PluginAddress::Clap {
-        id: "org.example.gain".to_owned(),
+    let half = |plain: &[f32]| plain.iter().map(|sample| sample * 0.5).collect::<Vec<f32>>();
+    for block in [512, 100, 4096, 1] {
+        let frames = if block == 1 { 1 } else { 45 };
+
+        let ((left, right, notes), (plain_left, plain_right)) =
+            with_and_without(the_clap_effect(clap_test_plugins::GAIN, numbers(&[0.5])), frames, block);
+
+        assert_eq!(left, half(&plain_left), "blocks of {block}, left");
+        assert_eq!(right, half(&plain_right), "blocks of {block}, right");
+        assert!(notes.lock().unwrap().is_empty(), "{:?}", notes.lock().unwrap());
+    }
+}
+
+#[test]
+fn a_clap_value_that_is_animated_is_what_the_keyframes_say_at_the_frame_of_each_stretch_of_32_samples_and_the_same_for_any_blocks()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let mut effect = the_clap_effect(clap_test_plugins::GAIN, numbers(&[1.0]));
+    let gain = PropertyId::effect_value(effect.kind, EffectInstanceId::FIRST, 0);
+    let keyframe = |frame, value| Keyframe {
+        frame,
+        value: PropertyValue::Number(value),
     };
+    // From 0 at the frame 10 to 4 at the frame 40, on a clip that begins at the frame 10.
+    effect.animation =
+        Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(10, 0.0), keyframe(40, 4.0)]))]);
+    let samples = 48_000;
+    let made = |block: usize| {
+        let (mut processor, _) = processor_of(&effect, 10);
+        let (mut left, mut right) = (vec![1.0_f32; samples], vec![1.0_f32; samples]);
+        for start in (0..samples).step_by(block) {
+            let end = (start + block).min(samples);
+            processor.process(&mut left[start..end], &mut right[start..end]);
+        }
+        (left, right)
+    };
+
+    let (left, right) = made(512);
+
+    for index in [0, 31, 32, 1599, 1600, 1601, 24_000, 40_000, 47_999] {
+        let stretch_begins_at = (index / 32) * 32;
+        let frame = 10 + stretch_begins_at as u64 * 30 / 48_000;
+        let expected = ((frame - 10) as f32 / 30.0 * 4.0).clamp(0.0, 4.0);
+        assert!(
+            (left[index] - expected).abs() < 1e-4,
+            "sample {index}: the gain is {} and the keyframes say {expected} at frame {frame}",
+            left[index]
+        );
+        assert_eq!(left[index], right[index]);
+    }
+    // The places that the keyframes are looked at are the same whatever the blocks are (unlike a plugin that is run in pieces).
+    for block in [13, 100, 1000, 4096] {
+        assert_eq!(made(block), (left.clone(), right.clone()), "blocks of {block}");
+    }
+}
+
+#[test]
+fn a_clap_value_changes_at_the_sample_where_its_stretch_begins_and_not_before() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut effect = the_clap_effect(clap_test_plugins::GAIN, numbers(&[1.0]));
+    let gain = PropertyId::effect_value(effect.kind, EffectInstanceId::FIRST, 0);
+    let keyframe = |frame, value| Keyframe {
+        frame,
+        value: PropertyValue::Number(value),
+    };
+    // 0 at the frame 0, 3 at the frame 3: a frame is 1600 samples, so the gain is 0 for 1600 samples, 1 for the next 1600...
+    effect.animation =
+        Animation::from_keyframes([(gain, Keyframes::from_unordered([keyframe(0, 0.0), keyframe(3, 3.0)]))]);
+    let (mut processor, _) = processor_of(&effect, 0);
+    let (mut left, mut right) = (vec![1.0_f32; 4800], vec![1.0_f32; 4800]);
+
+    processor.process(&mut left, &mut right);
+
+    assert_eq!(
+        (left[1599], left[1600]),
+        (0.0, 1.0),
+        "the value is the next at the sample the frame begins"
+    );
+    assert_eq!((left[3199], left[3200]), (1.0, 2.0));
+}
+
+#[test]
+fn a_clap_plugin_with_a_latency_is_made_up_for_in_the_graph_so_the_sound_is_where_it_was_for_any_blocks() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut processor, _) = processor_of(&the_clap_effect(clap_test_plugins::LATENCY, Vec::new()), 0);
+    assert_eq!(
+        processor.latency(),
+        clap_test_plugins::LATENCY_SAMPLES as usize,
+        "the effect says the latency of the plugin"
+    );
+    let (mut left, mut right) = (vec![1.0_f32; 8], vec![1.0_f32; 8]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(
+        left, [0.0; 8],
+        "without the graph the sound is late: silence while the plugin fills up"
+    );
+
+    for block in [512, 100, 1, 4096] {
+        let frames = if block == 1 { 1 } else { 45 };
+
+        let ((left, right, notes), (plain_left, plain_right)) =
+            with_and_without(the_clap_effect(clap_test_plugins::LATENCY, Vec::new()), frames, block);
+
+        assert_eq!(left, plain_left, "blocks of {block}, left");
+        assert_eq!(right, plain_right, "blocks of {block}, right");
+        assert!(notes.lock().unwrap().is_empty(), "{:?}", notes.lock().unwrap());
+    }
+}
+
+#[test]
+fn a_clap_plugin_of_one_channel_is_made_twice_and_one_with_a_side_chain_is_given_silence_for_it() {
+    let _alone = the_installed_plugins_to_myself();
+    let ((left, right, _), (plain_left, plain_right)) =
+        with_and_without(the_clap_effect(clap_test_plugins::MONO_HALF, Vec::new()), 3, 512);
+    assert_eq!(left, plain_left.iter().map(|sample| sample * 0.5).collect::<Vec<_>>());
+    assert_eq!(right, plain_right.iter().map(|sample| sample * 0.5).collect::<Vec<_>>());
+
+    let ((left, right, _), (plain_left, plain_right)) =
+        with_and_without(the_clap_effect(clap_test_plugins::SIDE_CHAIN, Vec::new()), 3, 512);
+    assert_eq!((left, right), (plain_left, plain_right), "the main input plus silence");
+
+    let ((left, right, _), (plain_left, plain_right)) =
+        with_and_without(the_clap_effect(clap_test_plugins::SWAP, Vec::new()), 3, 512);
+    assert_eq!(
+        (left, right),
+        (plain_right, plain_left),
+        "the channels are given to each other"
+    );
+}
+
+#[test]
+fn a_clap_choice_is_given_as_the_number_of_its_option_and_a_whole_number_as_it_is() {
+    let _alone = the_installed_plugins_to_myself();
+    // `Steps` 2 and `Mode` option 1: the sound times (2 + 1) times (1 + 1).
+    let values = vec![PropertyValue::Number(2.0), PropertyValue::Words("1".to_owned())];
+
+    let ((left, _, _), (plain, _)) = with_and_without(the_clap_effect(clap_test_plugins::CHOICE, values), 3, 512);
+
+    assert_eq!(left, plain.iter().map(|sample| sample * 6.0).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_clap_plugin_that_checks_its_threads_is_told_the_truth_when_it_runs_in_the_graph() {
+    let _alone = the_installed_plugins_to_myself();
+
+    let ((left, right, _), (plain_left, plain_right)) =
+        with_and_without(the_clap_effect(clap_test_plugins::THREADS, Vec::new()), 3, 512);
+
+    assert_eq!(
+        (left, right),
+        (plain_left, plain_right),
+        "the sign is not changed: it was made, activated and told which thread is which as the contract says"
+    );
+}
+
+#[test]
+fn a_clap_plugin_that_asks_to_be_made_again_is_made_again_between_blocks_and_given_its_values_again() {
+    let _alone = the_installed_plugins_to_myself();
+    let half = |plain: &[f32]| plain.iter().map(|sample| sample * 0.5).collect::<Vec<f32>>();
+
+    let ((left, right, notes), (plain_left, plain_right)) =
+        with_and_without(the_clap_effect(clap_test_plugins::CALLBACKS, numbers(&[0.5])), 45, 100);
+
+    assert_eq!(
+        (left, right),
+        (half(&plain_left), half(&plain_right)),
+        "each time it is made again it is told its value again, so it is not heard to be made again"
+    );
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(
+        said.len(),
+        1,
+        "it asks every time it is made, so the limit is reached and said once: {said:?}"
+    );
+    assert!(said[0].contains("more than 5 times"), "{said:?}");
+}
+
+#[test]
+fn a_clap_plugin_that_says_process_failed_is_left_out_and_said_and_the_sound_is_as_it_was() {
+    let _alone = the_installed_plugins_to_myself();
+    // The gain, said to be the plugin that fails when it processes (and to have none of the gain's values).
+    let mut plugin = the_clap_kind_of(clap_test_plugins::GAIN)
+        .installed_plugin()
+        .unwrap()
+        .clone();
+    plugin.descriptor.key = format!("clap:{}", clap_test_plugins::FAILS_TO_PROCESS).into();
+    plugin.descriptor.parameters = std::borrow::Cow::Owned(Vec::new());
+    plugin.address = crate::project::PluginAddress::Clap {
+        id: clap_test_plugins::FAILS_TO_PROCESS.to_owned(),
+    };
+    plugin.value_handles = Vec::new();
+    set_installed_plugins(vec![plugin]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let effect = LayerEffect {
+        instance: EffectInstanceId::FIRST,
+        kind,
+        values: Vec::new(),
+        animation: Animation::default(),
+        tables: Vec::new(),
+    };
+
+    let ((left, right, notes), (plain_left, plain_right)) = with_and_without(effect, 3, 512);
+
+    assert_eq!((left, right), (plain_left, plain_right));
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("could not be run") && said[0].contains("unchanged"),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn a_clap_plugin_that_is_not_the_one_that_was_scanned_is_not_run_and_says_to_scan_again() {
+    let _alone = the_installed_plugins_to_myself();
+    for (what, change) in [
+        (
+            "a value that the plugin has no parameter for",
+            Box::new(|plugin: &mut InstalledPlugin| plugin.value_handles = vec![99])
+                as Box<dyn Fn(&mut InstalledPlugin)>,
+        ),
+        (
+            "one of two values that the plugin has no parameter for",
+            Box::new(|plugin: &mut InstalledPlugin| plugin.value_handles = vec![1, 99]),
+        ),
+        (
+            "other channels",
+            Box::new(|plugin: &mut InstalledPlugin| {
+                plugin.audio_inputs = 1;
+                plugin.audio_outputs = 1;
+            }),
+        ),
+    ] {
+        let mut plugin = the_clap_kind_of(clap_test_plugins::GAIN)
+            .installed_plugin()
+            .unwrap()
+            .clone();
+        change(&mut plugin);
+        set_installed_plugins(vec![plugin]);
+        let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
+        let host = PluginHost::new();
+        host.allow_everything();
+        let notes = Notes::default();
+
+        assert!(ask(&host, &effect, &notes).is_none(), "{what}");
+
+        let said = notes.lock().unwrap().clone();
+        assert_eq!(said.len(), 1, "{what}: {said:?}");
+        assert!(said[0].contains("scan again"), "{what}: {said:?}");
+    }
+}
+
+#[test]
+fn a_clap_library_is_loaded_only_from_a_folder_that_was_said_yes_to_and_is_in_the_breadcrumb_before_it_is() {
+    let _alone = the_installed_plugins_to_myself();
+    let effect = the_clap_effect(clap_test_plugins::GAIN, numbers(&[1.0]));
+    let library = effect.kind.installed_plugin().unwrap().library.clone();
+    let host = PluginHost::new();
+    let notes = Notes::default();
+    let folder = tempfile::tempdir().unwrap();
+    let breadcrumb = folder.path().join("in_use.json");
+    host.keep_a_breadcrumb(crate::plugin_scan::Breadcrumb::at(breadcrumb.clone()));
+
+    assert!(
+        ask(&host, &effect, &notes).is_none(),
+        "nobody has said yes to the folder"
+    );
+    assert!(host.loaded_libraries().is_empty());
+    assert!(!breadcrumb.exists(), "nothing was loaded, so nothing is written");
+    let wanted = host.take_wanted();
+    assert_eq!(wanted.len(), 1);
+    assert_eq!(wanted[0].folder, folder_of(&library));
+
+    host.approve_folder(&folder_of(&library));
+    assert!(ask(&host, &effect, &notes).is_some());
+    assert_eq!(host.loaded_libraries(), std::slice::from_ref(&library));
+    let written = std::fs::read_to_string(&breadcrumb).expect("the library was written down before it was loaded");
+    assert!(written.contains("clap_test_plugins"), "{written}");
+}
+
+#[test]
+fn a_clap_library_that_cannot_be_loaded_is_said_and_the_sound_goes_through() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = the_clap_kind_of(clap_test_plugins::GAIN)
+        .installed_plugin()
+        .unwrap()
+        .clone();
+    plugin.library = PathBuf::from("/nowhere/at/all/gone.clap");
     set_installed_plugins(vec![plugin]);
     let effect = the_effect(EffectKind::installed_plugin_kinds()[0], &[1.0]);
     let host = PluginHost::new();
     host.allow_everything();
     let notes = Notes::default();
 
-    assert!(ask(&host, &effect, &notes).is_none(), "nothing is made of it");
     assert!(ask(&host, &effect, &notes).is_none());
 
     let said = notes.lock().unwrap().clone();
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(
-        said[0].contains("CLAP") && said[0].contains("not run yet") && said[0].contains("unchanged"),
+        said[0].contains("could not be loaded") && said[0].contains("gone.clap"),
         "{said:?}"
     );
+}
+
+#[test]
+fn a_clap_copy_that_asks_to_be_made_again_is_made_again_when_the_blocks_are_between() {
+    use super::instance::{ClapCopy, ClapMaker, PluginInstance};
+    let library = clap_host::Library::open(&clap_test_plugins::library_file_for_tests()).unwrap();
+    let worker = clap_host::MainThread::start();
+    let maker = || ClapMaker {
+        worker: Arc::clone(&worker),
+        library: library.clone(),
+        id: clap_test_plugins::CALLBACKS.to_owned(),
+    };
+    let mut copy = ClapCopy::new(maker().make().unwrap(), maker());
+    assert_eq!(copy.between_blocks(), BetweenBlocks::default(), "nothing was asked for");
+    let (mut input, mut output) = ([vec![1.0_f32; 8], vec![1.0; 8]], [vec![0.0_f32; 8], vec![0.0; 8]]);
+    let [in_left, in_right] = &mut input;
+    let [out_left, out_right] = &mut output;
+
+    copy.run(&mut [in_left, in_right], &mut [out_left, out_right], 8)
+        .unwrap();
+    let done = copy.between_blocks();
+
+    assert!(done.was_restarted, "the plugin asked in its first block");
+    assert_eq!(done.note, None, "its latency is the same");
+    assert_eq!(
+        copy.between_blocks(),
+        BetweenBlocks::default(),
+        "the new copy has asked for nothing yet"
+    );
+}
+
+#[test]
+fn a_clap_plugin_that_asks_to_be_made_again_every_time_is_made_again_a_few_times_and_then_goes_on_as_it_is_and_it_is_said_once()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let latency = clap_test_plugins::LATENCY_SAMPLES as usize;
+    let most = super::instance::MOST_RESTARTS_OF_A_COPY;
+
+    let ((left, _, notes), (plain, _)) =
+        with_and_without(the_clap_effect(clap_test_plugins::LATENCY_CHANGES, Vec::new()), 45, 100);
+
+    // Each time it was made again it began with nothing in its memory: a gap as long as its latency at the start of each of the blocks that it was made again before.
+    for restart in 0..most {
+        let from = restart * 100;
+        assert_eq!(
+            &left[from..from + latency],
+            &vec![0.0; latency][..],
+            "the gap of the restart number {restart}"
+        );
+        assert_eq!(
+            &left[from + latency..from + 100],
+            &plain[from + latency..from + 100],
+            "and then the sound"
+        );
+    }
+    assert_eq!(
+        &left[most * 100..],
+        &plain[most * 100..],
+        "after the last time it goes on as it is"
+    );
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("more than 5 times"), "{said:?}");
+}
+
+#[test]
+fn the_places_where_the_keyframes_are_looked_at_in_a_piece_are_its_start_and_every_32nd_sample_of_the_clip() {
+    use super::places_to_look_in;
+    assert_eq!(places_to_look_in(0, 100, true), [0, 32, 64, 96]);
+    assert_eq!(
+        places_to_look_in(10, 100, true),
+        [0, 22, 54, 86],
+        "the sample 32 of the clip is the place 22 of a piece that begins at 10"
+    );
+    assert_eq!(places_to_look_in(32, 64, true), [0, 32]);
+    assert_eq!(places_to_look_in(31, 2, true), [0, 1]);
+    assert_eq!(
+        places_to_look_in(33, 31, true),
+        [0],
+        "no multiple of 32 within the piece but its start"
+    );
+    assert_eq!(
+        places_to_look_in(0, 100, false),
+        [0],
+        "values that are not animated are looked at once"
+    );
+    assert_eq!(places_to_look_in(5, 1, true), [0]);
 }

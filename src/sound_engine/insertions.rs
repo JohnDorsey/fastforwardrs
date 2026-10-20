@@ -13,6 +13,13 @@ pub trait BlockProcessor: Send {
 
     /// Forgets what it has heard (a seek).
     fn reset(&mut self);
+
+    /// How many samples later than the sound that goes in the sound that comes out is, in samples at the rate of the sound engine (a limiter that looks ahead). **The graph
+    /// makes up for it for the effects of a clip**: it gives the effects of a clip that many samples more than the clip has before the first sample is heard, and the sound that
+    /// comes out of them is where the picture is. 0 for an effect that does not delay the sound.
+    fn latency(&self) -> usize {
+        0
+    }
 }
 
 /// What gives the graph the effects of a clip and of a track. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a

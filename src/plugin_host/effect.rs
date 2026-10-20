@@ -14,8 +14,7 @@
 
 use std::time::Instant;
 
-use ladspa_host::Instance;
-
+use super::instance::{PluginInstance, places_to_look_in};
 use crate::composition::LayerEffect;
 use crate::project::{FrameRate, InstalledPlugin, PropertyValue};
 use crate::sound_engine::{BlockProcessor, Notes, SAMPLE_RATE};
@@ -107,7 +106,7 @@ pub fn frame_of_a_sample(frame_rate: FrameRate, first_frame: u64, sample: u64) -
 
 /// A plugin that is an effect of the sound of a clip.
 pub struct PluginEffect {
-    instances: Vec<Instance>,
+    instances: Vec<Box<dyn PluginInstance>>,
     layout: Layout,
     plugin: &'static InstalledPlugin,
     effect: LayerEffect,
@@ -132,7 +131,7 @@ pub struct PluginEffect {
 impl PluginEffect {
     /// The effect `effect` of the plugin `plugin`, made of `instances` (as many as the layout needs, all of the plugin), on a clip that begins at `first_timeline_frame`.
     pub fn new(
-        instances: Vec<Instance>,
+        instances: Vec<Box<dyn PluginInstance>>,
         plugin: &'static InstalledPlugin,
         effect: LayerEffect,
         frame_rate: FrameRate,
@@ -186,8 +185,8 @@ impl PluginEffect {
             .push(line);
     }
 
-    /// Gives the plugin the values the keyframes say at `timeline_frame`, those that have changed.
-    fn give_the_values_at(&mut self, timeline_frame: u64) {
+    /// Gives the plugin the values the keyframes say at `timeline_frame`, those that have changed, to be applied from sample `at_sample` of the next run.
+    fn give_the_values_at(&mut self, timeline_frame: u64, at_sample: usize) {
         let values = self.effect.values_at(timeline_frame);
         let wanted: Vec<f32> = values
             .iter()
@@ -196,7 +195,9 @@ impl PluginEffect {
                 let number = match value {
                     PropertyValue::Number(number) => *number,
                     PropertyValue::Flag(on) => f32::from(u8::from(*on)),
-                    PropertyValue::Pair(..) | PropertyValue::Colour(_) | PropertyValue::Words(_) => 0.0,
+                    // (The id of an option of a choice is the number the plugin gives it.)
+                    PropertyValue::Words(words) => words.trim().parse::<f32>().unwrap_or(0.0),
+                    PropertyValue::Pair(..) | PropertyValue::Colour(_) => 0.0,
                 };
                 // (A value that is typed past the range is kept to it when the plugin is run.)
                 match self
@@ -222,8 +223,7 @@ impl PluginEffect {
                 continue;
             };
             for instance in &mut self.instances {
-                // (A value that is not a number is refused by the host, and the plugin keeps the one it had.)
-                let _ = instance.set_control(port as usize, *value);
+                instance.set_value(port, *value, at_sample);
             }
         }
         self.given = wanted;
@@ -317,6 +317,41 @@ impl PluginEffect {
     }
 }
 
+impl PluginEffect {
+    /// Things a plugin has asked of the host that are done between blocks: a call on its main thread, being made again (it then has to be given its values again).
+    fn do_what_the_plugins_asked_between_blocks(&mut self) {
+        for number in 0..self.instances.len() {
+            let done = self.instances[number].between_blocks();
+            if done.was_restarted {
+                self.given.clear();
+            }
+            if let Some(note) = done.note {
+                self.say(format!(
+                    "The sound plugin \u{ab}{}\u{bb}: {note}.",
+                    self.plugin.descriptor.name
+                ));
+            }
+        }
+    }
+
+    /// Runs the block with the values given at the samples where the keyframes say, in one run (or several, if the block is longer than the plugin takes): for a plugin that
+    /// is told when a value changes.
+    fn process_with_values_at_samples(&mut self, left: &mut [f32], right: &mut [f32], total: usize) {
+        let most = self.instances[0].most_samples_at_once().unwrap_or(total).max(1);
+        let mut piece_start = 0;
+        while piece_start < total && !self.left_out {
+            let piece_end = (piece_start + most).min(total);
+            let first_sample = self.samples_done + piece_start as u64;
+            for place in places_to_look_in(first_sample, piece_end - piece_start, self.animated) {
+                let frame = frame_of_a_sample(self.frame_rate, self.first_timeline_frame, first_sample + place as u64);
+                self.give_the_values_at(frame, place);
+            }
+            self.run_on(&mut left[piece_start..piece_end], &mut right[piece_start..piece_end]);
+            piece_start = piece_end;
+        }
+    }
+}
+
 impl BlockProcessor for PluginEffect {
     fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
         let total = left.len().min(right.len());
@@ -325,22 +360,27 @@ impl BlockProcessor for PluginEffect {
             return;
         }
         let began = Instant::now();
-        let step = if self.animated {
-            SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED
+        self.do_what_the_plugins_asked_between_blocks();
+        if self.instances[0].takes_values_at_samples() {
+            self.process_with_values_at_samples(left, right, total);
         } else {
-            total
-        };
-        let mut at = 0;
-        while at < total && !self.left_out {
-            let end = (at + step).min(total);
-            let frame = frame_of_a_sample(
-                self.frame_rate,
-                self.first_timeline_frame,
-                self.samples_done + at as u64,
-            );
-            self.give_the_values_at(frame);
-            self.run_on(&mut left[at..end], &mut right[at..end]);
-            at = end;
+            let step = if self.animated {
+                SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED
+            } else {
+                total
+            };
+            let mut at = 0;
+            while at < total && !self.left_out {
+                let end = (at + step).min(total);
+                let frame = frame_of_a_sample(
+                    self.frame_rate,
+                    self.first_timeline_frame,
+                    self.samples_done + at as u64,
+                );
+                self.give_the_values_at(frame, 0);
+                self.run_on(&mut left[at..end], &mut right[at..end]);
+                at = end;
+            }
         }
         self.samples_done += total as u64;
         if let Some(guard) = &mut self.guard {
@@ -361,5 +401,13 @@ impl BlockProcessor for PluginEffect {
             instance.reset();
         }
         self.given.clear();
+    }
+
+    fn latency(&self) -> usize {
+        self.instances
+            .iter()
+            .map(|instance| instance.latency())
+            .max()
+            .unwrap_or(0)
     }
 }

@@ -56,6 +56,30 @@ struct Live {
     processors: Vec<Box<dyn BlockProcessor>>,
     /// Whether the feed has given all its sound already.
     feed_has_ended: bool,
+    /// Whether the effects have been given the samples that make up for their latency (see [`BlockProcessor::latency`]).
+    has_made_up_for_the_latency: bool,
+}
+
+impl Live {
+    /// Gives the effects, before the first sample of the clip is made, as many samples of the feed as their latency in all, and throws away what comes out: the sound that comes out
+    /// of them from then on is the sound of the clip, where it is. (The effects are given silence after the end of the feed, so the last samples of the clip come out too.)
+    fn make_up_for_the_latency(&mut self) {
+        if std::mem::replace(&mut self.has_made_up_for_the_latency, true) {
+            return;
+        }
+        let latency: usize = self.processors.iter().map(|processor| processor.latency()).sum();
+        if latency == 0 {
+            return;
+        }
+        let (mut left, mut right) = (vec![0.0_f32; latency], vec![0.0_f32; latency]);
+        if !self.feed_has_ended {
+            let given = self.feed.read(&mut left, &mut right);
+            self.feed_has_ended = given < latency;
+        }
+        for processor in &mut self.processors {
+            processor.process(&mut left, &mut right);
+        }
+    }
 }
 
 impl SoundGraph {
@@ -184,7 +208,9 @@ impl SoundGraph {
                     feed: feeds.open(&request),
                     processors: insertions.for_clip(&request),
                     feed_has_ended: false,
+                    has_made_up_for_the_latency: false,
                 });
+                live.make_up_for_the_latency();
                 let offset = (first - from) as usize;
                 let length = (last - first) as usize;
                 let left = &mut scratch.left[offset..offset + length];

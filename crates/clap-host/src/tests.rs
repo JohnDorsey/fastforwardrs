@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use clap_test_plugins::{
-    CALLBACKS, CHOICE, FAILS_TO_ACTIVATE, FAILS_TO_PROCESS, GAIN, INSTRUMENT, LATENCY, LATENCY_SAMPLES, MONO_HALF,
-    PANICS, RATE, SIDE_CHAIN, SWAP, TAIL, TAIL_FOREVER, TAIL_SAMPLES, THREADS,
+    CALLBACKS, CHOICE, FAILS_TO_ACTIVATE, FAILS_TO_PROCESS, GAIN, INSTRUMENT, LATENCY, LATENCY_CHANGES,
+    LATENCY_SAMPLES, MONO_HALF, PANICS, RATE, SIDE_CHAIN, SWAP, TAIL, TAIL_FOREVER, TAIL_SAMPLES, THREADS,
 };
 
 use crate::scan::{LibraryScan, scan_library};
@@ -57,7 +57,7 @@ fn the_library_says_what_plugins_it_has_and_what_each_says_of_itself() {
     assert_eq!(described.problems, Vec::<String>::new());
     let ids: Vec<&str> = described.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
     assert!(ids.contains(&THREADS));
-    assert_eq!(ids.len(), 15, "{ids:?}");
+    assert_eq!(ids.len(), 16, "{ids:?}");
     assert!(ids.contains(&GAIN) && ids.contains(&INSTRUMENT));
     let gain = described.plugins.iter().find(|plugin| plugin.id == GAIN).unwrap();
     assert_eq!((gain.name.as_str(), gain.vendor.as_str()), ("Gain", "fastforwardrs"));
@@ -434,7 +434,7 @@ fn a_plugin_with_a_side_chain_is_given_silence_for_it_and_the_main_ports_come_th
 
 #[test]
 fn a_plugin_that_says_its_latency_changed_makes_the_host_ask_for_a_restart() {
-    let mut instance = made(LATENCY);
+    let mut instance = made(LATENCY_CHANGES);
     run_stereo(&mut instance, &[1.0; 8], &[1.0; 8], &[]);
     assert!(
         !instance.restart_was_requested(),

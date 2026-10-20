@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use ladspa_host::Library;
 
 use super::effect::{Layout, PluginEffect};
+use super::instance::{ClapCopy, ClapMaker, LadspaCopy, PluginInstance};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::plugin_scan::{Breadcrumb, dependency_search_folders};
@@ -61,6 +62,9 @@ impl Default for Search {
 pub struct PluginHost {
     trust: Mutex<Trust>,
     libraries: Mutex<HashMap<PathBuf, Result<Library, String>>>,
+    clap_libraries: Mutex<HashMap<PathBuf, Result<clap_host::Library, String>>>,
+    /// The thread that does what CLAP asks to be done on the main thread, started when the first CLAP plugin is wanted.
+    clap_worker: Mutex<Option<std::sync::Arc<clap_host::MainThread>>>,
     search: Mutex<Search>,
     breadcrumb: Mutex<Option<Breadcrumb>>,
     /// A number that is different whenever what may be run changed: what the sound is made of changes with it.
@@ -78,6 +82,8 @@ impl PluginHost {
         Self {
             trust: Mutex::new(Trust::default()),
             libraries: Mutex::new(HashMap::new()),
+            clap_libraries: Mutex::new(HashMap::new()),
+            clap_worker: Mutex::new(None),
             search: Mutex::new(Search::default()),
             breadcrumb: Mutex::new(None),
             generation: AtomicU64::new(0),
@@ -194,6 +200,16 @@ impl PluginHost {
             .filter(|(_, library)| library.is_ok())
             .map(|(path, _)| path.clone())
             .collect();
+        let clap_libraries = self
+            .clap_libraries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        paths.extend(
+            clap_libraries
+                .iter()
+                .filter(|(_, library)| library.is_ok())
+                .map(|(path, _)| path.clone()),
+        );
         paths.sort();
         paths
     }
@@ -231,6 +247,29 @@ impl PluginHost {
         if let Some(known) = libraries.get(path) {
             return known.clone();
         }
+        self.before_loading(path);
+        let loaded = Library::open(path).map_err(|error| error.to_string());
+        libraries.insert(path.to_owned(), loaded.clone());
+        loaded
+    }
+
+    /// The CLAP library at `path`, loaded (once: it stays loaded), or why it could not be.
+    fn clap_library(&self, path: &Path) -> Result<clap_host::Library, String> {
+        let mut libraries = self
+            .clap_libraries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(known) = libraries.get(path) {
+            return known.clone();
+        }
+        self.before_loading(path);
+        let loaded = clap_host::Library::open(path).map_err(|error| error.to_string());
+        libraries.insert(path.to_owned(), loaded.clone());
+        loaded
+    }
+
+    /// Before a library of either kind is loaded: where the libraries it needs are looked for, and the breadcrumb.
+    fn before_loading(&self, path: &Path) {
         self.prepare_the_search_for(path);
         if let Some(breadcrumb) = self
             .breadcrumb
@@ -241,9 +280,15 @@ impl PluginHost {
             // (A breadcrumb that cannot be written is not a reason to leave the plugin out: it only helps after a crash.)
             let _ = breadcrumb.note_use_of(path);
         }
-        let loaded = Library::open(path).map_err(|error| error.to_string());
-        libraries.insert(path.to_owned(), loaded.clone());
-        loaded
+    }
+
+    /// The thread that does the main-thread calls of CLAP plugins (started the first time it is wanted).
+    fn the_clap_worker(&self) -> std::sync::Arc<clap_host::MainThread> {
+        self.clap_worker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(clap_host::MainThread::start)
+            .clone()
     }
 
     /// Before a library is loaded: where the libraries that it needs are looked for, where that can be done after the program has started (on Windows: before the others of the
@@ -268,7 +313,7 @@ impl PluginHost {
         layout: Layout,
         library: &Library,
         notes: &Notes,
-    ) -> Option<Vec<ladspa_host::Instance>> {
+    ) -> Option<Vec<Box<dyn PluginInstance>>> {
         let PluginAddress::Ladspa { index, .. } = plugin.address else {
             return None;
         };
@@ -287,7 +332,7 @@ impl PluginHost {
                         );
                         return None;
                     }
-                    instances.push(instance);
+                    instances.push(Box::new(LadspaCopy(instance)) as Box<dyn PluginInstance>);
                 }
                 Err(error) => {
                     say(
@@ -303,6 +348,67 @@ impl PluginHost {
         }
         Some(instances)
     }
+}
+
+impl PluginHost {
+    /// As many copies of the CLAP plugin `id` of `library` as the layout needs, each activated at the rate of the sound engine, or why not (said in the notes).
+    fn the_clap_instances_of(
+        &self,
+        plugin: &'static InstalledPlugin,
+        id: &str,
+        layout: Layout,
+        library: &clap_host::Library,
+        notes: &Notes,
+    ) -> Option<Vec<Box<dyn PluginInstance>>> {
+        let worker = self.the_clap_worker();
+        let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
+        for _ in 0..layout.instances() {
+            let maker = ClapMaker {
+                worker: std::sync::Arc::clone(&worker),
+                library: library.clone(),
+                id: id.to_owned(),
+            };
+            match maker.make() {
+                Ok(instance) => {
+                    if !this_clap_plugin_is_the_one_that_was_scanned(&instance, plugin) {
+                        say(
+                            notes,
+                            format!(
+                                "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the library {} has changed): scan again.",
+                                plugin.descriptor.name,
+                                plugin.library.display()
+                            ),
+                        );
+                        return None;
+                    }
+                    instances.push(Box::new(ClapCopy::new(instance, maker)));
+                }
+                Err(error) => {
+                    say(
+                        notes,
+                        format!(
+                            "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
+                            plugin.descriptor.name
+                        ),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(instances)
+    }
+}
+
+/// Whether what the library gave for the CLAP plugin is the plugin that was scanned: the main ports have the channels that were scanned, and the plugin has every parameter that a
+/// value of the effect is the value of (it may have more).
+fn this_clap_plugin_is_the_one_that_was_scanned(instance: &clap_host::Instance, plugin: &InstalledPlugin) -> bool {
+    let channels = |ports: &[clap_host::scan::AudioPort]| ports.first().map_or(0, |port| port.channel_count as usize);
+    (channels(instance.audio_inputs()), channels(instance.audio_outputs()))
+        == (plugin.audio_inputs, plugin.audio_outputs)
+        && plugin
+            .value_handles
+            .iter()
+            .all(|handle| instance.parameters().iter().any(|parameter| parameter.id == *handle))
 }
 
 fn say(notes: &Notes, line: String) {
@@ -343,17 +449,6 @@ impl PluginRunner for PluginHost {
         is_for_the_preview: bool,
     ) -> Option<Box<dyn BlockProcessor>> {
         let plugin = effect.kind.installed_plugin()?;
-        if matches!(plugin.address, PluginAddress::Clap { .. }) {
-            // (Piece 7.8.4 runs them. Until then the folder is not asked about either: nothing of the plugin is loaded.)
-            say(
-                notes,
-                format!(
-                    "The sound plugin \u{ab}{}\u{bb} is a CLAP plugin, and CLAP plugins are found but not run yet. The sound goes through it unchanged.",
-                    plugin.descriptor.name
-                ),
-            );
-            return None;
-        }
         let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs)?;
         let folder = folder_of(&plugin.library);
         let library_name = plugin
@@ -363,21 +458,32 @@ impl PluginRunner for PluginHost {
         if !self.may_run_from(&folder, &library_name, &plugin.descriptor.name)? {
             return None;
         }
-        let library = match self.library(&plugin.library) {
-            Ok(library) => library,
-            Err(error) => {
-                say(
-                    notes,
-                    format!(
-                        "The sound plugin \u{ab}{}\u{bb} could not be loaded from {}: {error}. The sound goes through it unchanged.",
-                        plugin.descriptor.name,
-                        plugin.library.display()
-                    ),
-                );
-                return None;
+        let could_not_be_loaded = |error: String| {
+            say(
+                notes,
+                format!(
+                    "The sound plugin \u{ab}{}\u{bb} could not be loaded from {}: {error}. The sound goes through it unchanged.",
+                    plugin.descriptor.name,
+                    plugin.library.display()
+                ),
+            );
+        };
+        let instances = match &plugin.address {
+            PluginAddress::Ladspa { .. } => {
+                let library = self
+                    .library(&plugin.library)
+                    .inspect_err(|error| could_not_be_loaded(error.clone()))
+                    .ok()?;
+                self.the_instances_of(plugin, layout, &library, notes)?
+            }
+            PluginAddress::Clap { id } => {
+                let library = self
+                    .clap_library(&plugin.library)
+                    .inspect_err(|error| could_not_be_loaded(error.clone()))
+                    .ok()?;
+                self.the_clap_instances_of(plugin, id, layout, &library, notes)?
             }
         };
-        let instances = self.the_instances_of(plugin, layout, &library, notes)?;
         PluginEffect::new(
             instances,
             plugin,

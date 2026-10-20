@@ -935,3 +935,171 @@ fn a_clip_that_was_opened_without_having_been_started_is_not_started_again_when_
         "and the next one is, as it should be"
     );
 }
+
+// --- latency ---
+
+/// An effect that delays the sound by `latency` samples, and says so; and counts how many samples it was given.
+struct Delays {
+    latency: usize,
+    memory: std::collections::VecDeque<(f32, f32)>,
+    given: Arc<AtomicUsize>,
+}
+
+impl Delays {
+    fn new(latency: usize, given: &Arc<AtomicUsize>) -> Self {
+        Self {
+            latency,
+            memory: std::iter::repeat_n((0.0, 0.0), latency).collect(),
+            given: Arc::clone(given),
+        }
+    }
+}
+
+impl BlockProcessor for Delays {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.given.fetch_add(left.len(), Ordering::SeqCst);
+        for (left, right) in left.iter_mut().zip(right.iter_mut()) {
+            self.memory.push_back((*left, *right));
+            (*left, *right) = self.memory.pop_front().expect("the memory is never empty");
+        }
+    }
+
+    fn reset(&mut self) {
+        self.memory = std::iter::repeat_n((0.0, 0.0), self.latency).collect();
+    }
+
+    fn latency(&self) -> usize {
+        self.latency
+    }
+}
+
+/// A delay that does not say it is one: the sound comes out late.
+struct DelaysAndDoesNotSay(Delays);
+
+impl BlockProcessor for DelaysAndDoesNotSay {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.0.process(left, right);
+    }
+
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
+fn a_graph_with_delays(latencies: &'static [usize], given: &Arc<AtomicUsize>, ramps: &Ramps) -> SoundGraph {
+    struct Delaying {
+        latencies: &'static [usize],
+        given: Arc<AtomicUsize>,
+    }
+    impl Insertions for Delaying {
+        fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+            self.latencies
+                .iter()
+                .map(|latency| Box::new(Delays::new(*latency, &self.given)) as Box<dyn BlockProcessor>)
+                .collect()
+        }
+
+        fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+            Vec::new()
+        }
+    }
+    SoundGraph::new(
+        specification(
+            thirty(),
+            4,
+            vec![vec![
+                clip(2, LoudnessToExport::Constant(0.5)),
+                silence(1),
+                clip(1, LoudnessToExport::UNCHANGED),
+            ]],
+        ),
+        Box::new(ramps.clone()),
+        Box::new(Delaying {
+            latencies,
+            given: Arc::clone(given),
+        }),
+    )
+}
+
+#[test]
+fn an_effect_with_a_latency_is_made_up_for_so_the_sound_is_where_it_would_be_without_it_for_any_blocks() {
+    let ramps = Ramps::default().with_length(0, 0, 3000).with_length(0, 2, 900);
+    let plain = graph_of(
+        specification(
+            thirty(),
+            4,
+            vec![vec![
+                clip(2, LoudnessToExport::Constant(0.5)),
+                silence(1),
+                clip(1, LoudnessToExport::UNCHANGED),
+            ]],
+        ),
+        &ramps,
+    )
+    .render_to_the_end(512)
+    .0;
+    for latencies in [&[64_usize][..], &[1], &[300, 7], &[2000]] {
+        let latencies: &'static [usize] = Vec::leak(latencies.to_vec());
+        for block in [1, 13, 512, 100_000] {
+            let given = Arc::new(AtomicUsize::new(0));
+
+            let made = a_graph_with_delays(latencies, &given, &ramps)
+                .render_to_the_end(block)
+                .0;
+
+            assert_eq!(made, plain, "latencies {latencies:?}, blocks of {block}");
+        }
+    }
+}
+
+#[test]
+fn an_effect_with_a_latency_is_given_that_many_samples_more_than_its_clip_has_and_one_without_is_given_only_those() {
+    let ramps = Ramps::default();
+    for (latencies, extra) in [(&[0_usize][..], 0), (&[64], 64), (&[300, 7], 307)] {
+        let latencies: &'static [usize] = Vec::leak(latencies.to_vec());
+        let given = Arc::new(AtomicUsize::new(0));
+
+        a_graph_with_delays(latencies, &given, &ramps).render_to_the_end(512);
+
+        // Two clips of 3200 and 1600 samples; every effect of the chain is given each sample once, and the extra ones for the latency of the chain, for each clip.
+        let samples = 3200 + 1600;
+        assert_eq!(
+            given.load(Ordering::SeqCst),
+            latencies.len() * samples + latencies.len() * 2 * extra,
+            "latencies {latencies:?}"
+        );
+    }
+}
+
+#[test]
+fn an_effect_that_delays_the_sound_and_does_not_say_so_is_heard_late_by_what_it_delays() {
+    let ramps = Ramps::default().with_length(0, 0, 3200);
+    let spec = || specification(thirty(), 2, vec![vec![clip(2, LoudnessToExport::UNCHANGED)]]);
+    let plain = graph_of(spec(), &ramps).render_to_the_end(512).0;
+    let given = Arc::new(AtomicUsize::new(0));
+    struct Lying(Arc<AtomicUsize>);
+    impl Insertions for Lying {
+        fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+            vec![Box::new(DelaysAndDoesNotSay(Delays::new(10, &self.0)))]
+        }
+
+        fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+            Vec::new()
+        }
+    }
+
+    let made = SoundGraph::new(spec(), Box::new(ramps.clone()), Box::new(Lying(given)))
+        .render_to_the_end(512)
+        .0;
+
+    assert_eq!(
+        &made[..10],
+        &[0.0; 10],
+        "the first samples out are the silence it started with"
+    );
+    assert_eq!(
+        &made[10..],
+        &plain[..plain.len() - 10],
+        "late by ten samples, because nothing was told"
+    );
+}

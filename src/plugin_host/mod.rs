@@ -12,12 +12,16 @@
 
 mod effect;
 mod host;
+mod instance;
 mod needs;
 
 pub use effect::{
     Layout, PluginEffect, SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED, SECONDS_TOO_SLOW, SlownessGuard, frame_of_a_sample,
 };
 pub use host::{PluginHost, Wanted};
+pub use instance::{
+    BetweenBlocks, ClapCopy, ClapMaker, LadspaCopy, MOST_FRAMES_OF_A_CLAP_PLUGIN, PluginInstance, places_to_look_in,
+};
 pub use needs::folders_the_sound_of_a_project_needs;
 
 #[cfg(test)]
