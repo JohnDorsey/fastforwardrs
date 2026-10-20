@@ -1250,3 +1250,27 @@ fn the_folders_for_libraries_are_put_before_the_search_path_of_the_system_and_th
         "the folders of Windows are still in the search path: {entries:?}"
     );
 }
+
+#[test]
+fn sound_more_than_a_thousand_times_as_loud_as_the_loudest_is_silence_and_said_once_and_a_thousand_is_let_through() {
+    let _alone = the_installed_plugins_to_myself();
+    let (mut processor, notes) = processor_of(&the_effect(the_kind_of("ffrs_test_gain"), &[4.0]), 0);
+    let (mut left, mut right) = (vec![300.0_f32, 100.0, 250.0, -300.0], vec![1.0_f32; 4]);
+
+    processor.process(&mut left, &mut right);
+
+    assert_eq!(
+        left,
+        [0.0, 400.0, 1000.0, 0.0],
+        "1200 and -1200 are silence; 400 and exactly 1000 are let through"
+    );
+    assert_eq!(right, [4.0; 4]);
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("made silent") && said[0].contains("1000"), "{said:?}");
+
+    let (mut left, mut right) = (vec![300.0_f32], vec![1.0_f32]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, [0.0]);
+    assert_eq!(notes.lock().unwrap().len(), 1, "said once, though it happened again");
+}

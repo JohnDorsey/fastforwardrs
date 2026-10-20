@@ -47,8 +47,8 @@ made by the screenshot test (`tests/application_screenshots.rs`, ignored by defa
 ## 3. Decisions
 
 Those of the design (G1 to G18) stand, with these of mine [P]: the scan also makes each plugin and runs it once (a plugin that crashes in its constructor must not take the editor down); failures are kept by size and time of change, not by a hash;
-a track's effects are done to each of its clips; no pre-roll; a plugin that is too slow in the preview is left out after two seconds in a row (never in the export); a plugin's output is silenced if it is not a number, **not** if it is
-enormous (your decision, below). **Yours:** the folders for the libraries that plugins need and the box to look in the folders above (on by default); one question for each folder; the menu as a directory.
+a track's effects are done to each of its clips; no pre-roll; a plugin that is too slow in the preview is left out after two seconds in a row (never in the export); a plugin's output is silenced if it is not a number or is more than
+1000 times full scale (your decision, 2026-10-20). **Yours:** the folders for the libraries that plugins need and the box to look in the folders above (on by default); one question for each folder; the menu as a directory.
 
 ## 4. Tests rewritten on purpose
 
@@ -58,7 +58,7 @@ menu itself (`effect_menu_tests`, one of `sound_plugins_tests`) look at the dire
 
 ## 5. Limits
 
-Plugins run **in the editor's own process**: one that crashes ends the editor (the breadcrumb says which, the next time). A plugin that gives an enormous finite sound is not stopped. Plugins that do not repeat themselves do not make the same
+Plugins run **in the editor's own process**: one that crashes ends the editor (the breadcrumb says which, the next time). A sample more than 1000 times full scale is made silent (your decision, 2026-10-20). Plugins that do not repeat themselves do not make the same
 sound in the preview and the export (the plugin's own randomness). No pre-roll, no latency compensation, no generators, no master bus. A track's effect is not one effect on the sum of its clips. Sound effects of a group of clips or tracks
 do not exist. The effects of an embedded plugin do not run (the question is asked). On Linux and macOS the editor cannot change its own library search path after it starts: a plugin that needs a library that is not beside it may scan and
 not load [B, not tried]. CLAP is not here.
@@ -79,7 +79,7 @@ as the plugin says; an export from the editor has the plugin's sound; the 119 li
 
 ## 8. What I need from you
 
-(1) **Listen** to 7.6: a plugin on a clip, a value moved and keyframed, an export. (2) Whether a plugin's **enormous output** should be silenced (my suggestion: beyond ±1000, with a note). (3) **CLAP** (7.8): its design is written after
+(1) **Listen** to 7.6: a plugin on a clip, a value moved and keyframed, an export. (2) (Answered 2026-10-20: yes, beyond 1000 times full scale; built.) Whether a plugin's **enormous output** should be silenced (my suggestion: beyond ±1000, with a note). (3) **CLAP** (7.8): its design is written after
 you have heard 7.6; say when. (4) Embedded plugins' effects: later, as you said. (5) The order: the plan says phase 5 next.
 
 ## 9. The campaign of 7.7

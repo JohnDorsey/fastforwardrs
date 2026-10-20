@@ -23,6 +23,10 @@ use crate::sound_engine::{BlockProcessor, Notes, SAMPLE_RATE};
 /// How many samples apart the values of an effect that is animated are looked at (32 is 0.67 milliseconds at 48000 a second).
 pub const SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED: usize = 32;
 
+/// How many times the loudest sound there can be (1.0) a sample may be before it is taken for a plugin gone wrong and made silent: 60 decibels over. (A plugin may be louder than
+/// 1.0, as a later one may bring it back; a sample beyond this would be heard as a crash by anyone, whatever follows it.)
+pub const MOST_A_PLUGIN_MAY_GIVE: f32 = 1000.0;
+
 /// How many seconds of sound a plugin may be slower than the sound, one after another, before it is left out of the preview.
 pub const SECONDS_TOO_SLOW: f64 = 2.0;
 
@@ -120,6 +124,8 @@ pub struct PluginEffect {
     /// `Some` where a plugin that is too slow is left out (the preview).
     guard: Option<SlownessGuard>,
     left_out: bool,
+    /// Whether a note has been made of sound that was not fit to be heard (it is said once).
+    has_said_it_gave_too_much: bool,
     notes: Notes,
 }
 
@@ -153,6 +159,7 @@ impl PluginEffect {
             output: [Vec::new(), Vec::new()],
             guard: leave_out_one_that_is_too_slow.then(SlownessGuard::default),
             left_out: false,
+            has_said_it_gave_too_much: false,
             notes,
         })
     }
@@ -289,12 +296,23 @@ impl PluginEffect {
             ));
             return;
         }
-        let clean = |sample: f32| if sample.is_finite() { sample } else { 0.0 };
-        for (sound, made) in left.iter_mut().zip(output_left.iter()) {
-            *sound = clean(*made);
+        // (A sample that is not a number, or is louder than any sound should be, is silence in its place.)
+        let is_fit = |sample: f32| sample.is_finite() && sample.abs() <= MOST_A_PLUGIN_MAY_GIVE;
+        let mut was_unfit = false;
+        for (sound, made) in left
+            .iter_mut()
+            .zip(output_left.iter())
+            .chain(right.iter_mut().zip(output_right.iter()))
+        {
+            was_unfit |= !is_fit(*made);
+            *sound = if is_fit(*made) { *made } else { 0.0 };
         }
-        for (sound, made) in right.iter_mut().zip(output_right.iter()) {
-            *sound = clean(*made);
+        if was_unfit && !self.has_said_it_gave_too_much {
+            self.has_said_it_gave_too_much = true;
+            self.say(format!(
+                "The sound plugin \u{ab}{}\u{bb} gave sound that is not a number, or more than {MOST_A_PLUGIN_MAY_GIVE} times as loud as the loudest sound there can be, and that sound was made silent.",
+                self.plugin.descriptor.name
+            ));
         }
     }
 }
