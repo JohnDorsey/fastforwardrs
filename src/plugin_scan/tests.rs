@@ -804,3 +804,333 @@ fn a_library_that_was_failed_by_the_breadcrumb_is_believed_failed_until_it_chang
     );
     assert!(scanner.cache().is_empty());
 }
+
+// --- CLAP libraries (piece 7.8.2) ---
+
+fn a_clap_scan() -> clap_host::scan::LibraryScan {
+    clap_host::scan::LibraryScan {
+        plugins: vec![clap_host::scan::ScannedPlugin {
+            description: clap_host::PluginDescription {
+                id: "org.example.gain".to_owned(),
+                name: "Gain".to_owned(),
+                ..clap_host::PluginDescription::default()
+            },
+            audio_inputs: vec![clap_host::scan::AudioPort {
+                id: 0,
+                name: "Input".to_owned(),
+                channel_count: 2,
+                port_type: Some("stereo".to_owned()),
+                is_main: true,
+            }],
+            audio_outputs: Vec::new(),
+            parameters: Vec::new(),
+            latency: 64,
+            tail: Some(1000),
+            has_state: false,
+            problem: None,
+        }],
+        problems: vec!["plugin number 1 has no id".to_owned()],
+    }
+}
+
+#[test]
+fn the_answer_of_a_clap_scan_is_read_back_as_it_was_written_and_the_other_words_are_unchanged() {
+    for answer in [
+        ScanAnswer::ScannedClap(a_clap_scan()),
+        ScanAnswer::NotAClapLibrary("no factory".to_owned()),
+    ] {
+        let said = read_what_was_said(&answer_line(&answer));
+        assert_eq!(said.answer, Some(Ok(answer)));
+    }
+    // The words of the LADSPA answers are what they were (the cache and the scan program of another version are told apart by the number, not by the words).
+    assert!(answer_line(&ScanAnswer::CouldNotBeLoaded("x".to_owned())).contains("CouldNotBeLoaded"));
+    assert_eq!(super::protocol::SCAN_FORMAT, 2);
+}
+
+#[test]
+fn a_program_that_answered_for_a_clap_library_gives_the_scan_or_the_reason_it_was_refused() {
+    let scanned = ScanAnswer::ScannedClap(a_clap_scan());
+    assert_eq!(
+        outcome(HowItEnded::Exited(ended_well()), said_by_a_scan(&["a"], Some(&scanned))),
+        LibraryOutcome::ScannedClap(a_clap_scan())
+    );
+    let not_clap = ScanAnswer::NotAClapLibrary("no factory".to_owned());
+    assert_eq!(
+        outcome(HowItEnded::Exited(ended_well()), said_by_a_scan(&[], Some(&not_clap))),
+        LibraryOutcome::Failed(ScanFailure::NotAClapLibrary("no factory".to_owned()))
+    );
+    assert!(
+        ScanFailure::NotAClapLibrary("no factory".to_owned())
+            .to_string()
+            .contains("not a CLAP library")
+    );
+}
+
+#[test]
+fn a_clap_scan_is_kept_in_the_cache_file_and_the_scans_that_failed_for_want_of_a_library_are_forgotten_when_the_search_changes()
+ {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("scan_cache.json");
+    let clap = touch(folder.path(), "a.clap");
+    let not_clap = touch(folder.path(), "b.clap");
+    let crashed = touch(folder.path(), "c.clap");
+    let mut cache = ScanCache::at(file.clone());
+    cache.set_search_signature("first");
+    for (path, outcome) in [
+        (&clap, CachedOutcome::ScannedClap(a_clap_scan())),
+        (
+            &not_clap,
+            CachedOutcome::Failed(ScanFailure::NotAClapLibrary("no factory".to_owned())),
+        ),
+        (
+            &crashed,
+            CachedOutcome::Failed(ScanFailure::Crashed {
+                how: "signal 6".to_owned(),
+                during: None,
+            }),
+        ),
+    ] {
+        let fingerprint = FileFingerprint::of(path).unwrap();
+        cache.record(path, fingerprint, outcome);
+    }
+    cache.save();
+
+    let mut again = ScanCache::at(file);
+    assert_eq!(
+        again.lookup(&clap, &FileFingerprint::of(&clap).unwrap()),
+        Some(&CachedOutcome::ScannedClap(a_clap_scan()))
+    );
+    again.set_search_signature("second");
+    assert!(
+        again
+            .lookup(&not_clap, &FileFingerprint::of(&not_clap).unwrap())
+            .is_none(),
+        "a library that was not a CLAP one may be found to be, now that its other libraries can be found"
+    );
+    assert!(again.lookup(&clap, &FileFingerprint::of(&clap).unwrap()).is_some());
+    assert!(
+        again
+            .lookup(&crashed, &FileFingerprint::of(&crashed).unwrap())
+            .is_some(),
+        "a crash is the libraries own doing and stays"
+    );
+}
+
+#[test]
+fn a_cache_written_by_the_version_that_scanned_only_ladspa_libraries_is_not_believed() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("scan_cache.json");
+    let library = a_library_file(folder.path(), b"x");
+    let mut writer = ScanCache::at(file.clone());
+    writer.record(
+        &library,
+        FileFingerprint::of(&library).unwrap(),
+        CachedOutcome::Scanned(a_scan()),
+    );
+    writer.save();
+    let text = fs::read_to_string(&file)
+        .unwrap()
+        .replace("\"format\": 2", "\"format\": 1");
+    assert!(text.contains("\"format\": 1"));
+    fs::write(&file, text).unwrap();
+
+    assert!(ScanCache::at(file).is_empty());
+}
+
+#[test]
+fn a_file_is_a_clap_library_by_its_ending_whatever_the_case_and_the_folders_of_clap_are_those_of_the_standard() {
+    assert!(is_a_clap_file(Path::new("/a/b/plugin.clap")));
+    assert!(is_a_clap_file(Path::new("PLUGIN.CLAP")));
+    assert!(!is_a_clap_file(Path::new("/a/b/plugin.dll")));
+    assert!(!is_a_clap_file(Path::new("/a/b/clap")));
+    assert!(!is_a_clap_file(Path::new("/a/b/plugin.clap.txt")));
+
+    let variable = std::env::join_paths(["/from/variable", "", "/second"]).unwrap();
+    let folders = clap_folders(
+        Some(&variable),
+        Some(Path::new("/home/someone")),
+        Some(Path::new("/common")),
+        Some(Path::new("/local")),
+    );
+    // (CLAP_PATH first, in its own order; an empty entry is no folder.)
+    assert_eq!(
+        &folders[..2],
+        [PathBuf::from("/from/variable"), PathBuf::from("/second")]
+    );
+    let usual = &folders[2..];
+    if cfg!(windows) {
+        assert_eq!(
+            usual,
+            [
+                Path::new("/common").join("CLAP"),
+                Path::new("/local").join("Programs").join("Common").join("CLAP")
+            ]
+        );
+    } else if cfg!(target_os = "macos") {
+        assert_eq!(
+            usual,
+            [
+                PathBuf::from("/Library/Audio/Plug-Ins/CLAP"),
+                Path::new("/home/someone").join("Library/Audio/Plug-Ins/CLAP")
+            ]
+        );
+    } else {
+        assert_eq!(
+            usual,
+            [PathBuf::from("/usr/lib/clap"), PathBuf::from("/home/someone/.clap")]
+        );
+    }
+    // Nothing known of the home or of the places of Windows: only what is certain.
+    let without = clap_folders(None, None, None, None);
+    assert_eq!(without.len(), usize::from(!cfg!(windows)));
+}
+
+#[test]
+fn the_clap_libraries_of_a_folder_are_those_in_it_and_below_it_in_the_order_of_their_paths() {
+    let folder = tempfile::tempdir().unwrap();
+    let b = touch(folder.path(), "b.clap");
+    let upper = touch(folder.path(), "A.CLAP");
+    touch(folder.path(), "notes.txt");
+    touch(folder.path(), &format!("ladspa.{}", library_file_extension()));
+    let vendor = folder.path().join("Vendor");
+    fs::create_dir_all(vendor.join("deeper")).unwrap();
+    let in_vendor = touch(&vendor, "c.clap");
+    let deeper = touch(&vendor.join("deeper"), "d.clap");
+
+    let found = clap_libraries_in(folder.path()).unwrap();
+
+    // (A before b, without regard to case; and what is in a folder is after the files above it only because of its path.)
+    assert_eq!(found, [upper, b, in_vendor, deeper]);
+    assert_eq!(
+        clap_libraries_in(&folder.path().join("not_there")).unwrap(),
+        Vec::<PathBuf>::new()
+    );
+}
+
+#[test]
+fn the_walk_for_clap_libraries_stops_six_folders_down() {
+    let folder = tempfile::tempdir().unwrap();
+    let mut at = folder.path().to_owned();
+    let mut reached = Vec::new();
+    for depth in 0..=8 {
+        reached.push((depth, touch(&at, "p.clap")));
+        at = at.join(format!("level{depth}"));
+        fs::create_dir_all(&at).unwrap();
+    }
+
+    let found = clap_libraries_in(folder.path()).unwrap();
+
+    // (The folder asked for is down 0; six folders below it are looked in.)
+    let expected: Vec<PathBuf> = reached
+        .into_iter()
+        .filter(|(depth, _)| *depth <= 6)
+        .map(|(_, path)| path)
+        .collect();
+    assert_eq!(found.len(), expected.len());
+    for path in expected {
+        assert!(found.contains(&path), "{}", path.display());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_to_a_folder_is_not_walked_so_a_link_up_cannot_make_the_walk_endless() {
+    let folder = tempfile::tempdir().unwrap();
+    let real = touch(folder.path(), "real.clap");
+    std::os::unix::fs::symlink(folder.path(), folder.path().join("loop")).unwrap();
+
+    assert_eq!(clap_libraries_in(folder.path()).unwrap(), [real]);
+}
+
+#[test]
+fn a_bundle_is_fingerprinted_by_the_file_inside_it_and_a_folder_with_no_such_file_by_itself() {
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = folder.path().join("Plugin.clap");
+    let inside = bundle.join("Contents").join("MacOS");
+    fs::create_dir_all(&inside).unwrap();
+    fs::write(inside.join("Plugin"), b"12345").unwrap();
+
+    let fingerprint = FileFingerprint::of(&bundle).unwrap();
+
+    assert_eq!(fingerprint.size, 5, "the size of the library inside, not of the folder");
+    fs::write(inside.join("Plugin"), b"1234567").unwrap();
+    assert_eq!(FileFingerprint::of(&bundle).unwrap().size, 7);
+    // Two files there: it cannot be told which is the library, and the folder itself is looked at.
+    fs::write(inside.join("Other"), b"x").unwrap();
+    assert_eq!(
+        FileFingerprint::of(&bundle).unwrap().size,
+        fs::metadata(&bundle).unwrap().len()
+    );
+}
+
+#[test]
+fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_clap_path_and_its_usual_places() {
+    let environment = |name: &str| -> Option<std::ffi::OsString> {
+        match name {
+            "LADSPA_PATH" => Some("/ladspa/from/variable".into()),
+            "CLAP_PATH" => Some("/clap/from/variable".into()),
+            "COMMONPROGRAMFILES" => Some("/common".into()),
+            "LOCALAPPDATA" => Some("/local".into()),
+            _ => None,
+        }
+    };
+    let home = Path::new("/home/someone");
+
+    let folders = folders_looked_in_with(&environment, Some(home));
+
+    let mut expected = vec![PathBuf::from("/ladspa/from/variable")];
+    expected.extend(usual_folders(Some(home)));
+    expected.extend(clap_folders(
+        Some("/clap/from/variable".as_ref()),
+        Some(home),
+        Some(Path::new("/common")),
+        Some(Path::new("/local")),
+    ));
+    assert_eq!(folders, expected);
+    assert!(folders.contains(&PathBuf::from("/clap/from/variable")));
+    assert_eq!(
+        folders_looked_in_with(&|_| None, None).len(),
+        clap_folders(None, None, None, None).len() + usual_folders(None).len()
+    );
+}
+
+#[test]
+fn a_folder_named_like_a_clap_library_is_walked_into_where_a_library_is_a_file() {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let folder = tempfile::tempdir().unwrap();
+    let named_like_one = folder.path().join("folder.clap");
+    fs::create_dir(&named_like_one).unwrap();
+    let inside = touch(&named_like_one, "inside.clap");
+
+    assert_eq!(clap_libraries_in(folder.path()).unwrap(), [inside]);
+}
+
+#[test]
+fn paths_are_put_in_the_order_of_their_text_without_regard_to_case_whatever_order_they_come_in() {
+    let mut paths: Vec<PathBuf> = ["/x/b.clap", "/x/B.clap", "/x/a/z.clap", "/x/A.clap", "/y.clap"]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+
+    super::folders::sort_by_path_without_regard_to_case(&mut paths);
+
+    let sorted: Vec<&str> = paths.iter().map(|path| path.to_str().unwrap()).collect();
+    assert_eq!(
+        sorted,
+        ["/x/A.clap", "/x/a/z.clap", "/x/B.clap", "/x/b.clap", "/y.clap"]
+    );
+}
+
+#[test]
+fn what_a_clap_library_says_when_it_is_refused_is_not_confused_with_what_a_ladspa_one_says() {
+    assert_eq!(
+        ScanAnswer::from(clap_host::OpenError::NotAClapLibrary("no factory".to_owned())),
+        ScanAnswer::NotAClapLibrary("no factory".to_owned())
+    );
+    assert_eq!(
+        ScanAnswer::from(clap_host::OpenError::CouldNotBeLoaded("no file".to_owned())),
+        ScanAnswer::CouldNotBeLoaded("no file".to_owned())
+    );
+}

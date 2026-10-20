@@ -39,6 +39,62 @@ pub fn usual_folders(home: Option<&Path>) -> Vec<PathBuf> {
     folders
 }
 
+/// The folders that are looked in if nobody says otherwise, from the environment of this program, in the order of who is to win: `LADSPA_PATH`, the usual places of LADSPA, then
+/// `CLAP_PATH` and the usual places of CLAP. (The folders a person added come before all of these; see [`folders_to_scan`].)
+pub fn folders_looked_in_by_default() -> Vec<PathBuf> {
+    folders_looked_in_with(&|name| std::env::var_os(name), dirs::home_dir().as_deref())
+}
+
+/// The same, with `environment` giving the value of a variable of the environment (or nothing) and `home` the home folder: for the tests, which do not change the environment of
+/// the program they run in.
+pub fn folders_looked_in_with(
+    environment: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+    home: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut usual = usual_folders(home);
+    usual.extend(clap_folders(
+        environment("CLAP_PATH").as_deref(),
+        home,
+        environment("COMMONPROGRAMFILES").map(PathBuf::from).as_deref(),
+        environment("LOCALAPPDATA").map(PathBuf::from).as_deref(),
+    ));
+    folders_to_scan(&[], environment("LADSPA_PATH").as_deref(), &usual)
+}
+
+/// Whether `path` is named like a CLAP library: it ends in `.clap` (whatever case). On Windows and Linux a CLAP library is a file with that ending; on macOS it is a bundle, a
+/// folder with that ending, and the program that loads it finds the file inside.
+pub fn is_a_clap_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("clap"))
+}
+
+/// The folders that CLAP plugins are installed in, from the value of `CLAP_PATH` (a list of folders in the way the system makes a list of paths) and then the usual ones of the
+/// system, in that order: Windows `%COMMONPROGRAMFILES%\CLAP` and `%LOCALAPPDATA%\Programs\Common\CLAP`; macOS `/Library/Audio/Plug-Ins/CLAP` and
+/// `~/Library/Audio/Plug-Ins/CLAP`; elsewhere `/usr/lib/clap` and `~/.clap`. (The three places a system gives are passed in, so that this does not look at the environment.)
+pub fn clap_folders(
+    clap_path: Option<&OsStr>,
+    home: Option<&Path>,
+    common_program_files: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = clap_path
+        .map(|value| std::env::split_paths(value).collect())
+        .unwrap_or_default();
+    if cfg!(windows) {
+        folders.extend(common_program_files.map(|folder| folder.join("CLAP")));
+        folders.extend(local_app_data.map(|folder| folder.join("Programs").join("Common").join("CLAP")));
+    } else if cfg!(target_os = "macos") {
+        folders.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
+        folders.extend(home.map(|home| home.join("Library").join("Audio").join("Plug-Ins").join("CLAP")));
+    } else {
+        folders.push(PathBuf::from("/usr/lib/clap"));
+        folders.extend(home.map(|home| home.join(".clap")));
+    }
+    folders.retain(|folder| !folder.as_os_str().is_empty());
+    folders
+}
+
 /// All the folders to look in, in the order of who is to win: the ones a person added, then those of `ladspa_path` (the value of `LADSPA_PATH`, a list of folders in the way
 /// the system makes a list of paths), then the `usual` ones. A folder that is in the list more than once is in it once, where it first is; an empty path is not a folder.
 pub fn folders_to_scan(added_by_a_person: &[PathBuf], ladspa_path: Option<&OsStr>, usual: &[PathBuf]) -> Vec<PathBuf> {
@@ -124,4 +180,45 @@ pub fn libraries_in(folder: &Path) -> io::Result<Vec<PathBuf>> {
         (name.to_lowercase(), name)
     });
     Ok(libraries)
+}
+
+/// How many folders down from a folder that is looked in the CLAP libraries are looked for. (CLAP says to look in a folder and all that is in it; a person who adds a very
+/// large folder should not have the whole of it walked.)
+const MOST_FOLDERS_DOWN_FOR_CLAP: usize = 6;
+
+/// The CLAP libraries in `folder` **and in the folders in it**, down to six folders: the files that end in `.clap` (on macOS, the folders that end in `.clap`, which are not looked
+/// into), in the order of their paths without regard to case. A folder that is a link to another is not looked into, so that a link back up cannot make the walk go for ever. A
+/// folder that is not there has none; a folder inside that cannot be read is left out, and the folder that was asked for being unreadable is an error.
+pub fn clap_libraries_in(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut libraries = Vec::new();
+    match fs::read_dir(folder) {
+        Ok(_) => collect_clap_libraries(folder, MOST_FOLDERS_DOWN_FOR_CLAP, &mut libraries)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    }
+    sort_by_path_without_regard_to_case(&mut libraries);
+    Ok(libraries)
+}
+
+/// Puts `paths` in the order of their text without regard to case (and then, to be a total order, as they are): the same on every system, whatever order the folders give.
+pub(super) fn sort_by_path_without_regard_to_case(paths: &mut [PathBuf]) {
+    paths.sort_by_key(|path| {
+        let text = path.to_string_lossy().into_owned();
+        (text.to_lowercase(), text)
+    });
+}
+
+fn collect_clap_libraries(folder: &Path, folders_down: usize, libraries: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(folder)? {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else { continue };
+        if is_a_clap_file(&path) && (path.is_file() || (cfg!(target_os = "macos") && path.is_dir())) {
+            libraries.push(path);
+        } else if kind.is_dir() && folders_down > 0 {
+            // (A folder that cannot be read is left out: the rest of the folder is still looked in.)
+            let _ = collect_clap_libraries(&path, folders_down - 1, libraries);
+        }
+    }
+    Ok(())
 }

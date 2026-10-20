@@ -62,6 +62,36 @@ pub const TAIL_FOREVER: &str = "org.fastforwardrs.test.tail_forever";
 /// The sound times the sample rate it was activated at, over 1000.
 pub const RATE: &str = "org.fastforwardrs.test.rate";
 
+/// What the library is asked to do wrong, if anything: the value of the environment variable `FFRS_TEST_PLUGIN`, read once, when the library is first asked. It is for the
+/// tests of the scan, which run the scan program (a process of its own) with the variable set; **in a test program the variable is never set**.
+///
+/// `crash_when_loaded`, `hang_when_loaded`, `init_says_no` (the entry's `init` returns false), `crash_when_described`, `crash_when_made`, `hang_when_made`, `crash_when_activated`,
+/// `crash_when_run`, `hang_when_run`, `exit_when_run` (ends the program with no answer), `answer_wrong_when_run` (writes a line that is not an answer, and ends the program),
+/// `print_noise` (writes to the standard output while it is loaded and while it is made), `no_plugins` (a library with none).
+fn misbehaviour() -> &'static str {
+    static HOW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HOW.get_or_init(|| std::env::var("FFRS_TEST_PLUGIN").unwrap_or_default())
+}
+
+/// Does what the misbehaviour `how` says, if that is the one that was asked for,: crashes, never returns, or ends the program.
+fn misbehave_if_asked(how: &str) {
+    if misbehaviour() != how {
+        return;
+    }
+    if how.starts_with("crash") {
+        std::process::abort();
+    } else if how.starts_with("hang") {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    } else if how.starts_with("exit") {
+        std::process::exit(0);
+    } else if how.starts_with("answer_wrong") {
+        println!("\nffrs-scan-result: {{this is not an answer");
+        std::process::exit(0);
+    }
+}
+
 /// How many samples of latency the plugin `latency` says it has (and has).
 pub const LATENCY_SAMPLES: u32 = 64;
 /// How many samples of tail the plugin `tail` says it has.
@@ -354,6 +384,7 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
             KIND_TAIL => ECHO_SAMPLES,
             _ => 0,
         };
+        misbehave_if_asked("crash_when_activated");
         if KIND == KIND_FAILS_TO_ACTIVATE {
             return Err(PluginError::Message("this plugin never activates"));
         }
@@ -378,6 +409,14 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
 
     fn process(&mut self, _process: Process, mut audio: Audio, events: Events) -> Result<ProcessStatus, PluginError> {
         // The events are in order of time: the sound is made in stretches, each from one event to the next.
+        for how in [
+            "crash_when_run",
+            "hang_when_run",
+            "exit_when_run",
+            "answer_wrong_when_run",
+        ] {
+            misbehave_if_asked(how);
+        }
         if (KIND == KIND_CALLBACKS || KIND == KIND_LATENCY) && !self.asked {
             self.asked = true;
             if KIND == KIND_CALLBACKS {
@@ -546,14 +585,24 @@ struct Factory {
 
 impl PluginFactoryImpl for Factory {
     fn plugin_count(&self) -> u32 {
-        self.descriptors.len() as u32
+        if misbehaviour() == "no_plugins" {
+            0
+        } else {
+            self.descriptors.len() as u32
+        }
     }
 
     fn plugin_descriptor(&self, index: u32) -> Option<&PluginDescriptor> {
+        misbehave_if_asked("crash_when_described");
         self.descriptors.get(index as usize)
     }
 
     fn create_plugin<'a>(&'a self, host_info: HostInfo<'a>, plugin_id: &CStr) -> Option<PluginInstance<'a>> {
+        misbehave_if_asked("crash_when_made");
+        misbehave_if_asked("hang_when_made");
+        if misbehaviour() == "print_noise" {
+            println!("noise from a plugin that is being made");
+        }
         let number = IDS.iter().position(|id| plugin_id.to_str() == Ok(*id))?;
         let descriptor = &self.descriptors[number];
         macro_rules! made {
@@ -593,6 +642,14 @@ pub struct TestEntry {
 
 impl Entry for TestEntry {
     fn new(_plugin_path: Option<&CStr>) -> Result<Self, EntryLoadError> {
+        misbehave_if_asked("crash_when_loaded");
+        misbehave_if_asked("hang_when_loaded");
+        if misbehaviour() == "init_says_no" {
+            return Err(EntryLoadError);
+        }
+        if misbehaviour() == "print_noise" {
+            println!("noise from a library that is being loaded");
+        }
         let descriptors = IDS
             .iter()
             .zip(NAMES)

@@ -17,15 +17,27 @@ pub const STEP_PREFIX: &str = "ffrs-scan-step: ";
 pub const RESULT_PREFIX: &str = "ffrs-scan-result: ";
 
 /// What is in the cache of scans as well as on the wire. **Raise it when the scan finds something it did not (or means something else by what it finds)**, so that the answers
-/// that were kept are not believed any more.
-pub const SCAN_FORMAT: u32 = 1;
+/// that were kept are not believed any more. (2: the scan reads CLAP libraries too.)
+pub const SCAN_FORMAT: u32 = 2;
 
 /// The answer of the scan program.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ScanAnswer {
     Scanned(LibraryScan),
+    /// A `.clap` file that loaded, with what its plugins said and how each one did when it was made and run.
+    ScannedClap(clap_host::scan::LibraryScan),
     CouldNotBeLoaded(String),
     NotALadspaLibrary(String),
+    NotAClapLibrary(String),
+}
+
+impl From<clap_host::OpenError> for ScanAnswer {
+    fn from(error: clap_host::OpenError) -> Self {
+        match error {
+            clap_host::OpenError::CouldNotBeLoaded(reason) => Self::CouldNotBeLoaded(reason),
+            clap_host::OpenError::NotAClapLibrary(reason) => Self::NotAClapLibrary(reason),
+        }
+    }
 }
 
 impl From<OpenError> for ScanAnswer {

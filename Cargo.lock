@@ -1280,6 +1280,8 @@ name = "fastforwardrs"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "clap-host",
+ "clap-test-plugins",
  "cosmic-text",
  "cpal",
  "crc32fast",

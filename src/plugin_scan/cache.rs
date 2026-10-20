@@ -30,9 +30,10 @@ pub struct FileFingerprint {
 }
 
 impl FileFingerprint {
-    /// What the file at `path` is like now.
+    /// What the file at `path` is like now. **For a bundle (a CLAP library on macOS is a folder) it is the file inside that is looked at**: the time of a folder does not change
+    /// when a file deep in it does.
     pub fn of(path: &Path) -> io::Result<Self> {
-        let metadata = fs::metadata(path)?;
+        let metadata = fs::metadata(bundle_executable(path).as_deref().unwrap_or(path))?;
         let since_epoch = metadata
             .modified()
             .ok()
@@ -46,10 +47,24 @@ impl FileFingerprint {
     }
 }
 
+/// The file that is the library inside the bundle `path` (`Name.clap/Contents/MacOS/<the one file there>`), if `path` is a folder that has one.
+fn bundle_executable(path: &Path) -> Option<PathBuf> {
+    let mut files = fs::read_dir(path.join("Contents").join("MacOS"))
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|file| file.is_file());
+    let first = files.next()?;
+    // (A bundle with more than one file there is not one whose library can be told: the folder itself is looked at.)
+    files.next().is_none().then_some(first)
+}
+
 /// What a scan came to.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CachedOutcome {
     Scanned(LibraryScan),
+    /// A CLAP library that was scanned.
+    ScannedClap(clap_host::scan::LibraryScan),
     Failed(ScanFailure),
 }
 
@@ -151,7 +166,11 @@ impl ScanCache {
         self.entries.retain(|_, (_, outcome)| {
             !matches!(
                 outcome,
-                CachedOutcome::Failed(ScanFailure::CouldNotBeLoaded(_) | ScanFailure::NotALadspaLibrary(_))
+                CachedOutcome::Failed(
+                    ScanFailure::CouldNotBeLoaded(_)
+                        | ScanFailure::NotALadspaLibrary(_)
+                        | ScanFailure::NotAClapLibrary(_)
+                )
             )
         });
         self.search_signature = signature.to_owned();

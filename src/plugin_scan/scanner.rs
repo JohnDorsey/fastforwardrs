@@ -13,13 +13,15 @@ use thiserror::Error;
 use super::cache::{CachedOutcome, FileFingerprint, ScanCache};
 use super::child::{SCAN_TIME_LIMIT, scan_in_a_program};
 use super::failure::ScanFailure;
-use super::folders::{dependency_search_folders, libraries_in, library_search_variable};
+use super::folders::{clap_libraries_in, dependency_search_folders, libraries_in, library_search_variable};
 use ladspa_host::LibraryScan;
 
 /// What the scan of a library came to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LibraryOutcome {
     Scanned(LibraryScan),
+    /// A CLAP library was scanned.
+    ScannedClap(clap_host::scan::LibraryScan),
     Failed(ScanFailure),
 }
 
@@ -27,6 +29,7 @@ impl From<LibraryOutcome> for CachedOutcome {
     fn from(outcome: LibraryOutcome) -> Self {
         match outcome {
             LibraryOutcome::Scanned(scan) => Self::Scanned(scan),
+            LibraryOutcome::ScannedClap(scan) => Self::ScannedClap(scan),
             LibraryOutcome::Failed(failure) => Self::Failed(failure),
         }
     }
@@ -36,6 +39,7 @@ impl From<CachedOutcome> for LibraryOutcome {
     fn from(outcome: CachedOutcome) -> Self {
         match outcome {
             CachedOutcome::Scanned(scan) => Self::Scanned(scan),
+            CachedOutcome::ScannedClap(scan) => Self::ScannedClap(scan),
             CachedOutcome::Failed(failure) => Self::Failed(failure),
         }
     }
@@ -191,7 +195,11 @@ impl PluginScanner {
         let mut scan = FolderScan::default();
         let mut found = Vec::new();
         for folder in folders {
-            let libraries = match libraries_in(folder) {
+            // (The LADSPA libraries of the folder, and then the CLAP ones in it and below it.)
+            let libraries = match libraries_in(folder).and_then(|mut found| {
+                found.extend(clap_libraries_in(folder)?);
+                Ok(found)
+            }) {
                 Ok(libraries) => libraries,
                 Err(error) => {
                     scan.problems

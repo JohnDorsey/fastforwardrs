@@ -33,7 +33,8 @@ pub use child::{SCAN_TIME_LIMIT, scanner_program_beside_this_program};
 pub use effects::{NotUsed, PluginsFound, effect_of_a_plugin, key_of, plugins_found_in};
 pub use failure::ScanFailure;
 pub use folders::{
-    dependency_search_folders, folders_to_scan, libraries_in, library_file_extension, library_file_extensions,
+    clap_folders, clap_libraries_in, dependency_search_folders, folders_looked_in_by_default, folders_looked_in_with,
+    folders_to_scan, is_a_clap_file, libraries_in, library_file_extension, library_file_extensions,
     library_search_variable, usual_folders,
 };
 pub use ladspa_host::{LibraryScan, ScannedPlugin};

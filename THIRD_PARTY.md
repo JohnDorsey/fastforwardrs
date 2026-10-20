@@ -12,10 +12,10 @@ source of the ffmpeg that is shipped with a release is to be offered with it (`d
 
 | Licence | Libraries |
 |---|---|
-| [MIT License](#MIT) | 344 |
+| [MIT License](#MIT) | 348 |
 | [Unicode License v3](#Unicode-3.0) | 19 |
 | [Apache License 2.0](#Apache-2.0) | 18 |
-| [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 3 |
+| [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 4 |
 | [BSD 3-Clause "New" or "Revised" License](#BSD-3-Clause) | 2 |
 | [Boost Software License 1.0](#BSL-1.0) | 2 |
 | [zlib License](#Zlib) | 2 |
@@ -2186,6 +2186,7 @@ Public License instead of this License.  But first, please read
 ## GNU General Public License v3.0 or later <a id="GPL-3.0-or-later"></a>
 
 Used by:
+- clap-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 - ladspa-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 
 ```text
@@ -4760,6 +4761,42 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
+- clack-common 0.2.0 (https://github.com/prokopyl/clack)
+- clack-extensions 0.2.0 (https://github.com/prokopyl/clack)
+- clack-host 0.2.0 (https://github.com/prokopyl/clack)
+
+```text
+Copyright (c) 2021 Adrien Prokopowicz
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+## MIT License <a id="MIT"></a>
+
+Used by:
 - gpu-allocator 0.28.0 (https://github.com/Traverse-Research/gpu-allocator)
 
 ```text
@@ -6515,6 +6552,7 @@ Used by:
 - async-trait 0.1.92 (https://github.com/dtolnay/async-trait)
 - atomic-waker 1.1.2 (https://github.com/smol-rs/atomic-waker)
 - blocking 1.7.0 (https://github.com/smol-rs/blocking)
+- clap-sys 0.5.0 (https://github.com/micahrj/clap-sys)
 - concurrent-queue 2.5.0 (https://github.com/smol-rs/concurrent-queue)
 - displaydoc 0.2.7 (https://github.com/yaahc/displaydoc)
 - endi 1.1.1 (https://github.com/zeenix/endi)

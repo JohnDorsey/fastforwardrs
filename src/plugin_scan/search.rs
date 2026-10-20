@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use super::{
-    PluginScanner, PluginSearchSettings, ScanCache, folders_to_scan, plugins_found_in,
-    scanner_program_beside_this_program, usual_folders,
+    PluginScanner, PluginSearchSettings, ScanCache, folders_looked_in_by_default, plugins_found_in,
+    scanner_program_beside_this_program,
 };
 use crate::project::set_installed_plugins;
 
@@ -21,7 +21,7 @@ pub struct PluginSearch {
     pub settings_file: Option<PathBuf>,
     /// Where what the scans found is kept (`None`: only while the scan runs).
     pub cache_file: Option<PathBuf>,
-    /// Whether `LADSPA_PATH` and the usual folders are looked in besides those a person added.
+    /// Whether `LADSPA_PATH`, `CLAP_PATH` and the usual folders are looked in besides those a person added.
     pub look_in_the_usual_places: bool,
 }
 
@@ -66,11 +66,7 @@ impl PluginSearch {
         };
         let mut folders = settings.folders.clone();
         if self.look_in_the_usual_places {
-            for folder in folders_to_scan(
-                &[],
-                std::env::var_os("LADSPA_PATH").as_deref(),
-                &usual_folders(dirs::home_dir().as_deref()),
-            ) {
+            for folder in folders_looked_in_by_default() {
                 if !folders.contains(&folder) {
                     folders.push(folder);
                 }

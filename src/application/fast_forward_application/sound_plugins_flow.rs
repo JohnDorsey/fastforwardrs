@@ -16,8 +16,8 @@ use super::FastForwardApplication;
 use crate::application::commands::Command;
 use crate::application::sound_plugins_window::{SoundPluginsCommand, SoundPluginsView};
 use crate::plugin_scan::{
-    Breadcrumb, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache, folders_to_scan,
-    plugins_found_in, recover, scanner_program_beside_this_program, usual_folders,
+    Breadcrumb, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache, folders_looked_in_by_default,
+    plugins_found_in, recover, scanner_program_beside_this_program,
 };
 use crate::project::set_installed_plugins;
 
@@ -40,7 +40,7 @@ pub(super) struct PluginSearch {
     scanner_program: Option<PathBuf>,
     /// Where what the scans found is kept. `None` keeps it only while the program runs.
     cache_file: Option<PathBuf>,
-    /// Whether the folders of `LADSPA_PATH` and the usual ones are looked in. (They are, for the program a person uses; the tests ask for it where they mean to.)
+    /// Whether the folders of `LADSPA_PATH` and `CLAP_PATH` and the usual ones are looked in. (They are, for the program a person uses; the tests ask for it where they mean to.)
     look_in_the_usual_places: bool,
     /// The scan that is going on, if one is.
     running: Option<Receiver<(Vec<LibraryReport>, Vec<String>)>>,
@@ -56,14 +56,10 @@ impl PluginSearch {
         if !self.look_in_the_usual_places {
             return Vec::new();
         }
-        folders_to_scan(
-            &[],
-            std::env::var_os("LADSPA_PATH").as_deref(),
-            &usual_folders(dirs::home_dir().as_deref()),
-        )
+        folders_looked_in_by_default()
     }
 
-    /// All the folders, in the order of who wins: a person's, then `LADSPA_PATH`, then the usual ones.
+    /// All the folders, in the order of who wins: a person's, then `LADSPA_PATH` and the usual ones of LADSPA, then `CLAP_PATH` and the usual ones of CLAP.
     fn folders_to_scan(&self) -> Vec<PathBuf> {
         let mut all = self.settings.folders.clone();
         for folder in self.other_folders() {
