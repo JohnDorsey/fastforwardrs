@@ -244,9 +244,11 @@ and the benchmark (nothing has run on one), and the questions at the end of the 
 filter graph is the oracle of a null test, and `FASTFORWARDRS_SOUND=ffmpeg` selects it); the host of LADSPA plugins is a crate of its own, the only code with `unsafe`; the scan is a program of its own; sound plugins are effects, put on a
 clip, a track or a tag from the + menu (a directory of smaller menus by where effects come from), keyframed, saved (format 14) and heard; who may run a plugin is a question for each folder (a severe one for each plugin inside a project
 file); the command line refuses what nobody approved. The real set of LMMS (119 libraries, 211 plugins that can be effects) was run on the maintainer's computer. **CLAP (piece 7.8, 2026-10-20) is built as well**: found, offered as effects, run in the preview and the export with values as events at the sample, latency made up for and sound from before a clip for the plugins that remember (design `engine-phase-7-clap-design.md`, report `engine-phase-7-clap-report.md`). **Not built:** (the first plan said:) CLAP (a design of its own, after the maintainer has heard
-7.6), generators, a master bus, latency, a pre-roll, the effects of a group in sound (the effects of an embedded plugin were built on 2026-10-21). **Waiting on the maintainer:** listening (7.6), and the questions at the end of the report. **Next in the order: phase 5.**
+7.6), generators, a master bus, latency, a pre-roll, the effects of a group in sound (the effects of an embedded plugin were built on 2026-10-21). **Waiting on the maintainer:** listening (7.6), and the questions at the end of the report. **Phase 5 was built on 2026-10-21; next in the order: phase 6 (the ISF host).**
 
 ### Phase 5 — Group effects, adjustment clips and generator clips (size M)
+
+**BUILT 2026-10-21** (pieces 5.1 to 5.4; design `engine-phase-5-design.md`, report `engine-phase-5-report.md`). Differences from what is written below: a generator's content is a kind and the colour property a text object has, not an effect instance; the gate's "ungroup gives the same render" is met.
 
 GR-02, GR-06 to GR-10, EF-02, EF-03 (the backdrop slot, first use), EF-04, Q-33.
 

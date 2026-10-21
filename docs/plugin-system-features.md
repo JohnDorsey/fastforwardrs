@@ -306,7 +306,7 @@ can be supported. The design notes answer that at length; here is what the syste
 ## 7. Kinds of effect (EF)
 
 * **EF-01 [P] M** **Filters**: take the picture of the clip (or of the track, or of a group), give a picture.
-* **EF-02 [P] M** **Generators**: take no picture; give one (ISF source shaders; later the text generator). A generator clip has no media,
+* **EF-02 [P] M** **Generators** *(Solid colour built 2026-10-21, phase 5.4; ISF and the text generator are not)*: take no picture; give one (ISF source shaders; later the text generator). A generator clip has no media,
   has a duration the user sets (like a picture clip, **5 seconds by default, and it can be dragged longer**: Q-11, 2026-10-15), and its content is an effect instance.
 * **EF-03 [D] M** **Transitions** are effects with a **backdrop** input on the front clip (2026-10-13: acceptable): the clip is the
   "end" picture, what is composited behind it is the "start" picture, and `progress` is a number. (Q-09: where `progress` comes from.)
@@ -466,7 +466,7 @@ menu item or a window opened from one is marked.*
   gives the same render).
 * **GR-08 [P] S** The model of groups is built on the descriptor-driven effect model, never on the closed enum (the order: design
   notes, section 4).
-* **GR-09 [D] S** **Adjustment clips**: a clip with no picture of its own whose effects apply to the composite of everything behind it, for the
+* **GR-09 [D] S** **Adjustment clips** *(built 2026-10-21, phase 5.3)*: a clip with no picture of its own whose effects apply to the composite of everything behind it, for the
   length of the clip. Under the accepted transition model (EF-03) it costs almost nothing (a filter whose input is the backdrop), it is in
   Blender, MLT, Resolve and After Effects, and it is the cheapest first use of the backdrop mechanism. Not asked for by the maintainer; accepted when proposed (2026-10-13, Q-32), to be built after the engine.
 * **GR-10 [P] M** A group is **isolated** (its children are composited together first, then the group's effects and blend mode apply) or
