@@ -214,6 +214,7 @@ impl Scene {
             picture_size: Some(PROJECT_PICTURE),
             layers,
             symbol: self.symbol,
+            groups: Vec::new(),
             indicator_layout: self.indicator_layout,
             selected_clip: None,
         }
@@ -628,6 +629,7 @@ fn a_video_picture_that_is_the_size_of_the_frame_is_exactly_what_the_old_drawing
                 content: PreviewLayerContent::Video(VideoInThePicture::Picture(&picture)),
             }],
             symbol: None,
+            groups: Vec::new(),
             indicator_layout: SpeedIndicatorLayout::DEFAULT,
             selected_clip: None,
         };
@@ -673,6 +675,7 @@ fn a_text_object_is_the_same_picture_in_the_engine_and_in_the_old_drawing_whatev
                 picture_size: Some(PROJECT_PICTURE),
                 layers: vec![object("Hello, preview", colour, placement)],
                 symbol: None,
+                groups: Vec::new(),
                 indicator_layout: SpeedIndicatorLayout::DEFAULT,
                 selected_clip: None,
             };
@@ -712,6 +715,7 @@ fn the_symbol_over_a_video_is_the_same_picture_in_the_engine_and_in_the_old_draw
                         over: clip(0),
                         speed: SpeedFactor::new(speed).unwrap(),
                     }),
+                    groups: Vec::new(),
                     indicator_layout: layout,
                     selected_clip: None,
                 };

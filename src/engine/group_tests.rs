@@ -529,3 +529,44 @@ fn everything_in_a_group_changes_the_fingerprint_and_a_group_is_not_its_layers_f
     with_effects_on_the_group.layers[0].effects = vec![EffectCall::exposure(0.5)];
     assert_ne!(with_effects_on_the_group.fingerprint(), original.fingerprint());
 }
+
+#[test]
+fn a_group_is_clear_where_none_of_its_layers_are_so_what_is_behind_it_shows() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let pictures = the_pictures();
+        send_all(&mut renderer, &pictures);
+        let (behind, _) = render(&mut renderer, SIZE, vec![whole_frame(1, Vec::new())]);
+        // A group of one picture that is a quarter of the frame, in the middle.
+        let small = LayerDescription {
+            source: LayerSource::Picture(super::PictureId(3)),
+            corners: super::oracle_tests::upright(0.25, 0.25, 0.5, 0.5),
+            effects: Vec::new(),
+        };
+        let (flat, _) = render(&mut renderer, SIZE, vec![whole_frame(1, Vec::new()), small.clone()]);
+
+        let (grouped, _) = render(
+            &mut renderer,
+            SIZE,
+            vec![whole_frame(1, Vec::new()), a_group(vec![small], Vec::new())],
+        );
+
+        assert!(
+            the_largest_difference(&grouped, &flat) <= 1,
+            "the group's picture is clear outside the small one"
+        );
+        let pixel = |frame: &RenderedFrame, across: u32, down: u32| {
+            let first = ((down * SIZE.0 + across) * 4) as usize;
+            [
+                frame.rgba_pixels[first],
+                frame.rgba_pixels[first + 1],
+                frame.rgba_pixels[first + 2],
+            ]
+        };
+        assert_eq!(
+            pixel(&grouped, 2, 2),
+            pixel(&behind, 2, 2),
+            "at the corner what is behind shows"
+        );
+    });
+}

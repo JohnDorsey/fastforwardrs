@@ -173,7 +173,7 @@ pub(super) static OPACITY: EffectDescriptor = EffectDescriptor {
     description: Cow::Borrowed("Makes the picture more or less see-through"),
     category: Cow::Borrowed("Transform"),
     domain: EffectDomain::Picture,
-    // (It is not done to each pixel by itself: on a group it would be done to each member and not to the picture that they make together.)
+    // (It is not done to each pixel by itself: it changes how clear a pixel is. Since phase 5 that does not decide what a group can have: the engine makes the picture of a group.)
     changes_each_pixel_by_itself: false,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
         id: Cow::Borrowed("opacity"),

@@ -94,7 +94,7 @@ None of the keys works while a text field or a menu is open.
 
 * Eight effects: hue shift, saturation, brightness and contrast, exposure, opacity, blur, crop and a look-up table (`.cube`). At most 64 on one clip, track or group. Hue shift, saturation and brightness/contrast work on the numbers of the screen; exposure, opacity, blur and crop work in linear light.
 * A clip's effects are done first, then its track's, then its groups'. Drag a box by its heading to reorder.
-* **Groups** (tags, clip groups, track groups) are outlines on the timeline. **Their effects are a placeholder for now:** they are done to each member's picture by itself, which equals doing them to the whole only where the members are not see-through. Opacity, blur and crop are not offered to groups. Groups do nothing to sound.
+* **Groups** (tags, clip groups, track groups) are outlines on the timeline. **The effects of a clip group or a track group are done to the picture that its members make together** (a blur of a group is a blur of the whole; a group that has no effect that does anything is not a layer of its own). The effects of a tag are done to each member. The old drawing of the window (the fallback of a computer with no usable graphics adapter) leaves a group's effects out, as it leaves out a blur. Groups do nothing to sound.
 * The timeline's thumbnails and waveforms show the files as they are, without effects.
 
 **Project files**

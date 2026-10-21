@@ -797,3 +797,61 @@ fn a_picture_file_and_a_text_are_made_for_the_working_space_too() {
         assert!(matches!(data.working, WorkingSpace::Linear(_)), "{:?}", data.working);
     }
 }
+
+// --- groups (phase 5): grouping and ungrouping do not change what the picture is, until the group has an effect ---
+
+/// What is described for the frame `timeline_frame` of `project`: with a text and a picture file over a video, as `video_with_a_text_and_a_picture_over_it` makes it.
+fn described_at(project: &Project, timeline_frame: u64) -> crate::engine::FrameDescription {
+    let plan = plan_of(project);
+    let script = script_of_pictures(255);
+    let images = HashMap::from([(SourceMediaIdentifier::new(2), a_picture_file(100, 50))]);
+    let calls = TextCalls::default();
+    let mut describer = describer_of(&plan, &script, images, text_pictures_that_are_recorded(&calls));
+    describe(&mut describer, timeline_frame).0.description
+}
+
+#[test]
+fn a_group_with_no_effects_changes_nothing_in_the_frame_a_group_with_an_effect_is_a_layer_that_holds_its_members_and_ungrouping_changes_nothing()
+ {
+    use crate::project::{EffectKind, GroupKind, Member};
+    let (mut project, _) = video_with_a_text_and_a_picture_over_it(60);
+    let (image, text) = (clip_location(&project, 0, 0), clip_location(&project, 1, 0));
+    let flat = described_at(&project, 65);
+    assert_eq!(flat.layers.len(), 3, "the video, the text and the picture file");
+
+    // Grouped, with no effect: pass-through, the same frame to the last number.
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(text), Member::Clip(image)])
+        .unwrap();
+    assert_eq!(
+        described_at(&project, 65),
+        flat,
+        "grouping does not change what the picture is"
+    );
+
+    // With an effect: the video is where it was, and the other two are one layer, a group, that has the effect.
+    project.add_effect_to_the_group(group, EffectKind::HUE_SHIFT).unwrap();
+    project
+        .set_effect_value_of_the_group(
+            group,
+            crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT,
+            &PropertyValue::Number(90.0),
+        )
+        .unwrap();
+    let grouped = described_at(&project, 65);
+    assert_eq!(grouped.layers.len(), 2);
+    assert_eq!(grouped.layers[0], flat.layers[0], "the video is not in the group");
+    let LayerSource::Group(held) = &grouped.layers[1].source else {
+        panic!("a group was expected: {:?}", grouped.layers[1].source);
+    };
+    assert_eq!(held.layers, flat.layers[1..], "the text and the picture, as they were");
+    assert_eq!(grouped.layers[1].corners, CORNERS_OF_THE_WHOLE_PICTURE);
+    assert_eq!(grouped.layers[1].effects.len(), 1);
+    assert_eq!(grouped.layers[1].effects[0].key, COLOUR_MATRIX_KEY);
+    // (Before the group is in the picture, where it is not seen, nothing is a group.)
+    assert_eq!(described_at(&project, 10).layers.len(), 1);
+
+    // Ungrouped: the frame it was.
+    project.disband_group(group).unwrap();
+    assert_eq!(described_at(&project, 65), flat, "ungrouping gives the same frame");
+}

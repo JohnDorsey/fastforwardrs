@@ -17,15 +17,16 @@
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use crate::colour_effects::ColourMatrix;
 use crate::cube_table::CubeTable;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, Member, PictureOperation,
-    Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, Member,
+    PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor,
+    TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -114,15 +115,10 @@ pub struct Layer {
     /// The keyframes of what is seen of the clip, from all the racks that animate it wherever they are kept: where it is, and
     /// for a text object how it looks. Their frames are frames of the timeline. (Those of its effects are in the effects.)
     pub animation: Animation,
-    /// What is done to the picture of the layer, one after another: the effects that are applied to its clip, in the order they are
-    /// applied in (see [`Project::effects_applied_to_the_clip`]): those of the clip itself, those of its track where the badge of the
-    /// track is in the chain of the clip, those of the tags the clip is in where their badges are, and then those of the clip groups it
-    /// is in and of the track groups its track is in, the nearest first.
-    ///
-    /// **The effects of a clip group or a track group are a placeholder here.** They are meant to be applied to the picture that the
-    /// members of the group make together, which the preview and the export cannot make yet, so they are applied to the picture of each
-    /// member instead, which is the same picture except where a colour is cut off (see `project::groups::effects_of_groups`, which says
-    /// exactly what the difference is). When the pictures of groups can be made, they will not be in the effects of a layer.
+    /// What is done to the picture of the layer, one after another: the effects that are applied to its clip by itself, in the order they are
+    /// applied in (see [`Project::effects_applied_to_every_clip_by_itself`]): those of the clip itself, those of its track where the badge of the
+    /// track is in the chain of the clip, and those of the tags the clip is in where their badges are. **The effects of the clip groups and
+    /// the track groups it is in are not here** (phase 5): they are done to the picture that the group makes, which is [`PictureSection::groups`].
     pub effects: Vec<LayerEffect>,
 }
 
@@ -146,29 +142,7 @@ impl Layer {
     /// does nothing at the frame is left out, and neighbouring effects that mix colours are one** (a hue shift, a saturation and a brightness make one operation, which
     /// the engine does in one pass).
     pub fn operations_at(&self, timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
-        let mut operations: Vec<PictureOperation> = Vec::new();
-        for effect in &self.effects {
-            let Some(next) = effect
-                .kind
-                .picture_operation_with_tables(&effect.values_at(timeline_frame.value()), &effect.tables)
-            else {
-                continue;
-            };
-            if next.changes_nothing() {
-                continue;
-            }
-            match operations.last().and_then(|last| last.then_if_alike(&next)) {
-                Some(together) => {
-                    operations.pop();
-                    // (Two that undo each other are none.)
-                    if !together.changes_nothing() {
-                        operations.push(together);
-                    }
-                }
-                None => operations.push(next),
-            }
-        }
-        operations
+        operations_of_effects(&self.effects, timeline_frame)
     }
 
     /// How the effects of the layer that mix colours change the colours of its picture at `timeline_frame` (a frame it is seen at), all of them
@@ -228,6 +202,55 @@ impl Layer {
     }
 }
 
+/// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring
+/// effects that mix colours are one.
+pub fn operations_of_effects(effects: &[LayerEffect], timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
+    let mut operations: Vec<PictureOperation> = Vec::new();
+    for effect in effects {
+        let Some(next) = effect
+            .kind
+            .picture_operation_with_tables(&effect.values_at(timeline_frame.value()), &effect.tables)
+        else {
+            continue;
+        };
+        if next.changes_nothing() {
+            continue;
+        }
+        match operations.last().and_then(|last| last.then_if_alike(&next)) {
+            Some(together) => {
+                operations.pop();
+                // (Two that undo each other are none.)
+                if !together.changes_nothing() {
+                    operations.push(together);
+                }
+            }
+            None => operations.push(next),
+        }
+    }
+    operations
+}
+
+/// A clip group or a track group that makes a picture of its own in a section (phase 5): **the layers `first_layer..end_layer` of the section are drawn together, and the
+/// effects of the group are done to the picture they make**, which is then put over what is behind. A group with no effect that does anything is not one of these: its layers are
+/// drawn straight into what is behind (it is pass-through: GR-10, Q-33). The spans of a section are in the order of their first layers, the one that holds another first.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupSpan {
+    pub group: GroupId,
+    /// The first of the section's layers that is in the group.
+    pub first_layer: usize,
+    /// The layer after the last of the group's.
+    pub end_layer: usize,
+    /// What is done to the group's picture, one after another. (A group's effects have no keyframes, so they are the same at every frame.)
+    pub effects: Vec<LayerEffect>,
+}
+
+impl GroupSpan {
+    /// What the effects of the group do to its picture (the same at every frame).
+    pub fn operations(&self) -> Vec<PictureOperation> {
+        operations_of_effects(&self.effects, TimelineFrameIndex::new(0))
+    }
+}
+
 /// A stretch of the timeline over which the picture is made of the same layers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PictureSection {
@@ -238,6 +261,8 @@ pub struct PictureSection {
     /// What is seen, the layer at the back first, which is the order they are drawn in, on black.
     /// Nothing at all is a black picture.
     pub layers: Vec<Layer>,
+    /// The groups that make a picture of their own over some of the layers, the one that holds another first (see [`GroupSpan`]).
+    pub groups: Vec<GroupSpan>,
 }
 
 impl PictureSection {
@@ -318,21 +343,27 @@ struct Candidate<'project> {
     placement: Placement,
     /// The keyframes of what is seen of the clip.
     animation: Animation,
-    /// What is done to its picture: the effects that are applied to the clip (those of its groups are a placeholder, see
+    /// What is done to its picture by itself: the effects that are applied to the clip (those of its groups are done to the picture of the group, see
     /// [`Layer::effects`]).
     effects: Vec<LayerEffect>,
+    /// The clip groups and track groups that make a picture of their own that the clip is in, the outermost first.
+    shapes: Vec<GroupId>,
 }
 
 impl Candidate<'_> {
-    /// The layer that the clip is, with `content`.
-    fn layer(&self, content: LayerContent) -> Layer {
-        Layer {
-            clip: self.clip,
-            track: self.track,
-            content,
-            placement: self.placement,
-            animation: self.animation.clone(),
-            effects: self.effects.clone(),
+    /// The layer that the clip is, with `content`, in the groups it is in.
+    fn entry(&self, content: LayerContent) -> Entry {
+        Entry {
+            track_position: self.track_position,
+            layer: Layer {
+                clip: self.clip,
+                track: self.track,
+                content,
+                placement: self.placement,
+                animation: self.animation.clone(),
+                effects: self.effects.clone(),
+            },
+            shapes: self.shapes.clone(),
         }
     }
 
@@ -399,7 +430,8 @@ pub(crate) fn layer_effect_of(
 pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier) -> bool) -> PicturePlan {
     let picture_size = project.picture_size();
     let animations = project.resolved_animations();
-    let applied_effects = project.effects_applied_to_every_clip();
+    let applied_effects = project.effects_applied_to_every_clip_by_itself();
+    let group_effects = effects_of_the_groups_that_make_pictures(project, &animations);
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
         for placement in track.placements() {
@@ -441,6 +473,11 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                     .filter(|applied| applied.effect.kind().is_installed())
                     .map(|applied| layer_effect_of(project, &animations, applied))
                     .collect(),
+                shapes: project
+                    .shapes_round_the_clip_outermost_first(placement.id)
+                    .into_iter()
+                    .filter(|shape| group_effects.contains_key(shape))
+                    .collect(),
             });
         }
     }
@@ -474,7 +511,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
             active.push(&candidates[index]);
             next_to_start += 1;
         }
-        let (new_sections, frames_missing_pictures_here) = sections_between(first, end, &active);
+        let (new_sections, frames_missing_pictures_here) = sections_between(first, end, &active, &group_effects);
         frames_missing_a_picture += frames_missing_pictures_here;
         for section in new_sections {
             push_merging_with_the_one_before(&mut sections, section);
@@ -492,7 +529,12 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
 /// The sections (one, or more if a video runs out of source pictures partway) for the frames
 /// `first` up to `end`, over which no clip starts or ends, and how many of those frames have a video
 /// in front of what is seen that has no picture to show.
-fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<PictureSection>, u64) {
+fn sections_between(
+    first: u64,
+    end: u64,
+    active: &[&Candidate<'_>],
+    group_effects: &HashMap<GroupId, Vec<LayerEffect>>,
+) -> (Vec<PictureSection>, u64) {
     debug_assert!(
         active
             .iter()
@@ -519,7 +561,7 @@ fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<Pic
         let (from, until) = (pair[0], pair[1]);
         // The layers there are over these frames, the one at the back first (the ones with their
         // track position, which tells what is in front of what).
-        let mut layers: Vec<(usize, Layer)> = Vec::new();
+        let mut layers: Vec<Entry> = Vec::new();
         let mut missing_pictures_in_front_of = Vec::new();
         for candidate in &back_to_front {
             match candidate.content {
@@ -534,40 +576,32 @@ fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<Pic
                     // The range ends where the last picture's group of source frames does, but not
                     // beyond what the file (and the clip) have, so that a whole clip is cut exactly as the clip is.
                     let end_source_frame = (first_source_frame + (until - from) * speed).min(limit);
-                    layers.push((
-                        candidate.track_position,
-                        candidate.layer(LayerContent::Video(VisibleVideo {
-                            source: media.source(),
-                            first_source_frame,
-                            end_source_frame,
-                            speed: candidate.effective_speed,
-                        })),
-                    ));
+                    layers.push(candidate.entry(LayerContent::Video(VisibleVideo {
+                        source: media.source(),
+                        first_source_frame,
+                        end_source_frame,
+                        speed: candidate.effective_speed,
+                    })));
                 }
                 Clip::Image(image) => {
                     if candidate.source_frame_count > 0 {
-                        layers.push((
-                            candidate.track_position,
-                            candidate.layer(LayerContent::Image { source: image.source() }),
-                        ));
+                        layers.push(candidate.entry(LayerContent::Image { source: image.source() }));
                     }
                 }
-                Clip::Text(text) => layers.push((
-                    candidate.track_position,
-                    candidate.layer(LayerContent::Text(text.object.clone())),
-                )),
+                Clip::Text(text) => layers.push(candidate.entry(LayerContent::Text(text.object.clone()))),
                 Clip::Audio(_) | Clip::Crate(_) => {}
             }
         }
 
-        // What is behind the front-most layer that covers the picture cannot be seen.
-        let covering = layers.iter().rposition(|(_, layer)| layer.covers_the_picture());
-        if let Some(position_in_layers) = covering {
-            layers.drain(..position_in_layers);
-        }
+        // The layers that are in a group that makes a picture of its own are nodes of a tree: what is behind the front-most layer that covers the picture (or the
+        // group that covers it) cannot be seen, inside each group and in the frame.
+        let mut nodes = nodes_of(layers, 0);
+        let covering = nodes.iter().rposition(|node| node.covers_the_picture(group_effects));
+        let front_most_covering_track_position =
+            covering.map(|position| nodes[position].front_most_covering_track_position(group_effects));
+        drain_what_is_behind_what_covers(&mut nodes, group_effects);
         // A video with no picture is only missed if it would have been seen: nothing that covers
         // the picture is in front of it. (A track position that is less is further front.)
-        let front_most_covering_track_position = covering.map(|_| layers[0].0);
         let is_missed = missing_pictures_in_front_of
             .iter()
             .any(|&track_position| front_most_covering_track_position.is_none_or(|covering| track_position < covering));
@@ -575,10 +609,13 @@ fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<Pic
             frames_missing_a_picture += until - from;
         }
 
+        let (mut layers, mut groups) = (Vec::new(), Vec::new());
+        flatten(nodes, group_effects, &mut layers, &mut groups);
         sections.push(PictureSection {
             first_timeline_frame: from,
             end_timeline_frame: until,
-            layers: layers.into_iter().map(|(_, layer)| layer).collect(),
+            layers,
+            groups,
         });
     }
     (sections, frames_missing_a_picture)
@@ -589,6 +626,7 @@ fn sections_between(first: u64, end: u64, active: &[&Candidate<'_>]) -> (Vec<Pic
 fn push_merging_with_the_one_before(sections: &mut Vec<PictureSection>, section: PictureSection) {
     if let Some(previous) = sections.last_mut()
         && previous.end_timeline_frame == section.first_timeline_frame
+        && previous.groups == section.groups
         && let Some(carried_on) = layers_carried_on(previous, &section)
     {
         previous.layers = carried_on;
@@ -648,6 +686,11 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
         && before.speed == after.speed
         && after.first_source_frame == before.first_source_frame + frame_count * u64::from(before.speed.value())
 }
+
+mod group_nodes;
+use group_nodes::{
+    Entry, drain_what_is_behind_what_covers, effects_of_the_groups_that_make_pictures, flatten, nodes_of,
+};
 
 #[cfg(test)]
 mod animation_tests;

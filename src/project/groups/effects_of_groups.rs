@@ -13,39 +13,24 @@
 //!   after the clips of the group have been laid over one another, and after the effects of the clips and of their tracks, and
 //!   of the clip groups and track groups that are in this one.
 //!
-//! # A placeholder: group effects are applied to each member for now
+//! # The picture of a group (phase 5)
 //!
-//! **Neither the preview nor the export can make the picture that the members of a group make together yet.** Each draws every layer
-//! by itself, one over another, with the colour change of the layer applied to the layer's own picture (see
-//! [`crate::composition::Layer::effects`]). A new rendering engine that can draw some layers into a picture of their own, change that
-//! picture, and then draw it over the rest, is planned (`docs/long-term-plan-plugins-and-gpu-engine.md`), and this is for it to do.
+//! **The engine draws the members of a clip group or a track group into a picture of their own, and does the effects of the group to that picture** (see
+//! `docs/engine-phase-5-design.md`: `Project::effects_applied_to_the_group` gives them, `PictureSection::groups` carries them to the engine). A group that has no
+//! effect that does anything is pass-through: its members are drawn as if it was not there. So a clip's own picture is made with [`Project::effects_applied_to_every_clip_by_itself`]
+//! (its own effects, its track's and its tags' where the badges are), and **the effects of the clip groups and track groups it is in are not among them**.
 //!
-//! Until it can, the effects of a clip group or a track group are **applied to the own picture of each member** instead: they are added
-//! to the effects of the layer of each clip that is inside the group ([`Project::effects_applied_to_the_clip`]). That is the maintainer's
-//! decision of 2026-10-13 (recorded in `docs/groups-feature-spec.md`, G-26), and it is not what the effect is meant to do, so:
+//! [`Project::effects_applied_to_the_clip`] and [`Project::effects_applied_to_every_clip`] still give *every* effect that concerns a clip, the groups' last, for what asks
+//! "which effects does this clip have" (the sound, which has no effects of groups; a check of which effects the program does not have): they are not the order a picture is
+//! made in.
 //!
-//! * for an effect that changes the colour of each pixel by itself and does not change how clear it is (every effect there is: the
-//!   hue shift is a colour matrix) the picture is the same, **except where a colour is cut off at the least or the most there is**.
-//!   Where a layer that is partly clear is over another, and the effect pushes a colour of either past that limit, the colour that is cut
-//!   off is not the colour of what the layers make together, and the picture is off by some of the 255 steps of a colour. **How many
-//!   depends on how vivid the colours are and how clear the layer in front is; it is not limited to a few steps.** For two layers 40%
-//!   and 50% clear (a blue one over an orange one) and a turn of 120 degrees it is 14 steps in one colour (measured with ffmpeg, which
-//!   the export uses, and the same by arithmetic), 20 at the worst turn for those two colours, and for colours chosen at random among
-//!   all there are, with random clearness and turns, a search found differences of up to about 100 steps, more than 8 in about a
-//!   quarter of the pairs. Where the layers are **not clear at all** (a video, a picture without see-through parts) there is **no
-//!   difference**, because the layer in front is all that is seen; and where only one layer is, or the colours are greys or stay
-//!   inside the limits, there is none either (but for a step of rounding). So what shows is the edges of what is see-through (the soft
-//!   edge of text, of a turned picture, of a picture with a see-through part) where it is over something else. (The tests of this
-//!   module that have `placeholder` in their names work these differences out, so that it is known what the placeholder gets wrong, and
-//!   they are the ones to throw away with it);
-//! * for an effect that would **not** make the same picture that way (a blur, which is a mix of the pixels beside each pixel, a glow, a
-//!   vignette that is round the group and not round each member), applying it to each member is wrong, not a little off. Such an
-//!   effect says so in the table of effects (`on_a_composite` is `false`), and a clip group or a track group does not offer it, until
-//!   the engine can make the picture that it is applied to. A tag offers every effect: for a tag each member is what it is applied to.
+//! Until phase 5 the effects of a clip group or a track group were a **placeholder**: they were applied to the picture of each member by itself, which is the same
+//! picture only where the members are not see-through (and off by up to about 100 of the 255 levels of a colour at the see-through edges of layers that are over others:
+//! the tests of this module with `placeholder` in their names work that out, and are kept as the record of what was wrong). That is why a blur, a crop and an opacity were not
+//! offered to a clip group or a track group, which they are now.
 //!
-//! The order the effects are applied in is: the effects of the clip itself, with those of its tracks and of its tags where their badges
-//! are in its chain; then those of the clip groups it is in, the nearest first (each with its own tags, where its badges are); then those
-//! of the track groups its track is in, the nearest first.
+//! The order the effects of a clip are applied in is: the effects of the clip itself, with those of its tracks and of its tags where their badges are; then those of the clip
+//! groups it is in, the nearest first (each with its own tags, where its badges are); then those of the track groups its track is in, the nearest first.
 
 use std::collections::HashMap;
 
@@ -165,22 +150,76 @@ impl Project {
         let (Some(placement), Some(track)) = (self.placement_of(clip), self.track_holding(clip)) else {
             return Vec::new();
         };
-        self.effects_applied_to_a_clip(&self.parents(), track, clip, placement.effects, placement.clip.kind())
+        self.effects_applied_to_a_clip(
+            &self.parents(),
+            track,
+            clip,
+            placement.effects,
+            placement.clip.kind(),
+            true,
+        )
     }
 
     /// What [`Self::effects_applied_to_the_clip`] gives for every clip there is, worked out together (which is quicker).
     pub fn effects_applied_to_every_clip(&self) -> HashMap<ClipId, Vec<AppliedEffect<'_>>> {
+        self.effects_of_every_clip(true)
+    }
+
+    /// What [`Self::effects_applied_to_every_clip`] gives **without the effects of the clip groups and the track groups**: those of the clip, of its track and of its tags where the
+    /// badges are. (The picture of a group is made from the pictures of its members and its own effects are done to that, see [`Self::effects_applied_to_the_group`]; the effects
+    /// that are applied to a clip by itself are these.)
+    pub fn effects_applied_to_every_clip_by_itself(&self) -> HashMap<ClipId, Vec<AppliedEffect<'_>>> {
+        self.effects_of_every_clip(false)
+    }
+
+    fn effects_of_every_clip(&self, with_the_groups: bool) -> HashMap<ClipId, Vec<AppliedEffect<'_>>> {
         let parents = self.parents();
         let mut applied = HashMap::new();
         for track in &self.tracks {
             for entry in track.entries() {
                 applied.insert(
                     entry.id(),
-                    self.effects_applied_to_a_clip(&parents, track, entry.id(), entry.effects(), entry.clip().kind()),
+                    self.effects_applied_to_a_clip(
+                        &parents,
+                        track,
+                        entry.id(),
+                        entry.effects(),
+                        entry.clip().kind(),
+                        with_the_groups,
+                    ),
                 );
             }
         }
         applied
+    }
+
+    /// The effects that are done to the picture of the clip group or the track group `group`: its own, and where its chain has the badge of a tag, those of the tag, from the first
+    /// done to the last. The ones that are switched off, and the ones that a group of its kind cannot have, are left out. (Nothing, if there is no such group.)
+    pub fn effects_applied_to_the_group(&self, group: GroupId) -> Vec<AppliedEffect<'_>> {
+        let Some(found) = self.group(group) else {
+            return Vec::new();
+        };
+        let mut applied = Vec::new();
+        self.add_the_effects_of_the_group(group, self.groups.len(), &mut applied);
+        applied.retain(|applied| {
+            applied.effect.is_enabled() && applied.effect.kind().applies_to_a_group_of_kind(found.kind())
+        });
+        applied
+    }
+
+    /// The clip groups and track groups that the clip `clip` is inside, **the outermost first** (the track groups of its track, and then the clip groups it is in): the order in
+    /// which the pictures they make are made, from the one that holds all the others to the one that holds the clip. (Nothing, if there is no such clip.)
+    pub fn shapes_round_the_clip_outermost_first(&self, clip: ClipId) -> Vec<GroupId> {
+        let Some(track) = self.track_holding(clip) else {
+            return Vec::new();
+        };
+        let parents = self.parents();
+        let mut shapes = self.shapes_round(&parents, Member::Track(track.id()));
+        shapes.reverse();
+        let mut of_the_clip = self.shapes_round(&parents, Member::Clip(clip));
+        of_the_clip.reverse();
+        shapes.extend(of_the_clip);
+        shapes
     }
 
     /// The effects applied to the clip `clip`, which is on `track`, has the chain `chain` and is of kind `kind`. (All of those are the
@@ -192,6 +231,7 @@ impl Project {
         clip: ClipId,
         chain: &'project Effects,
         kind: ClipKind,
+        with_the_groups: bool,
     ) -> Vec<AppliedEffect<'project>> {
         let mut applied: Vec<AppliedEffect<'project>> = Vec::new();
         for item in chain.items(true) {
@@ -211,10 +251,12 @@ impl Project {
                 }
             }
         }
-        let shapes_round_the_clip = self.shapes_round(parents, Member::Clip(clip));
-        let shapes_round_the_track = self.shapes_round(parents, Member::Track(track.id()));
-        for shape in shapes_round_the_clip.into_iter().chain(shapes_round_the_track) {
-            self.add_the_effects_of_the_group(shape, self.groups.len(), &mut applied);
+        if with_the_groups {
+            let shapes_round_the_clip = self.shapes_round(parents, Member::Clip(clip));
+            let shapes_round_the_track = self.shapes_round(parents, Member::Track(track.id()));
+            for shape in shapes_round_the_clip.into_iter().chain(shapes_round_the_track) {
+                self.add_the_effects_of_the_group(shape, self.groups.len(), &mut applied);
+            }
         }
         // (An effect that is switched off is in its chain, and is not applied.)
         applied.retain(|applied| applied.effect.is_enabled() && applied.effect.kind().applies_to_a_clip_of_kind(kind));

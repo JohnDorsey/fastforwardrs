@@ -201,13 +201,12 @@ impl EffectKind {
     }
 
     /// Whether a group of kind `kind` can have the effect: a tag, which has it applied to each member, can have any; and a clip group or a track
-    /// group, which have it applied to what their members make together, only a picture effect that changes each pixel by itself.
+    /// group, which have it done to the picture that their members make together (phase 5: the engine makes that picture), any picture effect. (A sound effect is not for a picture
+    /// of a group.)
     pub fn applies_to_a_group_of_kind(self, kind: GroupKind) -> bool {
         match kind {
             GroupKind::Tag => true,
-            GroupKind::ClipGroup | GroupKind::TrackGroup => {
-                self.0.domain == EffectDomain::Picture && self.0.changes_each_pixel_by_itself
-            }
+            GroupKind::ClipGroup | GroupKind::TrackGroup => self.0.domain == EffectDomain::Picture,
         }
     }
 

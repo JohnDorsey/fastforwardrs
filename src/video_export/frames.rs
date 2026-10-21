@@ -23,7 +23,7 @@ use super::plan::ExportPlan;
 use crate::engine::{FrameDescription, PictureData, PictureId};
 use crate::frame_scene::{
     PreviewContent, SentPictures, TextPictures, VideoInThePicture, colour_of_a_picture_file, describe_frame,
-    layers_of_a_section, symbol_of_a_section,
+    groups_of_a_section, layers_of_a_section, symbol_of_a_section,
 };
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
@@ -141,6 +141,7 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
                     )
                 },
             ),
+            groups: groups_of_a_section(section, frame),
             symbol: symbol_of_a_section(section),
             indicator_layout: plan.symbol_layout,
             selected_clip: None,

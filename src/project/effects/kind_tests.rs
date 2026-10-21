@@ -439,8 +439,10 @@ fn a_kind_that_the_program_does_not_have_changes_no_colour() {
     );
 }
 
+// (Rewritten on purpose in phase 5: a clip group or a track group could have only a picture effect that changes each pixel by itself, because the effects of a group were done to each
+// member as a placeholder. The engine makes the picture of a group now, so it can have any picture effect, a blur among them; a sound effect is still not for a picture of a group.)
 #[test]
-fn what_a_kind_can_be_put_on_follows_its_domain_and_whether_it_changes_each_pixel_by_itself() {
+fn what_a_kind_can_be_put_on_follows_its_domain() {
     let picture = a_kind_of_effect_the_program_does_not_have("isf:a_picture_effect", &[("amount", degrees(0.0))]);
     let mut sound_descriptor = the_descriptor_of_an_effect_the_program_does_not_have("ladspa:1/a_sound_effect", &[]);
     sound_descriptor.domain = EffectDomain::Sound;
@@ -471,10 +473,10 @@ fn what_a_kind_can_be_put_on_follows_its_domain_and_whether_it_changes_each_pixe
     assert!(picture.applies_to_a_group_of_kind(GroupKind::ClipGroup));
     assert!(picture.applies_to_a_group_of_kind(GroupKind::TrackGroup));
     assert!(
-        !blur.applies_to_a_group_of_kind(GroupKind::ClipGroup),
-        "a blur of each member is not a blur of the group"
+        blur.applies_to_a_group_of_kind(GroupKind::ClipGroup),
+        "a blur is of the picture that the members of the group make together"
     );
-    assert!(!blur.applies_to_a_group_of_kind(GroupKind::TrackGroup));
+    assert!(blur.applies_to_a_group_of_kind(GroupKind::TrackGroup));
     assert!(
         !sound.applies_to_a_group_of_kind(GroupKind::ClipGroup),
         "a sound effect is not for a picture of a group"

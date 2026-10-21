@@ -8,8 +8,8 @@
 //! What the two do not share is passed in: what shows where a video is (the window may have only a thumbnail of it yet, or nothing; the export always has the
 //! picture) and the decoded picture of an image file.
 
-use super::{PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
-use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
+use super::{PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
+use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo, operations_of_effects};
 use crate::engine::PictureColour;
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
@@ -47,6 +47,19 @@ pub fn layers_of_a_section<'a>(
                     PreviewLayerContent::Text(layer.text_at(frame).expect("a text layer has a text object"))
                 }
             },
+        })
+        .collect()
+}
+
+/// The groups of `section` that make a picture of their own, as they are at `frame`: which layers they hold and what their effects do (the same at every frame).
+pub fn groups_of_a_section(section: &PictureSection, frame: TimelineFrameIndex) -> Vec<PreviewGroup> {
+    section
+        .groups
+        .iter()
+        .map(|group| PreviewGroup {
+            first_layer: group.first_layer,
+            end_layer: group.end_layer,
+            operations: operations_of_effects(&group.effects, frame),
         })
         .collect()
 }

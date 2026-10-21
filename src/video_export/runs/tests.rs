@@ -45,6 +45,7 @@ fn plan_of(sections: Vec<(u64, u64, Vec<Layer>)>) -> PicturePlan {
                 first_timeline_frame,
                 end_timeline_frame,
                 layers,
+                groups: Vec::new(),
             })
             .collect(),
         frames_missing_a_picture: 0,

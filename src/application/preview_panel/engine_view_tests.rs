@@ -42,6 +42,7 @@ fn content<'a>(layers: Vec<PreviewLayer<'a>>, selected: Option<u32>) -> PreviewC
         picture_size: Some((1600, 900)),
         layers,
         symbol: None,
+        groups: Vec::new(),
         indicator_layout: SpeedIndicatorLayout::DEFAULT,
         selected_clip: selected.map(clip),
     }
@@ -978,5 +979,165 @@ fn a_look_up_table_operation_is_described_as_a_call_that_names_a_table_that_the_
         published_table(id).map(|found| found.serial_number()),
         Some(table.serial_number()),
         "(it has been put where the engine takes it from)"
+    );
+}
+
+// --- groups (phase 5) ---
+
+fn a_group_of(first_layer: usize, end_layer: usize, degrees: f32) -> crate::frame_scene::PreviewGroup {
+    crate::frame_scene::PreviewGroup {
+        first_layer,
+        end_layer,
+        operations: vec![crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(
+            degrees,
+        ))],
+    }
+}
+
+fn the_picture_of(description_layer: &crate::engine::LayerDescription) -> PictureId {
+    match &description_layer.source {
+        LayerSource::Picture(id) => *id,
+        other => panic!("a picture was expected: {other:?}"),
+    }
+}
+
+fn the_layers_of_the_group(description_layer: &crate::engine::LayerDescription) -> &[crate::engine::LayerDescription] {
+    match &description_layer.source {
+        LayerSource::Group(group) => &group.layers,
+        other => panic!("a group was expected: {other:?}"),
+    }
+}
+
+#[test]
+fn a_group_is_a_layer_made_of_the_layers_in_it_over_the_whole_frame_with_the_effects_of_the_group() {
+    let picture = an_image();
+    let layers = (0..4)
+        .map(|number| image_layer(number, number + 1, Some(&picture), whole_picture()))
+        .collect();
+    let mut shown = content(layers, None);
+    shown.groups = vec![a_group_of(1, 3, 90.0)];
+
+    let (description, _) = describe(&shown);
+
+    assert_eq!(
+        description.layers.len(),
+        3,
+        "the first layer, the group, the last layer"
+    );
+    let group = &description.layers[1];
+    assert_eq!(the_layers_of_the_group(group).len(), 2);
+    assert_eq!(
+        group.corners, CORNERS_OF_THE_WHOLE_PICTURE,
+        "a group is over the whole frame"
+    );
+    assert_eq!(
+        group.effects,
+        vec![EffectCall::colour_matrix(ColourMatrix::hue_rotation(90.0).rows())],
+        "the effect of the group is the effect of its layer"
+    );
+    assert!(
+        the_layers_of_the_group(group)
+            .iter()
+            .all(|layer| layer.effects.is_empty())
+    );
+    // The layers are the pictures of the second and third layers, in their order, and the first and last are where they were.
+    let (flat, _) = describe(&content(
+        (0..4)
+            .map(|number| image_layer(number, number + 1, Some(&picture), whole_picture()))
+            .collect(),
+        None,
+    ));
+    assert_eq!(the_picture_of(&description.layers[0]), the_picture_of(&flat.layers[0]));
+    assert_eq!(
+        the_picture_of(&the_layers_of_the_group(group)[0]),
+        the_picture_of(&flat.layers[1])
+    );
+    assert_eq!(
+        the_picture_of(&the_layers_of_the_group(group)[1]),
+        the_picture_of(&flat.layers[2])
+    );
+    assert_eq!(the_picture_of(&description.layers[2]), the_picture_of(&flat.layers[3]));
+}
+
+#[test]
+fn a_group_in_a_group_is_a_layer_in_a_layer_and_a_group_with_nothing_to_show_is_not_there() {
+    let picture = an_image();
+    let layers = (0..3)
+        .map(|number| image_layer(number, number + 1, Some(&picture), whole_picture()))
+        .collect();
+    let mut shown = content(layers, None);
+    shown.groups = vec![a_group_of(0, 3, 45.0), a_group_of(1, 3, 90.0)];
+
+    let (description, _) = describe(&shown);
+
+    assert_eq!(description.layers.len(), 1);
+    let outer = the_layers_of_the_group(&description.layers[0]);
+    assert_eq!(outer.len(), 2, "a picture, and the group in the group");
+    assert_eq!(description.layers[0].effects.len(), 1);
+    assert_eq!(the_layers_of_the_group(&outer[1]).len(), 2);
+    assert_eq!(
+        outer[1].effects,
+        vec![EffectCall::colour_matrix(ColourMatrix::hue_rotation(90.0).rows())]
+    );
+}
+
+#[test]
+fn a_group_whose_layers_cannot_be_had_yet_is_left_out_and_the_others_are_not() {
+    let picture = an_image();
+    let mut layers: Vec<PreviewLayer<'_>> = (0..3)
+        .map(|number| image_layer(number, number + 1, Some(&picture), whole_picture()))
+        .collect();
+    layers[1] = image_layer(1, 2, None, whole_picture());
+    let mut shown = content(layers, None);
+    shown.groups = vec![a_group_of(1, 2, 90.0)];
+
+    // (A layer with no picture yet is a colour: it is there, and so is its group.)
+    let (description, _) = describe(&shown);
+    assert_eq!(description.layers.len(), 3);
+    assert!(matches!(
+        the_layers_of_the_group(&description.layers[1])[0].source,
+        LayerSource::Solid(_)
+    ));
+
+    // A text whose fonts are not loaded has no picture to make, and is left out; the group that is only that is left out with it.
+    let mut text = layer(5, whole_picture());
+    text.content = PreviewLayerContent::Text(Cow::Owned(TextObject::default()));
+    let mut with_text = content(vec![image_layer(0, 1, Some(&picture), whole_picture()), text], None);
+    with_text.groups = vec![a_group_of(1, 2, 90.0)];
+    let (probe, asked) = describe(&with_text);
+    assert_eq!(
+        probe.layers.len(),
+        2,
+        "(with the supply that says yes the group is there)"
+    );
+    let mut refuses_all = WritesItDown::default();
+    refuses_all.refuses.extend(asked.asked.iter().copied());
+    let (description, _) = describe_with(&with_text, 0, refuses_all);
+    assert!(
+        description.layers.is_empty(),
+        "every picture is refused, and the group is nothing"
+    );
+}
+
+#[test]
+fn the_symbol_of_a_video_that_is_in_a_group_is_drawn_after_the_video_inside_the_group() {
+    let picture = video_picture(1);
+    let image = an_image();
+    let layers = vec![
+        image_layer(0, 1, Some(&image), whole_picture()),
+        showing(1, &picture, whole_picture()),
+        image_layer(2, 2, Some(&image), whole_picture()),
+    ];
+    let mut shown = content(layers, None);
+    shown.groups = vec![a_group_of(1, 3, 90.0)];
+    shown.symbol = Some(the_symbol_over(1, 4));
+
+    let (description, _) = describe(&shown);
+
+    assert_eq!(description.layers.len(), 2);
+    assert_eq!(
+        the_layers_of_the_group(&description.layers[1]).len(),
+        3,
+        "the video, its symbol right after it, and the layer in front"
     );
 }

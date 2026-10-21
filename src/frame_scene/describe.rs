@@ -19,11 +19,11 @@ use std::hash::{Hash, Hasher};
 
 use egui::{Rect, pos2, vec2};
 
-use super::{PreviewContent, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
+use super::{PreviewContent, PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
 use crate::cube_table::Interpolation;
 use crate::engine::{
-    EffectCall, FrameColour, FrameDescription, LayerDescription, LayerSource, LutInterpolation, LutSpace,
-    PictureColour, PictureData, PictureId, WorkingSpace, publish_table,
+    CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameColour, FrameDescription, GroupDescription, LayerDescription,
+    LayerSource, LutInterpolation, LutSpace, PictureColour, PictureData, PictureId, WorkingSpace, publish_table,
 };
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
@@ -253,24 +253,83 @@ pub fn describe_frame(
     let Some(picture_size) = content.picture_size else {
         return description;
     };
-    for layer in &content.layers {
-        description.layers.extend(describe_layer(
-            layer,
-            picture_size,
-            generation,
-            colour_of_a_layer_without_a_picture,
-            colour.working,
-            supply,
-        ));
-        if let Some(symbol) = content.symbol
-            && symbol.over == layer.clip
-        {
-            description
-                .layers
-                .extend(describe_symbol(content, symbol, render_size, colour.working, supply));
-        }
-    }
+    let mut describer = Describer {
+        content,
+        picture_size,
+        render_size,
+        generation,
+        colour_of_a_layer_without_a_picture,
+        working: colour.working,
+        supply,
+    };
+    description.layers = describer.describe_layers(0, content.layers.len(), &content.groups);
     description
+}
+
+/// What describing the layers of a frame needs, which is the same for every layer of it and every group.
+struct Describer<'c, 'a, Supply: PictureSupply> {
+    content: &'c PreviewContent<'a>,
+    picture_size: (u32, u32),
+    render_size: (u32, u32),
+    generation: u64,
+    colour_of_a_layer_without_a_picture: [u8; 4],
+    working: WorkingSpace,
+    supply: &'c mut Supply,
+}
+
+impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
+    /// The layers `first..end` of the content, the one at the back first, where `groups` are the groups that make a picture of their own inside them (the one that holds another
+    /// first): **a group is a layer made of the layers in it**, with the effects of the group, put over the whole frame. A group that has nothing to show is not there.
+    fn describe_layers(&mut self, first: usize, end: usize, groups: &[PreviewGroup]) -> Vec<LayerDescription> {
+        let mut layers = Vec::new();
+        let mut at = first;
+        while at < end {
+            if let Some(place) = groups
+                .iter()
+                .position(|group| group.first_layer == at && group.end_layer <= end)
+            {
+                let group = &groups[place];
+                // (What is inside it: the groups that come after it and begin before it ends.)
+                let inside: Vec<PreviewGroup> = groups[place + 1..]
+                    .iter()
+                    .take_while(|inner| inner.first_layer < group.end_layer)
+                    .cloned()
+                    .collect();
+                let children = self.describe_layers(group.first_layer, group.end_layer, &inside);
+                if !children.is_empty() {
+                    layers.push(LayerDescription {
+                        source: LayerSource::Group(GroupDescription { layers: children }),
+                        corners: CORNERS_OF_THE_WHOLE_PICTURE,
+                        effects: group.operations.iter().filter_map(call_of_an_operation).collect(),
+                    });
+                }
+                at = group.end_layer.max(at + 1);
+                continue;
+            }
+            let layer = &self.content.layers[at];
+            layers.extend(describe_layer(
+                layer,
+                self.picture_size,
+                self.generation,
+                self.colour_of_a_layer_without_a_picture,
+                self.working,
+                self.supply,
+            ));
+            if let Some(symbol) = self.content.symbol
+                && symbol.over == layer.clip
+            {
+                layers.extend(describe_symbol(
+                    self.content,
+                    symbol,
+                    self.render_size,
+                    self.working,
+                    self.supply,
+                ));
+            }
+            at += 1;
+        }
+        layers
+    }
 }
 
 /// The layer that `layer` is, if it has anything to show.

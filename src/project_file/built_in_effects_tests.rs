@@ -130,8 +130,10 @@ fn the_snapshot_of_each_effect_in_the_file_has_its_category_and_binds_to_the_eff
     }
 }
 
+// (Rewritten on purpose in phase 5: it said that a file with an opacity on a clip group is refused, because the opacity of a group was not what it would be done to the picture the
+// members make together. The engine makes that picture now, so a clip group has an opacity, a blur and a crop in a file as a tag does.)
 #[test]
-fn a_tag_can_have_an_opacity_in_a_file_and_a_clip_group_or_a_track_group_cannot() {
+fn a_tag_and_a_clip_group_can_have_an_opacity_and_a_blur_in_a_file() {
     use crate::project::Member;
     let mut project = project_with_everything();
     let clip = the_first_video(&project);
@@ -140,23 +142,14 @@ fn a_tag_can_have_an_opacity_in_a_file_and_a_clip_group_or_a_track_group_cannot(
     project.add_effect_to_the_group(tag, EffectKind::EXPOSURE).unwrap();
     assert_same_content(&project_from_json_text(&saved(&project)).unwrap(), &project);
 
-    // A file that says a clip group has an opacity is refused, with the number of the group and the effect.
-    let mut file: serde_json::Value = serde_json::from_str(&saved(&project)).unwrap();
-    let group = file["groups"]
-        .as_array_mut()
-        .unwrap()
-        .iter_mut()
-        .find(|group| group["kind"] == "tag")
-        .expect("the tag is in the file");
-    group["kind"] = serde_json::json!("clip_group");
-    let reason = match project_from_json_text(&serde_json::to_string_pretty(&file).unwrap()) {
-        Err(ProjectFileError::InvalidProject { reason }) => reason,
-        other => panic!("{other:?}"),
-    };
-    assert!(
-        reason.contains("group number 1") && reason.contains("opacity"),
-        "{reason}"
-    );
+    // The same effects on a clip group, a track group and a clip group in the project that has groups of every kind are read as they are.
+    let mut groups = crate::project_file::groups_tests::a_project_with_groups_of_every_kind();
+    for kind in [GroupKind::ClipGroup, GroupKind::TrackGroup] {
+        let group = groups.groups().iter().find(|group| group.kind() == kind).unwrap().id();
+        groups.add_effect_to_the_group(group, EffectKind::OPACITY).unwrap();
+        groups.add_effect_to_the_group(group, EffectKind::BLUR).unwrap();
+    }
+    assert_same_content(&project_from_json_text(&saved(&groups)).unwrap(), &groups);
 }
 
 #[test]

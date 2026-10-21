@@ -40,6 +40,7 @@ fn content<'a>(layers: Vec<PreviewLayer<'a>>) -> PreviewContent<'a> {
         picture_size: Some((1600, 900)),
         layers,
         symbol: None,
+        groups: Vec::new(),
         indicator_layout: SpeedIndicatorLayout::DEFAULT,
         selected_clip: None,
     }

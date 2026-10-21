@@ -18,7 +18,7 @@ mod section;
 
 pub use colour::{colour_of_a_picture_file, colour_of_the_export, colour_of_the_preview, working_space_of};
 pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, TextPictures, describe_frame};
-pub use section::{layers_of_a_section, symbol_of_a_section};
+pub use section::{groups_of_a_section, layers_of_a_section, symbol_of_a_section};
 
 use std::borrow::Cow;
 
@@ -100,6 +100,16 @@ impl PreviewLayer<'_> {
     }
 }
 
+/// A group that makes a picture of its own over some of the layers of a frame (phase 5): the layers `first_layer..end_layer` of [`PreviewContent::layers`] are drawn together,
+/// and what the effects of the group do is done to the picture they make. The one that holds another comes first.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewGroup {
+    pub first_layer: usize,
+    pub end_layer: usize,
+    /// What the effects of the group do to its picture, one after another (the same at every frame). The old drawing leaves them out: it cannot make a picture of a group.
+    pub operations: Vec<PictureOperation>,
+}
+
 /// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.
 #[derive(Clone, Copy)]
 pub struct SymbolOnThePreview {
@@ -113,6 +123,8 @@ pub struct PreviewContent<'a> {
     pub picture_size: Option<(u32, u32)>,
     /// What is over the black picture now, the layer at the back first.
     pub layers: Vec<PreviewLayer<'a>>,
+    /// The groups that make a picture of their own over some of the layers, the one that holds another first.
+    pub groups: Vec<PreviewGroup>,
     /// The symbol of the video that is in front, if that is sped up.
     pub symbol: Option<SymbolOnThePreview>,
     pub indicator_layout: SpeedIndicatorLayout,

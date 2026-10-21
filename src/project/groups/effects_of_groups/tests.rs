@@ -435,19 +435,18 @@ fn something_that_is_not_there_has_no_chain_to_move_things_in() {
 // --- the effects of a group ---
 
 #[test]
-fn a_tag_can_have_every_effect_and_a_clip_group_or_a_track_group_every_effect_that_changes_each_pixel_by_itself() {
-    // (Rewritten on purpose in phase 4: the first effect that is not done to each pixel by itself, the opacity, is on the program now. Done to each member of a group it is
-    // not what it would be done to the picture that the members make together, so a clip group and a track group cannot have it; a tag, which has its effects applied
-    // to each member, can.)
+fn a_tag_can_have_every_effect_and_a_clip_group_or_a_track_group_every_picture_effect() {
+    // (Rewritten on purpose in phase 4 and again in phase 5: the opacity, the blur and the crop were not for a clip group or a track group while their effects were done to each
+    // member as a placeholder, which is not what they are done to the picture that the members make together. The engine makes that picture now, and every built-in effect is a
+    // picture effect, so every one of them can be on a group of any kind.)
     for effect in EffectKind::BUILT_IN {
         for kind in GroupKind::ALL {
-            let wanted = kind == GroupKind::Tag || effect.descriptor().changes_each_pixel_by_itself;
-            assert_eq!(effect.applies_to_a_group_of_kind(kind), wanted, "{effect} on a {kind}");
+            assert!(effect.applies_to_a_group_of_kind(kind), "{effect} on a {kind}");
         }
     }
     for effect in [EffectKind::OPACITY, EffectKind::BLUR, EffectKind::CROP] {
-        assert!(!effect.applies_to_a_group_of_kind(GroupKind::ClipGroup), "{effect}");
-        assert!(!effect.applies_to_a_group_of_kind(GroupKind::TrackGroup), "{effect}");
+        assert!(effect.applies_to_a_group_of_kind(GroupKind::ClipGroup), "{effect}");
+        assert!(effect.applies_to_a_group_of_kind(GroupKind::TrackGroup), "{effect}");
         assert!(effect.applies_to_a_group_of_kind(GroupKind::Tag), "{effect}");
     }
     for effect in [

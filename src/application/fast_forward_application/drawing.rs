@@ -20,7 +20,9 @@ use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
 use crate::composition::{Layer, PictureSection, VisibleVideo};
-use crate::frame_scene::{colour_of_a_picture_file, colour_of_the_preview, layers_of_a_section, symbol_of_a_section};
+use crate::frame_scene::{
+    colour_of_a_picture_file, colour_of_the_preview, groups_of_a_section, layers_of_a_section, symbol_of_a_section,
+};
 use crate::media::thumbnail_second_for_source_frame;
 use crate::playback::{FfmpegPictureStreamStarter, PreviewPictures};
 use crate::project::{ClipId, Project, SourceFrameIndex, SourceMediaIdentifier, SourceMediaKind, TrackHeight};
@@ -221,6 +223,9 @@ fn preview_content<'a>(
     PreviewContent {
         picture_size: (frame_state.total_frames > 0).then(|| project.picture_size()),
         layers,
+        groups: section.map_or_else(Vec::new, |section| {
+            groups_of_a_section(section, frame_state.current_frame)
+        }),
         symbol: section.and_then(symbol_of_a_section),
         indicator_layout: project.speed_indicator_layout(),
         selected_clip,
