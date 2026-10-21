@@ -59,3 +59,23 @@ jobs:
           done
           echo "::notice title=unix mode of the Surge binary in the zip::$(unzip -Z "$RUNNER_TEMP/probe/surge.zip" 'Surge XT Effects.clap/Contents/MacOS/*' 2>&1 | tr '\n' '|')"
           echo "::notice title=curl::$(curl --version | head -1)"
+
+      - name: Expand the installers of the disk images and look at the plugins inside
+        run: |
+          set -u
+          cd "$RUNNER_TEMP/probe"
+          for name in dragonfly dpf; do
+            pkg=$(find "mnt-$name" -maxdepth 1 -name '*.pkg' | head -1)
+            echo "::notice title=pkg of $name::$pkg"
+            pkgutil --expand-full "$pkg" "expanded-$name" > "expand-$name.txt" 2>&1 || echo "::warning title=expand $name failed::$(tr '\n' '|' < expand-$name.txt)"
+            echo "::notice title=top of expanded $name::$(ls "expanded-$name" | tr '\n' '|')"
+            echo "::notice title=clap bundles in expanded $name::$(find "expanded-$name" -iname '*.clap' -maxdepth 8 | tr '\n' '|')"
+            echo "::notice title=other plugin formats in expanded $name::$(find "expanded-$name" \( -iname '*.vst3' -o -iname '*.component' -o -iname '*.vst' -o -iname '*.lv2' \) -maxdepth 8 | tr '\n' '|')"
+            echo "::notice title=licence files in expanded $name::$(find "expanded-$name" \( -iname 'LICENSE*' -o -iname 'COPYING*' \) | head -10 | tr '\n' '|')"
+            for clap in $(find "expanded-$name" -iname '*.clap' -maxdepth 8 | head -6 | tr ' ' '#'); do
+              path=$(echo "$clap" | tr '#' ' ')
+              binary="$path"
+              [ -d "$path" ] && binary=$(find "$path/Contents/MacOS" -type f 2>/dev/null | head -1)
+              echo "::notice title=expanded $(basename "$path")::$(find "$path" -type f | wc -l) files; $(du -sk "$path" | cut -f1) KB; $(lipo -info "$binary" 2>&1 | tr '\n' ' ') ; $(codesign -dv "$path" 2>&1 | grep -E 'Signature|flags' | tr '\n' '|'); modes: $(find "$path" -type f -exec stat -f '%Sp' {} \; | sort | uniq -c | tr '\n' '|')"
+            done
+          done
