@@ -134,11 +134,21 @@ impl PluginScanner {
     /// The environment variables the scan program is started with for `library`: those that were asked for, and the variable that lists where libraries are looked for with
     /// the folders to look in put before what it has already.
     pub(super) fn environment_for(&self, library: &Path) -> Vec<(String, String)> {
+        self.environment_for_with(library, std::env::var_os(library_search_variable()))
+    }
+
+    /// The same, with the value that the variable has now given (or nothing). (Another thread of the editor may be changing it at the time: a plugin that is loaded puts folders in front of
+    /// the search path for as long as it is being loaded. A test says what it had, so as not to read it twice.)
+    pub(super) fn environment_for_with(
+        &self,
+        library: &Path,
+        value_now: Option<std::ffi::OsString>,
+    ) -> Vec<(String, String)> {
         let mut environment = self.environment.clone();
         let folders = dependency_search_folders(library, &self.dependency_folders, self.search_parent_folders);
         if !folders.is_empty() {
             let variable = library_search_variable();
-            let existing = std::env::var_os(variable).map(|value| std::env::split_paths(&value).collect::<Vec<_>>());
+            let existing = value_now.map(|value| std::env::split_paths(&value).collect::<Vec<_>>());
             let all = folders.into_iter().chain(existing.into_iter().flatten());
             if let Some(value) = std::env::join_paths(all)
                 .ok()

@@ -475,17 +475,26 @@ fn the_scan_program_is_started_with_the_variable_of_the_loader_listing_the_folde
     let scanner = PluginScanner::new(PathBuf::from("not-a-program"), ScanCache::in_memory())
         .with_environment_variable("FFRS_OTHER", "kept")
         .looking_for_dependencies_in(vec![mine.clone()], true);
-    let environment = scanner.environment_for(&library);
     let variable = library_search_variable();
+    // (What the editor had is given, and not read from the process: another test that loads a plugin changes the search path for a moment, and the test would be reading it twice.)
+    let had_before = std::env::join_paths([folder.path().join("had_first"), folder.path().join("had_second")]).unwrap();
+    let environment = scanner.environment_for_with(&library, Some(had_before));
     let listed: Vec<PathBuf> =
         std::env::split_paths(&environment.iter().find(|(name, _)| name == variable).unwrap().1).collect();
     assert_eq!(listed[0], mine);
     assert_eq!(&listed[1..3], [middle, top]);
-    let had: Vec<PathBuf> = std::env::var_os(variable)
-        .map(|value| std::env::split_paths(&value).collect())
-        .unwrap_or_default();
-    assert!(listed.ends_with(&had), "what the editor had is still there, after");
+    assert_eq!(
+        listed[listed.len() - 2..],
+        [folder.path().join("had_first"), folder.path().join("had_second")],
+        "what the editor had is still there, after, in its order"
+    );
     assert!(environment.contains(&("FFRS_OTHER".to_owned(), "kept".to_owned())));
+    // The one that is used for real reads the variable of the process (compared only when nothing changed it while the test looked).
+    let before = std::env::var_os(variable);
+    let for_real = scanner.environment_for(&library);
+    if std::env::var_os(variable) == before {
+        assert_eq!(for_real, scanner.environment_for_with(&library, before));
+    }
     // With nothing to add the variable is not touched.
     let plain = PluginScanner::new(PathBuf::from("not-a-program"), ScanCache::in_memory());
     assert!(plain.environment_for(&library).iter().all(|(name, _)| name != variable));
