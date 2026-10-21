@@ -2,7 +2,7 @@
 
 What each setting does, how colours are read and mixed, and what the exported video is.
 
-*This file holds sections that used to be in the README, as they were written, so that the README could be short. Where a section says "see *Settings*" or the like, the section is in one of the files that `docs/README.md` lists.*
+*Where a section says "see *Settings*" or the like, the section is in one of the files that `docs/README.md` lists.*
 
 ## Settings
 
@@ -36,7 +36,7 @@ only cut or moved. The hue shift is done on the numbers of the screen (sRGB code
 
 **What the colours of a file are.** A video says what its colours are (ffprobe's `color_space`, `color_range`, `color_primaries`, `color_transfer` and `chroma_location`), and the program
 reads it as a player does: the **matrix** (BT.601, BT.709 or BT.2020) and the **range** (limited, 16 to 235, or full) as the file says; where the file **says nothing** of the matrix, it is
-**BT.709 for a picture of more than 1024 across or 576 down and BT.601 for a smaller one** (it was BT.601 for every size until version 12), and the range is limited (full for a `yuvj` file);
+**BT.709 for a picture of more than 1024 across or 576 down and BT.601 for a smaller one**, and the range is limited (full for a `yuvj` file);
 the **primaries** as the file says (Rec.709 where it says nothing); and the **curve**: a file that says `bt709` (or any other curve of the video standards of standard dynamic range) or
 says nothing is read as **the curve that a screen shows it with, sRGB's** (nearly every such file is a recording of a screen, or made to be seen on one, and every player shows it so; the
 camera curve of BT.709 would lift every shadow, and is never chosen from a tag: only by hand). **High dynamic range** (PQ, HLG) is **not converted**: such a file is read as sRGB, and says so.
@@ -49,10 +49,6 @@ not say) decides how they are blended back into one for every pixel: **in linear
 under the lists is **everything that was assumed, in words**. A choice is applied at once and is an edit that can be undone (choices in a row on one file are one step); the preview and the
 export read the file as chosen, and the project file keeps it (see *Project files*). (The old drawing of the preview, which is only used when it is asked for, ignores all of this, as it always did.)
 
-**What can be seen to be different** from before colours were made like this (the pictures and numbers are in `docs/engine-comparison-phase-3`, and the list in `docs/engine-phase-3-report.md`):
-what is scaled, turned or made see-through is mixed as light (edges and fine detail are brighter; soft text edges are the coverage of light); an untagged high-definition video has other reds and
-greens (BT.709 instead of BT.601); the edge between two colours of a video is smooth; the exported file says its matrix, primaries and transfer where it used to say nothing for a video that
-said nothing. Nothing else changes.
 
 ## Exported video
 
@@ -70,20 +66,16 @@ said nothing. Nothing else changes.
   all have something to do at once. The export is made on the graphics adapter that the window is drawn with (see *Exporting without a window* for the other
   way).
 * What has **keyframes** is made **exactly at every frame**: where a layer is, how big it is, how far it is turned, how a text looks and how the colours are changed
-  are worked out for that frame, and not for a stretch of frames. (The export used to cut an animation into the stretches over which nothing changes, snap a place to
-  a whole pixel and a turn to a tenth of a degree, and refuse an animation that needed more than 1500 stretches; none of that is so any more, and a video that is in
-  another place in each of 1560 frames is exported, each where its keyframes say.) How loud a clip is, when it has keyframes for that, is worked out again for
+  are worked out for that frame, and not for a stretch of frames. How loud a clip is, when it has keyframes for that, is worked out again for
   every little piece of its sound (a fiftieth of a second or so) from the keyframes, and a clip or a track that is muted by keyframes for a while is silence for
   that while.
 * What has **effects** is made as they say: the colours of a layer are changed on the card by the matrix of its effects at that frame, before the layer is put in
   its place; the effects of a clip are done and then those of its track, and those of its groups (see *Groups*). The picture of a text object is changed the same
   way. An effect that changes nothing (a hue shift of no turn, or of whole turns) is not asked for at all.
-* The **colours of the file** are those of the **colour space of exported videos** of the project (see *Settings*), and nothing else (until version 12 of the
-  program they followed the first video of the project): the finished picture is put together in linear light, **encoded** with the curve that the space says into
+* The **colours of the file** are those of the **colour space of exported videos** of the project (see *Settings*), and nothing else: the finished picture is put together in linear light, **encoded** with the curve that the space says into
   half-float numbers, and **only then** turned into the planes of `yuv420p` (BT.709, the limited range, rounded to 8 bits once, at the end: it is not rounded to 8 bits
   first, as the preview's picture is), so that the file's numbers are the preview's when the space is the first one. **The file always says what its colours are**: its
-  matrix and its primaries (`bt709`), its transfer (`bt709` for the two spaces that are Rec.709 video, `iec61966-2-1` for sRGB) and its range (`tv`), where it used to say
-  nothing when the first video said nothing. A video of another matrix (a standard-definition one, say) is converted, in light, to what the file says, so its colours
+  matrix and its primaries (`bt709`), its transfer (`bt709` for the two spaces that are Rec.709 video, `iec61966-2-1` for sRGB) and its range (`tv`). A video of another matrix (a standard-definition one, say) is converted, in light, to what the file says, so its colours
   are its own and the file is not tagged with the matrix of another.
 * The sound is every track's sound mixed, each clip sped up with its picture (see *Settings*), and it is as long as
   the picture. It is **made first, by the sound engine, into a file in the temporary folder** (32-bit floats, 48000 a second, stereo: about 23 MB a minute, removed when
@@ -105,5 +97,3 @@ said nothing. Nothing else changes.
 * A video file that has **fewer pictures than the project was told** (it was changed behind the project's back) does not fail the export at the end of it: the
   last picture it has is held for the rest of the clip, **and the message at the end says how many pictures were held** (the command line says it as a warning, before
   it says that the video was saved).
-* The picture is not exactly what the old way of exporting (ffmpeg's filters) made: the same pictures are there, in the same places, to within a pixel and a
-  few levels at the edges of things that are turned or scaled (the new way is the one that is exact: see `docs/engine-phase-2-design.md`, section 9).

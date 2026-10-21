@@ -2,7 +2,7 @@
 
 The `.ffrs` and `.json` project files: their layout, an example, what each part means and how older versions are read.
 
-*This file holds sections that used to be in the README, as they were written, so that the README could be short. Where a section says "see *Settings*" or the like, the section is in one of the files that `docs/README.md` lists.*
+*Where a section says "see *Settings*" or the like, the section is in one of the files that `docs/README.md` lists.*
 
 ## Project files
 

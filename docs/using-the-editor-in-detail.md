@@ -2,7 +2,7 @@
 
 Everything the editor does, control by control, with the rules behind each. The README has the few things that are not obvious; this is the rest.
 
-*This file holds sections that used to be in the README, as they were written, so that the README could be short. Where a section says "see *Settings*" or the like, the section is in one of the files that `docs/README.md` lists.*
+*Where a section says "see *Settings*" or the like, the section is in one of the files that `docs/README.md` lists.*
 
 ## Using it
 
@@ -126,14 +126,13 @@ picture and text object that is there at the frame is a layer, in the place on t
 own shape), and turned as far as it was turned. A layer may reach out past the edge of the picture, with its
 middle always on the picture: what is past the edge is cut off. Where a layer does not cover the picture, what is
 behind it shows, down to black. The fast-forward symbol goes over the front-most video (if that is sped up), under whatever
-is in front of that. Two details that are decisions rather than accidents:
+is in front of that. Two details:
 
 * A video that fills the picture and is not turned hides everything behind it, so nothing behind it is read or
   drawn. A **picture** never counts as hiding what is behind it (a picture file may have clear places), and nor
   does a text object.
 * A video that has no picture to show (its file is missing, or is shorter than its clip) is not there at all for
-  those frames: what is behind it shows. (It used to leave the picture black, because a video always filled the
-  picture.)
+  those frames: what is behind it shows.
 
 What is heard is the **sound of every track mixed together**: each clip's sound at its own loudness and its
 track's.
@@ -193,7 +192,7 @@ The colour effects (hue shift, saturation, brightness and contrast) are done on 
 
 **At most 64 effects** can be on one clip, track or group; adding or copying the 65th is refused with a message, and a project file with more on one thing is refused when it is opened.
 
-**Look-up tables.** The **look-up table** effect reads a `.cube` file (the table that colourists' programs write; 1-D and 3-D tables, and the variant of DaVinci Resolve is read but not written). A file is **read as a table before anything is changed**: one that is not a table is refused with the number of the line that is wrong and the project is left as it was. A 3-D table of **more than 65 points a side** is refused for now (it says so). A 3-D table is applied with **tetrahedral** interpolation by default (or **trilinear**), and a 1-D table is applied to each of the three colours by itself. The *Input space* and the *Output space* say what the numbers of the table mean: the **codes of a screen (sRGB)**, which is what a table made for pictures wants and is the default, **Rec.709 video (gamma 2.4)**, or **linear light (the working space)**; the program converts to the input space, looks the colour up, and converts back from the output space. *Intensity* mixes the result with the picture as it was, in light. Five tables of the program's own are in the folder `assets/luts` (*cool*, *faded*, *monochrome*, *punchy*, *warm*: made by a formula, `tools/make_sample_luts.py`, and given to the public domain, CC0); choose one with *Add effect from file...*.
+**Look-up tables.** The **look-up table** effect reads a `.cube` file (the table that colourists' programs write; 1-D and 3-D tables, and the variant of DaVinci Resolve is read but not written). A file is **read as a table before anything is changed**: one that is not a table is refused with the number of the line that is wrong and the project is left as it was. A 3-D table of **more than 65 points a side** is refused (it says so). A 3-D table is applied with **tetrahedral** interpolation by default (or **trilinear**), and a 1-D table is applied to each of the three colours by itself. The *Input space* and the *Output space* say what the numbers of the table mean: the **codes of a screen (sRGB)**, which is what a table made for pictures wants and is the default, **Rec.709 video (gamma 2.4)**, or **linear light (the working space)**; the program converts to the input space, looks the colour up, and converts back from the output space. *Intensity* mixes the result with the picture as it was, in light. Five tables of the program's own are in the folder `assets/luts` (*cool*, *faded*, *monochrome*, *punchy*, *warm*: made by a formula, `tools/make_sample_luts.py`, and given to the public domain, CC0); choose one with *Add effect from file...*.
 
 **Where the table is kept can be changed afterwards.** Right-click the heading of the box of a look-up table effect: *Include table in project file* puts a linked table inside the `.ffrs` file (if the project is not saved as one, the program asks to save it as one first, as it does for a video), and *Take table out of project file* puts an included table back where it came from, if nothing is there or the same file is (another file at that place is never overwritten: then the next place is tried, and if there is none the table stays in the file and a message says so). Where the project has several tables that could be moved, the menu also offers *Include all N tables in project file* or *Take all N tables out of project file*. Like the same actions for a video this is not an edit that undo takes back.
 
@@ -217,13 +216,11 @@ Groups do nothing to the **sound** (their effects may, later). Deleting a clip o
 
 **Sound.** While the video plays, its sound plays too, and it is the sound the export will have: every clip's
 sound is cut out, sped up with the clip, and mixed with the other tracks' (see *Settings* for what sped-up sound
-is like). The sound starts a fraction of a second after pressing Play (about 0.07 seconds was measured on the
-development machine), jumps with the playhead when that is moved while playing, and stops the moment the video
+is like). The sound starts a fraction of a second after pressing Play (about 0.07 seconds, measured), jumps with the playhead when that is moved while playing, and stops the moment the video
 is paused. Changing the volume of one clip or track while playing does not interrupt the sound of the others.
 
-*How the sound is made (phase 7).* The sound is made by **the sound engine** (`sound_engine`): a graph that works a block at a time and is the same for the preview and the export.
-Each clip has an ffmpeg of its own that cuts it out of its file and sets its speed (with the very filters the one big filter graph of ffmpeg used to have for it, which is where
-`atempo` stays); the engine makes each clip **exactly as long as its place on the timeline**, gives it its **volume at every sample** (between two keyframes it goes evenly in
+*How the sound is made.* The sound is made by **the sound engine** (`sound_engine`): a graph that works a block at a time and is the same for the preview and the export.
+Each clip has an ffmpeg of its own that cuts it out of its file and sets its speed (with the filters of the old filter graph (where `atempo` is)); the engine makes each clip **exactly as long as its place on the timeline**, gives it its **volume at every sample** (between two keyframes it goes evenly in
 decibels), puts the clips of a track one after another **at the sample each frame is at** (worked out from the frame, so that 29.97 frames a second does not drift), and adds the
 tracks. The ffmpegs of the clips are started about two seconds before they are needed (at most twelve at a time). If the speakers want another kind of sound than stereo at 48000
 a second, the sound goes through one more ffmpeg that changes it, as it always did. **The old filter graph is still there**: set the environment variable
@@ -231,8 +228,7 @@ a second, the sound goes through one more ffmpeg that changes it, as it always d
 [V]:** with constant volumes the two are the same sound to one rounding of a float, in 48 made-up projects with sped-up clips, clips too long and too short for their place, and
 every setting for sped-up sound; where a volume **changes**, the old graph changes it in steps of 4096 samples (about 85 milliseconds) and the engine at every sample, so the
 engine is the one that follows the curve; and at 29.97 frames a second the old graph's clips are up to a sample later for each item before them, which the engine's are not. A
-project of 200 short clips is made at about nine times the speed it is heard, with the first sound after about half a second. Nothing has been **listened to** yet: whether it
-sounds right is for an ear.
+project of 200 short clips is made at about nine times the speed it is heard, with the first sound after about half a second.
 
 If a loaded project's file can't be found or opened, a warning appears in the middle of the window listing each
 such file and saying it must be chosen again. The rest of the program stays usable and none of the edits are
