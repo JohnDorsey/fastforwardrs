@@ -64,7 +64,7 @@ jobs:
         run: |
           set -u
           cd "$RUNNER_TEMP/probe"
-          for name in dragonfly dpf; do
+          for name in dpf; do
             pkg=$(find "mnt-$name" -maxdepth 1 -name '*.pkg' | head -1)
             echo "::notice title=pkg of $name::$pkg"
             pkgutil --expand-full "$pkg" "expanded-$name" > "expand-$name.txt" 2>&1 || echo "::warning title=expand $name failed::$(tr '\n' '|' < expand-$name.txt)"
