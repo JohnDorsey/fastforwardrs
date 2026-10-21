@@ -28,6 +28,7 @@ pub fn kind_name(kind: ClipKind) -> &'static str {
         ClipKind::Image => "Picture clip",
         ClipKind::Text => "Text object",
         ClipKind::Crate => "Keyframe crate",
+        ClipKind::Adjustment => "Adjustment clip",
     }
 }
 

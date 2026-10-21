@@ -46,6 +46,8 @@ pub fn layers_of_a_section<'a>(
                 LayerContent::Text(_) => {
                     PreviewLayerContent::Text(layer.text_at(frame).expect("a text layer has a text object"))
                 }
+                // (Never: an adjustment clip is a group of what is behind it, and is not a layer of a section.)
+                LayerContent::Adjustment => unreachable!("an adjustment clip is not a layer of a section"),
             },
         })
         .collect()
@@ -60,6 +62,7 @@ pub fn groups_of_a_section(section: &PictureSection, frame: TimelineFrameIndex) 
             first_layer: group.first_layer,
             end_layer: group.end_layer,
             operations: operations_of_effects(&group.effects, frame),
+            over_black: group.over_black,
         })
         .collect()
 }

@@ -63,7 +63,7 @@ impl Project {
                 )
             }
             Clip::Text(text) => Some(text.object.placement()),
-            Clip::Audio(_) | Clip::Crate(_) => None,
+            Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => None,
         }
     }
 

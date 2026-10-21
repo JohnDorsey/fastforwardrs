@@ -1,19 +1,23 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The layers of a section as a tree of the groups that make pictures of their own (phase 5; the design is `docs/engine-phase-5-design.md`, H3 to H5).
+//! The layers of a section as a tree of the groups that make pictures of their own (phase 5; the design is `docs/engine-phase-5-design.md`, H3 to H5 and H7).
 //!
 //! The rules of groups say that the layers of a section, back to front, are **contiguous for every group**, and that groups nest (a clip group inside the track groups of its tracks).
 //! So each layer comes with the groups it is in, the outermost first, and consecutive layers that are in one group are the children of one node. **A group that has no effect that does
-//! anything is not a node** (it is pass-through: its layers are children of what it is in); that is decided before, when the groups' effects are made ([`effects_of_the_groups_that_make_pictures`]).
+//! anything is not a node** (it is pass-through: its layers are children of what it is in); that is decided before, when the groups' effects are made
+//! ([`effects_of_the_groups_that_make_pictures`]).
+//!
+//! **An adjustment clip is a group made on the spot** (H7): everything behind it in its own container (the frame, or the group it is in) becomes the children of a node that has the
+//! adjustment's effects, and the adjustment itself is no layer. At the frame (and not inside a group) what is behind is over opaque black, as everything is.
 //!
 //! What is behind the front-most thing that covers the picture cannot be seen, and is left out: inside each group, and in the frame. A group covers the picture if a thing in it does
 //! **and its effects keep every pixel as opaque as it was** (a colour mix, an exposure and a table do; a blur, a crop and an opacity do not).
 
 use std::collections::HashMap;
 
-use super::{GroupSpan, Layer, LayerEffect, operations_of_effects};
-use crate::project::{GroupId, PictureOperation, Project, ResolvedAnimations, TimelineFrameIndex};
+use super::{GroupSpan, Layer, LayerContent, LayerEffect, SpanOwner};
+use crate::project::{GroupId, Project, ResolvedAnimations, TimelineFrameIndex};
 
 /// A layer, with where its track is (0 is the front-most track) and the groups that make pictures of their own that it is in, the outermost first.
 pub(super) struct Entry {
@@ -24,8 +28,17 @@ pub(super) struct Entry {
 
 /// A thing in a container (the frame, or a group): a layer, or a group with the things in it.
 pub(super) enum Node {
-    Layer { track_position: usize, layer: Layer },
-    Group { id: GroupId, children: Vec<Node> },
+    Layer {
+        track_position: usize,
+        layer: Layer,
+    },
+    Group {
+        owner: SpanOwner,
+        effects: Vec<LayerEffect>,
+        /// The things in it are over opaque black (an adjustment clip at the frame).
+        over_black: bool,
+        children: Vec<Node>,
+    },
 }
 
 /// The effects of the clip groups and track groups of `project` that make a picture of their own: those that have an effect that is installed, is a picture effect, and does
@@ -43,7 +56,7 @@ pub(super) fn effects_of_the_groups_that_make_pictures(
             .filter(|applied| applied.effect.kind().is_installed())
             .map(|applied| super::layer_effect_of(project, animations, applied))
             .collect();
-        if !operations_of_effects(&effects, TimelineFrameIndex::new(0)).is_empty() {
+        if !super::operations_of_effects(&effects, TimelineFrameIndex::new(0)).is_empty() {
             made.insert(group.id(), effects);
         }
     }
@@ -51,7 +64,11 @@ pub(super) fn effects_of_the_groups_that_make_pictures(
 }
 
 /// The things that `entries` are, from the level `depth` of their groups: a run of entries that are in one group at that level is a group node, and the others are layers.
-pub(super) fn nodes_of(entries: Vec<Entry>, depth: usize) -> Vec<Node> {
+pub(super) fn nodes_of(
+    entries: Vec<Entry>,
+    depth: usize,
+    group_effects: &HashMap<GroupId, Vec<LayerEffect>>,
+) -> Vec<Node> {
     let mut nodes = Vec::new();
     let mut remaining = entries.into_iter().peekable();
     while let Some(entry) = remaining.next() {
@@ -67,92 +84,116 @@ pub(super) fn nodes_of(entries: Vec<Entry>, depth: usize) -> Vec<Node> {
             run.extend(remaining.next());
         }
         nodes.push(Node::Group {
-            id,
-            children: nodes_of(run, depth + 1),
+            owner: SpanOwner::Group(id),
+            effects: group_effects.get(&id).cloned().unwrap_or_default(),
+            over_black: false,
+            children: nodes_of(run, depth + 1, group_effects),
         });
     }
     nodes
 }
 
-/// Whether the effects of a group keep every pixel of its picture as opaque as it was.
-fn keeps_the_opacity(id: GroupId, group_effects: &HashMap<GroupId, Vec<LayerEffect>>) -> bool {
-    group_effects.get(&id).is_some_and(|effects| {
-        operations_of_effects(effects, TimelineFrameIndex::new(0))
-            .iter()
-            .all(|operation| {
-                matches!(
-                    operation,
-                    PictureOperation::Mix(_) | PictureOperation::Exposure { .. } | PictureOperation::Lut(_)
-                )
-            })
-    })
+/// Makes each adjustment clip in `nodes` (and in the groups in them) the group that it is: everything in front of it in its container, behind it, becomes the children of a group that
+/// has its effects, and the clip is not a layer any more. An adjustment with nothing behind it, or with no effect, does nothing and is left out. `is_the_frame` says that `nodes` are
+/// what the frame is made of and not what is in a group, so that what is behind an adjustment is over black.
+pub(super) fn make_the_adjustments_groups(nodes: Vec<Node>, is_the_frame: bool) -> Vec<Node> {
+    let mut made: Vec<Node> = Vec::new();
+    for node in nodes {
+        match node {
+            Node::Group {
+                owner,
+                effects,
+                over_black,
+                children,
+            } => made.push(Node::Group {
+                owner,
+                effects,
+                over_black,
+                children: make_the_adjustments_groups(children, false),
+            }),
+            Node::Layer { layer, .. } if matches!(layer.content, LayerContent::Adjustment) => {
+                let behind = std::mem::take(&mut made);
+                if behind.is_empty() || layer.effects.is_empty() {
+                    made = behind;
+                    continue;
+                }
+                made.push(Node::Group {
+                    owner: SpanOwner::Adjustment(layer.clip),
+                    effects: layer.effects,
+                    over_black: is_the_frame,
+                    children: behind,
+                });
+            }
+            other => made.push(other),
+        }
+    }
+    made
+}
+
+/// Whether the effects keep every pixel of the picture they are done to as opaque as it was: every one is a change of colours by itself (a mix, an exposure, a table).
+fn keeps_the_opacity(effects: &[LayerEffect]) -> bool {
+    effects
+        .iter()
+        .all(|effect| effect.kind.descriptor().changes_each_pixel_by_itself)
 }
 
 impl Node {
     /// Whether nothing behind this can be seen: a layer that covers the picture, or a group that keeps what is in it as opaque as it was and has something in it that covers it.
-    pub(super) fn covers_the_picture(&self, group_effects: &HashMap<GroupId, Vec<LayerEffect>>) -> bool {
+    pub(super) fn covers_the_picture(&self) -> bool {
         match self {
             Self::Layer { layer, .. } => layer.covers_the_picture(),
-            Self::Group { id, children } => {
-                keeps_the_opacity(*id, group_effects)
-                    && children.iter().any(|child| child.covers_the_picture(group_effects))
+            Self::Group { effects, children, .. } => {
+                keeps_the_opacity(effects) && children.iter().any(Node::covers_the_picture)
             }
         }
     }
 
     /// The place of the track of the front-most layer in this that covers the picture (a node that does cover it).
-    pub(super) fn front_most_covering_track_position(
-        &self,
-        group_effects: &HashMap<GroupId, Vec<LayerEffect>>,
-    ) -> usize {
+    pub(super) fn front_most_covering_track_position(&self) -> usize {
         match self {
             Self::Layer { track_position, .. } => *track_position,
             Self::Group { children, .. } => children
                 .iter()
                 .rev()
-                .find(|child| child.covers_the_picture(group_effects))
-                .map_or(usize::MAX, |child| {
-                    child.front_most_covering_track_position(group_effects)
-                }),
+                .find(|child| child.covers_the_picture())
+                .map_or(usize::MAX, Node::front_most_covering_track_position),
         }
     }
 }
 
 /// Takes away what is behind the front-most thing that covers the picture, in each group and in `nodes`.
-pub(super) fn drain_what_is_behind_what_covers(
-    nodes: &mut Vec<Node>,
-    group_effects: &HashMap<GroupId, Vec<LayerEffect>>,
-) {
+pub(super) fn drain_what_is_behind_what_covers(nodes: &mut Vec<Node>) {
     for node in nodes.iter_mut() {
         if let Node::Group { children, .. } = node {
-            drain_what_is_behind_what_covers(children, group_effects);
+            drain_what_is_behind_what_covers(children);
         }
     }
-    if let Some(position) = nodes.iter().rposition(|node| node.covers_the_picture(group_effects)) {
+    if let Some(position) = nodes.iter().rposition(Node::covers_the_picture) {
         nodes.drain(..position);
     }
 }
 
 /// The layers of `nodes`, back to front, put in `layers`, and the groups among them in `groups` (the one that holds another first), with their effects.
-pub(super) fn flatten(
-    nodes: Vec<Node>,
-    group_effects: &HashMap<GroupId, Vec<LayerEffect>>,
-    layers: &mut Vec<Layer>,
-    groups: &mut Vec<GroupSpan>,
-) {
+pub(super) fn flatten(nodes: Vec<Node>, layers: &mut Vec<Layer>, groups: &mut Vec<GroupSpan>) {
     for node in nodes {
         match node {
             Node::Layer { layer, .. } => layers.push(layer),
-            Node::Group { id, children } => {
+            Node::Group {
+                owner,
+                effects,
+                over_black,
+                children,
+            } => {
                 let first_layer = layers.len();
                 let place = groups.len();
                 groups.push(GroupSpan {
-                    group: id,
+                    owner,
                     first_layer,
                     end_layer: first_layer,
-                    effects: group_effects.get(&id).cloned().unwrap_or_default(),
+                    effects,
+                    over_black,
                 });
-                flatten(children, group_effects, layers, groups);
+                flatten(children, layers, groups);
                 groups[place].end_layer = layers.len();
             }
         }

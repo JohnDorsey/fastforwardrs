@@ -106,8 +106,11 @@ impl PreviewLayer<'_> {
 pub struct PreviewGroup {
     pub first_layer: usize,
     pub end_layer: usize,
-    /// What the effects of the group do to its picture, one after another (the same at every frame). The old drawing leaves them out: it cannot make a picture of a group.
+    /// What the effects of the group do to its picture, one after another, at the frame. The old drawing leaves them out: it cannot make a picture of a group. A group whose
+    /// effects do nothing at the frame (an adjustment clip whose effect is animated) is as if it was not there.
     pub operations: Vec<PictureOperation>,
+    /// The layers of the group are put over opaque black first (an adjustment clip at the frame).
+    pub over_black: bool,
 }
 
 /// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.

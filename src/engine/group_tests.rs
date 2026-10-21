@@ -570,3 +570,53 @@ fn a_group_is_clear_where_none_of_its_layers_are_so_what_is_behind_it_shows() {
         );
     });
 }
+
+#[test]
+fn a_group_that_begins_with_opaque_black_has_the_effect_done_to_the_black_as_well_and_one_that_does_not_has_nothing_to_change_there()
+ {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let pictures = the_pictures();
+        send_all(&mut renderer, &pictures);
+        // A change of colours that makes everything lighter by a fifth, which is something that black has to be there for.
+        let lighter =
+            EffectCall::colour_matrix_with_offsets([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [0.2; 3]);
+        // A picture a quarter of the frame, in the middle: round it the group has nothing, unless it begins with black.
+        let small = LayerDescription {
+            source: LayerSource::Picture(super::PictureId(3)),
+            corners: super::oracle_tests::upright(0.25, 0.25, 0.5, 0.5),
+            effects: Vec::new(),
+        };
+        let black = LayerDescription {
+            source: LayerSource::Solid([0, 0, 0, 255]),
+            corners: CORNERS_OF_THE_WHOLE_PICTURE,
+            effects: Vec::new(),
+        };
+        let pixel = |frame: &RenderedFrame, across: u32, down: u32| {
+            let first = ((down * SIZE.0 + across) * 4) as usize;
+            [
+                frame.rgba_pixels[first],
+                frame.rgba_pixels[first + 1],
+                frame.rgba_pixels[first + 2],
+            ]
+        };
+
+        let (over_black, _) = render(
+            &mut renderer,
+            SIZE,
+            vec![a_group(vec![black, small.clone()], vec![lighter.clone()])],
+        );
+        let (over_nothing, _) = render(&mut renderer, SIZE, vec![a_group(vec![small], vec![lighter])]);
+
+        let corner = pixel(&over_black, 2, 2);
+        assert!(
+            corner.iter().all(|level| (50..=52).contains(level)),
+            "a fifth of the way up from black, which is 51 of the 255: {corner:?}"
+        );
+        assert_eq!(
+            pixel(&over_nothing, 2, 2),
+            [0, 0, 0],
+            "nothing there to be made lighter: it is clear, over black"
+        );
+    });
+}

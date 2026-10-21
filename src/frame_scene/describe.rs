@@ -295,12 +295,27 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
                     .take_while(|inner| inner.first_layer < group.end_layer)
                     .cloned()
                     .collect();
-                let children = self.describe_layers(group.first_layer, group.end_layer, &inside);
-                if !children.is_empty() {
+                let mut children = self.describe_layers(group.first_layer, group.end_layer, &inside);
+                let effects: Vec<EffectCall> = group.operations.iter().filter_map(call_of_an_operation).collect();
+                if effects.is_empty() {
+                    // (A group whose effects do nothing at this frame is pass-through: its layers are drawn into what it is in. What is behind it is black already, if it
+                    // is at the frame, so no black is put there.)
+                    layers.extend(children);
+                } else if !children.is_empty() {
+                    if group.over_black {
+                        children.insert(
+                            0,
+                            LayerDescription {
+                                source: LayerSource::Solid([0, 0, 0, 255]),
+                                corners: CORNERS_OF_THE_WHOLE_PICTURE,
+                                effects: Vec::new(),
+                            },
+                        );
+                    }
                     layers.push(LayerDescription {
                         source: LayerSource::Group(GroupDescription { layers: children }),
                         corners: CORNERS_OF_THE_WHOLE_PICTURE,
-                        effects: group.operations.iter().filter_map(call_of_an_operation).collect(),
+                        effects,
                     });
                 }
                 at = group.end_layer.max(at + 1);

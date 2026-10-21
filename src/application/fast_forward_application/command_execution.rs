@@ -23,12 +23,15 @@ use crate::application::preview_panel::PreviewView;
 use crate::application::selection::{Selection, SelectionChange, SelectionItem};
 use crate::playback::SoundEffect;
 use crate::project::{
-    AnimationTarget, ClipId, ClipSide, EditError, FrameRate, SpeedFactor, TextObject, TimelineFrameIndex, TrackId,
-    TrackSide,
+    AnimationTarget, ClipId, ClipSide, EditError, FrameRate, Project, SpeedFactor, TextObject, TimelineFrameIndex,
+    TrackId, TrackSide,
 };
 
 /// How long a text object lasts when it is made, in seconds (or less, if it would run into a clip).
 const SECONDS_A_NEW_TEXT_OBJECT_LASTS: f64 = 3.0;
+
+/// How long a new adjustment clip lasts, in seconds, as a picture does (Q-11 of `docs/plugin-system-features.md`): it can be made longer or shorter.
+const SECONDS_A_NEW_ADJUSTMENT_CLIP_LASTS: f64 = 5.0;
 
 impl FastForwardApplication {
     /// Carries out the commands of one frame of the window, one after another, except the one that would lose keyframes if there is
@@ -193,6 +196,7 @@ impl FastForwardApplication {
             }
 
             Command::NewTextObject { track, frame } => self.new_text_object(track, frame, now),
+            Command::NewAdjustmentClip { track, frame } => self.new_adjustment_clip(track, frame, now),
             Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
                 if let Err(error) = self.document.project.set_clip_duration(clip, frames) {
@@ -575,30 +579,55 @@ impl FastForwardApplication {
     /// of it, to begin with) are in the properties panel. The playhead goes to it if it is not there, so
     /// that it shows in the preview.
     fn new_text_object(&mut self, track: TrackId, frame: TimelineFrameIndex, now: Instant) {
+        self.new_clip_with_no_media(
+            frame,
+            now,
+            ("a text object", SECONDS_A_NEW_TEXT_OBJECT_LASTS),
+            |project, wanted_frames| project.try_insert_text(track, frame, TextObject::default(), wanted_frames),
+        );
+    }
+
+    /// Puts a new adjustment clip on `track`, starting at `frame`, and selects it, so that its properties show; the playhead goes to it if it is not there, so that what it does
+    /// shows in the preview.
+    fn new_adjustment_clip(&mut self, track: TrackId, frame: TimelineFrameIndex, now: Instant) {
+        self.new_clip_with_no_media(
+            frame,
+            now,
+            ("an adjustment clip", SECONDS_A_NEW_ADJUSTMENT_CLIP_LASTS),
+            |project, wanted_frames| project.try_insert_adjustment_clip(track, frame, wanted_frames),
+        );
+    }
+
+    /// Puts a new clip that has no media on a track, selects it and takes the playhead to it: `what` is what it is called in the words that say it could not be put there and for
+    /// how many seconds it lasts, `insert` puts it in (with the number of frames wanted, and says why it could not).
+    fn new_clip_with_no_media(
+        &mut self,
+        frame: TimelineFrameIndex,
+        now: Instant,
+        (what, seconds): (&str, f64),
+        insert: impl FnOnce(&mut Project, u64) -> Result<(ClipId, u64), EditError>,
+    ) {
         let wanted_frames = self
             .document
             .project
             .frame_rate()
-            .nearest_frame_to_seconds(SECONDS_A_NEW_TEXT_OBJECT_LASTS)
+            .nearest_frame_to_seconds(seconds)
             .max(1);
-        let (clip, duration_in_frames) =
-            match self
-                .document
-                .project
-                .try_insert_text(track, frame, TextObject::default(), wanted_frames)
-            {
-                Ok(inserted) => inserted,
-                Err(error) => {
-                    // (A place that has nothing on it can still be inside the rectangle of a clip group, where only its clips may be.)
-                    if !self.say_why_a_group_edit_was_refused("A text object cannot be put there", &error) {
-                        self.show_message(
-                            "There is no room for a text object there",
-                            "Choose a place on the track that has nothing on it.",
-                        );
-                    }
-                    return;
+        let (clip, duration_in_frames) = match insert(&mut self.document.project, wanted_frames) {
+            Ok(inserted) => inserted,
+            Err(error) => {
+                // (A place that has nothing on it can still be inside the rectangle of a clip group, where only its clips may be.)
+                let mut cannot = format!("{what} cannot be put there");
+                cannot[..1].make_ascii_uppercase();
+                if !self.say_why_a_group_edit_was_refused(&cannot, &error) {
+                    self.show_message(
+                        format!("There is no room for {what} there"),
+                        "Choose a place on the track that has nothing on it.",
+                    );
                 }
-            };
+                return;
+            }
+        };
         self.interface.selection = Selection::only(clip);
         let total_frames = self.document.project.total_frame_count();
         let current_frame = self.playback.clock.position(now, total_frames);

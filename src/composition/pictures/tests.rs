@@ -64,6 +64,7 @@ fn seen(layer: &Layer) -> Seen {
         }
         LayerContent::Text(_) => Seen::Text,
         LayerContent::Image { .. } => Seen::Picture,
+        LayerContent::Adjustment => unreachable!("an adjustment clip is not a layer of a section"),
     }
 }
 
@@ -745,7 +746,8 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<
                     break;
                 }
             }
-            Clip::Audio(_) | Clip::Crate(_) => {}
+            // (An adjustment clip has no picture of its own: it is a group of what is behind it, which these projects do not have.)
+            Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => {}
         }
     }
     front_to_back.reverse();

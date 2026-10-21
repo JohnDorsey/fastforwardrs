@@ -189,6 +189,11 @@ pub enum Command {
         track: TrackId,
         frame: TimelineFrameIndex,
     },
+    /// Put a new adjustment clip on a track, starting at a frame, and select it, so that its properties show. (Its effects are done to everything behind it.)
+    NewAdjustmentClip {
+        track: TrackId,
+        frame: TimelineFrameIndex,
+    },
     /// A text object was changed: what it says, how it looks, or where it is on the picture.
     SetTextObject {
         clip: ClipId,
@@ -422,6 +427,7 @@ impl Command {
             | Self::SetTrackMuted { .. }
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
+            | Self::NewAdjustmentClip { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
             | Self::AddEffect { .. }
@@ -548,6 +554,7 @@ impl Command {
             | Self::MoveTrack { .. }
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
+            | Self::NewAdjustmentClip { .. }
             | Self::SetTextObject { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }

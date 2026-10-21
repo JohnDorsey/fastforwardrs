@@ -55,6 +55,8 @@ pub enum LayerContent {
         source: SourceMediaIdentifier,
     },
     Text(TextObject),
+    /// An adjustment clip: no picture of its own. **It is not in the layers of a section**: what it does is a group of everything behind it (see [`GroupSpan`]).
+    Adjustment,
 }
 
 /// An effect that is on a layer: one that its clip has, or that its track has, with what its values are and the keyframes of them.
@@ -127,7 +129,7 @@ impl Layer {
     pub fn video(&self) -> Option<&VisibleVideo> {
         match &self.content {
             LayerContent::Video(video) => Some(video),
-            LayerContent::Image { .. } | LayerContent::Text(_) => None,
+            LayerContent::Image { .. } | LayerContent::Text(_) | LayerContent::Adjustment => None,
         }
     }
 
@@ -235,19 +237,31 @@ pub fn operations_of_effects(effects: &[LayerEffect], timeline_frame: TimelineFr
 /// drawn straight into what is behind (it is pass-through: GR-10, Q-33). The spans of a section are in the order of their first layers, the one that holds another first.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupSpan {
-    pub group: GroupId,
+    pub owner: SpanOwner,
     /// The first of the section's layers that is in the group.
     pub first_layer: usize,
     /// The layer after the last of the group's.
     pub end_layer: usize,
-    /// What is done to the group's picture, one after another. (A group's effects have no keyframes, so they are the same at every frame.)
+    /// What is done to the group's picture, one after another. (A clip group's or a track group's effects have no keyframes, so they are the same at every frame; an
+    /// adjustment clip's may have, like any clip's.)
     pub effects: Vec<LayerEffect>,
+    /// The group's layers are put over opaque black first (an adjustment clip at the frame: what is behind it is over black, as everything is).
+    pub over_black: bool,
+}
+
+/// What makes a [`GroupSpan`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpanOwner {
+    /// A clip group or a track group that has an effect that does something.
+    Group(GroupId),
+    /// An adjustment clip: everything behind it is its group.
+    Adjustment(ClipId),
 }
 
 impl GroupSpan {
-    /// What the effects of the group do to its picture (the same at every frame).
-    pub fn operations(&self) -> Vec<PictureOperation> {
-        operations_of_effects(&self.effects, TimelineFrameIndex::new(0))
+    /// What the effects of the group do to its picture at `timeline_frame`.
+    pub fn operations_at(&self, timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
+        operations_of_effects(&self.effects, timeline_frame)
     }
 }
 
@@ -442,13 +456,17 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 Clip::Video(_) => 0,
                 // A picture has no pictures to run out of: it is there or its file is not.
                 Clip::Image(image) => u64::from(is_usable(image.source())),
-                Clip::Text(_) => 0,
+                Clip::Text(_) | Clip::Adjustment(_) => 0,
                 // (Nothing is seen of a sound, or of a crate, which holds nothing but keyframes.)
                 Clip::Audio(_) | Clip::Crate(_) => continue,
             };
-            let where_it_is = project
-                .placement_on_the_picture(placement.clip)
-                .expect("a clip that is not a sound is on the picture");
+            let where_it_is = match placement.clip {
+                // (An adjustment clip is the whole picture, and is not drawn: what it does is done to what is behind it.)
+                Clip::Adjustment(_) => Placement::upright(CanvasArea::WHOLE_PICTURE),
+                clip => project
+                    .placement_on_the_picture(clip)
+                    .expect("a clip that is not a sound is on the picture"),
+            };
             candidates.push(Candidate {
                 track_position,
                 track: track.id(),
@@ -589,17 +607,18 @@ fn sections_between(
                     }
                 }
                 Clip::Text(text) => layers.push(candidate.entry(LayerContent::Text(text.object.clone()))),
+                Clip::Adjustment(_) => layers.push(candidate.entry(LayerContent::Adjustment)),
                 Clip::Audio(_) | Clip::Crate(_) => {}
             }
         }
 
         // The layers that are in a group that makes a picture of its own are nodes of a tree: what is behind the front-most layer that covers the picture (or the
         // group that covers it) cannot be seen, inside each group and in the frame.
-        let mut nodes = nodes_of(layers, 0);
-        let covering = nodes.iter().rposition(|node| node.covers_the_picture(group_effects));
+        let mut nodes = make_the_adjustments_groups(nodes_of(layers, 0, group_effects), true);
+        let covering = nodes.iter().rposition(Node::covers_the_picture);
         let front_most_covering_track_position =
-            covering.map(|position| nodes[position].front_most_covering_track_position(group_effects));
-        drain_what_is_behind_what_covers(&mut nodes, group_effects);
+            covering.map(|position| nodes[position].front_most_covering_track_position());
+        drain_what_is_behind_what_covers(&mut nodes);
         // A video with no picture is only missed if it would have been seen: nothing that covers
         // the picture is in front of it. (A track position that is less is further front.)
         let is_missed = missing_pictures_in_front_of
@@ -610,7 +629,7 @@ fn sections_between(
         }
 
         let (mut layers, mut groups) = (Vec::new(), Vec::new());
-        flatten(nodes, group_effects, &mut layers, &mut groups);
+        flatten(nodes, &mut layers, &mut groups);
         sections.push(PictureSection {
             first_timeline_frame: from,
             end_timeline_frame: until,
@@ -689,9 +708,12 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
 
 mod group_nodes;
 use group_nodes::{
-    Entry, drain_what_is_behind_what_covers, effects_of_the_groups_that_make_pictures, flatten, nodes_of,
+    Entry, Node, drain_what_is_behind_what_covers, effects_of_the_groups_that_make_pictures, flatten,
+    make_the_adjustments_groups, nodes_of,
 };
 
+#[cfg(test)]
+mod adjustment_tests;
 #[cfg(test)]
 mod animation_tests;
 #[cfg(test)]

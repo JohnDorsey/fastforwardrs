@@ -9,6 +9,7 @@
 //! mute switch of its own. All of the arithmetic that says which clip is at which frame lives in
 //! [`Track`]; everything here is plain data and logic, which can be tested quickly and thoroughly.
 
+mod adjustment_clip;
 mod clip;
 mod crate_clip;
 mod drawer;
@@ -24,6 +25,7 @@ mod text_object;
 mod track;
 mod track_height;
 
+pub use adjustment_clip::{AdjustmentClip, EmptyAdjustmentClip};
 pub use clip::{Clip, ClipKind};
 pub use crate_clip::{CrateClip, EmptyCrate};
 pub use drawer::Drawer;

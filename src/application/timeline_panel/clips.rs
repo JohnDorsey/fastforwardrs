@@ -248,6 +248,10 @@ pub(super) fn draw_clips(
             Clip::Crate(_) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::CRATE_CLIP_BACKGROUND);
             }
+            Clip::Adjustment(_) => {
+                painter.rect_filled(rectangles.whole, corner_radius, theme::ADJUSTMENT_CLIP_BACKGROUND);
+                draw_label(painter, rectangles, "Adjustment", theme::ADJUSTMENT_CLIP_TEXT);
+            }
         }
         draw_bevel(painter, rectangles, view);
         draw_grip_dots(painter, rectangles);

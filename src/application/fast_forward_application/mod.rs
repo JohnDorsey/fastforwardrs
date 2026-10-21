@@ -56,6 +56,8 @@ mod engine_window_tests;
 mod export_flow;
 pub(crate) use export_flow::effects_the_export_would_leave_out;
 #[cfg(test)]
+mod adjustment_clip_tests;
+#[cfg(test)]
 mod file_colour_tests;
 #[cfg(test)]
 mod file_question_tests;

@@ -53,6 +53,19 @@ fn wait_until_the_download_is_over(window: &mut Window) {
     panic!("the download did not end");
 }
 
+/// Draws the window until it shows a text that has `words` in it, for up to six seconds, and says that it never did if it does not: what the download says of itself comes from a
+/// thread, which a computer that is busy may take some time to begin.
+fn wait_until_it_shows(window: &mut Window, words: &str) {
+    for _ in 0..600 {
+        window.settle();
+        if shows_containing(window, words) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the window never showed {words:?}");
+}
+
 /// A fetcher that goes on until it is told to stop.
 struct NeverEnding;
 
@@ -247,10 +260,8 @@ fn cancel_stops_a_download_that_is_going_on_and_the_button_comes_back() {
     window.settle();
     assert!(window.application().bundle_download_is_going_on());
     assert!(is_shown(&window, CANCEL_LABEL), "there is a way to stop it");
-    assert!(
-        shows_containing(&window, "Downloading ONE (1 of 3)"),
-        "and it says what it is doing"
-    );
+    // (The thread that downloads says what it is doing when it has begun, which on a computer that is busy is not at once.)
+    wait_until_it_shows(&mut window, "Downloading ONE (1 of 3)");
 
     window.harness.get_by_label(CANCEL_LABEL).click();
     wait_until_the_download_is_over(&mut window);

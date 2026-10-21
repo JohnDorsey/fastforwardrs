@@ -111,7 +111,10 @@ fn the_groups_of_the_first_section(
         .iter()
         .map(|span| {
             (
-                span.group,
+                match span.owner {
+                    SpanOwner::Group(group) => group,
+                    SpanOwner::Adjustment(clip) => panic!("an adjustment clip: {clip:?}"),
+                },
                 section.layers[span.first_layer..span.end_layer]
                     .iter()
                     .map(|layer| layer.clip)
@@ -156,7 +159,7 @@ fn the_effects_of_a_clip_group_are_the_effects_of_a_group_of_the_layers_of_its_m
         [(group, vec![second, first], vec![turn(90.0)])]
     );
     assert_eq!(
-        plan.sections[0].groups[0].operations(),
+        plan.sections[0].groups[0].operations_at(frame(0)),
         [PictureOperation::Mix(ColourMatrix::hue_rotation(90.0))]
     );
 }

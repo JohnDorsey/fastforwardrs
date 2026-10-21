@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::archive::{self, plugin_library_entry_name};
-use super::tests::{edited_project, link_to_missing_video, saved};
+use super::tests::{edited_project, link_to_missing_video, saved, version_line};
 use super::*;
 use crate::digest::Sha256Digest;
 use crate::project::{
@@ -532,27 +532,29 @@ fn a_file_with_a_build_that_is_not_well_formed_is_refused_with_the_number_of_the
 // --- the version ---
 
 #[test]
-fn a_file_of_version_13_has_no_libraries_and_is_saved_as_version_14() {
+// (Rewritten on purpose in phase 5: it pinned the version to 14, and what it is about is that a file of 13 has no libraries and is saved as the version there is.)
+fn a_file_of_version_13_has_no_libraries_and_is_saved_as_the_version_there_is() {
     let folder = TempDir::new().unwrap();
     let project = edited_project(link_to_missing_video());
     let text = saved(&project);
-    assert!(text.contains("\"file_format_version\": 14"));
+    assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
     assert!(
         !text.contains("plugin_libraries"),
         "a project with none says nothing of them"
     );
-    let thirteen = text.replace("\"file_format_version\": 14", "\"file_format_version\": 13");
+    let thirteen = text.replace(&version_line(FILE_FORMAT_VERSION), &version_line(13));
     let loaded = project_from_json_text(&thirteen).unwrap();
     assert!(loaded.plugin_libraries().is_empty());
-    assert!(saved(&loaded).contains("\"file_format_version\": 14"));
+    assert!(saved(&loaded).contains(&version_line(FILE_FORMAT_VERSION)));
     // A file of a version after this one is refused, as before.
-    let fifteen = text.replace("\"file_format_version\": 14", "\"file_format_version\": 15");
+    let newer = text.replace(
+        &version_line(FILE_FORMAT_VERSION),
+        &version_line(FILE_FORMAT_VERSION + 1),
+    );
     assert!(matches!(
-        project_from_json_text(&fifteen),
-        Err(ProjectFileError::NewerFileFormat {
-            found: 15,
-            supported: 14
-        })
+        project_from_json_text(&newer),
+        Err(ProjectFileError::NewerFileFormat { found, supported })
+            if found == FILE_FORMAT_VERSION + 1 && supported == FILE_FORMAT_VERSION
     ));
     let _ = folder;
 }

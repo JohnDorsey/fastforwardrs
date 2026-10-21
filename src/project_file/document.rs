@@ -374,6 +374,18 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         badges: Vec<BadgeDocument>,
     },
+    /// An adjustment clip (format 15): no picture of its own; its effects are done to everything behind it, for as long as it lasts.
+    Adjustment {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        duration_in_frames: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
+    },
 }
 
 /// A group, as the file has it: its kind, its name and colour, what is in it, its effects, and where the badges of the tags that it is in

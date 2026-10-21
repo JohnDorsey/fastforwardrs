@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{Room, Track, TrackEntry};
+use crate::project::tracks::adjustment_clip::AdjustmentClip;
 use crate::project::tracks::clip::Clip;
 use crate::project::tracks::drawer::Drawer;
 use crate::project::tracks::gain::Gain;
@@ -269,7 +270,9 @@ impl Track {
         let changed = match &self.entries[index].clip {
             Clip::Video(media) => Clip::Video(change(media)),
             Clip::Audio(media) => Clip::Audio(change(media)),
-            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) => return Err(ClipEditError::NotAMediaClip { clip }),
+            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) => {
+                return Err(ClipEditError::NotAMediaClip { clip });
+            }
         };
         self.entries[index].clip = changed;
         self.reposition(&anchors);
@@ -442,6 +445,19 @@ impl Track {
         );
         self.rebuild_derived_values();
         Ok(id)
+    }
+
+    /// Adds an adjustment clip at `timeline_frame` that lasts `wanted_frames` frames, or less if it would run into the next clip. Returns the clip's name and how many frames
+    /// it lasts, or `None` if another clip is at that frame.
+    pub fn insert_adjustment_clip_at(
+        &mut self,
+        timeline_frame: TimelineFrameIndex,
+        wanted_frames: u64,
+    ) -> Option<(ClipId, u64)> {
+        let duration = self.longest_new_text_clip_at(timeline_frame, wanted_frames)?;
+        let clip = Clip::Adjustment(AdjustmentClip::new(duration).ok()?);
+        let id = self.insert_clip_at(timeline_frame, clip).ok()?;
+        Some((id, duration))
     }
 
     /// Adds a text clip at `timeline_frame` that lasts `wanted_frames` frames, or less if it would

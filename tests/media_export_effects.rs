@@ -4,7 +4,8 @@
 //! Exporting projects whose clips and tracks have effects with the real ffmpeg, checked colour by colour against what the effect
 //! says: a hue shift of a flat colour comes out as the colour that the arithmetic of the effect says, whether the effect is of the
 //! clip or of the track, and for a picture, a text object, and a value that has keyframes; and the hue shift of a group, of each of the three
-//! kinds, which is done to the picture of each of the clips that are in it (see the placeholder in `project::groups::effects_of_groups`).
+//! kinds, which is done to the picture that the clips in it make together (phase 5: it was done to the picture of each clip as a placeholder before), and of an adjustment clip,
+//! which is done to everything behind it for as long as it lasts.
 
 mod support;
 
@@ -678,4 +679,53 @@ fn the_look_up_table_of_a_track_and_of_a_tag_gives_the_colours_of_the_table_to_t
         .unwrap();
     let decoded = exported(&toolchain, &project, scratch.path(), "tag_lut.mp4");
     assert_every_picture_is(&decoded, looked_up(&table, ORANGE), "the table of a tag");
+}
+
+// --- an adjustment clip (phase 5) ---
+
+#[test]
+fn an_adjustment_clip_turns_the_colours_of_everything_behind_it_for_as_long_as_it_lasts_and_not_before_or_after() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let front = project.add_track_in_front();
+    let (adjustment, lasts) = project
+        .try_insert_adjustment_clip(front, TimelineFrameIndex::new(20), 20)
+        .unwrap();
+    assert_eq!(lasts, 20);
+    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(adjustment), 120.0);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "adjusted.mp4");
+
+    assert_eq!(decoded.pictures.len(), 60);
+    for (number, picture) in decoded.pictures.iter().enumerate() {
+        let wanted = if (20..40).contains(&number) {
+            turned(ORANGE, 120.0)
+        } else {
+            ORANGE
+        };
+        assert_near(
+            colour_at(picture, WIDTH / 2, HEIGHT / 2),
+            wanted,
+            &format!("frame {number}"),
+        );
+    }
+}
+
+#[test]
+fn two_adjustment_clips_one_over_the_other_turn_the_colours_by_both_turns() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    for degrees in [60.0, 70.0] {
+        let track = project.add_track_in_front();
+        let (adjustment, _) = project
+            .try_insert_adjustment_clip(track, TimelineFrameIndex::new(0), 60)
+            .unwrap();
+        put_a_hue_shift_on(&mut project, AnimationTarget::Clip(adjustment), degrees);
+    }
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "two_adjustments.mp4");
+
+    assert_every_picture_is(&decoded, turned(ORANGE, 130.0), "turned by 60 and then by 70 degrees");
 }

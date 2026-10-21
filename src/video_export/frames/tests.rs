@@ -855,3 +855,33 @@ fn a_group_with_no_effects_changes_nothing_in_the_frame_a_group_with_an_effect_i
     project.disband_group(group).unwrap();
     assert_eq!(described_at(&project, 65), flat, "ungrouping gives the same frame");
 }
+
+#[test]
+fn an_adjustment_clip_is_a_group_of_what_is_behind_it_over_black_with_its_effects_for_as_long_as_it_lasts() {
+    let (mut project, _) = video_with_a_text_and_a_picture_over_it(150);
+    let front = project.add_track_in_front();
+    let (adjustment, _) = project.try_insert_adjustment_clip(front, frame(60), 30).unwrap();
+    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(adjustment), 90.0);
+
+    // Before it and after it the frame is what it was.
+    assert_eq!(described_at(&project, 55).layers.len(), 2, "the video and the text");
+    assert_eq!(described_at(&project, 95).layers.len(), 1, "the video");
+    let during = described_at(&project, 65);
+
+    assert_eq!(
+        during.layers.len(),
+        1,
+        "a group, which is everything behind the adjustment clip"
+    );
+    assert_eq!(during.layers[0].effects.len(), 1);
+    assert_eq!(during.layers[0].effects[0].key, COLOUR_MATRIX_KEY);
+    let LayerSource::Group(held) = &during.layers[0].source else {
+        panic!("a group was expected: {:?}", during.layers[0].source);
+    };
+    assert_eq!(
+        held.layers[0].source,
+        LayerSource::Solid([0, 0, 0, 255]),
+        "over black first"
+    );
+    assert_eq!(held.layers.len(), 3, "the black, the video and the text");
+}

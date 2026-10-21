@@ -74,6 +74,7 @@ fn kind_of_the_layer_in_the_plan(layer: &Layer) -> &'static str {
         LayerContent::Video(_) => "video",
         LayerContent::Image { .. } => "picture file",
         LayerContent::Text(_) => "text",
+        LayerContent::Adjustment => "adjustment",
     }
 }
 

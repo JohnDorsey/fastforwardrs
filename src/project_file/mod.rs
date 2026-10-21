@@ -34,8 +34,8 @@ use thiserror::Error;
 use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
-    Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectKind, Effects, FontSize,
-    ImageClip, InputColourOverride, MediaClip, Placement, Project, ProjectSettings, PropertyValue,
+    AdjustmentClip, Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectKind, Effects,
+    FontSize, ImageClip, InputColourOverride, MediaClip, Placement, Project, ProjectSettings, PropertyValue,
     SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
     SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
     TrackHeight, TrackId, ValueKind,
@@ -114,8 +114,9 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// snapshots say nothing of how a value is shown. Version 13 also added the `resources` of the project (the files that its effects use, such as a table of colours): see
 /// `resources.rs`. A file of version 12 has none; and a setting for how they are kept, `resource_storage`, that a project may have set for itself. Version 14 added the
 /// `plugin_libraries` of the project (the libraries of native code that its sound effects come from, linked or with their builds inside the archive): see `plugin_libraries.rs`. A file
-/// of version 13 has none.
-pub const FILE_FORMAT_VERSION: u32 = 14;
+/// of version 13 has none. Version 15 added the adjustment clip (`"kind": "adjustment"`): a clip with no picture of its own whose effects are done to everything behind it. A file of
+/// version 14 has none.
+pub const FILE_FORMAT_VERSION: u32 = 15;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -827,6 +828,28 @@ fn clip_from_document(
                 racks: drawer,
             })
         }
+        ClipDocument::Adjustment {
+            gap_before_frames,
+            duration_in_frames,
+            drawer,
+            effects,
+            badges,
+        } => {
+            let adjustment = AdjustmentClip::new(duration_in_frames).map_err(|error| error.to_string())?;
+            Ok(ClipFromDocument {
+                gap_before_frames,
+                clip: Clip::Adjustment(adjustment),
+                effects: groups::chain_from_documents(
+                    effects,
+                    badges,
+                    kinds,
+                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Adjustment),
+                    group_count,
+                )?,
+                legacy_animation: AnimationDocument::default(),
+                racks: drawer,
+            })
+        }
         ClipDocument::Crate {
             gap_before_frames,
             duration_in_frames,
@@ -1221,6 +1244,13 @@ fn clip_document_of(
             drawer,
             badges,
         },
+        Clip::Adjustment(adjustment) => ClipDocument::Adjustment {
+            gap_before_frames,
+            duration_in_frames: adjustment.duration_in_frames(),
+            drawer,
+            effects,
+            badges,
+        },
     }
 }
 
@@ -1256,6 +1286,8 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
     Ok(parts.join("/"))
 }
 
+#[cfg(test)]
+mod adjustment_clip_tests;
 #[cfg(test)]
 mod animation_tests;
 #[cfg(test)]

@@ -17,7 +17,8 @@ use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
 use crate::application::timeline_panel::SourceLook;
 use crate::project::{
-    AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, Member, PropertyId, SpeedFactor,
+    AdjustmentClip, AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, Member,
+    PropertyId, SpeedFactor,
 };
 
 /// What the row of how big a video or a picture is is called.
@@ -36,6 +37,7 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         Clip::Text(text) => text_properties::show(ui, content, clip, text, commands),
         // (A crate has nothing of its own to change: what it holds is in its racks, which are shown in the timeline.)
         Clip::Crate(_) => {}
+        Clip::Adjustment(adjustment) => show_an_adjustment_clip(ui, content, clip, adjustment, commands),
     }
     chain::show(ui, content, Member::Clip(clip), commands);
 }
@@ -123,6 +125,23 @@ fn show_a_video_or_a_sound(
             placement_controls::show(ui, content, clip, SIZE_LABEL, commands);
         }
         offer_to_choose_the_file_again(ui, look, media.source(), commands);
+    });
+}
+
+/// What an adjustment clip says of itself, and how long it lasts. (What it does is in its chain of effects, which is shown after this.)
+fn show_an_adjustment_clip(
+    ui: &mut Ui,
+    content: &PropertiesContent<'_>,
+    clip: ClipId,
+    adjustment: &AdjustmentClip,
+    commands: &mut Vec<Command>,
+) {
+    kind_box::show(ui, kind_name(ClipKind::Adjustment), |ui| {
+        ui.weak("Its effects are done to everything behind it.");
+        ui.add_space(4.0);
+        if let Some(frames) = shown_for(ui, content.project.frame_rate(), adjustment.duration_in_frames()) {
+            commands.push(Command::SetClipDuration { clip, frames });
+        }
     });
 }
 

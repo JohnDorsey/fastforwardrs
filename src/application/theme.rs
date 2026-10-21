@@ -105,6 +105,10 @@ pub const TEXT_CLIP_TEXT: Color32 = Color32::from_rgb(236, 246, 246);
 pub const IMAGE_CLIP_BACKGROUND: Color32 = Color32::from_rgb(70, 52, 104);
 pub const IMAGE_CLIP_TEXT: Color32 = Color32::from_rgb(240, 234, 250);
 
+/// An adjustment clip: its name on a muted olive, which no other kind of clip is.
+pub const ADJUSTMENT_CLIP_BACKGROUND: Color32 = Color32::from_rgb(100, 84, 36);
+pub const ADJUSTMENT_CLIP_TEXT: Color32 = Color32::from_rgb(250, 244, 224);
+
 /// A keyframe crate: a box that is nothing but a drawer that is always open, a little darker than the strip it is on.
 pub const CRATE_CLIP_BACKGROUND: Color32 = Color32::from_rgb(24, 26, 31);
 
@@ -205,6 +209,7 @@ mod tests {
     fn the_name_on_a_picture_clip_and_the_words_of_a_text_clip_can_be_read() {
         assert!(contrast_ratio(IMAGE_CLIP_BACKGROUND, IMAGE_CLIP_TEXT) > 7.0);
         assert!(contrast_ratio(TEXT_CLIP_BACKGROUND, TEXT_CLIP_TEXT) > 4.5);
+        assert!(contrast_ratio(ADJUSTMENT_CLIP_BACKGROUND, ADJUSTMENT_CLIP_TEXT) > 4.5);
     }
 
     #[test]
@@ -253,6 +258,7 @@ mod tests {
             IMAGE_CLIP_BACKGROUND,
             MISSING_CLIP_BACKGROUND,
             CRATE_CLIP_BACKGROUND,
+            ADJUSTMENT_CLIP_BACKGROUND,
         ];
         for (index, first) in colours.iter().enumerate() {
             for second in &colours[index + 1..] {

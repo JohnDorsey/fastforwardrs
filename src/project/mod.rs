@@ -87,11 +87,11 @@ pub use speed_factor::{SpeedFactor, ZeroSpeedFactor};
 pub use speed_indicator_layout::SpeedIndicatorLayout;
 pub use timecode::format_timecode;
 pub use tracks::{
-    Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner, CrateClip,
-    CutEdges, Drawer, EmptyClip, EmptyCrate, EmptyImageClip, EmptyTextClip, FontSize, Gain, ImageClip, InsertError,
-    KeyframeId, MediaClip, PictureDimensions, PictureFit, PixelBox, Placement, PointOnThePicture, Rack, RackCut,
-    RackEditError, RackId, RackKeyframe, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track,
-    TrackEntry, TrackHeight, TrackId, fit_inside_picture, fitted_placement,
+    AdjustmentClip, Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner,
+    CrateClip, CutEdges, Drawer, EmptyAdjustmentClip, EmptyClip, EmptyCrate, EmptyImageClip, EmptyTextClip, FontSize,
+    Gain, ImageClip, InsertError, KeyframeId, MediaClip, PictureDimensions, PictureFit, PixelBox, Placement,
+    PointOnThePicture, Rack, RackCut, RackEditError, RackId, RackKeyframe, Room, SplitError, SplitOutcome, TextClip,
+    TextColour, TextObject, Track, TrackEntry, TrackHeight, TrackId, fit_inside_picture, fitted_placement,
 };
 
 /// The frame rate of a project that has no video to take one from.
@@ -333,7 +333,7 @@ impl Project {
                     Clip::Video(_) => SourceMediaKind::Video,
                     Clip::Audio(_) => SourceMediaKind::Audio,
                     Clip::Image(_) => SourceMediaKind::Image,
-                    Clip::Text(_) | Clip::Crate(_) => continue,
+                    Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) => continue,
                 };
                 if source.kind() != wanted_kind {
                     return Err(InconsistentProject::ClipUsesSourceOfTheWrongKind {
@@ -1070,6 +1070,23 @@ impl Project {
         })
     }
 
+    /// Adds an adjustment clip to a track at `timeline_frame`, lasting `wanted_frames` frames or as long as there is room for if that is less. Returns the new clip and how many
+    /// frames it lasts, or why it could not: [`EditError::NoRoomThere`] if there is no such track or a clip is at that frame, and [`EditError::BreaksTheRulesOfGroups`] if it would
+    /// be in the rectangle of a clip group (where only what is in the group may be).
+    pub fn try_insert_adjustment_clip(
+        &mut self,
+        track: TrackId,
+        timeline_frame: TimelineFrameIndex,
+        wanted_frames: u64,
+    ) -> Result<(ClipId, u64), EditError> {
+        self.keeping_the_groups_valid(|project| {
+            project
+                .track_mut(track)
+                .and_then(|track| track.insert_adjustment_clip_at(timeline_frame, wanted_frames))
+                .ok_or(EditError::NoRoomThere)
+        })
+    }
+
     pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), EditError> {
         Ok(self.track_holding_mut_or_error(clip)?.set_text_object(clip, object)?)
     }
@@ -1100,6 +1117,8 @@ impl Default for Project {
     }
 }
 
+#[cfg(test)]
+mod adjustment_clip_tests;
 #[cfg(test)]
 mod animating_tests;
 #[cfg(test)]

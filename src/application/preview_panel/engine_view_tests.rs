@@ -991,6 +991,7 @@ fn a_group_of(first_layer: usize, end_layer: usize, degrees: f32) -> crate::fram
         operations: vec![crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(
             degrees,
         ))],
+        over_black: false,
     }
 }
 
@@ -1140,4 +1141,39 @@ fn the_symbol_of_a_video_that_is_in_a_group_is_drawn_after_the_video_inside_the_
         3,
         "the video, its symbol right after it, and the layer in front"
     );
+}
+
+#[test]
+fn a_group_that_is_over_black_has_an_opaque_black_layer_first_and_one_whose_effects_do_nothing_is_pass_through() {
+    let picture = an_image();
+    let layers = || {
+        (0..2)
+            .map(|number| image_layer(number, number + 1, Some(&picture), whole_picture()))
+            .collect()
+    };
+    let mut shown = content(layers(), None);
+    shown.groups = vec![crate::frame_scene::PreviewGroup {
+        over_black: true,
+        ..a_group_of(0, 2, 90.0)
+    }];
+
+    let (description, _) = describe(&shown);
+
+    assert_eq!(description.layers.len(), 1);
+    let held = the_layers_of_the_group(&description.layers[0]);
+    assert_eq!(held.len(), 3, "the black, and the two layers");
+    assert_eq!(held[0].source, LayerSource::Solid([0, 0, 0, 255]));
+    assert_eq!(held[0].corners, CORNERS_OF_THE_WHOLE_PICTURE);
+
+    // An adjustment whose effects do nothing at the frame (an animated value at its start) makes no group: the layers are where they would be without it, and no black is put.
+    let (flat, _) = describe(&content(layers(), None));
+    let mut doing_nothing = content(layers(), None);
+    doing_nothing.groups = vec![crate::frame_scene::PreviewGroup {
+        first_layer: 0,
+        end_layer: 2,
+        operations: Vec::new(),
+        over_black: true,
+    }];
+    let (described, _) = describe(&doing_nothing);
+    assert_eq!(described.layers, flat.layers);
 }
