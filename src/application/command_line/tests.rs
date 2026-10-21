@@ -17,7 +17,7 @@ fn export_of(list: &[&str]) -> ExportRequest {
         // (Plugins are not looked for on the computer that runs the tests, unless a test says where.)
         CommandLine::Export(request) => ExportRequest {
             plugin_search: None,
-            ..request
+            ..*request
         },
         other => panic!("expected an export, got {other:?}"),
     }
@@ -750,7 +750,7 @@ fn the_folders_and_the_scans_are_kept_beside_the_settings_file_that_was_asked_fo
 fn the_command_line_looks_for_plugins_beside_the_settings_file_it_is_given() {
     let request =
         match parse_arguments(arguments(&["--settings", "/elsewhere/s.json", "trip.json", "out.mp4"])).unwrap() {
-            CommandLine::Export(request) => request,
+            CommandLine::Export(request) => *request,
             other => panic!("{other:?}"),
         };
     // (There is a scan program beside the tests only when the whole package has been built.)
@@ -829,4 +829,41 @@ fn the_places_for_libraries_that_the_file_beside_the_settings_says_are_told_to_t
         host.where_dependencies_are_looked_for(),
         (vec![folder.path().to_owned()], false)
     );
+}
+
+#[test]
+fn the_plugins_that_came_with_the_program_are_run_by_the_export_without_an_approval_and_other_folders_are_still_refused()
+ {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, plugin) = project_with_a_plugin_on_its_clip();
+    let its_folder = crate::plugin_trust::folder_of(&plugin.library);
+    let elsewhere = tempfile::tempdir().unwrap();
+
+    let refused = find_and_check_the_plugins_of_the_sound(
+        &ExportRequest {
+            bundled_plugins: Some(elsewhere.path().to_owned()),
+            ..a_request_for_the_plugins_of(false, None)
+        },
+        &project,
+    );
+    assert!(
+        refused.is_err(),
+        "bundled plugins are in another folder: this folder has not been approved"
+    );
+
+    // The plugin's folder is the bundled one (or below it: the bundled folder is the one above).
+    for bundled in [its_folder.clone(), its_folder.parent().unwrap().to_owned()] {
+        let host = find_and_check_the_plugins_of_the_sound(
+            &ExportRequest {
+                bundled_plugins: Some(bundled.clone()),
+                ..a_request_for_the_plugins_of(false, None)
+            },
+            &project,
+        )
+        .unwrap_or_else(|why| panic!("{bundled:?} is the bundled folder, and the export was refused: {why}"));
+        assert_eq!(
+            host.standing_of(&its_folder),
+            crate::plugin_trust::FolderStanding::Approved
+        );
+    }
 }

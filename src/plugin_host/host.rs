@@ -37,6 +37,8 @@ struct Trust {
     approved: HashSet<PathBuf>,
     declined: HashSet<PathBuf>,
     wanted: Vec<Wanted>,
+    /// The folder of the plugins that came with the program, and every folder in it, which are trusted without a question (not written down: it is the program's own).
+    bundled: Option<PathBuf>,
 }
 
 /// Where the libraries that plugin libraries need are looked for, besides beside the plugin library.
@@ -112,6 +114,14 @@ impl PluginHost {
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
+    /// Says that the plugins that came with the program are in `folder` (as [`crate::plugin_trust::folder_key`] names it, or as it is given: it is made so) **and in the folders
+    /// below it**: they are trusted without a question, as the program is (a release's own files are as trusted as the program; the licences and the source offer that go with them are
+    /// in `docs/distribution-notices.md`). Not written to the file of approvals: it is the program's own, and a folder that is not this one is asked about as it always was.
+    pub fn trust_bundled_folder(&self, folder: &Path) {
+        self.trust().bundled = Some(crate::plugin_trust::folder_key(folder));
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
     /// Says which folders have been approved (those that are written down), replacing what was said.
     pub fn set_approved_folders(&self, folders: impl IntoIterator<Item = PathBuf>) {
         let mut trust = self.trust();
@@ -152,7 +162,13 @@ impl PluginHost {
     /// the person said no, or nobody has said anything.
     pub fn standing_of(&self, folder: &Path) -> FolderStanding {
         let trust = self.trust();
-        if trust.everything_is_allowed || trust.approved.contains(folder) {
+        if trust.everything_is_allowed
+            || trust.approved.contains(folder)
+            || trust
+                .bundled
+                .as_ref()
+                .is_some_and(|bundled| folder.starts_with(bundled))
+        {
             FolderStanding::Approved
         } else if trust.declined.contains(folder) {
             FolderStanding::Declined

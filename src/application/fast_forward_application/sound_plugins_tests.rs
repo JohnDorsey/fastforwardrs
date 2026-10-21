@@ -817,6 +817,7 @@ fn the_view<'a>(
     crate::application::sound_plugins_window::SoundPluginsView {
         settings,
         other_folders: &[],
+        bundled_folder: None,
         is_scanning,
         has_scanned,
         libraries: &[],
@@ -913,4 +914,64 @@ fn the_window_tells_of_a_clap_plugin_whose_start_depends_on_memory_it_did_not_wr
         &format!("Roarer is unreliable at its start: {warning}.")
     ));
     assert!(!is_shown(&window, "Steady One is unreliable"));
+}
+
+#[test]
+fn the_placeholder_of_a_plugin_in_the_bundled_folder_does_not_ask_for_trust_and_one_elsewhere_does() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = a_reverb();
+    plugin.descriptor.name = "tap reverb".into();
+    set_installed_plugins(vec![plugin.clone()]);
+    let (mut window, _) = window_with_the_video_selected();
+    open_the_menu(&mut window);
+    window.harness.get_by_label("Tap reverb").click();
+    window.settle();
+    assert!(shows_containing(
+        &window,
+        "You have not said whether to trust the folder"
+    ));
+
+    window
+        .application_mut()
+        .trust_the_plugins_bundled_in(&crate::plugin_trust::folder_of(&plugin.library));
+    window.settle();
+
+    assert!(
+        !shows_containing(&window, "You have not said whether to trust the folder"),
+        "the plugins that came with the program are trusted"
+    );
+    assert!(!shows_containing(&window, NOT_RUNNING_NOTE));
+}
+
+#[test]
+fn the_window_calls_the_bundled_folder_bundled_and_the_others_usual() {
+    let settings = crate::plugin_scan::PluginSearchSettings::default();
+    let mut open = true;
+    let others = [
+        std::path::PathBuf::from("/usr/lib/clap"),
+        std::path::PathBuf::from("/the/program/plugins"),
+    ];
+    let mut commands = Vec::new();
+    let mut harness = egui_kittest::Harness::new_ui(|ui| {
+        let mut view = the_view(&settings, false, true);
+        view.other_folders = &others;
+        view.bundled_folder = Some(std::path::Path::new("/the/program/plugins"));
+        crate::application::sound_plugins_window::show(ui.ctx(), &mut open, &view, &mut commands);
+    });
+    harness.run();
+
+    let shown = |text: String| harness.query_by_label(&text).is_some();
+    assert!(shown(format!(
+        "{} (usual)",
+        std::path::Path::new("/usr/lib/clap").display()
+    )));
+    assert!(shown(format!(
+        "{} ({})",
+        std::path::Path::new("/the/program/plugins").display(),
+        crate::application::sound_plugins_window::BUNDLED_LABEL
+    )));
+    assert!(!shown(format!(
+        "{} (usual)",
+        std::path::Path::new("/the/program/plugins").display()
+    )));
 }

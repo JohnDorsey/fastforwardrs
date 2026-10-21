@@ -20,7 +20,8 @@ use crate::plugin_scan::ScanFailure;
 use crate::plugin_scan::is_a_clap_file;
 use crate::plugin_scan::{
     Breadcrumb, LibraryOutcome, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache,
-    folders_looked_in_by_default, plugins_found_in, recover, scanner_program_beside_this_program,
+    bundled_plugins_folder, folders_looked_in_by_default, plugins_found_in, recover,
+    scanner_program_beside_this_program,
 };
 use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
 use crate::project::{EffectKind, set_installed_plugins};
@@ -234,6 +235,9 @@ impl FastForwardApplication {
         if let Some(file) = PluginSearchSettings::default_file() {
             self.keep_plugin_search_settings_in(file);
         }
+        if let Some(folder) = bundled_plugins_folder() {
+            self.trust_the_plugins_bundled_in(&folder);
+        }
         match scanner_program_beside_this_program() {
             Some(program) => {
                 self.use_this_plugin_scanner(program, ScanCache::default_file(), true);
@@ -248,6 +252,12 @@ impl FastForwardApplication {
                 );
             }
         }
+    }
+
+    /// Says that the plugins that came with the program are in `folder`: they are trusted without the question that other folders are asked (they are the program's own files; the
+    /// licences and the source of each are with them). The folder is looked in by the scan that is made of the usual places.
+    pub fn trust_the_plugins_bundled_in(&mut self, folder: &Path) {
+        self.environment.plugin_host.trust_bundled_folder(folder);
     }
 
     /// Looks at what the last run left in `file`: if it ended while it was using a plugin library, that library is failed (it is not loaded again until it changes) and a message
@@ -380,10 +390,12 @@ impl FastForwardApplication {
     /// What the window of sound plugins shows.
     pub(super) fn show_the_window_of_sound_plugins(&mut self, context: &egui::Context, commands: &mut Vec<Command>) {
         let other_folders = self.environment.plugin_search.other_folders();
+        let bundled_folder = bundled_plugins_folder();
         let search = &self.environment.plugin_search;
         let view = SoundPluginsView {
             settings: &search.settings,
             other_folders: &other_folders,
+            bundled_folder: bundled_folder.as_deref(),
             is_scanning: search.running.is_some(),
             has_scanned: search.has_scanned,
             libraries: &search.result.libraries,

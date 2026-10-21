@@ -2148,3 +2148,42 @@ fn a_plugin_whose_start_is_unreliable_says_so_once_in_the_sound_it_is_run_in_and
     let ((_, _, notes), _) = with_and_without(effect(), 3, 512);
     assert!(notes.lock().unwrap().is_empty(), "{:?}", notes.lock().unwrap());
 }
+
+#[test]
+fn the_bundled_folder_and_the_folders_in_it_are_trusted_and_no_other_folder_is_not_even_one_named_like_it() {
+    let host = PluginHost::new();
+    let root = tempfile::tempdir().unwrap();
+    let bundled = root.path().join("plugins");
+    std::fs::create_dir_all(bundled.join("reverbs").join("deeper")).unwrap();
+    std::fs::create_dir_all(root.path().join("plugins_of_someone")).unwrap();
+    std::fs::create_dir_all(root.path().join("other")).unwrap();
+    let key = |path: &std::path::Path| crate::plugin_trust::folder_key(path);
+    for folder in [&bundled, &bundled.join("reverbs"), &root.path().join("other")] {
+        assert_eq!(
+            host.standing_of(&key(folder)),
+            FolderStanding::NotAsked,
+            "before: {folder:?}"
+        );
+    }
+
+    host.trust_bundled_folder(&bundled);
+
+    assert_eq!(host.standing_of(&key(&bundled)), FolderStanding::Approved);
+    assert_eq!(
+        host.standing_of(&key(&bundled.join("reverbs"))),
+        FolderStanding::Approved
+    );
+    assert_eq!(
+        host.standing_of(&key(&bundled.join("reverbs").join("deeper"))),
+        FolderStanding::Approved
+    );
+    assert_eq!(
+        host.standing_of(&key(&root.path().join("plugins_of_someone"))),
+        FolderStanding::NotAsked,
+        "a folder whose name begins like the bundled one is another folder"
+    );
+    assert_eq!(
+        host.standing_of(&key(&root.path().join("other"))),
+        FolderStanding::NotAsked
+    );
+}

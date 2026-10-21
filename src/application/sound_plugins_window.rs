@@ -25,6 +25,9 @@ pub const SCANNING_NOTE: &str = "Scanning...";
 /// How wide the window can grow, in points (a long path is cut short, and says all of itself when the pointer is on it).
 const MOST_WIDTH: f32 = 720.0;
 
+/// What a folder of plugins that came with the program is called in the list of folders (the others that are looked in are "usual").
+pub const BUNDLED_LABEL: &str = "bundled with the program";
+
 /// What the window can ask for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SoundPluginsCommand {
@@ -46,6 +49,8 @@ pub struct SoundPluginsView<'a> {
     pub settings: &'a PluginSearchSettings,
     /// The folders that are looked in besides those a person added: those of `LADSPA_PATH` and `CLAP_PATH`, and the usual ones.
     pub other_folders: &'a [PathBuf],
+    /// Which of those is the folder of the plugins that came with the program, if one is (it is said so, and not called usual).
+    pub bundled_folder: Option<&'a Path>,
     pub is_scanning: bool,
     pub has_scanned: bool,
     pub libraries: &'a [LibraryReport],
@@ -84,6 +89,7 @@ fn show_contents(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Co
         "plugin folders",
         &view.settings.folders,
         view.other_folders,
+        view.bundled_folder,
         commands,
         true,
     );
@@ -99,6 +105,7 @@ fn show_contents(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Co
         "dependency folders",
         &view.settings.dependency_folders,
         &[],
+        None,
         commands,
         false,
     );
@@ -159,6 +166,7 @@ fn show_folders(
     salt: &str,
     folders: &[PathBuf],
     other_folders: &[PathBuf],
+    bundled: Option<&Path>,
     commands: &mut Vec<Command>,
     for_plugins: bool,
 ) {
@@ -177,7 +185,12 @@ fn show_folders(
             });
         }
         for folder in other_folders {
-            ui.add(egui::Label::new(RichText::new(format!("{} (usual)", folder.display())).weak()).truncate())
+            let kind = if bundled == Some(folder.as_path()) {
+                BUNDLED_LABEL
+            } else {
+                "usual"
+            };
+            ui.add(egui::Label::new(RichText::new(format!("{} ({kind})", folder.display())).weak()).truncate())
                 .on_hover_text(folder.display().to_string());
         }
         if ui.button(ADD_FOLDER_LABEL).clicked() {

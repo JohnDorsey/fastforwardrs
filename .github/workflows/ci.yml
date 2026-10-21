@@ -192,6 +192,13 @@ jobs:
       - name: Tests of the helper that writes the results of the test steps (tools/ci)
         run: python -m unittest discover -s tools/ci -p "test_*.py"
 
+      # The plugins that ship with the program: the manifest is checked against the licence policy (no AGPL, no GPL-2.0-only, https addresses, a checksum for every file), and the
+      # script that builds the folder from it has checks of its own (nothing is downloaded: the archives are made in the tests).
+      - name: Manifest and fetch script of the bundled plugins (tools/bundled_plugins)
+        run: |
+          python tools/bundled_plugins/fetch_bundled_plugins.py --check
+          python -m unittest discover -s tools/bundled_plugins -p "test_*.py"
+
   licences:
     name: licences (REUSE, cargo-deny, third-party notices)
     runs-on: ubuntu-latest

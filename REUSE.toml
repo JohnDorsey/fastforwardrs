@@ -19,6 +19,7 @@ path = [
     "about.hbs",
     "rustfmt.toml",
     "docs/**",
+    "bundled-plugins/**",
     "tools/**/*.md",
     "tools/linux/*.sh",
     "tools/ci/*.sh",

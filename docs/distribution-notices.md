@@ -49,3 +49,22 @@ The program runs `ffmpeg` and `ffprobe` as separate programs. A release that **s
 ## The plugin clarification
 
 See `LICENSE-PLUGIN-CLARIFICATION`. A **release that includes someone else's plugin** (none does) needs that plugin's own licence file, in addition.
+
+## Plugins that ship with the program (2026-10-20)
+
+`bundled-plugins/manifest.json` is the manifest (name, authors, licence, home page, version, the release file of each system with its checksum, the licence texts with their checksums, and where the source is). **It is checked by CI against the licence policy above** (`tools/bundled_plugins/fetch_bundled_plugins.py --check`: no AGPL, no GPL-2.0-only, every address https, a checksum for every file). Nothing is distributed yet; what a release does is:
+
+1. `py tools/bundled_plugins/fetch_bundled_plugins.py --platform <system> --out <the release folder>/plugins --with-source` for each system it is made for (`windows-x86_64` and `linux-x86_64` have builds; **macOS has none yet**), which puts in `plugins/<set>/` only the `.clap` files named, **the licence texts, a `NOTICE.txt`, and the source archive** of that exact version (the corresponding source that GPLv3 section 6 and LGPLv3 owe, as for ffmpeg above);
+2. keeps the source archives where the release is hosted too (the archive of the tag that GitHub makes for DPF-Plugins has no stable checksum: **a release keeps its own copy**, and the checksum of that copy is then put in the manifest);
+3. `plugins/README.txt` says what is there.
+
+| Set | Authors | Licence | Plugins | Source |
+|---|---|---|---|---|
+| Dragonfly Reverb 3.2.10 | Michael Willis, Rob van den Berg | GPL-3.0-or-later (the Freeverb parts it carries are GPL-2.0-or-later) | Hall, Plate and Room reverbs | `dragonfly-reverb-3.2.10-src.tar.xz` of its release |
+| MVerb (DPF-Plugins v1.7) | Martin Eastwood, Filipe Coelho | GPL-3.0-or-later | MVerb | the tag `v1.7` of DISTRHO/DPF-Plugins |
+| MaGigaverb (DPF-Plugins v1.7) | Cycling '74 (the Gen~ export), Filipe Coelho | LGPL-3.0-only AND ISC (the wrapper) | MaGigaverb | the tag `v1.7` of DISTRHO/DPF-Plugins |
+| Surge XT Effects 1.3.4 | the Surge Synth Team and the authors of Surge | GPL-3.0-or-later | Surge XT Effects | `surge-src-1.3.4.tar.gz` of its release (md5 published by the project) |
+
+**Left out on purpose:** Airwindows Consolidated (the maintainer's decision for now), the AGPL plugins (ZL), Nekobi (GPL-2.0-only), and the three plugins of DPF-Plugins v1.7 that share MVerb's CLAP id (3BandEQ, 3BandSplitter, PingPongPan).
+
+**Trust:** a folder called `plugins` beside the program, or the one that `FFRS_BUNDLED_PLUGINS` names, is looked in last and **trusted without the question** (in the editor and in `fastforwardrs-export`): its files are the release's own and are as trusted as the program. Where the licence texts could not be found in a release archive, they are taken from the project's repository at the tag that matches the version (the manifest says which, with a checksum). Where **the licence of a set is not the one its authors state in one place** (MaGigaverb: the DPF licence table says LGPL-3.0, the file of its wrapper says ISC), the manifest says which it took and why.

@@ -42,7 +42,40 @@ pub fn usual_folders(home: Option<&Path>) -> Vec<PathBuf> {
 /// The folders that are looked in if nobody says otherwise, from the environment of this program, in the order of who is to win: `LADSPA_PATH`, the usual places of LADSPA, then
 /// `CLAP_PATH` and the usual places of CLAP. (The folders a person added come before all of these; see [`folders_to_scan`].)
 pub fn folders_looked_in_by_default() -> Vec<PathBuf> {
-    folders_looked_in_with(&|name| std::env::var_os(name), dirs::home_dir().as_deref())
+    folders_looked_in_with(
+        &|name| std::env::var_os(name),
+        dirs::home_dir().as_deref(),
+        bundled_plugins_folder().as_deref(),
+    )
+}
+
+/// The name of the environment variable that says where the bundled plugins are, where they are not in a folder called `plugins` beside the program (for a program run from the
+/// build folder of a developer, and for the tests).
+pub const BUNDLED_PLUGINS_VARIABLE: &str = "FFRS_BUNDLED_PLUGINS";
+
+/// The folder of the plugins that came with this program, if there is one: the folder the variable [`BUNDLED_PLUGINS_VARIABLE`] names, or else a folder called `plugins` beside the
+/// program (`tools/bundled_plugins/fetch_bundled_plugins.py` makes it). **The program trusts it without a question** (see `PluginHost::trust_bundled_folder`).
+pub fn bundled_plugins_folder() -> Option<PathBuf> {
+    bundled_plugins_folder_with(
+        std::env::var_os(BUNDLED_PLUGINS_VARIABLE).as_deref(),
+        std::env::current_exe().ok().as_deref(),
+    )
+}
+
+/// The same, with the value of the variable (or nothing) and the file of the program given: for the tests. A variable that is set and does not name a folder that is there means
+/// that there is none (it is not a reason to look beside the program: a person who said where did not mean another place). Beside a program that is in a folder called `deps`
+/// (a test program of cargo) the folder of the program that is above it is looked at too.
+pub fn bundled_plugins_folder_with(variable: Option<&OsStr>, program: Option<&Path>) -> Option<PathBuf> {
+    if let Some(variable) = variable.filter(|value| !value.is_empty()) {
+        let folder = PathBuf::from(variable);
+        return folder.is_dir().then_some(folder);
+    }
+    let beside = program?.parent()?;
+    let mut candidates = vec![beside.join("plugins")];
+    if beside.file_name().is_some_and(|name| name == "deps") {
+        candidates.push(beside.parent()?.join("plugins"));
+    }
+    candidates.into_iter().find(|candidate| candidate.is_dir())
 }
 
 /// The same, with `environment` giving the value of a variable of the environment (or nothing) and `home` the home folder: for the tests, which do not change the environment of
@@ -50,6 +83,7 @@ pub fn folders_looked_in_by_default() -> Vec<PathBuf> {
 pub fn folders_looked_in_with(
     environment: &dyn Fn(&str) -> Option<std::ffi::OsString>,
     home: Option<&Path>,
+    bundled: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut usual = usual_folders(home);
     usual.extend(clap_folders(
@@ -58,7 +92,14 @@ pub fn folders_looked_in_with(
         environment("COMMONPROGRAMFILES").map(PathBuf::from).as_deref(),
         environment("LOCALAPPDATA").map(PathBuf::from).as_deref(),
     ));
-    folders_to_scan(&[], environment("LADSPA_PATH").as_deref(), &usual)
+    let mut folders = folders_to_scan(&[], environment("LADSPA_PATH").as_deref(), &usual);
+    // (The bundled plugins come last: a plugin that a person installed wins over the one that came with the program.)
+    if let Some(bundled) = bundled
+        && !folders.iter().any(|folder| folder == bundled)
+    {
+        folders.push(bundled.to_owned());
+    }
+    folders
 }
 
 /// Whether `path` is named like a CLAP library: it ends in `.clap` (whatever case). On Windows and Linux a CLAP library is a file with that ending; on macOS it is a bundle, a

@@ -1091,7 +1091,7 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
     };
     let home = Path::new("/home/someone");
 
-    let folders = folders_looked_in_with(&environment, Some(home));
+    let folders = folders_looked_in_with(&environment, Some(home), None);
 
     let mut expected = vec![PathBuf::from("/ladspa/from/variable")];
     expected.extend(usual_folders(Some(home)));
@@ -1104,7 +1104,7 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
     assert_eq!(folders, expected);
     assert!(folders.contains(&PathBuf::from("/clap/from/variable")));
     assert_eq!(
-        folders_looked_in_with(&|_| None, None).len(),
+        folders_looked_in_with(&|_| None, None, None).len(),
         clap_folders(None, None, None, None).len() + usual_folders(None).len()
     );
 }
@@ -1165,4 +1165,99 @@ fn the_build_identity_is_read_from_what_a_program_wrote_and_the_last_line_that_s
     assert_eq!(build_id_in("a message that is not it: ffrs-scan-build: 99"), None);
     assert_eq!(build_id_in(""), None);
     assert_eq!(BUILD_ID.len(), 16, "the identity is sixteen hexadecimal digits");
+}
+
+// --- the plugins that came with the program ---
+
+#[test]
+fn the_bundled_plugins_are_in_the_folder_the_variable_names_if_it_is_there_and_nowhere_else_if_it_is_not() {
+    let folder = tempfile::tempdir().unwrap();
+    let program_folder = tempfile::tempdir().unwrap();
+    fs::create_dir(program_folder.path().join("plugins")).unwrap();
+    let program = program_folder.path().join("fastforwardrs");
+
+    assert_eq!(
+        bundled_plugins_folder_with(Some(folder.path().as_os_str()), Some(&program)),
+        Some(folder.path().to_owned()),
+        "the variable is believed, before the place beside the program"
+    );
+    assert_eq!(
+        bundled_plugins_folder_with(Some(folder.path().join("not there").as_os_str()), Some(&program)),
+        None,
+        "a person who said where did not mean another place"
+    );
+    assert_eq!(
+        bundled_plugins_folder_with(Some(std::ffi::OsStr::new("")), Some(&program)),
+        Some(program_folder.path().join("plugins")),
+        "an empty variable says nothing"
+    );
+    let file = folder.path().join("a file");
+    fs::write(&file, b"x").unwrap();
+    assert_eq!(
+        bundled_plugins_folder_with(Some(file.as_os_str()), None),
+        None,
+        "a file is not a folder"
+    );
+}
+
+#[test]
+fn the_bundled_plugins_are_found_beside_the_program_and_above_the_deps_folder_of_a_test_program_and_not_if_there_is_no_such_folder()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let program = root.path().join("fastforwardrs");
+    assert_eq!(
+        bundled_plugins_folder_with(None, Some(&program)),
+        None,
+        "no folder called plugins"
+    );
+    assert_eq!(bundled_plugins_folder_with(None, None), None, "no program");
+
+    // A file called plugins is not a folder of plugins.
+    fs::write(root.path().join("plugins"), b"x").unwrap();
+    assert_eq!(bundled_plugins_folder_with(None, Some(&program)), None);
+    fs::remove_file(root.path().join("plugins")).unwrap();
+    fs::create_dir(root.path().join("plugins")).unwrap();
+    assert_eq!(
+        bundled_plugins_folder_with(None, Some(&program)),
+        Some(root.path().join("plugins"))
+    );
+
+    // A test program of cargo is in `deps`, one folder below the folder that the program is in.
+    let deps = root.path().join("deps");
+    fs::create_dir(&deps).unwrap();
+    assert_eq!(
+        bundled_plugins_folder_with(None, Some(&deps.join("a_test_program"))),
+        Some(root.path().join("plugins"))
+    );
+    let elsewhere = root.path().join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    assert_eq!(
+        bundled_plugins_folder_with(None, Some(&elsewhere.join("program"))),
+        None,
+        "only deps looks one folder up"
+    );
+}
+
+#[test]
+fn the_bundled_folder_is_looked_in_last_so_that_a_plugin_a_person_installed_wins_and_it_is_not_looked_in_twice() {
+    let environment = |name: &str| match name {
+        "LADSPA_PATH" => Some("/ladspa/from/variable".into()),
+        _ => None,
+    };
+    let bundled = Path::new("/the/program/plugins");
+
+    let folders = folders_looked_in_with(&environment, None, Some(bundled));
+
+    assert_eq!(folders.last(), Some(&bundled.to_owned()));
+    assert_eq!(
+        folders[..folders.len() - 1],
+        folders_looked_in_with(&environment, None, None)[..]
+    );
+    // Already there (a person put it in CLAP_PATH): where it was.
+    let there = |name: &str| match name {
+        "CLAP_PATH" => Some("/the/program/plugins".into()),
+        _ => None,
+    };
+    let once = folders_looked_in_with(&there, None, Some(bundled));
+    assert_eq!(once.iter().filter(|folder| folder.as_path() == bundled).count(), 1);
 }

@@ -66,6 +66,10 @@ Vital, Calf and the x42 plugins I did not search for CLAP builds (Calf and x42 a
 Download **Dragonfly Reverb 3.2.10 (win64)** and the **ten effects of DPF-Plugins v1.7**, scan them with our scanner, run them through the same measurements as Aura Lite, and listen.
 Then Surge XT Effects, then the rest. For Linux and Ubuntu CI, the same plugins' Linux builds can be run in WSL.
 
+## Built (2026-10-20, after the maintainer's answers: manifest and script outside the repository's binaries, the bundled folder trusted, MVerb alone from DPF)
+
+`bundled-plugins/manifest.json`, `tools/bundled_plugins/fetch_bundled_plugins.py` (and its tests, run by CI), the folder `plugins` beside the program looked in last and trusted, a window label, `fastforwardrs-export` that does not refuse it, and `tests/bundled_plugins_real.rs` (ignored; run by hand on the folder the script makes). **Verified [V]:** the script run for real on Windows and in Ubuntu (WSL) downloaded every file, checked every checksum and made the folder; the six plugins load from it **alone** (a single `.clap` file each, with no other file of their archives), scan, can be effects, and start steady. See `distribution-notices.md` for what a release does, and the README.
+
 ## What was downloaded and what was found (2026-10-20, after the decision)
 
 Downloaded to the scratch folder (not into the project), **one new folder each**, nothing run from them except by our scanner and our test harness: Dragonfly Reverb 3.2.10 (win64 and

@@ -97,12 +97,15 @@ pub struct ExportRequest {
     pub plugin_approvals_file: Option<PathBuf>,
     /// How plugins are looked for when the project has effects that are plugins (`None`: they are not looked for, and those effects pass the sound through).
     pub plugin_search: Option<Box<PluginSearch>>,
+    /// The folder of the plugins that came with the program (`None`: there is none): they are run without the approval that other folders need.
+    pub bundled_plugins: Option<PathBuf>,
 }
 
 /// What the arguments of a command line come to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandLine {
-    Export(ExportRequest),
+    /// (Boxed: the request is large, and the other variant has nothing in it.)
+    Export(Box<ExportRequest>),
     Help,
 }
 
@@ -151,7 +154,7 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
         }
     }
     match <[PathBuf; 2]>::try_from(files) {
-        Ok([project_file, video_file]) => Ok(CommandLine::Export(ExportRequest {
+        Ok([project_file, video_file]) => Ok(CommandLine::Export(Box::new(ExportRequest {
             project_file,
             video_file,
             adapter,
@@ -159,13 +162,14 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             archive_cache_folder: None,
             allow_plugins,
             plugin_approvals_file,
+            bundled_plugins: crate::plugin_scan::bundled_plugins_folder(),
             plugin_search: scanner_program_beside_this_program().map(|program| {
                 Box::new(PluginSearch::beside_the_settings_file(
                     program,
                     settings_file.as_deref(),
                 ))
             }),
-        })),
+        }))),
         Err(files) => Err(match files.len() {
             0 | 1 => "the project file and the video file are both needed".to_owned(),
             _ => "only the project file and the video file are wanted".to_owned(),
@@ -189,7 +193,7 @@ pub fn run(arguments: impl IntoIterator<Item = OsString>, error_stream: &mut dyn
             let _ = writeln!(error_stream, "{USAGE}");
             return 0;
         }
-        Ok(CommandLine::Export(request)) => request,
+        Ok(CommandLine::Export(request)) => *request,
         Err(problem) => {
             let _ = writeln!(error_stream, "{problem}\n\n{USAGE}");
             return 2;
@@ -330,6 +334,10 @@ fn find_and_check_the_plugins_of_the_sound(
     project: &Project,
 ) -> Result<Arc<PluginHost>, String> {
     let host = Arc::new(PluginHost::new());
+    // (The plugins that came with the program are the program's own: no question, so no refusal either.)
+    if let Some(folder) = &request.bundled_plugins {
+        host.trust_bundled_folder(folder);
+    }
     let has_effects_to_find = !super::fast_forward_application::effects_the_export_would_leave_out(project).is_empty();
     if has_effects_to_find && let Some(search) = &request.plugin_search {
         let found = search.scan_and_install();
@@ -346,9 +354,13 @@ fn find_and_check_the_plugins_of_the_sound(
         .plugin_approvals_file
         .clone()
         .map_or_else(ApprovalStore::in_memory, ApprovalStore::at);
-    let (approved, refused): (Vec<_>, Vec<_>) = folders_the_sound_of_a_project_needs(project)
-        .into_iter()
-        .partition(|wanted| approvals.is_folder_approved(&wanted.folder));
+    let (approved, refused): (Vec<_>, Vec<_>) =
+        folders_the_sound_of_a_project_needs(project)
+            .into_iter()
+            .partition(|wanted| {
+                approvals.is_folder_approved(&wanted.folder)
+                    || host.standing_of(&wanted.folder) == crate::plugin_trust::FolderStanding::Approved
+            });
     host.set_approved_folders(approved.into_iter().map(|wanted| wanted.folder));
     if refused.is_empty() {
         return Ok(host);
