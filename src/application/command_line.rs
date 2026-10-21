@@ -20,9 +20,11 @@ use super::archive_cache::ArchiveCache;
 use crate::engine::AdapterChoice;
 use crate::media::{FfmpegToolchain, MediaLocation};
 use crate::plugin_host::{PluginHost, folders_the_sound_of_a_project_needs};
-use crate::plugin_scan::{PluginSearch, scanner_program_beside_this_program};
+use crate::plugin_scan::{
+    LibraryOutcome, PluginSearch, plugins_found_in, scan_a_library_alone, scanner_program_beside_this_program,
+};
 use crate::plugin_trust::{ApprovalStore, folder_for_a_person, this_platform, what_the_command_line_refuses};
-use crate::project::{Project, Settings, SourceMedia};
+use crate::project::{InstalledPlugin, Project, Settings, SourceMedia, installed_plugins, set_installed_plugins};
 use crate::project_file::archive::entry_place;
 use crate::project_file::read_project_file;
 use crate::settings_file::{default_settings_file_path, read_settings_file};
@@ -54,7 +56,9 @@ progress is told on the error stream.
                         your rights) be run. A command line cannot ask, so
                         without this a project that needs a plugin that is
                         inside the project file, or one in a folder that has
-                        not been approved, is refused, and they are listed
+                        not been approved, is refused, and they are listed.
+                        With it, a plugin inside the project file is written
+                        out, checked against its recorded hash, and run
   --plugin-approvals <file>
                         read the plugins that were approved from this file and
                         not from the editor's own
@@ -249,6 +253,9 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
     // (Before ffmpeg is looked for: a project that is refused is refused wherever it is asked.)
     refuse_plugins_that_nobody_has_said_yes_to(request, &project)?;
     let plugins = find_and_check_the_plugins_of_the_sound(request, &project)?;
+    for words in write_out_and_install_the_plugins_inside_the_project(request, &project, &plugins)? {
+        report(Report::Warning(words));
+    }
     let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
     let plan = plan_export(&project, settings_of_the_export(request, &project)?).map_err(|error| error.to_string())?;
     for words in warnings_about(&project) {
@@ -380,6 +387,73 @@ fn find_and_check_the_plugins_of_the_sound(
             .join("
 ")
     ))
+}
+
+/// **With `--allow-plugins`** (the person said yes to every plugin, the one thing a command line can do): the plugin libraries that are inside the project file, and have a build for
+/// this computer, are written out (each checked against the hash the project recorded for it: a library that is not what the project says it is **refuses the export**), scanned
+/// by the scan program, and their plugins are installed after those of the folders, so that the effects of them are run as the editor runs them after a person has held *Load it*.
+/// What could not be scanned is given back as words, for the export to say (what uses it passes the sound through).
+fn write_out_and_install_the_plugins_inside_the_project(
+    request: &ExportRequest,
+    project: &Project,
+    host: &PluginHost,
+) -> Result<Vec<String>, String> {
+    if !request.allow_plugins {
+        return Ok(Vec::new());
+    }
+    let platform = this_platform();
+    let wanted: Vec<_> = project
+        .plugin_libraries()
+        .iter()
+        .filter(|library| library.is_embedded() && library.build_for(&platform).is_some())
+        .collect();
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(search) = &request.plugin_search else {
+        return Ok(vec![
+            "the plugins inside the project were not looked at, because there is no program to scan them with"
+                .to_owned(),
+        ]);
+    };
+    let mut words = Vec::new();
+    let mut reports = Vec::new();
+    for library in wanted {
+        let file = host
+            .write_out_and_trust_an_embedded_plugin(library, &platform)
+            .map_err(|why| {
+                format!(
+                    "the plugin {} inside the project cannot be used, so nothing was exported: {why}",
+                    library.name()
+                )
+            })?;
+        match scan_a_library_alone(search.scanner_program.clone(), &file, Vec::new(), false) {
+            Ok(report) => {
+                if let LibraryOutcome::Failed(failure) = &report.outcome {
+                    words.push(format!(
+                        "the plugin {}, inside the project, could not be used ({failure}), so the sound goes through it unchanged",
+                        library.name()
+                    ));
+                }
+                reports.push(report);
+            }
+            Err(problem) => words.push(format!(
+                "the plugin {}, inside the project, could not be looked at ({problem}), so the sound goes through it unchanged",
+                library.name()
+            )),
+        }
+    }
+    let mut installed: Vec<InstalledPlugin> = installed_plugins().into_iter().cloned().collect();
+    for plugin in plugins_found_in(&reports).effects {
+        if !installed
+            .iter()
+            .any(|already| already.descriptor.key == plugin.descriptor.key)
+        {
+            installed.push(plugin);
+        }
+    }
+    set_installed_plugins(installed);
+    Ok(words)
 }
 
 /// The settings that the export of `project` is made with: the global ones, from the file that the request names (the defaults where it names none, and where the file is

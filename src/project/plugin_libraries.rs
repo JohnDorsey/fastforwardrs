@@ -40,6 +40,8 @@ const MOST_CHARACTERS_IN_A_PLATFORM: usize = 40;
 pub enum PluginLibraryKind {
     /// LADSPA: a `.dll`, `.so` or `.dylib` that gives sound effects (`ladspa_descriptor`).
     Ladspa,
+    /// CLAP: a `.clap` file (on macOS a bundle, which a project file cannot carry yet) that gives plugins (`clap_entry`).
+    Clap,
 }
 
 impl PluginLibraryKind {
@@ -47,12 +49,14 @@ impl PluginLibraryKind {
     pub fn key(self) -> &'static str {
         match self {
             Self::Ladspa => "ladspa",
+            Self::Clap => "clap",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Self> {
         match key {
             "ladspa" => Some(Self::Ladspa),
+            "clap" => Some(Self::Clap),
             _ => None,
         }
     }

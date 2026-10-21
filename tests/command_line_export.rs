@@ -15,8 +15,8 @@ use fastforwardrs::media::MediaLocation;
 use fastforwardrs::plugin_scan::{PluginSearchSettings, effect_of_a_plugin};
 use fastforwardrs::plugin_trust::ApprovalStore;
 use fastforwardrs::project::{
-    AnimationTarget, EffectKind, PropertyId, PropertyValue, SourceMediaIdentifier, SourceMediaLink, TimelineFrameIndex,
-    set_installed_plugins,
+    AnimationTarget, EffectKind, EmbeddedBuild, PluginLibrary, PluginLibraryKind, PluginLibrarySource, PropertyId,
+    PropertyValue, SourceMediaIdentifier, SourceMediaLink, TimelineFrameIndex, set_installed_plugins,
 };
 use fastforwardrs::project_file::archive::resource_entry_name;
 use fastforwardrs::project_file::{HowToWrite, write_project_file, write_project_file_including};
@@ -305,6 +305,43 @@ fn run_with_plugin_folders(project: &Path, video: &Path, settings_file: &Path, m
     command.output().expect("the program starts")
 }
 
+/// The project of `video` as it is, and the same with the gain plugin of the test library at `library` on its clip at 0.5 (the plugin is installed in this program for as long as it
+/// takes to make it, and not after).
+fn a_project_with_the_gain_plugin_at_half(
+    toolchain: &fastforwardrs::media::FfmpegToolchain,
+    video: &support::TestVideo,
+    library: &Path,
+) -> (fastforwardrs::project::Project, fastforwardrs::project::Project) {
+    // (The list of the plugins that are installed is for the whole program, and the tests of this file run at the same time.)
+    static THE_LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _alone = THE_LIST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let scan = ladspa_host::scan_library(library, |_| {}).unwrap();
+    set_installed_plugins(
+        scan.plugins
+            .iter()
+            .filter_map(|plugin| effect_of_a_plugin(library, plugin).ok())
+            .collect(),
+    );
+    let kind = EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key().ends_with(":ffrs_test_gain"))
+        .expect("the gain plugin");
+    let plain = project_for(toolchain, video);
+    let mut project = plain.clone();
+    let clip = support::clip_number(&project, 0);
+    let effect = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            PropertyId::effect_value(kind, effect, 0),
+            PropertyValue::Number(0.5),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+    set_installed_plugins(Vec::new());
+    (plain, project)
+}
+
 #[test]
 fn a_project_with_a_plugin_on_a_clip_is_refused_until_its_folder_is_approved_and_then_the_sound_of_the_video_has_the_plugin_in_it()
  {
@@ -327,30 +364,7 @@ fn a_project_with_a_plugin_on_a_clip_is_refused_until_its_folder_is_approved_and
     .unwrap();
 
     // A project with the gain plugin at 0.5 on its clip, made here and written to its file (the plugin is installed in this program for that).
-    let scan = ladspa_host::scan_library(&library, |_| {}).unwrap();
-    set_installed_plugins(
-        scan.plugins
-            .iter()
-            .filter_map(|plugin| effect_of_a_plugin(&library, plugin).ok())
-            .collect(),
-    );
-    let kind = EffectKind::installed_plugin_kinds()
-        .into_iter()
-        .find(|kind| kind.key().ends_with(":ffrs_test_gain"))
-        .expect("the gain plugin");
-    let plain = project_for(&toolchain, &video);
-    let mut project = plain.clone();
-    let clip = support::clip_number(&project, 0);
-    let effect = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
-    project
-        .set_property_at(
-            AnimationTarget::Clip(clip),
-            PropertyId::effect_value(kind, effect, 0),
-            PropertyValue::Number(0.5),
-            TimelineFrameIndex::new(0),
-        )
-        .unwrap();
-    set_installed_plugins(Vec::new());
+    let (plain, project) = a_project_with_the_gain_plugin_at_half(&toolchain, &video, &library);
     let project_file = scratch.path().join("with_a_plugin.fastforwardrs.json");
     write_project_file(&project, &project_file).unwrap();
     let plain_file = scratch.path().join("plain.fastforwardrs.json");
@@ -397,4 +411,125 @@ fn a_project_with_a_plugin_on_a_clip_is_refused_until_its_folder_is_approved_and
         (ratio - 0.5).abs() < 0.03,
         "the plugin halves the sound: {with} against {without} is {ratio}"
     );
+}
+
+/// A project file (an archive, which is what can carry a plugin) with the gain plugin of the test library at 0.5 on its clip and **the library inside the file**, as its own bytes
+/// are, or as another build whose bytes are not what the file says they are.
+fn write_a_project_with_the_gain_plugin_inside(
+    toolchain: &fastforwardrs::media::FfmpegToolchain,
+    video: &support::TestVideo,
+    scratch: &Path,
+    the_build_is_damaged: bool,
+) -> PathBuf {
+    let library_file = scratch.join(format!("good.{}", fastforwardrs::plugin_scan::library_file_extension()));
+    std::fs::copy(ladspa_test_plugins::library_file_for_tests(), &library_file).unwrap();
+    let (_, mut project) = a_project_with_the_gain_plugin_at_half(toolchain, video, &library_file);
+    let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(std::fs::read(&library_file).unwrap());
+    let platform = fastforwardrs::plugin_trust::this_platform();
+    let build = if the_build_is_damaged {
+        // (The digest is the one of the bytes that the file should have, and the bytes are others: a build that was changed after the project was made.)
+        let recorded = fastforwardrs::digest::Sha256Digest::of_bytes(&bytes);
+        let mut changed = bytes.to_vec();
+        changed[0] ^= 0xff;
+        EmbeddedBuild::as_recorded(&platform, recorded, std::sync::Arc::from(changed)).unwrap()
+    } else {
+        EmbeddedBuild::new(&platform, bytes).unwrap()
+    };
+    let name = library_file.file_name().unwrap().to_string_lossy().into_owned();
+    project
+        .add_plugin_library(
+            PluginLibrary::new(
+                &name,
+                PluginLibraryKind::Ladspa,
+                PluginLibrarySource::Embedded(vec![build]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let project_file = scratch.join("with_a_plugin_inside.ffrs");
+    write_project_file(&project, &project_file).unwrap();
+    project_file
+}
+
+#[test]
+fn a_plugin_inside_the_project_file_refuses_the_export_unless_plugins_are_allowed_and_then_it_is_written_out_checked_found_and_heard_and_a_damaged_one_refuses_it_again()
+ {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let scratch = scratch_directory();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+    // (Nowhere to look for plugins but the usual places: the plugin is not installed, it is only in the file.)
+    let settings_file = scratch.path().join("settings.json");
+    PluginSearchSettings::default()
+        .write(&settings_file.with_file_name("plugin_search.json"))
+        .unwrap();
+    let approvals = scratch.path().join("plugin_approvals.json");
+    let project_file = write_a_project_with_the_gain_plugin_inside(&toolchain, &video, scratch.path(), false);
+    let destination = scratch.path().join("with_a_plugin_inside.mp4");
+
+    // Without `--allow-plugins` the command line cannot ask: refused, and the library is named as one that is inside the file.
+    let refused = run_with_plugin_folders(
+        &project_file,
+        &destination,
+        &settings_file,
+        &[Path::new("--plugin-approvals"), &approvals],
+    );
+    let words = said(&refused);
+    assert_eq!(refused.status.code(), Some(1), "{words}");
+    assert!(
+        words.contains("inside the project file") && words.contains("a command line cannot ask"),
+        "{words}"
+    );
+    assert!(!destination.exists());
+
+    // With it: the plugin that is inside the file is run, and the sound is half as loud.
+    let allowed = run_with_plugin_folders(
+        &project_file,
+        &destination,
+        &settings_file,
+        &[
+            Path::new("--plugin-approvals"),
+            &approvals,
+            Path::new("--allow-plugins"),
+        ],
+    );
+    let words = said(&allowed);
+    assert_eq!(allowed.status.code(), Some(0), "{words}");
+    assert!(!words.contains("warning"), "nothing was left out: {words}");
+    let plain_file = scratch.path().join("plain.fastforwardrs.json");
+    write_project_file(&project_for(&toolchain, &video), &plain_file).unwrap();
+    let plain_destination = scratch.path().join("plain.mp4");
+    let unchanged = run_with_plugin_folders(&plain_file, &plain_destination, &settings_file, &[]);
+    assert_eq!(unchanged.status.code(), Some(0), "{}", said(&unchanged));
+    let with = loudness(&decoded_sound(&toolchain, &destination, 2, 48_000));
+    let without = loudness(&decoded_sound(&toolchain, &plain_destination, 2, 48_000));
+    assert!(without > 0.02, "the test video has a tone to be changed: {without}");
+    let ratio = with / without;
+    assert!(
+        (ratio - 0.5).abs() < 0.03,
+        "the plugin that was inside the file halves the sound: {with} against {without} is {ratio}"
+    );
+
+    // A build that is not what the project says it is is never run, even with `--allow-plugins`: the export is refused, and nothing is made.
+    let damaged_file = scratch.path().join("damaged");
+    std::fs::create_dir_all(&damaged_file).unwrap();
+    let damaged = write_a_project_with_the_gain_plugin_inside(&toolchain, &video, &damaged_file, true);
+    let damaged_destination = scratch.path().join("damaged.mp4");
+    let refused_again = run_with_plugin_folders(
+        &damaged,
+        &damaged_destination,
+        &settings_file,
+        &[
+            Path::new("--plugin-approvals"),
+            &approvals,
+            Path::new("--allow-plugins"),
+        ],
+    );
+    let words = said(&refused_again);
+    assert_eq!(refused_again.status.code(), Some(1), "{words}");
+    assert!(
+        words.contains("is not the one the project says it is") && words.contains("nothing was exported"),
+        "{words}"
+    );
+    assert!(!damaged_destination.exists());
 }

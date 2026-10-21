@@ -581,6 +581,7 @@ impl FastForwardApplication {
         self.say_what_the_picture_engine_has_done_and_gone_on_after();
         self.collect_finished_background_work();
         self.take_what_the_plugin_scan_found();
+        self.take_what_the_scans_of_embedded_plugins_found();
         self.take_what_the_download_of_the_bundles_said();
         self.forget_what_is_gone_from_the_project();
         self.synchronise_the_preview_with_the_project();

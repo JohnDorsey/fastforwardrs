@@ -20,7 +20,7 @@ use crate::plugin_scan::ScanFailure;
 use crate::plugin_scan::is_a_clap_file;
 use crate::plugin_scan::{
     Breadcrumb, LibraryOutcome, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache,
-    bundled_plugins_folder, folders_looked_in_by_default, plugins_found_in, recover,
+    bundled_plugins_folder, folders_looked_in_by_default, plugins_found_in, recover, scan_a_library_alone,
     scanner_program_beside_this_program,
 };
 use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
@@ -53,6 +53,14 @@ pub(super) struct PluginSearch {
     another_wanted: bool,
     pub(super) has_scanned: bool,
     pub(super) result: ScanResult,
+    /// What the scans of the plugin libraries that were written out of the project file that is open found (the ones a person said yes to: see `plugin_flow`). They are installed
+    /// after the plugins of the folders, which win where a key is the same, and are forgotten when another project is opened.
+    pub(super) embedded: Vec<LibraryReport>,
+    /// The scans of those that are going on, each with the file it is of.
+    embedded_running: Vec<Receiver<(PathBuf, Result<LibraryReport, String>)>>,
+    /// The plugin libraries inside the project that is open that are not loaded (nobody has said yes to them, or the person said no, or they could not be written out): a plugin
+    /// that is not installed may be in one of them, and the window of the effect says so.
+    pub(super) embedded_not_loaded: Vec<String>,
     /// The *Bundles* tab: the plugins that can be fetched from their authors.
     pub(super) bundles: super::plugin_bundles_flow::Bundles,
 }
@@ -106,10 +114,22 @@ impl PluginSearch {
 
     /// Why no plugin stands in for the effect whose key is `namespace:rest`.
     fn why_a_plugin_is_not_installed(&self, namespace: &str, rest: &str) -> String {
+        let why = self.why_a_plugin_is_not_in_the_folders(namespace, rest);
+        if self.embedded_not_loaded.is_empty() {
+            return why;
+        }
+        format!(
+            "{why}\n\nThe project has plugin libraries inside it that are not loaded ({}): the plugin may be in one of them. They are asked about when the project is opened, and a plugin inside a project is loaded only if you hold down \u{ab}Load it\u{bb}.",
+            self.embedded_not_loaded.join(", ")
+        )
+    }
+
+    /// Why no plugin stands in for the effect whose key is `namespace:rest`, of the plugins in the folders that are looked in.
+    fn why_a_plugin_is_not_in_the_folders(&self, namespace: &str, rest: &str) -> String {
         if self.scanner_program.is_none() {
             return "The program that scans plugin libraries was not found beside the editor, so no plugins are looked for.".to_owned();
         }
-        if self.running.is_some() || !self.has_scanned {
+        if self.running.is_some() || !self.has_scanned || !self.embedded_running.is_empty() {
             return "The plugins are still being looked for.".to_owned();
         }
         let named = |path: &Path| {
@@ -374,17 +394,112 @@ impl FastForwardApplication {
     /// Makes the plugins that can be effects the effects that are installed, and keeps the rest for the window to show.
     fn apply_what_a_scan_found(&mut self, libraries: Vec<LibraryReport>, problems: Vec<String>) {
         let search = &mut self.environment.plugin_search;
-        let found = plugins_found_in(&libraries);
-        search.result = ScanResult {
-            libraries,
-            not_used: found.not_used,
-            effect_count: found.effects.len(),
-            problems,
-        };
+        search.result.libraries = libraries;
+        search.result.problems = problems;
         search.has_scanned = true;
+        self.install_the_plugins_that_were_found();
+    }
+
+    /// Makes the plugins that the scans found, of the folders and of the libraries written out of the project file (those last: a plugin of a folder wins where a key is the same),
+    /// the plugins that are installed.
+    fn install_the_plugins_that_were_found(&mut self) {
+        let search = &mut self.environment.plugin_search;
+        let reports: Vec<LibraryReport> = search
+            .result
+            .libraries
+            .iter()
+            .chain(&search.embedded)
+            .cloned()
+            .collect();
+        let found = plugins_found_in(&reports);
+        search.result.not_used = found.not_used;
+        search.result.effect_count = found.effects.len();
         set_installed_plugins(found.effects);
         // (Effects of plugins that were not installed before are now: their folders are asked about, and the sound is made with them if the answer is yes.)
         self.ask_about_the_folders_the_sound_needs();
+    }
+
+    /// Starts the scan of the plugin library at `file`, which was written out of the project file after a person said yes to it, on a thread of its own (nothing is kept of it: the
+    /// plugins it has are installed until another project is opened). Where there is no scan program nothing is scanned: the window of sound plugins says so.
+    pub(super) fn start_scanning_an_embedded_plugin(&mut self, file: PathBuf) {
+        let search = &mut self.environment.plugin_search;
+        let Some(program) = search.scanner_program.clone() else {
+            return;
+        };
+        let dependency_folders = search.settings.dependency_folders.clone();
+        let search_parents = search.settings.search_parent_folders;
+        let wake_up = self.environment.wake_up.clone();
+        let (sender, receiver) = mpsc::channel();
+        let started = thread::Builder::new()
+            .name("scanning a plugin of the project".to_owned())
+            .spawn(move || {
+                let report = scan_a_library_alone(program, &file, dependency_folders, search_parents)
+                    .map_err(|problem| problem.to_string());
+                let _ = sender.send((file, report));
+                wake_up();
+            });
+        match started {
+            Ok(_) => search.embedded_running.push(receiver),
+            Err(error) => search.result.problems.push(format!(
+                "The scan of a plugin inside the project could not be started: {error}"
+            )),
+        }
+    }
+
+    /// Takes what the scans of the plugins written out of the project file found, if they have finished: the plugins that can be effects are installed from then on.
+    pub(super) fn take_what_the_scans_of_embedded_plugins_found(&mut self) {
+        let search = &mut self.environment.plugin_search;
+        if search.embedded_running.is_empty() {
+            return;
+        }
+        let mut done = Vec::new();
+        search.embedded_running.retain(|receiver| match receiver.try_recv() {
+            Ok(answer) => {
+                done.push(answer);
+                false
+            }
+            Err(mpsc::TryRecvError::Empty) => true,
+            Err(mpsc::TryRecvError::Disconnected) => false,
+        });
+        if done.is_empty() {
+            return;
+        }
+        let mut said = Vec::new();
+        for (file, answer) in done {
+            let name = file
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            match answer {
+                Ok(report) => {
+                    if let LibraryOutcome::Failed(failure) = &report.outcome {
+                        said.push(format!(
+                            "\u{ab}{name}\u{bb}, inside the project, could not be used: {failure}. What uses it passes the sound through unchanged."
+                        ));
+                    }
+                    search.embedded.retain(|known| known.path != file);
+                    search.embedded.push(report);
+                }
+                Err(problem) => said.push(format!(
+                    "\u{ab}{name}\u{bb}, inside the project, could not be looked at: {problem}"
+                )),
+            }
+        }
+        self.install_the_plugins_that_were_found();
+        for line in said {
+            self.add_to_message("A plugin inside the project", line);
+        }
+    }
+
+    /// Lets go of the plugins that were written out of the project file that was open (another is being opened, and a plugin inside a project is asked about every time): they are
+    /// not trusted any more and are not installed.
+    pub(super) fn forget_the_embedded_plugins(&mut self) {
+        self.environment.plugin_host.forget_the_embedded_plugins();
+        let search = &mut self.environment.plugin_search;
+        search.embedded_running.clear();
+        search.embedded_not_loaded.clear();
+        if !std::mem::take(&mut search.embedded).is_empty() {
+            self.install_the_plugins_that_were_found();
+        }
     }
 
     /// For the tests: as if a scan had found these libraries.

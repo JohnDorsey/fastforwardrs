@@ -42,7 +42,7 @@ pub use folders::{
     library_search_variable, usual_folders,
 };
 pub use ladspa_host::{LibraryScan, ScannedPlugin};
-pub use scanner::{FolderScan, LibraryOutcome, LibraryReport, PluginScanner, ScannerProblem};
+pub use scanner::{FolderScan, LibraryOutcome, LibraryReport, PluginScanner, ScannerProblem, scan_a_library_alone};
 pub use search::{PluginSearch, WhatTheScanFound};
 pub use settings::PluginSearchSettings;
 

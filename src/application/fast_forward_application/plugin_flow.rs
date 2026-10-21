@@ -89,6 +89,8 @@ impl FastForwardApplication {
         self.environment.plugin_trust.export_is_waiting = false;
         self.environment.plugin_host.forget_what_was_declined();
         self.environment.plugin_trust.notes_told.clear();
+        // (A plugin inside a project is asked about every time: what was said yes to for the project before is not said yes to for this one, though it is the same plugin.)
+        self.forget_the_embedded_plugins();
         // (The plugins that the sound of the project uses are asked about when it is opened, and not when the sound first reaches them.)
         self.ask_about_the_folders_the_sound_needs();
         if self.document.project.plugin_libraries().is_empty() {
@@ -107,6 +109,14 @@ impl FastForwardApplication {
             &self.environment.plugin_trust.approvals,
             &self.environment.plugin_trust.session,
         );
+        self.environment.plugin_search.embedded_not_loaded = needed
+            .questions
+            .iter()
+            .filter_map(|question| match question {
+                Question::Embedded { library, .. } => Some(library.clone()),
+                Question::Linked { .. } => None,
+            })
+            .collect();
         self.environment.plugin_trust.waiting = needed.questions.into();
         if !needed.unavailable.is_empty() {
             let lines: Vec<String> = needed
@@ -148,21 +158,53 @@ impl FastForwardApplication {
             self.add_to_message("The approved plugins could not be kept", problem);
         }
         // (What runs the plugins is told: the sound is made again with them, or without.)
-        if let Question::Linked { folder, .. } = question {
-            match answer {
+        match question {
+            Question::Linked { folder, .. } => match answer {
                 Answer::Load => self.environment.plugin_host.approve_folder(folder),
                 Answer::DontLoad => self.environment.plugin_host.decline_folder(folder),
+            },
+            Question::Embedded { library, .. } if answer == Answer::Load => {
+                self.run_a_plugin_inside_the_project(library)
             }
+            Question::Embedded { .. } => {}
         }
         self.show_the_next_plugin_question();
         self.go_on_with_the_export_that_was_waiting();
+    }
+
+    /// The person held down *Load it* for the plugin library `name` that is inside the project: it is written out (checked against its recorded hash), trusted, and scanned in the
+    /// background, and its plugins are installed when the scan is done, **for as long as this project is open**.
+    fn run_a_plugin_inside_the_project(&mut self, name: &str) {
+        let Some(library) = self.document.project.plugin_libraries().get(name).cloned() else {
+            return;
+        };
+        match self
+            .environment
+            .plugin_host
+            .write_out_and_trust_an_embedded_plugin(&library, &this_platform())
+        {
+            Ok(file) => {
+                self.environment
+                    .plugin_search
+                    .embedded_not_loaded
+                    .retain(|not_loaded| not_loaded != name);
+                self.start_scanning_an_embedded_plugin(file);
+            }
+            Err(problem) => self.add_to_message(
+                "A plugin inside the project could not be loaded",
+                format!("\u{ab}{name}\u{bb}: {problem}\n\nWhat uses it passes the sound through unchanged."),
+            ),
+        }
     }
 
     /// Puts the question about the folder `wanted` in the queue, if nobody has answered for the folder and it is not in the queue or on the screen. Whether nobody has
     /// answered for the folder (whether the question is in the queue or on the screen now, or was put in just now).
     fn ask_about_a_folder(&mut self, wanted: &Wanted) -> bool {
         let trust = &self.environment.plugin_trust;
-        if trust.session.standing_of_folder(&trust.approvals, &wanted.folder) != FolderStanding::NotAsked {
+        if trust.session.standing_of_folder(&trust.approvals, &wanted.folder) != FolderStanding::NotAsked
+            // (What runs the plugins knows more than the answers do: the folder of the plugins that came with the program, and of those that were written out of the project file.)
+            || self.environment.plugin_host.standing_of(&wanted.folder) == FolderStanding::Approved
+        {
             return false;
         }
         let question = Question::linked(&wanted.folder, wanted.libraries.clone());
@@ -193,6 +235,11 @@ impl FastForwardApplication {
             .filter_map(|wanted| {
                 let why = match trust.session.standing_of_folder(&trust.approvals, &wanted.folder) {
                     FolderStanding::Approved => return None,
+                    FolderStanding::NotAsked
+                        if self.environment.plugin_host.standing_of(&wanted.folder) == FolderStanding::Approved =>
+                    {
+                        return None;
+                    }
                     FolderStanding::Declined => "you said no",
                     FolderStanding::NotAsked => "nobody has said yes",
                 };

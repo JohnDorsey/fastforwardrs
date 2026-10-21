@@ -2214,3 +2214,179 @@ fn two_bundled_folders_are_both_trusted_and_a_folder_that_was_not_there_when_it_
         FolderStanding::NotAsked
     );
 }
+
+// Added on 2026-10-21 with the plugins that are inside a project file. (The first of these is a regression test: the folder of the plugins that come with the program was trusted by
+// `standing_of`, which the window of an effect reads, and not by the check that decides whether a plugin is run, which went on asking about it.)
+#[test]
+fn a_plugin_in_the_bundled_folder_is_run_and_nobody_is_asked_about_its_folder() {
+    let _alone = the_installed_plugins_to_myself();
+    let (effect, plugin) = the_gain_effect();
+    let host = PluginHost::new();
+    let notes = Notes::default();
+    assert!(ask(&host, &effect, &notes).is_none(), "before: nobody has said yes");
+    let _ = host.take_wanted();
+
+    host.trust_bundled_folder(&the_folder_of(plugin));
+
+    let mut processor = ask(&host, &effect, &notes).expect("it is the program's own: it is run");
+    let (mut left, mut right) = (vec![1.0_f32; 4], vec![1.0_f32; 4]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, vec![0.5; 4]);
+    assert!(host.take_wanted().is_empty(), "and the folder is not asked about");
+}
+
+/// A library of the test plugins as a project file carries it: inside, with a build for this computer.
+fn an_embedded_library_of_the_test_plugins() -> crate::project::PluginLibrary {
+    use crate::project::{EmbeddedBuild, PluginLibrary, PluginLibraryKind, PluginLibrarySource};
+    let file = ladspa_test_plugins::library_file_for_tests();
+    let bytes: Arc<[u8]> = Arc::from(std::fs::read(&file).unwrap());
+    PluginLibrary::new(
+        &file.file_name().unwrap().to_string_lossy(),
+        PluginLibraryKind::Ladspa,
+        PluginLibrarySource::Embedded(vec![
+            EmbeddedBuild::new(&crate::plugin_trust::this_platform(), bytes).unwrap(),
+        ]),
+    )
+    .unwrap()
+}
+
+/// Installs the plugins of the library at `file`, as the editor does when the scan of a library that was written out is done.
+fn install_the_plugins_of(file: &std::path::Path) {
+    let scan = ladspa_host::scan_library(file, |_| {}).unwrap();
+    set_installed_plugins(
+        scan.plugins
+            .iter()
+            .filter_map(|plugin| crate::plugin_scan::effect_of_a_plugin(file, plugin).ok())
+            .collect(),
+    );
+}
+
+#[test]
+fn an_embedded_plugin_is_written_out_and_trusted_and_run_and_taken_back_when_another_project_is_opened() {
+    let _alone = the_installed_plugins_to_myself();
+    let library = an_embedded_library_of_the_test_plugins();
+    let host = PluginHost::new();
+    let platform = crate::plugin_trust::this_platform();
+
+    let file = host
+        .write_out_and_trust_an_embedded_plugin(&library, &platform)
+        .unwrap();
+
+    assert_eq!(file.file_name().unwrap(), library.name(), "the file keeps its name");
+    assert_eq!(
+        std::fs::read(&file).unwrap().len(),
+        library.build_for(&platform).unwrap().bytes().len()
+    );
+    assert_eq!(host.standing_of(&folder_of(&file)), FolderStanding::Approved);
+    install_the_plugins_of(&file);
+    let kind = EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key().ends_with(":ffrs_test_gain"))
+        .expect("the gain plugin");
+    let effect = the_effect(kind, &[0.5]);
+    let notes = Notes::default();
+    let mut processor = ask(&host, &effect, &notes).expect("the plugin that was inside the project is run");
+    let (mut left, mut right) = (vec![1.0_f32; 4], vec![1.0_f32; 4]);
+    processor.process(&mut left, &mut right);
+    assert_eq!(left, vec![0.5; 4]);
+    assert!(
+        host.take_wanted().is_empty(),
+        "nobody is asked: the person said yes to it"
+    );
+
+    let before = host.generation();
+    assert!(host.forget_the_embedded_plugins(), "something was taken back");
+    assert_ne!(
+        host.generation(),
+        before,
+        "what may be run changed: the sound is made again"
+    );
+    assert_eq!(host.standing_of(&folder_of(&file)), FolderStanding::NotAsked);
+    assert!(ask(&host, &effect, &notes).is_none(), "not run any more");
+    assert_eq!(
+        host.take_wanted().len(),
+        1,
+        "and it is a folder nobody has said anything about"
+    );
+    assert!(
+        !host.forget_the_embedded_plugins(),
+        "there is nothing more to take back"
+    );
+
+    // Written out and trusted again, as when the project is opened again and the person says yes again.
+    let again = host
+        .write_out_and_trust_an_embedded_plugin(&library, &platform)
+        .unwrap();
+    assert_eq!(again, file, "the same file, which was not written again");
+    assert_eq!(host.standing_of(&folder_of(&again)), FolderStanding::Approved);
+}
+
+#[test]
+fn two_builds_that_have_one_name_are_in_two_folders_and_each_is_trusted_for_its_own() {
+    use crate::project::{EmbeddedBuild, PluginLibrary, PluginLibraryKind, PluginLibrarySource};
+    let host = PluginHost::new();
+    let platform = crate::plugin_trust::this_platform();
+    let library = |bytes: &'static [u8]| {
+        PluginLibrary::new(
+            "amp.dll",
+            PluginLibraryKind::Ladspa,
+            PluginLibrarySource::Embedded(vec![EmbeddedBuild::new(&platform, Arc::from(bytes)).unwrap()]),
+        )
+        .unwrap()
+    };
+
+    let first = host
+        .write_out_and_trust_an_embedded_plugin(&library(b"one build"), &platform)
+        .unwrap();
+    let second = host
+        .write_out_and_trust_an_embedded_plugin(&library(b"another build"), &platform)
+        .unwrap();
+
+    assert_eq!(first.file_name(), second.file_name());
+    assert_ne!(folder_of(&first), folder_of(&second));
+    assert_eq!(host.standing_of(&folder_of(&first)), FolderStanding::Approved);
+    assert_eq!(host.standing_of(&folder_of(&second)), FolderStanding::Approved);
+    assert!(host.forget_the_embedded_plugins());
+    assert_eq!(host.standing_of(&folder_of(&first)), FolderStanding::NotAsked);
+    assert_eq!(host.standing_of(&folder_of(&second)), FolderStanding::NotAsked);
+}
+
+#[test]
+fn an_embedded_plugin_that_is_not_what_the_project_recorded_is_not_written_out_or_trusted_and_one_with_no_build_for_this_computer_is_said()
+ {
+    use crate::project::{EmbeddedBuild, PluginLibrary, PluginLibraryKind, PluginLibrarySource};
+    let host = PluginHost::new();
+    let platform = crate::plugin_trust::this_platform();
+    let recorded = crate::digest::Sha256Digest::of_bytes(b"what the project says it has");
+    let lying = EmbeddedBuild::as_recorded(&platform, recorded, Arc::from(b"what it has".as_slice())).unwrap();
+    let damaged = PluginLibrary::new(
+        "amp.dll",
+        PluginLibraryKind::Ladspa,
+        PluginLibrarySource::Embedded(vec![lying]),
+    )
+    .unwrap();
+
+    let error = host
+        .write_out_and_trust_an_embedded_plugin(&damaged, &platform)
+        .unwrap_err();
+
+    assert!(error.contains("is not the one the project says it is"), "{error}");
+    assert!(!host.forget_the_embedded_plugins(), "nothing was trusted");
+
+    let elsewhere = PluginLibrary::new(
+        "amp.dll",
+        PluginLibraryKind::Ladspa,
+        PluginLibrarySource::Embedded(vec![
+            EmbeddedBuild::new("some-other-platform", Arc::from(b"another".as_slice())).unwrap(),
+        ]),
+    )
+    .unwrap();
+    let error = host
+        .write_out_and_trust_an_embedded_plugin(&elsewhere, &platform)
+        .unwrap_err();
+    assert!(
+        error.contains("has no build for") && error.contains("some-other-platform"),
+        "{error}"
+    );
+    assert!(!host.forget_the_embedded_plugins());
+}

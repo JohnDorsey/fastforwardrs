@@ -76,6 +76,19 @@ pub struct FolderScan {
     pub problems: Vec<String>,
 }
 
+/// Scans the one library at `path` with `program` and **keeps nothing**: the scan is not written to any file (for a plugin that was written out of a project file, which is in a folder
+/// that will be gone, and is not one of the libraries that are installed).
+pub fn scan_a_library_alone(
+    program: PathBuf,
+    path: &Path,
+    dependency_folders: Vec<PathBuf>,
+    search_parent_folders: bool,
+) -> Result<LibraryReport, ScannerProblem> {
+    PluginScanner::new(program, ScanCache::in_memory())
+        .looking_for_dependencies_in(dependency_folders, search_parent_folders)
+        .scan_library(path)
+}
+
 /// Scans libraries with a program of its own, and keeps what it finds.
 #[derive(Debug)]
 pub struct PluginScanner {

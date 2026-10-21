@@ -553,6 +553,33 @@ fn an_export_that_was_waiting_for_the_answers_is_forgotten_when_another_project_
     );
 }
 
+// Added on 2026-10-21: the folder of the plugins that come with the program was trusted by the window of an effect and not by the questions, which asked about it all the same.
+#[test]
+fn the_folder_of_the_plugins_that_came_with_the_program_is_not_asked_about_when_the_project_is_opened_or_exported() {
+    let _alone = the_installed_plugins_to_myself();
+    let reverb = a_reverb();
+    let (mut window, _) = window_with_plugins_on_the_clip(vec![reverb.clone()], &["Tap reverb"]);
+    window
+        .application_mut()
+        .trust_the_plugins_bundled_in(&crate::plugin_trust::folder_of(&reverb.library));
+
+    open_it_again(&mut window);
+
+    assert!(
+        the_question_shown(&window).is_none(),
+        "nobody is asked about the program's own plugins"
+    );
+    assert!(window.application().plugin_trust().waiting.is_empty());
+    assert!(
+        !window.application_mut().ask_about_the_folders_the_sound_needs(),
+        "nothing is left to be answered for"
+    );
+    assert!(
+        window.application().plugins_that_an_export_would_not_run().is_empty(),
+        "and the export says nothing of them: they are run"
+    );
+}
+
 #[test]
 fn a_question_that_is_waiting_is_not_put_in_the_queue_again() {
     let _alone = the_installed_plugins_to_myself();

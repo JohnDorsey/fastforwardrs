@@ -298,6 +298,111 @@ fn the_space_bar_held_for_as_long_as_you_like_does_nothing() {
     assert_eq!(would_be_loaded(&window, "amp_1181.dll"), Err(WhyNot::NotAsked));
 }
 
+// --- what a yes does (AU-13: the plugin is run, and only for as long as the project is open) ---
+
+/// The names of the plugin libraries inside the project that is open that are not loaded.
+fn not_loaded(window: &Window) -> Vec<String> {
+    window
+        .application()
+        .environment
+        .plugin_search
+        .embedded_not_loaded
+        .clone()
+}
+
+#[test]
+fn a_yes_to_a_plugin_inside_the_project_writes_it_out_and_trusts_it_and_a_no_does_neither() {
+    let project = project_with(vec![an_embedded_plugin("amp_1181.dll", "the build")]);
+    let mut asked_yes = window_showing(project.clone());
+    assert_eq!(
+        not_loaded(&asked_yes),
+        ["amp_1181.dll"],
+        "it is not loaded while it is asked about"
+    );
+
+    press_on(&mut asked_yes, PLUGIN_LOAD_LABEL);
+    run_for(&mut asked_yes, 5.5);
+
+    assert!(
+        not_loaded(&asked_yes).is_empty(),
+        "it is loaded: the window of an effect does not blame it"
+    );
+    assert!(
+        asked_yes.application().plugin_host().forget_the_embedded_plugins(),
+        "the folder it was written out to is trusted"
+    );
+
+    let mut asked_no = window_showing(project);
+    let at = asked_no.rectangle_of(PLUGIN_DONT_LOAD_LABEL).center();
+    asked_no.click(at);
+
+    assert_eq!(not_loaded(&asked_no), ["amp_1181.dll"], "a no leaves it not loaded");
+    assert!(
+        !asked_no.application().plugin_host().forget_the_embedded_plugins(),
+        "and nothing was trusted"
+    );
+}
+
+#[test]
+fn a_plugin_inside_the_project_whose_build_is_not_what_the_project_recorded_is_not_trusted_and_the_person_is_told() {
+    let lying = EmbeddedBuild::as_recorded(
+        &this_platform(),
+        crate::digest::Sha256Digest::of_bytes(b"what the project says it has"),
+        Arc::from(b"what it has".as_slice()),
+    )
+    .unwrap();
+    let damaged = PluginLibrary::new(
+        "amp_1181.dll",
+        PluginLibraryKind::Ladspa,
+        PluginLibrarySource::Embedded(vec![lying]),
+    )
+    .unwrap();
+    let mut window = window_showing(project_with(vec![damaged]));
+
+    press_on(&mut window, PLUGIN_LOAD_LABEL);
+    run_for(&mut window, 5.5);
+
+    let (title, text) = window.application().message_showing().expect("the person is told");
+    assert_eq!(title, "A plugin inside the project could not be loaded");
+    assert!(
+        text.contains("amp_1181.dll")
+            && text.contains("is not the one the project says it is")
+            && text.contains("passes the sound through"),
+        "{text}"
+    );
+    assert_eq!(not_loaded(&window), ["amp_1181.dll"], "still not loaded");
+    assert!(
+        !window.application().plugin_host().forget_the_embedded_plugins(),
+        "nothing was trusted"
+    );
+}
+
+#[test]
+fn what_was_trusted_for_a_project_is_taken_back_when_another_is_opened() {
+    let project = project_with(vec![an_embedded_plugin("amp_1181.dll", "the build")]);
+    let mut window = window_showing(project.clone());
+    press_on(&mut window, PLUGIN_LOAD_LABEL);
+    run_for(&mut window, 5.5);
+    assert!(not_loaded(&window).is_empty());
+
+    window.show_another_project(Project::empty());
+
+    assert!(
+        not_loaded(&window).is_empty(),
+        "the other project has no plugin inside it"
+    );
+    assert!(
+        !window.application().plugin_host().forget_the_embedded_plugins(),
+        "the trust was taken back when the project was closed"
+    );
+    window.show_another_project(project);
+    assert_eq!(
+        not_loaded(&window),
+        ["amp_1181.dll"],
+        "and the same plugin is not loaded in the project that has it again"
+    );
+}
+
 // --- what is remembered ---
 
 #[test]

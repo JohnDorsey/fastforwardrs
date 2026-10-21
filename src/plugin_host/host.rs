@@ -16,8 +16,8 @@ use super::instance::{ClapCopy, ClapMaker, LadspaCopy, Lives, PluginInstance};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::plugin_scan::{Breadcrumb, dependency_search_folders};
-use crate::plugin_trust::{FolderStanding, folder_of};
-use crate::project::{FrameRate, InstalledPlugin, PluginAddress};
+use crate::plugin_trust::{FolderStanding, PluginCache, folder_of};
+use crate::project::{FrameRate, InstalledPlugin, PluginAddress, PluginLibrary};
 use crate::sound_engine::{BlockProcessor, Notes, PluginRunner, SAMPLE_RATE};
 
 /// A folder that plugins are wanted from and nobody has said anything about yet: the editor asks, and the sound is made again when it has been answered.
@@ -39,6 +39,25 @@ struct Trust {
     wanted: Vec<Wanted>,
     /// The folder of the plugins that came with the program, and every folder in it, which are trusted without a question (not written down: it is the program's own).
     bundled: Vec<PathBuf>,
+}
+
+/// What is known of the plugins that are files in `folder` (as [`crate::plugin_trust::folder_key`] names it): they may be run (every folder is allowed, or a person said yes to it, or
+/// it is the program's own bundled folder or in it), they may not, or nobody has said anything. **The one place that decides it.**
+fn standing_in(trust: &Trust, folder: &Path) -> FolderStanding {
+    if trust.everything_is_allowed
+        || trust.approved.contains(folder)
+        || trust
+            .bundled
+            .iter()
+            // (Each is named as the system names it when it is looked at: a folder that was not there when it was said may be by now.)
+            .any(|bundled| folder.starts_with(crate::plugin_trust::folder_key(bundled)))
+    {
+        FolderStanding::Approved
+    } else if trust.declined.contains(folder) {
+        FolderStanding::Declined
+    } else {
+        FolderStanding::NotAsked
+    }
 }
 
 /// Where the libraries that plugin libraries need are looked for, besides beside the plugin library.
@@ -77,6 +96,11 @@ pub struct PluginHost {
     lives: std::sync::Arc<Mutex<Lives>>,
     /// How long a plugin that is made waits for the plugins of the same library that are being let go of (see [`Self::the_clap_instances_of`]).
     longest_wait_for_what_is_being_let_go_of: std::time::Duration,
+    /// The folders of the plugins that were written out of a project file and are trusted until the next project is opened (see [`Self::write_out_and_trust_an_embedded_plugin`]).
+    embedded_folders: Mutex<Vec<PathBuf>>,
+    /// Where the plugins of project files are written out, made when the first is. **The last field: the libraries above it are let go of before its files are removed** (a
+    /// library that is loaded cannot be removed on Windows).
+    embedded_cache: Mutex<Option<PluginCache>>,
 }
 
 /// How long a CLAP plugin that is made waits, at the most, for the plugins of its library that are being let go of by a stream that is being stopped.
@@ -101,7 +125,78 @@ impl PluginHost {
             problems: ProblemBoard::default(),
             lives: std::sync::Arc::default(),
             longest_wait_for_what_is_being_let_go_of: LONGEST_WAIT_FOR_WHAT_IS_BEING_LET_GO_OF,
+            embedded_folders: Mutex::new(Vec::new()),
+            embedded_cache: Mutex::new(None),
         }
+    }
+
+    /// Writes out the build for `platform` of the plugin library `library`, which is inside a project file, to a folder of its own in the temporary files (**the bytes are checked
+    /// against the digest the project recorded for them first, and nothing is written if they are not that**), says that plugins may be run from that folder, and gives the file.
+    ///
+    /// **Call this only for a library that a person has said yes to** (the severe question of `plugin_trust`, asked every time a project is opened), or that the command line was
+    /// told to allow: it is the one way that a plugin of a project file comes to be run, and it trusts what it writes. The trust is for the plugins of this build's folder alone, and
+    /// lasts until [`Self::forget_the_embedded_plugins`] (another project is opened).
+    pub fn write_out_and_trust_an_embedded_plugin(
+        &self,
+        library: &PluginLibrary,
+        platform: &str,
+    ) -> Result<PathBuf, String> {
+        let build = library.build_for(platform).ok_or_else(|| {
+            format!(
+                "the plugin library {} has no build for {platform} (it has {})",
+                library.name(),
+                library.platforms().join(" and ")
+            )
+        })?;
+        let path = {
+            let mut cache = self
+                .embedded_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if cache.is_none() {
+                *cache = Some(
+                    PluginCache::in_the_temporary_files()
+                        .map_err(|error| format!("the folder to write plugins out to could not be made: {error}"))?,
+                );
+            }
+            cache
+                .as_ref()
+                .expect("the cache was just made")
+                .extract(library.name(), build)
+                .map_err(|error| error.to_string())?
+        };
+        let folder = folder_of(&path);
+        let mut folders = self
+            .embedded_folders
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !folders.contains(&folder) {
+            folders.push(folder.clone());
+        }
+        drop(folders);
+        self.approve_folder(&folder);
+        Ok(path)
+    }
+
+    /// Takes back the trust that [`Self::write_out_and_trust_an_embedded_plugin`] gave (another project was opened, and an embedded plugin is asked about every time). The files
+    /// stay where they were written; a plugin of one is not run again unless it is written out and trusted again. Whether any was trusted.
+    pub fn forget_the_embedded_plugins(&self) -> bool {
+        let folders = std::mem::take(
+            &mut *self
+                .embedded_folders
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        if folders.is_empty() {
+            return false;
+        }
+        let mut trust = self.trust();
+        for folder in &folders {
+            trust.approved.remove(folder);
+        }
+        drop(trust);
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        true
     }
 
     fn trust(&self) -> std::sync::MutexGuard<'_, Trust> {
@@ -165,21 +260,7 @@ impl PluginHost {
     /// What the host does about plugins that are files in `folder` (as [`crate::plugin_trust::folder_key`] names it), without asking for any: they are run, or they are not and
     /// the person said no, or nobody has said anything.
     pub fn standing_of(&self, folder: &Path) -> FolderStanding {
-        let trust = self.trust();
-        if trust.everything_is_allowed
-            || trust.approved.contains(folder)
-            || trust
-                .bundled
-                .iter()
-                // (Each is named as the system names it when it is looked at: a folder that was not there when it was said may be by now.)
-                .any(|bundled| folder.starts_with(crate::plugin_trust::folder_key(bundled)))
-        {
-            FolderStanding::Approved
-        } else if trust.declined.contains(folder) {
-            FolderStanding::Declined
-        } else {
-            FolderStanding::NotAsked
-        }
+        standing_in(&self.trust(), folder)
     }
 
     /// The folders that plugins have been wanted from and nobody has answered for, once each; they are not given again.
@@ -275,11 +356,11 @@ impl PluginHost {
     /// Whether plugins from `folder` may be run now: `Some(true)` yes, `Some(false)` declined, `None` nobody has answered (and the folder is then wanted).
     fn may_run_from(&self, folder: &Path, library_name: &str, plugin_name: &str) -> Option<bool> {
         let mut trust = self.trust();
-        if trust.everything_is_allowed || trust.approved.contains(folder) {
-            return Some(true);
-        }
-        if trust.declined.contains(folder) {
-            return Some(false);
+        // (The same answer as [`Self::standing_of`] gives, which the window of an effect reads: what it says is what is done.)
+        match standing_in(&trust, folder) {
+            FolderStanding::Approved => return Some(true),
+            FolderStanding::Declined => return Some(false),
+            FolderStanding::NotAsked => {}
         }
         match trust.wanted.iter_mut().find(|wanted| wanted.folder == folder) {
             Some(wanted) => {

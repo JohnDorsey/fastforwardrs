@@ -45,12 +45,16 @@ fn a_library_has_a_name_a_kind_and_where_it_is_and_an_embedded_one_is_found_by_p
     assert_eq!(by_a_path.bytes_of_builds(), 0);
 }
 
+// (Rewritten on purpose on 2026-10-21: it said that "clap" is a kind this version does not know, which was true until CLAP plugins could be hosted and a project could carry one.)
 #[test]
 fn the_kinds_of_library_are_known_by_their_keys() {
     assert_eq!(PluginLibraryKind::Ladspa.key(), "ladspa");
     assert_eq!(PluginLibraryKind::from_key("ladspa"), Some(PluginLibraryKind::Ladspa));
-    assert_eq!(PluginLibraryKind::from_key("clap"), None);
+    assert_eq!(PluginLibraryKind::Clap.key(), "clap");
+    assert_eq!(PluginLibraryKind::from_key("clap"), Some(PluginLibraryKind::Clap));
+    assert_eq!(PluginLibraryKind::from_key("vst3"), None);
     assert_eq!(PluginLibraryKind::from_key("LADSPA"), None);
+    assert_eq!(PluginLibraryKind::from_key("CLAP"), None);
 }
 
 #[test]

@@ -88,10 +88,15 @@ impl PluginCache {
                 found,
             });
         }
-        // (The name has been checked as the name of a file by the project; the digest and the platform make it different for every build.)
-        let path = self
-            .folder
-            .join(format!("{}-{}-{}", found.short_hex(), build.platform(), library_name));
+        // (The name has been checked as the name of a file by the project. **Each build has a folder of its own**, made different by the digest and the platform, **and the file
+        // in it keeps its name**: a LADSPA plugin's key is made from the name of its file, so the plugin that an embedded library gives is the same effect as the one that is installed
+        // from a folder; and the question of trust is one for a folder, which is then one build.)
+        let folder = self.folder.join(format!("{}-{}", found.short_hex(), build.platform()));
+        fs::create_dir_all(&folder).map_err(|source| ExtractionError::CouldNotWrite {
+            path: folder.clone(),
+            source,
+        })?;
+        let path = folder.join(library_name);
         if fs::metadata(&path).is_ok_and(|metadata| metadata.len() == bytes.len() as u64)
             && Sha256Digest::of_file(&path).is_ok_and(|on_disk| on_disk == found)
         {

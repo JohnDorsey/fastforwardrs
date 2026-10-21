@@ -362,13 +362,24 @@ fn a_build_is_written_out_after_being_checked_and_the_folder_goes_when_the_cache
     let path = cache.extract("amp.dll", &build).unwrap();
     assert!(path.starts_with(&folder));
     assert_eq!(fs::read(&path).unwrap(), b"the library bytes");
-    assert!(path.file_name().unwrap().to_string_lossy().ends_with("amp.dll"));
+    assert_eq!(
+        path.file_name().unwrap(),
+        "amp.dll",
+        "the file keeps its name: a LADSPA plugin's key is made from it"
+    );
+    let own_folder = path.parent().unwrap();
+    assert_ne!(own_folder, folder, "each build has a folder of its own");
+    assert_eq!(own_folder.parent().unwrap(), folder);
+    let own_name = own_folder.file_name().unwrap().to_string_lossy();
     assert!(
-        path.file_name()
-            .unwrap()
-            .to_string_lossy()
-            .contains(&build.digest().short_hex()),
-        "the name has what is in the file in it"
+        own_name.contains(&build.digest().short_hex()) && own_name.contains(THIS),
+        "the folder's name has what is in the file and the kind of computer in it: {own_name}"
+    );
+    let other = cache.extract("amp.dll", &self::build(THIS, "other bytes")).unwrap();
+    assert_ne!(
+        other.parent(),
+        path.parent(),
+        "two builds of one name are in two folders"
     );
     // Again: the same file, not written again.
     let modified = fs::metadata(&path).unwrap().modified().unwrap();

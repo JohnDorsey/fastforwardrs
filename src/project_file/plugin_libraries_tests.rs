@@ -142,6 +142,36 @@ fn libraries_are_saved_in_an_archive_with_their_builds_and_read_back_whole_in_th
 }
 
 #[test]
+fn a_clap_library_inside_a_project_is_saved_and_read_back_as_a_clap_library_with_its_build() {
+    let folder = TempDir::new().unwrap();
+    let mut project = edited_project(link_to_missing_video());
+    project
+        .add_plugin_library(
+            PluginLibrary::new(
+                "good.clap",
+                PluginLibraryKind::Clap,
+                PluginLibrarySource::Embedded(vec![build("windows-x86_64", "a clap build")]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let destination = folder.path().join("project.ffrs");
+
+    write_project_file_including(&project, &destination, &IncludedFiles::new(), HowToWrite::Anew).unwrap();
+
+    let loaded = read_project_file(&destination).unwrap();
+    let library = loaded
+        .plugin_libraries()
+        .get("good.clap")
+        .expect("the library is there");
+    assert_eq!(library.kind(), PluginLibraryKind::Clap);
+    assert_eq!(
+        library.build_for("windows-x86_64").unwrap().bytes().as_ref(),
+        b"a clap build"
+    );
+}
+
+#[test]
 fn a_project_with_an_embedded_plugin_is_the_same_text_and_the_same_builds_after_a_save_a_load_and_a_save() {
     let folder = TempDir::new().unwrap();
     let project = project_with_libraries(folder.path());
