@@ -57,6 +57,9 @@ pub struct InstalledPlugin {
     /// there (C10 of `docs/engine-phase-7-clap-design.md`): the tail it says it has, up to two seconds, or half a second where it says nothing. 0 for a LADSPA plugin, which has no
     /// way to say how long it remembers (and keeps the behaviour of piece 7.6).
     pub pre_roll_samples: usize,
+    /// What the check of the plugin's start found, if it found something to tell a person (`StartCheck::warning` of `clap-host`): the plugin's sound at its start depends on what was in
+    /// memory before it was made. `None` for a plugin that was found steady, that varies by itself, that was not checked (a LADSPA plugin is not).
+    pub start_warning: Option<String>,
 }
 
 /// The plugins that are installed now, in the order of the folders they were found in.

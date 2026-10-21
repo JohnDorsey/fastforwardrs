@@ -57,7 +57,7 @@ fn the_library_says_what_plugins_it_has_and_what_each_says_of_itself() {
     assert_eq!(described.problems, Vec::<String>::new());
     let ids: Vec<&str> = described.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
     assert!(ids.contains(&THREADS));
-    assert_eq!(ids.len(), 17, "{ids:?}");
+    assert_eq!(ids.len(), 18, "{ids:?}");
     assert!(ids.contains(&GAIN) && ids.contains(&INSTRUMENT));
     let gain = described.plugins.iter().find(|plugin| plugin.id == GAIN).unwrap();
     assert_eq!((gain.name.as_str(), gain.vendor.as_str()), ("Gain", "fastforwardrs"));
@@ -565,4 +565,155 @@ fn the_only_unsafe_code_of_this_crate_is_the_loading_of_the_library_and_it_says_
         library.contains("// SAFETY:"),
         "the unsafe block has to say why it is fine"
     );
+}
+
+// --- the check of a plugin's start ---
+
+use crate::start_check::{StartCheck, how_different, judge, the_pair_that_agrees};
+
+#[test]
+fn how_different_is_the_greatest_difference_of_a_sample_over_the_loudness() {
+    let loud: Vec<f32> = (0..1000)
+        .map(|moment| if moment % 2 == 0 { 0.5 } else { -0.5 })
+        .collect();
+    assert_eq!(how_different(&loud, &loud), 0.0);
+    let mut one_off = loud.clone();
+    one_off[10] += 0.25;
+    // (The loudness, the rms, is 0.5, and the greatest difference is 0.25.)
+    assert!((how_different(&loud, &one_off) - 0.5).abs() < 1e-6);
+    assert_eq!(
+        how_different(&loud, &loud[1..]),
+        f32::INFINITY,
+        "sounds of two lengths are not the same sound"
+    );
+    assert_eq!(how_different(&[], &[]), 0.0);
+}
+
+#[test]
+fn how_different_does_not_tell_two_silences_apart_by_their_rounding_and_knows_a_sample_that_is_not_a_number() {
+    let silence = vec![0.0_f32; 100];
+    let rounding = vec![1e-5_f32; 100];
+    assert!(
+        how_different(&silence, &rounding) < 0.01,
+        "a loudness below the least is taken to be the least"
+    );
+    let broken = vec![f32::NAN; 100];
+    assert_eq!(
+        how_different(&broken, &broken),
+        0.0,
+        "the same not-a-number is the same"
+    );
+    assert_eq!(how_different(&silence, &broken), f32::INFINITY);
+    assert_eq!(how_different(&broken, &silence), f32::INFINITY);
+}
+
+#[test]
+fn the_judgement_is_steady_unless_a_filled_start_is_different_and_it_names_the_worst() {
+    let steady: Vec<f32> = (0..1000).map(|moment| (moment as f32 * 0.1).sin()).collect();
+    assert_eq!(
+        judge((&steady, &steady), &[(0xFF, steady.clone()), (0xCD, steady.clone())]),
+        StartCheck::Steady
+    );
+    let slightly: Vec<f32> = steady.iter().map(|sample| sample * 1.1).collect();
+    let very: Vec<f32> = steady.iter().map(|sample| sample * 3.0).collect();
+    let StartCheck::Unreliable {
+        filled_with,
+        relative_difference,
+    } = judge(
+        (&steady, &steady),
+        &[(0xFF, slightly), (0xCD, very), (0xFF, steady.clone())],
+    )
+    else {
+        panic!("a start that sounds three times as loud is not steady");
+    };
+    assert_eq!(
+        filled_with, 0xCD,
+        "the byte that made the greatest difference is the one named"
+    );
+    assert!(relative_difference > 1.0, "{relative_difference}");
+    assert_eq!(
+        judge((&steady, &steady), &[]),
+        StartCheck::Steady,
+        "nothing filled, nothing found"
+    );
+}
+
+#[test]
+fn a_plugin_that_differs_from_itself_in_cleared_memory_is_not_judged_by_its_start() {
+    let one: Vec<f32> = (0..1000).map(|moment| (moment as f32 * 0.1).sin()).collect();
+    let other: Vec<f32> = (0..1000).map(|moment| (moment as f32 * 0.1 + 1.0).sin()).collect();
+    assert_eq!(
+        judge((&one, &other), &[(0xFF, one.clone())]),
+        StartCheck::DiffersByItself
+    );
+}
+
+#[test]
+fn only_a_start_that_depends_on_memory_has_a_warning_and_it_says_what_and_whose_fault() {
+    assert_eq!(StartCheck::NotChecked.warning(), None);
+    assert_eq!(StartCheck::Steady.warning(), None);
+    assert_eq!(StartCheck::DiffersByItself.warning(), None);
+    let warning = StartCheck::Unreliable {
+        filled_with: 0xFF,
+        relative_difference: 1.87,
+    }
+    .warning()
+    .expect("it has a warning");
+    for wanted in [
+        "depends on what was in memory",
+        "0xFF",
+        "187%",
+        "fault of the plugin and not of the editor",
+    ] {
+        assert!(warning.contains(wanted), "{wanted:?} is not in {warning:?}");
+    }
+}
+
+#[test]
+fn a_scan_from_before_the_check_has_no_start_in_it_and_is_read_as_not_checked() {
+    let scan = scan_of_the_library();
+    let mut json = serde_json::to_value(&scan.plugins[0]).expect("a plugin is written");
+    assert!(json.as_object_mut().expect("an object").remove("start").is_some());
+    let read: crate::scan::ScannedPlugin = serde_json::from_value(json).expect("an old scan is read");
+    assert_eq!(read.start, StartCheck::NotChecked);
+}
+
+#[test]
+fn the_sound_in_cleared_memory_is_the_pair_of_runs_that_agree_and_the_third_is_made_only_if_the_first_two_do_not() {
+    let one = vec![0.1_f32; 100];
+    let two = vec![0.9_f32; 100];
+    let never = || panic!("the third run is not made when the first two agree");
+    assert_eq!(
+        the_pair_that_agrees(one.clone(), one.clone(), never).unwrap(),
+        (one.clone(), one.clone())
+    );
+    // The first is the odd one out (it landed in what the plugin itself left): the second and the third agree.
+    assert_eq!(
+        the_pair_that_agrees(one.clone(), two.clone(), || Some(two.clone())).unwrap(),
+        (two.clone(), two.clone())
+    );
+    // The second is the odd one out.
+    assert_eq!(
+        the_pair_that_agrees(one.clone(), two.clone(), || Some(one.clone())).unwrap(),
+        (one.clone(), one.clone())
+    );
+    // None agree: the plugin differs by itself. The third cannot be made: nothing can be said.
+    let three = vec![-0.5_f32; 100];
+    assert_eq!(
+        the_pair_that_agrees(one.clone(), two.clone(), || Some(three)),
+        Err(StartCheck::DiffersByItself)
+    );
+    assert_eq!(the_pair_that_agrees(one, two, || None), Err(StartCheck::NotChecked));
+}
+
+#[test]
+fn a_start_that_is_a_little_different_is_unreliable_and_one_that_is_hardly_different_is_steady() {
+    let steady: Vec<f32> = (0..1000).map(|moment| (moment as f32 * 0.1).sin()).collect();
+    let little: Vec<f32> = steady.iter().map(|sample| sample * 1.1).collect();
+    let hardly: Vec<f32> = steady.iter().map(|sample| sample * 1.0001).collect();
+    assert!(matches!(
+        judge((&steady, &steady), &[(0xFF, little)]),
+        StartCheck::Unreliable { filled_with: 0xFF, .. }
+    ));
+    assert_eq!(judge((&steady, &steady), &[(0xFF, hardly)]), StartCheck::Steady);
 }

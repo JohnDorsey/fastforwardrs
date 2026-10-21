@@ -87,8 +87,8 @@ fn clap_plugins_found_in_the_background_are_offered_put_on_a_clip_saved_and_kept
     assert_eq!(journey.application().plugin_libraries_found().len(), 1);
     assert_eq!(
         EffectKind::installed_plugin_kinds().len(),
-        13,
-        "thirteen of the seventeen test plugins can be effects (not the instrument, and not the three that misbehave)"
+        14,
+        "fourteen of the eighteen test plugins can be effects (not the instrument, and not the three that misbehave)"
     );
     assert!(
         EffectKind::installed_plugin_kinds()

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::instance::{Instance, ParameterChange};
 use crate::library::{Library, OpenError, PluginDescription};
 use crate::main_thread::MainThread;
+use crate::start_check::StartCheck;
 
 /// The sample rate that a plugin is made at when it is tried.
 pub const PROBE_SAMPLE_RATE: f64 = 48_000.0;
@@ -91,6 +92,9 @@ pub struct ScannedPlugin {
     /// `Some` if the plugin says how long its tail is.
     pub tail: Option<u32>,
     pub has_state: bool,
+    /// Whether the plugin's sound at its start depends on memory it did not write (see [`crate::start_check`]). A scan from before the check has [`StartCheck::NotChecked`].
+    #[serde(default)]
+    pub start: StartCheck,
     /// Why the plugin cannot be used, if it cannot be made or run.
     pub problem: Option<String>,
 }
@@ -104,15 +108,27 @@ pub struct LibraryScan {
 }
 
 /// Loads the library at `path`, describes it, and makes each plugin once and runs it on a block of silence. `step` is told what is about to be done, before it is done.
-pub fn scan_library(path: &Path, mut step: impl FnMut(&str)) -> Result<LibraryScan, OpenError> {
+pub fn scan_library(path: &Path, step: impl FnMut(&str)) -> Result<LibraryScan, OpenError> {
+    scan_library_checking_starts_for(path, crate::start_check::LONGEST_FOR_A_LIBRARY, step)
+}
+
+/// The same, checking the start of the plugins (see [`crate::start_check`]) for `longest` all together: the plugins after the time is up are not checked.
+pub fn scan_library_checking_starts_for(
+    path: &Path,
+    longest: std::time::Duration,
+    mut step: impl FnMut(&str),
+) -> Result<LibraryScan, OpenError> {
     step("loading the library");
     let library = Library::open(path)?;
     step("reading what the plugins say of themselves");
     let described = library.describe();
     let worker = MainThread::start();
     let mut plugins = Vec::new();
+    let began = std::time::Instant::now();
     for description in described.plugins {
-        plugins.push(probe(&worker, &library, description, &mut step));
+        // (The check of a plugin's start takes about half a second: a library of hundreds of plugins is checked for as long as it is given.)
+        let check_the_start = began.elapsed() < longest;
+        plugins.push(probe(&worker, &library, description, check_the_start, &mut step));
     }
     Ok(LibraryScan {
         plugins,
@@ -124,6 +140,7 @@ fn probe(
     worker: &Arc<MainThread>,
     library: &Library,
     description: PluginDescription,
+    check_the_start: bool,
     step: &mut impl FnMut(&str),
 ) -> ScannedPlugin {
     step(&format!(
@@ -138,6 +155,7 @@ fn probe(
         latency: 0,
         tail: None,
         has_state: false,
+        start: StartCheck::NotChecked,
         problem: None,
     };
     let mut instance = match Instance::new(
@@ -183,5 +201,13 @@ fn probe(
     scanned.tail = instance.tail();
     step(&format!("stopping the plugin {}", scanned.description.id));
     drop(instance);
+    if scanned.problem.is_none() && check_the_start {
+        step(&format!(
+            "making the plugin {} again in memory that holds other bytes, to see whether its start depends on them",
+            scanned.description.id
+        ));
+        scanned.start =
+            crate::start_check::check_the_start(worker, library, &scanned.description.id, main_in, main_out);
+    }
     scanned
 }

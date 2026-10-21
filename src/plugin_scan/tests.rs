@@ -378,9 +378,11 @@ fn a_thread_is_waited_for_until_it_finishes_but_not_for_longer_than_it_is_given(
 
 #[test]
 fn a_scan_is_given_five_seconds_unless_the_scanner_is_told_otherwise() {
-    assert_eq!(SCAN_TIME_LIMIT, Duration::from_secs(5));
+    // (30 seconds: the check of the start of each plugin, half a second or so each, has to fit in it as well as the making of the plugins; 12 seconds of it are given to the checks.)
+    assert_eq!(SCAN_TIME_LIMIT, Duration::from_secs(30));
+    assert!(SCAN_TIME_LIMIT >= 2 * clap_host::start_check::LONGEST_FOR_A_LIBRARY);
     let scanner = PluginScanner::new(PathBuf::from("not-a-program"), ScanCache::in_memory());
-    assert_eq!(scanner.time_limit(), Duration::from_secs(5));
+    assert_eq!(scanner.time_limit(), Duration::from_secs(30));
     assert_eq!(
         scanner.with_time_limit(Duration::from_millis(250)).time_limit(),
         Duration::from_millis(250)
@@ -827,6 +829,7 @@ fn a_clap_scan() -> clap_host::scan::LibraryScan {
             latency: 64,
             tail: Some(1000),
             has_state: false,
+            start: clap_host::start_check::StartCheck::NotChecked,
             problem: None,
         }],
         problems: vec!["plugin number 1 has no id".to_owned()],
@@ -844,7 +847,8 @@ fn the_answer_of_a_clap_scan_is_read_back_as_it_was_written_and_the_other_words_
     }
     // The words of the LADSPA answers are what they were (the cache and the scan program of another version are told apart by the number, not by the words).
     assert!(answer_line(&ScanAnswer::CouldNotBeLoaded("x".to_owned())).contains("CouldNotBeLoaded"));
-    assert_eq!(super::protocol::SCAN_FORMAT, 2);
+    // (3: the scan checks whether a CLAP plugin's start depends on memory it did not write. It is raised when the scan finds something it did not.)
+    assert_eq!(super::protocol::SCAN_FORMAT, 3);
 }
 
 #[test]
@@ -918,6 +922,16 @@ fn a_clap_scan_is_kept_in_the_cache_file_and_the_scans_that_failed_for_want_of_a
 
 #[test]
 fn a_cache_written_by_the_version_that_scanned_only_ladspa_libraries_is_not_believed() {
+    a_cache_of_the_format_before_is_not_believed(1);
+}
+
+#[test]
+fn a_cache_written_before_the_start_of_clap_plugins_was_checked_is_not_believed() {
+    // (Format 2 has CLAP scans with no word of the check: believed, every plugin would stay "not checked" for as long as its file does not change.)
+    a_cache_of_the_format_before_is_not_believed(2);
+}
+
+fn a_cache_of_the_format_before_is_not_believed(format: u32) {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("scan_cache.json");
     let library = a_library_file(folder.path(), b"x");
@@ -928,10 +942,11 @@ fn a_cache_written_by_the_version_that_scanned_only_ladspa_libraries_is_not_beli
         CachedOutcome::Scanned(a_scan()),
     );
     writer.save();
-    let text = fs::read_to_string(&file)
-        .unwrap()
-        .replace("\"format\": 2", "\"format\": 1");
-    assert!(text.contains("\"format\": 1"));
+    let text = fs::read_to_string(&file).unwrap().replace(
+        &format!("\"format\": {}", super::protocol::SCAN_FORMAT),
+        &format!("\"format\": {format}"),
+    );
+    assert!(text.contains(&format!("\"format\": {format}")));
     fs::write(&file, text).unwrap();
 
     assert!(ScanCache::at(file).is_empty());

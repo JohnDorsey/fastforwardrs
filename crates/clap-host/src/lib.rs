@@ -18,6 +18,7 @@ mod instance;
 mod library;
 mod main_thread;
 pub mod scan;
+pub mod start_check;
 
 pub use instance::{Instance, InstanceError, ParameterChange, ProcessOutcome, RunError};
 pub use library::{Library, LibraryDescription, OpenError, PluginDescription};

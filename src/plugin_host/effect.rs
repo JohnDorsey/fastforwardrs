@@ -131,6 +131,8 @@ pub struct PluginEffect {
     left_out: bool,
     /// Whether a note has been made of sound that was not fit to be heard (it is said once).
     has_said_it_gave_too_much: bool,
+    /// Whether the warning that the plugin's start is unreliable (if it has one) has been said.
+    has_said_its_start_is_unreliable: bool,
     notes: Notes,
     /// Where a plugin that is left out says why, for the window.
     problems: Option<ProblemBoard>,
@@ -168,6 +170,7 @@ impl PluginEffect {
             guard: leave_out_one_that_is_too_slow.then(SlownessGuard::default),
             left_out: false,
             has_said_it_gave_too_much: false,
+            has_said_its_start_is_unreliable: false,
             notes,
             problems: None,
         })
@@ -394,6 +397,14 @@ impl BlockProcessor for PluginEffect {
             return;
         }
         let began = Instant::now();
+        if !std::mem::replace(&mut self.has_said_its_start_is_unreliable, true)
+            && let Some(warning) = &self.plugin.start_warning
+        {
+            self.say(format!(
+                "The sound plugin \u{ab}{}\u{bb} is unreliable at its start: {warning}.",
+                self.plugin.descriptor.name
+            ));
+        }
         self.do_what_the_plugins_asked_between_blocks();
         if self.instances[0].takes_values_at_samples() {
             self.process_with_values_at_samples(left, right, total);

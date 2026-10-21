@@ -17,7 +17,7 @@ use super::scanner::LibraryOutcome;
 use crate::media::{background_command, collect_error_output_in_background};
 
 /// How long the scan of a library may take before the program is stopped. (A plugin that needs longer than this to be made is not one to use in a preview.)
-pub const SCAN_TIME_LIMIT: Duration = Duration::from_secs(5);
+pub const SCAN_TIME_LIMIT: Duration = Duration::from_secs(30);
 
 /// The most that is read of what the scan program says, in bytes: more is thrown away. (The answer for a library of a hundred plugins is a few hundred kilobytes.)
 const MOST_TO_READ: usize = 32 * 1024 * 1024;

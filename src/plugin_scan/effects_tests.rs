@@ -663,6 +663,7 @@ fn a_clap_plugin(id: &str, parameters: Vec<Parameter>) -> ScannedClapPlugin {
         latency: 0,
         tail: None,
         has_state: false,
+        start: clap_host::start_check::StartCheck::NotChecked,
         problem: None,
     }
 }
@@ -1066,4 +1067,24 @@ fn a_clap_plugin_asks_for_sound_from_before_a_clip_as_long_as_its_tail_up_to_two
     assert_eq!(asks(Some(200_000)), 96_000, "two seconds at most");
     assert_eq!(asks(Some(u32::MAX)), 96_000, "a tail for ever is two seconds");
     assert_eq!(asks(None), 24_000, "nothing said is half a second");
+}
+
+#[test]
+fn a_clap_plugin_whose_start_depends_on_memory_it_did_not_write_carries_the_warning_and_no_other_does() {
+    use clap_host::start_check::StartCheck;
+    let mut plugin = a_clap_plugin("com.example.reverb", Vec::new());
+    for steady in [StartCheck::NotChecked, StartCheck::Steady, StartCheck::DiffersByItself] {
+        plugin.start = steady;
+        assert_eq!(the_effect(&plugin).start_warning, None);
+    }
+
+    plugin.start = StartCheck::Unreliable {
+        filled_with: 0xFF,
+        relative_difference: 0.9,
+    };
+
+    let warning = the_effect(&plugin)
+        .start_warning
+        .expect("the warning goes with the effect");
+    assert_eq!(Some(warning), plugin.start.warning());
 }

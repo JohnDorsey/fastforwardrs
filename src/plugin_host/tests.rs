@@ -2111,3 +2111,40 @@ fn a_plugin_that_is_let_go_of_is_not_waited_for_even_if_its_stream_is_still_bein
         "both are let go of: there is nothing to wait for, though the stream is still said to be stopping"
     );
 }
+
+#[test]
+fn a_plugin_whose_start_is_unreliable_says_so_once_in_the_sound_it_is_run_in_and_one_that_is_not_says_nothing() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = the_clap_kind_of(clap_test_plugins::GAIN)
+        .installed_plugin()
+        .unwrap()
+        .clone();
+    plugin.start_warning = Some("its start depends on memory it did not write".to_owned());
+    set_installed_plugins(vec![plugin]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let effect = || LayerEffect {
+        instance: EffectInstanceId::FIRST,
+        kind,
+        values: kind.default_values(),
+        animation: Animation::default(),
+        tables: Vec::new(),
+    };
+
+    let ((_, _, notes), _) = with_and_without(effect(), 3, 512);
+
+    let said = notes.lock().unwrap().clone();
+    assert_eq!(said.len(), 1, "once, however many blocks are run: {said:?}");
+    assert!(
+        said[0].contains("unreliable at its start")
+            && said[0].contains("its start depends on memory it did not write")
+            && said[0].contains("\u{ab}gain\u{bb}"),
+        "{said:?}"
+    );
+
+    // The plugin of the same kind that has no warning says nothing.
+    let mut quiet = kind.installed_plugin().unwrap().clone();
+    quiet.start_warning = None;
+    set_installed_plugins(vec![quiet]);
+    let ((_, _, notes), _) = with_and_without(effect(), 3, 512);
+    assert!(notes.lock().unwrap().is_empty(), "{:?}", notes.lock().unwrap());
+}

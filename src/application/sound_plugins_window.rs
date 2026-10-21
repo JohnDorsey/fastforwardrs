@@ -210,6 +210,15 @@ fn show_libraries(ui: &mut Ui, view: &SoundPluginsView<'_>) {
                 let count = scan.plugins.len();
                 ui.label(format!("{name}: {count} plugin{}", if count == 1 { "" } else { "s" }))
                     .on_hover_text(library.path.display().to_string());
+                // (A plugin whose start depends on memory it did not write is told of here: a person is told, and not blamed.)
+                for plugin in &scan.plugins {
+                    if let Some(warning) = plugin.start.warning() {
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            format!("{} is unreliable at its start: {warning}.", plugin.description.name),
+                        );
+                    }
+                }
             }
             LibraryOutcome::Failed(failure) => {
                 ui.colored_label(ui.visuals().warn_fg_color, format!("{name}: {failure}"))

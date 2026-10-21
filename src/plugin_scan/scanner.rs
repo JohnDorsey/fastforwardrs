@@ -105,7 +105,7 @@ impl PluginScanner {
         .looking_for_dependencies_in(Vec::new(), false)
     }
 
-    /// The same, with another time limit for the scan of one library (for the tests, which do not want to wait five seconds).
+    /// The same, with another time limit for the scan of one library (for the tests, which do not want to wait thirty seconds).
     #[must_use]
     pub fn with_time_limit(mut self, time_limit: Duration) -> Self {
         self.time_limit = time_limit;

@@ -66,6 +66,10 @@ pub const LATENCY_CHANGES: &str = "org.fastforwardrs.test.latency_changes";
 /// A plugin that does not allow two of itself to be alive at once (as a plugin may that keeps something for all its instances): **one that is activated while another is alive gives its
 /// sound with the sign changed**, for as long as it lives. (Found with a reverb that began to roar when a new instance was made while the one before was still being let go of.)
 pub const SINGLE_INSTANCE: &str = "org.fastforwardrs.test.single_instance";
+/// A plugin with a bug that real plugins have: **it reads memory it never wrote** (when it is activated it adds up bytes of buffers it has just been given and not filled), and gives
+/// the sound times a gain that is made from the sum. In memory that is cleared the gain is 1; in memory that holds other bytes it is not. (Found with a reverb that roared, warbled and went
+/// silent at random; the check of a plugin's start is tested with this.)
+pub const READS_GARBAGE: &str = "org.fastforwardrs.test.reads_garbage";
 
 /// What the library is asked to do wrong, if anything: the value of the environment variable `FFRS_TEST_PLUGIN`, read once, when the library is first asked. It is for the
 /// tests of the scan, which run the scan program (a process of its own) with the variable set; **in a test program the variable is never set**.
@@ -121,12 +125,13 @@ const KIND_TAIL_FOREVER: u8 = 13;
 const KIND_RATE: u8 = 14;
 const KIND_LATENCY_CHANGES: u8 = 15;
 const KIND_SINGLE_INSTANCE: u8 = 16;
+const KIND_READS_GARBAGE: u8 = 17;
 
 /// How many `single_instance` plugins are alive.
 static SINGLE_INSTANCES_ALIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The ids of the plugins, in the order of the kinds.
-const IDS: [&str; 17] = [
+const IDS: [&str; 18] = [
     GAIN,
     SWAP,
     MONO_HALF,
@@ -144,8 +149,9 @@ const IDS: [&str; 17] = [
     RATE,
     LATENCY_CHANGES,
     SINGLE_INSTANCE,
+    READS_GARBAGE,
 ];
-const NAMES: [&str; 17] = [
+const NAMES: [&str; 18] = [
     "Gain",
     "Swap",
     "Mono half",
@@ -163,6 +169,7 @@ const NAMES: [&str; 17] = [
     "Rate",
     "Latency changes",
     "Single instance",
+    "Reads garbage",
 ];
 
 /// What the parameters of a plugin are, as `(id, name, minimum, maximum, default, flags)`.
@@ -369,6 +376,40 @@ impl<const KIND: u8> PluginTailImpl for Processor<'_, KIND> {
     }
 }
 
+/// **A bug, on purpose:** takes many buffers of large sizes (like the delay lines of a reverb), looks at some words of each **without writing them first**, and makes a gain of 1 plus
+/// a quarter for each word that is all ones (`0xFF` bytes) or all `0xCD` (what a debug allocator fills with): in memory that holds zeros there are none. Reading memory that was never
+/// written is what the plugin that roared did.
+#[allow(unsafe_code)]
+fn gain_from_memory_it_did_not_write() -> f32 {
+    use std::alloc::{Layout, alloc, dealloc};
+    let mut buffers = Vec::new();
+    let mut words = 0_u32;
+    for number in 0..48_usize {
+        let size = 65_536 + number * 7_000;
+        let layout = Layout::from_size_align(size, 8).expect("a valid layout");
+        // SAFETY: the layout has a size above zero. The words that are read were never written (the point of this plugin): they are read with `read_volatile`, so that the reads are
+        // made, from places inside the buffer.
+        unsafe {
+            let buffer = alloc(layout);
+            if buffer.is_null() {
+                continue;
+            }
+            for place in [0, size / 4, size / 2, size * 3 / 4] {
+                let word = std::ptr::read_volatile(buffer.add(place / 4 * 4).cast::<u32>());
+                if word == u32::MAX || word == 0xCDCD_CDCD {
+                    words += 1;
+                }
+            }
+            buffers.push((buffer, layout));
+        }
+    }
+    for (pointer, layout) in buffers {
+        // SAFETY: each pointer was given by `alloc` with this layout, and is let go of once.
+        unsafe { dealloc(pointer, layout) };
+    }
+    1.0 + words as f32 * 0.25
+}
+
 /// The audio thread of a plugin.
 pub struct Processor<'a, const KIND: u8> {
     shared: &'a Shared,
@@ -379,6 +420,8 @@ pub struct Processor<'a, const KIND: u8> {
     asked: bool,
     /// Whether another `single_instance` was alive when this one was activated (`single_instance` only).
     crowded: bool,
+    /// The gain that the bytes it read when it was activated made (`reads_garbage` only; 1 when they were all zero).
+    garbage_gain: f32,
     /// The sample rate it was activated at.
     sample_rate: f64,
     /// The most frames it was activated for: a host that gives it more breaks the contract, and the plugin says so.
@@ -419,6 +462,11 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
             threads_were_right,
             asked: false,
             crowded: KIND == KIND_SINGLE_INSTANCE && SINGLE_INSTANCES_ALIVE.fetch_add(1, Ordering::SeqCst) > 0,
+            garbage_gain: if KIND == KIND_READS_GARBAGE {
+                gain_from_memory_it_did_not_write()
+            } else {
+                1.0
+            },
             sample_rate: audio_config.sample_rate,
             most_frames: audio_config.max_frames_count,
             values: [shared.get(0), shared.get(1)],
@@ -527,6 +575,7 @@ impl<const KIND: u8> Processor<'_, KIND> {
             KIND_CHOICE => ((self.values[0] as i64 + 1) * (self.values[1] as i64 + 1)) as f32,
             KIND_THREADS if !self.threads_were_right => -1.0,
             KIND_SINGLE_INSTANCE if self.crowded => -1.0,
+            KIND_READS_GARBAGE => self.garbage_gain,
             KIND_RATE => (self.sample_rate / 1000.0) as f32,
             _ => 1.0,
         };
@@ -656,6 +705,7 @@ impl PluginFactoryImpl for Factory {
             KIND_LATENCY => made!(KIND_LATENCY),
             KIND_LATENCY_CHANGES => made!(KIND_LATENCY_CHANGES),
             KIND_SINGLE_INSTANCE => made!(KIND_SINGLE_INSTANCE),
+            KIND_READS_GARBAGE => made!(KIND_READS_GARBAGE),
             KIND_TAIL => made!(KIND_TAIL),
             KIND_CHOICE => made!(KIND_CHOICE),
             KIND_INSTRUMENT => made!(KIND_INSTRUMENT),

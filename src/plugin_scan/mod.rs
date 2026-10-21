@@ -5,7 +5,7 @@
 //!
 //! * [`folders`] says where to look (the folders a person added, `LADSPA_PATH`, the usual ones of the system) and which files in a folder are libraries.
 //! * A library is **scanned by a program of its own**, `fastforwardrs-plugin-scan` ([`child`], with the words it and the editor use for each other in [`protocol`]): the program
-//!   loads the library, reads what its plugins say, makes each one and runs it once on silence. A library that crashes it, never returns (it is stopped after five seconds),
+//!   loads the library, reads what its plugins say, makes each one and runs it once on silence. A library that crashes it, never returns (it is stopped after thirty seconds),
 //!   says nothing, or says something that is not the answer is **failed, with the reason** ([`ScanFailure`]), and nothing is lost but the program.
 //! * What was found, and what failed, is kept in a file ([`cache`]) and **not tried again until the library's size or time changes**, so that a library that crashes the
 //!   scanner does not do it at every start of the editor.

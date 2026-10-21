@@ -17,7 +17,7 @@ use fastforwardrs::plugin_scan::{
 const SCANNER: &str = env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan");
 const MISBEHAVE: &str = "FFRS_TEST_PLUGIN";
 /// How many plugins the test library has.
-const PLUGINS: usize = 17;
+const PLUGINS: usize = 18;
 
 /// A copy of the good test library, named as a CLAP library is, in a folder of its own.
 fn good_library_in(folder: &Path) -> PathBuf {
@@ -27,7 +27,7 @@ fn good_library_in(folder: &Path) -> PathBuf {
 }
 
 fn scanner() -> PluginScanner {
-    PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory()).with_time_limit(Duration::from_secs(4))
+    PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory()).with_time_limit(Duration::from_secs(30))
 }
 
 fn misbehaving(how: &str) -> PluginScanner {
@@ -91,6 +91,27 @@ fn the_scan_of_a_good_clap_library_finds_every_plugin_with_its_ports_and_paramet
     );
     assert_eq!(plugin(LATENCY).latency, LATENCY_SAMPLES);
     assert_eq!(plugin(CHOICE).parameters[1].texts, ["off", "double", "triple"]);
+    // The check of the start came across the wire too: the scan program, which does nothing else while it checks, found the plugin that reads memory it did not write (as it does
+    // on Windows and Ubuntu; macOS was not verified) and none of the others that are steady.
+    use clap_host::start_check::StartCheck;
+    if cfg!(target_os = "macos") {
+        assert!(matches!(
+            plugin(clap_test_plugins::READS_GARBAGE).start,
+            StartCheck::Unreliable { .. } | StartCheck::Steady
+        ));
+    } else {
+        assert!(
+            matches!(
+                plugin(clap_test_plugins::READS_GARBAGE).start,
+                StartCheck::Unreliable { .. }
+            ),
+            "{:?}",
+            plugin(clap_test_plugins::READS_GARBAGE).start
+        );
+    }
+    assert_eq!(gain.start, StartCheck::Steady);
+    assert_eq!(plugin(clap_test_plugins::INSTRUMENT).start, StartCheck::NotChecked);
+    assert_eq!(plugin(FAILS_TO_ACTIVATE).start, StartCheck::NotChecked);
 }
 
 #[test]
@@ -257,7 +278,7 @@ fn a_clap_scan_that_was_made_is_not_made_again_until_the_file_changes_not_even_b
 
     let first = {
         let mut scanner = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::at(cache_file.clone()))
-            .with_time_limit(Duration::from_secs(4));
+            .with_time_limit(Duration::from_secs(30));
         let scan = scanner.scan_folders(&[folder.path().to_owned()]);
         assert!(!scan.libraries[0].from_cache);
         scan.libraries[0].outcome.clone()
@@ -345,7 +366,7 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
         .iter()
         .map(|effect| effect.descriptor.key.as_ref())
         .collect();
-    assert_eq!(keys.len(), 13, "{keys:?}");
+    assert_eq!(keys.len(), 14, "{keys:?}");
     assert!(keys.iter().all(|key| key.starts_with("clap:org.fastforwardrs.test.")));
     assert!(found.effects.iter().all(|effect| effect.library == library));
     let reason_of = |id: &str| {

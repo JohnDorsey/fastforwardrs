@@ -860,3 +860,57 @@ fn scan_again_can_be_pressed_when_no_scan_is_going_on_and_not_while_one_is() {
     );
     assert!(disabled && says_scanning);
 }
+
+#[test]
+fn the_window_tells_of_a_clap_plugin_whose_start_depends_on_memory_it_did_not_write_and_of_no_other() {
+    use clap_host::start_check::StartCheck;
+    let _alone = the_installed_plugins_to_myself();
+    let mut window = Window::showing(super::test_window::project_of(100));
+    open_the_window(&mut window);
+    let plugin = |name: &str, start: StartCheck| clap_host::scan::ScannedPlugin {
+        description: clap_host::PluginDescription {
+            id: format!("com.example.{name}"),
+            name: name.to_owned(),
+            ..clap_host::PluginDescription::default()
+        },
+        audio_inputs: Vec::new(),
+        audio_outputs: Vec::new(),
+        parameters: Vec::new(),
+        latency: 0,
+        tail: None,
+        has_state: false,
+        start,
+        problem: None,
+    };
+    window.application_mut().pretend_the_scan_found(vec![LibraryReport {
+        path: std::path::PathBuf::from("/plugins/reverbs.clap"),
+        outcome: LibraryOutcome::ScannedClap(clap_host::scan::LibraryScan {
+            plugins: vec![
+                plugin(
+                    "Roarer",
+                    StartCheck::Unreliable {
+                        filled_with: 0xFF,
+                        relative_difference: 1.5,
+                    },
+                ),
+                plugin("Steady One", StartCheck::Steady),
+            ],
+            problems: Vec::new(),
+        }),
+        from_cache: false,
+    }]);
+    window.settle();
+
+    assert!(is_shown(&window, "reverbs.clap: 2 plugins"));
+    let warning = StartCheck::Unreliable {
+        filled_with: 0xFF,
+        relative_difference: 1.5,
+    }
+    .warning()
+    .unwrap();
+    assert!(is_shown(
+        &window,
+        &format!("Roarer is unreliable at its start: {warning}.")
+    ));
+    assert!(!is_shown(&window, "Steady One is unreliable"));
+}
