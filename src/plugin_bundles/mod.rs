@@ -5,6 +5,7 @@
 //! program, with the licence policy it is checked against, and the download of the release files of the plugins' own authors, checked by their checksums and unpacked beside a notice
 //! of who wrote them and under which licence. See `docs/plugins-and-trust.md`.
 
+mod archive;
 mod download;
 mod manifest;
 
@@ -17,6 +18,8 @@ pub use manifest::{
     this_platform,
 };
 
+#[cfg(test)]
+mod macos_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]

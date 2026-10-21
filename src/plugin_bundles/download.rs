@@ -148,13 +148,13 @@ pub fn fetched_plugins_folder() -> Option<PathBuf> {
     dirs::data_local_dir().map(|folder| folder.join("fastforwardrs").join("plugins"))
 }
 
-/// Whether every plugin of `set` for `platform` is in its folder in `folder`.
+/// Whether every plugin of `set` for `platform` is in its folder in `folder` (a file, or on macOS a bundle, which is a folder).
 pub fn is_fetched(set: &BundleSet, platform: &str, folder: &Path) -> bool {
     set.platforms.get(platform).is_some_and(|build| {
         build
             .members
             .iter()
-            .all(|member| folder.join(&set.id).join(&member.to).is_file())
+            .all(|member| folder.join(&set.id).join(&member.to).exists())
     })
 }
 
@@ -303,8 +303,11 @@ fn build_the_set(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
     fs::create_dir_all(building).map_err(|error| format!("{} could not be made: {error}", building.display()))?;
-    for member in &build.members {
-        extract_member(archive, &member.from, &building.join(&member.to))?;
+    {
+        let mut opened = super::archive::open(archive, build.installer.as_deref(), temporary)?;
+        for member in &build.members {
+            opened.take(&member.from, &building.join(&member.to))?;
+        }
     }
     for text in &set.licence_texts {
         let path = temporary.join(format!("{}-{}", text.sha256, text.name));
@@ -332,55 +335,6 @@ fn check_the_checksum(path: &Path, wanted: &str, url: &str) -> Result<(), String
 
 fn file_name_of(url: &str) -> &str {
     url.rsplit('/').next().unwrap_or("download")
-}
-
-/// Takes the file `member` out of the `.zip` or `.tar` archive and writes it to `to`.
-fn extract_member(archive: &Path, member: &str, to: &Path) -> Result<(), String> {
-    if is_a_zip(archive) {
-        let file =
-            fs::File::open(archive).map_err(|error| format!("{} could not be opened: {error}", archive.display()))?;
-        let mut zip = zip::ZipArchive::new(file)
-            .map_err(|error| format!("{} is not a zip archive: {error}", archive.display()))?;
-        let mut inside = zip.by_name(member).map_err(|_| {
-            format!(
-                "{} has no file called {member:?}",
-                file_name_of(&archive.to_string_lossy())
-            )
-        })?;
-        let mut out =
-            fs::File::create(to).map_err(|error| format!("{} could not be written: {error}", to.display()))?;
-        io::copy(&mut inside, &mut out).map_err(|error| format!("{member:?} could not be taken out: {error}"))?;
-        return Ok(());
-    }
-    // (A tar archive: the system's tar gives the file on its output. Where the names were written with `./` in front, that is tried too.)
-    for name in [member.to_owned(), format!("./{member}")] {
-        let out = fs::File::create(to).map_err(|error| format!("{} could not be written: {error}", to.display()))?;
-        let status = background_command(Path::new("tar"))
-            .arg("-xOf")
-            .arg(archive)
-            .arg(&name)
-            .stdout(out)
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|error| {
-                format!("`tar` could not be run, and it opens the archives of the builds for Linux: {error}")
-            })?;
-        if status.success() && fs::metadata(to).is_ok_and(|metadata| metadata.len() > 0) {
-            return Ok(());
-        }
-    }
-    let _ = fs::remove_file(to);
-    Err(format!(
-        "{} has no file called {member:?}",
-        file_name_of(&archive.to_string_lossy())
-    ))
-}
-
-fn is_a_zip(path: &Path) -> bool {
-    let mut start = [0_u8; 2];
-    fs::File::open(path)
-        .and_then(|mut file| file.read_exact(&mut start))
-        .is_ok_and(|()| &start == b"PK")
 }
 
 /// What `NOTICE.txt` in the folder of a set says.

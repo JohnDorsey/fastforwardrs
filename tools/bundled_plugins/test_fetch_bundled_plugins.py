@@ -10,7 +10,9 @@ import copy
 import hashlib
 import io
 import json
+import os
 import pathlib
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -138,11 +140,23 @@ class TheRealManifest(unittest.TestCase):
         for left_out in ("airwindows", "agpl", "nekobi", "zl equalizer", "3bandeq", "pingpongpan", "3bandsplitter"):
             self.assertNotIn(left_out, named)
 
-    def test_every_set_has_a_build_for_windows_and_for_linux_and_the_files_it_takes_are_the_plugins_it_names(self):
+    def test_every_set_has_a_build_for_windows_linux_and_macos_and_the_files_it_takes_are_the_plugins_it_names(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
-            self.assertEqual(set(plugin_set["platforms"]), {"windows-x86_64", "linux-x86_64"}, plugin_set["id"])
+            self.assertEqual(set(plugin_set["platforms"]), {"windows-x86_64", "linux-x86_64", "macos-universal"}, plugin_set["id"])
             for build in plugin_set["platforms"].values():
                 self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), plugin_set["id"])
+
+    def test_the_builds_for_macos_are_a_folder_of_a_zip_or_the_folders_of_an_installer_in_a_disk_image(self):
+        for plugin_set in THE_REAL_MANIFEST["sets"]:
+            build = plugin_set["platforms"]["macos-universal"]
+            if build["url"].endswith(".dmg"):
+                self.assertTrue(build["installer"].endswith(".pkg"), plugin_set["id"])
+                for member in build["members"]:
+                    self.assertTrue(member["from"].endswith(".clap") and "/Payload/" in member["from"], member["from"])
+            else:
+                self.assertTrue(build["url"].endswith(".zip"), plugin_set["id"])
+                for member in build["members"]:
+                    self.assertTrue(member["from"].endswith(".clap/"), member["from"])
 
     def test_the_source_of_every_set_is_named_with_a_checksum_or_the_reason_there_is_none(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
@@ -209,6 +223,20 @@ class WhatIsWrongWithAManifest(unittest.TestCase):
         for wanted in ("not a platform that is known", "no plugins named", "the id is used twice"):
             self.assertIn(wanted, problems)
 
+    def test_an_installer_is_only_a_plain_pkg_name_in_a_dmg(self):
+        build = self.first["platforms"]["windows-x86_64"]
+        for installer, url in (
+            ("Plugins.pkg", "https://example.org/a.zip"),
+            ("../Plugins.pkg", "https://example.org/a.dmg"),
+            ("sub/Plugins.pkg", "https://example.org/a.dmg"),
+            ("Plugins.dmg", "https://example.org/a.dmg"),
+            ("", "https://example.org/a.dmg"),
+        ):
+            build["installer"], build["url"] = installer, url
+            self.assertIn("an installer is a plain name of a .pkg file in a .dmg", self.problems(), (installer, url))
+        build["installer"], build["url"] = "Plugins.pkg", "https://example.org/a.dmg"
+        self.assertNotIn("an installer", self.problems())
+
     def test_another_format_and_no_sets_are_refused_at_once(self):
         self.assertEqual(len(fetcher.check_manifest({"format": 2, "sets": []})), 1)
         self.assertEqual(fetcher.check_manifest({"format": 1, "sets": []}), ["the manifest has no sets"])
@@ -243,6 +271,53 @@ class AssemblingTheFolder(unittest.TestCase):
     def test_a_tar_archive_gives_its_files_by_the_names_inside_it(self):
         self.assemble(platform_name="linux-x86_64")
         self.assertEqual((self.out / "pack" / "Reverb.clap").read_bytes(), b"the reverb for linux")
+
+    def a_zip_with_a_bundle_manifest(self, member_from: str) -> dict:
+        path = self.root / "plugins-mac.zip"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Reverb.clap/", b"")
+            runnable = zipfile.ZipInfo("Reverb.clap/Contents/MacOS/Reverb")
+            runnable.external_attr = (0o100755) << 16
+            archive.writestr(runnable, b"the code")
+            plain = zipfile.ZipInfo("Reverb.clap/Contents/Info.plist")
+            plain.external_attr = (0o100644) << 16
+            archive.writestr(plain, b"<plist/>")
+            archive.writestr("Reverb.clapped/Contents/Other", b"a folder whose name only begins like it")
+            archive.writestr("Other.clap/Contents/MacOS/Other", b"another plugin, not taken")
+        manifest = self.fixtures.manifest()
+        build = {"url": path.as_uri(), "sha256": sha256(path.read_bytes()), "members": [{"from": member_from, "to": "Reverb.clap"}]}
+        manifest["sets"][0]["platforms"] = {"macos-universal": build}
+        return manifest
+
+    def test_a_folder_of_a_zip_is_taken_with_everything_in_it_and_nothing_outside_it_and_what_can_be_run_can_still_be(self):
+        made = self.assemble(self.a_zip_with_a_bundle_manifest("Reverb.clap/"), platform_name="macos-universal")
+
+        bundle = self.out / "pack" / "Reverb.clap"
+        self.assertEqual(made, [bundle])
+        found = sorted(str(path.relative_to(bundle).as_posix()) for path in bundle.rglob("*") if path.is_file())
+        self.assertEqual(found, ["Contents/Info.plist", "Contents/MacOS/Reverb"], "not `Reverb.clapped`, not `Other.clap`")
+        self.assertEqual((bundle / "Contents" / "MacOS" / "Reverb").read_bytes(), b"the code")
+        if os.name == "posix":
+            self.assertEqual((bundle / "Contents" / "MacOS" / "Reverb").stat().st_mode & 0o777, 0o755)
+            self.assertEqual((bundle / "Contents" / "Info.plist").stat().st_mode & 0o777, 0o644)
+
+    def test_a_folder_that_is_not_in_the_zip_is_said_and_nothing_is_left_half_made(self):
+        with self.assertRaisesRegex(fetcher.FetchError, "no folder called 'Missing.clap'"):
+            self.assemble(self.a_zip_with_a_bundle_manifest("Missing.clap/"), platform_name="macos-universal")
+        self.assertFalse((self.out / "pack").exists() or (self.out / "pack.building").exists())
+
+    @unittest.skipIf(sys.platform == "darwin", "macOS has hdiutil: this is about what is said where it has not")
+    def test_a_disk_image_where_the_system_cannot_open_it_is_said_in_words_and_nothing_is_left(self):
+        manifest = self.a_zip_with_a_bundle_manifest("Reverb.clap")
+        build = manifest["sets"][0]["platforms"]["macos-universal"]
+        image = self.root / "image.dmg"
+        image.write_bytes(b"not really a disk image")
+        build.update(url=image.as_uri(), sha256=sha256(image.read_bytes()), installer="Plugins.pkg")
+
+        with self.assertRaisesRegex(fetcher.FetchError, "hdiutil"):
+            self.assemble(manifest, platform_name="macos-universal")
+
+        self.assertFalse((self.out / "pack").exists() or (self.out / "pack.building").exists())
 
     def test_with_source_the_source_archive_is_put_in_the_folder_and_the_notice_says_so(self):
         self.assemble(with_source=True)

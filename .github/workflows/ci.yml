@@ -157,6 +157,21 @@ jobs:
           bash tools/ci/run_tests_and_report.sh warning "Library tests of the engine and the export that failed on Metal" cargo test --lib --no-fail-fast -- engine:: video_export:: --nocapture
           bash tools/ci/run_tests_and_report.sh warning "Integration tests of the export that failed on Metal" cargo test --no-fail-fast --test video_export_pictures --test video_export_runs --test video_export_encoder --test command_line_export -- --nocapture
 
+      # The bundled plugins as the *Bundles* tab fetches them, on a Mac: the real download of the release files of the plugins' authors (about 270 MB: disk images with installers,
+      # and a zip with a bundle), their checksums, the plugins taken out as folders, then the scan program finds, loads and start-checks every one of them. Nobody here has a Mac,
+      # so this is the only place that the builds for macOS in bundled-plugins/manifest.json are tried; a failure is a WARNING that says what failed, and does not make the build red.
+      - name: Fetch the bundled plugins and scan them (macOS; failures are warnings)
+        if: ${{ runner.os == 'macOS' }}
+        timeout-minutes: 25
+        continue-on-error: true
+        shell: bash
+        run: |
+          fetched="$RUNNER_TEMP/fetched-plugins"
+          mkdir -p "$fetched"
+          FFRS_FETCH_INTO="$fetched" bash tools/ci/run_tests_and_report.sh warning "The real fetch of the bundled plugins failed on macOS" cargo test --lib --no-fail-fast fetch_the_real_plugins -- --ignored --nocapture
+          FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The scan of the fetched bundled plugins failed on macOS" cargo test --release --test bundled_plugins_real --no-fail-fast -- --ignored --nocapture
+          echo "::notice title=Fetched bundled plugins (macOS)::$(find "$fetched" -maxdepth 2 | sed "s|$fetched/||" | tr '\n' '|')"
+
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
       # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.
       - name: Show the graphics adapters

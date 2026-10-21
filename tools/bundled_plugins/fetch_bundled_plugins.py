@@ -21,12 +21,16 @@ library is used."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import re
 import shutil
+import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -34,6 +38,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Iterator
 
 THE_PROJECT = pathlib.Path(__file__).resolve().parents[2]
 THE_MANIFEST = THE_PROJECT / "bundled-plugins" / "manifest.json"
@@ -125,6 +130,11 @@ def check_manifest(manifest: dict, allow_local_addresses: bool = False) -> list[
             members = archive.get("members") or []
             if not members:
                 problems.append(f"{there}: no files taken")
+            installer = archive.get("installer")
+            if installer is not None and not (
+                _is_a_plain_file_name(installer) and installer.lower().endswith(".pkg") and str(archive.get("url")).lower().endswith(".dmg")
+            ):
+                problems.append(f"{there}: an installer is a plain name of a .pkg file in a .dmg disk image")
             targets: set[str] = set()
             for member in members:
                 taken, kept = member.get("from", ""), member.get("to", "")
@@ -199,6 +209,82 @@ def _member_bytes(archive_path: pathlib.Path, wanted: str) -> bytes:
     raise FetchError(f"{archive_path.name}: no file called {wanted!r} inside")
 
 
+def _take_a_folder_from_a_zip(archive_path: pathlib.Path, wanted: str, to: pathlib.Path) -> None:
+    """The folder `wanted` of the zip (a plugin of macOS is a bundle, a folder) with everything in it, at `to`: which files can be run is kept, and a link is made as a link."""
+    prefix = wanted.rstrip("/") + "/"
+    found = False
+    with zipfile.ZipFile(archive_path) as archive:
+        for info in archive.infolist():
+            if not info.filename.startswith(prefix):
+                continue
+            relative = info.filename[len(prefix) :]
+            if relative.startswith(("/", "\\")) or ".." in re.split(r"[\\/]", relative):
+                raise FetchError(f"{archive_path.name}: an entry whose name goes out of the folder: {info.filename!r}")
+            found = True
+            target = to / relative if relative else to
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            mode = info.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                os.symlink(archive.read(info).decode("utf8"), target)
+                continue
+            target.write_bytes(archive.read(info))
+            if mode:
+                target.chmod(mode & 0o777)
+    if not found:
+        raise FetchError(f"{archive_path.name}: no folder called {wanted.rstrip('/')!r} inside")
+
+
+def _run_a_program_of_macos(command: list[str], what: str) -> None:
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError as error:
+        raise FetchError(f"`{command[0]}` could not be run, and it opens {what} of the builds for macOS (it is a program of macOS): {error}") from None
+    if done.returncode != 0:
+        raise FetchError(f"{what} could not be opened (`{' '.join(command[:2])}`): {done.stderr.strip()}")
+
+
+@contextlib.contextmanager
+def _expanded_installer(archive_path: pathlib.Path, installer: str, work: pathlib.Path) -> Iterator[pathlib.Path]:
+    """What the installer `installer` (a .pkg) of the disk image would install, expanded in `work` (nothing is installed); the image is let go of afterwards."""
+    mount = work / "mounted"
+    mount.mkdir()
+    _run_a_program_of_macos(["hdiutil", "attach", "-nobrowse", "-readonly", "-noverify", "-noautoopen", "-mountpoint", str(mount), str(archive_path)], "the disk images")
+    try:
+        expanded = work / "expanded"
+        _run_a_program_of_macos(["pkgutil", "--expand-full", str(mount / installer), str(expanded)], "the installers")
+        yield expanded
+    finally:
+        subprocess.run(["hdiutil", "detach", "-force", "-quiet", str(mount)], capture_output=True, check=False)
+
+
+def _take_from_an_expanded_installer(expanded: pathlib.Path, wanted: str, to: pathlib.Path) -> None:
+    source = expanded / wanted
+    if not source.exists():
+        raise FetchError(f"the installer has no {wanted!r}")
+    if source.is_dir():
+        shutil.copytree(source, to, symlinks=True)
+    else:
+        shutil.copy2(source, to)
+
+
+def _take_the_members(archive_path: pathlib.Path, archive: dict, building: pathlib.Path) -> None:
+    """Puts the files the manifest names for this build in `building`: from a zip or a tar (a name that ends with `/` is a folder, of a zip), or from the installer in a disk image."""
+    members = archive["members"]
+    if archive.get("installer"):
+        with tempfile.TemporaryDirectory() as work, _expanded_installer(archive_path, archive["installer"], pathlib.Path(work)) as expanded:
+            for member in members:
+                _take_from_an_expanded_installer(expanded, member["from"], building / member["to"])
+        return
+    for member in members:
+        if member["from"].endswith("/"):
+            _take_a_folder_from_a_zip(archive_path, member["from"], building / member["to"])
+        else:
+            (building / member["to"]).write_bytes(_member_bytes(archive_path, member["from"]))
+
+
 def assemble(
     manifest: dict,
     platform_name: str,
@@ -224,8 +310,7 @@ def assemble(
         building.mkdir()
         try:
             archive_path = fetch(archive["url"], archive["sha256"], cache)
-            for member in archive["members"]:
-                (building / member["to"]).write_bytes(_member_bytes(archive_path, member["from"]))
+            _take_the_members(archive_path, archive, building)
             for text in plugin_set["licence_texts"]:
                 (building / text["name"]).write_bytes(fetch(text["url"], text["sha256"], cache).read_bytes())
             if with_source:

@@ -88,6 +88,10 @@ pub struct Build {
     pub size: u64,
     /// The files taken out of it.
     pub members: Vec<Member>,
+    /// For a disk image (`.dmg`, the builds for macOS): the name of the installer (`.pkg`) in it whose contents are taken; the members are then paths in what the installer holds. Nothing
+    /// is installed.
+    #[serde(default)]
+    pub installer: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -170,6 +174,15 @@ impl Manifest {
                 if build.members.is_empty() {
                     problems.push(format!("{there}: no files taken"));
                 }
+                if let Some(installer) = &build.installer
+                    && !(is_a_plain_file_name(installer)
+                        && installer.to_ascii_lowercase().ends_with(".pkg")
+                        && build.url.to_ascii_lowercase().ends_with(".dmg"))
+                {
+                    problems.push(format!(
+                        "{there}: an installer is a plain name of a .pkg file in a .dmg disk image"
+                    ));
+                }
                 let mut kept: Vec<&str> = Vec::new();
                 for member in &build.members {
                     let climbs = member.from.split(['/', '\\']).any(|part| part == "..");
@@ -229,6 +242,9 @@ pub fn this_platform() -> Option<&'static str> {
         Some("windows-x86_64")
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         Some("linux-x86_64")
+    } else if cfg!(target_os = "macos") {
+        // (The builds for macOS are universal: they hold the code for Intel and for Apple Silicon.)
+        Some("macos-universal")
     } else {
         None
     }

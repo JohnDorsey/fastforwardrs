@@ -6,7 +6,7 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -554,6 +554,7 @@ fn a_tar_archive_gives_its_files_with_the_names_inside_it_with_or_without_dot_sl
                     to: "Top.clap".to_owned(),
                 },
             ],
+            installer: None,
         },
     )]);
     let mut files = a_fixture().files;
@@ -729,14 +730,20 @@ fn fetch_the_real_plugins_from_the_network_and_find_every_file_the_manifest_name
         return;
     };
     let manifest = Manifest::embedded();
-    let folder = tempfile::tempdir().unwrap();
+    // (`FFRS_FETCH_INTO` names a folder to fetch into and keep, for the step of the CI that then scans what was fetched; without it a folder is made and is not removed either.)
+    let kept = std::env::var_os("FFRS_FETCH_INTO").map(PathBuf::from);
+    let made = kept.is_none().then(|| tempfile::tempdir().unwrap());
+    let folder: &Path = kept
+        .as_deref()
+        .or_else(|| made.as_ref().map(tempfile::TempDir::path))
+        .unwrap();
     let began = Instant::now();
     let mut last_step = String::new();
 
     let outcome = fetch_plugins(
         &manifest,
         platform,
-        folder.path(),
+        folder,
         &Curl::https_only(),
         &mut |progress| {
             if progress.step != last_step {
@@ -757,21 +764,34 @@ fn fetch_the_real_plugins_from_the_network_and_find_every_file_the_manifest_name
     assert_eq!(outcome.sets.len(), manifest.sets.len());
     for set in &manifest.sets {
         for member in &set.platforms[platform].members {
-            let file = folder.path().join(&set.id).join(&member.to);
-            assert!(
-                file.metadata().is_ok_and(|metadata| metadata.len() > 100_000),
-                "{file:?}"
-            );
+            let file = folder.join(&set.id).join(&member.to);
+            assert!(size_of_a_file_or_a_folder(&file) > 100_000, "{file:?}");
         }
-        assert!(folder.path().join(&set.id).join("NOTICE.txt").is_file());
+        assert!(folder.join(&set.id).join("NOTICE.txt").is_file());
         for text in &set.licence_texts {
-            assert!(folder.path().join(&set.id).join(&text.name).is_file());
+            assert!(folder.join(&set.id).join(&text.name).is_file());
         }
-        assert!(is_fetched(set, platform, folder.path()));
+        assert!(is_fetched(set, platform, folder));
     }
     // The folder that was made is the one a release makes with the script: the plugins are found by the scan program and start steady (see `tests/bundled_plugins_real.rs`).
-    eprintln!("fetched into {:?} in {:?}", folder.path(), began.elapsed());
-    std::mem::forget(folder);
+    eprintln!("fetched into {folder:?} in {:?}", began.elapsed());
+    std::mem::forget(made);
+}
+
+/// The bytes of a file, or of every file in a folder (a plugin of macOS is a folder).
+fn size_of_a_file_or_a_folder(path: &Path) -> u64 {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => std::fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| size_of_a_file_or_a_folder(&entry.path()))
+                    .sum()
+            })
+            .unwrap_or(0),
+        Ok(metadata) => metadata.len(),
+        Err(_) => 0,
+    }
 }
 
 #[test]

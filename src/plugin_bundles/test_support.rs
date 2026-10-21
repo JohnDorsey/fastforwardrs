@@ -131,6 +131,7 @@ pub(crate) fn a_fixture() -> Fixture {
                         to: (*to).to_owned(),
                     })
                     .collect(),
+                installer: None,
             },
         )]),
     };

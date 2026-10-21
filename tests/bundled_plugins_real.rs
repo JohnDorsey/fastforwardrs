@@ -30,7 +30,7 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
         .iter()
         .flat_map(|set| {
             // (The files the script takes for this system: the names are the same on every system.)
-            set["platforms"]["windows-x86_64"]["members"]
+            set["platforms"][fastforwardrs::plugin_bundles::this_platform().expect("builds for this system")]["members"]
                 .as_array()
                 .unwrap()
                 .iter()
