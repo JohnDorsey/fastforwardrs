@@ -1241,20 +1241,21 @@ fn the_names_of_clips_and_tracks_are_made_up_afresh_when_a_project_is_loaded_and
 
 // --- the documentation ---
 
-/// The JSON of the example in the README: the first block of code that is JSON.
-fn the_example_in_the_readme() -> String {
-    let readme = include_str!("../../README.md").replace("\r\n", "\n");
+/// The JSON of the example in the description of the project file (`docs/project-file-format.md`): the first block of code that is JSON.
+fn the_example_in_the_description_of_the_project_file() -> String {
+    let readme = include_str!("../../docs/project-file-format.md").replace("\r\n", "\n");
     let start = readme
         .find("```json\n")
-        .expect("the README has an example of a project file")
+        .expect("the description of the project file has an example of it")
         + "```json\n".len();
     let length = readme[start..].find("\n```").expect("the example ends");
     readme[start..start + length].to_owned()
 }
 
 #[test]
-fn the_example_in_the_readme_is_a_project_file_this_version_reads_and_has_what_it_says_it_has() {
-    let project = project_from_json_text(&the_example_in_the_readme()).unwrap();
+fn the_example_in_the_description_of_the_project_file_is_a_project_file_this_version_reads_and_has_what_it_says_it_has()
+{
+    let project = project_from_json_text(&the_example_in_the_description_of_the_project_file()).unwrap();
 
     assert_eq!(project.sources().len(), 3, "a video, a sound and a picture");
     assert_eq!(project.tracks().len(), 2);

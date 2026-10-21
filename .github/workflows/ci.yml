@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y pkg-config libasound2-dev libudev-dev libx11-dev libxcb1-dev libxkbcommon-dev libwayland-dev \
             libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libvulkan1 mesa-vulkan-drivers
 
-      # ffmpeg 9 or newer is needed (README, "ffmpeg"): an older one is refused by the program. The actions that install ffmpeg give older versions
+      # ffmpeg 9 or newer is needed (README, "Install and run"): an older one is refused by the program. The actions that install ffmpeg give older versions
       # or do not run on the Mac of the runner (arm64), so each system gets its own step.
       - name: ffmpeg 9 (Windows)
         if: runner.os == 'Windows'

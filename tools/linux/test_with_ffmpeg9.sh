@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs the whole test suite (library and integration tests) on the Linux copy, with the ffmpeg 9 in ~/ffmpeg9 first on the path, because the
-# program is only correct with ffmpeg 9 (see the README, "ffmpeg"). Use from Windows:
+# program is only correct with ffmpeg 9 (see the README, "Install and run"). Use from Windows:
 #
 #     wsl -d Ubuntu --cd <project folder> -- bash tools/linux/run_in_wsl.sh bash tools/linux/test_with_ffmpeg9.sh
 set -e
