@@ -64,6 +64,22 @@ fn readings_of_the_videos(
 /// the others wait their turn, and are the room that the decoders and the encoder are given to be a little late and a little early without stopping the engine.
 const MOST_FRAMES_ASKED_AHEAD: usize = 4;
 
+/// How long the card gets to make **one frame of an export**. The preview gives it two seconds (it has to keep up with a person), and an export has nobody waiting for a frame: a computer
+/// that is busy with other work, or a graphics adapter made of software, can take longer than that for one frame, and failing the whole export for it (found by running an export while
+/// every core of the computer was busy: 2 of 12 failed with "the graphics card did not finish the frame in time") loses the person's wait for nothing. A card that has really stopped is
+/// still found, in a minute.
+const HOW_LONG_THE_CARD_MAY_TAKE_FOR_A_FRAME_OF_AN_EXPORT: Duration = Duration::from_secs(60);
+
+/// The settings of the engine that makes the pictures of an export: no kept frames (a frame is asked for once), and the time for a frame that an export is given.
+fn settings_of_the_engine_of_an_export(adapter: AdapterChoice) -> EngineSettings {
+    EngineSettings {
+        frame_timeout: HOW_LONG_THE_CARD_MAY_TAKE_FOR_A_FRAME_OF_AN_EXPORT,
+        most_cached_frames: 0,
+        most_cached_frame_bytes: 0,
+        ..EngineSettings::new(adapter)
+    }
+}
+
 /// How long the export waits for the engine to say something before it looks at everything else again.
 const HOW_LONG_TO_WAIT_FOR_THE_ENGINE: Duration = Duration::from_millis(20);
 
@@ -397,11 +413,7 @@ fn produce(job: Job) -> Result<(), Ending> {
     // The engine is started first: making its device takes a good fraction of a second, which goes by while the files are looked at.
     let (wake_sender, wake_receiver) = mpsc::channel::<()>();
     let mut engine = Engine::start(
-        EngineSettings {
-            most_cached_frames: 0,
-            most_cached_frame_bytes: 0,
-            ..EngineSettings::new(adapter)
-        },
+        settings_of_the_engine_of_an_export(adapter),
         Arc::new(move || {
             let _ = wake_sender.send(());
         }),

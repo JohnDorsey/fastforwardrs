@@ -44,7 +44,7 @@ pub(super) fn events_of(engine: &Engine, count: usize) -> Vec<EngineEvent> {
 }
 
 pub(super) fn software_engine() -> (Engine, Arc<AtomicUsize>) {
-    software_engine_with(EngineSettings::new(AdapterChoice::SoftwareOnly))
+    software_engine_with(EngineSettings::patient(AdapterChoice::SoftwareOnly))
 }
 
 pub(super) fn software_engine_with(settings: EngineSettings) -> (Engine, Arc<AtomicUsize>) {

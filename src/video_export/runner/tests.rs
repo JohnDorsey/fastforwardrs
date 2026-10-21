@@ -449,3 +449,26 @@ fn each_video_of_the_export_is_read_with_the_size_of_its_own_picture_and_what_th
         crate::engine::PictureColour::SRGB
     );
 }
+
+#[test]
+fn the_engine_of_an_export_gives_the_card_far_longer_for_a_frame_than_the_preview_does_and_keeps_no_frames() {
+    let preview = EngineSettings::new(AdapterChoice::SoftwareOnly);
+
+    let export = settings_of_the_engine_of_an_export(AdapterChoice::SoftwareOnly);
+
+    assert_eq!(
+        preview.frame_timeout,
+        Duration::from_secs(2),
+        "the preview keeps up with a person"
+    );
+    assert_eq!(
+        export.frame_timeout,
+        Duration::from_secs(60),
+        "an export has nobody waiting for a frame"
+    );
+    assert_eq!((export.most_cached_frames, export.most_cached_frame_bytes), (0, 0));
+    assert_eq!(
+        export.export_frames_in_flight, preview.export_frames_in_flight,
+        "the rest is as it is"
+    );
+}

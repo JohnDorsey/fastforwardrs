@@ -195,7 +195,7 @@ impl Window {
     /// Like [`Self::showing`], but the preview is made by the picture engine, on the software graphics adapter, which a computer may not have (a Mac has none: then
     /// there is no window, and the test is to stop at once).
     pub(super) fn showing_with_the_engine(project: Project) -> Option<Self> {
-        Self::showing_with_the_engine_set_up(project, EngineSettings::new(AdapterChoice::SoftwareOnly))
+        Self::showing_with_the_engine_set_up(project, EngineSettings::patient(AdapterChoice::SoftwareOnly))
     }
 
     /// Like [`Self::showing_with_the_engine`], with an engine that is set up as `settings` say (the adapter should be the software one: see

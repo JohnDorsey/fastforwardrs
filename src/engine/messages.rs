@@ -104,6 +104,17 @@ pub struct EngineSettings {
 }
 
 impl EngineSettings {
+    /// For a test that is **not about the watchdog**: the usual settings, but a card is given a minute for a frame, not two seconds. The tests run many at once on a computer that
+    /// is busy with them, and a software adapter that is slow because the other tests have the processor is not a card that has stopped (found when a test of the window and one
+    /// of the export each failed once in a full run, and the export did again under load). The tests of the watchdog itself use [`Self::new`].
+    #[cfg(test)]
+    pub(crate) fn patient(adapter: AdapterChoice) -> Self {
+        Self {
+            frame_timeout: Duration::from_secs(60),
+            ..Self::new(adapter)
+        }
+    }
+
     /// The usual settings, with the device made from `adapter`.
     pub fn new(adapter: AdapterChoice) -> Self {
         Self {

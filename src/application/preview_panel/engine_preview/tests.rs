@@ -80,7 +80,7 @@ struct Setup {
 }
 
 fn setup() -> Option<Setup> {
-    setup_with(EngineSettings::new(AdapterChoice::SoftwareOnly))
+    setup_with(EngineSettings::patient(AdapterChoice::SoftwareOnly))
 }
 
 /// The same, with an engine that has these settings.
