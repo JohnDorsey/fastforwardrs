@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use super::*;
 use crate::composition::LayerContent;
+use crate::engine::LayerSource;
 use crate::engine::{COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, PicturePixels};
 use crate::project::{
     AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, Settings, SpeedIndicatorLayout,
@@ -95,7 +96,12 @@ fn ids_of(sent: &[(PictureId, PictureData)]) -> Vec<PictureId> {
 }
 
 fn source_of_the_layers(described: &DescribedFrame) -> Vec<LayerSource> {
-    described.description.layers.iter().map(|layer| layer.source).collect()
+    described
+        .description
+        .layers
+        .iter()
+        .map(|layer| layer.source.clone())
+        .collect()
 }
 
 fn a_picture_file(width: u32, height: u32) -> RgbaPicture {

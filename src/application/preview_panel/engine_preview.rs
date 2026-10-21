@@ -22,8 +22,8 @@ use super::PreviewContent;
 use super::engine_view::{PictureSupply, PictureWanted, SentPictures, describe_frame_in_colour};
 use crate::application::textures::PictureFilter;
 use crate::engine::{
-    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameColour, FrameDescription, LayerSource, PictureId,
-    QualityGovernor, QualityRules, RenderedFrame, WakeUp,
+    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameColour, FrameDescription, PictureId, QualityGovernor,
+    QualityRules, RenderedFrame, WakeUp,
 };
 use crate::project::FrameRate;
 use crate::text_rendering::LazyTextRenderer;
@@ -471,10 +471,8 @@ impl EnginePreview {
 
     fn note_the_pictures_used(&mut self, description: &FrameDescription) {
         let frame_number = self.frames_asked_for + 1;
-        for layer in &description.layers {
-            if let LayerSource::Picture(id) = layer.source {
-                self.last_used_in.insert(id, frame_number);
-            }
+        for id in description.pictures_used() {
+            self.last_used_in.insert(id, frame_number);
         }
     }
 

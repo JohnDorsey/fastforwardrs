@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use super::pictures::{PicturesOfTheRuns, RunPictureProblem, RunStreamStarter};
 use super::plan::ExportPlan;
-use crate::engine::{FrameDescription, LayerSource, PictureData, PictureId};
+use crate::engine::{FrameDescription, PictureData, PictureId};
 use crate::frame_scene::{
     PreviewContent, SentPictures, TextPictures, VideoInThePicture, colour_of_a_picture_file, describe_frame,
     layers_of_a_section, symbol_of_a_section,
@@ -160,14 +160,7 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
             &mut supply,
         );
 
-        let used: HashSet<PictureId> = description
-            .layers
-            .iter()
-            .filter_map(|layer| match layer.source {
-                LayerSource::Picture(id) => Some(id),
-                LayerSource::Solid(_) => None,
-            })
-            .collect();
+        let used: HashSet<PictureId> = description.pictures_used().into_iter().collect();
         let mut forget: Vec<PictureId> = self.sent.difference(&used).copied().collect();
         forget.sort_unstable();
         self.sent.retain(|id| used.contains(id));

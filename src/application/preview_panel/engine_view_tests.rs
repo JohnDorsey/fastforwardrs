@@ -217,7 +217,7 @@ fn the_layers_are_in_the_order_the_content_has_them_the_one_at_the_back_first() 
         ],
         None,
     ));
-    let ids: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source).collect();
+    let ids: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source.clone()).collect();
     assert_eq!(
         ids,
         vec![
@@ -345,7 +345,7 @@ fn a_picture_file_is_a_picture_with_the_id_of_the_file_and_its_size() {
             generation,
             WritesItDown::default(),
         );
-        description.layers[0].source
+        description.layers[0].source.clone()
     };
     assert_eq!(id_of(7, &decoded, 0), LayerSource::Picture(id));
     assert_ne!(id_of(8, &decoded, 0), LayerSource::Picture(id), "another file");
@@ -415,6 +415,7 @@ fn a_thumbnail_that_stands_in_for_a_video_is_a_picture_of_its_own_with_the_colou
         .0
         .layers[0]
             .source
+            .clone()
     };
     assert_eq!(id_of(0), id_of(0));
     assert_ne!(id_of(0), id_of(1));
@@ -436,7 +437,7 @@ fn a_text_object_is_a_picture_whose_id_is_what_it_looks_like_and_it_is_left_out_
         None,
     ));
     assert_eq!(supply.kinds, vec!["text", "text", "text"]);
-    let ids: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source).collect();
+    let ids: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source.clone()).collect();
     assert_eq!(ids[0], ids[2], "the same words look the same");
     assert_ne!(ids[0], ids[1], "other words do not");
 
@@ -456,8 +457,8 @@ fn a_text_object_is_a_picture_whose_id_is_what_it_looks_like_and_it_is_left_out_
         0,
         supply,
     );
-    let kept: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source).collect();
-    assert_eq!(kept, vec![ids[0], ids[2]]);
+    let kept: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source.clone()).collect();
+    assert_eq!(kept, vec![ids[0].clone(), ids[2].clone()]);
 }
 
 fn the_symbol_over(clip_number: u32, speed: u32) -> SymbolOnThePreview {
@@ -556,7 +557,7 @@ fn the_symbol_is_a_picture_of_its_speed_and_its_height_in_pixels_and_nothing_els
         shown.symbol = Some(the_symbol_over(0, speed));
         shown.indicator_layout = layout;
         let (description, _) = describe_with(&shown, generation, WritesItDown::default());
-        description.layers[1].source
+        description.layers[1].source.clone()
     };
     let layout = SpeedIndicatorLayout::new(0.1, 0.2, 0.15);
     let id = the_symbol_id(4, layout, 0);
@@ -604,7 +605,7 @@ fn a_picture_that_the_supply_cannot_make_leaves_its_layer_out_and_not_the_others
         0,
         supply,
     );
-    let sources: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source).collect();
+    let sources: Vec<LayerSource> = description.layers.iter().map(|layer| layer.source.clone()).collect();
     assert_eq!(
         sources,
         vec![LayerSource::Picture(PictureId(1)), LayerSource::Picture(PictureId(3))]
@@ -635,9 +636,9 @@ fn the_ids_of_different_kinds_of_picture_are_never_the_same_and_a_video_picture_
     let ids: Vec<u64> = description
         .layers
         .iter()
-        .filter_map(|layer| match layer.source {
-            LayerSource::Picture(PictureId(id)) => Some(id),
-            LayerSource::Solid(_) => None,
+        .filter_map(|layer| match &layer.source {
+            LayerSource::Picture(PictureId(id)) => Some(*id),
+            LayerSource::Solid(_) | LayerSource::Group(_) => None,
         })
         .collect();
     assert_eq!(

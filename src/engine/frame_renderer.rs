@@ -255,10 +255,11 @@ impl FrameRenderer {
     /// finish had in it that the engine did not write.
     pub fn shader_effects_in(&self, description: &FrameDescription) -> Vec<String> {
         let mut keys: Vec<String> = Vec::new();
+        let flat = description.flatten();
         for pass in &plan_frame(description, &self.effects_that_run).passes {
             if let PassPlan::Effects { layer, calls } = pass {
                 for &call in calls {
-                    let key = &description.layers[*layer].effects[call].key;
+                    let key = &flat.layers[*layer].layer.effects[call].key;
                     if self.effects_that_run.kind_of(key) == Some(KindOfEffect::Shader) && !keys.contains(key) {
                         keys.push(key.clone());
                     }
@@ -473,7 +474,7 @@ impl FrameRenderer {
     /// than [`MOST_TABLES_ON_THE_CARD`].
     fn have_the_tables_of(&mut self, description: &FrameDescription) {
         let mut wanted: Vec<TableId> = Vec::new();
-        for effect in description.layers.iter().flat_map(|layer| &layer.effects) {
+        for effect in description.flatten().layers.iter().flat_map(|flat| &flat.layer.effects) {
             if effect.key == LUT_KEY
                 && let Some(id) = effect.table
                 && !wanted.contains(&id)
@@ -542,12 +543,7 @@ impl FrameRenderer {
         if width == 0 || height == 0 || width > largest || height > largest {
             return Err(RenderProblem::BadSize { width, height, largest });
         }
-        let pictures_used = || {
-            description.layers.iter().filter_map(|layer| match layer.source {
-                LayerSource::Picture(id) => Some(id),
-                LayerSource::Solid(_) => None,
-            })
-        };
+        let pictures_used = || description.pictures_used().into_iter();
         let missing = self.pictures.missing(pictures_used());
         if !missing.is_empty() {
             return Err(RenderProblem::PicturesMissing(missing));
@@ -568,6 +564,8 @@ impl FrameRenderer {
 
         self.have_the_tables_of(description);
         let plan = plan_frame(description, &self.effects_that_run);
+        // (Every layer of the frame and of its groups, as the plan numbers them.)
+        let flat = description.flatten();
         let accumulation_shape = TextureShape {
             width_in_pixels: width,
             height_in_pixels: height,
@@ -599,6 +597,10 @@ impl FrameRenderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         };
         let accumulation = self.pool.acquire(&self.device.device, accumulation_shape);
+        // The picture of each group (the container with that number, from 1: the frame is container 0, which the accumulation is), the size of the frame and in the same format.
+        let group_textures: Vec<wgpu::Texture> = (1..flat.containers.len())
+            .map(|_| self.pool.acquire(&self.device.device, accumulation_shape))
+            .collect();
         let output = self.pool.acquire(&self.device.device, output_shape);
         let planes_textures = matches!(output_kind, FrameOutput::Planes(_)).then(|| {
             (
@@ -616,18 +618,22 @@ impl FrameRenderer {
             let PassPlan::Effects { layer, .. } = pass else {
                 continue;
             };
-            let LayerSource::Picture(id) = description.layers[*layer].source else {
-                continue;
-            };
-            let picture = self
-                .pictures
-                .get(id)
-                .expect("the pictures of the frame are on the card");
-            let shape = TextureShape {
-                width_in_pixels: picture.width_in_pixels,
-                height_in_pixels: picture.height_in_pixels,
-                format: ACCUMULATION_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            let shape = match &flat.layers[*layer].layer.source {
+                LayerSource::Picture(id) => {
+                    let picture = self
+                        .pictures
+                        .get(*id)
+                        .expect("the pictures of the frame are on the card");
+                    TextureShape {
+                        width_in_pixels: picture.width_in_pixels,
+                        height_in_pixels: picture.height_in_pixels,
+                        format: ACCUMULATION_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    }
+                }
+                // (The picture of a group is the size of the frame.)
+                LayerSource::Group(_) => accumulation_shape,
+                LayerSource::Solid(_) => continue,
             };
             let numbers = plan.steps_of_effects[pass_number]
                 .iter()
@@ -643,6 +649,10 @@ impl FrameRenderer {
         let (readbacks, mistake) = self.device.catching_errors(|| {
             let accumulation_view = accumulation.create_view(&wgpu::TextureViewDescriptor::default());
             let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
+            let group_views: Vec<wgpu::TextureView> = group_textures
+                .iter()
+                .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+                .collect();
             let effect_views: Vec<wgpu::TextureView> = effect_pictures
                 .iter()
                 .map(|(_, texture)| texture.create_view(&wgpu::TextureViewDescriptor::default()))
@@ -651,18 +661,21 @@ impl FrameRenderer {
             // The uniforms of every pass of the frame that has some, written to the card before anything is recorded that uses them. For each pass of
             // the plan, in its order: the slots of the effects it runs (none for the others); and, for the layers that are put in their places, each one's.
             let mut effect_slots: Vec<Vec<UniformSlot>> = Vec::with_capacity(plan.passes.len());
-            let mut slots = Vec::new();
+            // For each pass that puts layers in their places, the slot of each of its layers (by the number of the layer); empty for the others.
+            let mut place_slots: Vec<Vec<(usize, UniformSlot)>> = Vec::with_capacity(plan.passes.len());
             for (pass_number, pass) in plan.passes.iter().enumerate() {
                 match pass {
                     PassPlan::Effects { layer, .. } => {
-                        let effects = &description.layers[*layer].effects;
+                        place_slots.push(Vec::new());
+                        let effects = &flat.layers[*layer].layer.effects;
                         let domain = DisplayDomainConversion::of(description.colour.working);
                         // (The size of the picture that the effects work on: the effects that depend on it are the blur and the crop.)
-                        let picture_size = match description.layers[*layer].source {
+                        let picture_size = match &flat.layers[*layer].layer.source {
                             LayerSource::Picture(id) => self
                                 .pictures
-                                .get(id)
+                                .get(*id)
                                 .map_or((1, 1), |picture| (picture.width_in_pixels, picture.height_in_pixels)),
+                            LayerSource::Group(_) => (width, height),
                             LayerSource::Solid(_) => (1, 1),
                         };
                         effect_slots.push(
@@ -765,18 +778,23 @@ impl FrameRenderer {
                                 .collect(),
                         );
                     }
-                    PassPlan::PlaceLayers { layers } => {
+                    PassPlan::PlaceLayers { layers } | PassPlan::PlaceGroup { layers, .. } => {
                         effect_slots.push(Vec::new());
+                        let mut slots = Vec::new();
                         for &number in layers {
                             let uniforms = PlacementUniforms::of_layer_in(
-                                &description.layers[number],
+                                flat.layers[number].layer,
                                 (width, height),
                                 description.colour.working,
                             );
                             slots.push((number, self.uniforms.add_slot(|writer| uniforms.write(writer))));
                         }
+                        place_slots.push(slots);
                     }
-                    PassPlan::ClearAccumulation | PassPlan::Output => effect_slots.push(Vec::new()),
+                    PassPlan::ClearAccumulation | PassPlan::Output => {
+                        effect_slots.push(Vec::new());
+                        place_slots.push(Vec::new());
+                    }
                 }
             }
             // The numbers of the last pass (the display transform, or what the output is encoded as), and then, for the export, those that make its planes.
@@ -811,15 +829,20 @@ impl FrameRenderer {
                     }
                     PassPlan::Effects { layer, .. } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with effects has uniforms");
-                        let LayerSource::Picture(id) = description.layers[*layer].source else {
-                            continue;
+                        // Each effect works on the picture the one before it made (the first, on the layer's own: an uploaded picture, or the picture of a group).
+                        let mut input_view = match &flat.layers[*layer].layer.source {
+                            LayerSource::Picture(id) => {
+                                &self
+                                    .pictures
+                                    .get(*id)
+                                    .expect("the pictures of the frame are on the card")
+                                    .view
+                            }
+                            LayerSource::Group(_) => {
+                                &group_views[flat.layers[*layer].group.expect("a layer that is a group has its container") - 1]
+                            }
+                            LayerSource::Solid(_) => continue,
                         };
-                        // Each effect works on the picture the one before it made (the first, on the layer's own).
-                        let mut input_view = &self
-                            .pictures
-                            .get(id)
-                            .expect("the pictures of the frame are on the card")
-                            .view;
                         for ((slot, &picture_number), step) in effect_slots[pass_number]
                             .iter()
                             .zip(&effect_picture_numbers[layer])
@@ -828,7 +851,7 @@ impl FrameRenderer {
                             let kind = match *step {
                                 EffectStep::Call { call, .. } | EffectStep::SecondPass { call } => self
                                     .effects_that_run
-                                    .kind_of(&description.layers[*layer].effects[call].key),
+                                    .kind_of(&flat.layers[*layer].layer.effects[call].key),
                                 EffectStep::Conversion { .. } => Some(KindOfEffect::ColourMatrix),
                             };
                             let uniform_binding = wgpu::BindGroupEntry {
@@ -846,7 +869,7 @@ impl FrameRenderer {
                             // (The effect that mixes colours reads its picture with no sampler; one that a shader runs also has the sampler of the effects.)
                             let (pipeline, bind_group, label) = match kind {
                                 Some(KindOfEffect::Shader) => (
-                                    &self.shader_effects[&description.layers[*layer].effects[step_call(step)].key],
+                                    &self.shader_effects[&flat.layers[*layer].layer.effects[step_call(step)].key],
                                     self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
                                         label: Some("engine effect pass"),
                                         layout: &self.pipelines.foreign_effect.bind_group_layout,
@@ -873,7 +896,7 @@ impl FrameRenderer {
                                     "engine: blur a layer's picture along one line",
                                 ),
                                 Some(KindOfEffect::Lut) => {
-                                    let table = description.layers[*layer].effects[step_call(step)]
+                                    let table = flat.layers[*layer].layer.effects[step_call(step)]
                                         .table
                                         .and_then(|id| self.tables.get(&id))
                                         .expect("a look-up table effect that runs has its table on the card");
@@ -939,23 +962,36 @@ impl FrameRenderer {
                             input_view = &effect_views[picture_number];
                         }
                     }
-                    PassPlan::PlaceLayers { .. } => {
+                    PassPlan::PlaceLayers { .. } | PassPlan::PlaceGroup { .. } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with layers has uniforms");
+                        let slots = &place_slots[pass_number];
                         let mut bind_groups = Vec::with_capacity(slots.len());
-                        for &(number, slot) in &slots {
-                            let picture_view = match description.layers[number].source {
-                                LayerSource::Picture(id) => {
-                                    match effect_picture_numbers.get(&number).and_then(|numbers| numbers.last()) {
-                                        Some(&last) => &effect_views[last],
-                                        None => {
-                                            &self
-                                                .pictures
-                                                .get(id)
-                                                .expect("the pictures of the frame are on the card")
-                                                .view
-                                        }
+                        for &(number, slot) in slots {
+                            // (What the layer is put in its place from: the picture its last effect made, or its own picture.)
+                            let last_effect_picture = effect_picture_numbers
+                                .get(&number)
+                                .and_then(|numbers| numbers.last())
+                                .map(|&last| &effect_views[last]);
+                            let picture_view = match &flat.layers[number].layer.source {
+                                LayerSource::Picture(id) => match last_effect_picture {
+                                    Some(view) => view,
+                                    None => {
+                                        &self
+                                            .pictures
+                                            .get(*id)
+                                            .expect("the pictures of the frame are on the card")
+                                            .view
                                     }
-                                }
+                                },
+                                LayerSource::Group(_) => match last_effect_picture {
+                                    Some(view) => view,
+                                    None => {
+                                        &group_views[flat.layers[number]
+                                            .group
+                                            .expect("a layer that is a group has its container")
+                                            - 1]
+                                    }
+                                },
                                 LayerSource::Solid(_) => &self.white_pixel,
                             };
                             bind_groups.push(self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -981,12 +1017,20 @@ impl FrameRenderer {
                                 ],
                             }));
                         }
-                        let mut render_pass = begin_pass(
-                            &mut encoder,
-                            "engine: put the layers in their places",
-                            &accumulation_view,
-                            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        );
+                        // The frame is put together over opaque black; a group over nothing, so that what is not covered is clear.
+                        let (label, target, cleared_to) = match pass {
+                            PassPlan::PlaceGroup { container, .. } => (
+                                "engine: put the layers of a group in their places",
+                                &group_views[container - 1],
+                                wgpu::Color::TRANSPARENT,
+                            ),
+                            _ => (
+                                "engine: put the layers in their places",
+                                &accumulation_view,
+                                wgpu::Color::BLACK,
+                            ),
+                        };
+                        let mut render_pass = begin_pass(&mut encoder, label, target, wgpu::LoadOp::Clear(cleared_to));
                         render_pass.set_pipeline(&self.pipelines.place.pipeline);
                         for (&(_, slot), bind_group) in slots.iter().zip(&bind_groups) {
                             render_pass.set_bind_group(0, bind_group, &[slot.offset]);
@@ -1088,6 +1132,9 @@ impl FrameRenderer {
             }
         });
         self.pool.release(accumulation_shape, accumulation);
+        for texture in group_textures {
+            self.pool.release(accumulation_shape, texture);
+        }
         self.pool.release(output_shape, output);
         if let Some((luma, chroma)) = planes_textures {
             self.pool.release(luma_shape, luma);

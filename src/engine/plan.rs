@@ -47,6 +47,10 @@ pub enum PassPlan {
     /// Clears the picture that the layers are put together in to opaque black and then puts the layers in their places on it, back to front. `layers`
     /// are the numbers of the layers in the description.
     PlaceLayers { layers: Vec<usize> },
+    /// Clears the picture of the group that is container number `container` (see `FlatLayers`) to **clear** and puts the layers of the group in their places on it, back to front.
+    /// `layers` are their numbers in the list of every layer (the frame's first): those of a group are numbered after those of the frame. It comes before the layer that is
+    /// made of the group has its effects run, and before the layers of the container that it is in are put in their places.
+    PlaceGroup { container: usize, layers: Vec<usize> },
     /// Turns the picture that was put together into the 8-bit frame.
     Output,
 }
@@ -71,7 +75,10 @@ impl FramePlan {
             .zip(&self.steps_of_effects)
             .map(|(pass, steps)| match pass {
                 PassPlan::Effects { .. } => steps.len(),
-                PassPlan::ClearAccumulation | PassPlan::PlaceLayers { .. } | PassPlan::Output => 1,
+                PassPlan::ClearAccumulation
+                | PassPlan::PlaceLayers { .. }
+                | PassPlan::PlaceGroup { .. }
+                | PassPlan::Output => 1,
             })
             .sum()
     }
@@ -349,6 +356,7 @@ pub fn lut_changes_nothing(values: &[f32]) -> bool {
 
 /// Which effects of `layer` run, and how many cannot.
 fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (Vec<usize>, usize) {
+    // (The picture of a group is a picture for the effects to work on; a colour has none.)
     if matches!(layer.source, LayerSource::Solid(_)) {
         return (Vec::new(), layer.effects.len());
     }
@@ -406,53 +414,82 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
     (calls, not_run)
 }
 
+/// The pass that runs the effects of the layer `layer`, which is number `number` in the list of every layer, and the steps of it, if any of its effects runs; and how many of its
+/// effects cannot.
+fn effects_pass_of(
+    number: usize,
+    layer: &LayerDescription,
+    effects_that_run: &EffectsThatRun,
+    working_space_is_light: bool,
+) -> (Option<(PassPlan, Vec<EffectStep>)>, usize) {
+    let (calls, not_run) = effects_of(layer, effects_that_run);
+    if calls.is_empty() {
+        return (None, not_run);
+    }
+    let to_run: Vec<EffectToRun> = calls
+        .iter()
+        .map(|&call| {
+            let kind = effects_that_run
+                .kind_of(&layer.effects[call].key)
+                .expect("a call that runs is of a kind that the engine can run");
+            let call_itself = &layer.effects[call];
+            EffectToRun {
+                call,
+                domain: kind.domain_of_a_call(call_itself),
+                passes: kind.passes(),
+                converts_itself: kind.converts_itself_for_a_call(call_itself),
+            }
+        })
+        .collect();
+    let steps = steps_of_a_run_of_effects(&to_run, working_space_is_light);
+    (Some((PassPlan::Effects { layer: number, calls }, steps)), not_run)
+}
+
 /// The steps that make the frame `description` describes, with the effects `effects_that_run` says the engine can run.
+///
+/// **The groups come first, the last one first** (see [`FlatLayers`](super::FlatLayers)): for each, the effects of its layers and then the pass that puts its layers together in its picture; so that the
+/// picture of a group is made before the effects of the layer that it is run, and before the layers of the container it is in are put in their places. The frame's own layers come
+/// last, as they did when there were no groups.
 pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThatRun) -> FramePlan {
-    let mut passes = Vec::new();
-    let mut steps_of_effects = Vec::new();
+    let flat = description.flatten();
+    let mut passes: Vec<PassPlan> = Vec::new();
+    let mut steps_of_passes: Vec<Vec<EffectStep>> = Vec::new();
     let mut effects_not_run = 0;
     let working_space_is_light = matches!(description.colour.working, WorkingSpace::Linear(_));
-    for (number, layer) in description.layers.iter().enumerate() {
-        let (calls, not_run) = effects_of(layer, effects_that_run);
-        effects_not_run += not_run;
-        if !calls.is_empty() {
-            let to_run: Vec<EffectToRun> = calls
-                .iter()
-                .map(|&call| {
-                    let kind = effects_that_run
-                        .kind_of(&layer.effects[call].key)
-                        .expect("a call that runs is of a kind that the engine can run");
-                    let call_itself = &layer.effects[call];
-                    EffectToRun {
-                        call,
-                        domain: kind.domain_of_a_call(call_itself),
-                        passes: kind.passes(),
-                        converts_itself: kind.converts_itself_for_a_call(call_itself),
-                    }
-                })
-                .collect();
-            steps_of_effects.push(steps_of_a_run_of_effects(&to_run, working_space_is_light));
-            passes.push(PassPlan::Effects { layer: number, calls });
+    for container in (0..flat.containers.len()).rev() {
+        let numbers = flat.containers[container].clone();
+        for number in numbers.clone() {
+            let (pass, not_run) = effects_pass_of(
+                number,
+                flat.layers[number].layer,
+                effects_that_run,
+                working_space_is_light,
+            );
+            effects_not_run += not_run;
+            if let Some((pass, steps)) = pass {
+                passes.push(pass);
+                steps_of_passes.push(steps);
+            }
+        }
+        // (Every pass that does not run effects has an empty list of steps.)
+        if container > 0 {
+            passes.push(PassPlan::PlaceGroup {
+                container,
+                layers: numbers.collect(),
+            });
+            steps_of_passes.push(Vec::new());
+        } else if numbers.is_empty() {
+            passes.push(PassPlan::ClearAccumulation);
+            steps_of_passes.push(Vec::new());
+        } else {
+            passes.push(PassPlan::PlaceLayers {
+                layers: numbers.collect(),
+            });
+            steps_of_passes.push(Vec::new());
         }
     }
-    // (The steps are kept by the pass they belong to: an empty list for each pass that runs no effects.)
-    let mut steps_of_passes: Vec<Vec<EffectStep>> = Vec::new();
-    let mut with_effects = steps_of_effects.into_iter();
-    for pass in &passes {
-        steps_of_passes.push(match pass {
-            PassPlan::Effects { .. } => with_effects.next().expect("every pass that runs effects has its steps"),
-            _ => Vec::new(),
-        });
-    }
-    if description.layers.is_empty() {
-        passes.push(PassPlan::ClearAccumulation);
-    } else {
-        passes.push(PassPlan::PlaceLayers {
-            layers: (0..description.layers.len()).collect(),
-        });
-    }
     passes.push(PassPlan::Output);
-    steps_of_passes.extend([Vec::new(), Vec::new()]);
+    steps_of_passes.push(Vec::new());
     FramePlan {
         passes,
         steps_of_effects: steps_of_passes,

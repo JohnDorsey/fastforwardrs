@@ -76,6 +76,8 @@ mod foreign_effect_tests;
 #[cfg(test)]
 mod gain_tests;
 #[cfg(test)]
+mod group_tests;
+#[cfg(test)]
 mod guard_tests;
 #[cfg(test)]
 mod hang_tests;
@@ -115,8 +117,9 @@ pub use plan::{
 };
 pub use quality::{PreviewScale, QualityGovernor, QualityRules};
 pub use scene::{
-    BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, FrameDescription,
-    LUT_KEY, LayerDescription, LayerSource, LutInterpolation, LutSpace, OPACITY_KEY, PictureId, TableId,
+    BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, FlatLayer,
+    FlatLayers, FrameDescription, GroupDescription, LUT_KEY, LayerDescription, LayerSource, LutInterpolation, LutSpace,
+    OPACITY_KEY, PictureId, TableId,
 };
 pub use tables::{MOST_TABLES_ON_THE_CARD, publish_table, published_table};
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};

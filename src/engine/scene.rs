@@ -101,12 +101,41 @@ pub const CORNERS_OF_THE_WHOLE_PICTURE: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0
 pub struct PictureId(pub u64);
 
 /// What a layer is made of.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum LayerSource {
     /// A picture the engine has been sent.
     Picture(PictureId),
     /// One colour all over (red, green, blue and how opaque, not multiplied by it).
     Solid([u8; 4]),
+    /// **A group** (phase 5): layers that are put together in a picture of their own, the size of the frame and clear where nothing is, which is the picture of this layer. What is
+    /// done to the layer's picture (its effects) is done to **the composite of the layers of the group**, and the picture is then put in its place like any other.
+    Group(GroupDescription),
+}
+
+/// The layers of a group: the one at the back first, as a frame's are. They may be groups too.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GroupDescription {
+    pub layers: Vec<LayerDescription>,
+}
+
+impl LayerSource {
+    /// What tells this source from every other: equal sources hash alike.
+    fn hash_into(&self, hasher: &mut DefaultHasher) {
+        match self {
+            Self::Picture(id) => {
+                0_u8.hash(hasher);
+                id.hash(hasher);
+            }
+            Self::Solid(rgba) => {
+                1_u8.hash(hasher);
+                rgba.hash(hasher);
+            }
+            Self::Group(group) => {
+                2_u8.hash(hasher);
+                hash_layers(&group.layers, hasher);
+            }
+        }
+    }
 }
 
 /// One thing that is done to the picture of a layer, by the key of the effect and the numbers it is given.
@@ -226,6 +255,48 @@ impl FrameDescription {
         }
     }
 
+    /// Every layer of the frame and of the groups in it, numbered as the plan numbers them (see [`FlatLayers`]).
+    pub fn flatten(&self) -> FlatLayers<'_> {
+        let mut layers: Vec<FlatLayer<'_>> = Vec::new();
+        let mut containers: Vec<std::ops::Range<usize>> = Vec::new();
+        // (The layers of each container, the frame's first. A group found in a container is put at the end, so that it comes after the container it is in.)
+        let mut pending: Vec<&[LayerDescription]> = vec![&self.layers];
+        let mut next = 0;
+        while next < pending.len() {
+            let first = layers.len();
+            for layer in pending[next] {
+                let group = match &layer.source {
+                    LayerSource::Group(group) => {
+                        pending.push(&group.layers);
+                        Some(pending.len() - 1)
+                    }
+                    LayerSource::Picture(_) | LayerSource::Solid(_) => None,
+                };
+                layers.push(FlatLayer {
+                    layer,
+                    container: next,
+                    group,
+                });
+            }
+            containers.push(first..layers.len());
+            next += 1;
+        }
+        FlatLayers { layers, containers }
+    }
+
+    /// The pictures that the frame is made of, in the layers of the frame and of its groups, each once, in the order they are met in.
+    pub fn pictures_used(&self) -> Vec<PictureId> {
+        let mut used: Vec<PictureId> = Vec::new();
+        for flat in self.flatten().layers {
+            if let LayerSource::Picture(id) = flat.layer.source
+                && !used.contains(&id)
+            {
+                used.push(id);
+            }
+        }
+        used
+    }
+
     /// What tells this description from every other one that looks different: equal descriptions have the same fingerprint, and a difference in
     /// any number, any layer, any key or any size is a different one (as far as a 64-bit hash goes). It is only the same from one run to the next
     /// of the same program, and is not for keeping in a file.
@@ -247,21 +318,46 @@ impl FrameDescription {
     fn hash_the_layers(&self, hasher: &mut DefaultHasher) {
         // (The colour is a part of what is shown: a frame that is put together in another space or encoded as another is another picture.)
         self.colour.hash(hasher);
-        self.layers.len().hash(hasher);
-        for layer in &self.layers {
-            layer.source.hash(hasher);
-            for (across, down) in layer.corners {
-                across.to_bits().hash(hasher);
-                down.to_bits().hash(hasher);
-            }
-            layer.effects.len().hash(hasher);
-            for effect in &layer.effects {
-                effect.key.hash(hasher);
-                effect.table.hash(hasher);
-                effect.values.len().hash(hasher);
-                for value in &effect.values {
-                    value.to_bits().hash(hasher);
-                }
+        hash_layers(&self.layers, hasher);
+    }
+}
+
+/// A frame's layers and those of the groups in it, in one list (the frame's first, then those of the first group that was found, and so on): **the number of a layer in the list is the
+/// number that the plan and the renderer give it**. A group is a container with a number too (the frame is container 0): the containers are numbered in the order they are found in, so
+/// **a container is always numbered after the one it is in**, and drawing them from the last to the first draws every group before the layer that is made of it.
+#[derive(Debug)]
+pub struct FlatLayers<'a> {
+    pub layers: Vec<FlatLayer<'a>>,
+    /// For each container, which of `layers` are its own.
+    pub containers: Vec<std::ops::Range<usize>>,
+}
+
+/// One layer of a [`FlatLayers`].
+#[derive(Clone, Copy, Debug)]
+pub struct FlatLayer<'a> {
+    pub layer: &'a LayerDescription,
+    /// The container this layer is in (0 is the frame).
+    pub container: usize,
+    /// If the layer is a group, the container that its layers are.
+    pub group: Option<usize>,
+}
+
+/// Hashes `layers` and everything in them, the layers of the groups among them too.
+fn hash_layers(layers: &[LayerDescription], hasher: &mut DefaultHasher) {
+    layers.len().hash(hasher);
+    for layer in layers {
+        layer.source.hash_into(hasher);
+        for (across, down) in layer.corners {
+            across.to_bits().hash(hasher);
+            down.to_bits().hash(hasher);
+        }
+        layer.effects.len().hash(hasher);
+        for effect in &layer.effects {
+            effect.key.hash(hasher);
+            effect.table.hash(hasher);
+            effect.values.len().hash(hasher);
+            for value in &effect.values {
+                value.to_bits().hash(hasher);
             }
         }
     }

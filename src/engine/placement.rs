@@ -24,9 +24,10 @@ impl PlacementUniforms {
         let (width, height) = (frame_size_in_pixels.0 as f32, frame_size_in_pixels.1 as f32);
         Self {
             corners_in_pixels: layer.corners.map(|(across, down)| (across * width, down * height)),
-            tint: match layer.source {
-                LayerSource::Picture(_) => [1.0, 1.0, 1.0, 1.0],
-                LayerSource::Solid(rgba) => premultiplied_tint(rgba),
+            tint: match &layer.source {
+                // (A group's picture is a picture: it is made of the layers of the group and is drawn as it is.)
+                LayerSource::Picture(_) | LayerSource::Group(_) => [1.0, 1.0, 1.0, 1.0],
+                LayerSource::Solid(rgba) => premultiplied_tint(*rgba),
             },
             frame_size_in_pixels,
         }
@@ -37,8 +38,8 @@ impl PlacementUniforms {
     /// In the compatibility mode it is [`Self::of_layer`].
     pub fn of_layer_in(layer: &LayerDescription, frame_size_in_pixels: (u32, u32), working: WorkingSpace) -> Self {
         let mut uniforms = Self::of_layer(layer, frame_size_in_pixels);
-        if let (LayerSource::Solid(rgba), WorkingSpace::Linear(primaries)) = (layer.source, working) {
-            uniforms.tint = premultiplied_tint_in_light(rgba, primaries);
+        if let (LayerSource::Solid(rgba), WorkingSpace::Linear(primaries)) = (&layer.source, working) {
+            uniforms.tint = premultiplied_tint_in_light(*rgba, primaries);
         }
         uniforms
     }
