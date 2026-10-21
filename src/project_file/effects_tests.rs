@@ -360,12 +360,16 @@ fn values_of_an_effect_that_are_too_few_or_too_many_or_of_the_wrong_kind_are_ref
 }
 
 #[test]
-fn a_sound_and_a_keyframe_crate_have_no_effects_to_be_given_in_a_file() {
+fn a_keyframe_crate_has_no_effects_to_be_given_in_a_file_and_a_sound_has_only_those_of_sound_plugins() {
+    // (A sound clip has effects, those of sound plugins: `audio_effects_tests`. A picture effect is not one of them.)
     let text = the_file_of_everything_with(|file| {
         file["tracks"][1]["clips"][0]["effects"] = serde_json::json!([{"effect": "hue shift"}]);
     });
-    let reason = reason_for_unreadable_project(&text);
-    assert!(reason.contains("unknown field `effects`"), "{reason}");
+    let reason = reason_for_invalid_project(&text);
+    assert!(
+        reason.contains("clip number 1 of track number 2") && reason.contains("it cannot have the hue shift effect"),
+        "the clip has a place for effects, and the effect is refused for what it is: {reason}"
+    );
 
     let text = the_file_of_everything_with(|file| {
         file["tracks"][0]["clips"]

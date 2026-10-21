@@ -53,7 +53,7 @@ something other than what has the drawer, a `target`: the `track` (its place in 
 for a clip, the `clip` (its place in the list of that track's clips, counting from 0). What the clip itself says (its
 gain, its place, its words) is what the property is while it has no keyframes, and is left as it was when it has some.
 A drawer may have several racks of one property of one thing (they say it together, in the order they are in). A video,
-a picture, a text object or a track that has **effects** has `effects`: a list with an entry for each, in the order they are
+a picture, a text object, a clip of a sound file (its effects are those of sound plugins) or a track that has **effects** has `effects`: a list with an entry for each, in the order they are
 done in, which is its `effect` (the key of the type of effect: a namespace, a colon and an id, `builtin:hue_shift`), its `version` (the
 major and the minor number of the type that it was made with), its `instance` (the number that the effect has in this list, which no
 other effect of the list has: there may be several effects of one kind, and this is what tells them apart) and its `values`, an object

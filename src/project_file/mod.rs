@@ -746,6 +746,7 @@ fn clip_from_document(
             muted,
             animation,
             drawer,
+            effects,
             badges,
         } => {
             let media = MediaClip::new(source_identifier, first_source_frame, end_source_frame, speed_factor)
@@ -753,7 +754,13 @@ fn clip_from_document(
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Audio(media.with_gain(gain_decibels).with_muted(muted)),
-                effects: groups::chain_from_documents(Vec::new(), badges, kinds, |_| false, group_count)?,
+                effects: groups::chain_from_documents(
+                    effects,
+                    badges,
+                    kinds,
+                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Audio),
+                    group_count,
+                )?,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -1181,6 +1188,7 @@ fn clip_document_of(
             muted: media.is_muted(),
             animation,
             drawer,
+            effects,
             badges,
         },
         Clip::Image(image) => ClipDocument::Image {
@@ -1250,6 +1258,8 @@ fn relative_path_as_portable_text(relative_path: &Path) -> Result<String, Projec
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod audio_effects_tests;
 #[cfg(test)]
 mod built_in_effects_tests;
 #[cfg(test)]

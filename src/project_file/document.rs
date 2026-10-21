@@ -316,7 +316,11 @@ pub(super) enum ClipDocument {
         animation: AnimationDocument,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         drawer: Vec<RackDocument>,
-        /// The badges in the chain of the clip: those of the tags it is in. (It has no effects, so each is before none of them.)
+        /// The effects the sound clip has, in the order they were put on in: the effects of sound plugins. Left out for a clip that has none, and in the files written before
+        /// they were written (they were put on in the window and not saved: found with a reverb on the first clip of a song that was gone when the project was loaded).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
+        /// The badges in the chain of the clip (see [`BadgeDocument`]).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         badges: Vec<BadgeDocument>,
     },
