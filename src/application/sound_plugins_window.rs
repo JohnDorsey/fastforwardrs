@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use egui::{Align2, Context, Id, RichText, ScrollArea, Ui, Window, vec2};
 
 use super::commands::Command;
+use super::sound_plugins_bundles::{BundlesView, show as show_bundles};
 use crate::plugin_scan::{LibraryOutcome, LibraryReport, NotUsed, PluginSearchSettings};
 
 /// The title of the window, and what its buttons and the checkbox say.
@@ -28,6 +29,9 @@ const MOST_WIDTH: f32 = 720.0;
 /// What a folder of plugins that came with the program is called in the list of folders (the others that are looked in are "usual").
 pub const BUNDLED_LABEL: &str = "bundled with the program";
 
+/// What the folder that the *Bundles* tab fetches into is called in that list.
+pub const FETCHED_LABEL: &str = "fetched with Bundles";
+
 /// What the window can ask for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SoundPluginsCommand {
@@ -42,6 +46,37 @@ pub enum SoundPluginsCommand {
     SetSearchParentFolders(bool),
     /// Scan the folders again (the libraries that did not change are not scanned again, and those that failed for want of a library are, if the places to look for them changed).
     ScanAgain,
+    /// Show the other tab.
+    SelectTab(SoundPluginsTab),
+    /// The button of the *Bundles* tab was pressed: the question that comes before the download is shown.
+    AskToDownloadBundles,
+    CancelAskingToDownloadBundles,
+    /// The question was answered yes: the download begins.
+    DownloadBundles,
+    /// A download that is going on is stopped.
+    CancelBundleDownload,
+    /// What the last download said is taken away.
+    DismissBundleMessage,
+}
+
+/// The two tabs of the window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SoundPluginsTab {
+    /// Where plugins are looked for, and what the scan found.
+    #[default]
+    Plugins,
+    /// The plugins that can be fetched from their authors.
+    Bundles,
+}
+
+impl SoundPluginsTab {
+    /// What the tab is called.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Plugins => "Plugins",
+            Self::Bundles => "Bundles",
+        }
+    }
 }
 
 /// What the window shows.
@@ -51,6 +86,10 @@ pub struct SoundPluginsView<'a> {
     pub other_folders: &'a [PathBuf],
     /// Which of those is the folder of the plugins that came with the program, if one is (it is said so, and not called usual).
     pub bundled_folder: Option<&'a Path>,
+    /// The folder that the *Bundles* tab fetches into (it is one of those, where it is there).
+    pub fetched_folder: Option<&'a Path>,
+    pub tab: SoundPluginsTab,
+    pub bundles: BundlesView<'a>,
     pub is_scanning: bool,
     pub has_scanned: bool,
     pub libraries: &'a [LibraryReport],
@@ -83,13 +122,28 @@ pub fn show(context: &Context, open: &mut bool, view: &SoundPluginsView<'_>, com
 }
 
 fn show_contents(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Command>) {
+    ui.horizontal(|ui| {
+        for tab in [SoundPluginsTab::Plugins, SoundPluginsTab::Bundles] {
+            if ui.selectable_label(view.tab == tab, tab.label()).clicked() && view.tab != tab {
+                commands.push(Command::SoundPlugins(SoundPluginsCommand::SelectTab(tab)));
+            }
+        }
+    });
+    ui.separator();
+    match view.tab {
+        SoundPluginsTab::Plugins => show_the_plugins_tab(ui, view, commands),
+        SoundPluginsTab::Bundles => show_bundles(ui, &view.bundles, commands),
+    }
+}
+
+fn show_the_plugins_tab(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Command>) {
     ui.label(RichText::new(FOLDERS_HEADING).strong());
     show_folders(
         ui,
         "plugin folders",
         &view.settings.folders,
         view.other_folders,
-        view.bundled_folder,
+        [view.bundled_folder, view.fetched_folder],
         commands,
         true,
     );
@@ -105,7 +159,7 @@ fn show_contents(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Co
         "dependency folders",
         &view.settings.dependency_folders,
         &[],
-        None,
+        [None, None],
         commands,
         false,
     );
@@ -166,7 +220,7 @@ fn show_folders(
     salt: &str,
     folders: &[PathBuf],
     other_folders: &[PathBuf],
-    bundled: Option<&Path>,
+    [bundled, fetched]: [Option<&Path>; 2],
     commands: &mut Vec<Command>,
     for_plugins: bool,
 ) {
@@ -187,6 +241,8 @@ fn show_folders(
         for folder in other_folders {
             let kind = if bundled == Some(folder.as_path()) {
                 BUNDLED_LABEL
+            } else if fetched == Some(folder.as_path()) {
+                FETCHED_LABEL
             } else {
                 "usual"
             };

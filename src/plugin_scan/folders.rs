@@ -45,8 +45,16 @@ pub fn folders_looked_in_by_default() -> Vec<PathBuf> {
     folders_looked_in_with(
         &|name| std::env::var_os(name),
         dirs::home_dir().as_deref(),
-        bundled_plugins_folder().as_deref(),
+        &bundled_plugin_folders(),
     )
+}
+
+/// The folders of plugins that are the program's own, in the order they are looked in: the one that came with the program (see [`bundled_plugins_folder`]) and then the one that the
+/// *Bundles* tab fetches into, where it is there (`crate::plugin_bundles::fetched_plugins_folder`).
+pub fn bundled_plugin_folders() -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = bundled_plugins_folder().into_iter().collect();
+    folders.extend(crate::plugin_bundles::fetched_plugins_folder().filter(|folder| folder.is_dir()));
+    folders
 }
 
 /// The name of the environment variable that says where the bundled plugins are, where they are not in a folder called `plugins` beside the program (for a program run from the
@@ -83,7 +91,7 @@ pub fn bundled_plugins_folder_with(variable: Option<&OsStr>, program: Option<&Pa
 pub fn folders_looked_in_with(
     environment: &dyn Fn(&str) -> Option<std::ffi::OsString>,
     home: Option<&Path>,
-    bundled: Option<&Path>,
+    bundled: &[PathBuf],
 ) -> Vec<PathBuf> {
     let mut usual = usual_folders(home);
     usual.extend(clap_folders(
@@ -94,10 +102,10 @@ pub fn folders_looked_in_with(
     ));
     let mut folders = folders_to_scan(&[], environment("LADSPA_PATH").as_deref(), &usual);
     // (The bundled plugins come last: a plugin that a person installed wins over the one that came with the program.)
-    if let Some(bundled) = bundled
-        && !folders.iter().any(|folder| folder == bundled)
-    {
-        folders.push(bundled.to_owned());
+    for folder in bundled {
+        if !folders.contains(folder) {
+            folders.push(folder.clone());
+        }
     }
     folders
 }
@@ -256,10 +264,19 @@ fn collect_clap_libraries(folder: &Path, folders_down: usize, libraries: &mut Ve
         let Ok(kind) = entry.file_type() else { continue };
         if is_a_clap_file(&path) && (path.is_file() || (cfg!(target_os = "macos") && path.is_dir())) {
             libraries.push(path);
-        } else if kind.is_dir() && folders_down > 0 {
+        } else if kind.is_dir() && folders_down > 0 && !is_being_made(&path) {
             // (A folder that cannot be read is left out: the rest of the folder is still looked in.)
             let _ = collect_clap_libraries(&path, folders_down - 1, libraries);
         }
     }
     Ok(())
+}
+
+/// Whether `folder` is one that the *Bundles* tab is making at the moment (`<set>.building`, and `.downloading` for the archives): what is in it is not a plugin that is there yet, and a
+/// scan that is made while a download goes on must not find it.
+fn is_being_made(folder: &Path) -> bool {
+    folder
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name == ".downloading" || name.ends_with(".building"))
 }

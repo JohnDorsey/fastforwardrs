@@ -98,7 +98,7 @@ pub struct ExportRequest {
     /// How plugins are looked for when the project has effects that are plugins (`None`: they are not looked for, and those effects pass the sound through).
     pub plugin_search: Option<Box<PluginSearch>>,
     /// The folder of the plugins that came with the program (`None`: there is none): they are run without the approval that other folders need.
-    pub bundled_plugins: Option<PathBuf>,
+    pub bundled_plugins: Vec<PathBuf>,
 }
 
 /// What the arguments of a command line come to.
@@ -162,7 +162,7 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             archive_cache_folder: None,
             allow_plugins,
             plugin_approvals_file,
-            bundled_plugins: crate::plugin_scan::bundled_plugins_folder(),
+            bundled_plugins: crate::plugin_scan::bundled_plugin_folders(),
             plugin_search: scanner_program_beside_this_program().map(|program| {
                 Box::new(PluginSearch::beside_the_settings_file(
                     program,
@@ -335,7 +335,7 @@ fn find_and_check_the_plugins_of_the_sound(
 ) -> Result<Arc<PluginHost>, String> {
     let host = Arc::new(PluginHost::new());
     // (The plugins that came with the program are the program's own: no question, so no refusal either.)
-    if let Some(folder) = &request.bundled_plugins {
+    for folder in &request.bundled_plugins {
         host.trust_bundled_folder(folder);
     }
     let has_effects_to_find = !super::fast_forward_application::effects_the_export_would_leave_out(project).is_empty();

@@ -1091,7 +1091,7 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
     };
     let home = Path::new("/home/someone");
 
-    let folders = folders_looked_in_with(&environment, Some(home), None);
+    let folders = folders_looked_in_with(&environment, Some(home), &[]);
 
     let mut expected = vec![PathBuf::from("/ladspa/from/variable")];
     expected.extend(usual_folders(Some(home)));
@@ -1104,7 +1104,7 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
     assert_eq!(folders, expected);
     assert!(folders.contains(&PathBuf::from("/clap/from/variable")));
     assert_eq!(
-        folders_looked_in_with(&|_| None, None, None).len(),
+        folders_looked_in_with(&|_| None, None, &[]).len(),
         clap_folders(None, None, None, None).len() + usual_folders(None).len()
     );
 }
@@ -1245,19 +1245,49 @@ fn the_bundled_folder_is_looked_in_last_so_that_a_plugin_a_person_installed_wins
         _ => None,
     };
     let bundled = Path::new("/the/program/plugins");
+    let fetched = Path::new("/the/data/plugins");
 
-    let folders = folders_looked_in_with(&environment, None, Some(bundled));
+    let folders = folders_looked_in_with(&environment, None, &[bundled.to_owned(), fetched.to_owned()]);
 
-    assert_eq!(folders.last(), Some(&bundled.to_owned()));
     assert_eq!(
-        folders[..folders.len() - 1],
-        folders_looked_in_with(&environment, None, None)[..]
+        folders[folders.len() - 2..],
+        [bundled.to_owned(), fetched.to_owned()],
+        "in the order they are given"
+    );
+    assert_eq!(
+        folders[..folders.len() - 2],
+        folders_looked_in_with(&environment, None, &[])[..]
     );
     // Already there (a person put it in CLAP_PATH): where it was.
     let there = |name: &str| match name {
         "CLAP_PATH" => Some("/the/program/plugins".into()),
         _ => None,
     };
-    let once = folders_looked_in_with(&there, None, Some(bundled));
+    let once = folders_looked_in_with(&there, None, &[bundled.to_owned()]);
     assert_eq!(once.iter().filter(|folder| folder.as_path() == bundled).count(), 1);
+}
+
+#[test]
+fn a_scan_does_not_find_the_plugins_of_a_set_that_is_being_made_by_a_download() {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    for folder in ["done", "other.building", ".downloading", "done/nested"] {
+        fs::create_dir_all(root.path().join(folder)).unwrap();
+        fs::write(root.path().join(folder).join("a.clap"), b"x").unwrap();
+    }
+
+    let found = clap_libraries_in(root.path()).unwrap();
+
+    let names: Vec<String> = found
+        .iter()
+        .map(|path| {
+            path.strip_prefix(root.path())
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert_eq!(names, ["done/a.clap", "done/nested/a.clap"], "{names:?}");
 }

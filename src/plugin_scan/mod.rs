@@ -36,9 +36,10 @@ pub use effects::{
 };
 pub use failure::ScanFailure;
 pub use folders::{
-    BUNDLED_PLUGINS_VARIABLE, bundled_plugins_folder, bundled_plugins_folder_with, clap_folders, clap_libraries_in,
-    dependency_search_folders, folders_looked_in_by_default, folders_looked_in_with, folders_to_scan, is_a_clap_file,
-    libraries_in, library_file_extension, library_file_extensions, library_search_variable, usual_folders,
+    BUNDLED_PLUGINS_VARIABLE, bundled_plugin_folders, bundled_plugins_folder, bundled_plugins_folder_with,
+    clap_folders, clap_libraries_in, dependency_search_folders, folders_looked_in_by_default, folders_looked_in_with,
+    folders_to_scan, is_a_clap_file, libraries_in, library_file_extension, library_file_extensions,
+    library_search_variable, usual_folders,
 };
 pub use ladspa_host::{LibraryScan, ScannedPlugin};
 pub use scanner::{FolderScan, LibraryOutcome, LibraryReport, PluginScanner, ScannerProblem};

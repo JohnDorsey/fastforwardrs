@@ -841,7 +841,7 @@ fn the_plugins_that_came_with_the_program_are_run_by_the_export_without_an_appro
 
     let refused = find_and_check_the_plugins_of_the_sound(
         &ExportRequest {
-            bundled_plugins: Some(elsewhere.path().to_owned()),
+            bundled_plugins: vec![elsewhere.path().to_owned()],
             ..a_request_for_the_plugins_of(false, None)
         },
         &project,
@@ -855,7 +855,7 @@ fn the_plugins_that_came_with_the_program_are_run_by_the_export_without_an_appro
     for bundled in [its_folder.clone(), its_folder.parent().unwrap().to_owned()] {
         let host = find_and_check_the_plugins_of_the_sound(
             &ExportRequest {
-                bundled_plugins: Some(bundled.clone()),
+                bundled_plugins: vec![bundled.clone()],
                 ..a_request_for_the_plugins_of(false, None)
             },
             &project,

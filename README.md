@@ -8,6 +8,7 @@ A small video editor with one main job: **fast-forward the parts of a video you 
 
 * **ffmpeg and ffprobe, version 9 or newer** (the GPL build). An older one is refused with a message that lists where it looked: ffmpeg 8 shifts the pictures of a file whose sound starts before its picture, so every frame would be off by one. They are looked for in the folder named by `FASTFORWARDRS_FFMPEG_DIRECTORY`, then the folder of the program, then the `PATH`. If they are missing the window still opens and says so.
 * **Rust 1.88 or newer** to build it (edition 2024).
+* **`curl`**, only for the *Bundles* tab (below).
 * **A graphics adapter** for the preview and the export (a software one works, slowly: see the export command below).
 * **On Linux**, the window system libraries that `eframe`/`wgpu` need, and ALSA's development files (`libasound2-dev` on Debian and Ubuntu) for the sound.
 
@@ -130,7 +131,7 @@ CLAP and LADSPA plugins with an audio input and output can be effects on a clip,
 * Plugins run inside the editor: **one that crashes takes the editor with it**, and the next start says which library it was. A plugin too slow for two seconds of sound is left out of the preview (never the export).
 * They are found by a separate **scan program** (`fastforwardrs-plugin-scan`), never by the editor, in the folders you add under *Edit > Sound plugins...*, in `LADSPA_PATH`, `CLAP_PATH` and the usual places of each system. After rebuilding, **build everything again** (`cargo build --release --bins`): the editor refuses a scan program built from other code.
 * The scan also checks whether a CLAP plugin's sound at its start depends on memory it never wrote (a bug some plugins have: a roar, a warble or silence at random). The window and a note while the sound plays say so; it cannot be fixed from here.
-* A folder called `plugins` beside the program holds the plugins that come with it (`py tools/bundled_plugins/fetch_bundled_plugins.py --out <folder>/plugins` makes it); it is trusted without the question.
+* **The *Bundles* tab** of *Edit > Sound plugins...* downloads six free reverbs (Dragonfly Hall, Plate and Room, MVerb, MaGigaverb and Surge XT Effects, about 140 MB) from their authors' release pages, after a question, and checks every file against a checksum that is kept in the program. They are kept in `fastforwardrs/plugins` in your data folder (`%LOCALAPPDATA%` on Windows) and are trusted without the folder question. It needs the `curl` program (Windows 10 and later, macOS and most Linux systems have it) and has builds for Windows and Linux only. A folder called `plugins` beside the program is trusted the same way (`py tools/bundled_plugins/fetch_bundled_plugins.py --out <folder>/plugins` makes one, for a release).
 
 ## Licence
 

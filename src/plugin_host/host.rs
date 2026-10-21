@@ -38,7 +38,7 @@ struct Trust {
     declined: HashSet<PathBuf>,
     wanted: Vec<Wanted>,
     /// The folder of the plugins that came with the program, and every folder in it, which are trusted without a question (not written down: it is the program's own).
-    bundled: Option<PathBuf>,
+    bundled: Vec<PathBuf>,
 }
 
 /// Where the libraries that plugin libraries need are looked for, besides beside the plugin library.
@@ -118,7 +118,11 @@ impl PluginHost {
     /// below it**: they are trusted without a question, as the program is (a release's own files are as trusted as the program; the licences and the source offer that go with them are
     /// in `docs/distribution-notices.md`). Not written to the file of approvals: it is the program's own, and a folder that is not this one is asked about as it always was.
     pub fn trust_bundled_folder(&self, folder: &Path) {
-        self.trust().bundled = Some(crate::plugin_trust::folder_key(folder));
+        let mut trust = self.trust();
+        if !trust.bundled.iter().any(|known| known == folder) {
+            trust.bundled.push(folder.to_owned());
+        }
+        drop(trust);
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -166,8 +170,9 @@ impl PluginHost {
             || trust.approved.contains(folder)
             || trust
                 .bundled
-                .as_ref()
-                .is_some_and(|bundled| folder.starts_with(bundled))
+                .iter()
+                // (Each is named as the system names it when it is looked at: a folder that was not there when it was said may be by now.)
+                .any(|bundled| folder.starts_with(crate::plugin_trust::folder_key(bundled)))
         {
             FolderStanding::Approved
         } else if trust.declined.contains(folder) {

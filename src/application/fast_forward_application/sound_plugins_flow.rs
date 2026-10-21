@@ -53,6 +53,8 @@ pub(super) struct PluginSearch {
     another_wanted: bool,
     pub(super) has_scanned: bool,
     pub(super) result: ScanResult,
+    /// The *Bundles* tab: the plugins that can be fetched from their authors.
+    pub(super) bundles: super::plugin_bundles_flow::Bundles,
 }
 
 impl PluginSearch {
@@ -235,7 +237,11 @@ impl FastForwardApplication {
         if let Some(file) = PluginSearchSettings::default_file() {
             self.keep_plugin_search_settings_in(file);
         }
-        if let Some(folder) = bundled_plugins_folder() {
+        // (The folder that the Bundles tab fetches into is trusted before it is there: what is put in it is checked against the checksums of the program.)
+        for folder in bundled_plugins_folder()
+            .into_iter()
+            .chain(crate::plugin_bundles::fetched_plugins_folder())
+        {
             self.trust_the_plugins_bundled_in(&folder);
         }
         match scanner_program_beside_this_program() {
@@ -391,11 +397,24 @@ impl FastForwardApplication {
     pub(super) fn show_the_window_of_sound_plugins(&mut self, context: &egui::Context, commands: &mut Vec<Command>) {
         let other_folders = self.environment.plugin_search.other_folders();
         let bundled_folder = bundled_plugins_folder();
+        let (rows, has_builds, total_bytes, hosts) = self.what_the_bundles_tab_shows();
+        let fetched_folder = self.folder_of_the_bundles();
         let search = &self.environment.plugin_search;
+        let bundles = crate::application::sound_plugins_bundles::BundlesView {
+            rows: &rows,
+            has_builds,
+            total_bytes,
+            hosts: &hosts,
+            folder: fetched_folder.as_deref(),
+            state: super::plugin_bundles_flow::state_of(&search.bundles.download),
+        };
         let view = SoundPluginsView {
             settings: &search.settings,
             other_folders: &other_folders,
             bundled_folder: bundled_folder.as_deref(),
+            fetched_folder: fetched_folder.as_deref(),
+            tab: self.interface.sound_plugins_tab,
+            bundles,
             is_scanning: search.running.is_some(),
             has_scanned: search.has_scanned,
             libraries: &search.result.libraries,
@@ -446,6 +465,12 @@ impl FastForwardApplication {
                 }
             }
             SoundPluginsCommand::ScanAgain => self.start_scanning_plugins(),
+            SoundPluginsCommand::SelectTab(tab) => self.interface.sound_plugins_tab = tab,
+            SoundPluginsCommand::AskToDownloadBundles => self.ask_whether_to_download_the_bundles(),
+            SoundPluginsCommand::CancelAskingToDownloadBundles => self.do_not_download_the_bundles(),
+            SoundPluginsCommand::DownloadBundles => self.download_the_bundles(),
+            SoundPluginsCommand::CancelBundleDownload => self.cancel_the_download_of_the_bundles(),
+            SoundPluginsCommand::DismissBundleMessage => self.dismiss_what_the_download_said(),
         }
     }
 

@@ -2187,3 +2187,30 @@ fn the_bundled_folder_and_the_folders_in_it_are_trusted_and_no_other_folder_is_n
         FolderStanding::NotAsked
     );
 }
+
+#[test]
+fn two_bundled_folders_are_both_trusted_and_a_folder_that_was_not_there_when_it_was_said_is_trusted_when_it_is() {
+    let host = PluginHost::new();
+    let root = tempfile::tempdir().unwrap();
+    let (beside, fetched) = (root.path().join("plugins"), root.path().join("data").join("plugins"));
+    std::fs::create_dir_all(&beside).unwrap();
+    host.trust_bundled_folder(&beside);
+    // (The second is said before it is there: the folder of the Bundles tab is trusted from the start.)
+    host.trust_bundled_folder(&fetched);
+    host.trust_bundled_folder(&fetched);
+    std::fs::create_dir_all(fetched.join("set")).unwrap();
+
+    assert_eq!(
+        host.standing_of(&crate::plugin_trust::folder_key(&beside)),
+        FolderStanding::Approved
+    );
+    assert_eq!(
+        host.standing_of(&crate::plugin_trust::folder_key(&fetched.join("set"))),
+        FolderStanding::Approved,
+        "the first is not forgotten, and the second is a folder that is there now"
+    );
+    assert_eq!(
+        host.standing_of(&crate::plugin_trust::folder_key(root.path())),
+        FolderStanding::NotAsked
+    );
+}

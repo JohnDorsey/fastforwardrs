@@ -70,6 +70,10 @@ Then Surge XT Effects, then the rest. For Linux and Ubuntu CI, the same plugins'
 
 `bundled-plugins/manifest.json`, `tools/bundled_plugins/fetch_bundled_plugins.py` (and its tests, run by CI), the folder `plugins` beside the program looked in last and trusted, a window label, `fastforwardrs-export` that does not refuse it, and `tests/bundled_plugins_real.rs` (ignored; run by hand on the folder the script makes). **Verified [V]:** the script run for real on Windows and in Ubuntu (WSL) downloaded every file, checked every checksum and made the folder; the six plugins load from it **alone** (a single `.clap` file each, with no other file of their archives), scan, can be effects, and start steady. See `distribution-notices.md` for what a release does, and the README.
 
+## The *Bundles* tab (2026-10-21)
+
+The maintainer asked that the average person not have to run a script, if there is no meaningful legal difference. **The tab is built**: *Edit > Sound plugins... > Bundles*, a button that asks and then downloads the six plugins from their authors' release pages into the person's data folder, checks every checksum, and keeps the licence texts and a notice beside them (see `plugins-and-trust.md`; the legal reading is in `distribution-notices.md`). **Verified [V]** with the real network on Windows (146 MB in 54 seconds) and in Ubuntu (109 MB in 30 seconds, with `tar`): every file of the manifest was fetched, and what Windows fetched loaded in the scan program and started steady. The script stays for releases that must work with no network.
+
 ## What was downloaded and what was found (2026-10-20, after the decision)
 
 Downloaded to the scratch folder (not into the project), **one new folder each**, nothing run from them except by our scanner and our test harness: Dragonfly Reverb 3.2.10 (win64 and

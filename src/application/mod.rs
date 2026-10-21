@@ -35,6 +35,7 @@ mod scrub_bar;
 mod scrub_slider;
 mod selection;
 mod settings_windows;
+pub mod sound_plugins_bundles;
 pub mod sound_plugins_window;
 mod start_time_hold;
 mod textures;

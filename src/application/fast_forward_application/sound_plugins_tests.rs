@@ -41,7 +41,7 @@ fn open_the_menu_of_the_plus_button(window: &mut Window) {
     window.click(plus);
 }
 
-fn is_shown(window: &Window, label: &str) -> bool {
+pub(super) fn is_shown(window: &Window, label: &str) -> bool {
     window.harness.query_by_label(label).is_some()
 }
 
@@ -199,7 +199,7 @@ fn a_plugin_chosen_in_the_menu_is_put_on_the_clip_with_the_values_its_ports_begi
 }
 
 /// Whether the window shows a label that has `text` in it.
-fn shows_containing(window: &Window, text: &str) -> bool {
+pub(super) fn shows_containing(window: &Window, text: &str) -> bool {
     window.harness.query_all_by_label_contains(text).next().is_some()
 }
 
@@ -460,7 +460,7 @@ fn the_placeholder_of_an_installed_plugin_says_when_its_folder_is_not_trusted_or
 
 // --- the window ---
 
-fn open_the_window(window: &mut Window) {
+pub(super) fn open_the_window(window: &mut Window) {
     window.harness.get_by_label("Edit").click();
     window.settle();
     window.harness.get_by_label("Sound plugins...").click();
@@ -818,6 +818,16 @@ fn the_view<'a>(
         settings,
         other_folders: &[],
         bundled_folder: None,
+        fetched_folder: None,
+        tab: crate::application::sound_plugins_window::SoundPluginsTab::Plugins,
+        bundles: crate::application::sound_plugins_bundles::BundlesView {
+            rows: &[],
+            has_builds: true,
+            total_bytes: 0,
+            hosts: "",
+            folder: None,
+            state: crate::application::sound_plugins_bundles::BundleState::Idle,
+        },
         is_scanning,
         has_scanned,
         libraries: &[],

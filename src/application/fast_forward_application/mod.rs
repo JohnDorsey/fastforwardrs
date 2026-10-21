@@ -100,6 +100,7 @@ mod navigation_key_tests;
 mod picture_tests;
 #[cfg(test)]
 mod playing_edit_tests;
+mod plugin_bundles_flow;
 mod plugin_flow;
 #[cfg(test)]
 mod plugin_tests;
@@ -131,6 +132,8 @@ mod selection_tests;
 mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
+#[cfg(test)]
+mod sound_plugin_bundles_tests;
 #[cfg(test)]
 mod sound_plugin_folder_tests;
 mod sound_plugins_flow;
@@ -578,6 +581,7 @@ impl FastForwardApplication {
         self.say_what_the_picture_engine_has_done_and_gone_on_after();
         self.collect_finished_background_work();
         self.take_what_the_plugin_scan_found();
+        self.take_what_the_download_of_the_bundles_said();
         self.forget_what_is_gone_from_the_project();
         self.synchronise_the_preview_with_the_project();
 
