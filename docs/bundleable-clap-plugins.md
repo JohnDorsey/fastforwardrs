@@ -74,6 +74,15 @@ Then Surge XT Effects, then the rest. For Linux and Ubuntu CI, the same plugins'
 
 The maintainer asked that the average person not have to run a script, if there is no meaningful legal difference. **The tab is built**: *Edit > Sound plugins... > Bundles*, a button that asks and then downloads the six plugins from their authors' release pages into the person's data folder, checks every checksum, and keeps the licence texts and a notice beside them (see `plugins-and-trust.md`; the legal reading is in `distribution-notices.md`). **Verified [V]** with the real network on Windows (146 MB in 54 seconds) and in Ubuntu (109 MB in 30 seconds, with `tar`): every file of the manifest was fetched, and what Windows fetched loaded in the scan program and started steady. The script stays for releases that must work with no network.
 
+## The builds for macOS (2026-10-21)
+
+Nobody here has a Mac, so what is known comes from a probe job on a GitHub runner (macOS 26, arm64) and then from a step of the CI that does the whole thing. **Verified [V], by the CI on a Mac:**
+
+* The release files are `surge-xt-macos-1.3.4-pluginsonly.zip` (187 MB; it holds `Surge XT Effects.clap/`, a bundle), `dragonfly-reverb-3.2.10-macos-universal.dmg` (25 MB) and `DPF-Plugins-v1.7-macos-universal.dmg` (58 MB). **A disk image holds `.app` programs of the standalone plugins and one `.pkg` installer, and the `.clap` bundles are only in the installer**: `pkgutil --expand-full` gives `dpf-<name>-clapbundles.pkg/Payload/<Plugin>.clap`. So the manifest has an `installer` field for a build, the program (and the script) mounts the image with `hdiutil attach -readonly -nobrowse`, expands the installer into a scratch folder, copies the bundles out and lets the image go. **Nothing is installed.**
+* Every bundle is **universal (x86_64 and arm64), signed ad hoc by its authors** (no Developer ID: nobody vouches for them beyond the checksum), and a DPF or Dragonfly bundle is one file, `Contents/MacOS/<Name>`, with no `Info.plist`. `curl` does not mark what it downloads as quarantined, so no Gatekeeper question is asked. The execute bits are kept when the folder is copied (the zip stores them).
+* **The real fetch and the real scan pass on the Mac of the CI**: all six plugins are fetched with their checksums right, are found by the scan program (which sees a `.clap` folder as one library on macOS), load, can be effects, and none of them is unreliable at its start (`tests/bundled_plugins_real.rs`, the step *Fetch the bundled plugins and scan them (macOS)*; a failure there is a warning, not a red build).
+* **Not verified [B]:** that they sound right (nobody has heard a plugin run on a Mac), that the window works on a Mac, and that the plugins load on an Intel Mac (the files hold both, and the runner is arm64).
+
 ## What was downloaded and what was found (2026-10-20, after the decision)
 
 Downloaded to the scratch folder (not into the project), **one new folder each**, nothing run from them except by our scanner and our test harness: Dragonfly Reverb 3.2.10 (win64 and
