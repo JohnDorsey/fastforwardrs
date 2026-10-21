@@ -46,6 +46,11 @@ pub fn layers_of_a_section<'a>(
                 LayerContent::Text(_) => {
                     PreviewLayerContent::Text(layer.text_at(frame).expect("a text layer has a text object"))
                 }
+                LayerContent::Solid { .. } => PreviewLayerContent::Solid(
+                    layer
+                        .solid_colour_at(frame)
+                        .expect("a layer that is a solid colour has a colour"),
+                ),
                 // (Never: an adjustment clip is a group of what is behind it, and is not a layer of a section.)
                 LayerContent::Adjustment => unreachable!("an adjustment clip is not a layer of a section"),
             },

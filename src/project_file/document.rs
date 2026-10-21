@@ -374,6 +374,25 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         badges: Vec<BadgeDocument>,
     },
+    /// A generator clip (format 15): a picture the program makes from a few values, shown for a while. The only generator there is makes a solid colour.
+    Generator {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        duration_in_frames: u64,
+        /// Which generator: its key, `builtin:solid_colour`.
+        generator: String,
+        colour: ColourDocument,
+        area: CanvasAreaDocument,
+        /// How far the area is turned, clockwise. Left out for one that is upright.
+        #[serde(default, skip_serializing_if = "is_not_turned")]
+        rotation_degrees: f32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
+    },
     /// An adjustment clip (format 15): no picture of its own; its effects are done to everything behind it, for as long as it lasts.
     Adjustment {
         #[serde(default, skip_serializing_if = "is_zero")]

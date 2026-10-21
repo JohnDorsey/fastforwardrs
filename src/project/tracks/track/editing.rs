@@ -12,8 +12,10 @@ use crate::project::tracks::adjustment_clip::AdjustmentClip;
 use crate::project::tracks::clip::Clip;
 use crate::project::tracks::drawer::Drawer;
 use crate::project::tracks::gain::Gain;
+use crate::project::tracks::generator_clip::{GeneratorClip, GeneratorKind};
 use crate::project::tracks::ids::{ClipId, RackId};
 use crate::project::tracks::placement::Placement;
+use crate::project::tracks::text_object::TextColour;
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
 use crate::project::{AnimationTarget, EffectKind, Effects, PropertyId, PropertyValue};
@@ -62,6 +64,8 @@ pub enum ClipEditError {
     NotAMediaClip { clip: ClipId },
     #[error("{clip} is not a text object, so this does not apply to it")]
     NotATextClip { clip: ClipId },
+    #[error("{clip} is not a generator clip, so this does not apply to it")]
+    NotAGeneratorClip { clip: ClipId },
     #[error("{clip} is a sound, which is not on the picture, so this does not apply to it")]
     NotOnThePicture { clip: ClipId },
     #[error("{clip} lasts as long as the part of its video or sound it is made from, so this does not apply to it")]
@@ -270,7 +274,7 @@ impl Track {
         let changed = match &self.entries[index].clip {
             Clip::Video(media) => Clip::Video(change(media)),
             Clip::Audio(media) => Clip::Audio(change(media)),
-            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) => {
+            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => {
                 return Err(ClipEditError::NotAMediaClip { clip });
             }
         };
@@ -311,6 +315,16 @@ impl Track {
             return Err(ClipEditError::NotATextClip { clip });
         };
         text.object = object;
+        Ok(())
+    }
+
+    /// Makes the generator clip `clip` make the picture of `colour`.
+    pub fn set_generator_colour(&mut self, clip: ClipId, colour: TextColour) -> Result<(), ClipEditError> {
+        let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
+        let Clip::Generator(generator) = &mut self.entries[index].clip else {
+            return Err(ClipEditError::NotAGeneratorClip { clip });
+        };
+        *generator = generator.with_colour(colour);
         Ok(())
     }
 
@@ -456,6 +470,20 @@ impl Track {
     ) -> Option<(ClipId, u64)> {
         let duration = self.longest_new_text_clip_at(timeline_frame, wanted_frames)?;
         let clip = Clip::Adjustment(AdjustmentClip::new(duration).ok()?);
+        let id = self.insert_clip_at(timeline_frame, clip).ok()?;
+        Some((id, duration))
+    }
+
+    /// Adds a generator clip of `kind` at `timeline_frame` that lasts `wanted_frames` frames, or less if it would run into the next clip. Returns the clip's name and how many
+    /// frames it lasts, or `None` if another clip is at that frame.
+    pub fn insert_generator_clip_at(
+        &mut self,
+        timeline_frame: TimelineFrameIndex,
+        kind: GeneratorKind,
+        wanted_frames: u64,
+    ) -> Option<(ClipId, u64)> {
+        let duration = self.longest_new_text_clip_at(timeline_frame, wanted_frames)?;
+        let clip = Clip::Generator(GeneratorClip::new(kind, duration).ok()?);
         let id = self.insert_clip_at(timeline_frame, clip).ok()?;
         Some((id, duration))
     }

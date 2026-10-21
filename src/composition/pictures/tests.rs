@@ -4,7 +4,8 @@
 use super::*;
 use crate::composition::test_projects::{
     LONG_VIDEO, LONG_VIDEO_FRAME_COUNT, SHORT_SILENT_VIDEO, SHORT_VIDEO_FRAME_COUNT, TALL_VIDEO, WIDE_PICTURE,
-    media_clip, project_of, random_project_with_places, random_project_with_places_and_keyframes,
+    media_clip, project_of, random_project_with_generators, random_project_with_generators_and_keyframes,
+    random_project_with_places, random_project_with_places_and_keyframes,
 };
 use crate::project::tracks::{Angle, CanvasArea, ClipId, ImageClip, Placement, TextClip, TrackId};
 use crate::project::{AnimationTarget, SourceMediaIdentifier, fitted_placement, with_placement_value};
@@ -55,6 +56,8 @@ enum Seen {
     Video(u64, u64, u32),
     Text,
     Picture,
+    /// A solid colour (a generator clip).
+    Solid,
 }
 
 fn seen(layer: &Layer) -> Seen {
@@ -64,6 +67,7 @@ fn seen(layer: &Layer) -> Seen {
         }
         LayerContent::Text(_) => Seen::Text,
         LayerContent::Image { .. } => Seen::Picture,
+        LayerContent::Solid { .. } => Seen::Solid,
         LayerContent::Adjustment => unreachable!("an adjustment clip is not a layer of a section"),
     }
 }
@@ -703,6 +707,22 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<
                 None,
                 plain_place(project, location, text.object.placement(), timeline_frame),
             )),
+            Clip::Generator(generator) => {
+                let place = plain_place(project, location, generator.placement(), timeline_frame);
+                front_to_back.push((location, None, place));
+                // (A solid colour hides what is behind it if nothing of it is see-through or moved about, and it is all of the picture and upright.)
+                let target = AnimationTarget::Clip(location);
+                if generator.colour.alpha == u8::MAX
+                    && !project.is_animated(target, PropertyId::Colour)
+                    && generator.placement().rotation.is_zero()
+                    && generator.placement().area == CanvasArea::WHOLE_PICTURE
+                    && !PROPERTIES_OF_WHERE_A_LAYER_IS
+                        .into_iter()
+                        .any(|property| project.is_animated(target, property))
+                {
+                    break;
+                }
+            }
             Clip::Image(image) => {
                 let shown_size = project
                     .source(image.source())
@@ -772,6 +792,21 @@ fn plain_place(project: &Project, clip: ClipId, says: Placement, timeline_frame:
 #[test]
 fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at_a_time_shows() {
     check_that_the_plan_shows_what_looking_at_one_frame_at_a_time_shows(0, random_project_with_places);
+}
+
+#[test]
+fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at_a_time_shows_when_some_clips_are_solid_colours()
+ {
+    check_that_the_plan_shows_what_looking_at_one_frame_at_a_time_shows(31_000, random_project_with_generators);
+}
+
+#[test]
+fn the_plan_shows_at_every_frame_exactly_what_looking_at_the_tracks_one_frame_at_a_time_shows_when_keyframes_move_and_colour_solid_colours()
+ {
+    check_that_the_plan_shows_what_looking_at_one_frame_at_a_time_shows(
+        32_000,
+        random_project_with_generators_and_keyframes,
+    );
 }
 
 #[test]

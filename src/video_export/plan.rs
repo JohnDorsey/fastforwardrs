@@ -151,7 +151,7 @@ pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, 
                 used_sources.insert(*source);
                 image_sources.insert(*source);
             }
-            LayerContent::Text(_) | LayerContent::Adjustment => {}
+            LayerContent::Text(_) | LayerContent::Solid { .. } | LayerContent::Adjustment => {}
         }
     }
     let runs = find_the_runs(&pictures, picture_size);

@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use crate::project::tracks::{
-    Angle, CanvasArea, Clip, ClipKind, ImageClip, MediaClip, Placement, TextClip, TextColour, TextObject, Track,
-    TrackId,
+    Angle, CanvasArea, Clip, ClipKind, GeneratorClip, GeneratorKind, ImageClip, MediaClip, Placement, TextClip,
+    TextColour, TextObject, Track, TrackId,
 };
 use crate::project::{
     AnimationTarget, EffectKind, FrameRate, Project, PropertyId, PropertyValue, SourceAudioProperties,
@@ -93,14 +93,20 @@ pub(super) fn project_of(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
 /// A project with a few tracks of videos, sounds and text, laid out at random, where some clips
 /// reach past the end of their file.
 pub(super) fn random_project(random: &mut DeterministicRandomNumbers) -> Project {
-    random_project_of(random, false)
+    random_project_of(random, false, false)
 }
 
 /// Like [`random_project`], and, as `with_places`, some of its videos are of another shape than
 /// the picture or are put somewhere on it (some over the whole of it) and some of its text is
 /// turned.
 pub(super) fn random_project_with_places(random: &mut DeterministicRandomNumbers) -> Project {
-    random_project_of(random, true)
+    random_project_of(random, true, false)
+}
+
+/// Like [`random_project_with_places`], and about half of the text objects that it would have are generator clips (solid colours, some of them see-through) instead, some
+/// of them put somewhere on the picture. (Only here, so that the projects that the other functions make from the same seeds are what they always were.)
+pub(crate) fn random_project_with_generators(random: &mut DeterministicRandomNumbers) -> Project {
+    random_project_of(random, true, true)
 }
 
 /// Like [`random_project`], and some of the clips that have sound in it have keyframes for how loud they are and whether
@@ -164,7 +170,19 @@ pub(super) fn random_project_with_sound_keyframes(random: &mut DeterministicRand
 /// Like [`random_project_with_places`], and some of the videos, pictures and text objects in it have keyframes for where
 /// they are, and some text objects for how they look.
 pub(super) fn random_project_with_places_and_keyframes(random: &mut DeterministicRandomNumbers) -> Project {
-    let mut project = random_project_with_places(random);
+    let project = random_project_with_places(random);
+    with_random_keyframes(random, project)
+}
+
+/// Like [`random_project_with_generators`], and some of the clips in it have keyframes for where they are, and some of the text objects and generator clips for how they look
+/// (the colour of a generator).
+pub(crate) fn random_project_with_generators_and_keyframes(random: &mut DeterministicRandomNumbers) -> Project {
+    let project = random_project_with_generators(random);
+    with_random_keyframes(random, project)
+}
+
+/// `project`, and some of the videos, pictures, text objects and generator clips in it have keyframes for where they are, and some text objects and generator clips for how they look.
+fn with_random_keyframes(random: &mut DeterministicRandomNumbers, mut project: Project) -> Project {
     let clips: Vec<_> = project
         .tracks()
         .iter()
@@ -239,7 +257,18 @@ fn random_value_of_the_kind(random: &mut DeterministicRandomNumbers, kind: Value
 /// tracks, have some of the effects there are, with values chosen at random (what they begin with for some), some of them with
 /// keyframes. (Nothing here names an effect: each of the table is tried.)
 pub(crate) fn random_project_with_effects(random: &mut DeterministicRandomNumbers) -> Project {
-    let mut project = random_project_with_places_and_keyframes(random);
+    let project = random_project_with_places_and_keyframes(random);
+    with_random_effects(random, project)
+}
+
+/// Like [`random_project_with_generators_and_keyframes`], with the effects of [`random_project_with_effects`].
+pub(crate) fn random_project_with_generators_and_effects(random: &mut DeterministicRandomNumbers) -> Project {
+    let project = random_project_with_generators_and_keyframes(random);
+    with_random_effects(random, project)
+}
+
+/// `project`, and some of the videos, pictures, text objects and generator clips in it, and some of the tracks, have some of the effects there are (see [`random_project_with_effects`]).
+fn with_random_effects(random: &mut DeterministicRandomNumbers, mut project: Project) -> Project {
     let total_frames = project.total_frame_count();
     let mut targets: Vec<(AnimationTarget, u64, u64)> = Vec::new();
     for track in project.tracks() {
@@ -298,7 +327,7 @@ pub(crate) fn random_project_with_effects(random: &mut DeterministicRandomNumber
     project
 }
 
-fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool) -> Project {
+fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool, with_generators: bool) -> Project {
     let track_count = 1 + random.next_below(4);
     let mut tracks = Vec::new();
     for number in 0..track_count {
@@ -327,6 +356,21 @@ fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool)
                     let first = random.next_below(SOUND_FILE_FRAME_COUNT);
                     let end = first + 1 + random.next_below(SOUND_FILE_FRAME_COUNT * 3 / 2);
                     Clip::Audio(media_clip(SOUND_FILE, first, end, clip_speed))
+                }
+                _ if with_generators && random.next_below(2) == 0 => {
+                    let generator = GeneratorClip::new(GeneratorKind::SolidColour, 1 + random.next_below(80)).unwrap();
+                    // (Mostly not see-through, so that those that cover the picture are tried as much as those that do not.)
+                    let alpha = if random.next_below(3) == 0 {
+                        random.next_below(255) as u8
+                    } else {
+                        255
+                    };
+                    Clip::Generator(generator.with_colour(TextColour::new(
+                        random.next_below(256) as u8,
+                        random.next_below(256) as u8,
+                        random.next_below(256) as u8,
+                        alpha,
+                    )))
                 }
                 _ => Clip::Text(TextClip::new(text_object(random), 1 + random.next_below(80)).unwrap()),
             };
@@ -395,6 +439,20 @@ fn placed_at_random(random: &mut DeterministicRandomNumbers, clip: Clip) -> Clip
                 text.object.clone()
             };
             Clip::Text(TextClip::new(object, text.duration_in_frames()).expect("it lasted before"))
+        }
+        Clip::Generator(generator) => {
+            // (Over the whole picture, as it is made, or somewhere on it, turned or not.)
+            let place = match random.next_below(4) {
+                0 => random_place(random),
+                1 => Placement::upright(CanvasArea::new(
+                    unit(random) * 0.5,
+                    unit(random) * 0.5,
+                    0.2 + unit(random) * 0.5,
+                    0.2 + unit(random) * 0.5,
+                )),
+                _ => generator.placement(),
+            };
+            Clip::Generator(generator.with_placement(place))
         }
         other => other,
     }

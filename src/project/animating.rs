@@ -13,7 +13,9 @@ use std::fmt;
 
 use super::animation::{PropertyId, PropertyValue, placement_value, text_value, with_placement_value, with_text_value};
 use super::racks::NewKeyframe;
-use super::tracks::{Clip, ClipEditError, ClipId, ClipPlacement, Gain, Placement, TextObject, TrackId};
+use super::tracks::{
+    Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, Gain, Placement, TextColour, TextObject, TrackId,
+};
 use super::{EditError, Project, TimelineFrameIndex, fitted_placement};
 
 /// What a keyframe, or a change of a property, is about: a clip, or a track.
@@ -63,6 +65,7 @@ impl Project {
                 )
             }
             Clip::Text(text) => Some(text.object.placement()),
+            Clip::Generator(generator) => Some(generator.placement()),
             Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => None,
         }
     }
@@ -90,6 +93,17 @@ impl Project {
         )
     }
 
+    /// The colour that the generator clip `clip` makes the picture of at `timeline_frame`: what it says, changed as its keyframes say. (A frame before
+    /// the clip is taken for its first, one after it for its last.) `None` for what is not a generator clip.
+    pub fn generator_colour_at(&self, clip: ClipId, timeline_frame: TimelineFrameIndex) -> Option<TextColour> {
+        let placement = self.placement_of(clip)?;
+        let generator = placement.clip.as_generator()?;
+        Some(
+            self.animation_of(AnimationTarget::Clip(clip))
+                .colour_at(generator.colour, the_frame_the_clip_is_at(&placement, timeline_frame)),
+        )
+    }
+
     /// The value that `property` of the clip `placement` is has when it is not animated. `None` if the clip does not have the
     /// property (a value of an effect that it does not have is not one of its properties).
     fn static_value_of_a_clip(&self, placement: &ClipPlacement<'_>, property: PropertyId) -> Option<PropertyValue> {
@@ -105,6 +119,9 @@ impl Project {
             PropertyId::Muted => clip.as_media().map(|media| PropertyValue::Flag(media.is_muted())),
             PropertyId::Position | PropertyId::Size | PropertyId::Rotation => {
                 placement_value(&self.placement_on_the_picture(clip)?, property)
+            }
+            PropertyId::Colour if clip.kind() == ClipKind::Generator => {
+                Some(PropertyValue::Colour(clip.as_generator()?.colour))
             }
             PropertyId::Text | PropertyId::FontFamily | PropertyId::FontSize | PropertyId::Colour => {
                 text_value(&clip.as_text()?.object, property)
@@ -153,6 +170,9 @@ impl Project {
             (PropertyId::Position | PropertyId::Size | PropertyId::Rotation, _) => {
                 let current = self.placement_on_the_picture(&clip).ok_or_else(wrong)?;
                 self.set_clip_placement(clip_id, with_placement_value(current, property, value))
+            }
+            (PropertyId::Colour, PropertyValue::Colour(colour)) if clip.kind() == ClipKind::Generator => {
+                self.set_generator_colour(clip_id, *colour)
             }
             (PropertyId::Text | PropertyId::FontFamily | PropertyId::FontSize | PropertyId::Colour, _) => {
                 let text = clip.as_text().ok_or_else(wrong)?;

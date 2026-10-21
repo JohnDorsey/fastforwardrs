@@ -9,9 +9,10 @@ use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
     AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, EffectInstanceId, EffectKind,
-    FrameRate, Gain, GroupColour, GroupId, GroupKind, InputColourOverride, KeyframeId, KeyframeMove, Member, Placement,
-    ProjectSettings, PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
-    SpeedIndicatorLayout, TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
+    FrameRate, Gain, GeneratorKind, GroupColour, GroupId, GroupKind, InputColourOverride, KeyframeId, KeyframeMove,
+    Member, Placement, ProjectSettings, PropertyId, PropertyValue, RackDestination, RackId, Settings,
+    SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextColour, TextObject, TimeDirection,
+    TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -193,6 +194,17 @@ pub enum Command {
     NewAdjustmentClip {
         track: TrackId,
         frame: TimelineFrameIndex,
+    },
+    /// Put a new generator clip of this kind on a track, starting at a frame, and select it, so that its properties show.
+    NewGeneratorClip {
+        track: TrackId,
+        frame: TimelineFrameIndex,
+        kind: GeneratorKind,
+    },
+    /// The colour that a solid colour (a generator clip) makes the picture of was changed.
+    SetGeneratorColour {
+        clip: ClipId,
+        colour: TextColour,
     },
     /// A text object was changed: what it says, how it looks, or where it is on the picture.
     SetTextObject {
@@ -428,6 +440,8 @@ impl Command {
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
             | Self::NewAdjustmentClip { .. }
+            | Self::NewGeneratorClip { .. }
+            | Self::SetGeneratorColour { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
             | Self::AddEffect { .. }
@@ -555,6 +569,8 @@ impl Command {
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
             | Self::NewAdjustmentClip { .. }
+            | Self::NewGeneratorClip { .. }
+            | Self::SetGeneratorColour { .. }
             | Self::SetTextObject { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
@@ -614,6 +630,7 @@ impl Command {
             Self::SetTrackGain { track, .. } => Some(EditKey::about(&("the gain of", track))),
             Self::SetTrackHeight { track, .. } => Some(EditKey::about(&("the height of", track))),
             Self::SetTextObject { clip, .. } => Some(EditKey::about(&("the text object of", clip))),
+            Self::SetGeneratorColour { clip, .. } => Some(EditKey::about(&("the colour of", clip))),
             Self::SetClipDuration { clip, .. } => Some(EditKey::about(&("how long it lasts of", clip))),
             Self::SetEffectValue { target, property, .. } => {
                 Some(EditKey::about(&("the value of the effect", target, property)))

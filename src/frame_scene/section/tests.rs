@@ -74,6 +74,7 @@ fn kind_of_the_layer_in_the_plan(layer: &Layer) -> &'static str {
         LayerContent::Video(_) => "video",
         LayerContent::Image { .. } => "picture file",
         LayerContent::Text(_) => "text",
+        LayerContent::Solid { .. } => "solid colour",
         LayerContent::Adjustment => "adjustment",
     }
 }
@@ -83,6 +84,7 @@ fn kind_of_the_layer_made(layer: &PreviewLayer<'_>) -> &'static str {
         PreviewLayerContent::Video(_) => "video",
         PreviewLayerContent::Image { .. } => "picture file",
         PreviewLayerContent::Text(_) => "text",
+        PreviewLayerContent::Solid(_) => "solid colour",
     }
 }
 
@@ -156,6 +158,7 @@ fn a_video_is_asked_about_once_with_its_layer_and_a_picture_file_once_with_its_s
             }
             PreviewLayerContent::Video(shown) => assert!(matches!(shown, VideoInThePicture::Waiting)),
             PreviewLayerContent::Text(text) => assert_eq!(text.text, "hello"),
+            PreviewLayerContent::Solid(_) => panic!("there is no solid colour in this project"),
         }
     }
     assert_eq!(picture_files, 1);
@@ -404,4 +407,64 @@ fn the_colour_that_the_caller_gives_for_a_picture_file_is_the_colour_of_its_laye
         })
         .collect();
     assert_eq!(colours, vec![chosen]);
+}
+
+#[test]
+fn a_solid_colour_is_a_layer_that_has_the_colour_the_clip_says_at_each_frame_by_its_keyframes_and_nothing_is_asked_for_it()
+ {
+    let (mut project, _, _) = a_video_with_a_text_and_a_picture_file_over_it();
+    let front = project.add_track_in_front();
+    let (solid, _) = project
+        .try_insert_generator_clip(front, frame(0), crate::project::GeneratorKind::SolidColour, 200)
+        .unwrap();
+    project
+        .set_generator_colour(solid, crate::project::TextColour::new(255, 0, 0, 128))
+        .unwrap();
+    make_a_keyframe(
+        &mut project,
+        AnimationTarget::Clip(solid),
+        PropertyId::Colour,
+        100,
+        PropertyValue::Colour(crate::project::TextColour::new(0, 0, 255, 128)),
+    );
+    make_a_keyframe(
+        &mut project,
+        AnimationTarget::Clip(solid),
+        PropertyId::Colour,
+        200 - 1,
+        PropertyValue::Colour(crate::project::TextColour::new(0, 255, 0, 128)),
+    );
+    let plan = plan_of(&project);
+    let colours_at = |timeline_frame: u64| {
+        let mut asked = WhatWasAsked::default();
+        the_layers_at(&plan, timeline_frame, &mut asked, None)
+            .iter()
+            .filter_map(|layer| match &layer.content {
+                PreviewLayerContent::Solid(colour) => Some(*colour),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        colours_at(60),
+        [crate::project::TextColour::new(0, 0, 255, 128)],
+        "the frame before the first keyframe is its colour"
+    );
+    assert_eq!(colours_at(100), [crate::project::TextColour::new(0, 0, 255, 128)]);
+    assert_eq!(colours_at(199), [crate::project::TextColour::new(0, 255, 0, 128)]);
+    let half_way = colours_at(150);
+    assert_eq!(half_way.len(), 1);
+    assert!(half_way[0].blue > 100 && half_way[0].blue < 160 && half_way[0].green > 100 && half_way[0].green < 160);
+    let mut asked = WhatWasAsked::default();
+    let layers = the_layers_at(&plan, 60, &mut asked, None);
+    assert!(
+        asked.videos.len() == 1 && asked.pictures.len() == 1,
+        "only the video and the picture file are asked about"
+    );
+    assert_eq!(
+        layers.len(),
+        4,
+        "the video, the text, the picture file and the solid colour"
+    );
 }

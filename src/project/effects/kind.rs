@@ -186,14 +186,14 @@ impl EffectKind {
             .collect()
     }
 
-    /// Whether a clip of this kind can have the effect: a picture effect can be on what is seen (a video, a picture, a text object, and an adjustment clip, which is what
-    /// is behind it, seen), and a
+    /// Whether a clip of this kind can have the effect: a picture effect can be on what is seen (a video, a picture, a text object, a generator clip, and an adjustment clip,
+    /// which is what is behind it, seen), and a
     /// sound effect on what is heard (a sound, **and a video, which has a soundtrack**: it was only a sound until phase 7).
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self.0.domain {
             EffectDomain::Picture => matches!(
                 kind,
-                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Adjustment
+                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Adjustment | ClipKind::Generator
             ),
             EffectDomain::Sound => matches!(kind, ClipKind::Audio | ClipKind::Video),
         }

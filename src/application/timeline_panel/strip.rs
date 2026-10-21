@@ -11,7 +11,7 @@
 //! * Right-clicking a clip selects it (unless it is one of the clips that are selected already), and the
 //!   settings of what is selected are in the properties panel. It also opens a menu to put a copy of the clip (or of all the
 //!   selected clips, if it is one of them) beside it, and to delete it (see [`super::clip_menu`]).
-//! * Right-clicking an empty part of the strip opens a menu with "New", which has "Text object" and "Adjustment clip".
+//! * Right-clicking an empty part of the strip opens a menu with "New", which has "Text object", "Adjustment clip" and "Generator" (which has "Solid colour").
 //! * Under the strip hang the drawers that are open: those of its clips, and the one of the track (see [`super::drawers`]).
 //!
 //! Cutting a track is done with a key (see the `keyboard` module), not with the mouse.
@@ -32,7 +32,7 @@ use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::application::start_time_hold::StartTimeMemory;
 use crate::application::textures::Textures;
 use crate::application::theme;
-use crate::project::{AnimationTarget, Clip, ClipId, Project, Track, TrackId};
+use crate::project::{AnimationTarget, Clip, ClipId, GeneratorKind, Project, Track, TrackId};
 
 /// The name the strip of a track is known by to screen readers (and the tests): it says which track.
 pub fn strip_label(track_title: &str) -> String {
@@ -183,6 +183,20 @@ pub(super) fn show(
                     }
                     ui.close();
                 }
+                ui.menu_button("Generator", |ui| {
+                    for kind in GeneratorKind::ALL {
+                        if ui.button(kind.name()).clicked() {
+                            if let Some(target) = state.new_menu_target {
+                                commands.push(Command::NewGeneratorClip {
+                                    track: target.track,
+                                    frame: target.frame,
+                                    kind,
+                                });
+                            }
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
     }

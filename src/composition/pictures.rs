@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use crate::colour_effects::ColourMatrix;
 use crate::cube_table::CubeTable;
-use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
+use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextColour, TextObject, TrackId};
 use crate::project::{
     Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, Member,
     PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor,
@@ -55,6 +55,10 @@ pub enum LayerContent {
         source: SourceMediaIdentifier,
     },
     Text(TextObject),
+    /// A generator clip that makes a solid colour: the colour it is before its keyframes change that (see [`Layer::solid_colour_at`]).
+    Solid {
+        colour: TextColour,
+    },
     /// An adjustment clip: no picture of its own. **It is not in the layers of a section**: what it does is a group of everything behind it (see [`GroupSpan`]).
     Adjustment,
 }
@@ -129,7 +133,10 @@ impl Layer {
     pub fn video(&self) -> Option<&VisibleVideo> {
         match &self.content {
             LayerContent::Video(video) => Some(video),
-            LayerContent::Image { .. } | LayerContent::Text(_) | LayerContent::Adjustment => None,
+            LayerContent::Image { .. }
+            | LayerContent::Text(_)
+            | LayerContent::Solid { .. }
+            | LayerContent::Adjustment => None,
         }
     }
 
@@ -192,12 +199,28 @@ impl Layer {
         })
     }
 
+    /// The colour the layer makes the picture of at `timeline_frame` (a frame it is seen at): what the generator says, changed as the keyframes say. `None` if the layer is
+    /// not a solid colour.
+    pub fn solid_colour_at(&self, timeline_frame: TimelineFrameIndex) -> Option<TextColour> {
+        let LayerContent::Solid { colour } = &self.content else {
+            return None;
+        };
+        Some(self.animation.colour_at(*colour, timeline_frame.value()))
+    }
+
     /// Whether the layer fills all of the picture with pictures and is not turned, so that nothing
     /// behind it can be seen. (A text object never does: it is mostly clear. Nor does a picture: it
     /// may have clear places, and a picture file does not say whether it has. Nor does a video that keyframes move
-    /// about: it may not at some other frame.)
+    /// about: it may not at some other frame. A solid colour does if it is not see-through and its colour is not animated, which may make it so at some other frame.)
     pub fn covers_the_picture(&self) -> bool {
-        self.video().is_some()
+        let fills_with_pictures = match &self.content {
+            LayerContent::Video(_) => true,
+            LayerContent::Solid { colour } => {
+                colour.alpha == u8::MAX && !self.animation.is_animated(PropertyId::Colour)
+            }
+            LayerContent::Image { .. } | LayerContent::Text(_) | LayerContent::Adjustment => false,
+        };
+        fills_with_pictures
             // (An effect that makes pixels clear, an opacity, a crop, a blur, lets what is behind show.)
             && effects_keep_the_opacity(&self.effects)
             && !self.is_moved_by_keyframes()
@@ -466,7 +489,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 Clip::Video(_) => 0,
                 // A picture has no pictures to run out of: it is there or its file is not.
                 Clip::Image(image) => u64::from(is_usable(image.source())),
-                Clip::Text(_) | Clip::Adjustment(_) => 0,
+                Clip::Text(_) | Clip::Adjustment(_) | Clip::Generator(_) => 0,
                 // (Nothing is seen of a sound, or of a crate, which holds nothing but keyframes.)
                 Clip::Audio(_) | Clip::Crate(_) => continue,
             };
@@ -617,6 +640,9 @@ fn sections_between(
                     }
                 }
                 Clip::Text(text) => layers.push(candidate.entry(LayerContent::Text(text.object.clone()))),
+                Clip::Generator(generator) => layers.push(candidate.entry(LayerContent::Solid {
+                    colour: generator.colour,
+                })),
                 Clip::Adjustment(_) => layers.push(candidate.entry(LayerContent::Adjustment)),
                 Clip::Audio(_) | Clip::Crate(_) => {}
             }
@@ -730,6 +756,8 @@ mod animation_tests;
 mod conformance_tests;
 #[cfg(test)]
 mod effects_tests;
+#[cfg(test)]
+mod generator_tests;
 #[cfg(test)]
 mod group_effects_tests;
 #[cfg(test)]

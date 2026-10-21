@@ -174,6 +174,17 @@ fn draw_layer(
             ));
             None
         }
+        PreviewLayerContent::Solid(colour) => {
+            // (The old drawing mixes the colour as it mixes the colours of a picture, and leaves the other effects out.)
+            let mut pixel = [colour.red, colour.green, colour.blue, colour.alpha];
+            layer.colour().apply_to_rgba_pixels(&mut pixel);
+            painter.add(Shape::convex_polygon(
+                corners.to_vec(),
+                Color32::from_rgba_unmultiplied(pixel[0], pixel[1], pixel[2], pixel[3]),
+                Stroke::NONE,
+            ));
+            None
+        }
         PreviewLayerContent::Text(object) => {
             let (picture_width, picture_height) = picture.size_in_whole_pixels();
             let key = TextAppearance::of(object, picture_width, picture_height);

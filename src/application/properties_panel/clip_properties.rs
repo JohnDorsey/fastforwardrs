@@ -17,8 +17,8 @@ use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
 use crate::application::timeline_panel::SourceLook;
 use crate::project::{
-    AdjustmentClip, AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, Member,
-    PropertyId, SpeedFactor,
+    AdjustmentClip, AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, GeneratorClip, ImageClip, MediaClip,
+    Member, PropertyId, SpeedFactor, TextColour,
 };
 
 /// What the row of how big a video or a picture is is called.
@@ -38,6 +38,7 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         // (A crate has nothing of its own to change: what it holds is in its racks, which are shown in the timeline.)
         Clip::Crate(_) => {}
         Clip::Adjustment(adjustment) => show_an_adjustment_clip(ui, content, clip, adjustment, commands),
+        Clip::Generator(generator) => show_a_generator_clip(ui, content, clip, generator, commands),
     }
     chain::show(ui, content, Member::Clip(clip), commands);
 }
@@ -142,6 +143,45 @@ fn show_an_adjustment_clip(
         if let Some(frames) = shown_for(ui, content.project.frame_rate(), adjustment.duration_in_frames()) {
             commands.push(Command::SetClipDuration { clip, frames });
         }
+    });
+}
+
+/// What a generator clip makes the picture of (for a solid colour, the colour, which can have keyframes), how long it lasts, and where it is on the picture.
+fn show_a_generator_clip(
+    ui: &mut Ui,
+    content: &PropertiesContent<'_>,
+    clip: ClipId,
+    generator: &GeneratorClip,
+    commands: &mut Vec<Command>,
+) {
+    kind_box::show(ui, kind_name(ClipKind::Generator), |ui| {
+        ui.weak(generator.kind().name());
+        ui.add_space(4.0);
+        let colour_now = content
+            .project
+            .generator_colour_at(clip, content.current_frame)
+            .unwrap_or(generator.colour);
+        let new_colour = animatable::row(
+            ui,
+            content,
+            Animatable::of_a_clip(clip, PropertyId::Colour),
+            commands,
+            |ui, _| {
+                let label = ui.label("Colour");
+                let mut rgba = [colour_now.red, colour_now.green, colour_now.blue, colour_now.alpha];
+                ui.color_edit_button_srgba_unmultiplied(&mut rgba)
+                    .labelled_by(label.id)
+                    .changed()
+                    .then_some(TextColour::new(rgba[0], rgba[1], rgba[2], rgba[3]))
+            },
+        );
+        if let Some(colour) = new_colour {
+            commands.push(Command::SetGeneratorColour { clip, colour });
+        }
+        if let Some(frames) = shown_for(ui, content.project.frame_rate(), generator.duration_in_frames()) {
+            commands.push(Command::SetClipDuration { clip, frames });
+        }
+        placement_controls::show(ui, content, clip, SIZE_LABEL, commands);
     });
 }
 
