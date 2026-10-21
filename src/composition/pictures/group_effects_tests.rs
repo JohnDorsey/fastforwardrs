@@ -514,3 +514,43 @@ fn a_group_whose_effect_is_an_exposure_covers_the_picture_as_one_with_a_hue_shif
         "an exposure keeps what is opaque opaque, so the group covers what is behind it"
     );
 }
+
+// A regression test (found on 2026-10-21 while the groups were made to cover the picture by what their effects do): a layer that covers the picture hid what is behind it whatever
+// its own effects were, so a video made half see-through by an opacity left out the layers that its see-through half is over.
+#[test]
+fn a_video_that_an_effect_makes_see_through_does_not_hide_what_is_behind_it() {
+    let mut project = project_of(vec![vec![(0, long_video(0, 40, 1))], vec![(0, text(40))]]);
+    let [video, behind] = [0, 1].map(|track| project.tracks()[track].placement_at_index(0).unwrap().id);
+    let opacity = project
+        .add_effect(AnimationTarget::Clip(video), EffectKind::OPACITY)
+        .unwrap();
+    project
+        .set_property_at(
+            AnimationTarget::Clip(video),
+            PropertyId::effect_value(EffectKind::OPACITY, opacity, 0),
+            PropertyValue::Number(0.5),
+            frame(0),
+        )
+        .unwrap();
+
+    let see_through = plan(&project);
+
+    assert_eq!(
+        see_through.sections[0]
+            .layers
+            .iter()
+            .map(|layer| layer.clip)
+            .collect::<Vec<_>>(),
+        [behind, video],
+        "the text object behind a half see-through video is seen through it"
+    );
+    // The same video with a colour change, which keeps it opaque, hides it still.
+    let mut opaque = project_of(vec![vec![(0, long_video(0, 40, 1))], vec![(0, text(40))]]);
+    let video = opaque.tracks()[0].placement_at_index(0).unwrap().id;
+    put_a_hue_shift_on(&mut opaque, AnimationTarget::Clip(video), 40.0);
+    assert_eq!(
+        plan(&opaque).sections[0].layers.len(),
+        1,
+        "a hue shift keeps it opaque, and what is behind it is not seen"
+    );
+}

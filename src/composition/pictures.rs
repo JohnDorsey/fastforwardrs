@@ -198,10 +198,20 @@ impl Layer {
     /// about: it may not at some other frame.)
     pub fn covers_the_picture(&self) -> bool {
         self.video().is_some()
+            // (An effect that makes pixels clear, an opacity, a crop, a blur, lets what is behind show.)
+            && effects_keep_the_opacity(&self.effects)
             && !self.is_moved_by_keyframes()
             && self.placement.rotation.is_zero()
             && self.placement.area == CanvasArea::WHOLE_PICTURE
     }
+}
+
+/// Whether `effects` keep every pixel of the picture they are done to as opaque as it was: every one is a change of colours by itself (a mix, an exposure, a table), by the kind of
+/// the effect and whatever its values are. (One that is not, an opacity, a crop, a blur, may let what is behind show.)
+pub(crate) fn effects_keep_the_opacity(effects: &[LayerEffect]) -> bool {
+    effects
+        .iter()
+        .all(|effect| effect.kind.descriptor().changes_each_pixel_by_itself)
 }
 
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring

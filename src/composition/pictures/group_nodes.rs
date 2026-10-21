@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use super::{GroupSpan, Layer, LayerContent, LayerEffect, SpanOwner};
+use super::{GroupSpan, Layer, LayerContent, LayerEffect, SpanOwner, effects_keep_the_opacity};
 use crate::project::{GroupId, Project, ResolvedAnimations, TimelineFrameIndex};
 
 /// A layer, with where its track is (0 is the front-most track) and the groups that make pictures of their own that it is in, the outermost first.
@@ -130,20 +130,13 @@ pub(super) fn make_the_adjustments_groups(nodes: Vec<Node>, is_the_frame: bool) 
     made
 }
 
-/// Whether the effects keep every pixel of the picture they are done to as opaque as it was: every one is a change of colours by itself (a mix, an exposure, a table).
-fn keeps_the_opacity(effects: &[LayerEffect]) -> bool {
-    effects
-        .iter()
-        .all(|effect| effect.kind.descriptor().changes_each_pixel_by_itself)
-}
-
 impl Node {
     /// Whether nothing behind this can be seen: a layer that covers the picture, or a group that keeps what is in it as opaque as it was and has something in it that covers it.
     pub(super) fn covers_the_picture(&self) -> bool {
         match self {
             Self::Layer { layer, .. } => layer.covers_the_picture(),
             Self::Group { effects, children, .. } => {
-                keeps_the_opacity(effects) && children.iter().any(Node::covers_the_picture)
+                effects_keep_the_opacity(effects) && children.iter().any(Node::covers_the_picture)
             }
         }
     }

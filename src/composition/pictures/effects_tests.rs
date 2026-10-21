@@ -8,7 +8,7 @@ use super::tests::{frame, long_video, picture, text};
 use super::*;
 use crate::colour_effects::ColourMatrix;
 use crate::composition::test_projects::{project_of, random_project_with_effects};
-use crate::project::{AnimationTarget, Effect, EffectInstanceId, EffectKind, PropertyId, PropertyValue};
+use crate::project::{AnimationTarget, EffectInstanceId, EffectKind, PropertyId, PropertyValue};
 use crate::test_support::{self, DeterministicRandomNumbers, put_a_hue_shift_on};
 
 const HUE: PropertyId = crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT;
@@ -378,14 +378,15 @@ fn every_layer_has_the_effects_and_values_the_project_says_at_every_frame_it_is_
 /// they are videos).
 type WhatASectionShows = (u64, u64, Vec<(ClipId, Option<(u64, u64)>)>);
 
+// (Rewritten on purpose on 2026-10-21: it said that no effect changes where the sections begin and end or what they show. That was wrong for an effect that makes pixels clear (an
+// opacity, a crop, a blur): a video that has one does not cover the picture, so what is behind it is seen, and the sections show more. It is true of the effects that change colours
+// and nothing else, which are what it is held to now; the others have a test of their own.)
 #[test]
-fn effects_do_not_change_where_the_sections_of_the_plan_begin_and_end_or_what_they_show() {
+fn effects_that_only_change_colours_do_not_change_where_the_sections_of_the_plan_begin_and_end_or_what_they_show() {
     let mut projects_with_effects_checked = 0;
     for seed in 1..=100u64 {
         let mut random = DeterministicRandomNumbers::with_seed(seed + 22_000);
         let project = random_project_with_effects(&mut random);
-        let mut without = project.clone();
-        let mut had_one = false;
         let targets: Vec<AnimationTarget> = project
             .tracks()
             .iter()
@@ -394,16 +395,29 @@ fn effects_do_not_change_where_the_sections_of_the_plan_begin_and_end_or_what_th
                     .chain(track.placements().map(|placement| AnimationTarget::Clip(placement.id)))
             })
             .collect();
-        for target in targets {
-            let on_it: Vec<EffectInstanceId> = without
+        // `with_colour_effects` keeps only the effects that change colours and nothing else; `without` has no effect at all.
+        let mut with_colour_effects = project.clone();
+        let mut without = project.clone();
+        let mut had_one = false;
+        for &target in &targets {
+            let on_it: Vec<(EffectInstanceId, bool)> = project
                 .effects_of(target)
                 .unwrap()
                 .iter()
-                .map(Effect::instance)
+                .map(|effect| {
+                    (
+                        effect.instance(),
+                        effect.kind().descriptor().changes_each_pixel_by_itself,
+                    )
+                })
                 .collect();
-            for instance in on_it {
+            for (instance, only_colours) in on_it {
                 without.remove_effect(target, instance).unwrap();
-                had_one = true;
+                if only_colours {
+                    had_one = true;
+                } else {
+                    with_colour_effects.remove_effect(target, instance).unwrap();
+                }
             }
         }
 
@@ -432,11 +446,11 @@ fn effects_do_not_change_where_the_sections_of_the_plan_begin_and_end_or_what_th
                 .collect()
         };
 
-        assert_eq!(shown(&project), shown(&without), "seed {seed}");
+        assert_eq!(shown(&with_colour_effects), shown(&without), "seed {seed}");
         projects_with_effects_checked += usize::from(had_one);
     }
     assert!(
-        projects_with_effects_checked > 80,
+        projects_with_effects_checked > 40,
         "only {projects_with_effects_checked} projects had effects"
     );
 }
