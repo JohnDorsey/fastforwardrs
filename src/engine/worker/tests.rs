@@ -958,6 +958,10 @@ fn a_frame_with_an_effect_that_depends_on_earlier_frames_is_neither_taken_from_t
     use crate::engine::persistent_buffer_tests::{
         ADD_A_TENTH_OF_RED, THE_PICTURE_AND_A_BUFFER, one_buffer_that_lasts, stateful,
     };
+    // (A computer with no software adapter, as the macOS runners are, has none to run it on.)
+    let Some(_graphics) = really_software_graphics() else {
+        return;
+    };
     with_a_worker(software_settings(), |worker, told| {
         worker
             .take_an_effect_with_structure(
