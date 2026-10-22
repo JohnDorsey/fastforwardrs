@@ -27,25 +27,40 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use super::guard::GuardedShader;
 use super::pipelines::{ACCUMULATION_FORMAT, pipeline_of_two_modules, shader_module};
+use super::shader_structure::{MOST_IMAGES_OF_A_SHADER, ShaderStructure, TargetFormat};
 use super::shaders;
 use super::uniform_bytes::SlotWriter;
 
+/// What is on the shelf for an effect: the WGSL of its shader and what the shader is made of besides its code (see [`ShaderStructure`]).
+type OnTheShelf = (Arc<str>, Arc<ShaderStructure>);
+
 /// The shaders that were put on the shelf (see [`publish_effect_shader`]), by the key of the effect they run.
-static SHELF: Mutex<Option<HashMap<String, Arc<str>>>> = Mutex::new(None);
+static SHELF: Mutex<Option<HashMap<String, OnTheShelf>>> = Mutex::new(None);
 
 /// Puts the WGSL `source` of the effect under `key` on the shelf, for **the engine to take when a frame asks for the effect**: whoever describes a frame does not need a
 /// handle of the engine to give it the shader (phase 6: the host of ISF shaders makes the WGSL and publishes it; the window's engine and the export's engine each take what they
-/// are asked for). A key that is on the shelf already has its shader replaced.
+/// are asked for). A key that is on the shelf already has its shader replaced. The shader is **one pass that reads one picture** (see [`publish_effect_shader_with`] for one that is
+/// not).
 pub fn publish_effect_shader(key: &str, source: &str) {
+    publish_effect_shader_with(key, source, ShaderStructure::one_pass_of_one_picture());
+}
+
+/// The same, for a shader that is made of what `structure` says: the pictures it reads, the buffers it draws into, and its passes.
+pub fn publish_effect_shader_with(key: &str, source: &str, structure: ShaderStructure) {
     SHELF
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_with(HashMap::new)
-        .insert(key.to_owned(), Arc::from(source));
+        .insert(key.to_owned(), (Arc::from(source), Arc::new(structure)));
 }
 
 /// The shader that is on the shelf for the effect under `key`, if there is one.
 pub fn published_effect_shader(key: &str) -> Option<Arc<str>> {
+    published_effect_shader_with_structure(key).map(|(source, _)| source)
+}
+
+/// The shader that is on the shelf for the effect under `key`, and what it is made of, if there is one.
+pub fn published_effect_shader_with_structure(key: &str) -> Option<(Arc<str>, Arc<ShaderStructure>)> {
     SHELF
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -67,21 +82,51 @@ pub const NUMBERS_THE_ENGINE_ADDS: usize = 4;
 pub const FOREIGN_EFFECT_UNIFORM_BYTES: u64 =
     ((MOST_NUMBERS_OF_A_FOREIGN_EFFECT + NUMBERS_THE_ENGINE_ADDS) * std::mem::size_of::<f32>()) as u64;
 
-/// What the pipelines of all the effects that others wrote are made from: the same bindings, the same vertex stage, the same sampler.
-pub struct ForeignEffectPass {
-    pub bind_group_layout: wgpu::BindGroupLayout,
+/// The format of a buffer that is not `float`: 8 bits of each colour.
+pub const EIGHT_BIT_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// The format that a pass draws into, for the kind of target that the structure of a shader says.
+pub fn texture_format_of(format: TargetFormat) -> wgpu::TextureFormat {
+    match format {
+        TargetFormat::Half => ACCUMULATION_FORMAT,
+        TargetFormat::EightBit => EIGHT_BIT_BUFFER_FORMAT,
+    }
+}
+
+/// The numbers a pass of a call is given: those of the call, with the number of the pass in the place that the structure says (`PASSINDEX`), if it says one. (A shader of phase 1
+/// owns all its numbers.)
+pub fn numbers_of_a_pass(values: &[f32], structure: &ShaderStructure, pass: usize) -> Vec<f32> {
+    let mut numbers = values.to_vec();
+    if let Some(place) = structure.pass_index_number {
+        if numbers.len() <= place {
+            numbers.resize(place + 1, 0.0);
+        }
+        numbers[place] = pass as f32;
+    }
+    numbers
+}
+
+/// The bindings of a pass for shaders that read some number of pictures, and the layout of the pipeline that is made from them.
+struct LayoutForPictures {
+    bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
+}
+
+/// What the pipelines of all the effects that others wrote are made from: the same vertex stage, the same sampler, and for each number of pictures that a shader reads the same
+/// bindings (the numbers at 0, then a texture and a sampler for each picture: the kth at `1 + 2k` and `2 + 2k`).
+pub struct ForeignEffectPass {
+    /// The bindings for no picture, one, two... up to [`MOST_IMAGES_OF_A_SHADER`].
+    layouts: Vec<LayoutForPictures>,
     vertex_stage: wgpu::ShaderModule,
-    /// How the picture an effect works on is read: smoothly between its pixels, and the pixel at the edge beyond them.
+    /// How the pictures an effect works on are read: smoothly between their pixels, and the pixel at the edge beyond them.
     pub sampler: wgpu::Sampler,
 }
 
 impl ForeignEffectPass {
     pub fn create(device: &wgpu::Device) -> Self {
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("engine foreign effect bindings"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let layouts = (0..=MOST_IMAGES_OF_A_SHADER)
+            .map(|images| {
+                let mut entries = vec![wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
@@ -92,30 +137,40 @@ impl ForeignEffectPass {
                         min_binding_size: std::num::NonZeroU64::new(FOREIGN_EFFECT_UNIFORM_BYTES),
                     },
                     count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("engine foreign effect layout"),
-            bind_group_layouts: &[Some(&bind_group_layout)],
-            immediate_size: 0,
-        });
+                }];
+                for image in 0..images as u32 {
+                    entries.push(wgpu::BindGroupLayoutEntry {
+                        binding: 1 + 2 * image,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    });
+                    entries.push(wgpu::BindGroupLayoutEntry {
+                        binding: 2 + 2 * image,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    });
+                }
+                let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("engine foreign effect bindings"),
+                    entries: &entries,
+                });
+                let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("engine foreign effect layout"),
+                    bind_group_layouts: &[Some(&bind_group_layout)],
+                    immediate_size: 0,
+                });
+                LayoutForPictures {
+                    bind_group_layout,
+                    pipeline_layout,
+                }
+            })
+            .collect();
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("engine foreign effect sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -128,23 +183,34 @@ impl ForeignEffectPass {
         });
         Self {
             vertex_stage: shader_module(device, "engine full screen triangle", shaders::FULL_SCREEN_TRIANGLE),
-            bind_group_layout,
-            pipeline_layout,
+            layouts,
             sampler,
         }
     }
 
-    /// The pipeline that runs `shader` (which has been through the guard) on a picture. Call it where the errors of the graphics library are caught: a shader
-    /// that the library will not take makes an error that is not in the return value.
-    pub fn pipeline_for(&self, device: &wgpu::Device, key: &str, shader: &GuardedShader) -> wgpu::RenderPipeline {
+    /// The bindings of a pass of a shader that reads `images` pictures (at most [`MOST_IMAGES_OF_A_SHADER`]).
+    pub fn bind_group_layout_for(&self, images: usize) -> &wgpu::BindGroupLayout {
+        &self.layouts[images].bind_group_layout
+    }
+
+    /// The pipeline that runs `shader` (which has been through the guard), which reads `images` pictures, drawing into a texture of `format`. Call it where the errors of the
+    /// graphics library are caught: a shader that the library will not take makes an error that is not in the return value.
+    pub fn pipeline_for(
+        &self,
+        device: &wgpu::Device,
+        key: &str,
+        shader: &GuardedShader,
+        images: usize,
+        format: TargetFormat,
+    ) -> wgpu::RenderPipeline {
         let fragment_stage = shader_module(device, &format!("effect {key}"), &shader.wgsl);
         pipeline_of_two_modules(
             device,
             &format!("effect {key}"),
             &self.vertex_stage,
             &fragment_stage,
-            &self.pipeline_layout,
-            ACCUMULATION_FORMAT,
+            &self.layouts[images].pipeline_layout,
+            texture_format_of(format),
             None,
         )
     }
@@ -256,6 +322,37 @@ mod tests {
             .map(|four| f32::from_le_bytes(*four))
             .collect();
         assert_eq!(engines, [7.0, 9.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn the_number_of_the_pass_is_put_where_the_structure_says_and_nowhere_when_it_says_nowhere() {
+        let mut structure = ShaderStructure::one_pass_of_one_picture();
+        // A shader of phase 1 owns all its numbers.
+        assert_eq!(
+            numbers_of_a_pass(&[1.0, 2.0, 3.0, 4.0, 5.0], &structure, 2),
+            vec![1.0, 2.0, 3.0, 4.0, 5.0]
+        );
+        structure.pass_index_number = Some(3);
+        assert_eq!(
+            numbers_of_a_pass(&[1.0, 2.0, 3.0, 4.0, 5.0], &structure, 2),
+            vec![1.0, 2.0, 3.0, 2.0, 5.0]
+        );
+        assert_eq!(numbers_of_a_pass(&[1.0, 2.0, 3.0, 4.0, 5.0], &structure, 0)[3], 0.0);
+        // A call that has fewer numbers is made as long as it has to be.
+        assert_eq!(numbers_of_a_pass(&[], &structure, 5), vec![0.0, 0.0, 0.0, 5.0]);
+        assert_eq!(numbers_of_a_pass(&[7.0, 8.0], &structure, 1), vec![7.0, 8.0, 0.0, 1.0]);
+        structure.pass_index_number = Some(0);
+        assert_eq!(numbers_of_a_pass(&[9.0, 8.0], &structure, 3), vec![3.0, 8.0]);
+    }
+
+    #[test]
+    fn a_pass_draws_into_half_floats_or_into_eight_bits_as_the_structure_says() {
+        assert_eq!(texture_format_of(TargetFormat::Half), ACCUMULATION_FORMAT);
+        assert_eq!(
+            texture_format_of(TargetFormat::EightBit),
+            wgpu::TextureFormat::Rgba8Unorm
+        );
+        assert_eq!(EIGHT_BIT_BUFFER_FORMAT, wgpu::TextureFormat::Rgba8Unorm);
     }
 
     fn shader_with(entry_points: Vec<(&str, naga::ShaderStage)>) -> GuardedShader {

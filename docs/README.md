@@ -6,7 +6,8 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 
 | File | What is in it |
 |---|---|
-| [`using-the-editor-in-detail.md`](using-the-editor-in-detail.md) | every menu, control, key and drag, with the rules behind each (tracks, clips, keyframes, racks, drawers, effects, groups) |
+| [`using-the-editor-in-detail.md`](using-the-editor-in-detail.md) | every menu, control, key and drag, with the rules behind each (tracks, clips, keyframes, racks, drawers, groups) |
+| [`effects-and-shaders-in-detail.md`](effects-and-shaders-in-detail.md) | what an effect is, the effects there are, look-up tables, shaders (ISF: filters, generators, passes), where the files that effects use are kept |
 | [`settings-colours-and-export.md`](settings-colours-and-export.md) | each setting, how colours are read and mixed, what the exported video is |
 | [`project-file-format.md`](project-file-format.md) | the `.ffrs` and `.json` project files: layout, an example (it is run by a test), every version |
 | [`plugins-and-trust.md`](plugins-and-trust.md) | sound plugins: who may run them, how they are found, how they run in the sound, the check of a plugin's start, the plugins that come with the program |
@@ -38,7 +39,8 @@ The documents above say "the README" and name a section. The README was split; t
 | Section | Now in |
 |---|---|
 | *Status*, *Running it* (the picture engine), *How it is built*, *Testing*, *Known limits* | [`developer-readme.md`](developer-readme.md) |
-| *Using it* (menus, window, keys, tracks, layers, keyframes, effects, groups, sound, missing files) | [`using-the-editor-in-detail.md`](using-the-editor-in-detail.md) |
+| *Using it* (menus, window, keys, tracks, layers, keyframes, groups, sound, missing files) | [`using-the-editor-in-detail.md`](using-the-editor-in-detail.md) |
+| *Using it*: effects, look-up tables, shaders | [`effects-and-shaders-in-detail.md`](effects-and-shaders-in-detail.md) |
 | *Settings*, *Colours*, *Exported video* | [`settings-colours-and-export.md`](settings-colours-and-export.md) |
 | *Project files* | [`project-file-format.md`](project-file-format.md) |
 | *Plugins and who may run them* | [`plugins-and-trust.md`](plugins-and-trust.md) |

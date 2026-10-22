@@ -6,13 +6,14 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
 use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, OutputConversion};
 use super::device::EngineDevice;
-use super::effect_shaders::{check_that_it_is_an_effect, write_the_numbers_of_a_call};
+use super::effect_shaders::{check_that_it_is_an_effect, numbers_of_a_pass, write_the_numbers_of_a_call};
 use super::guard::GuardedShader;
 use super::own_effects::{LutNumbers, blur_numbers, crop_numbers, gain_factors};
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
@@ -26,6 +27,8 @@ use super::plan::{
     CallDomain, EffectStep, EffectsThatRun, KindOfEffect, NUMBERS_OF_A_COLOUR_MATRIX, PassPlan, plan_frame,
 };
 use super::readback::{PendingReadback, ReadbackBuffers, ReadbackProblem};
+use super::shader_steps::{StepPlan, plan_the_steps};
+use super::shader_structure::{ImageSource, ShaderStructure, TargetFormat};
 use super::tables::{
     MOST_TABLES_ON_THE_CARD, TableOnTheCard, published_table, put_on_the_card as put_the_table_on_the_card,
 };
@@ -37,6 +40,15 @@ use super::{
     UniformBytes, UniformSlot,
 };
 use super::{LUT_KEY, TableId};
+
+/// An effect that was given to the engine as a shader, made into pipelines on the card: one that draws into the pictures that effects make, and one that draws into a buffer of 8 bits
+/// of each colour if the shader has such buffers (a pipeline draws into one format).
+struct InstalledShader {
+    pipeline_of_pictures: wgpu::RenderPipeline,
+    pipeline_of_eight_bit_buffers: Option<wgpu::RenderPipeline>,
+    /// What the shader is made of besides its code.
+    structure: Arc<ShaderStructure>,
+}
 
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
 const IDLE_TEXTURE_BUDGET_IN_BYTES: u64 = 256 * 1024 * 1024;
@@ -144,8 +156,10 @@ pub struct FrameRenderer {
     upload_arena: UniformArena,
     /// A picture of one white pixel, which a layer that is a colour is made of.
     white_pixel: wgpu::TextureView,
+    /// A picture of one clear pixel, which a buffer of a shader that was not drawn into yet is read as.
+    clear_pixel: wgpu::TextureView,
     /// The effects that were given to the engine as shaders, by their keys.
-    shader_effects: HashMap<String, wgpu::RenderPipeline>,
+    shader_effects: HashMap<String, InstalledShader>,
     /// Which effects the engine can run: its own, and the keys of `shader_effects`.
     effects_that_run: EffectsThatRun,
     /// The look-up tables the card has, taken from the shelf (see `tables`) when a frame needed them, and let go of when there are too many.
@@ -194,10 +208,39 @@ impl FrameRenderer {
                 depth_or_array_layers: 1,
             },
         );
+        let clear = device.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("engine: one clear pixel"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SENT_PICTURE_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        device.queue.write_texture(
+            clear.as_image_copy(),
+            &[0, 0, 0, 0],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
         let alignment = device.uniform_alignment;
         Self {
             uniforms: UniformBytes::new(alignment),
             white_pixel: white.create_view(&wgpu::TextureViewDescriptor::default()),
+            clear_pixel: clear.create_view(&wgpu::TextureViewDescriptor::default()),
             device,
             pool: TexturePool::default(),
             readback: ReadbackBuffers::default(),
@@ -230,24 +273,50 @@ impl FrameRenderer {
     /// Makes the effect under `key` an effect that frames can ask for, run by `shader`, which has been through the guard: its pipeline is made now, so that
     /// a shader the graphics library will not take is found out now and not in the middle of a frame. An effect that was under `key` is replaced.
     pub fn install_effect(&mut self, key: &str, shader: &GuardedShader) -> Result<(), RenderProblem> {
+        self.install_effect_with_structure(key, shader, &ShaderStructure::one_pass_of_one_picture())
+    }
+
+    /// The same for a shader that is made of what `structure` says (see [`ShaderStructure`]): its pipelines are made for the number of pictures it reads, and for a buffer of 8
+    /// bits of each colour if it has one.
+    pub fn install_effect_with_structure(
+        &mut self,
+        key: &str,
+        shader: &GuardedShader,
+        structure: &ShaderStructure,
+    ) -> Result<(), RenderProblem> {
         if key == COLOUR_MATRIX_KEY || key.starts_with("engine:") {
             return Err(RenderProblem::BadEffectShader(format!(
                 "the key {key} belongs to the engine's own effects"
             )));
         }
         check_that_it_is_an_effect(shader).map_err(RenderProblem::BadEffectShader)?;
-        let (pipeline, mistake) = self.device.catching_errors(|| {
-            self.pipelines
-                .foreign_effect
-                .pipeline_for(&self.device.device, key, shader)
+        structure.check().map_err(RenderProblem::BadEffectShader)?;
+        let images = structure.images.len();
+        let has_eight_bit_buffers = structure.buffers.iter().any(|buffer| !buffer.float);
+        let (pipelines, mistake) = self.device.catching_errors(|| {
+            let foreign = &self.pipelines.foreign_effect;
+            (
+                foreign.pipeline_for(&self.device.device, key, shader, images, TargetFormat::Half),
+                has_eight_bit_buffers
+                    .then(|| foreign.pipeline_for(&self.device.device, key, shader, images, TargetFormat::EightBit)),
+            )
         });
         if let Some(mistake) = mistake {
             return Err(RenderProblem::BadEffectShader(format!(
                 "the graphics library would not take it: {mistake}"
             )));
         }
-        self.shader_effects.insert(key.to_owned(), pipeline);
-        self.effects_that_run.add_shader(key);
+        let (pipeline_of_pictures, pipeline_of_eight_bit_buffers) = pipelines;
+        self.shader_effects.insert(
+            key.to_owned(),
+            InstalledShader {
+                pipeline_of_pictures,
+                pipeline_of_eight_bit_buffers,
+                structure: Arc::new(structure.clone()),
+            },
+        );
+        self.effects_that_run
+            .add_shader_with_passes(key, structure.passes.len());
         Ok(())
     }
 
@@ -614,6 +683,8 @@ impl FrameRenderer {
         // is the one the layer is put in its place from).
         let mut effect_pictures: Vec<(TextureShape, wgpu::Texture)> = Vec::new();
         let mut effect_picture_numbers: HashMap<usize, Vec<usize>> = HashMap::new();
+        // What each step of each pass that runs effects draws into and reads (empty for the other passes).
+        let mut step_plans: Vec<Vec<StepPlan>> = vec![Vec::new(); plan.passes.len()];
         for (pass_number, pass) in plan.passes.iter().enumerate() {
             let PassPlan::Effects { layer, .. } = pass else {
                 continue;
@@ -635,13 +706,26 @@ impl FrameRenderer {
                 LayerSource::Group(_) => accumulation_shape,
                 LayerSource::Solid(_) => continue,
             };
-            let numbers = plan.steps_of_effects[pass_number]
+            let plans = plan_the_steps(
+                &plan.steps_of_effects[pass_number],
+                &flat.layers[*layer].layer.effects,
+                |key| {
+                    self.shader_effects
+                        .get(key)
+                        .map(|installed| Arc::clone(&installed.structure))
+                },
+                shape,
+                (shape.width_in_pixels, shape.height_in_pixels),
+                largest,
+            );
+            let numbers = plans
                 .iter()
-                .map(|_| {
-                    effect_pictures.push((shape, self.pool.acquire(&self.device.device, shape)));
+                .map(|step| {
+                    effect_pictures.push((step.shape, self.pool.acquire(&self.device.device, step.shape)));
                     effect_pictures.len() - 1
                 })
                 .collect();
+            step_plans[pass_number] = plans;
             effect_picture_numbers.insert(*layer, numbers);
         }
         self.uniforms.clear();
@@ -681,7 +765,8 @@ impl FrameRenderer {
                         effect_slots.push(
                             plan.steps_of_effects[pass_number]
                                 .iter()
-                                .map(|step| match *step {
+                                .enumerate()
+                                .map(|(step_number, step)| match *step {
                                     EffectStep::Call {
                                         call,
                                         converts_into_display,
@@ -689,9 +774,13 @@ impl FrameRenderer {
                                     } => {
                                         let effect = &effects[call];
                                         match self.effects_that_run.kind_of(&effect.key) {
-                                            Some(KindOfEffect::Shader) => self.uniforms.add_slot(|writer| {
-                                                write_the_numbers_of_a_call(writer, &effect.values, picture_size);
-                                            }),
+                                            Some(KindOfEffect::Shader) => {
+                                                let step_plan = &step_plans[pass_number][step_number];
+                                                let numbers = shader_numbers(&self.shader_effects, effect, step_plan);
+                                                self.uniforms.add_slot(|writer| {
+                                                    write_the_numbers_of_a_call(writer, &numbers, step_plan.size);
+                                                })
+                                            }
                                             Some(kind @ (KindOfEffect::Exposure | KindOfEffect::Opacity)) => {
                                                 let factors = gain_factors(kind, effect.values[0]);
                                                 self.uniforms.add_slot(|writer| {
@@ -749,8 +838,18 @@ impl FrameRenderer {
                                             }
                                         }
                                     }
+                                    EffectStep::LaterPass { call, .. }
+                                        if self.effects_that_run.kind_of(&effects[call].key)
+                                            == Some(KindOfEffect::Shader) =>
+                                    {
+                                        let step_plan = &step_plans[pass_number][step_number];
+                                        let numbers = shader_numbers(&self.shader_effects, &effects[call], step_plan);
+                                        self.uniforms.add_slot(|writer| {
+                                            write_the_numbers_of_a_call(writer, &numbers, step_plan.size);
+                                        })
+                                    }
                                     // (The second pass of a blur is along the columns.)
-                                    EffectStep::SecondPass { call } => {
+                                    EffectStep::LaterPass { call, .. } => {
                                         let (sigma, half_width) = blur_numbers(effects[call].values[0], picture_size.1);
                                         self.uniforms.add_slot(|writer| {
                                             writer.i32(0).i32(1).f32(sigma).i32(half_width);
@@ -843,13 +942,19 @@ impl FrameRenderer {
                             }
                             LayerSource::Solid(_) => continue,
                         };
-                        for ((slot, &picture_number), step) in effect_slots[pass_number]
+                        // (What a shader that takes several passes reads as the picture it works on: the one that its first pass was given, in every pass.)
+                        let mut call_input_view = input_view;
+                        for (step_number, ((slot, &picture_number), step)) in effect_slots[pass_number]
                             .iter()
                             .zip(&effect_picture_numbers[layer])
                             .zip(&plan.steps_of_effects[pass_number])
+                            .enumerate()
                         {
+                            if matches!(step, EffectStep::Call { .. }) {
+                                call_input_view = input_view;
+                            }
                             let kind = match *step {
-                                EffectStep::Call { call, .. } | EffectStep::SecondPass { call } => self
+                                EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. } => self
                                     .effects_that_run
                                     .kind_of(&flat.layers[*layer].layer.effects[call].key),
                                 EffectStep::Conversion { .. } => Some(KindOfEffect::ColourMatrix),
@@ -868,24 +973,47 @@ impl FrameRenderer {
                             };
                             // (The effect that mixes colours reads its picture with no sampler; one that a shader runs also has the sampler of the effects.)
                             let (pipeline, bind_group, label) = match kind {
-                                Some(KindOfEffect::Shader) => (
-                                    &self.shader_effects[&flat.layers[*layer].layer.effects[step_call(step)].key],
-                                    self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                        label: Some("engine effect pass"),
-                                        layout: &self.pipelines.foreign_effect.bind_group_layout,
-                                        entries: &[
-                                            uniform_binding,
-                                            picture_binding,
-                                            wgpu::BindGroupEntry {
-                                                binding: 2,
-                                                resource: wgpu::BindingResource::Sampler(
-                                                    &self.pipelines.foreign_effect.sampler,
-                                                ),
-                                            },
-                                        ],
-                                    }),
-                                    "engine: an effect that was given to the engine as a shader",
-                                ),
+                                Some(KindOfEffect::Shader) => {
+                                    let installed = &self.shader_effects[&flat.layers[*layer].layer.effects[step_call(step)].key];
+                                    let shader_step = step_plans[pass_number][step_number]
+                                        .shader
+                                        .as_ref()
+                                        .expect("a step of a shader says what it reads");
+                                    // The numbers at binding 0, and then a texture and a sampler for each picture the shader reads.
+                                    let mut entries = vec![uniform_binding];
+                                    for (place, read) in shader_step.reads.iter().enumerate() {
+                                        let view = match read {
+                                            ImageSource::Picture => call_input_view,
+                                            ImageSource::DrawnByPass(drawn_by) => {
+                                                &effect_views[effect_picture_numbers[layer][shader_step.first_step + drawn_by]]
+                                            }
+                                            ImageSource::Clear => &self.clear_pixel,
+                                        };
+                                        entries.push(wgpu::BindGroupEntry {
+                                            binding: 1 + 2 * place as u32,
+                                            resource: wgpu::BindingResource::TextureView(view),
+                                        });
+                                        entries.push(wgpu::BindGroupEntry {
+                                            binding: 2 + 2 * place as u32,
+                                            resource: wgpu::BindingResource::Sampler(&self.pipelines.foreign_effect.sampler),
+                                        });
+                                    }
+                                    (
+                                        match shader_step.target_format {
+                                            TargetFormat::Half => &installed.pipeline_of_pictures,
+                                            TargetFormat::EightBit => installed
+                                                .pipeline_of_eight_bit_buffers
+                                                .as_ref()
+                                                .expect("a shader that draws into a buffer of 8 bits has a pipeline for it"),
+                                        },
+                                        self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                            label: Some("engine effect pass"),
+                                            layout: self.pipelines.foreign_effect.bind_group_layout_for(shader_step.images),
+                                            entries: &entries,
+                                        }),
+                                        "engine: an effect that was given to the engine as a shader",
+                                    )
+                                }
                                 Some(KindOfEffect::Blur) => (
                                     &self.pipelines.blur.pipeline,
                                     self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1250,7 +1378,7 @@ fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
 /// The number of the effect that a step runs. (Only asked of the steps that call a shader.)
 fn step_call(step: &EffectStep) -> usize {
     match step {
-        EffectStep::Call { call, .. } | EffectStep::SecondPass { call } => *call,
+        EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. } => *call,
         EffectStep::Conversion { .. } => unreachable!("a conversion is not run by a shader"),
     }
 }
@@ -1308,6 +1436,16 @@ fn planes_of(data: &PictureData) -> Vec<StagingPlane<'_>> {
                 },
             ]
         }
+    }
+}
+
+/// The numbers that a step of a shader is given: those of the call, with the number of the pass where the structure of the shader says (see [`numbers_of_a_pass`]).
+fn shader_numbers(shaders: &HashMap<String, InstalledShader>, effect: &super::EffectCall, step: &StepPlan) -> Vec<f32> {
+    match (&step.shader, shaders.get(&effect.key)) {
+        (Some(shader_step), Some(installed)) => {
+            numbers_of_a_pass(&effect.values, &installed.structure, shader_step.pass)
+        }
+        _ => effect.values.clone(),
     }
 }
 

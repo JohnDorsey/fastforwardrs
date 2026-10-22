@@ -12,6 +12,8 @@ use naga::front::glsl::{Frontend, Options};
 
 use super::reader::{IsfFile, IsfProblem, Shape};
 use super::rewrite::{Rewritten, rewrite};
+use super::structure::structure_of;
+use crate::engine::ShaderStructure;
 
 /// The name of the entry point of a compiled shader: the one the engine looks for.
 pub const ENTRY_POINT: &str = "fs_main";
@@ -20,7 +22,7 @@ pub const ENTRY_POINT: &str = "fs_main";
 const STACK_OF_THE_COMPILER: usize = 64 * 1024 * 1024;
 
 /// A shader that was compiled.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledShader {
     /// The WGSL module, with the fragment entry point [`ENTRY_POINT`].
     pub wgsl: String,
@@ -30,6 +32,9 @@ pub struct CompiledShader {
     pub notes: Vec<String>,
     /// What the shader is for (see [`Shape`]).
     pub shape: Shape,
+    /// What the engine is told of the shader besides its code: the pictures it reads, the buffers it draws into, its passes. **A shader can compile and have none**: what this version
+    /// cannot give a shader (images of its own, pictures but the one the effect works on) is told here, as the reason that it cannot be run.
+    pub structure: Result<ShaderStructure, Vec<IsfProblem>>,
 }
 
 /// The place in the ISF file that a place of the rewritten GLSL is, if it is one: the generated beginning and the generated end are no place of the file.
@@ -120,11 +125,13 @@ pub fn compile(file: &IsfFile) -> Result<CompiledShader, Vec<IsfProblem>> {
                 "the shader cannot be written as WGSL: {error}"
             ))]
         })?;
+    let structure = structure_of(file, &rewritten.image_names);
     Ok(CompiledShader {
         wgsl,
         image_names: rewritten.image_names,
         notes: rewritten.notes,
         shape: file.shape(),
+        structure,
     })
 }
 

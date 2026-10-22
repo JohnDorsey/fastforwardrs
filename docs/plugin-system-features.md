@@ -400,7 +400,7 @@ menu item or a window opened from one is marked.*
   point2D -> pair, event -> trigger, image -> input slot.
 * **PH-11 [P] M** Compiles the source through a small rewriting step and naga into WGSL, in a worker thread that survives a panic, and
   validates it. Compile errors are shown with line and column.
-* **PH-12 [P] M** Multi-pass shaders (`PASSES` with `TARGET`, `WIDTH` and `HEIGHT` expressions) and persistent buffers (EN-06); `IMG_*`
+* **PH-12 [P] M** Multi-pass shaders (`PASSES` with `TARGET`, `WIDTH` and `HEIGHT` expressions; **built 2026-10-22, phase 6.4.1**) and persistent buffers (EN-06); `IMG_*`
   macros; `TIME` is clip-local time and `FRAMEINDEX` clip-local frame number, never the wall clock; the y-axis flip.
 * **PH-13 [P] M** Filters, generators and transitions are told apart by their inputs (`inputImage`; none; `startImage`, `endImage`,
   `progress`) (EF-01 to EF-03).

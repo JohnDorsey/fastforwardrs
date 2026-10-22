@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::effect_shaders::{check_that_it_is_an_effect, published_effect_shader};
+use super::effect_shaders::{check_that_it_is_an_effect, published_effect_shader_with_structure};
 use super::guard::{ShaderProblem, guard_wgsl};
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
+use super::shader_structure::ShaderStructure;
 use super::worker;
 use super::{COLOUR_MATRIX_KEY, FrameDescription, PictureData, PictureId, YuvColour};
 
@@ -68,6 +69,17 @@ impl Engine {
     /// it. A shader that was under the key is replaced. Keys that begin with `engine:` are the engine's own. What a shader of an effect has to be is in
     /// `effect_shaders`.
     pub fn compile_effect_shader(&self, key: &str, source: &str) -> Result<EffectShaderReport, ShaderProblem> {
+        self.compile_effect_shader_with_structure(key, source, ShaderStructure::one_pass_of_one_picture())
+    }
+
+    /// The same, for a shader that is made of what `structure` says (see [`ShaderStructure`]): the pictures it reads, the buffers it draws into, and its passes. A structure that
+    /// is not well formed (see [`ShaderStructure::check`]) is refused here, in words.
+    pub fn compile_effect_shader_with_structure(
+        &self,
+        key: &str,
+        source: &str,
+        structure: ShaderStructure,
+    ) -> Result<EffectShaderReport, ShaderProblem> {
         let refuse = |message: String| ShaderProblem {
             message,
             line: None,
@@ -83,12 +95,14 @@ impl Engine {
         }
         let shader = guard_wgsl(source, self.most_passes_of_a_loop)?;
         check_that_it_is_an_effect(&shader).map_err(refuse)?;
+        structure.check().map_err(refuse)?;
         let report = EffectShaderReport {
             loops_capped: shader.loops_capped,
         };
         let _ = self.requests.send(EngineRequest::InstallEffect {
             key: key.to_owned(),
             shader: Arc::new(shader),
+            structure: Arc::new(structure),
         });
         Ok(report)
     }
@@ -101,8 +115,8 @@ impl Engine {
                 if effect.key.starts_with("engine:") || self.taken_off_the_shelf.contains(&effect.key) {
                     continue;
                 }
-                if let Some(source) = published_effect_shader(&effect.key) {
-                    let _ = self.compile_effect_shader(&effect.key, &source);
+                if let Some((source, structure)) = published_effect_shader_with_structure(&effect.key) {
+                    let _ = self.compile_effect_shader_with_structure(&effect.key, &source, (*structure).clone());
                     self.taken_off_the_shelf.insert(effect.key.clone());
                 }
             }

@@ -19,7 +19,7 @@
 //! a run in the display-referred domain; a shader cannot, so a pass of its own does it (an [`EffectStep::Conversion`]). In the compatibility mode (the numbers already are
 //! codes) there is nothing to convert, and there are no such passes.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::effect_shaders::MOST_NUMBERS_OF_A_FOREIGN_EFFECT;
 use super::{
@@ -103,8 +103,9 @@ pub enum EffectStep {
         converts_into_display: bool,
         converts_out_of_display: bool,
     },
-    /// The second pass of the effect with this number among the layer's effects, for an effect that takes two (the blur: along the rows, and then along the columns).
-    SecondPass { call: usize },
+    /// A pass after the first of the effect with this number among the layer's effects, for an effect that takes more than one: `pass` is its number (the first is 0, which is the
+    /// `Call`). The blur takes two (along the rows, and then along the columns); a shader takes as many as its structure has (see [`ShaderStructure`](super::ShaderStructure)).
+    LaterPass { call: usize, pass: usize },
     /// A pass of its own that only converts, light to display codes (`into_display`) or display codes to light.
     Conversion { into_display: bool },
 }
@@ -115,7 +116,7 @@ pub struct EffectToRun {
     /// The number of the effect among the layer's effects.
     pub call: usize,
     pub domain: CallDomain,
-    /// How many passes of the card the effect takes (one, or two for the blur).
+    /// How many passes of the card the effect takes (one; two for the blur; as many as the structure of a shader says).
     pub passes: usize,
     /// Whether the effect's own pass can do the conversion before it (when it is the first of its domain) and after it (when it is the last): the engine's colour matrix can.
     pub converts_itself: bool,
@@ -155,8 +156,11 @@ pub fn steps_of_a_run_of_effects(effects: &[EffectToRun], working_space_is_light
             converts_into_display,
             converts_out_of_display,
         });
-        if effect.passes == 2 {
-            steps.push(EffectStep::SecondPass { call: effect.call });
+        for pass in 1..effect.passes {
+            steps.push(EffectStep::LaterPass {
+                call: effect.call,
+                pass,
+            });
         }
     }
     let mut steps: Vec<EffectStep> = Vec::with_capacity(effects.len());
@@ -242,7 +246,7 @@ impl KindOfEffect {
         }
     }
 
-    /// How many passes of the card an effect of this kind takes.
+    /// How many passes of the card an effect of this kind takes (a shader is one pass here; [`EffectsThatRun::passes_of`] says how many a given shader takes).
     pub fn passes(self) -> usize {
         match self {
             Self::Blur => 2,
@@ -254,7 +258,8 @@ impl KindOfEffect {
 /// The effects the engine can run: the ones it has of its own, and the ones that were given to it as shaders.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectsThatRun {
-    keys_of_shaders: HashSet<String>,
+    /// The keys of the effects that shaders run, and how many passes each takes.
+    keys_of_shaders: HashMap<String, usize>,
     /// The tables that the card has, which a look-up table effect needs one of.
     tables: HashSet<TableId>,
 }
@@ -265,9 +270,22 @@ impl EffectsThatRun {
         Self::default()
     }
 
-    /// The effect under `key` is also run, by a shader. (A key that is the engine's own stays the engine's own.)
+    /// The effect under `key` is also run, by a shader of one pass. (A key that is the engine's own stays the engine's own.)
     pub fn add_shader(&mut self, key: &str) {
-        self.keys_of_shaders.insert(key.to_owned());
+        self.add_shader_with_passes(key, 1);
+    }
+
+    /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one).
+    pub fn add_shader_with_passes(&mut self, key: &str, passes: usize) {
+        self.keys_of_shaders.insert(key.to_owned(), passes.max(1));
+    }
+
+    /// How many passes of the card an effect takes: a shader, as many as it was given with; any other, as many as its kind takes.
+    pub fn passes_of(&self, key: &str, kind: KindOfEffect) -> usize {
+        match kind {
+            KindOfEffect::Shader => self.keys_of_shaders.get(key).copied().unwrap_or(1),
+            _ => kind.passes(),
+        }
     }
 
     /// The effect under `key` is not run any more.
@@ -299,7 +317,7 @@ impl EffectsThatRun {
             Some(KindOfEffect::Crop)
         } else if key == LUT_KEY {
             Some(KindOfEffect::Lut)
-        } else if self.keys_of_shaders.contains(key) {
+        } else if self.keys_of_shaders.contains_key(key) {
             Some(KindOfEffect::Shader)
         } else {
             None
@@ -436,7 +454,7 @@ fn effects_pass_of(
             EffectToRun {
                 call,
                 domain: kind.domain_of_a_call(call_itself),
-                passes: kind.passes(),
+                passes: effects_that_run.passes_of(&call_itself.key, kind),
                 converts_itself: kind.converts_itself_for_a_call(call_itself),
             }
         })
@@ -794,8 +812,9 @@ mod tests {
         }
     }
 
+    // (Rewritten on purpose in phase 6.4: the second pass of an effect is `LaterPass` number 1.)
     fn second_pass_of(call: usize) -> EffectStep {
-        EffectStep::SecondPass { call }
+        EffectStep::LaterPass { call, pass: 1 }
     }
 
     #[test]
@@ -1080,6 +1099,94 @@ mod tests {
             );
             assert_eq!(plan.effects_not_run, usize::from(!runs), "{} numbers", numbers.len());
         }
+    }
+
+    /// An effect run by a shader that takes `passes` passes of the card.
+    fn a_shader_of_passes(call: usize, passes: usize) -> EffectToRun {
+        EffectToRun {
+            passes,
+            ..a_shader(call)
+        }
+    }
+
+    fn later_pass_of(call: usize, pass: usize) -> EffectStep {
+        EffectStep::LaterPass { call, pass }
+    }
+
+    #[test]
+    fn a_shader_that_takes_several_passes_has_them_one_after_another_numbered_from_the_second() {
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_shader_of_passes(0, 3)], false),
+            vec![call_of(0, false, false), later_pass_of(0, 1), later_pass_of(0, 2)]
+        );
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_matrix(0), a_shader_of_passes(1, 4), a_matrix(2)], true),
+            vec![
+                call_of(0, true, false),
+                call_of(1, false, false),
+                later_pass_of(1, 1),
+                later_pass_of(1, 2),
+                later_pass_of(1, 3),
+                call_of(2, false, true),
+            ],
+            "(the conversions are done once round the passes of a shader, and not between them)"
+        );
+        // A shader of one pass has nothing after its first, and a shader of none is taken for one.
+        assert_eq!(
+            steps_of_a_run_of_effects(&[a_shader_of_passes(0, 1)], false),
+            vec![call_of(0, false, false)]
+        );
+    }
+
+    #[test]
+    fn a_shader_given_with_several_passes_takes_them_in_a_plan_and_counts_them_and_one_given_with_none_takes_one() {
+        let mut known = EffectsThatRun::built_in_only();
+        known.add_shader_with_passes("test:passes", 3);
+        known.add_shader_with_passes("test:none", 0);
+        known.add_shader("test:plain");
+        let shader = |key: &str| EffectCall {
+            key: key.to_owned(),
+            values: vec![1.0],
+            table: None,
+        };
+        assert_eq!(known.passes_of("test:passes", KindOfEffect::Shader), 3);
+        assert_eq!(known.passes_of("test:none", KindOfEffect::Shader), 1);
+        assert_eq!(known.passes_of("test:plain", KindOfEffect::Shader), 1);
+        assert_eq!(
+            known.passes_of("test:never_given", KindOfEffect::Shader),
+            1,
+            "a shader that was not given is taken for one pass"
+        );
+        assert_eq!(
+            known.passes_of(BLUR_KEY, KindOfEffect::Blur),
+            2,
+            "the blur's passes are the blur's"
+        );
+
+        let plan = plan_frame(
+            &description_of(vec![layer_with(1, vec![shader("test:plain"), shader("test:passes")])]),
+            &known,
+        );
+        assert_eq!(
+            plan.steps_of_effects[0],
+            vec![
+                call_of(0, false, false),
+                call_of(1, false, false),
+                later_pass_of(1, 1),
+                later_pass_of(1, 2)
+            ]
+        );
+        assert_eq!(
+            plan.passes_recorded(),
+            4 + 1 + 1,
+            "the passes, the layer and the output"
+        );
+        // The same key given again with another number of passes replaces the first.
+        known.add_shader_with_passes("test:passes", 2);
+        assert_eq!(known.passes_of("test:passes", KindOfEffect::Shader), 2);
+        // An effect that is taken away takes no passes (and is not run).
+        known.remove_shader("test:passes");
+        assert_eq!(known.kind_of("test:passes"), None);
     }
 
     #[test]

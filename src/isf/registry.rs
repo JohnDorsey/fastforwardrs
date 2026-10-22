@@ -4,8 +4,8 @@
 //! Which shaders are usable: the kinds of effect that are ISF shaders are compiled **once each** (by the key, which has the digest of the text in it), the result is kept, and what
 //! compiled is put on the engine's shelf (`engine::publish_effect_shader`) for it to take when a frame asks for the effect.
 //!
-//! A shader is **usable** if it compiles, and is one that this version can run: so far a filter of one picture or a generator, with no passes of its own and no imported images (see
-//! `docs/engine-phase-6-design.md`, J8). Any other is a kind of effect that is *not installed*: it is kept in the project with its values and does nothing, and the properties box says
+//! A shader is **usable** if it compiles, and is one that this version can run: so far a filter of one picture or a generator, with passes and buffers of its own (not ones that last
+//! from one frame to the next) and no imported images (see `docs/engine-phase-6-design.md`, J8, and `docs/engine-phase-6-4-design.md`). Any other is a kind of effect that is *not installed*: it is kept in the project with its values and does nothing, and the properties box says
 //! why ([`why_not_usable`]).
 
 use std::collections::HashMap;
@@ -39,9 +39,6 @@ fn what_cannot_be_run_yet(file: &IsfFile) -> Option<IsfProblem> {
             "this shader reads a picture called {other}, which this version cannot give it yet"
         ));
     }
-    if !file.passes.is_empty() {
-        return says("this shader has passes of its own, which this version cannot run yet".to_owned());
-    }
     if !file.imported.is_empty() {
         return says("this shader has images of its own (IMPORTED), which this version cannot run yet".to_owned());
     }
@@ -60,7 +57,14 @@ fn make(key: &str, text: &str) -> Result<CompiledShader, Vec<IsfProblem>> {
         return Err(vec![problem]);
     }
     let compiled = compile_in_a_worker(&file)?;
-    crate::engine::publish_effect_shader(key, &compiled.wgsl);
+    // (What it is made of must be something the engine can run: told here, in words, and the shader is not given to it.)
+    let structure = compiled.structure.clone()?;
+    structure.check().map_err(|why| {
+        vec![IsfProblem::nowhere_in_particular(format!(
+            "this shader cannot be run yet: {why}"
+        ))]
+    })?;
+    crate::engine::publish_effect_shader_with(key, &compiled.wgsl, structure);
     Ok(compiled)
 }
 

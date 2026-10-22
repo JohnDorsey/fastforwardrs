@@ -45,6 +45,8 @@ mod readback;
 mod recycler;
 mod replacement;
 mod scene;
+mod shader_steps;
+mod shader_structure;
 mod shaders;
 mod tables;
 #[cfg(test)]
@@ -82,9 +84,13 @@ mod guard_tests;
 #[cfg(test)]
 mod hang_tests;
 #[cfg(test)]
+mod isf_pass_tests;
+#[cfg(test)]
 mod linear_light_tests;
 #[cfg(test)]
 mod lut_tests;
+#[cfg(test)]
+mod multi_pass_tests;
 #[cfg(test)]
 pub(crate) mod oracle_tests;
 #[cfg(test)]
@@ -104,7 +110,7 @@ pub use device::{
 };
 pub use effect_shaders::{
     FOREIGN_EFFECT_UNIFORM_BYTES, MOST_NUMBERS_OF_A_FOREIGN_EFFECT, NUMBERS_THE_ENGINE_ADDS, publish_effect_shader,
-    published_effect_shader,
+    publish_effect_shader_with, published_effect_shader, published_effect_shader_with_structure,
 };
 pub use frame_cache::FrameCache;
 pub use frame_renderer::{FinishedFrame, FrameOutput, FrameRenderer, PendingFrame, RenderProblem};
@@ -123,6 +129,10 @@ pub use scene::{
     BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, FlatLayer,
     FlatLayers, FrameDescription, GroupDescription, LUT_KEY, LayerDescription, LayerSource, LutInterpolation, LutSpace,
     OPACITY_KEY, PictureId, TableId,
+};
+pub use shader_structure::{
+    BufferSpec, ImageSlot, ImageSource, LARGEST_SIDE_OF_A_BUFFER, MOST_IMAGES_OF_A_SHADER, MOST_PASSES_OF_A_SHADER,
+    MathFunction, Operator, PassFacts, PassSpec, ShaderStructure, SizeExpression, TargetFormat, size_from,
 };
 pub use tables::{MOST_TABLES_ON_THE_CARD, publish_table, published_table};
 pub use texture_pool::{PoolStatistics, TexturePool, TextureShape};

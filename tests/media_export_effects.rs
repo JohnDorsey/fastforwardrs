@@ -934,6 +934,80 @@ fn a_project_that_is_saved_and_read_again_carries_the_shader_and_exports_the_sam
     assert_eq!(before.pictures, after.pictures);
 }
 
+// --- passes of a shader's own (phase 6.4) ---
+
+/// The first pass draws a colour into a buffer a quarter as big as the picture; the second draws the buffer with its red and its blue swapped, and ignores the picture.
+const A_COLOUR_THROUGH_A_BUFFER: &str = r#"/*{
+	"INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ],
+	"PASSES": [ { "TARGET": "held", "WIDTH": "$WIDTH / 4", "HEIGHT": "$HEIGHT / 4" }, { } ]
+}*/
+void main() {
+	if (PASSINDEX == 0) {
+		gl_FragColor = vec4(0.2, 0.4, 0.6, 1.0);
+	} else {
+		vec4 c = IMG_THIS_NORM_PIXEL(held);
+		gl_FragColor = vec4(c.b, c.g, c.r, 1.0);
+	}
+}
+"#;
+
+/// The two-pass blur that the spike made (and the ISF files in the wild are like): one pass along the rows into a buffer, one along the columns.
+const THE_TWO_PASS_BLUR: &str = include_str!("../src/isf/fixtures/gaussian_blur.fs");
+
+#[test]
+fn a_shader_with_a_buffer_gives_the_colour_that_its_passes_make_between_them() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_shader_on(
+        &mut project,
+        AnimationTarget::Clip(clip),
+        "buffer.fs",
+        A_COLOUR_THROUGH_A_BUFFER,
+    );
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_buffer.mp4");
+
+    // (0.2, 0.4, 0.6 of 255, red and blue swapped.)
+    assert_every_picture_is(
+        &decoded,
+        (153, 102, 51),
+        "the colour of the first pass, swapped by the second",
+    );
+}
+
+#[test]
+fn the_two_pass_blur_gives_a_picture_that_is_all_of_one_colour_the_colour_it_was() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_shader_on(&mut project, AnimationTarget::Clip(clip), "blur.fs", THE_TWO_PASS_BLUR);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_blur.mp4");
+
+    assert_every_picture_is(&decoded, ORANGE, "the weights of the blur add up to one");
+}
+
+#[test]
+fn a_shader_with_passes_that_is_saved_and_read_again_exports_the_same() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_shader_on(
+        &mut project,
+        AnimationTarget::Clip(clip),
+        "buffer.fs",
+        A_COLOUR_THROUGH_A_BUFFER,
+    );
+    let before = exported(&toolchain, &project, scratch.path(), "buffer_before_saving.mp4");
+
+    let text = fastforwardrs::project_file::project_to_json_text(&project, scratch.path()).unwrap();
+    let loaded = fastforwardrs::project_file::project_from_json_text(&text).unwrap();
+    let after = exported(&toolchain, &loaded, scratch.path(), "buffer_after_loading.mp4");
+
+    assert_eq!(before.pictures, after.pictures);
+}
+
 // --- a generator clip (phase 6): an ISF shader that reads no picture ---
 
 const SOLID_GENERATOR: &str = r#"/*{

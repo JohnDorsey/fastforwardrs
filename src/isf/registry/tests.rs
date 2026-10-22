@@ -43,7 +43,23 @@ fn what_this_version_cannot_run_yet_is_not_usable_and_says_why() {
     };
     // (Rewritten on purpose in phase 6: a generator is run now, so the example of what is not is the transition alone.)
     assert!(reason("wipe.fs", WIPE).contains("transition"));
-    assert!(reason("blur.fs", BLUR).contains("passes of its own"));
+    // (Rewritten on purpose in phase 6.4: a shader with passes of its own is run now, and the example of one that is not is a buffer that lasts.)
+    let lasting = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true }, {} ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(memory); }
+";
+    assert!(reason("lasting.fs", lasting).contains("lasts from one frame to the next is not run yet"));
+    let two_writers = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"a\" }, { \"TARGET\": \"a\" }, {} ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(a); }
+";
+    assert!(reason("two_writers.fs", two_writers).contains("more than one pass"));
+    let into_a_buffer_last = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"a\" } ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }
+";
+    assert!(reason("into_a_buffer_last.fs", into_a_buffer_last).contains("last pass draws into a buffer"));
+    let bad_size = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"a\", \"WIDTH\": \"$WIDTH /\" }, {} ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(a); }
+";
+    assert!(reason("bad_size.fs", bad_size).contains("the WIDTH of pass number 1"));
     let other_image = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"maskImage\", \"TYPE\": \"image\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
     assert!(reason("mask.fs", other_image).contains("maskImage"));
     let imported = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"IMPORTED\": { \"tex\": { \"PATH\": \"a.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
@@ -114,6 +130,30 @@ fn what_compiled_is_on_the_shelf_of_the_engine_under_the_key_and_what_did_not_is
     let bad = descriptor_from("shelf_bad.fs", BAD_SYNTAX);
     assert!(compiled_shader_of(&bad).is_some());
     assert!(crate::engine::published_effect_shader(&bad.key).is_none());
+}
+
+#[test]
+fn a_shader_with_passes_of_its_own_is_usable_and_the_engine_is_given_what_it_is_made_of_with_it() {
+    let blur = descriptor_from("shelf_blur.fs", BLUR);
+    assert!(is_usable(&blur), "{:?}", why_not_usable(&blur));
+    assert_eq!(why_not_usable(&blur), None);
+    assert!(EffectKind::from_snapshot(blur.clone()).unwrap().is_installed());
+
+    let (wgsl, structure) =
+        crate::engine::published_effect_shader_with_structure(&blur.key).expect("it is on the shelf");
+    assert_eq!(
+        &*wgsl,
+        compiled_shader_of(&blur).unwrap().as_ref().as_ref().unwrap().wgsl
+    );
+    assert_eq!(structure.passes.len(), 2);
+    assert_eq!(structure.buffers.len(), 1);
+    assert_eq!(structure.pass_index_number, Some(3));
+    // A shader of one pass is on the shelf with the structure of one pass, which still is not the structure of a shader of phase 1 (it has a number for the pass).
+    let plain = descriptor_from("shelf_plain.fs", COLOR_CONTROLS);
+    assert!(is_usable(&plain));
+    let (_, plain_structure) = crate::engine::published_effect_shader_with_structure(&plain.key).unwrap();
+    assert_eq!(plain_structure.passes.len(), 1);
+    assert_eq!(plain_structure.pass_index_number, Some(3));
 }
 
 #[test]

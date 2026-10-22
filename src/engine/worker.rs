@@ -21,6 +21,7 @@ use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::replacement::{
     AfterAFailedFrame, ReplacementLimiter, what_to_do_after_a_failed_frame, why_the_device_was_lost,
 };
+use super::shader_structure::ShaderStructure;
 use super::{FrameDescription, FrameStatistics, PictureData, PictureId, YuvColour};
 
 /// What the thread does after a batch of requests.
@@ -84,6 +85,12 @@ struct OnItsWay {
     effects_of_strangers: Vec<String>,
 }
 
+/// A shader that was given to the engine, with what it is made of besides its code.
+struct GivenShader {
+    shader: Arc<GuardedShader>,
+    structure: Arc<ShaderStructure>,
+}
+
 /// Everything the thread keeps from one batch to the next.
 struct Worker<'a> {
     settings: &'a EngineSettings,
@@ -91,7 +98,7 @@ struct Worker<'a> {
     renderer: FrameRenderer,
     cache: FrameCache,
     /// The effects that were given to the engine as shaders, in the order they were given, so that a new device can be given them again.
-    given_effects: Vec<(String, Arc<GuardedShader>)>,
+    given_effects: Vec<(String, GivenShader)>,
     /// The keys of the effects that are not run any more because a frame they were in did not finish.
     switched_off: Vec<String>,
     replacements: ReplacementLimiter,
@@ -133,7 +140,9 @@ impl<'a> Worker<'a> {
                     self.renderer.forget_pictures(ids);
                     Ok(())
                 }
-                EngineRequest::InstallEffect { key, shader } => self.take_an_effect(key, shader),
+                EngineRequest::InstallEffect { key, shader, structure } => {
+                    self.take_an_effect_with_structure(key, shader, structure)
+                }
                 EngineRequest::Render { serial, description } => {
                     newest_render = Some((serial, description));
                     Ok(())
@@ -193,7 +202,18 @@ impl<'a> Worker<'a> {
         Ok(())
     }
 
+    /// Takes the shader of an effect that is one pass that reads one picture (see [`ShaderStructure::one_pass_of_one_picture`]).
+    #[cfg(test)]
     fn take_an_effect(&mut self, key: String, shader: Arc<GuardedShader>) -> Result<(), String> {
+        self.take_an_effect_with_structure(key, shader, Arc::new(ShaderStructure::one_pass_of_one_picture()))
+    }
+
+    fn take_an_effect_with_structure(
+        &mut self,
+        key: String,
+        shader: Arc<GuardedShader>,
+        structure: Arc<ShaderStructure>,
+    ) -> Result<(), String> {
         if self.switched_off.contains(&key) {
             (self.tell)(EngineEvent::EffectRejected {
                 key,
@@ -201,12 +221,12 @@ impl<'a> Worker<'a> {
             });
             return Ok(());
         }
-        match self
-            .attempt_and_again_on_a_new_device_if_it_was_lost(|renderer| renderer.install_effect(&key, &shader))?
-        {
+        match self.attempt_and_again_on_a_new_device_if_it_was_lost(|renderer| {
+            renderer.install_effect_with_structure(&key, &shader, &structure)
+        })? {
             Ok(()) => {
                 self.given_effects.retain(|(given, _)| *given != key);
-                self.given_effects.push((key, shader));
+                self.given_effects.push((key, GivenShader { shader, structure }));
                 // (What a frame is made of now depends on a shader that frames that were made did not have.)
                 self.cache.clear();
             }
@@ -435,12 +455,15 @@ impl<'a> Worker<'a> {
             .collect();
         self.switched_off.extend(newly_switched_off.iter().cloned());
         let given = std::mem::take(&mut self.given_effects);
-        for (key, shader) in given {
+        for (key, given) in given {
             if self.switched_off.contains(&key) {
                 continue;
             }
-            match self.renderer.install_effect(&key, &shader) {
-                Ok(()) => self.given_effects.push((key, shader)),
+            match self
+                .renderer
+                .install_effect_with_structure(&key, &given.shader, &given.structure)
+            {
+                Ok(()) => self.given_effects.push((key, given)),
                 Err(problem) => {
                     (self.tell)(EngineEvent::EffectRejected {
                         key,

@@ -11,6 +11,8 @@ mod descriptor;
 mod reader;
 mod registry;
 mod rewrite;
+mod size_expression;
+mod structure;
 
 pub use compile::{CompiledShader, ENTRY_POINT, compile, compile_in_a_worker};
 
@@ -21,3 +23,5 @@ pub use reader::{
     IsfFile, IsfImportedImage, IsfInput, IsfInputKind, IsfPass, IsfProblem, MOST_NUMBERS_OF_THE_INPUTS, Shape, read,
 };
 pub use rewrite::{MOST_NESTING, NUMBERS_BEFORE_THE_INPUTS, VEC4S_OF_THE_UNIFORM_BLOCK};
+pub use size_expression::{LONGEST_EXPRESSION, MOST_NESTING_OF_AN_EXPRESSION, read_size_expression};
+pub use structure::structure_of;

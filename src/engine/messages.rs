@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use super::device::AdapterChoice;
 use super::guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader};
+use super::shader_structure::ShaderStructure;
 use super::{FrameDescription, FrameStatistics, PictureData, PictureId, RenderedFrame, RenderedPlanes, YuvColour};
 
 /// What the engine calls when it has something to tell: the window's way of being asked to draw again, so that the engine's thread does not
@@ -23,7 +24,12 @@ pub enum EngineRequest {
     /// Let go of these pictures.
     Forget(Vec<PictureId>),
     /// From now on the effect under `key` is run by this shader, which has been through the guard (an effect that was under that key is replaced).
-    InstallEffect { key: String, shader: Arc<GuardedShader> },
+    InstallEffect {
+        key: String,
+        shader: Arc<GuardedShader>,
+        /// What the shader is made of besides its code (see [`ShaderStructure`]).
+        structure: Arc<ShaderStructure>,
+    },
     /// Make the frame `description` describes. If more requests have come by the time the engine looks, only the newest of them is made, and
     /// the others are not answered: the window only wants the latest.
     Render { serial: u64, description: FrameDescription },
