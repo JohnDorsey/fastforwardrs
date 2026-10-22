@@ -14,6 +14,7 @@ use std::thread;
 
 use super::FastForwardApplication;
 use crate::application::commands::Command;
+use crate::application::plugin_manager_bundles::{BundleKind, BundlesView};
 use crate::application::plugin_manager_window::{PluginManagerCommand, PluginManagerView};
 use crate::plugin_host::PluginHost;
 use crate::plugin_scan::ScanFailure;
@@ -24,7 +25,10 @@ use crate::plugin_scan::{
     scanner_program_beside_this_program,
 };
 use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
-use crate::project::{EffectKind, set_installed_plugins};
+use crate::project::{EffectKind, set_installed_plugins, set_installed_shaders};
+use crate::shader_files::{
+    ShaderScan, scan_folders as scan_the_folders_for_shaders, usual_folders as usual_folders_of_shaders,
+};
 
 /// What a scan found, for the window to show.
 #[derive(Default)]
@@ -33,6 +37,15 @@ pub(super) struct ScanResult {
     pub(super) not_used: Vec<NotUsed>,
     pub(super) effect_count: usize,
     pub(super) problems: Vec<String>,
+    /// The shaders that were found in the folders, each with what became of it (the usable ones are the installed shaders).
+    pub(super) shaders: ShaderScan,
+}
+
+/// What the thread of a scan gives back: the libraries that were found (and what went wrong that was not a library's doing) and the shaders.
+struct ScanDone {
+    libraries: Vec<LibraryReport>,
+    problems: Vec<String>,
+    shaders: ShaderScan,
 }
 
 /// What the editor knows of the plugins that are installed.
@@ -48,7 +61,12 @@ pub(super) struct PluginSearch {
     /// Whether the folders of `LADSPA_PATH` and `CLAP_PATH` and the usual ones are looked in. (They are, for the program a person uses; the tests ask for it where they mean to.)
     look_in_the_usual_places: bool,
     /// The scan that is going on, if one is.
-    running: Option<Receiver<(Vec<LibraryReport>, Vec<String>)>>,
+    running: Option<Receiver<ScanDone>>,
+    /// Whether the editor looked for its scan program and did not find it (the window says so, with the problems of the scans).
+    scanner_missing: bool,
+    /// Whether this editor put shaders in the list of the installed ones (so that it takes them out again when they are gone, and never writes the list when it has put nothing in it:
+    /// the list is one for the whole program).
+    shaders_installed: bool,
     /// A scan was asked for while another was going on: another is started when that one is taken.
     another_wanted: bool,
     pub(super) has_scanned: bool,
@@ -66,12 +84,51 @@ pub(super) struct PluginSearch {
 }
 
 impl PluginSearch {
+    /// What the window says went wrong that was not a library's doing: that there is no scan program (if there is not), and what the scans said.
+    fn problems_to_show(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.scanner_missing {
+            problems.push(
+                "The program that scans plugin libraries (fastforwardrs-plugin-scan) was not found beside the editor, so no plugins are looked for (shaders are).".to_owned(),
+            );
+        }
+        problems.extend(self.result.problems.iter().cloned());
+        problems
+    }
+
     /// The folders that are looked in besides those a person added.
     fn other_folders(&self) -> Vec<PathBuf> {
         if !self.look_in_the_usual_places {
             return Vec::new();
         }
         folders_looked_in_by_default()
+    }
+
+    /// The folders that are looked in for shaders besides those a person added: the usual places of ISF, and the folder that the *Bundles* tab fetches shaders into.
+    fn other_folders_for_shaders(&self) -> Vec<PathBuf> {
+        let mut folders = Vec::new();
+        if self.look_in_the_usual_places {
+            folders.extend(usual_folders_of_shaders());
+        }
+        // (The folder that the tab fetches into is looked in when the usual places are, and when the tab was told another folder to fetch into, as the tests do.)
+        let fetched = match &self.bundles.shader_folder {
+            Some(folder) => Some(folder.clone()),
+            None if self.look_in_the_usual_places => crate::plugin_bundles::fetched_shaders_folder(),
+            None => None,
+        };
+        folders.extend(fetched);
+        folders
+    }
+
+    /// The folders that shaders are looked for in: a person's, then the usual places of ISF and the folder of the shaders that were fetched.
+    fn folders_to_scan_for_shaders(&self) -> Vec<PathBuf> {
+        let mut all = self.settings.folders.clone();
+        for folder in self.other_folders_for_shaders() {
+            if !all.contains(&folder) {
+                all.push(folder);
+            }
+        }
+        all
     }
 
     /// All the folders, in the order of who wins: a person's, then `LADSPA_PATH` and the usual ones of LADSPA, then `CLAP_PATH` and the usual ones of CLAP.
@@ -273,9 +330,11 @@ impl FastForwardApplication {
                 self.start_scanning_plugins();
             }
             None => {
-                self.environment.plugin_search.result.problems.push(
-                    "The program that scans plugin libraries (fastforwardrs-plugin-scan) was not found beside the editor, so no plugins are looked for.".to_owned(),
-                );
+                // (Said by the window, whatever the scans find: see `PluginSearch::problems_to_show`.)
+                self.environment.plugin_search.scanner_missing = true;
+                // (The shaders are looked for all the same: a shader is read by the editor itself, and needs no scan program.)
+                self.environment.plugin_search.look_in_the_usual_places = true;
+                self.start_scanning_plugins();
             }
         }
     }
@@ -327,16 +386,21 @@ impl FastForwardApplication {
             .look_for_dependencies_in(settings.dependency_folders.clone(), settings.search_parent_folders);
     }
 
-    /// Starts a scan of the folders on a thread of its own, if there is a scan program and none is going on (if one is, another follows it).
+    /// Starts a scan of the folders on a thread of its own, if there is something to scan with and none is going on (if one is, another follows it): the plugin libraries, with the
+    /// scan program if there is one, and the shaders, which need no program (a shader is read, and compiled by the host in this process).
     pub fn start_scanning_plugins(&mut self) {
         let search = &mut self.environment.plugin_search;
         if search.running.is_some() {
             search.another_wanted = true;
             return;
         }
-        let Some(program) = search.scanner_program.clone() else {
+        let program = search.scanner_program.clone();
+        let shader_folders = search.folders_to_scan_for_shaders();
+        if program.is_none() && shader_folders.is_empty() {
+            // (Nothing to look with and nothing to look in: the shaders that the folders that were taken away had are gone.)
+            self.install_the_shaders_that_were_found(ShaderScan::default());
             return;
-        };
+        }
         let folders = search.folders_to_scan();
         let dependency_folders = search.settings.dependency_folders.clone();
         let search_parents = search.settings.search_parent_folders;
@@ -349,10 +413,21 @@ impl FastForwardApplication {
         let started = thread::Builder::new()
             .name("scanning plugins".to_owned())
             .spawn(move || {
-                let mut scanner =
-                    PluginScanner::new(program, cache).looking_for_dependencies_in(dependency_folders, search_parents);
-                let scan = scanner.scan_folders(&folders);
-                let _ = sender.send((scan.libraries, scan.problems));
+                let (libraries, problems) = match program {
+                    Some(program) => {
+                        let mut scanner = PluginScanner::new(program, cache)
+                            .looking_for_dependencies_in(dependency_folders, search_parents);
+                        let scan = scanner.scan_folders(&folders);
+                        (scan.libraries, scan.problems)
+                    }
+                    None => (Vec::new(), Vec::new()),
+                };
+                let shaders = scan_the_folders_for_shaders(&shader_folders);
+                let _ = sender.send(ScanDone {
+                    libraries,
+                    problems,
+                    shaders,
+                });
                 wake_up();
             });
         match started {
@@ -375,29 +450,43 @@ impl FastForwardApplication {
         let Some(receiver) = &search.running else {
             return;
         };
-        let (libraries, problems) = match receiver.try_recv() {
+        let done = match receiver.try_recv() {
             Ok(done) => done,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => (
-                Vec::new(),
-                vec!["The scan of the sound plugins ended without an answer.".to_owned()],
-            ),
+            Err(mpsc::TryRecvError::Disconnected) => ScanDone {
+                libraries: Vec::new(),
+                problems: vec!["The scan of the plugins ended without an answer.".to_owned()],
+                shaders: ShaderScan::default(),
+            },
         };
         search.running = None;
-        self.apply_what_a_scan_found(libraries, problems);
+        self.apply_what_a_scan_found(done.libraries, done.problems, done.shaders);
         let search = &mut self.environment.plugin_search;
         if std::mem::take(&mut search.another_wanted) {
             self.start_scanning_plugins();
         }
     }
 
-    /// Makes the plugins that can be effects the effects that are installed, and keeps the rest for the window to show.
-    fn apply_what_a_scan_found(&mut self, libraries: Vec<LibraryReport>, problems: Vec<String>) {
+    /// Makes the plugins that can be effects, and the shaders that can be used, the effects that are installed, and keeps the rest for the window to show.
+    fn apply_what_a_scan_found(&mut self, libraries: Vec<LibraryReport>, problems: Vec<String>, shaders: ShaderScan) {
         let search = &mut self.environment.plugin_search;
         search.result.libraries = libraries;
-        search.result.problems = problems;
+        search.result.problems = problems.into_iter().chain(shaders.problems.iter().cloned()).collect();
         search.has_scanned = true;
+        self.install_the_shaders_that_were_found(shaders);
         self.install_the_plugins_that_were_found();
+    }
+
+    /// Makes the shaders of `scan` that can be used the shaders that are installed (a shader is data: it is installed by being found, and the same one found again is the kind of effect
+    /// that it was), and keeps the scan for the window. **Nothing is written to the list of the installed ones by an editor that put nothing in it and has nothing to put.**
+    fn install_the_shaders_that_were_found(&mut self, scan: ShaderScan) {
+        let search = &mut self.environment.plugin_search;
+        let kinds = scan.usable_kinds();
+        if search.shaders_installed || !kinds.is_empty() {
+            search.shaders_installed = !kinds.is_empty();
+            set_installed_shaders(kinds);
+        }
+        search.result.shaders = scan;
     }
 
     /// Makes the plugins that the scans found, of the folders and of the libraries written out of the project file (those last: a plugin of a folder wins where a key is the same),
@@ -502,20 +591,37 @@ impl FastForwardApplication {
         }
     }
 
+    /// For the tests: as if the editor had looked for its scan program and not found it.
+    #[cfg(test)]
+    pub(super) fn pretend_the_scan_program_is_missing(&mut self) {
+        self.environment.plugin_search.scanner_missing = true;
+    }
+
     /// For the tests: as if a scan had found these libraries.
     #[cfg(test)]
     pub(super) fn pretend_the_scan_found(&mut self, libraries: Vec<LibraryReport>) {
-        self.apply_what_a_scan_found(libraries, Vec::new());
+        self.apply_what_a_scan_found(libraries, Vec::new(), ShaderScan::default());
     }
 
     /// What the plugin manager shows.
     pub(super) fn show_the_plugin_manager(&mut self, context: &egui::Context, commands: &mut Vec<Command>) {
-        let other_folders = self.environment.plugin_search.other_folders();
+        let mut other_folders = self.environment.plugin_search.other_folders();
+        for folder in self.environment.plugin_search.other_folders_for_shaders() {
+            if !other_folders.contains(&folder) {
+                other_folders.push(folder);
+            }
+        }
         let bundled_folder = bundled_plugins_folder();
-        let (rows, has_builds, total_bytes, hosts) = self.what_the_bundles_tab_shows();
+        let fetched_shaders_folder = crate::plugin_bundles::fetched_shaders_folder();
+        let (rows, has_builds, total_bytes, hosts) = self.what_the_bundles_tab_shows(BundleKind::SoundPlugins);
+        let (shader_rows, shaders_have_builds, shader_bytes, shader_hosts) =
+            self.what_the_bundles_tab_shows(BundleKind::Shaders);
         let fetched_folder = self.folder_of_the_bundles();
+        let shader_folder = self.folder_of_the_shader_bundles();
         let search = &self.environment.plugin_search;
-        let bundles = crate::application::plugin_manager_bundles::BundlesView {
+        let problems = search.problems_to_show();
+        let bundles = BundlesView {
+            kind: BundleKind::SoundPlugins,
             rows: &rows,
             has_builds,
             total_bytes,
@@ -523,19 +629,31 @@ impl FastForwardApplication {
             folder: fetched_folder.as_deref(),
             state: super::plugin_bundles_flow::state_of(&search.bundles.download),
         };
+        let shader_bundles = BundlesView {
+            kind: BundleKind::Shaders,
+            rows: &shader_rows,
+            has_builds: shaders_have_builds,
+            total_bytes: shader_bytes,
+            hosts: &shader_hosts,
+            folder: shader_folder.as_deref(),
+            state: super::plugin_bundles_flow::state_of(&search.bundles.shader_download),
+        };
         let view = PluginManagerView {
             settings: &search.settings,
             other_folders: &other_folders,
             bundled_folder: bundled_folder.as_deref(),
             fetched_folder: fetched_folder.as_deref(),
+            fetched_shaders_folder: fetched_shaders_folder.as_deref(),
             tab: self.interface.plugin_manager_tab,
             bundles,
+            shader_bundles,
             is_scanning: search.running.is_some(),
             has_scanned: search.has_scanned,
             libraries: &search.result.libraries,
             not_used: &search.result.not_used,
             effect_count: search.result.effect_count,
-            problems: &search.result.problems,
+            problems: &problems,
+            shaders: &search.result.shaders,
         };
         crate::application::plugin_manager_window::show(
             context,
@@ -550,7 +668,7 @@ impl FastForwardApplication {
         match command {
             PluginManagerCommand::Show => self.interface.plugin_manager_open = true,
             PluginManagerCommand::AddFolder => {
-                if let Some(folder) = self.ask_for_a_folder("Choose a folder with sound plugins") {
+                if let Some(folder) = self.ask_for_a_folder("Choose a folder with plugins or shaders") {
                     self.add_plugin_folder(folder);
                 }
             }
@@ -581,11 +699,11 @@ impl FastForwardApplication {
             }
             PluginManagerCommand::ScanAgain => self.start_scanning_plugins(),
             PluginManagerCommand::SelectTab(tab) => self.interface.plugin_manager_tab = tab,
-            PluginManagerCommand::AskToDownloadBundles => self.ask_whether_to_download_the_bundles(),
-            PluginManagerCommand::CancelAskingToDownloadBundles => self.do_not_download_the_bundles(),
-            PluginManagerCommand::DownloadBundles => self.download_the_bundles(),
-            PluginManagerCommand::CancelBundleDownload => self.cancel_the_download_of_the_bundles(),
-            PluginManagerCommand::DismissBundleMessage => self.dismiss_what_the_download_said(),
+            PluginManagerCommand::AskToDownloadBundles(kind) => self.ask_whether_to_download_the_bundles(kind),
+            PluginManagerCommand::CancelAskingToDownloadBundles(kind) => self.do_not_download_the_bundles(kind),
+            PluginManagerCommand::DownloadBundles(kind) => self.download_the_bundles(kind),
+            PluginManagerCommand::CancelBundleDownload(kind) => self.cancel_the_download_of_the_bundles(kind),
+            PluginManagerCommand::DismissBundleMessage(kind) => self.dismiss_what_the_download_said(kind),
         }
     }
 

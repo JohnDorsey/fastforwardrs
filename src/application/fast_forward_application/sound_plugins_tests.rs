@@ -491,6 +491,8 @@ fn the_plugin_manager_is_opened_from_the_edit_menu_and_shows_where_plugins_are_l
 
 #[test]
 fn a_folder_that_is_chosen_is_added_and_kept_in_the_file_and_removing_it_takes_it_out_again() {
+    // (Adding a folder looks in it for shaders too, which installs what it finds: the list of what is installed is held.)
+    let _alone = the_installed_plugins_to_myself();
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("plugin_search.json");
     let chooser = ScriptedFileChooser::default();
@@ -508,7 +510,10 @@ fn a_folder_that_is_chosen_is_added_and_kept_in_the_file_and_removing_it_takes_i
         .click();
     window.settle();
     assert_eq!(chooser.questions_asked().len(), 1);
-    assert_eq!(chooser.questions_asked()[0].title, "Choose a folder with sound plugins");
+    assert_eq!(
+        chooser.questions_asked()[0].title,
+        "Choose a folder with plugins or shaders"
+    );
     assert_eq!(
         window.application().plugin_search_settings().folders,
         [folder.path().join("plugins")]
@@ -745,6 +750,8 @@ fn a_whole_number_that_the_plugin_says_is_one_is_set_as_a_whole_number() {
 
 #[test]
 fn a_folder_that_is_chosen_twice_is_in_the_list_once() {
+    // (Adding a folder looks in it for shaders too, which installs what it finds: the list of what is installed is held.)
+    let _alone = the_installed_plugins_to_myself();
     let chooser = ScriptedFileChooser::default();
     let mut window = Window::showing(super::test_window::project_of(100));
     window.use_file_chooser(&chooser);
@@ -778,6 +785,8 @@ fn a_folder_that_is_chosen_twice_is_in_the_list_once() {
 
 #[test]
 fn the_folder_whose_button_is_pressed_is_the_one_that_is_removed() {
+    // (Adding a folder looks in it for shaders too, which installs what it finds: the list of what is installed is held.)
+    let _alone = the_installed_plugins_to_myself();
     let mut window = Window::showing(super::test_window::project_of(100));
     for name in ["/first", "/second", "/third"] {
         window
@@ -809,6 +818,12 @@ fn the_folder_whose_button_is_pressed_is_the_one_that_is_removed() {
 
 // --- the window by itself ---
 
+/// A scan that found no shader.
+static NO_SHADERS_FOUND: crate::shader_files::ShaderScan = crate::shader_files::ShaderScan {
+    shaders: Vec::new(),
+    problems: Vec::new(),
+};
+
 fn the_view<'a>(
     settings: &'a crate::plugin_scan::PluginSearchSettings,
     is_scanning: bool,
@@ -819,10 +834,21 @@ fn the_view<'a>(
         other_folders: &[],
         bundled_folder: None,
         fetched_folder: None,
+        fetched_shaders_folder: None,
         tab: crate::application::plugin_manager_window::PluginManagerTab::Plugins,
         bundles: crate::application::plugin_manager_bundles::BundlesView {
+            kind: crate::application::plugin_manager_bundles::BundleKind::SoundPlugins,
             rows: &[],
             has_builds: true,
+            total_bytes: 0,
+            hosts: "",
+            folder: None,
+            state: crate::application::plugin_manager_bundles::BundleState::Idle,
+        },
+        shader_bundles: crate::application::plugin_manager_bundles::BundlesView {
+            kind: crate::application::plugin_manager_bundles::BundleKind::Shaders,
+            rows: &[],
+            has_builds: false,
             total_bytes: 0,
             hosts: "",
             folder: None,
@@ -834,6 +860,7 @@ fn the_view<'a>(
         not_used: &[],
         effect_count: 1,
         problems: &[],
+        shaders: &NO_SHADERS_FOUND,
     }
 }
 

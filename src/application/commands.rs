@@ -214,6 +214,13 @@ pub enum Command {
         /// The images that the shader brings with it, read from beside its file (see `shader_flow`).
         images: Vec<crate::project::ShaderImage>,
     },
+    /// Put a new generator clip on a track, starting at a frame, and select it: made by a shader that the plugin manager found (an installed generator: see
+    /// [`crate::project::EffectKind::installed_generators`]), which is put in the project with the clip as the shader of a file chosen by hand is.
+    NewGeneratorClipOfKind {
+        track: TrackId,
+        frame: TimelineFrameIndex,
+        kind: EffectKind,
+    },
     /// A text object was changed: what it says, how it looks, or where it is on the picture.
     SetTextObject {
         clip: ClipId,
@@ -459,6 +466,7 @@ impl Command {
             | Self::NewAdjustmentClip { .. }
             | Self::ChooseAGeneratorFile { .. }
             | Self::NewGeneratorClip { .. }
+            | Self::NewGeneratorClipOfKind { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
             | Self::AddEffect { .. }
@@ -591,6 +599,7 @@ impl Command {
             | Self::NewAdjustmentClip { .. }
             | Self::ChooseAGeneratorFile { .. }
             | Self::NewGeneratorClip { .. }
+            | Self::NewGeneratorClipOfKind { .. }
             | Self::SetTextObject { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }

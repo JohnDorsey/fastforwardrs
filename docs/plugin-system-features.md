@@ -354,7 +354,7 @@ menu item or a window opened from one is marked.*
 * **UI-07 [P] S** The **colour settings** (working space, input space of a source, display transform, output colour space of an export)
   are in the project settings, the clip's properties and the export window: no new always-visible controls.
 * **UI-08 [D] L** On-canvas handles for point parameters (ID-07), drawn by the preview's transform-box code: **later** (Q-20, 2026-10-15).
-* **UI-09 [P] C** A window that lists the effect types that were found and those that failed, with the reason (the plugin manager).
+* **UI-09 [P] C** A window that lists the effect types that were found and those that failed, with the reason (the plugin manager). *(Built 2026-10-22: the window of sound plugins is the plugin manager, which lists shaders too, each with whether it can be used and why not.)*
 * **UI-11 [D] M** (2026-10-15) The **global settings window** gets the controls of EN-14 (mode, checkpoint interval, checkpoint memory budget), the
   resource size limit of RS-07, and the folders of DS-02. No project setting is added for any of them.
 * **UI-12 [D] M** (2026-10-15) **The prompts about plugins** (SF-05 to SF-09) are modal windows, shown only when a project that needs them is opened or a plugin
@@ -408,7 +408,8 @@ menu item or a window opened from one is marked.*
 * **PH-15 [P] M** A **golden corpus** of ISF shaders with expected pictures from a reference host guards correctness; the compile rate
   alone is not accepted as correctness. **The reference host is the ISF Editor on Windows, run by hand, for 10 to 20 shaders** (Q-24, 2026-10-15).
 * **PH-16 [D] M** What ships in the box (Q-25, 2026-10-15): **gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else**; the
-  licence policy of LG-02 decides anything beyond that.
+  licence policy of LG-02 decides anything beyond that. *(2026-10-22, the maintainer: "I'd like a bundle downloader for license-compatible ISFs": the shaders are **fetched** by the *Bundles* tab of the plugin manager after a question
+  and are not in the box; `bundled-plugins/shaders.json`, 157 shaders of Vidvox's collection, which already holds 68 of the gl-transitions, converted by Vidvox with their MIT lines kept: see `engine-phase-6-6-design.md`, section 2.)*
 * **PH-17 [P] L** `audio` and `audioFFT` inputs (AN-05).
 
 ### 11.3 Built-in host

@@ -37,7 +37,10 @@ pub use descriptor::{
     MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT,
     ParameterControl, ParameterDescriptor, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
 };
-pub use installed::{InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, set_installed_plugins};
+pub use installed::{
+    InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, installed_shaders, set_installed_plugins,
+    set_installed_shaders,
+};
 pub use kind::EffectKind;
 
 use std::fmt;

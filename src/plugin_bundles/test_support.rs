@@ -10,7 +10,9 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::{Build, BundleSet, CANCELLED, Fetcher, LicenceText, Manifest, Member, Source};
+use super::{
+    Build, BundleSet, CANCELLED, Fetcher, LicenceText, Manifest, Member, ShaderEntry, ShaderManifest, ShaderSet, Source,
+};
 use crate::digest::Sha256Digest;
 
 pub(crate) fn sha(bytes: &[u8]) -> String {
@@ -169,6 +171,81 @@ pub(crate) fn a_fixture() -> Fixture {
     sets.push(elsewhere);
     Fixture {
         manifest: Manifest { format: 1, sets },
+        files,
+    }
+}
+
+/// What a fixture of shaders has: a manifest of two sets, and the bytes that every address in it serves.
+pub(crate) struct ShaderFixture {
+    pub(crate) manifest: ShaderManifest,
+    pub(crate) files: HashMap<String, Vec<u8>>,
+}
+
+/// A shader that is a filter of ISF, which says what it is by `tag` (so that two have different bytes).
+pub(crate) fn a_shader_that_says(tag: &str) -> Vec<u8> {
+    format!(
+        "/*{{ \"CREDIT\": \"{tag}\", \"INPUTS\": [ {{ \"NAME\": \"inputImage\", \"TYPE\": \"image\" }} ] }}*/\nvoid main() {{ gl_FragColor = IMG_THIS_PIXEL(inputImage); }}\n"
+    )
+    .into_bytes()
+}
+
+/// Two sets: `pack` with a filter and a generator (under MIT and BSD-3-Clause, with one licence text), and `solo` with one transition (under MIT, with another licence text).
+pub(crate) fn a_shader_fixture() -> ShaderFixture {
+    let mut files = HashMap::new();
+    let mut entry = |set: &str, name: &str, file: &str, shape: &str, licence: &str| {
+        let bytes = a_shader_that_says(&format!("{set}/{name}"));
+        let url = format!("https://example.org/{set}/{}", file.replace(' ', "%20"));
+        files.insert(url.clone(), bytes.clone());
+        ShaderEntry {
+            name: name.to_owned(),
+            file: file.to_owned(),
+            url,
+            sha256: sha(&bytes),
+            size: bytes.len() as u64,
+            licence: licence.to_owned(),
+            shape: shape.to_owned(),
+        }
+    };
+    let pack_shaders = vec![
+        entry("pack", "Swirl Thing", "Swirl Thing.fs", "filter", "MIT"),
+        entry("pack", "Glow", "Glow.fs", "generator", "BSD-3-Clause"),
+    ];
+    let solo_shaders = vec![entry("solo", "Wipe", "Wipe.isf", "transition", "MIT")];
+    let mut text = |url: &str, bytes: &[u8]| {
+        files.insert(url.to_owned(), bytes.to_vec());
+        LicenceText {
+            name: "LICENSE.txt".to_owned(),
+            url: url.to_owned(),
+            sha256: sha(bytes),
+        }
+    };
+    let pack_text = text("https://example.org/pack/LICENSE", b"MIT License, a copy for pack");
+    let solo_text = text("https://example.org/solo/LICENSE", b"MIT License, a copy for solo");
+    let set = |id: &str, licence: &str, texts: Vec<LicenceText>, shaders: Vec<ShaderEntry>| ShaderSet {
+        id: id.to_owned(),
+        name: id.to_uppercase(),
+        version: "abc1234".to_owned(),
+        authors: vec!["Someone".to_owned()],
+        licence: licence.to_owned(),
+        licence_note: None,
+        homepage: "https://example.org/".to_owned(),
+        licence_texts: texts,
+        source: Source {
+            url: format!("https://example.org/{id}/tree/abc1234"),
+            sha256: None,
+            md5: None,
+            note: Some("a note about the source".to_owned()),
+        },
+        shaders,
+    };
+    ShaderFixture {
+        manifest: ShaderManifest {
+            format: 1,
+            sets: vec![
+                set("pack", "MIT AND BSD-3-Clause", vec![pack_text], pack_shaders),
+                set("solo", "MIT", vec![solo_text], solo_shaders),
+            ],
+        },
         files,
     }
 }

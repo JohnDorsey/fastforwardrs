@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError, RwLock};
 
-use super::EffectDescriptor;
+use super::{EffectDescriptor, EffectKind};
 
 /// Which plugin of a library a plugin is, in the way its format says (C14 of `docs/engine-phase-7-clap-design.md`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -105,4 +105,25 @@ pub fn installed_plugin_for(descriptor: &EffectDescriptor) -> Option<&'static In
         .iter()
         .copied()
         .find(|plugin| plugin.descriptor.can_stand_in_for(descriptor))
+}
+
+/// The shaders that are installed now: the kinds of effect that the shader files found in the folders of the plugin manager are (phase 6.8), the usable ones, in the order of the
+/// folders they were found in. **A shader is data and is installed by being found, with no question** (a plugin library is code and is asked about: see `plugin_trust`); what puts one
+/// in a project is the project's own copy of its text, so a project never depends on the folder.
+static INSTALLED_SHADERS: RwLock<Vec<EffectKind>> = RwLock::new(Vec::new());
+
+/// Makes `kinds` the shaders that are installed, in place of those that were. (A kind is a kind of effect that can be put on a clip: the plugin manager gives it the ones that read and
+/// compile and that this version runs. The same shader found again is the same kind: a kind is made from the text and the pictures of its shader.)
+pub fn set_installed_shaders(kinds: Vec<EffectKind>) {
+    #[cfg(test)]
+    assert!(
+        crate::test_support::this_thread_holds_the_list_of_installed_plugins(),
+        "a test changed the list of installed shaders without `the_installed_plugins_to_myself` (which holds the shaders too)"
+    );
+    *INSTALLED_SHADERS.write().unwrap_or_else(PoisonError::into_inner) = kinds;
+}
+
+/// The shaders that are installed now.
+pub fn installed_shaders() -> Vec<EffectKind> {
+    INSTALLED_SHADERS.read().unwrap_or_else(PoisonError::into_inner).clone()
 }

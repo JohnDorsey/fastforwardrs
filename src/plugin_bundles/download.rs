@@ -39,6 +39,30 @@ pub trait Fetcher: Send + Sync {
         on_bytes: &mut dyn FnMut(u64),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), String>;
+
+    /// Downloads each of `items` (an address, and the file to put what is there in), one after another, telling `on_bytes` how many bytes there are of all of them as it goes. **A
+    /// fetcher that can keep its connection from one to the next does so** (the system's `curl` is given all of them in one run: a shader is a few kilobytes, and a connection for each would
+    /// take longer than the bytes). **If one fails, no file is left of the others.**
+    fn fetch_many(
+        &self,
+        items: &[(&str, &Path)],
+        on_bytes: &mut dyn FnMut(u64),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), String> {
+        let mut done = 0_u64;
+        for (url, to) in items {
+            let before = done;
+            let result = self.fetch(url, to, &mut |bytes| on_bytes(before + bytes), cancelled);
+            if let Err(error) = result {
+                for (_, made) in items {
+                    let _ = fs::remove_file(made);
+                }
+                return Err(error);
+            }
+            done = before + fs::metadata(to).map_or(0, |metadata| metadata.len());
+        }
+        Ok(())
+    }
 }
 
 /// The system's `curl`.
@@ -59,13 +83,56 @@ impl Curl {
     }
 }
 
-impl Fetcher for Curl {
-    fn fetch(
+/// What curl says when the connection cannot be checked against the lists of certificates that have been revoked (Windows' `schannel` fails so when the server that has the list
+/// cannot be reached, and says "revocation": found by a download that failed 6 times in 6 on the computer this was made on).
+pub(super) fn is_a_failure_to_check_revocation(said: &str) -> bool {
+    said.to_ascii_lowercase().contains("revocation")
+}
+
+/// Runs `once` (told whether the check of revocation is to be made on a best-effort basis: `--ssl-revoke-best-effort`), and **again with that if it failed for want of a way to check
+/// revocation**: the flag is only given then, because curls before 7.70 do not know it, and because the checksum of every file, not the connection, is what says that the file is the
+/// right one.
+pub(super) fn with_a_second_try_for_revocation(mut once: impl FnMut(bool) -> Result<(), String>) -> Result<(), String> {
+    match once(false) {
+        Err(error) if is_a_failure_to_check_revocation(&error) => once(true),
+        other => other,
+    }
+}
+
+/// How many bytes the files that exist among `outputs` have.
+fn bytes_of(outputs: &[&Path]) -> u64 {
+    outputs
+        .iter()
+        .map(|output| fs::metadata(output).map_or(0, |metadata| metadata.len()))
+        .sum()
+}
+
+/// The text of a configuration file of curl that fetches each of `items` (what curl reads with `--config`: a line `url` and a line `output` for each; a value is in quotes, and a
+/// backslash and a quote in it are escaped).
+pub(super) fn configuration_of_curl_for(items: &[(&str, &Path)]) -> String {
+    let quoted = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut text = String::new();
+    for (url, to) in items {
+        text.push_str(&format!(
+            "url = {}\noutput = {}\n",
+            quoted(url),
+            quoted(&to.to_string_lossy())
+        ));
+    }
+    text
+}
+
+impl Curl {
+    /// Runs `curl` once with `arguments` (what to fetch and where to put it), watching the files `outputs` for how many bytes there are, and removing them if it fails. `describe` says
+    /// what failed, from what curl said.
+    fn run_once(
         &self,
-        url: &str,
-        to: &Path,
+        arguments: &[std::ffi::OsString],
+        outputs: &[&Path],
         on_bytes: &mut dyn FnMut(u64),
         cancelled: &dyn Fn() -> bool,
+        describe: &dyn Fn(&str) -> String,
+        best_effort_revocation: bool,
     ) -> Result<(), String> {
         let mut command = background_command(Path::new("curl"));
         command
@@ -83,13 +150,11 @@ impl Fetcher for Curl {
                 "20",
             ])
             // (A download that has gone quiet for a minute is not going on.)
-            .args(["--speed-limit", "1000", "--speed-time", "60"])
-            .arg("--output")
-            .arg(to)
-            .arg("--")
-            .arg(url)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+            .args(["--speed-limit", "1000", "--speed-time", "60"]);
+        if best_effort_revocation {
+            command.arg("--ssl-revoke-best-effort");
+        }
+        command.args(arguments).stdout(Stdio::null()).stderr(Stdio::piped());
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
                 "the program `curl` was not found, and it is what downloads the plugins (it comes with Windows 10 and later and with macOS, and most Linux systems have it): install it, or fetch the plugins with tools/bundled_plugins/fetch_bundled_plugins.py".to_owned()
@@ -97,6 +162,11 @@ impl Fetcher for Curl {
                 format!("`curl` could not be started: {error}")
             }
         })?;
+        let remove_the_outputs = || {
+            for output in outputs {
+                let _ = fs::remove_file(output);
+            }
+        };
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
@@ -104,23 +174,20 @@ impl Fetcher for Curl {
                     if let Some(mut stderr) = child.stderr.take() {
                         let _ = stderr.read_to_string(&mut said);
                     }
-                    on_bytes(fs::metadata(to).map_or(0, |metadata| metadata.len()));
+                    on_bytes(bytes_of(outputs));
                     if status.success() {
                         return Ok(());
                     }
-                    let _ = fs::remove_file(to);
-                    let said = said.trim();
-                    return Err(format!(
-                        "{url} could not be downloaded: {}",
-                        if said.is_empty() { "curl said no" } else { said }
-                    ));
+                    let described = describe(said.trim());
+                    remove_the_outputs();
+                    return Err(described);
                 }
                 Ok(None) => {
-                    on_bytes(fs::metadata(to).map_or(0, |metadata| metadata.len()));
+                    on_bytes(bytes_of(outputs));
                     if cancelled() {
                         let _ = child.kill();
                         let _ = child.wait();
-                        let _ = fs::remove_file(to);
+                        remove_the_outputs();
                         return Err(CANCELLED.to_owned());
                     }
                     std::thread::sleep(Duration::from_millis(100));
@@ -128,6 +195,73 @@ impl Fetcher for Curl {
                 Err(error) => return Err(format!("`curl` could not be waited for: {error}")),
             }
         }
+    }
+
+    fn run(
+        &self,
+        arguments: &[std::ffi::OsString],
+        outputs: &[&Path],
+        on_bytes: &mut dyn FnMut(u64),
+        cancelled: &dyn Fn() -> bool,
+        describe: &dyn Fn(&str) -> String,
+    ) -> Result<(), String> {
+        with_a_second_try_for_revocation(|best_effort| {
+            self.run_once(arguments, outputs, on_bytes, cancelled, describe, best_effort)
+        })
+    }
+}
+
+impl Fetcher for Curl {
+    fn fetch(
+        &self,
+        url: &str,
+        to: &Path,
+        on_bytes: &mut dyn FnMut(u64),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), String> {
+        let arguments = [std::ffi::OsString::from("--output"), to.into(), "--".into(), url.into()];
+        self.run(&arguments, &[to], on_bytes, cancelled, &|said| {
+            format!(
+                "{url} could not be downloaded: {}",
+                if said.is_empty() { "curl said no" } else { said }
+            )
+        })
+    }
+
+    fn fetch_many(
+        &self,
+        items: &[(&str, &Path)],
+        on_bytes: &mut dyn FnMut(u64),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), String> {
+        let Some((_, first)) = items.first() else {
+            return Ok(());
+        };
+        let configuration = first
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(format!(".curl-{}.configuration", std::process::id()));
+        fs::write(&configuration, configuration_of_curl_for(items))
+            .map_err(|error| format!("{} could not be written: {error}", configuration.display()))?;
+        let arguments = [
+            std::ffi::OsString::from("--fail-early"),
+            "--config".into(),
+            configuration.clone().into(),
+        ];
+        let outputs: Vec<&Path> = items.iter().map(|(_, to)| *to).collect();
+        let result = self.run(&arguments, &outputs, on_bytes, cancelled, &|said| {
+            // (The one that failed is the first that has no file: curl makes the file of a download when its bytes begin to come.)
+            let which = items
+                .iter()
+                .find(|(_, to)| !to.exists())
+                .map_or_else(|| "a file".to_owned(), |(url, _)| (*url).to_owned());
+            format!(
+                "{which} could not be downloaded: {}",
+                if said.is_empty() { "curl said no" } else { said }
+            )
+        });
+        let _ = fs::remove_file(&configuration);
+        result
     }
 }
 
@@ -146,6 +280,12 @@ pub struct Outcome {
 /// The folder that the plugins that a person fetched are put in: `fastforwardrs/plugins` in the folder of the programs' data of the person (`%LOCALAPPDATA%` on Windows).
 pub fn fetched_plugins_folder() -> Option<PathBuf> {
     dirs::data_local_dir().map(|folder| folder.join("fastforwardrs").join("plugins"))
+}
+
+/// The folder that the shaders that a person fetched are put in: `fastforwardrs/shaders` in the same folder of the programs' data, beside `plugins` (a shader is data, and its
+/// folder is not trusted as the folder of plugins is: a plugin is code).
+pub fn fetched_shaders_folder() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|folder| folder.join("fastforwardrs").join("shaders"))
 }
 
 /// Whether every plugin of `set` for `platform` is in its folder in `folder` (a file, or on macOS a bundle, which is a folder).
@@ -320,7 +460,7 @@ fn build_the_set(
         .map_err(|error| format!("NOTICE.txt could not be written: {error}"))
 }
 
-fn check_the_checksum(path: &Path, wanted: &str, url: &str) -> Result<(), String> {
+pub(super) fn check_the_checksum(path: &Path, wanted: &str, url: &str) -> Result<(), String> {
     let found = Sha256Digest::of_file(path)
         .map_err(|error| format!("{} could not be read to be checked: {error}", path.display()))?;
     if found.to_hex() == wanted {

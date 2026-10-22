@@ -14,8 +14,8 @@ use super::sound_plugins_tests::{is_shown, open_the_window, shows_containing};
 use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::plugin_manager_bundles::{
-    ASK_NO_LABEL, ASK_YES_LABEL, CANCEL_LABEL, FETCHED_NOTE, NO_BUILD_FOR_THIS_COMPUTER_NOTE, NO_BUILDS_NOTE,
-    NOT_FETCHED_NOTE, OK_LABEL,
+    ASK_NO_LABEL, ASK_YES_LABEL, BundleKind, CANCEL_LABEL, FETCHED_NOTE, NO_BUILD_FOR_THIS_COMPUTER_NOTE,
+    NO_BUILDS_NOTE, NOT_FETCHED_NOTE, OK_LABEL,
 };
 use crate::application::plugin_manager_window::PluginManagerCommand;
 use crate::plugin_bundles::test_support::{FakeFetcher, a_fixture};
@@ -28,6 +28,11 @@ fn window_on_the_bundles_tab(fetcher: Arc<dyn Fetcher>) -> (Window, tempfile::Te
     let mut window = Window::showing(super::test_window::project_of(100));
     let folder = tempfile::tempdir().unwrap();
     let bundles = &mut window.application_mut().environment.plugin_search.bundles;
+    // (These tests are about the plugins: the shaders have a section of their own, which has nothing in it here and is not shown, and tests of its own.)
+    bundles.shader_manifest = Some(crate::plugin_bundles::ShaderManifest {
+        format: 1,
+        sets: Vec::new(),
+    });
     bundles.manifest = Some(a_fixture().manifest);
     bundles.platform = Some("windows-x86_64");
     bundles.folder = Some(folder.path().to_owned());
@@ -158,7 +163,9 @@ fn a_download_that_nobody_asked_about_is_never_begun() {
     let fetcher = the_fake_fetcher();
     let (mut window, folder) = window_on_the_bundles_tab(fetcher.clone());
 
-    window.do_this(Command::PluginManager(PluginManagerCommand::DownloadBundles));
+    window.do_this(Command::PluginManager(PluginManagerCommand::DownloadBundles(
+        BundleKind::SoundPlugins,
+    )));
     window.settle();
     std::thread::sleep(Duration::from_millis(100));
     window.settle();

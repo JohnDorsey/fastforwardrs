@@ -25,6 +25,7 @@
 //! * [`video_export`] makes the finished video: ffmpeg decodes and encodes, and the engine draws every frame from the very description the preview is drawn from.
 //! * [`plugin_host`] runs the sound plugins that are effects in the sound of the preview and of the export (phase 7).
 //! * [`plugin_scan`] finds the sound plugins that are installed, in a program of its own, so that a library that crashes does not take the editor with it (phase 7).
+//! * [`shader_files`] reads a shader file (ISF) into the kind of effect it is, with the images beside it, and finds the shaders that are in folders (phase 6.8: the plugin manager).
 //! * [`sound_engine`] makes the sound of a project, a block at a time, for the preview and the export alike (phase 7).
 //! * [`engine`] makes the finished picture of the preview on the graphics card, on a thread and a device of its own, from messages
 //!   (what is on a frame) and gives it back as pixels.
@@ -52,6 +53,7 @@ pub mod project;
 pub mod project_file;
 pub mod rgba_picture;
 pub mod settings_file;
+pub mod shader_files;
 pub mod sound_engine;
 pub mod speed_indicator;
 pub mod text_rendering;

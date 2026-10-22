@@ -109,6 +109,10 @@ mod plugin_flow;
 #[cfg(test)]
 mod plugin_manager_bundles_tests;
 #[cfg(test)]
+mod plugin_manager_shader_bundles_tests;
+#[cfg(test)]
+mod plugin_manager_shader_tests;
+#[cfg(test)]
 mod plugin_tests;
 #[cfg(test)]
 mod preview_layer_tests;

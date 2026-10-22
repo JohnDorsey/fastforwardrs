@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The *Bundles* tab of the plugin manager: the plugins that the program can fetch from their authors' own release pages, who made each and under which licence, whether each is
-//! fetched already, and a button that fetches them all after a question. It changes nothing itself: it hands back commands (`PluginManagerCommand`).
+//! The *Bundles* tab of the plugin manager: the plugins and the shaders that the program can fetch from their authors' own pages, who made each and under which licence, whether each
+//! is fetched already, and for each kind a button that fetches them all after a question (**a person who wants only the shaders, which are a few hundred kilobytes, is not made to
+//! fetch the plugins, which are 145 MB**). It changes nothing itself: it hands back commands (`PluginManagerCommand`).
 
 use std::path::Path;
 
@@ -14,6 +15,9 @@ use crate::plugin_bundles::Progress;
 
 /// What the tab says.
 pub const INTRO: &str = "Plugins that other people made. They are fetched from the release pages of their authors, and nothing is downloaded until you ask.";
+pub const SHADERS_INTRO: &str = "Shaders (ISF) that other people made. They are fetched from the page of their authors' repository, each file at a fixed version, and nothing is downloaded until you ask.";
+pub const SOUND_PLUGINS_HEADING: &str = "Sound plugins";
+pub const SHADERS_HEADING: &str = "Shaders";
 pub const NO_BUILDS_NOTE: &str = "There are no builds of these plugins for this computer yet.";
 pub const ASK_YES_LABEL: &str = "Download";
 pub const ASK_NO_LABEL: &str = "Cancel";
@@ -23,12 +27,49 @@ pub const FETCHED_NOTE: &str = "fetched";
 pub const NOT_FETCHED_NOTE: &str = "not fetched yet";
 pub const NO_BUILD_FOR_THIS_COMPUTER_NOTE: &str = "no build for this computer";
 
-/// One set of plugins, as the tab shows it.
+/// The two kinds of what can be fetched: each has a section of its own in the tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BundleKind {
+    SoundPlugins,
+    Shaders,
+}
+
+impl BundleKind {
+    /// The heading of the section.
+    pub const fn heading(self) -> &'static str {
+        match self {
+            Self::SoundPlugins => SOUND_PLUGINS_HEADING,
+            Self::Shaders => SHADERS_HEADING,
+        }
+    }
+
+    /// What a section says of itself, under the heading.
+    pub const fn intro(self) -> &'static str {
+        match self {
+            Self::SoundPlugins => INTRO,
+            Self::Shaders => SHADERS_INTRO,
+        }
+    }
+
+    /// What one of them is called, and several: `1 plugin`, `4 plugins`.
+    pub fn counted(self, count: usize) -> String {
+        let noun = match self {
+            Self::SoundPlugins => "plugin",
+            Self::Shaders => "shader",
+        };
+        format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+    }
+}
+
+/// One set of plugins or of shaders, as the tab shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BundleRow {
     pub name: String,
     pub version: String,
-    pub plugins: Vec<String>,
+    /// What it has in it, for a person: the names of the plugins, or how many shaders of each kind.
+    pub contents: String,
+    /// How many plugins or shaders it has.
+    pub count: usize,
     pub authors: String,
     pub licence: String,
     /// Where the corresponding source is.
@@ -50,8 +91,9 @@ pub enum BundleState<'a> {
     Failed(&'a str),
 }
 
-/// What the tab shows.
+/// What a section of the tab shows.
 pub struct BundlesView<'a> {
+    pub kind: BundleKind,
     pub rows: &'a [BundleRow],
     /// Whether there are builds for this computer.
     pub has_builds: bool,
@@ -74,27 +116,25 @@ pub fn size_in_words(bytes: u64) -> String {
     }
 }
 
-/// What the button that begins the download says.
+/// What the button that begins the download says (the one of the shaders says what it fetches, so that it is not taken for the other).
 pub fn download_button_label(view: &BundlesView<'_>) -> String {
-    format!("Download all ({})...", size_in_words(view.total_bytes))
+    match view.kind {
+        BundleKind::SoundPlugins => format!("Download all ({})...", size_in_words(view.total_bytes)),
+        BundleKind::Shaders => format!("Download all shaders ({})...", size_in_words(view.total_bytes)),
+    }
 }
 
 /// What the question says.
 pub fn question(view: &BundlesView<'_>) -> String {
-    let count: usize = view
-        .rows
-        .iter()
-        .filter(|row| row.has_build)
-        .map(|row| row.plugins.len())
-        .sum();
+    let count: usize = view.rows.iter().filter(|row| row.has_build).map(|row| row.count).sum();
     let folder = view.folder.map_or_else(
         || "the folder of the program's data".to_owned(),
         |folder| folder.display().to_string(),
     );
     format!(
-        "Download {count} plugin{} ({}) from {} and keep {} in {folder}? Each file is checked against a checksum that is kept in this program, and is not used if it is different. \
+        "Download {} ({}) from {} and keep {} in {folder}? Each file is checked against a checksum that is kept in this program, and is not used if it is different. \
          The licence of each is listed here and is kept with it.",
-        if count == 1 { "" } else { "s" },
+        view.kind.counted(count),
         size_in_words(view.total_bytes),
         view.hosts,
         if count == 1 { "it" } else { "them" },
@@ -102,7 +142,8 @@ pub fn question(view: &BundlesView<'_>) -> String {
 }
 
 pub fn show(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Command>) {
-    ui.label(RichText::new(INTRO).weak().small());
+    ui.label(RichText::new(view.kind.heading()).strong());
+    ui.label(RichText::new(view.kind.intro()).weak().small());
     ui.add_space(6.0);
     // (What can be done comes before the list, so that the button, the question and the progress are in view without scrolling.)
     show_the_download(ui, view, commands);
@@ -120,7 +161,7 @@ pub fn show(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Command>) {
                 };
                 ui.label(RichText::new(note).weak());
             });
-            ui.label(format!("{} ({})", row.plugins.join(", "), row.licence));
+            ui.label(format!("{} ({})", row.contents, row.licence));
             ui.label(
                 RichText::new(format!("By {}. Source: {}", row.authors, row.source))
                     .weak()
@@ -138,18 +179,20 @@ fn show_the_download(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Com
     match &view.state {
         BundleState::Idle => {
             if ui.button(download_button_label(view)).clicked() {
-                commands.push(Command::PluginManager(PluginManagerCommand::AskToDownloadBundles));
+                commands.push(Command::PluginManager(PluginManagerCommand::AskToDownloadBundles(
+                    view.kind,
+                )));
             }
         }
         BundleState::Asking => {
             ui.label(question(view));
             ui.horizontal(|ui| {
                 if ui.button(ASK_YES_LABEL).clicked() {
-                    commands.push(Command::PluginManager(PluginManagerCommand::DownloadBundles));
+                    commands.push(Command::PluginManager(PluginManagerCommand::DownloadBundles(view.kind)));
                 }
                 if ui.button(ASK_NO_LABEL).clicked() {
                     commands.push(Command::PluginManager(
-                        PluginManagerCommand::CancelAskingToDownloadBundles,
+                        PluginManagerCommand::CancelAskingToDownloadBundles(view.kind),
                     ));
                 }
             });
@@ -162,7 +205,9 @@ fn show_the_download(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Com
             };
             ui.add(ProgressBar::new(fraction).text(progress.step.clone()));
             if ui.button(CANCEL_LABEL).clicked() {
-                commands.push(Command::PluginManager(PluginManagerCommand::CancelBundleDownload));
+                commands.push(Command::PluginManager(PluginManagerCommand::CancelBundleDownload(
+                    view.kind,
+                )));
             }
         }
         BundleState::Done(message) | BundleState::Failed(message) => {
@@ -172,7 +217,9 @@ fn show_the_download(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Com
                 ui.label(*message);
             }
             if ui.button(OK_LABEL).clicked() {
-                commands.push(Command::PluginManager(PluginManagerCommand::DismissBundleMessage));
+                commands.push(Command::PluginManager(PluginManagerCommand::DismissBundleMessage(
+                    view.kind,
+                )));
             }
         }
     }

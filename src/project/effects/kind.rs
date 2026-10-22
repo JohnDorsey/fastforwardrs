@@ -19,7 +19,7 @@ use std::sync::{Mutex, PoisonError};
 use super::built_in::{
     self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, LUT, OPACITY, PictureOperation, SATURATION,
 };
-use super::installed::{InstalledPlugin, installed_plugin_for, installed_plugins};
+use super::installed::{InstalledPlugin, installed_plugin_for, installed_plugins, installed_shaders};
 use super::{EffectDescriptor, EffectDomain, ParameterDescriptor, ShaderSource};
 use crate::colour_effects::ColourMatrix;
 use crate::project::animation::{PropertyValue, ValueKind};
@@ -167,9 +167,24 @@ impl EffectKind {
             .collect()
     }
 
-    /// The effects that a thing can be offered: those the program has in itself, then the plugins that are installed now.
+    /// The kinds of effect that are shaders, found in the folders of the plugin manager and run by this version (phase 6.8), in the order of the folders they were found in.
+    pub fn installed_shader_kinds() -> Vec<EffectKind> {
+        installed_shaders()
+    }
+
+    /// The installed shaders that make a picture and read none: what a generator clip is made of (they are not offered as effects).
+    pub fn installed_generators() -> Vec<EffectKind> {
+        installed_shaders()
+            .into_iter()
+            .filter(|kind| kind.is_a_generator())
+            .collect()
+    }
+
+    /// The effects that a thing can be offered: those the program has in itself, then the shaders that are installed now (the filters, and the transitions: a generator is
+    /// not an effect, it is made into a clip), then the plugins that are installed now.
     pub fn offered() -> Vec<EffectKind> {
         let mut kinds = Self::BUILT_IN.to_vec();
+        kinds.extend(installed_shaders().into_iter().filter(|kind| !kind.is_a_generator()));
         kinds.extend(Self::installed_plugin_kinds());
         kinds
     }

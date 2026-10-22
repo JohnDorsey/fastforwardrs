@@ -209,6 +209,9 @@ impl FastForwardApplication {
                 text,
                 images,
             } => self.new_generator_clip(track, frame, &file_name, &text, images, now),
+            Command::NewGeneratorClipOfKind { track, frame, kind } => {
+                self.new_generator_clip_of_kind(track, frame, kind, now);
+            }
             Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
                 if let Err(error) = self.document.project.set_clip_duration(clip, frames) {

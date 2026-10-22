@@ -11,7 +11,8 @@
 //! * Right-clicking a clip selects it (unless it is one of the clips that are selected already), and the
 //!   settings of what is selected are in the properties panel. It also opens a menu to put a copy of the clip (or of all the
 //!   selected clips, if it is one of them) beside it, and to delete it (see [`super::clip_menu`]).
-//! * Right-clicking an empty part of the strip opens a menu with "New", which has "Text object", "Adjustment clip" and "Generator from file...".
+//! * Right-clicking an empty part of the strip opens a menu with "New", which has "Text object", "Adjustment clip", "Generator from file..." and, when the plugin manager has found
+//!   shaders that make a picture, "Generator", a list of them.
 //! * Under the strip hang the drawers that are open: those of its clips, and the one of the track (see [`super::drawers`]).
 //!
 //! Cutting a track is done with a key (see the `keyboard` module), not with the mouse.
@@ -28,11 +29,12 @@ use super::strip_view::StripView;
 use super::view_state::Grabbed;
 use super::{NewMenuTarget, TimelineContent, TimelineViewState};
 use crate::application::commands::Command;
+use crate::application::naming::what_an_effect_is_called;
 use crate::application::selection::{SelectionChange, SelectionItem};
 use crate::application::start_time_hold::StartTimeMemory;
 use crate::application::textures::Textures;
 use crate::application::theme;
-use crate::project::{AnimationTarget, Clip, ClipId, Project, Track, TrackId};
+use crate::project::{AnimationTarget, Clip, ClipId, EffectKind, Project, Track, TrackId};
 
 /// The name the strip of a track is known by to screen readers (and the tests): it says which track.
 pub fn strip_label(track_title: &str) -> String {
@@ -192,9 +194,47 @@ pub(super) fn show(
                     }
                     ui.close();
                 }
+                show_the_installed_generators(ui, state.new_menu_target, commands);
             });
         });
     }
+}
+
+/// The heading of the list of the generators that the plugin manager found, in the New menu.
+pub const GENERATOR_LIST_LABEL: &str = "Generator";
+
+/// How tall the list of generators may be before it scrolls, in points.
+const MOST_HEIGHT_OF_THE_LIST_OF_GENERATORS: f32 = 360.0;
+
+/// In the New menu, the generators that the plugin manager found (shaders that make a picture and read none), by name, each a clip in one step. Nothing is shown when there are none.
+fn show_the_installed_generators(ui: &mut Ui, target: Option<NewMenuTarget>, commands: &mut Vec<Command>) {
+    let mut generators = EffectKind::installed_generators();
+    if generators.is_empty() {
+        return;
+    }
+    generators.sort_by_key(|kind| kind.name().to_lowercase());
+    ui.menu_button(GENERATOR_LIST_LABEL, |ui| {
+        egui::ScrollArea::vertical()
+            .max_height(MOST_HEIGHT_OF_THE_LIST_OF_GENERATORS)
+            .show(ui, |ui| {
+                for kind in generators {
+                    if ui
+                        .button(what_an_effect_is_called(kind))
+                        .on_hover_text(kind.description())
+                        .clicked()
+                    {
+                        if let Some(target) = target {
+                            commands.push(Command::NewGeneratorClipOfKind {
+                                track: target.track,
+                                frame: target.frame,
+                                kind,
+                            });
+                        }
+                        ui.close();
+                    }
+                }
+            });
+    });
 }
 
 /// Draws the drawers that hang under the strip of `track` and are open (or sliding): the one of the track, and those of its

@@ -1,17 +1,20 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The plugin manager, opened from the Edit menu (G17 of `docs/engine-phase-7-design.md`): where plugins are looked for (the folders a person adds; those of
-//! `LADSPA_PATH`, `CLAP_PATH` and the usual ones are shown and cannot be removed), where the libraries that plugins need are looked for, and what the scan found and what failed. It is a
-//! window that is opened, not a control that is always there. It changes nothing itself: it hands back commands.
+//! The plugin manager, opened from the Edit menu (G17 of `docs/engine-phase-7-design.md`, and phase 6.8): where plugins and shaders are looked for (the folders a person adds; those of
+//! `LADSPA_PATH`, `CLAP_PATH` and the usual ones, and those of ISF, are shown and cannot be removed), where the libraries that plugins need are looked for, and what the scan found and
+//! what failed: the sound plugins (LADSPA and CLAP) by library, and the shaders (ISF), each with whether it can be used and why not. It is a window that is opened, not a control that is
+//! always there. It changes nothing itself: it hands back commands.
 
 use std::path::{Path, PathBuf};
 
 use egui::{Align2, Context, Id, RichText, ScrollArea, Ui, Window, vec2};
 
 use super::commands::Command;
-use super::plugin_manager_bundles::{BundlesView, show as show_bundles};
+use super::plugin_manager_bundles::{BundleKind, BundlesView, show as show_bundles};
+use crate::isf::Shape;
 use crate::plugin_scan::{LibraryOutcome, LibraryReport, NotUsed, PluginSearchSettings};
+use crate::shader_files::{FoundShader, ShaderScan};
 
 /// The title of the window, and what its buttons and the checkbox say.
 pub const TITLE: &str = "Plugin manager";
@@ -19,7 +22,7 @@ pub const ADD_FOLDER_LABEL: &str = "Add folder...";
 pub const REMOVE_LABEL: &str = "Remove";
 pub const SCAN_AGAIN_LABEL: &str = "Scan again";
 pub const SEARCH_PARENT_FOLDERS_LABEL: &str = "Also look in the folders above each plugin library";
-pub const FOLDERS_HEADING: &str = "Folders to look for plugins in";
+pub const FOLDERS_HEADING: &str = "Folders to look for plugins and shaders in";
 pub const DEPENDENCY_FOLDERS_HEADING: &str = "Folders with libraries that plugins need";
 pub const SCANNING_NOTE: &str = "Scanning...";
 
@@ -48,15 +51,15 @@ pub enum PluginManagerCommand {
     ScanAgain,
     /// Show the other tab.
     SelectTab(PluginManagerTab),
-    /// The button of the *Bundles* tab was pressed: the question that comes before the download is shown.
-    AskToDownloadBundles,
-    CancelAskingToDownloadBundles,
+    /// The button of a section of the *Bundles* tab was pressed: the question that comes before the download is shown.
+    AskToDownloadBundles(BundleKind),
+    CancelAskingToDownloadBundles(BundleKind),
     /// The question was answered yes: the download begins.
-    DownloadBundles,
+    DownloadBundles(BundleKind),
     /// A download that is going on is stopped.
-    CancelBundleDownload,
+    CancelBundleDownload(BundleKind),
     /// What the last download said is taken away.
-    DismissBundleMessage,
+    DismissBundleMessage(BundleKind),
 }
 
 /// The two tabs of the window.
@@ -88,8 +91,12 @@ pub struct PluginManagerView<'a> {
     pub bundled_folder: Option<&'a Path>,
     /// The folder that the *Bundles* tab fetches into (it is one of those, where it is there).
     pub fetched_folder: Option<&'a Path>,
+    /// The folder that the *Bundles* tab fetches shaders into (it is one of those too).
+    pub fetched_shaders_folder: Option<&'a Path>,
     pub tab: PluginManagerTab,
+    /// The section of the *Bundles* tab for the sound plugins, and the one for the shaders (which is not shown if the program has no shaders to fetch).
     pub bundles: BundlesView<'a>,
+    pub shader_bundles: BundlesView<'a>,
     pub is_scanning: bool,
     pub has_scanned: bool,
     pub libraries: &'a [LibraryReport],
@@ -98,6 +105,8 @@ pub struct PluginManagerView<'a> {
     pub effect_count: usize,
     /// What went wrong that was not a library's doing.
     pub problems: &'a [String],
+    /// The shaders that were found, with what became of each.
+    pub shaders: &'a ShaderScan,
 }
 
 /// Shows the window if it is `open`, and adds the commands for what is done in it.
@@ -132,7 +141,14 @@ fn show_contents(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mut Vec<C
     ui.separator();
     match view.tab {
         PluginManagerTab::Plugins => show_the_plugins_tab(ui, view, commands),
-        PluginManagerTab::Bundles => show_bundles(ui, &view.bundles, commands),
+        PluginManagerTab::Bundles => {
+            show_bundles(ui, &view.bundles, commands);
+            if !view.shader_bundles.rows.is_empty() {
+                ui.add_space(10.0);
+                ui.separator();
+                show_bundles(ui, &view.shader_bundles, commands);
+            }
+        }
     }
 }
 
@@ -143,7 +159,7 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mu
         "plugin folders",
         &view.settings.folders,
         view.other_folders,
-        [view.bundled_folder, view.fetched_folder],
+        [view.bundled_folder, view.fetched_folder, view.fetched_shaders_folder],
         commands,
         true,
     );
@@ -159,7 +175,7 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mu
         "dependency folders",
         &view.settings.dependency_folders,
         &[],
-        [None, None],
+        [None, None, None],
         commands,
         false,
     );
@@ -189,6 +205,7 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mu
     ui.add_space(4.0);
     ui.separator();
     show_libraries(ui, view);
+    show_shaders(ui, view);
 }
 
 /// What the scan came to, in a line.
@@ -203,15 +220,31 @@ pub fn summary(view: &PluginManagerView<'_>) -> String {
     } else {
         format!("{} plugins can be put on a clip", view.effect_count)
     };
+    let shaders = summary_of_the_shaders(view.shaders);
     let libraries = if view.libraries.len() == 1 {
         "1 library".to_owned()
     } else {
         format!("{} libraries", view.libraries.len())
     };
     if failed == 0 {
-        format!("{libraries} found; {effects}.")
+        format!("{libraries} found; {effects}{shaders}.")
     } else {
-        format!("{libraries} found, {failed} of them failed; {effects}.")
+        format!("{libraries} found, {failed} of them failed; {effects}{shaders}.")
+    }
+}
+
+/// What the scan came to of shaders, to follow the rest of the line: nothing if no shader was found, and otherwise `; 212 shaders can be used, 9 cannot`.
+fn summary_of_the_shaders(shaders: &ShaderScan) -> String {
+    if shaders.shaders.is_empty() {
+        return String::new();
+    }
+    let usable = shaders.usable_count();
+    let unusable = shaders.unusable_count();
+    let can_be_used = format!("{usable} shader{} can be used", if usable == 1 { "" } else { "s" });
+    if unusable == 0 {
+        format!("; {can_be_used}")
+    } else {
+        format!("; {can_be_used}, {unusable} cannot")
     }
 }
 
@@ -220,7 +253,7 @@ fn show_folders(
     salt: &str,
     folders: &[PathBuf],
     other_folders: &[PathBuf],
-    [bundled, fetched]: [Option<&Path>; 2],
+    [bundled, fetched, fetched_shaders]: [Option<&Path>; 3],
     commands: &mut Vec<Command>,
     for_plugins: bool,
 ) {
@@ -241,7 +274,7 @@ fn show_folders(
         for folder in other_folders {
             let kind = if bundled == Some(folder.as_path()) {
                 BUNDLED_LABEL
-            } else if fetched == Some(folder.as_path()) {
+            } else if fetched == Some(folder.as_path()) || fetched_shaders == Some(folder.as_path()) {
                 FETCHED_LABEL
             } else {
                 "usual"
@@ -264,6 +297,87 @@ fn file_name(path: &Path) -> String {
         || path.display().to_string(),
         |name| name.to_string_lossy().into_owned(),
     )
+}
+
+/// What a shader is for, as the lists say it.
+pub fn word_for_a_shape(shape: Shape) -> &'static str {
+    match shape {
+        Shape::Filter => "filter",
+        Shape::Generator => "generator",
+        Shape::Transition => "transition",
+    }
+}
+
+/// The heading of the list of the shaders that can be used.
+pub fn heading_of_the_shaders_that_can_be_used(count: usize) -> String {
+    format!("Shaders that can be used ({count})")
+}
+
+/// The heading of the list of the shaders that cannot be used.
+pub fn heading_of_the_shaders_that_cannot_be_used(count: usize) -> String {
+    format!("Shaders that cannot be used ({count})")
+}
+
+/// What a line of the list of the shaders that can be used says: its name, what it is for, and its file.
+pub fn line_of_a_shader_that_can_be_used(shader: &FoundShader) -> String {
+    let name = shader.kind.map_or_else(
+        || shader.file_name.clone(),
+        crate::application::naming::what_an_effect_is_called,
+    );
+    match shader.shape {
+        Some(shape) => format!("{name} ({}): {}", word_for_a_shape(shape), shader.file_name),
+        None => format!("{name}: {}", shader.file_name),
+    }
+}
+
+/// What a line of the list of the shaders that cannot be used says: its file, and why.
+pub fn line_of_a_shader_that_cannot_be_used(shader: &FoundShader) -> String {
+    format!(
+        "{}: {}",
+        shader.file_name,
+        shader.why_not_usable.as_deref().unwrap_or("it cannot be used")
+    )
+}
+
+/// The shaders that were found: the ones that can be used (each once, by what it is), then the ones that cannot, with why. Nothing is shown before a shader is found.
+fn show_shaders(ui: &mut Ui, view: &PluginManagerView<'_>) {
+    if view.shaders.shaders.is_empty() {
+        return;
+    }
+    let mut usable: Vec<&FoundShader> = Vec::new();
+    for shader in &view.shaders.shaders {
+        if shader.can_be_used() && !usable.iter().any(|known| known.kind == shader.kind) {
+            usable.push(shader);
+        }
+    }
+    let unusable: Vec<&FoundShader> = view
+        .shaders
+        .shaders
+        .iter()
+        .filter(|shader| !shader.can_be_used())
+        .collect();
+    ui.add_space(6.0);
+    if !usable.is_empty() {
+        egui::CollapsingHeader::new(heading_of_the_shaders_that_can_be_used(usable.len()))
+            .id_salt("shaders that can be used")
+            .show(ui, |ui| {
+                for shader in usable {
+                    ui.label(line_of_a_shader_that_can_be_used(shader))
+                        .on_hover_text(shader.path.display().to_string());
+                }
+            });
+    }
+    if !unusable.is_empty() {
+        egui::CollapsingHeader::new(heading_of_the_shaders_that_cannot_be_used(unusable.len()))
+            .id_salt("shaders that cannot be used")
+            .default_open(true)
+            .show(ui, |ui| {
+                for shader in unusable {
+                    ui.colored_label(ui.visuals().warn_fg_color, line_of_a_shader_that_cannot_be_used(shader))
+                        .on_hover_text(shader.path.display().to_string());
+                }
+            });
+    }
 }
 
 fn show_libraries(ui: &mut Ui, view: &PluginManagerView<'_>) {

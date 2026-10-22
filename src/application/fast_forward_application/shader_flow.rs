@@ -19,12 +19,9 @@ use super::command_execution::SECONDS_A_NEW_GENERATOR_CLIP_LASTS;
 use super::table_flow::NOT_A_FILE_TITLE;
 use crate::application::commands::Command;
 use crate::application::file_chooser::{FileKind, FileQuestion};
-use crate::isf;
-use crate::project::{
-    AnimationTarget, EffectKind, MOST_BYTES_OF_A_SHADER, MOST_IMAGES_A_SHADER_BRINGS, Member, ShaderImage,
-    TimelineFrameIndex, TrackId,
-};
-use crate::project_file::read_a_resource_file;
+use crate::isf::Shape;
+use crate::project::{AnimationTarget, EffectKind, Member, ShaderImage, TimelineFrameIndex, TrackId};
+use crate::shader_files::{ShaderFile, ShaderFileProblem, kind_of_a_shader, read_a_shader_file};
 
 /// What the message about a file that is not a shader that can be used says.
 pub const NOT_A_SHADER_TITLE: &str = "This is not a shader that can be used";
@@ -36,46 +33,24 @@ enum Wanted {
     Generator,
 }
 
-/// The images that the shader `text`, the file `path`, brings with it (an ISF file's `IMPORTED`), read from beside it: **each is a file in the folder of the shader or in a folder below it**
-/// (a path that is absolute, or goes up, or says nothing, is refused: a shader is not a way to read the files of a computer), and must be a PNG or a JPEG that the program can use.
-/// What is wrong, in words, with the first that is wrong, if anything is.
-fn images_of_the_shader(path: &Path, text: &str) -> Result<Vec<ShaderImage>, String> {
-    let Ok(file) = isf::read(text) else {
-        // (A file that cannot be read says so when it is made into a kind.)
-        return Ok(Vec::new());
-    };
-    if file.imported.len() > MOST_IMAGES_A_SHADER_BRINGS {
-        return Err(format!(
-            "the shader brings {} images, and {MOST_IMAGES_A_SHADER_BRINGS} are the most",
-            file.imported.len()
-        ));
+/// What is wrong with a shader that is (or is not) a generator, for what is `wanted` of it, in words, if something is: a generator where an effect is wanted, or the other way round.
+fn what_is_wrong_with_the_shape(wanted: Wanted, is_a_generator: bool) -> Option<&'static str> {
+    match (wanted, is_a_generator) {
+        (Wanted::Filter, true) => Some(
+            "this shader is a generator: it makes a picture, and is made into a clip with New, then Generator from file..., on an empty part of a track",
+        ),
+        (Wanted::Generator, false) => Some(
+            "this shader is a filter: it works on a picture, and is put on one with Add effect from file..., not made into a clip",
+        ),
+        _ => None,
     }
-    let folder = path.parent().unwrap_or_else(|| Path::new("."));
-    file.imported
-        .iter()
-        .map(|imported| {
-            let relative = Path::new(&imported.path);
-            let stays_below = !imported.path.trim().is_empty()
-                && relative.is_relative()
-                && !relative.has_root()
-                && relative
-                    .components()
-                    .all(|part| matches!(part, std::path::Component::Normal(_) | std::path::Component::CurDir));
-            if !stays_below {
-                return Err(format!(
-                    "the image {} is at {:?}, which is not a file in the folder of the shader or below it",
-                    imported.name, imported.path
-                ));
-            }
-            let bytes = read_a_resource_file(&folder.join(relative))
-                .map_err(|problem| format!("the image {} ({}): {problem}", imported.name, imported.path))?;
-            let image = ShaderImage::new(imported.name.clone(), bytes);
-            image
-                .pixels()
-                .map_err(|why| format!("the image {} ({}): {why}", imported.name, imported.path))?;
-            Ok(image)
-        })
-        .collect()
+}
+
+/// What is wrong with the shader `file` for what is `wanted` of it, in words, if something is: this version cannot run it, or it is the wrong shape.
+fn what_is_wrong_with(file: &ShaderFile, wanted: Wanted) -> Option<String> {
+    file.why_not_usable
+        .clone()
+        .or_else(|| what_is_wrong_with_the_shape(wanted, file.shape == Shape::Generator).map(str::to_owned))
 }
 
 /// The kind of effect that the shader `text` of the file `file_name`, which brings `images`, is, if it is a good one and is what is `wanted` of it: **what is wrong with it, in words, if not.**
@@ -85,59 +60,52 @@ fn kind_of_the_shader(
     images: Vec<ShaderImage>,
     wanted: Wanted,
 ) -> Result<EffectKind, String> {
-    if text.len() > MOST_BYTES_OF_A_SHADER {
-        return Err(format!(
-            "the file is {} bytes, and {MOST_BYTES_OF_A_SHADER} are the most a shader can be",
-            text.len()
-        ));
-    }
-    let file = isf::read(text).map_err(|problem| problem.to_string())?;
-    let descriptor = isf::descriptor_with_images_of(&file, file_name, text, images);
-    let kind = EffectKind::from_snapshot(descriptor)?;
-    if let Some(why) = isf::why_not_usable(kind.descriptor()) {
+    let made = kind_of_a_shader(file_name, text, images)?;
+    if let Some(why) = made.why_not_usable {
         return Err(why);
     }
-    match (wanted, kind.is_a_generator()) {
-        (Wanted::Filter, true) => Err("this shader is a generator: it makes a picture, and is made into a clip with New, then Generator from file..., on an empty part of a track".to_owned()),
-        (Wanted::Generator, false) => Err("this shader is a filter: it works on a picture, and is put on one with Add effect from file..., not made into a clip".to_owned()),
-        _ => Ok(kind),
+    match what_is_wrong_with_the_shape(wanted, made.shape == Shape::Generator) {
+        Some(why) => Err(why.to_owned()),
+        None => Ok(made.kind),
     }
 }
 
 impl FastForwardApplication {
-    /// Reads the file at `path` as a shader and puts an effect of it on `owner` (see the top of this file). The user is told why not if it cannot be done.
-    pub(super) fn use_the_shader_in(&mut self, path: &Path, owner: Member, now: Instant, context: &Context) {
+    /// Reads the file at `path` as a shader that is `wanted`, or tells the person why it is not one and gives nothing.
+    fn read_the_shader_that_was_chosen(&mut self, path: &Path, wanted: Wanted) -> Option<ShaderFile> {
         let name = path
             .file_name()
             .map_or_else(|| "shader.fs".to_owned(), |name| name.to_string_lossy().into_owned());
-        let bytes = match read_a_resource_file(path) {
-            Ok(bytes) => bytes,
-            Err(problem) => {
-                self.show_message(NOT_A_FILE_TITLE, problem.to_string());
-                return;
+        match read_a_shader_file(path) {
+            Err(ShaderFileProblem::CouldNotBeRead(words)) => {
+                self.show_message(NOT_A_FILE_TITLE, words);
+                None
             }
-        };
-        let Ok(text) = String::from_utf8(bytes.to_vec()) else {
-            self.show_message(NOT_A_SHADER_TITLE, format!("{name}: the file is not text"));
-            return;
-        };
-        let images = match images_of_the_shader(path, &text) {
-            Ok(images) => images,
-            Err(why) => {
-                self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
-                return;
+            Err(ShaderFileProblem::NotAShader(words)) => {
+                self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {words}"));
+                None
             }
-        };
-        if let Err(why) = kind_of_the_shader(&name, &text, images.clone(), Wanted::Filter) {
-            self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
-            return;
+            Ok(file) => {
+                if let Some(why) = what_is_wrong_with(&file, wanted) {
+                    self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
+                    return None;
+                }
+                Some(file)
+            }
         }
+    }
+
+    /// Reads the file at `path` as a shader and puts an effect of it on `owner` (see the top of this file). The user is told why not if it cannot be done.
+    pub(super) fn use_the_shader_in(&mut self, path: &Path, owner: Member, now: Instant, context: &Context) {
+        let Some(file) = self.read_the_shader_that_was_chosen(path, Wanted::Filter) else {
+            return;
+        };
         self.carry_out_all(
             vec![Command::UseAShader {
                 owner,
-                file_name: name,
-                text: Arc::from(text),
-                images,
+                file_name: file.file_name,
+                text: Arc::from(file.text),
+                images: file.images,
             }],
             now,
             context,
@@ -170,38 +138,16 @@ impl FastForwardApplication {
         }) else {
             return;
         };
-        let name = path
-            .file_name()
-            .map_or_else(|| "generator.fs".to_owned(), |name| name.to_string_lossy().into_owned());
-        let bytes = match read_a_resource_file(&path) {
-            Ok(bytes) => bytes,
-            Err(problem) => {
-                self.show_message(NOT_A_FILE_TITLE, problem.to_string());
-                return;
-            }
-        };
-        let Ok(text) = String::from_utf8(bytes.to_vec()) else {
-            self.show_message(NOT_A_SHADER_TITLE, format!("{name}: the file is not text"));
+        let Some(file) = self.read_the_shader_that_was_chosen(&path, Wanted::Generator) else {
             return;
         };
-        let images = match images_of_the_shader(&path, &text) {
-            Ok(images) => images,
-            Err(why) => {
-                self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
-                return;
-            }
-        };
-        if let Err(why) = kind_of_the_shader(&name, &text, images.clone(), Wanted::Generator) {
-            self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
-            return;
-        }
         self.carry_out_all(
             vec![Command::NewGeneratorClip {
                 track,
                 frame,
-                file_name: name,
-                text: Arc::from(text),
-                images,
+                file_name: file.file_name,
+                text: Arc::from(file.text),
+                images: file.images,
             }],
             now,
             context,
@@ -221,6 +167,21 @@ impl FastForwardApplication {
         let Ok(kind) = kind_of_the_shader(file_name, text, images, Wanted::Generator) else {
             return;
         };
+        self.new_generator_clip_of_kind(track, frame, kind, now);
+    }
+
+    /// Puts a new generator clip made by the shader of the kind `kind` on `track`, starting at `frame`, and selects it. (What [`Command::NewGeneratorClipOfKind`] is: the shader is
+    /// one that the plugin manager found; a kind that is not a generator is no clip.)
+    pub(super) fn new_generator_clip_of_kind(
+        &mut self,
+        track: TrackId,
+        frame: TimelineFrameIndex,
+        kind: EffectKind,
+        now: Instant,
+    ) {
+        if !kind.is_a_generator() {
+            return;
+        }
         self.new_clip_with_no_media(
             frame,
             now,

@@ -33,7 +33,8 @@ Everything the editor does, control by control, with the rules behind each. The 
   * Loading, starting a new project and closing the window ask first if there are changes that have not been
     saved, unless Autosave is on (see *Settings*).
 * **Edit**: *Undo* and *Redo*, *Deselect* (with its key, **Esc**, shown beside it; it can be used while a clip is
-  selected), *Project settings* and *Global settings*, which open little windows (see *Settings*).
+  selected), *Project settings* and *Global settings*, which open little windows (see *Settings*), and *Plugin manager...*, which opens a window where sound plugins and shaders are looked
+  for, listed, and fetched (see *Sound plugins* and, for shaders, *Shaders in the plugin manager* in `effects-and-shaders-in-detail.md`).
 * **View**: the checkbox *Generate lead-up on seek*, a global setting (see *Settings*); nothing else yet. Choosing it closes the menu, as the other items do.
 
 **The window** is divided into three **panels**, each in a lighter grey than the space between them (which is 6

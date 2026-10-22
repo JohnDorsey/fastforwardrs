@@ -321,7 +321,8 @@ impl DeterministicRandomNumbers {
     }
 }
 
-/// The list of the plugins that are installed (see `project::set_installed_plugins`) is a list for the whole program, and the tests run at the same time. **Tests that put
+/// The list of the plugins that are installed (see `project::set_installed_plugins`; the shaders that are installed, `project::set_installed_shaders`, are kept with it: the plugin manager
+/// finds both) is a list for the whole program, and the tests run at the same time. **Tests that put
 /// plugins in it hold [`the_installed_plugins_to_myself`], tests whose menus or rules would be different with plugins in it hold [`the_installed_plugins_in_peace`]:** any
 /// number of the second kind run together, and never with the first. (A CI run found the lack of this: a test that says a sound has no plus button, which is true only with
 /// no sound plugin installed, ran while another test had a plugin installed.)
@@ -345,6 +346,7 @@ pub struct TheInstalledPluginsToMyself {
 impl Drop for TheInstalledPluginsToMyself {
     fn drop(&mut self) {
         crate::project::set_installed_plugins(Vec::new());
+        crate::project::set_installed_shaders(Vec::new());
         HOLDS_THE_LIST.with(|holds| holds.set(false));
     }
 }
@@ -362,6 +364,7 @@ pub fn the_installed_plugins_to_myself() -> TheInstalledPluginsToMyself {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     HOLDS_THE_LIST.with(|holds| holds.set(true));
     crate::project::set_installed_plugins(Vec::new());
+    crate::project::set_installed_shaders(Vec::new());
     TheInstalledPluginsToMyself { _guard: guard }
 }
 

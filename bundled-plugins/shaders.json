@@ -1,0 +1,1443 @@
+{
+  "format": 1,
+  "sets": [
+    {
+      "id": "vidvox-isf-files",
+      "name": "Vidvox ISF files",
+      "version": "395072d",
+      "authors": [
+        "Vidvox",
+        "and the people credited in the header of each shader"
+      ],
+      "licence": "MIT",
+      "licence_note": "the licence of the repository, and of each file the one its own text says",
+      "homepage": "https://github.com/Vidvox/ISF-Files",
+      "licence_texts": [
+        {
+          "name": "LICENSE-ISF-Files.txt",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/LICENSE",
+          "sha256": "83e4dd21429a91fb7cea67a476032a9641425e5355df2e0f589a738b6ec9fd2c"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/Vidvox/ISF-Files/tree/395072d48b3ce7351ccb20a5fda54470591324df",
+        "note": "The shaders are the files of that version of the repository, unaltered."
+      },
+      "shaders": [
+        {
+          "name": "3d Rotate",
+          "file": "3d Rotate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/3d%20Rotate.fs",
+          "sha256": "8c5f958d071e8c8d98cd91bce353001f77d95b51791909d8c91b889b34bc070d",
+          "size": 760,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Apply Alpha",
+          "file": "Apply Alpha.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Apply%20Alpha.fs",
+          "sha256": "54c60d8bcee4251d4224da0f8248004c6f1641ff9e9c0879a768279164eada44",
+          "size": 401,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Auto Color Tone",
+          "file": "Auto Color Tone.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Auto%20Color%20Tone.fs",
+          "sha256": "8dadb283218b98fee057e204080e24df5106d7f17bccad5ba4e154b683603cf7",
+          "size": 9448,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Auto Levels",
+          "file": "Auto Levels.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Auto%20Levels.fs",
+          "sha256": "91e91683415fcf122d8f458a3498f4d10464634c63fa2705173af081a3dcf30e",
+          "size": 10153,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Bad TV",
+          "file": "Bad TV.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Bad%20TV.fs",
+          "sha256": "f54a150bb77413ef81b82dd650ed9e57667a28b9bc9faaa9f15f714a45d5386d",
+          "size": 4637,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Basic Shape",
+          "file": "Basic Shape.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Basic%20Shape.fs",
+          "sha256": "166fc840ca13f8269991cf686ecfc1f51ccfaf979ec364b232c7afafb971fbea",
+          "size": 7773,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Bordered Box",
+          "file": "Bordered Box.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Bordered%20Box.fs",
+          "sha256": "32fa398dead872705e20b7556085261b62ef892a437421164271f5f53b138b13",
+          "size": 2848,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Bright",
+          "file": "Bright.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Bright.fs",
+          "sha256": "5d0c0b05541feb395e68234d7b8d65d29d958886a47aa745d470beb6f9db6bdc",
+          "size": 369,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Broken LCD",
+          "file": "Broken LCD.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Broken%20LCD.fs",
+          "sha256": "167fca49415b476b29929987b8f3079ea13f377cb45d9926b1089ec3aa5d5a4f",
+          "size": 19733,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Bump Distortion",
+          "file": "Bump Distortion.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Bump%20Distortion.fs",
+          "sha256": "547ba3a58bb96929f158095f39d0206e67e3f6d2a124a2464c581f87a4d27578",
+          "size": 1992,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "CMYK Halftone-Lookaround",
+          "file": "CMYK Halftone-Lookaround.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/CMYK%20Halftone-Lookaround.fs",
+          "sha256": "e4155d26143a7b8216d0de27f80fca62ac7535ec098aa3495f449b17e9cf777a",
+          "size": 5637,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "CMYK Halftone",
+          "file": "CMYK Halftone.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/CMYK%20Halftone.fs",
+          "sha256": "c2632a0b6f860ed572933d632dec60d0648569ab7ccac94066f5912b7105ff4c",
+          "size": 2920,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Channel Slide",
+          "file": "Channel Slide.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Channel%20Slide.fs",
+          "sha256": "ad7681b739e41f03a68bb9558e243b0d192aa322a6df71f7b14cb43fb808377c",
+          "size": 1281,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Checkerboard",
+          "file": "Checkerboard.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Checkerboard.fs",
+          "sha256": "c58a85c48a43ab55f1d4c108aa5087c4bb5df3639b98169a56763070ab723842",
+          "size": 1544,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Chroma Zoom",
+          "file": "Chroma Zoom.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Chroma%20Zoom.fs",
+          "sha256": "373b91cc23ee8e871505349a9800e7ff4aed04b81b5217f4358fea2859e54a9a",
+          "size": 1631,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Chromatic Aberration",
+          "file": "Chromatic Aberration.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Chromatic%20Aberration.fs",
+          "sha256": "8cc3166b56fd953a457172909d694b9ac64fbfb9ba5d7641a4b3d12efb839094",
+          "size": 2955,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Circle Splash Distortion",
+          "file": "Circle Splash Distortion.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Circle%20Splash%20Distortion.fs",
+          "sha256": "0ea370a9fc338f09645536194e8d4471d2f0f871e4e495289c280b322a748db6",
+          "size": 2145,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Circle Warp",
+          "file": "Circle Warp.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Circle%20Warp.fs",
+          "sha256": "5040711ecf3ab218ac4a54ed88c44f654217e6aa8268955e72e223dace92266d",
+          "size": 1901,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Circle Wrap Distortion",
+          "file": "Circle Wrap Distortion.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Circle%20Wrap%20Distortion.fs",
+          "sha256": "5b2737ce0f73505d716a9b87d26441fee805ee68461a180717ffadfd64c30616",
+          "size": 1953,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Circular Screen",
+          "file": "Circular Screen.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Circular%20Screen.fs",
+          "sha256": "8f7330b1d33e1462db8ab13e52b9b66b2394f8adf15b366121ea1e4d119e855b",
+          "size": 2680,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Collage",
+          "file": "Collage.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Collage.fs",
+          "sha256": "e0f4738f2beeb7c71be2b5a3eed6c2fdf67ac75b51afbc19173612ebfceed169",
+          "size": 3006,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Color Bars",
+          "file": "Color Bars.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Bars.fs",
+          "sha256": "5b7ba7172d87d7eea45ff86704d84fc689dccad08bc6e938ad78820b3b2ffab2",
+          "size": 1671,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Color Controls",
+          "file": "Color Controls.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Controls.fs",
+          "sha256": "5ef5b2fc3c4bac524981afa96b145764b7148f37e62f0124eeb9de0daf249df8",
+          "size": 1994,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Color History",
+          "file": "Color History.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20History.fs",
+          "sha256": "82a18903e0406e582004af02c085eeb46977b3878f1ac3f333f8000e9dd477d6",
+          "size": 1550,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Color Invert",
+          "file": "Color Invert.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Invert.fs",
+          "sha256": "a117efbbc8bbb779c15f106788cc653fb19cfb4258637cb3cb044c46fda0997d",
+          "size": 368,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Color Levels",
+          "file": "Color Levels.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Levels.fs",
+          "sha256": "d47683e1e1a398f46317e4e0f49e3d74c95932f3e9906b6373019c266748b19a",
+          "size": 2426,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Color Monochrome",
+          "file": "Color Monochrome.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Monochrome.fs",
+          "sha256": "3e294f33ff8c02d91b14f8223fbdb6f67d287756413a30595cef0e566e4696e7",
+          "size": 1074,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Color Posterize",
+          "file": "Color Posterize.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Posterize.fs",
+          "sha256": "99bec3bacdd8c9ead9b9d4ef6868ef9bf4570346e1c259c9b7cd15540e8ff20d",
+          "size": 741,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Color Schemes",
+          "file": "Color Schemes.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Schemes.fs",
+          "sha256": "9568a883d195d19b0bf04e1dfe9ada19e178150b4a6d2f9e435fc4fb6df0c6fe",
+          "size": 6443,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Color Test Grid",
+          "file": "Color Test Grid.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Color%20Test%20Grid.fs",
+          "sha256": "7fa8d1756af60a19b5beccac23c52c02a6c7f3c649a8b50d1abb29c7875fff37",
+          "size": 2203,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "ConstantAlpha",
+          "file": "ConstantAlpha.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/ConstantAlpha.fs",
+          "sha256": "8c5f6c31e21187e790d2b76d39588a885ecff9222b699495e6274b9e3b12c258",
+          "size": 461,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Corner Color Tint",
+          "file": "Corner Color Tint.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Corner%20Color%20Tint.fs",
+          "sha256": "7f47dd2c82d4eee7b7e2441b737fecf599e531716e599d991cd3a1da9e94abc7",
+          "size": 1996,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Corner Colors",
+          "file": "Corner Colors.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Corner%20Colors.fs",
+          "sha256": "26c1139a75fdb257e33fe3721cc0ff017ccae658fe357660c18d3765c7ffcdc0",
+          "size": 2027,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Deinterlace",
+          "file": "Deinterlace.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Deinterlace.fs",
+          "sha256": "ed8fb70431239975f1a67bf784c54efeda61e1d787e7ce4261ff295f6f007aa8",
+          "size": 766,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Diagonal Blur",
+          "file": "Diagonal Blur.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Diagonal%20Blur.fs",
+          "sha256": "617d2a317333e8ba3582f0d2ee21d05f23c282911fb8a11f5fa3486221881b74",
+          "size": 1382,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Diagonalize",
+          "file": "Diagonalize.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Diagonalize.fs",
+          "sha256": "00164eb1e9987c6ad1998b0181de1b0ce90ef0e82d1a50754d70f7235fb5b242",
+          "size": 2709,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Dilate-Fast",
+          "file": "Dilate-Fast.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Dilate-Fast.fs",
+          "sha256": "47a2b0b41d449e2231ad98b7a44e211101cb0001fd73bf38e0fbc7f321129002",
+          "size": 5137,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Dilate",
+          "file": "Dilate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Dilate.fs",
+          "sha256": "704fa2c26b5d96afc7cc19705f5d9f5bc7d4d1959ed85843c5dff219151503cb",
+          "size": 3978,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Dirty Lens",
+          "file": "Dirty Lens.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Dirty%20Lens.fs",
+          "sha256": "fd3439b4ebed6358529b59a781bc5d3ea23051d30fe718176d535d0708008579",
+          "size": 5429,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Doodler Overlay",
+          "file": "Doodler Overlay.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Doodler%20Overlay.fs",
+          "sha256": "c45e0f9525b65de81abeb3a9ae23b607e2c7fce549e272a6409c8c55630e01ee",
+          "size": 4120,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Dot Screen",
+          "file": "Dot Screen.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Dot%20Screen.fs",
+          "sha256": "a062a834459598d7f201f3226b85e3210835eaf95eacc808bc70f9596b7306a3",
+          "size": 2693,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Double Vision",
+          "file": "Double Vision.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Double%20Vision.fs",
+          "sha256": "4603aa80ca14c865fe5a3c1053246d79c1457e7040a973c29d390b0ec4d65c5c",
+          "size": 1728,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Duotone",
+          "file": "Duotone.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Duotone.fs",
+          "sha256": "cd55d3c4ac55a8a97ff50b1c6c503f0acb9fb9847d66055e8720fd70ef8e04c1",
+          "size": 2261,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Echo Trace",
+          "file": "Echo Trace.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Echo%20Trace.fs",
+          "sha256": "18062c3c634d7db079f337df1d70ee87684c1783faf4814dc39fe5b48f392629",
+          "size": 1562,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Edge Blowout",
+          "file": "Edge Blowout.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Edge%20Blowout.fs",
+          "sha256": "92d0b5c5c16b7f8a7df67162d6f06c17d9c2e7658c4a2410bcbe6ed37990c6a3",
+          "size": 6447,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Edge Distort",
+          "file": "Edge Distort.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Edge%20Distort.fs",
+          "sha256": "4964658348417361ced25b891c00d673a629ffe44006134d5e3561f3d78df44b",
+          "size": 2285,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Edge Trace",
+          "file": "Edge Trace.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Edge%20Trace.fs",
+          "sha256": "0a7b3280277720c6f0925166f9d27c8157fa69fb3a9151ad7e35fc3c43ecbccf",
+          "size": 2022,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Edges",
+          "file": "Edges.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Edges.fs",
+          "sha256": "38ca3a87996db50968641d51b948b2f092e324f3be14cfb946378eeb41184672",
+          "size": 2531,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Emboss",
+          "file": "Emboss.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Emboss.fs",
+          "sha256": "3ba5def708e6f5b2e39749b82f93a6d8dcc5b2ce832bf375154ab34a57ea9863",
+          "size": 1413,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Erode-Fast",
+          "file": "Erode-Fast.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Erode-Fast.fs",
+          "sha256": "3c435bab89aa3817ba89bbd98e2f95e7eaaee281c2e0f5deeed895d95f9614ac",
+          "size": 5137,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Erode",
+          "file": "Erode.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Erode.fs",
+          "sha256": "4a668566fe78602f73c850a3e68a3d199ed0839e842197adc6859579106fdf8e",
+          "size": 3993,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Exposure Adjust",
+          "file": "Exposure Adjust.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Exposure%20Adjust.fs",
+          "sha256": "0572e4355efb690e559efe61a477e24c909ca983d0a71ce1e90cf0f33826e98e",
+          "size": 605,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "False Color",
+          "file": "False Color.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/False%20Color.fs",
+          "sha256": "a9e5d072f400d38995c839a0880d44b3c02d8a396d101776b9e927d973662131",
+          "size": 699,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Flip H",
+          "file": "Flip H.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Flip%20H.fs",
+          "sha256": "c6e133c35d7f91c8bd2eddf97b3d0d41b8d5972d15feebc4060859e652555a96",
+          "size": 379,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Flip V",
+          "file": "Flip V.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Flip%20V.fs",
+          "sha256": "0bd387bc0713c153d9501f0cdb799027acab18d6aaa4412bcadcc49d744ca5f3",
+          "size": 379,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Gamma Correction",
+          "file": "Gamma Correction.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Gamma%20Correction.fs",
+          "sha256": "36b9e6c59aa5da24dd387856e743cbd97da6b34bbb3d25c5f556a2481ab36ac9",
+          "size": 781,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Ghosting",
+          "file": "Ghosting.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Ghosting.fs",
+          "sha256": "47fb69fb9e29c21277e02bcaf242fd59453c92339105551855cedb94df12de06",
+          "size": 2889,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "God Rays",
+          "file": "God Rays.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/God%20Rays.fs",
+          "sha256": "ce3dd19a3b52b29a51093a399d50bced11767e313f4bd1f3af6217373ff7c761",
+          "size": 2113,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Graph Paper",
+          "file": "Graph Paper.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Graph%20Paper.fs",
+          "sha256": "49abc9b46bb344a223478f55469b3649e1eed5900bac5ee93d0b82a7c16c593d",
+          "size": 2973,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "HSVtoRGB",
+          "file": "HSVtoRGB.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/HSVtoRGB.fs",
+          "sha256": "c96218f11fdd15edb94a9a9837620f2c9dd63eb16ddb53a052eefca3b3542a75",
+          "size": 1075,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Hatch Blur",
+          "file": "Hatch Blur.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Hatch%20Blur.fs",
+          "sha256": "6c332f5e102662d3b7468e146f7e644cc4c18efd4218a1d945c6dcde17cc5357",
+          "size": 1795,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Highlighter Overlay",
+          "file": "Highlighter Overlay.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Highlighter%20Overlay.fs",
+          "sha256": "e4678757f7a67a71584ee897dc5dd0a23f0898ac341a879458dfecdfe03fee23",
+          "size": 2925,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "HorizVertHold",
+          "file": "HorizVertHold.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/HorizVertHold.fs",
+          "sha256": "1c6361f76c0e4acd6af9bb802ea19efaddb407ba03a4c8b929619978f4889473",
+          "size": 1560,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Hyperspace",
+          "file": "Hyperspace.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Hyperspace.fs",
+          "sha256": "1aafaa936de86ea5ddec78e83d3c10ca159db8a7ea6e25c59598ffb856f9c8c9",
+          "size": 1853,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Interlace Mirror",
+          "file": "Interlace Mirror.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Interlace%20Mirror.fs",
+          "sha256": "9ad0b20c2ea4cbd615a83c0c6b674d5ced0e8eca714f88cddbe043a547d96a0c",
+          "size": 871,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "JPEG Block Corruption",
+          "file": "JPEG Block Corruption.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/JPEG%20Block%20Corruption.fs",
+          "sha256": "2222df27034d28baf14cac2259fdda5df66b90d4e74d7cbf80994af56a28962e",
+          "size": 4142,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Kaleidoscope Tile",
+          "file": "Kaleidoscope Tile.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Kaleidoscope%20Tile.fs",
+          "sha256": "e334b81bc4ffd3accf233e1e1696011cd3a272be41c2f24c04b032240ab669e0",
+          "size": 2971,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Kaleidoscope",
+          "file": "Kaleidoscope.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Kaleidoscope.fs",
+          "sha256": "bc0a6f2084320abf7b001f372bca08319a91505f44f7ff0bf7d819762f51c282",
+          "size": 1970,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "LGG",
+          "file": "LGG.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/LGG.fs",
+          "sha256": "96548342a7f84b863befd098622269498e892ee486e52d1a124a33cb3763bdf7",
+          "size": 1463,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Layer Position",
+          "file": "Layer Position.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Layer%20Position.fs",
+          "sha256": "47814855a4feff1631c2d1be0c6ba660e14e88d4ecb32fbf484e404baea49c71",
+          "size": 917,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Line Screen",
+          "file": "Line Screen.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Line%20Screen.fs",
+          "sha256": "f753cbd93b7287ec09b102a700c265ee29c54d68ffd5fa622685cd314b808afc",
+          "size": 2325,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Linear Gradient",
+          "file": "Linear Gradient.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Linear%20Gradient.fs",
+          "sha256": "65cdd1ef8f0dffb68eac51a8bdbc1eb93279ac0320ee092c8f34a47dad5755f9",
+          "size": 1490,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Lines",
+          "file": "Lines.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Lines.fs",
+          "sha256": "fea98ff324fac6dafaccb7dd0d69e78d4a30beeaa31265a804bf5a0f37610633",
+          "size": 2064,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Long Exposure",
+          "file": "Long Exposure.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Long%20Exposure.fs",
+          "sha256": "55002f18f52cb4be3b84f7a3a89fc571500de2440c7295e24fa5a2c7eecf3a75",
+          "size": 1301,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Luminance Posterize",
+          "file": "Luminance Posterize.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Luminance%20Posterize.fs",
+          "sha256": "d37a4170e552b8bccd2965856c561d586ba7a0d2ea2765a944e76abcd0cfec15",
+          "size": 1483,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Maximum Component",
+          "file": "Maximum Component.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Maximum%20Component.fs",
+          "sha256": "5ed1b97ec347979c68bde8c8ebb8148cfb92998400527dca9493434f592d320e",
+          "size": 374,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Meta Image",
+          "file": "Meta Image.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Meta%20Image.fs",
+          "sha256": "56f95fd54a01e2cb26cecc60d9ac26b0382b89b64c4e69aaaca6ed2fd2a5ee73",
+          "size": 2364,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Minimum Component",
+          "file": "Minimum Component.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Minimum%20Component.fs",
+          "sha256": "5246b091b2f371a479f9082349683b4aa541cc44e66a3f6b68f0d845fdc6197e",
+          "size": 437,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Mirror Edge",
+          "file": "Mirror Edge.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Mirror%20Edge.fs",
+          "sha256": "1a8d71335a2bb50cf7ba2cb1c4fe25d60e342dbcecbc8e11f9a98a9e9553b014",
+          "size": 1086,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Mirror",
+          "file": "Mirror.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Mirror.fs",
+          "sha256": "42db9003b64fce230872be2b099b576c69410dc712a5cc3d59278df714d80ca8",
+          "size": 812,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Motion Heat Map",
+          "file": "Motion Heat Map.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Motion%20Heat%20Map.fs",
+          "sha256": "f8bb3a6b01e849f8118502d1041e39d212b758e64da6f26587ab191b3b6b0227",
+          "size": 2959,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Motion Mask",
+          "file": "Motion Mask.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Motion%20Mask.fs",
+          "sha256": "8c6cdbe6fa35d02085ecbac7800985364675de23caa1a512f36b3d55c3892ada",
+          "size": 5171,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Multi Hue Shift",
+          "file": "Multi Hue Shift.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Multi%20Hue%20Shift.fs",
+          "sha256": "3dee767f56f6e592b8d92442f0c8afd0c7fdc5b151aac355982af96845127c04",
+          "size": 2001,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Multi-Pixellate",
+          "file": "Multi-Pixellate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Multi-Pixellate.fs",
+          "sha256": "b174877e4a1315bf058bc17339669770998dc2adb0c6285f9962d3b3b5505d53",
+          "size": 3517,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "MultiFrame 2x2",
+          "file": "MultiFrame 2x2.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/MultiFrame%202x2.fs",
+          "sha256": "b483eda3073e1be57762bce60e70eca594c0a545eb818d3dd83e9bb6356f1c3a",
+          "size": 3394,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Neon",
+          "file": "Neon.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Neon.fs",
+          "sha256": "f13bb222d74850fcfd3b63368c4748760682351e962a24e56d6b013432720ff1",
+          "size": 3015,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Noise Adapt",
+          "file": "Noise Adapt.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Noise%20Adapt.fs",
+          "sha256": "53ab90a3179488c0b2b60cf2541bdd10039881c9d701e01ee4175c33bd08297e",
+          "size": 2242,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Noise Displace",
+          "file": "Noise Displace.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Noise%20Displace.fs",
+          "sha256": "740ab48b21cb3f80fb03399324a95e60d284cc36448ff605e3822acbddc43d68",
+          "size": 1569,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Noise Pixellate",
+          "file": "Noise Pixellate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Noise%20Pixellate.fs",
+          "sha256": "22bbbf82c56fb7f8c11c3d35319348291333cbce06aefecb90082a658464fd10",
+          "size": 2594,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Noise",
+          "file": "Noise.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Noise.fs",
+          "sha256": "0f145e928eae5eb4406acf6a8905d8434bc5fdad1f6371e1bca4802194ee326c",
+          "size": 4282,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Pixel Shifter",
+          "file": "Pixel Shifter.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Pixel%20Shifter.fs",
+          "sha256": "60f6f4f59c44d8d62e285ebdcaa9407d649401850928dfffebc472d96525f3d8",
+          "size": 2759,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Pixellate",
+          "file": "Pixellate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Pixellate.fs",
+          "sha256": "9b5bff60f480fa6de62b398f72c0965f1bd1fbaa802e75a23e041728b4650229",
+          "size": 1782,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Poly Glitch",
+          "file": "Poly Glitch.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Poly%20Glitch.fs",
+          "sha256": "06684f0fd3bbf58af6d586cedfee2e2d5ea9816da48aefa30f2641e414aaf3b8",
+          "size": 4517,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Poly Star",
+          "file": "Poly Star.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Poly%20Star.fs",
+          "sha256": "b6b0b58e108de0190ce32f46b42ecfefb50273906d84b47c069f0c30b8cd0750",
+          "size": 2413,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Posterize",
+          "file": "Posterize.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Posterize.fs",
+          "sha256": "459dcf0f09be9eb76e7ef5a28f2a1fb4889c6b2bde60afe77a27eb170d22568d",
+          "size": 903,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Power Warp",
+          "file": "Power Warp.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Power%20Warp.fs",
+          "sha256": "88383a32c4a96cfb547296d504ef4b717d616b07ac87c2661ac63568c3a70470",
+          "size": 2143,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Quad Mask",
+          "file": "Quad Mask.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Quad%20Mask.fs",
+          "sha256": "e1243543fb3b19a58c2f46457a0bc62ef73d3f8b6e1b6b72a7f7c8e97a7b3148",
+          "size": 3156,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Quad Tile",
+          "file": "Quad Tile.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Quad%20Tile.fs",
+          "sha256": "930a2eca8a96c82d747025e3018e21f87136d81fae4167699ac35e0f4c13ae45",
+          "size": 2713,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "RGB EQ",
+          "file": "RGB EQ.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/RGB%20EQ.fs",
+          "sha256": "8816ebc4998baebebb845828961e07016ed4562fc2563ff089a5c1607cb3ec92",
+          "size": 934,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "RGB Halftone-lookaround",
+          "file": "RGB Halftone-lookaround.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/RGB%20Halftone-lookaround.fs",
+          "sha256": "047e63f4cb4b1ce4fbd6380c4eaf5cc1431331890e2e07a9f3ecaa56c14d92d6",
+          "size": 4889,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "RGB Halftone",
+          "file": "RGB Halftone.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/RGB%20Halftone.fs",
+          "sha256": "dad72232b20aa3e02dfcba754978452d8d13ee7393169fadf2c6fa6a29dad386",
+          "size": 2475,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "RGB Trails 3.0",
+          "file": "RGB Trails 3.0.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/RGB%20Trails%203.0.fs",
+          "sha256": "60933bfaf85a41e47d32a6b99a4f1c9154e5920560dfdd51b964ba214828671b",
+          "size": 1005,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "RGBA Swap",
+          "file": "RGBA Swap.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/RGBA%20Swap.fs",
+          "sha256": "a487c875a2074d117c5efcb5615103d8db781b7589ffa6287c66e71cab59bb0c",
+          "size": 2411,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "RGBtoHSV",
+          "file": "RGBtoHSV.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/RGBtoHSV.fs",
+          "sha256": "1144f09c22c27765b014906bc49d4b269d407e29b663a9b7ce0debd1f84fd3b4",
+          "size": 1075,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Random Checkerboard",
+          "file": "Random Checkerboard.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Random%20Checkerboard.fs",
+          "sha256": "e1446bbe8d127255878dce16881ada189e6a2407030d075b008080982a41ad14",
+          "size": 2839,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Random Lines",
+          "file": "Random Lines.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Random%20Lines.fs",
+          "sha256": "f75e24bb98b1d4123651d73fb8866f85bd83f9fc5d27148379324203d736e88b",
+          "size": 9015,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Random Shape",
+          "file": "Random Shape.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Random%20Shape.fs",
+          "sha256": "3c552c6a428072e0135ea95ef02d7733d195e94eec1efc7ffd2e9e1ae096d58c",
+          "size": 8503,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Random Squares Mask",
+          "file": "Random Squares Mask.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Random%20Squares%20Mask.fs",
+          "sha256": "61c97f430e5bc0b7d20881f4220e9ef0c93e40694183a43af83b9a3c0c5e8655",
+          "size": 1719,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Random Stripes",
+          "file": "Random Stripes.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Random%20Stripes.fs",
+          "sha256": "6981f75bcbee819bae38d152b842a655e1acba7b7fa6ed57e55618e55d36b3b2",
+          "size": 2821,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Replicate Random",
+          "file": "Replicate Random.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Replicate%20Random.fs",
+          "sha256": "941b43992403c9c259a03ea41b8e51fa009294c27d9360be2ae7ab2eb191f406",
+          "size": 2509,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Replicate",
+          "file": "Replicate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Replicate.fs",
+          "sha256": "2d1b1c8e70816725bff73581b593ed4226917b4f8bf2ee296dea777b72b83963",
+          "size": 3485,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Resize Glitch",
+          "file": "Resize Glitch.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Resize%20Glitch.fs",
+          "sha256": "101af8ee866b9d816da5e16fa7e9937afdba1e6a7c821901960faf7811c9da06",
+          "size": 2546,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Ridgelines",
+          "file": "Ridgelines.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Ridgelines.fs",
+          "sha256": "18ee44ea280dc7ad53f2989a25bd9f0fee4e2a6a23c352dfb7022b5a5aeefa60",
+          "size": 7093,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Ripples",
+          "file": "Ripples.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Ripples.fs",
+          "sha256": "6314488ce9e1a992b74da2b7a8652e3509493e355effbb7c4817a42fd6c2cd8e",
+          "size": 2870,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Rotate",
+          "file": "Rotate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Rotate.fs",
+          "sha256": "a508416164f7d56f1d2009eb1fb679bf7815ba237c8092ab377e29e4a40c52d5",
+          "size": 713,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Set Alpha",
+          "file": "Set Alpha.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Set%20Alpha.fs",
+          "sha256": "74b164323d855b6bf11e89f56cff81a057a4a2c164dceb9e8f84a08d09b03e23",
+          "size": 617,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Shake",
+          "file": "Shake.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Shake.fs",
+          "sha256": "55a92d516d98efbdfbb29a065e72de9f587449d02b62eac8f0c4fe2019480b1c",
+          "size": 1201,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Sharpen Luminance",
+          "file": "Sharpen Luminance.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sharpen%20Luminance.fs",
+          "sha256": "4e9884b0d8aefd7028bc586a29628ad948daaf760aea344586b100cbdb2827cf",
+          "size": 1454,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Sharpen RGB",
+          "file": "Sharpen RGB.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sharpen%20RGB.fs",
+          "sha256": "d09e08312fc04d20e74e2a3f96ac4547d0b6d00cbff3dfe877278d78794cdfe9",
+          "size": 1913,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Shockwave Pulse",
+          "file": "Shockwave Pulse.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Shockwave%20Pulse.fs",
+          "sha256": "71a3ea75a9f5f9069b5feee2eec18d6a5db8203027e5c94c9a41ebb308f55803",
+          "size": 2456,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Shockwave",
+          "file": "Shockwave.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Shockwave.fs",
+          "sha256": "6171fef55a8b9ec1448d0ad12f684d19e5518f9fc9ad908f3b48744953d4e330",
+          "size": 1604,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Show Alpha",
+          "file": "Show Alpha.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Show%20Alpha.fs",
+          "sha256": "471e14dd737d9cf3e19555a03d3160a9cfd6f0fedc6d5dd1c65c3761b5d08493",
+          "size": 428,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Side Scroller And Flip",
+          "file": "Side Scroller And Flip.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Side%20Scroller%20And%20Flip.fs",
+          "sha256": "0ca4b8eca998cef5c53418de1598418186abbfa92337810ef3b76d2b43683d86",
+          "size": 978,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Simplex Noise",
+          "file": "Simplex Noise.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Simplex%20Noise.fs",
+          "sha256": "000dd5b6d27411012f3562833cc332c223dfae1154d18803bb232855e53ee658",
+          "size": 5734,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Sine Warp Gradient",
+          "file": "Sine Warp Gradient.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sine%20Warp%20Gradient.fs",
+          "sha256": "e5c100ccb3c0fd3559ab4b7583e4239ef4cb316ee8c60984aac77f0674ef7d16",
+          "size": 2440,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Sine Warp Tile",
+          "file": "Sine Warp Tile.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sine%20Warp%20Tile.fs",
+          "sha256": "6d4ed20a6a69797714842f1db9b04b69576b733e4e75846f29ca42e6da89aadd",
+          "size": 1831,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Sketch",
+          "file": "Sketch.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sketch.fs",
+          "sha256": "d1ae125c99ef7ad7ea53c0c2b9781052825d28fff14ce879335e17c6043de8de",
+          "size": 1868,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Sliding Strips",
+          "file": "Sliding Strips.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sliding%20Strips.fs",
+          "sha256": "3845016619865a0d5393b00016651d24a9e28ade1bcb1d04949c7e07c8e6bf06",
+          "size": 1645,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Slit Scan Mask",
+          "file": "Slit Scan Mask.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Slit%20Scan%20Mask.fs",
+          "sha256": "ff01fde27f81ed9c129a82df5b01304fcbc325a6173079ab02510ef3d0b07c82",
+          "size": 2181,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Smudged Lens",
+          "file": "Smudged Lens.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Smudged%20Lens.fs",
+          "sha256": "262d8304531aaaae18d393bcf63fe855c04bc2b38e33cd379d298e0cbad58a34",
+          "size": 6936,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Soft Blur",
+          "file": "Soft Blur.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Soft%20Blur.fs",
+          "sha256": "2d8eae98ef9c213c34acea03ce60477914acc898d4e8cb720ca83348a5d77ee6",
+          "size": 2049,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Soft Flip",
+          "file": "Soft Flip.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Soft%20Flip.fs",
+          "sha256": "d39d5b8b11b9592a1e6a3b826d3259099b1a2e8fa37e7f4f07a0f9f09a25f9f8",
+          "size": 2799,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Solarize",
+          "file": "Solarize.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Solarize.fs",
+          "sha256": "c4de5c155d4916b700ab07bdf1cf93585ddae4d7f7ca6581674e295bb85aa370",
+          "size": 1970,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Solid Color",
+          "file": "Solid Color.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Solid%20Color.fs",
+          "sha256": "70d6688e5baab47688887df4862660f2ce1d81f828d3042e2092182d33b9e9eb",
+          "size": 451,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Sphere Map",
+          "file": "Sphere Map.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Sphere%20Map.fs",
+          "sha256": "d07fee1e6ce417445724114e8a68ba9c8b0d4568998d1cdc545e45faa7cf7e49",
+          "size": 1614,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Spiral",
+          "file": "Spiral.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Spiral.fs",
+          "sha256": "8133009f56b98a436cbdf385b1d2c40cfa18af3b84d54ca13be92f39c2012b27",
+          "size": 2335,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Stripes",
+          "file": "Stripes.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Stripes.fs",
+          "sha256": "1a8c5ab0d9a575c1ef2285ab0cb8c89f31beffcb480b1914e45974bdb04c28ba",
+          "size": 1383,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "Strobe",
+          "file": "Strobe.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Strobe.fs",
+          "sha256": "bfea508d08ccf746d93345a5ceb8091d82a964dd657e97f2c38c3150b8f752b1",
+          "size": 2063,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Trapezoid Distortion",
+          "file": "Trapezoid Distortion.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Trapezoid%20Distortion.fs",
+          "sha256": "f56daf3a0db44caab9623b22b9102f3e8715720afbd7772f068cd137c521d7a4",
+          "size": 1423,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Triangle Mosaic",
+          "file": "Triangle Mosaic.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Triangle%20Mosaic.fs",
+          "sha256": "42387dec2f0fb0ca037648821e7f4ae9c30aca26ce5c04955fba7248840a493d",
+          "size": 4631,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Triangle Warp",
+          "file": "Triangle Warp.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Triangle%20Warp.fs",
+          "sha256": "3f7e664322e9579e0607a47688dac265986291bed2c3d88e3040d27f024a986b",
+          "size": 1288,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Triangles",
+          "file": "Triangles.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Triangles.fs",
+          "sha256": "26063dc7ffba9097946975d74d63f75952aa941d276041862f8ba387f988db92",
+          "size": 3988,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Triple Rotate",
+          "file": "Triple Rotate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Triple%20Rotate.fs",
+          "sha256": "0ed450152c406e8492a38dcdd84ab0dbd8e2bd47b5aae33b8cf41e98616fa220",
+          "size": 2493,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Twirl",
+          "file": "Twirl.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Twirl.fs",
+          "sha256": "a597a066bc6bb435d19d4e4a222b61bbfe09e896f0d2c465cee8f716b956ab5d",
+          "size": 1595,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Unsharp Mask",
+          "file": "Unsharp Mask.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Unsharp%20Mask.fs",
+          "sha256": "20876f4a07ef5e6c517da845ebc05c19d629497afadf574ad2113bbd75501977",
+          "size": 1385,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "VU Meter",
+          "file": "VU Meter.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/VU%20Meter.fs",
+          "sha256": "bb530c64af142f4368d0eb6f1808c91423c95b65cab90f5256aa89ceb267bd6e",
+          "size": 1498,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "VVMotionBlur 3.0",
+          "file": "VVMotionBlur 3.0.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/VVMotionBlur%203.0.fs",
+          "sha256": "370fb161851c60b2dd222b38c8b3cce1ad3748e217ee864aa4b42dd508a51f2d",
+          "size": 624,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Vertex Manipulator",
+          "file": "Vertex Manipulator.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Vertex%20Manipulator.fs",
+          "sha256": "dac0e3dbddd1b5a1b22d75378bd431b5464d6860d13815126fc2950d502a8314",
+          "size": 1171,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Vertical Tearing",
+          "file": "Vertical Tearing.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Vertical%20Tearing.fs",
+          "sha256": "450acb5a22f09898008035b28c4cbc159d0831167ca832155285f6c9cde80bfb",
+          "size": 1033,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Vibrance",
+          "file": "Vibrance.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Vibrance.fs",
+          "sha256": "f2cb27ab7d6045b9cb301c3e06e45f684515c5f76115e14cff9e49ca3962a1b7",
+          "size": 1233,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "White Point Adjust",
+          "file": "White Point Adjust.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/White%20Point%20Adjust.fs",
+          "sha256": "05862c5ed0e129b7aa4782aaa574bd43d4c311148f73646d2be6b48335deb5ed",
+          "size": 463,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Worley Cells",
+          "file": "Worley Cells.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Worley%20Cells.fs",
+          "sha256": "9c1ac531d66abbce22c78b7120ad0e6353e6eceecba2fa7473ba6ddc0a3d6573",
+          "size": 5670,
+          "licence": "MIT",
+          "shape": "generator"
+        },
+        {
+          "name": "XYZoom",
+          "file": "XYZoom.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/XYZoom.fs",
+          "sha256": "9346b9064b9e5c839adbf060b51de270bc23ab54b1e842447f2a4ee73d23a75a",
+          "size": 1228,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "Zoom",
+          "file": "Zoom.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/Zoom.fs",
+          "sha256": "f08014de75455fdb56cd5e8c0f051043e14a40f78379822b8ef11f8fd666430a",
+          "size": 1072,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "v002 Dilate",
+          "file": "v002 Dilate.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/v002%20Dilate.fs",
+          "sha256": "bff18eb0817b48e14fb692df47ccb486b4df01601dfc7a74eedbacbc7b568a8f",
+          "size": 1310,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "v002 Erode",
+          "file": "v002 Erode.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/v002%20Erode.fs",
+          "sha256": "bb293fa9cbca5097483dd49b8203730e5e3986e54e87ac2539425929fe41afd0",
+          "size": 1290,
+          "licence": "MIT",
+          "shape": "filter"
+        },
+        {
+          "name": "v002-CRT-Displacement",
+          "file": "v002-CRT-Displacement.fs",
+          "url": "https://raw.githubusercontent.com/Vidvox/ISF-Files/395072d48b3ce7351ccb20a5fda54470591324df/ISF/v002-CRT-Displacement.fs",
+          "sha256": "d811b353e69136987e852795938167727dc20dafc42697972494e24abbf12d20",
+          "size": 1079,
+          "licence": "MIT",
+          "shape": "filter"
+        }
+      ]
+    }
+  ]
+}

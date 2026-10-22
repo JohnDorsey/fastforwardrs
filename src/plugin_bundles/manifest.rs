@@ -211,18 +211,18 @@ pub fn licence_is_allowed(expression: &str) -> bool {
         .all(|part| part.split(" OR ").any(|name| ALLOWED_LICENCES.contains(&name.trim())))
 }
 
-fn is_https(address: &str) -> bool {
+pub(super) fn is_https(address: &str) -> bool {
     address.starts_with("https://") && address.len() > "https://".len()
 }
 
-fn is_a_sha256(text: &str) -> bool {
+pub(super) fn is_a_sha256(text: &str) -> bool {
     text.len() == 64
         && text
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn is_a_plain_id(text: &str) -> bool {
+pub(super) fn is_a_plain_id(text: &str) -> bool {
     text.chars()
         .next()
         .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
