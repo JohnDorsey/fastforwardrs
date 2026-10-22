@@ -381,11 +381,13 @@ fn an_effect_that_changes_nothing_is_not_run_and_an_effect_the_engine_does_not_h
             key: "someone:else".to_owned(),
             values: vec![1.0, 2.0, 3.0],
             table: None,
+            state: None,
         };
         let too_few_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 4],
             table: None,
+            state: None,
         };
         let (with_the_others, statistics) = render(
             &mut renderer,
@@ -408,6 +410,7 @@ fn an_effect_that_changes_nothing_is_not_run_and_an_effect_the_engine_does_not_h
                         key: "someone:else".to_owned(),
                         values: Vec::new(),
                         table: None,
+                        state: None,
                     },
                     matrix_effect(redder),
                 ],

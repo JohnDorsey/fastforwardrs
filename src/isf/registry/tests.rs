@@ -43,11 +43,7 @@ fn what_this_version_cannot_run_yet_is_not_usable_and_says_why() {
     };
     // (Rewritten on purpose in phase 6: a generator is run now, so the example of what is not is the transition alone.)
     assert!(reason("wipe.fs", WIPE).contains("transition"));
-    // (Rewritten on purpose in phase 6.4: a shader with passes of its own is run now, and the example of one that is not is a buffer that lasts.)
-    let lasting = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true }, {} ] }*/
-void main() { gl_FragColor = IMG_THIS_PIXEL(memory); }
-";
-    assert!(reason("lasting.fs", lasting).contains("lasts from one frame to the next is not run yet"));
+    // (Rewritten on purpose in phase 6.4: a shader with passes of its own is run now, and since 6.4.2 so is one with a buffer that lasts: see the tests that say so.)
     let two_writers = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"a\" }, { \"TARGET\": \"a\" }, {} ] }*/
 void main() { gl_FragColor = IMG_THIS_PIXEL(a); }
 ";
@@ -182,4 +178,24 @@ fn the_kind_of_effect_a_shader_is_is_installed_if_the_shader_is_usable() {
     // The kinds of the program and of plugins are as they were.
     assert!(EffectKind::HUE_SHIFT.is_installed());
     assert!(EffectKind::HUE_SHIFT.shader_source().is_none());
+}
+
+#[test]
+fn a_shader_with_a_buffer_that_lasts_is_usable_and_says_that_it_depends_on_earlier_frames_and_one_without_does_not() {
+    let lasting = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true }, {} ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(memory); }\n";
+    let lasting = descriptor_from("lasting.fs", lasting);
+    assert!(is_usable(&lasting), "{:?}", why_not_usable(&lasting));
+    assert!(depends_on_earlier_frames(&lasting));
+    for (name, source) in [
+        ("blur.fs", BLUR),
+        ("color_controls.fs", COLOR_CONTROLS),
+        ("plasma.fs", PLASMA),
+    ] {
+        let descriptor = descriptor_from(name, source);
+        assert!(is_usable(&descriptor));
+        assert!(!depends_on_earlier_frames(&descriptor), "{name}");
+    }
+    // Neither a shader that is not usable nor an effect that is no shader depends on anything.
+    assert!(!depends_on_earlier_frames(&descriptor_from("wipe.fs", WIPE)));
+    assert!(!depends_on_earlier_frames(EffectKind::HUE_SHIFT.descriptor()));
 }

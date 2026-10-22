@@ -18,6 +18,7 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use crate::colour_effects::ColourMatrix;
@@ -179,7 +180,7 @@ impl Layer {
     /// does nothing at the frame is left out, and neighbouring effects that mix colours are one** (a hue shift, a saturation and a brightness make one operation, which
     /// the engine does in one pass).
     pub fn operations_at(&self, timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
-        operations_of_effects(&self.effects, timeline_frame)
+        operations_of_effects(&self.effects, timeline_frame, hash_of(self.clip))
     }
 
     /// How the effects of the layer that mix colours change the colours of its picture at `timeline_frame` (a frame it is seen at), all of them
@@ -249,11 +250,30 @@ pub(crate) fn effects_keep_the_opacity(effects: &[LayerEffect]) -> bool {
         .all(|effect| effect.kind.descriptor().changes_each_pixel_by_itself)
 }
 
+/// A number made of `value`, the same for the same value every time (what tells the states of effects from each other).
+fn hash_of(value: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// What tells the state of the effect that is number `place` of `effects`, which are done to what `seed` says (a clip, or a group), from every other state: it is the same at every
+/// frame, and **not the same for another clip, another place in the chain, or another kind of effect**. (An effect of a track or of a tag is done to each clip it reaches, with one
+/// instance, so the instance alone would not tell them apart; a change of the order of the chain makes the effect start clear.)
+fn state_id(seed: u64, place: usize, effect: &LayerEffect) -> u64 {
+    hash_of((seed, place, effect.instance, effect.kind.key()))
+}
+
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring
-/// effects that mix colours are one.
-pub fn operations_of_effects(effects: &[LayerEffect], timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
+/// effects that mix colours are one. `seed` is a number that tells what the effects are done to (a clip, or a group) from every other thing: the states of the effects that depend on
+/// earlier frames are told from each other by it.
+pub fn operations_of_effects(
+    effects: &[LayerEffect],
+    timeline_frame: TimelineFrameIndex,
+    seed: u64,
+) -> Vec<PictureOperation> {
     let mut operations: Vec<PictureOperation> = Vec::new();
-    for effect in effects {
+    for (place, effect) in effects.iter().enumerate() {
         let values = effect.values_at(timeline_frame.value());
         let next = if effect.kind.shader_source().is_some() {
             // (A shader that cannot be run is an effect that does nothing, as an effect that the program does not have does.)
@@ -271,6 +291,10 @@ pub fn operations_of_effects(effects: &[LayerEffect], timeline_frame: TimelineFr
             PictureOperation::Shader {
                 key: effect.kind.key().to_owned(),
                 numbers,
+                state: effect
+                    .kind
+                    .depends_on_earlier_frames()
+                    .then(|| (state_id(seed, place, effect), clock.frames_at(timeline_frame.value()))),
             }
         } else {
             let Some(next) = effect.kind.picture_operation_with_tables(&values, &effect.tables) else {
@@ -313,7 +337,7 @@ pub struct GroupSpan {
 }
 
 /// What makes a [`GroupSpan`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SpanOwner {
     /// A clip group or a track group that has an effect that does something.
     Group(GroupId),
@@ -324,7 +348,7 @@ pub enum SpanOwner {
 impl GroupSpan {
     /// What the effects of the group do to its picture at `timeline_frame`.
     pub fn operations_at(&self, timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
-        operations_of_effects(&self.effects, timeline_frame)
+        operations_of_effects(&self.effects, timeline_frame, hash_of(self.owner))
     }
 }
 
@@ -801,5 +825,7 @@ mod group_effects_tests;
 mod operations_tests;
 #[cfg(test)]
 mod shader_tests;
+#[cfg(test)]
+mod state_tests;
 #[cfg(test)]
 mod tests;

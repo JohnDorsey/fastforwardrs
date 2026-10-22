@@ -659,26 +659,31 @@ mod tests {
             key: "someone:else".to_owned(),
             values: vec![1.0, 2.0],
             table: None,
+            state: None,
         };
         let too_few_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 8],
             table: None,
+            state: None,
         };
         let too_many_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 10],
             table: None,
+            state: None,
         };
         let not_a_number = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::NAN, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             table: None,
+            state: None,
         };
         let infinite = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::INFINITY, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             table: None,
+            state: None,
         };
         let plan = plan_of_the_built_in_effects(&description_of(vec![
             layer_with(1, vec![unknown, redder(), too_few_numbers]),
@@ -861,11 +866,13 @@ mod tests {
             key: BLUR_KEY.to_owned(),
             values: numbers.to_vec(),
             table: None,
+            state: None,
         };
         let crop = |numbers: &[f32]| EffectCall {
             key: CROP_KEY.to_owned(),
             values: numbers.to_vec(),
             table: None,
+            state: None,
         };
         let plan_of = |effects: Vec<EffectCall>| plan_frame(&description_of(vec![layer_with(1, effects)]), &known);
         // (A layer, its effects, the place and the output: two passes besides the effects.)
@@ -1041,6 +1048,7 @@ mod tests {
             key: "test:shader".to_owned(),
             values: vec![1.0],
             table: None,
+            state: None,
         };
         let mut description = in_light();
         description.layers = vec![
@@ -1079,6 +1087,7 @@ mod tests {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: numbers.to_vec(),
             table: None,
+            state: None,
         };
         let with = |offsets: [f32; 3]| [nine.as_slice(), offsets.as_slice()].concat();
         for (numbers, runs) in [
@@ -1148,6 +1157,7 @@ mod tests {
             key: key.to_owned(),
             values: vec![1.0],
             table: None,
+            state: None,
         };
         assert_eq!(known.passes_of("test:passes", KindOfEffect::Shader), 3);
         assert_eq!(known.passes_of("test:none", KindOfEffect::Shader), 1);
@@ -1196,6 +1206,7 @@ mod tests {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: [identity.as_slice(), offsets.as_slice()].concat(),
             table: None,
+            state: None,
         };
         let plan = plan_of_the_built_in_effects(&description_of(vec![layer_with(1, vec![call([0.0; 3])])]));
         assert_eq!(

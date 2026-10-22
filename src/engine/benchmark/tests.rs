@@ -174,6 +174,7 @@ fn the_lookup_stand_in_of_the_benchmark_leaves_a_picture_of_one_colour_as_it_is_
                 key: LOOKUP_KEY.to_owned(),
                 values: vec![amount],
                 table: None,
+                state: None,
             }],
         );
         for pixel in frame.rgba_pixels.as_chunks::<4>().0 {

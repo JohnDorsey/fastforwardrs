@@ -9,7 +9,7 @@
 //! picture) and the decoded picture of an image file.
 
 use super::{PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
-use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo, operations_of_effects};
+use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
 use crate::engine::PictureColour;
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
@@ -62,7 +62,7 @@ pub fn groups_of_a_section(section: &PictureSection, frame: TimelineFrameIndex) 
         .map(|group| PreviewGroup {
             first_layer: group.first_layer,
             end_layer: group.end_layer,
-            operations: operations_of_effects(&group.effects, frame),
+            operations: group.operations_at(frame),
             over_black: group.over_black,
         })
         .collect()

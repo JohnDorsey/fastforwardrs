@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use super::compile::{CompiledShader, compile_in_a_worker};
 use super::descriptor::key_is_of_the_text;
 use super::reader::{IsfFile, IsfProblem, Shape, read};
+use crate::engine::ShaderStructure;
 use crate::project::{EffectDescriptor, ShaderLanguage};
 
 /// What was made of the text of a shader.
@@ -109,6 +110,15 @@ pub fn shape_of(descriptor: &EffectDescriptor) -> Option<Shape> {
 /// Whether the effect described by `descriptor` is an ISF shader that this version can run.
 pub fn is_usable(descriptor: &EffectDescriptor) -> bool {
     matches!(compiled_shader_of(descriptor).as_deref(), Some(Ok(_)))
+}
+
+/// Whether the effect described by `descriptor` is an ISF shader that this version can run and that keeps something from one frame to the next (a buffer with `PERSISTENT`), so that
+/// what it shows depends on the frames before it.
+pub fn depends_on_earlier_frames(descriptor: &EffectDescriptor) -> bool {
+    matches!(
+        compiled_shader_of(descriptor).as_deref(),
+        Some(Ok(compiled)) if compiled.structure.as_ref().is_ok_and(ShaderStructure::depends_on_earlier_frames)
+    )
 }
 
 /// Why the effect described by `descriptor`, which is an ISF shader, cannot be run, in words, with the place in the file if the mistake has one. `None` if it can be, or is no ISF shader.

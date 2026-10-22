@@ -391,3 +391,44 @@ fn a_colour_and_a_point_of_a_shader_have_controls_and_not_only_words() {
         );
     }
 }
+
+const REMEMBERS: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true }, {} ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(memory); }\n";
+
+#[test]
+fn the_box_of_a_shader_that_keeps_something_from_one_frame_to_the_next_says_so_and_no_other_does() {
+    let folder = tempfile::tempdir().unwrap();
+    let (mut window, clip, chooser) = window_that_asks();
+    add_from_a_file(
+        &mut window,
+        &chooser,
+        clip,
+        &a_file_in(folder.path(), "remembers.fs", REMEMBERS),
+    );
+    window.settle();
+    assert!(
+        window
+            .harness
+            .query_by_label_contains("Depends on earlier frames")
+            .is_some()
+    );
+    assert!(
+        window.harness.query_by_label_contains("The export is exact").is_some(),
+        "and that the export is not touched by it"
+    );
+
+    let (mut other, other_clip, other_chooser) = window_that_asks();
+    add_from_a_file(
+        &mut other,
+        &other_chooser,
+        other_clip,
+        &a_file_in(folder.path(), "mixer.fs", TINT),
+    );
+    other.settle();
+    assert!(
+        other
+            .harness
+            .query_by_label_contains("Depends on earlier frames")
+            .is_none(),
+        "a shader that keeps nothing says nothing of it"
+    );
+}

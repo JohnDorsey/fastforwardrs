@@ -1008,6 +1008,97 @@ fn a_shader_with_passes_that_is_saved_and_read_again_exports_the_same() {
     assert_eq!(before.pictures, after.pictures);
 }
 
+// --- a buffer that lasts from one frame to the next (phase 6.4.2) ---
+
+/// Adds a hundredth of red to what its buffer (half floats, kept from the frame before) held, and shows the buffer with a fifth of green and of blue.
+const ADDS_A_HUNDREDTH_OF_RED_EACH_FRAME: &str = r#"/*{
+	"INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ],
+	"PASSES": [ { "TARGET": "memory", "PERSISTENT": true, "FLOAT": true }, { } ]
+}*/
+void main() {
+	vec4 held = IMG_THIS_NORM_PIXEL(memory);
+	if (PASSINDEX == 0) {
+		gl_FragColor = vec4(held.r + 0.01, 0.0, 0.0, 1.0);
+	} else {
+		gl_FragColor = vec4(held.r, 0.2, 0.2, 1.0);
+	}
+}
+"#;
+
+#[test]
+fn a_shader_with_a_buffer_that_lasts_goes_on_from_each_frame_of_the_export_to_the_next() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_shader_on(
+        &mut project,
+        AnimationTarget::Clip(clip),
+        "memory.fs",
+        ADDS_A_HUNDREDTH_OF_RED_EACH_FRAME,
+    );
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_memory.mp4");
+
+    let red_at = |frame: usize| i32::from(colour_at(&decoded.pictures[frame], WIDTH / 2, HEIGHT / 2).0);
+    // A hundredth of red is 2.55 of 255, added once in the first frame, twice in the second...
+    assert_near(
+        colour_at(&decoded.pictures[0], WIDTH / 2, HEIGHT / 2),
+        (3, 51, 51),
+        "frame 0",
+    );
+    assert_near(
+        colour_at(&decoded.pictures[29], WIDTH / 2, HEIGHT / 2),
+        (77, 51, 51),
+        "frame 29",
+    );
+    assert_near(
+        colour_at(&decoded.pictures[59], WIDTH / 2, HEIGHT / 2),
+        (153, 51, 51),
+        "the last frame",
+    );
+    for frame in 1..60 {
+        assert!(
+            red_at(frame) >= red_at(frame - 1) - 1,
+            "the red never goes down: frame {frame} has {} after {}",
+            red_at(frame),
+            red_at(frame - 1)
+        );
+    }
+}
+
+#[test]
+fn the_second_half_of_a_clip_that_is_cut_starts_its_buffer_again_clear() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    // (The effect is put on the whole clip, and the cut copies it: both halves have one, each its own.)
+    put_a_shader_on(
+        &mut project,
+        AnimationTarget::Clip(clip),
+        "memory.fs",
+        ADDS_A_HUNDREDTH_OF_RED_EACH_FRAME,
+    );
+    project.split_at(TimelineFrameIndex::new(30), None);
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_memory_cut.mp4");
+
+    // The first half is as it was; the second begins again from nothing: a hundredth of red in its first frame, which is the frame 30 of the project.
+    assert_near(
+        colour_at(&decoded.pictures[29], WIDTH / 2, HEIGHT / 2),
+        (77, 51, 51),
+        "the last frame of the first half",
+    );
+    assert_near(
+        colour_at(&decoded.pictures[30], WIDTH / 2, HEIGHT / 2),
+        (3, 51, 51),
+        "the first frame of the second half",
+    );
+    assert_near(
+        colour_at(&decoded.pictures[59], WIDTH / 2, HEIGHT / 2),
+        (77, 51, 51),
+        "the last frame of the second half",
+    );
+}
+
 // --- a generator clip (phase 6): an ISF shader that reads no picture ---
 
 const SOLID_GENERATOR: &str = r#"/*{

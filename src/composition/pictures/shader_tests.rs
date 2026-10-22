@@ -22,7 +22,7 @@ fn kind_of(name: &str, source: &str) -> EffectKind {
 
 fn the_shader_operation(operations: &[PictureOperation]) -> (String, Vec<f32>) {
     match operations {
-        [PictureOperation::Shader { key, numbers }] => (key.clone(), numbers.clone()),
+        [PictureOperation::Shader { key, numbers, .. }] => (key.clone(), numbers.clone()),
         other => panic!("one operation of a shader was expected: {other:?}"),
     }
 }
@@ -182,7 +182,7 @@ fn a_shader_that_is_not_installed_is_no_operation_even_when_it_is_in_the_effects
     };
 
     assert_eq!(
-        operations_of_effects(&[effect], frame(3)),
+        operations_of_effects(&[effect], frame(3), 0),
         Vec::<PictureOperation>::new()
     );
 }

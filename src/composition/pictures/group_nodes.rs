@@ -56,7 +56,7 @@ pub(super) fn effects_of_the_groups_that_make_pictures(
             .filter(|applied| applied.effect.kind().is_installed())
             .map(|applied| super::layer_effect_of(project, animations, applied))
             .collect();
-        if !super::operations_of_effects(&effects, TimelineFrameIndex::new(0)).is_empty() {
+        if !super::operations_of_effects(&effects, TimelineFrameIndex::new(0), 0).is_empty() {
             made.insert(group.id(), effects);
         }
     }
@@ -141,6 +141,20 @@ impl Node {
         }
     }
 
+    /// Whether this is a layer, or a group, or has in it, an effect that depends on earlier frames (phase 6.4.2): it has to be made in every frame to go on, hidden or not.
+    fn depends_on_earlier_frames(&self) -> bool {
+        match self {
+            Self::Layer { layer, .. } => layer
+                .effects
+                .iter()
+                .any(|effect| effect.kind.depends_on_earlier_frames()),
+            Self::Group { effects, children, .. } => {
+                effects.iter().any(|effect| effect.kind.depends_on_earlier_frames())
+                    || children.iter().any(Node::depends_on_earlier_frames)
+            }
+        }
+    }
+
     /// The place of the track of the front-most layer in this that covers the picture (a node that does cover it).
     pub(super) fn front_most_covering_track_position(&self) -> usize {
         match self {
@@ -162,7 +176,13 @@ pub(super) fn drain_what_is_behind_what_covers(nodes: &mut Vec<Node>) {
         }
     }
     if let Some(position) = nodes.iter().rposition(Node::covers_the_picture) {
-        nodes.drain(..position);
+        // (What has an effect that depends on earlier frames is kept, though it cannot be seen: it has to be made in every frame to go on from the one before, or it would start clear
+        // when it was seen again, and the export would not be what it says.)
+        let kept: Vec<Node> = nodes
+            .drain(..position)
+            .filter(Node::depends_on_earlier_frames)
+            .collect();
+        nodes.splice(0..0, kept);
     }
 }
 

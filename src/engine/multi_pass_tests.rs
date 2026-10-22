@@ -340,8 +340,9 @@ fn the_effect_after_a_shader_of_several_passes_works_on_what_its_last_pass_drew(
 fn a_structure_that_is_not_well_formed_is_refused_when_the_shader_is_given_and_the_effect_is_not_run() {
     with_software_graphics!(graphics, {
         let mut renderer = FrameRenderer::new(graphics.device.clone());
-        let mut persistent = a_buffer_and_two_passes(false);
-        persistent.buffers[0].persistent = true;
+        // (Rewritten on purpose in phase 6.4.2, when a buffer that lasts began to be run: the example of a structure that is refused is a buffer drawn by two passes.)
+        let mut two_writers = a_buffer_and_two_passes(false);
+        two_writers.passes = vec![a_pass(Some(0)), a_pass(Some(0)), a_pass(None)];
         let refused = renderer
             .install_effect_with_structure(
                 "test:lasting",
@@ -349,11 +350,11 @@ fn a_structure_that_is_not_well_formed_is_refused_when_the_shader_is_given_and_t
                     &the_source(THE_PICTURE_AND_A_BUFFER, A_COLOUR_THROUGH_A_BUFFER),
                     DEFAULT_MOST_PASSES_OF_A_LOOP,
                 ),
-                &persistent,
+                &two_writers,
             )
             .unwrap_err();
         assert!(
-            matches!(&refused, RenderProblem::BadEffectShader(why) if why.contains("lasts from one frame to the next")),
+            matches!(&refused, RenderProblem::BadEffectShader(why) if why.contains("more than one pass")),
             "{refused}"
         );
         // (And what was not given is not run: the frame is made, and says that the effect was left out.)
@@ -428,18 +429,15 @@ fn a_shader_with_no_structure_said_is_given_as_one_pass_that_reads_one_picture()
 fn a_structure_that_is_not_well_formed_is_refused_by_the_handle_and_nothing_is_sent() {
     use super::Engine;
     let (engine, _events, requests) = Engine::scripted_for_tests();
-    let mut lasting = a_buffer_and_two_passes(false);
-    lasting.buffers[0].persistent = true;
+    let mut two_writers = a_buffer_and_two_passes(false);
+    two_writers.passes = vec![a_pass(Some(0)), a_pass(Some(0)), a_pass(None)];
     let source = the_source(THE_PICTURE_AND_A_BUFFER, A_COLOUR_THROUGH_A_BUFFER);
 
     let refused = engine
-        .compile_effect_shader_with_structure("test:handle_lasting", &source, lasting)
+        .compile_effect_shader_with_structure("test:handle_two_writers", &source, two_writers)
         .unwrap_err();
 
-    assert!(
-        refused.message.contains("lasts from one frame to the next"),
-        "{refused:?}"
-    );
+    assert!(refused.message.contains("more than one pass"), "{refused:?}");
     assert_eq!(requests.try_iter().count(), 0);
     // The same with a structure that is well formed is sent.
     engine

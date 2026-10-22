@@ -79,7 +79,7 @@ fn the_effects_of_a_generator_layer_begin_with_what_it_makes_and_its_clock_is_it
     assert_eq!(layer.effects[0].clock.first_frame, 10);
     let operations = layer.operations_at(frame(25));
     match operations.as_slice() {
-        [PictureOperation::Shader { key, numbers }, PictureOperation::Mix(_)] => {
+        [PictureOperation::Shader { key, numbers, .. }, PictureOperation::Mix(_)] => {
             assert_eq!(key, a_generator().key());
             assert_eq!(numbers[2], 15.0, "FRAMEINDEX: 15 frames since the clip began");
             assert_eq!(

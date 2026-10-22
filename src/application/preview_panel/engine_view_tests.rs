@@ -1186,6 +1186,33 @@ fn generator_layer<'a>(number: u32, placement: Placement) -> PreviewLayer<'a> {
 }
 
 #[test]
+fn the_state_that_a_shader_goes_on_with_is_in_the_call_that_the_engine_is_asked_for_and_a_shader_with_none_has_none() {
+    let place = Placement::upright(CanvasArea::WHOLE_PICTURE);
+    let picture = an_image();
+    let mut layer = image_layer(0, 1, Some(&picture), place);
+    layer.operations = vec![
+        crate::project::PictureOperation::Shader {
+            key: "isf:remembers-000000000000".to_owned(),
+            numbers: vec![0.0; 4],
+            state: Some((77, 12)),
+        },
+        crate::project::PictureOperation::Shader {
+            key: "isf:forgets-000000000000".to_owned(),
+            numbers: vec![0.0; 4],
+            state: None,
+        },
+    ];
+
+    let (described, _) = describe(&content(vec![layer], None));
+
+    let effects = &described.layers[0].effects;
+    assert_eq!(effects.len(), 2);
+    assert_eq!(effects[0].state, Some(crate::engine::EffectState { id: 77, frame: 12 }));
+    assert_eq!(effects[1].state, None);
+    assert!(described.depends_on_earlier_frames());
+}
+
+#[test]
 fn a_generator_is_drawn_into_a_picture_of_its_own_that_has_nothing_in_it_for_its_shader_to_make_and_that_is_put_in_its_place()
  {
     let turned = Placement::new(CanvasArea::new(0.1, 0.2, 0.5, 0.4), Angle::from_degrees(30.0));
@@ -1195,6 +1222,7 @@ fn a_generator_is_drawn_into_a_picture_of_its_own_that_has_nothing_in_it_for_its
         crate::project::PictureOperation::Shader {
             key: "isf:made_up-000000000000".to_owned(),
             numbers: vec![0.5, 0.033, 15.0, 0.0, 1.0, 2.0],
+            state: None,
         },
         crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(90.0)),
     ];

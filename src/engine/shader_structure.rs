@@ -159,7 +159,7 @@ pub enum ImageSlot {
 /// A picture that a shader draws into in one pass and reads in the next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferSpec {
-    /// Whether it keeps what was drawn into it for the next frame (not run yet: phase 6.4.2).
+    /// Whether it keeps what was drawn into it for the next frame (phase 6.4.2: the engine keeps it under the state of the call, see [`EffectState`](super::EffectState)).
     pub persistent: bool,
     /// Whether it holds floating point numbers (half floats here) and not 8 bits of each colour.
     pub float: bool,
@@ -215,6 +215,9 @@ pub enum ImageSource {
     DrawnByPass(usize),
     /// Nothing: a buffer that has not been drawn into yet in this frame, and keeps nothing from the frame before.
     Clear,
+    /// What the buffer held when the frame before ended: a buffer that lasts, and that no earlier pass of this frame drew into. (A call that has no state to keep it under reads nothing,
+    /// as it would of a buffer that does not last.)
+    FromTheFrameBefore,
 }
 
 impl ShaderStructure {
@@ -238,7 +241,7 @@ impl ShaderStructure {
     }
 
     /// In words, what is wrong with the structure if anything is: more pictures or passes than there may be, a buffer that is not one of the buffers, a buffer drawn into by two
-    /// passes, a last pass that draws into a buffer and not the picture the effect makes, and a buffer that is to last (not run yet).
+    /// passes, and a last pass that draws into a buffer and not the picture the effect makes.
     pub fn check(&self) -> Result<(), String> {
         if self.images.len() > MOST_IMAGES_OF_A_SHADER {
             return Err(format!(
@@ -283,10 +286,12 @@ impl ShaderStructure {
                     .to_owned(),
             );
         }
-        if self.buffers.iter().any(|buffer| buffer.persistent) {
-            return Err("a buffer that lasts from one frame to the next is not run yet".to_owned());
-        }
         Ok(())
+    }
+
+    /// Whether the shader keeps something from one frame to the next, so that what it shows depends on the frames before: some buffer of it lasts.
+    pub fn depends_on_earlier_frames(&self) -> bool {
+        self.buffers.iter().any(|buffer| buffer.persistent)
     }
 
     /// What each pass draws into and how big that is, for a picture the effect works on of `picture_size` and a call with these `numbers`; `largest_side` is the most pixels
@@ -319,8 +324,8 @@ impl ShaderStructure {
             .collect()
     }
 
-    /// What each of the pictures of the shader reads in the pass number `pass`: the picture the effect works on, or a buffer as an earlier pass drew it, or nothing if no earlier
-    /// pass drew it.
+    /// What each of the pictures of the shader reads in the pass number `pass`: the picture the effect works on, or a buffer as an earlier pass drew it, or, if no earlier pass drew
+    /// it, what a buffer that lasts held at the end of the frame before (and nothing for one that does not).
     pub fn what_each_image_reads(&self, pass: usize) -> Vec<ImageSource> {
         self.images
             .iter()
@@ -331,7 +336,16 @@ impl ShaderStructure {
                     .iter()
                     .take(pass)
                     .position(|earlier| earlier.target == Some(*buffer))
-                    .map_or(ImageSource::Clear, ImageSource::DrawnByPass),
+                    .map_or_else(
+                        || {
+                            if self.buffers[*buffer].persistent {
+                                ImageSource::FromTheFrameBefore
+                            } else {
+                                ImageSource::Clear
+                            }
+                        },
+                        ImageSource::DrawnByPass,
+                    ),
             })
             .collect()
     }

@@ -481,7 +481,14 @@ pub enum PictureOperation {
     },
     /// A shader (an ISF file) is run with these numbers: the four of the shader itself (`TIME`, `TIMEDELTA`, `FRAMEINDEX`, `PASSINDEX`) and then those of its inputs (see
     /// `crate::isf::numbers_of_the_values`). The engine gives it the size of the picture. What it does is not known, so it is never an operation that changes nothing.
-    Shader { key: String, numbers: Vec<f32> },
+    ///
+    /// A shader that depends on earlier frames (it has a buffer that lasts: phase 6.4.2) also says **which state it goes on with and at which frame of its own clock**, as `(id, frame)`
+    /// (see `crate::engine::EffectState`); every other shader has none.
+    Shader {
+        key: String,
+        numbers: Vec<f32>,
+        state: Option<(u64, u64)>,
+    },
 }
 
 impl PictureOperation {

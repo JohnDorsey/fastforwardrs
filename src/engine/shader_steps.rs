@@ -25,6 +25,8 @@ pub struct ShaderStep {
     pub images: usize,
     /// The format of what the step draws into.
     pub target_format: TargetFormat,
+    /// The buffer the step draws into, if it draws into one.
+    pub target_buffer: Option<usize>,
     /// What each of the pictures of the shader reads in this pass.
     pub reads: Vec<ImageSource>,
 }
@@ -97,6 +99,7 @@ pub fn plan_the_steps(
                     first_step,
                     images: structure.images.len(),
                     target_format: facts.format,
+                    target_buffer: facts.target,
                     reads: structure.what_each_image_reads(pass),
                 }),
             }

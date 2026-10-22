@@ -19,6 +19,7 @@ fn call(key: &str, values: Vec<f32>) -> EffectCall {
         key: key.to_owned(),
         values,
         table: None,
+        state: None,
     }
 }
 
@@ -116,6 +117,7 @@ fn the_steps_of_a_two_pass_shader_draw_the_buffer_and_then_the_picture_and_say_w
             first_step: 0,
             images: 2,
             target_format: TargetFormat::EightBit,
+            target_buffer: Some(0),
             reads: vec![ImageSource::Picture, ImageSource::Clear],
         })
     );
@@ -130,6 +132,7 @@ fn the_steps_of_a_two_pass_shader_draw_the_buffer_and_then_the_picture_and_say_w
             first_step: 0,
             images: 2,
             target_format: TargetFormat::Half,
+            target_buffer: None,
             reads: vec![ImageSource::Picture, ImageSource::DrawnByPass(0)],
         })
     );

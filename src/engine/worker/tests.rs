@@ -952,3 +952,45 @@ fn the_shelf_gives_back_what_was_put_on_it_and_a_second_shader_under_a_key_repla
     publish_effect_shader("test:shelf_replaced", "second");
     assert_eq!(&*published_effect_shader("test:shelf_replaced").unwrap(), "second");
 }
+
+#[test]
+fn a_frame_with_an_effect_that_depends_on_earlier_frames_is_neither_taken_from_the_cache_nor_put_in_it() {
+    use crate::engine::persistent_buffer_tests::{
+        ADD_A_TENTH_OF_RED, THE_PICTURE_AND_A_BUFFER, one_buffer_that_lasts, stateful,
+    };
+    with_a_worker(software_settings(), |worker, told| {
+        worker
+            .take_an_effect_with_structure(
+                "test:accumulate".to_owned(),
+                Arc::new(guarded(
+                    &format!("{THE_PICTURE_AND_A_BUFFER}\n{ADD_A_TENTH_OF_RED}"),
+                    DEFAULT_MOST_PASSES_OF_A_LOOP,
+                )),
+                Arc::new(one_buffer_that_lasts()),
+            )
+            .unwrap();
+        send_the_picture(worker);
+
+        // The same description, asked for twice: made twice (and it is the same picture, the second time from the state as it was before the frame).
+        let stateful_frame = description_of_picture_1(vec![stateful("test:accumulate", 1, 0)]);
+        assert!(stateful_frame.depends_on_earlier_frames());
+        let mut seen = Vec::new();
+        for serial in [1, 2, 3] {
+            assert!(matches!(worker.answer(serial, stateful_frame.clone()), Next::GoOn));
+            let said = what_was_said(told);
+            let (frame, statistics) = the_frame_in(&said[0]);
+            assert!(!statistics.came_from_the_cache, "serial {serial}");
+            seen.push(frame.pixel(4, 4)[0]);
+        }
+        assert_eq!(seen[0], seen[1]);
+        assert_eq!(seen[1], seen[2]);
+
+        // A frame that has no state to go on with depends on nothing, and is cached as any frame is.
+        let plain = description_of_picture_1(vec![]);
+        assert!(!plain.depends_on_earlier_frames());
+        assert!(matches!(worker.answer(4, plain.clone()), Next::GoOn));
+        assert!(!the_frame_in(&what_was_said(told)[0]).1.came_from_the_cache);
+        assert!(matches!(worker.answer(5, plain), Next::GoOn));
+        assert!(the_frame_in(&what_was_said(told)[0]).1.came_from_the_cache);
+    });
+}

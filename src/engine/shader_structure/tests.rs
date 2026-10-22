@@ -183,9 +183,10 @@ fn a_structure_that_is_not_well_formed_says_what_is_wrong_with_it() {
     last_pass_into_a_buffer.passes = vec![pass(None), pass(Some(0))];
     assert!(said(last_pass_into_a_buffer).contains("the last pass draws into a buffer"));
 
+    // (Rewritten on purpose in phase 6.4.2: a buffer that lasts is run now, and is not what the structure says is wrong.)
     let mut lasting = two_pass_blur();
     lasting.buffers = vec![buffer(true, false)];
-    assert!(said(lasting).contains("lasts from one frame to the next is not run yet"));
+    assert_eq!(lasting.check(), Ok(()));
 }
 
 #[test]
@@ -323,4 +324,81 @@ fn a_generator_has_no_picture_and_starts_at_its_buffers() {
     };
     assert_eq!(structure.check(), Ok(()));
     assert_eq!(structure.what_each_image_reads(1), vec![ImageSource::DrawnByPass(0)]);
+}
+
+#[test]
+fn a_buffer_that_lasts_is_read_as_the_frame_before_left_it_by_the_passes_before_the_one_that_draws_it_and_as_drawn_after()
+ {
+    // The picture and one buffer that lasts; the first pass draws it, and so reads what it held, and the second reads what the first drew.
+    let mut structure = two_pass_blur();
+    structure.buffers = vec![buffer(true, false)];
+    assert_eq!(structure.check(), Ok(()));
+    assert_eq!(
+        structure.what_each_image_reads(0),
+        vec![ImageSource::Picture, ImageSource::FromTheFrameBefore]
+    );
+    assert_eq!(
+        structure.what_each_image_reads(1),
+        vec![ImageSource::Picture, ImageSource::DrawnByPass(0)]
+    );
+    // A buffer that does not last, read before it is drawn, is clear.
+    structure.buffers = vec![buffer(false, false)];
+    assert_eq!(
+        structure.what_each_image_reads(0),
+        vec![ImageSource::Picture, ImageSource::Clear]
+    );
+}
+
+#[test]
+fn a_buffer_that_is_drawn_late_is_the_frame_before_to_every_pass_up_to_it() {
+    // Buffers 0 (lasts) and 1 (does not); passes: draw 1, draw 0, the picture.
+    let structure = ShaderStructure {
+        images: vec![ImageSlot::Picture, ImageSlot::Buffer(0), ImageSlot::Buffer(1)],
+        buffers: vec![buffer(true, false), buffer(false, false)],
+        passes: vec![pass(Some(1)), pass(Some(0)), pass(None)],
+        pass_index_number: Some(3),
+    };
+    assert_eq!(structure.check(), Ok(()));
+    assert_eq!(
+        structure.what_each_image_reads(0),
+        vec![
+            ImageSource::Picture,
+            ImageSource::FromTheFrameBefore,
+            ImageSource::Clear
+        ]
+    );
+    assert_eq!(
+        structure.what_each_image_reads(1),
+        vec![
+            ImageSource::Picture,
+            ImageSource::FromTheFrameBefore,
+            ImageSource::DrawnByPass(0)
+        ]
+    );
+    assert_eq!(
+        structure.what_each_image_reads(2),
+        vec![
+            ImageSource::Picture,
+            ImageSource::DrawnByPass(1),
+            ImageSource::DrawnByPass(0)
+        ]
+    );
+}
+
+#[test]
+fn a_shader_depends_on_earlier_frames_if_any_of_its_buffers_lasts() {
+    assert!(!ShaderStructure::one_pass_of_one_picture().depends_on_earlier_frames());
+    assert!(!two_pass_blur().depends_on_earlier_frames());
+    let mut lasting = two_pass_blur();
+    lasting.buffers = vec![buffer(true, false)];
+    assert!(lasting.depends_on_earlier_frames());
+    let mut one_of_two = ShaderStructure {
+        images: vec![ImageSlot::Picture, ImageSlot::Buffer(0), ImageSlot::Buffer(1)],
+        buffers: vec![buffer(false, false), buffer(false, false)],
+        passes: vec![pass(Some(0)), pass(Some(1)), pass(None)],
+        pass_index_number: Some(3),
+    };
+    assert!(!one_of_two.depends_on_earlier_frames());
+    one_of_two.buffers[1].persistent = true;
+    assert!(one_of_two.depends_on_earlier_frames());
 }

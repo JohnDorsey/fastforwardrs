@@ -138,6 +138,18 @@ impl LayerSource {
     }
 }
 
+/// What a call of a shader that depends on earlier frames says of itself: **which state it goes on with** and **which frame of it this is** (phase 6.4.2; see `docs/engine-phase-6-4-design.md`, K8 and K9).
+///
+/// The engine keeps the buffers of such a shader that last from one frame to the next under `id`. A frame that is the one after the one the state was made at goes on from it; the same frame
+/// again is made from the state as it was before that frame (so that it is the same picture); any other frame starts clear.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EffectState {
+    /// What tells this effect on this clip (or group) from every other: the same number in every frame that the state goes on in.
+    pub id: u64,
+    /// The frame of the effect's own clock (frames since the clip, or the timeline, began); the first is 0.
+    pub frame: u64,
+}
+
 /// One thing that is done to the picture of a layer, by the key of the effect and the numbers it is given.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectCall {
@@ -146,6 +158,9 @@ pub struct EffectCall {
     /// The table that the effect uses, if it uses one (see [`LUT_KEY`]).
     #[serde(default)]
     pub table: Option<TableId>,
+    /// Which state the effect goes on with, if it is a shader that depends on earlier frames (see [`EffectState`]); nobody else has one.
+    #[serde(default)]
+    pub state: Option<EffectState>,
 }
 
 impl EffectCall {
@@ -155,6 +170,7 @@ impl EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: rows.into_iter().flatten().collect(),
             table: None,
+            state: None,
         }
     }
 
@@ -164,6 +180,7 @@ impl EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: rows.into_iter().flatten().chain(offsets).collect(),
             table: None,
+            state: None,
         }
     }
 
@@ -173,6 +190,7 @@ impl EffectCall {
             key: EXPOSURE_KEY.to_owned(),
             values: vec![stops],
             table: None,
+            state: None,
         }
     }
 
@@ -182,6 +200,7 @@ impl EffectCall {
             key: BLUR_KEY.to_owned(),
             values: vec![radius],
             table: None,
+            state: None,
         }
     }
 
@@ -192,6 +211,7 @@ impl EffectCall {
             key: CROP_KEY.to_owned(),
             values: vec![left, top, right, bottom, feather],
             table: None,
+            state: None,
         }
     }
 
@@ -208,6 +228,7 @@ impl EffectCall {
             key: LUT_KEY.to_owned(),
             values: vec![intensity, input.number(), output.number(), interpolation.number()],
             table: Some(table),
+            state: None,
         }
     }
 
@@ -217,6 +238,7 @@ impl EffectCall {
             key: OPACITY_KEY.to_owned(),
             values: vec![opacity],
             table: None,
+            state: None,
         }
     }
 }
@@ -307,6 +329,15 @@ impl FrameDescription {
         hasher.finish()
     }
 
+    /// Whether any effect in the frame goes on with a state it keeps from earlier frames (see [`EffectState`]): **such a frame is never the same as another that looks the same**, because
+    /// what it shows depends on the frames before it, so it is not kept in the cache of finished frames and not taken from it.
+    pub fn depends_on_earlier_frames(&self) -> bool {
+        self.flatten()
+            .layers
+            .iter()
+            .any(|flat| flat.layer.effects.iter().any(|effect| effect.state.is_some()))
+    }
+
     /// Like [`Self::fingerprint`], but not made of the size the frame is made at: it is the same for two descriptions of what is shown that are made at different
     /// sizes, and it is not for two that show something different. (It is what the quality of the preview goes by, which changes the size and not the picture.)
     pub fn fingerprint_of_what_is_shown(&self) -> u64 {
@@ -355,6 +386,7 @@ fn hash_layers(layers: &[LayerDescription], hasher: &mut DefaultHasher) {
         for effect in &layer.effects {
             effect.key.hash(hasher);
             effect.table.hash(hasher);
+            effect.state.hash(hasher);
             effect.values.len().hash(hasher);
             for value in &effect.values {
                 value.to_bits().hash(hasher);
@@ -452,6 +484,21 @@ mod tests {
         changed("an effect has a table", &|d| {
             d.layers[1].effects[0].table = Some(TableId(7))
         });
+        changed("an effect has a state", &|d| {
+            d.layers[1].effects[0].state = Some(EffectState { id: 1, frame: 0 })
+        });
+        changed("an effect has another state", &|d| {
+            d.layers[0].effects.push(EffectCall {
+                state: Some(EffectState { id: 2, frame: 0 }),
+                ..EffectCall::colour_matrix([[1.0; 3]; 3])
+            })
+        });
+        changed("an effect has another state than that", &|d| {
+            d.layers[0].effects.push(EffectCall {
+                state: Some(EffectState { id: 2, frame: 1 }),
+                ..EffectCall::colour_matrix([[1.0; 3]; 3])
+            })
+        });
         changed("an effect has another table", &|d| {
             d.layers[0].effects.push(EffectCall::lut(
                 TableId(8),
@@ -469,6 +516,35 @@ mod tests {
         fingerprints.sort_unstable();
         fingerprints.dedup();
         assert_eq!(fingerprints.len(), changes.len());
+    }
+
+    #[test]
+    fn a_frame_depends_on_earlier_frames_if_any_effect_of_any_layer_of_it_or_of_a_group_in_it_has_a_state() {
+        let stateful = || EffectCall {
+            state: Some(EffectState { id: 3, frame: 5 }),
+            ..EffectCall::exposure(1.0)
+        };
+        assert!(!description().depends_on_earlier_frames());
+        assert!(!FrameDescription::black((8, 8)).depends_on_earlier_frames());
+        let mut on_the_last = description();
+        on_the_last.layers.last_mut().unwrap().effects.push(stateful());
+        assert!(on_the_last.depends_on_earlier_frames(), "on the last of two layers");
+        let mut on_the_first = description();
+        on_the_first.layers[0].effects.push(stateful());
+        assert!(on_the_first.depends_on_earlier_frames(), "on the first");
+        // In a group of the frame.
+        let mut in_a_group = description();
+        in_a_group.layers.push(LayerDescription {
+            source: LayerSource::Group(GroupDescription {
+                layers: vec![LayerDescription {
+                    effects: vec![stateful()],
+                    ..layer(4)
+                }],
+            }),
+            corners: CORNERS_OF_THE_WHOLE_PICTURE,
+            effects: Vec::new(),
+        });
+        assert!(in_a_group.depends_on_earlier_frames(), "in a group");
     }
 
     #[test]
@@ -517,6 +593,7 @@ mod tests {
                 key: "a".to_owned(),
                 values: vec![1.0, 2.0],
                 table: None,
+                state: None,
             }],
         });
         let mut second = FrameDescription::black((8, 8));
@@ -528,11 +605,13 @@ mod tests {
                     key: "a".to_owned(),
                     values: vec![1.0],
                     table: None,
+                    state: None,
                 },
                 EffectCall {
                     key: String::new(),
                     values: vec![2.0],
                     table: None,
+                    state: None,
                 },
             ],
         });

@@ -349,7 +349,10 @@ impl<'a> Worker<'a> {
     /// Makes the frame `description` describes (or takes it from the cache), and says how it came out. A frame that did not finish makes a new device.
     fn answer(&mut self, serial: u64, description: FrameDescription) -> Next {
         let fingerprint = description.fingerprint();
-        if let Some(frame) = self.cache.get(fingerprint) {
+        // (A frame that has an effect that depends on earlier frames is not what the same description made before: what it shows depends on the frames before it, which the
+        // description does not say. It is neither taken from the cache nor put in it.)
+        let cacheable = !description.depends_on_earlier_frames();
+        if let Some(frame) = cacheable.then(|| self.cache.get(fingerprint)).flatten() {
             return self.say(EngineEvent::Frame {
                 serial,
                 frame,
@@ -362,7 +365,9 @@ impl<'a> Worker<'a> {
         match self.renderer.render(&description, self.settings.frame_timeout) {
             Ok((frame, statistics)) => {
                 let frame = Arc::new(frame);
-                self.cache.insert(fingerprint, Arc::clone(&frame));
+                if cacheable {
+                    self.cache.insert(fingerprint, Arc::clone(&frame));
+                }
                 self.say(EngineEvent::Frame {
                     serial,
                     frame,

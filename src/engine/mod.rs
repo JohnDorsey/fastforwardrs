@@ -28,6 +28,7 @@ mod byte_lru;
 mod colour;
 mod device;
 mod effect_shaders;
+mod effect_states;
 mod frame_cache;
 mod frame_renderer;
 mod frames;
@@ -94,6 +95,8 @@ mod multi_pass_tests;
 #[cfg(test)]
 pub(crate) mod oracle_tests;
 #[cfg(test)]
+mod persistent_buffer_tests;
+#[cfg(test)]
 mod picture_tests;
 #[cfg(test)]
 mod planes_out_tests;
@@ -126,9 +129,9 @@ pub use plan::{
 };
 pub use quality::{PreviewScale, QualityGovernor, QualityRules};
 pub use scene::{
-    BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, FlatLayer,
-    FlatLayers, FrameDescription, GroupDescription, LUT_KEY, LayerDescription, LayerSource, LutInterpolation, LutSpace,
-    OPACITY_KEY, PictureId, TableId,
+    BLUR_KEY, COLOUR_MATRIX_KEY, CORNERS_OF_THE_WHOLE_PICTURE, CROP_KEY, EXPOSURE_KEY, EffectCall, EffectState,
+    FlatLayer, FlatLayers, FrameDescription, GroupDescription, LUT_KEY, LayerDescription, LayerSource,
+    LutInterpolation, LutSpace, OPACITY_KEY, PictureId, TableId,
 };
 pub use shader_structure::{
     BufferSpec, ImageSlot, ImageSource, LARGEST_SIDE_OF_A_BUFFER, MOST_IMAGES_OF_A_SHADER, MOST_PASSES_OF_A_SHADER,

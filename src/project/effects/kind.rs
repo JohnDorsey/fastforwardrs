@@ -143,6 +143,12 @@ impl EffectKind {
         crate::isf::shape_of(self.0) == Some(crate::isf::Shape::Generator)
     }
 
+    /// Whether the effect is a shader that this version runs and that keeps something from one frame to the next (a buffer with `PERSISTENT`), so that what it shows depends on the
+    /// frames before it.
+    pub fn depends_on_earlier_frames(self) -> bool {
+        self.0.shader.is_some() && crate::isf::depends_on_earlier_frames(self.0)
+    }
+
     /// The shader that runs the effect, if it is one (see [`ShaderSource`]): the text of its file, which the project carries.
     pub fn shader_source(self) -> Option<&'static ShaderSource> {
         self.0.shader.as_ref()

@@ -17,11 +17,11 @@ use egui::{CornerRadius, Key, Popup, Rect, Response, RichText, ScrollArea, Strok
 use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
-    ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE,
-    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
-    SWITCHED_OFF_NOTE, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match, effects_to_offer,
-    grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept, show_the_control_of,
-    show_the_control_of_a_group_effect,
+    ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DEPENDS_ON_EARLIER_FRAMES_NOTE,
+    DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE, NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, SEARCH_EFFECTS_HINT,
+    SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE, VALUES_ARE_KEPT_NOTE,
+    WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source,
+    items_for_where_the_tables_are_kept, show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -190,6 +190,9 @@ fn show_an_effect(
                 );
             } else if !kind.is_installed() {
                 ui.label(RichText::new(NOT_INSTALLED_NOTE).weak());
+            }
+            if kind.depends_on_earlier_frames() {
+                ui.label(RichText::new(DEPENDS_ON_EARLIER_FRAMES_NOTE).weak());
             }
             if !effect.is_enabled() {
                 ui.label(RichText::new(SWITCHED_OFF_NOTE).weak());

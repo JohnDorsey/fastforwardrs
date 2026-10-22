@@ -14,6 +14,7 @@ use thiserror::Error;
 use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, OutputConversion};
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, numbers_of_a_pass, write_the_numbers_of_a_call};
+use super::effect_states::{BufferWanted, BuffersOfACall, Continuation, StatesOfEffects};
 use super::guard::GuardedShader;
 use super::own_effects::{LutNumbers, blur_numbers, crop_numbers, gain_factors};
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
@@ -28,7 +29,7 @@ use super::plan::{
 };
 use super::readback::{PendingReadback, ReadbackBuffers, ReadbackProblem};
 use super::shader_steps::{StepPlan, plan_the_steps};
-use super::shader_structure::{ImageSource, ShaderStructure, TargetFormat};
+use super::shader_structure::{ImageSlot, ImageSource, ShaderStructure, TargetFormat};
 use super::tables::{
     MOST_TABLES_ON_THE_CARD, TableOnTheCard, published_table, put_on_the_card as put_the_table_on_the_card,
 };
@@ -160,6 +161,8 @@ pub struct FrameRenderer {
     clear_pixel: wgpu::TextureView,
     /// The effects that were given to the engine as shaders, by their keys.
     shader_effects: HashMap<String, InstalledShader>,
+    /// What the shaders that depend on earlier frames keep from one frame to the next (phase 6.4.2).
+    effect_states: StatesOfEffects,
     /// Which effects the engine can run: its own, and the keys of `shader_effects`.
     effects_that_run: EffectsThatRun,
     /// The look-up tables the card has, taken from the shelf (see `tables`) when a frame needed them, and let go of when there are too many.
@@ -250,12 +253,18 @@ impl FrameRenderer {
             upload_uniforms: UniformBytes::new(alignment),
             upload_arena: UniformArena::default(),
             shader_effects: HashMap::new(),
+            effect_states: StatesOfEffects::default(),
             effects_that_run: EffectsThatRun::built_in_only(),
             tables: HashMap::new(),
             table_use_order: Vec::new(),
             #[cfg(test)]
             the_card_never_finishes: false,
         }
+    }
+
+    /// How many states of effects that depend on earlier frames the card keeps, and how many bytes of textures they take up.
+    pub fn effect_states_kept(&self) -> (usize, u64) {
+        (self.effect_states.len(), self.effect_states.bytes())
     }
 
     /// How many tables of colours the card has now.
@@ -685,6 +694,9 @@ impl FrameRenderer {
         let mut effect_picture_numbers: HashMap<usize, Vec<usize>> = HashMap::new();
         // What each step of each pass that runs effects draws into and reads (empty for the other passes).
         let mut step_plans: Vec<Vec<StepPlan>> = vec![Vec::new(); plan.passes.len()];
+        // Where the buffers that last are, for each call (by the layer and the number among its effects) that has a state to keep them in, and which states are used, at which frame and how.
+        let mut call_buffers: HashMap<(usize, usize), BuffersOfACall> = HashMap::new();
+        let mut states_used: Vec<(u64, u64, Continuation)> = Vec::new();
         for (pass_number, pass) in plan.passes.iter().enumerate() {
             let PassPlan::Effects { layer, .. } = pass else {
                 continue;
@@ -718,6 +730,51 @@ impl FrameRenderer {
                 (shape.width_in_pixels, shape.height_in_pixels),
                 largest,
             );
+            // The buffers that last, of the calls that have a state (phase 6.4.2). A state that two calls of a frame have is kept by the first: the second runs as a call that has none.
+            let effects = &flat.layers[*layer].layer.effects;
+            for step in &plan.steps_of_effects[pass_number] {
+                let EffectStep::Call { call, .. } = step else {
+                    continue;
+                };
+                let effect = &effects[*call];
+                let (Some(state), Some(installed)) = (effect.state, self.shader_effects.get(&effect.key)) else {
+                    continue;
+                };
+                if !installed.structure.depends_on_earlier_frames()
+                    || states_used.iter().any(|(id, _, _)| *id == state.id)
+                {
+                    continue;
+                }
+                let facts = installed.structure.facts_of_the_passes(
+                    (shape.width_in_pixels, shape.height_in_pixels),
+                    &effect.values,
+                    largest,
+                );
+                let wanted: Vec<Option<BufferWanted>> = installed
+                    .structure
+                    .buffers
+                    .iter()
+                    .enumerate()
+                    .map(|(buffer, spec)| {
+                        spec.persistent
+                            .then(|| {
+                                facts
+                                    .iter()
+                                    .find(|fact| fact.target == Some(buffer))
+                                    .map(|fact| BufferWanted {
+                                        size: fact.size,
+                                        format: fact.format,
+                                    })
+                            })
+                            .flatten()
+                    })
+                    .collect();
+                let buffers = self
+                    .effect_states
+                    .prepare(&self.device.device, state.id, state.frame, &wanted);
+                states_used.push((state.id, state.frame, buffers.continuation));
+                call_buffers.insert((*layer, *call), buffers);
+            }
             let numbers = plans
                 .iter()
                 .map(|step| {
@@ -741,6 +798,30 @@ impl FrameRenderer {
                 .iter()
                 .map(|(_, texture)| texture.create_view(&wgpu::TextureViewDescriptor::default()))
                 .collect();
+            // What the steps that draw a buffer that lasts draw into: its texture, which the state keeps, and not one of the pool's (by the layer and the number of the step).
+            let mut kept_targets: HashMap<(usize, usize), wgpu::TextureView> = HashMap::new();
+            for (pass_number, pass) in plan.passes.iter().enumerate() {
+                let PassPlan::Effects { layer, .. } = pass else {
+                    continue;
+                };
+                for (step_number, step) in plan.steps_of_effects[pass_number].iter().enumerate() {
+                    let (EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. }) = step else {
+                        continue;
+                    };
+                    let (Some(buffers), Some(shader_step)) = (
+                        call_buffers.get(&(*layer, *call)),
+                        step_plans[pass_number][step_number].shader.as_ref(),
+                    ) else {
+                        continue;
+                    };
+                    if let Some(target) = shader_step
+                        .target_buffer
+                        .and_then(|buffer| buffers.target[buffer].clone())
+                    {
+                        kept_targets.insert((*layer, step_number), target);
+                    }
+                }
+            }
 
             // The uniforms of every pass of the frame that has some, written to the card before anything is recorded that uses them. For each pass of
             // the plan, in its order: the slots of the effects it runs (none for the others); and, for the layers that are put in their places, each one's.
@@ -916,6 +997,17 @@ impl FrameRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("engine frame"),
                 });
+            // The state before the frame of each effect that starts again is clear.
+            for buffers in call_buffers.values() {
+                for view in &buffers.to_clear {
+                    drop(begin_pass(
+                        &mut encoder,
+                        "engine: clear what an effect that starts again keeps",
+                        view,
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ));
+                }
+            }
             for (pass_number, pass) in plan.passes.iter().enumerate() {
                 match pass {
                     PassPlan::ClearAccumulation => {
@@ -985,9 +1077,20 @@ impl FrameRenderer {
                                         let view = match read {
                                             ImageSource::Picture => call_input_view,
                                             ImageSource::DrawnByPass(drawn_by) => {
-                                                &effect_views[effect_picture_numbers[layer][shader_step.first_step + drawn_by]]
+                                                let drawn = shader_step.first_step + drawn_by;
+                                                kept_targets
+                                                    .get(&(*layer, drawn))
+                                                    .unwrap_or(&effect_views[effect_picture_numbers[layer][drawn]])
                                             }
                                             ImageSource::Clear => &self.clear_pixel,
+                                            // (A call that has no state to keep the buffer in reads nothing, as of a buffer that does not last.)
+                                            ImageSource::FromTheFrameBefore => match installed.structure.images[place] {
+                                                ImageSlot::Buffer(buffer) => call_buffers
+                                                    .get(&(*layer, step_call(step)))
+                                                    .and_then(|buffers| buffers.base[buffer].as_ref())
+                                                    .unwrap_or(&self.clear_pixel),
+                                                ImageSlot::Picture => &self.clear_pixel,
+                                            },
                                         };
                                         entries.push(wgpu::BindGroupEntry {
                                             binding: 1 + 2 * place as u32,
@@ -1080,7 +1183,9 @@ impl FrameRenderer {
                             let mut render_pass = begin_pass(
                                 &mut encoder,
                                 label,
-                                &effect_views[picture_number],
+                                kept_targets
+                                    .get(&(*layer, step_number))
+                                    .unwrap_or(&effect_views[picture_number]),
                                 wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                             );
                             render_pass.set_pipeline(pipeline);
@@ -1271,6 +1376,15 @@ impl FrameRenderer {
         for (shape, texture) in effect_pictures {
             self.pool.release(shape, texture);
         }
+        // (What the effects that depend on earlier frames keep is theirs from this frame on, if it was made; if it was not, they start clear at their next.)
+        for (id, frame, continuation) in states_used {
+            if mistake.is_some() {
+                self.effect_states.abandon(id);
+            } else {
+                self.effect_states.commit(id, frame, continuation);
+            }
+        }
+        self.effect_states.end_frame();
         if let Some(mistake) = mistake {
             return Err(RenderProblem::GraphicsMistake(mistake));
         }

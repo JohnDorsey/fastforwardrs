@@ -22,8 +22,9 @@ use egui::{Rect, pos2, vec2};
 use super::{PreviewContent, PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
 use crate::cube_table::Interpolation;
 use crate::engine::{
-    CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, FrameColour, FrameDescription, GroupDescription, LayerDescription,
-    LayerSource, LutInterpolation, LutSpace, PictureColour, PictureData, PictureId, WorkingSpace, publish_table,
+    CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, EffectState, FrameColour, FrameDescription, GroupDescription,
+    LayerDescription, LayerSource, LutInterpolation, LutSpace, PictureColour, PictureData, PictureId, WorkingSpace,
+    publish_table,
 };
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
@@ -472,10 +473,11 @@ fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
             },
         ),
         PictureOperation::Blur { radius } => EffectCall::blur(*radius),
-        PictureOperation::Shader { key, numbers } => EffectCall {
+        PictureOperation::Shader { key, numbers, state } => EffectCall {
             key: key.clone(),
             values: numbers.clone(),
             table: None,
+            state: state.map(|(id, frame)| EffectState { id, frame }),
         },
         PictureOperation::Crop {
             left,
