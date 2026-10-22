@@ -237,7 +237,7 @@ impl FrameStream {
 }
 
 /// How the preview has ffmpeg scale the pictures it decodes: quickly (the preview wants them in time, and is not looked at closely).
-const QUICK_SCALING_OF_THE_PREVIEW: &str = "fast_bilinear";
+pub const QUICK_SCALING_OF_THE_PREVIEW: &str = "fast_bilinear";
 
 #[derive(Clone, Copy)]
 struct FrameSize {

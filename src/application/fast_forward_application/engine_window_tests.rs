@@ -797,3 +797,423 @@ fn a_jump_in_a_project_with_an_effect_that_depends_on_earlier_frames_says_over_t
         "no checkpoint is left to go on from"
     );
 }
+
+// ---- the lead-up on a seek (EN-14, option 1) ----
+
+/// A shader that adds a tenth of red to what it kept in every frame and shows what it kept: the red of the picture is how many frames of the effect have gone into it.
+const COUNTS_THE_FRAMES: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true }, {} ] }*/
+void main() {
+    if (PASSINDEX == 0) {
+        vec4 held = IMG_THIS_PIXEL(memory);
+        gl_FragColor = vec4(held.r + 0.1, 0.0, 0.0, 1.0);
+    } else {
+        gl_FragColor = IMG_THIS_PIXEL(memory);
+    }
+}
+";
+
+/// A window with a picture file that has the effect that counts the frames on it (and nothing else: **no video, which would need ffmpeg to be decoded for the lead-up**, and a window of a test has
+/// none; the lead-up of a video has tests with the real one), a checkpoint every 30 frames, and the lead-up on a seek as `lead_up_on_seek` says.
+fn a_window_whose_picture_counts_its_frames(lead_up_on_seek: bool) -> Option<Window> {
+    let mut project = Project::empty();
+    let picture_file = picture_source();
+    let source = picture_file.identifier;
+    let clip = project
+        .import_source(picture_file, TimelineFrameIndex::new(0))
+        .unwrap()
+        .clip
+        .expect("a picture makes a clip");
+    let file = crate::isf::read(COUNTS_THE_FRAMES).unwrap();
+    let kind =
+        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "counts.fs", COUNTS_THE_FRAMES))
+            .unwrap();
+    assert!(kind.is_installed() && kind.depends_on_earlier_frames(), "a premise");
+    project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    let mut window = Window::showing_with_the_engine(project)?;
+    decode_the_picture_file(&mut window, source, [200, 100, 50, 255]);
+    let global = window.application().global_settings();
+    window.do_this(Command::SetGlobalSettings(crate::project::Settings {
+        checkpoint_interval: crate::project::CheckpointInterval::Every30Frames,
+        ..global
+    }));
+    window.do_this(Command::SetGenerateLeadUpOnSeek(lead_up_on_seek));
+    Some(window)
+}
+
+fn the_red_of_the_picture(window: &Window) -> u8 {
+    the_pixel_at(window, 0.5, 0.5)[0]
+}
+
+fn is_not_exact(window: &Window) -> bool {
+    window.engine_preview().unwrap().the_picture_shown_is_not_exact()
+}
+
+/// Draws the window for `how_long`, as a window that is looked at is.
+fn draw_the_window_for(window: &mut Window, how_long: std::time::Duration) {
+    let started = std::time::Instant::now();
+    while started.elapsed() < how_long {
+        window.harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_seek_that_leaves_the_picture_not_exact_is_made_exact_by_the_lead_up_when_the_picture_stays_and_it_is_the_picture_that_playing_from_the_start_makes()
+ {
+    let Some(mut window) = a_window_whose_picture_counts_its_frames(true) else {
+        return;
+    };
+    // Played in order from the first frame: nine frames of the effect, nine tenths of red.
+    for frame in 0..=8 {
+        go_to_the_frame(&mut window, frame);
+    }
+    assert!(!is_not_exact(&window));
+    let red_made_by_playing = the_red_of_the_picture(&window);
+    assert!(red_made_by_playing > 200, "nine tenths of 255: {red_made_by_playing}");
+
+    // A jump away and back to frame 8: the state goes on from the checkpoint of frame 0, and the picture is not exact and shows two tenths.
+    go_to_the_frame(&mut window, 20);
+    go_to_the_frame(&mut window, 8);
+    assert!(is_not_exact(&window), "it went on from the checkpoint");
+    let red_after_the_jump = the_red_of_the_picture(&window);
+    assert!(
+        red_after_the_jump + 100 < red_made_by_playing,
+        "a picture of two tenths and not nine: {red_after_the_jump} and {red_made_by_playing}"
+    );
+
+    // It stays: the lead-up is wanted, made, and the picture that is made again is exact, and is what playing made.
+    window.draw_frames_until("the lead-up has made the picture exact", |window| !is_not_exact(window));
+    let red_after_the_lead_up = the_red_of_the_picture(&window);
+    assert!(
+        red_after_the_lead_up.abs_diff(red_made_by_playing) <= 1,
+        "the lead-up made the state that playing makes: {red_after_the_lead_up} and {red_made_by_playing}"
+    );
+    assert!(!window.engine_preview().unwrap().a_lead_up_is_being_made());
+    assert_eq!(window.engine_preview().unwrap().why_it_stopped(), None);
+
+    // The frame after it goes on from the state that the lead-up made: ten tenths, which is all the red there is.
+    go_to_the_frame(&mut window, 9);
+    assert!(!is_not_exact(&window), "and it is exact");
+    assert!(the_red_of_the_picture(&window) > red_after_the_lead_up);
+}
+
+#[test]
+fn with_the_checkbox_off_the_picture_stays_not_exact_and_no_lead_up_is_made_and_turning_it_on_makes_one() {
+    let Some(mut window) = a_window_whose_picture_counts_its_frames(false) else {
+        return;
+    };
+    for frame in 0..=8 {
+        go_to_the_frame(&mut window, frame);
+    }
+    let red_made_by_playing = the_red_of_the_picture(&window);
+    go_to_the_frame(&mut window, 20);
+    go_to_the_frame(&mut window, 8);
+    assert!(is_not_exact(&window));
+
+    // It stays for longer than the time that a lead-up waits for a picture that stays: none is made.
+    draw_the_window_for(&mut window, std::time::Duration::from_millis(700));
+    assert!(is_not_exact(&window), "no lead-up is made with the checkbox off");
+    assert!(!window.engine_preview().unwrap().a_lead_up_is_being_made());
+
+    // The checkbox is turned on, and the picture that stays has a lead-up made for it.
+    window.do_this(Command::SetGenerateLeadUpOnSeek(true));
+    window.draw_frames_until("the lead-up has made the picture exact", |window| !is_not_exact(window));
+    assert!(the_red_of_the_picture(&window).abs_diff(red_made_by_playing) <= 1);
+}
+
+#[test]
+fn a_seek_before_the_picture_has_stayed_has_no_lead_up_made_for_the_frame_that_is_left_and_the_next_stay_is_made_exact()
+{
+    let Some(mut window) = a_window_whose_picture_counts_its_frames(true) else {
+        return;
+    };
+    for frame in 0..=8 {
+        go_to_the_frame(&mut window, frame);
+    }
+    go_to_the_frame(&mut window, 20);
+    go_to_the_frame(&mut window, 8);
+    // Another seek at once, before the picture has stayed for a while: nothing is made for frame 8.
+    go_to_the_frame(&mut window, 9);
+    assert!(!window.engine_preview().unwrap().a_lead_up_is_being_made());
+    window.draw_frames_until("the lead-up has made the picture of frame 9 exact", |window| {
+        !is_not_exact(window)
+    });
+    assert!(the_red_of_the_picture(&window) > 200);
+}
+
+/// The requests that a scripted engine has been given and the window has not looked at yet, gathered over the frames drawn (so that none is lost).
+#[derive(Default)]
+struct WhatTheWindowAsked {
+    pictures: Vec<(crate::engine::PictureId, (u32, u32))>,
+    frames: Vec<(u64, crate::engine::FrameDescription)>,
+    lead_ups: Vec<(u64, std::sync::mpsc::Receiver<crate::engine::LeadUpItem>)>,
+    cancelled_lead_ups: Vec<u64>,
+}
+
+impl WhatTheWindowAsked {
+    fn take_from(&mut self, requests: &std::sync::mpsc::Receiver<crate::engine::EngineRequest>) {
+        use crate::engine::EngineRequest;
+        while let Ok(request) = requests.try_recv() {
+            match request {
+                EngineRequest::Upload { id, data } => {
+                    self.pictures.push((id, (data.width_in_pixels, data.height_in_pixels)))
+                }
+                EngineRequest::Render { serial, description } => self.frames.push((serial, description)),
+                EngineRequest::StartTheLeadUp { generation, items } => self.lead_ups.push((generation, items)),
+                EngineRequest::CancelTheLeadUp { generation } => self.cancelled_lead_ups.push(generation),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Draws the window until `done`, gathering what it asks of the scripted engine.
+fn draw_until_asked(
+    window: &mut Window,
+    requests: &std::sync::mpsc::Receiver<crate::engine::EngineRequest>,
+    asked: &mut WhatTheWindowAsked,
+    what: &str,
+    done: impl Fn(&WhatTheWindowAsked, &Window) -> bool,
+) {
+    let started = std::time::Instant::now();
+    loop {
+        window.harness.step();
+        asked.take_from(requests);
+        if done(asked, window) {
+            return;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(30),
+            "it did not happen: {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    }
+}
+
+fn a_frame_that_the_scripted_engine_made(serial: u64, approximate: bool) -> crate::engine::EngineEvent {
+    crate::engine::EngineEvent::Frame {
+        serial,
+        frame: std::sync::Arc::new(crate::engine::RenderedFrame {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            rgba_pixels: [0, 0, 0, 255].repeat(4),
+        }),
+        statistics: crate::engine::FrameStatistics {
+            approximate,
+            ..Default::default()
+        },
+    }
+}
+
+/// A window of the picture that counts its frames, with a preview that is made with an engine that is scripted (it makes no frame, and what the window asks of it is read), with the playhead
+/// at frame 8, the frame asked for, and the engine saying that it is not exact: and the lead-up that the window makes of that, started and waiting for the engine to take what it describes.
+struct WindowWithALeadUpThatIsBeingMade {
+    window: Window,
+    events: std::sync::mpsc::Sender<crate::engine::EngineEvent>,
+    requests: std::sync::mpsc::Receiver<crate::engine::EngineRequest>,
+    asked: WhatTheWindowAsked,
+    /// The frame that the preview asked for, as the window described it, and the number of the request.
+    the_frame_on_the_screen: (u64, crate::engine::FrameDescription),
+    /// What the lead-up gives the engine.
+    items: std::sync::mpsc::Receiver<crate::engine::LeadUpItem>,
+    generation: u64,
+}
+
+fn a_window_that_is_making_a_lead_up() -> Option<WindowWithALeadUpThatIsBeingMade> {
+    use crate::application::preview_panel::EnginePreview;
+    use crate::engine::Engine;
+    let mut window = a_window_whose_picture_counts_its_frames(true)?;
+    let (engine, events, requests) = Engine::scripted_for_tests();
+    window.application_mut().interface.engine_preview = Some(EnginePreview::with_engine(engine));
+    let mut asked = WhatTheWindowAsked::default();
+    window.do_this(Command::SeekTo(TimelineFrameIndex::new(8)));
+    draw_until_asked(
+        &mut window,
+        &requests,
+        &mut asked,
+        "the frame is asked for",
+        |asked, _| !asked.frames.is_empty(),
+    );
+    let the_frame_on_the_screen = asked.frames.last().unwrap().clone();
+    events
+        .send(a_frame_that_the_scripted_engine_made(the_frame_on_the_screen.0, true))
+        .unwrap();
+    draw_until_asked(
+        &mut window,
+        &requests,
+        &mut asked,
+        "the lead-up is started",
+        |asked, _| !asked.lead_ups.is_empty(),
+    );
+    let (generation, items) = asked.lead_ups.remove(0);
+    Some(WindowWithALeadUpThatIsBeingMade {
+        window,
+        events,
+        requests,
+        asked,
+        the_frame_on_the_screen,
+        items,
+        generation,
+    })
+}
+
+#[test]
+fn the_lead_up_that_the_window_makes_is_of_the_frames_before_the_one_on_the_screen_made_with_the_states_the_size_and_the_colour_of_the_preview()
+ {
+    use crate::application::preview_panel::{
+        THE_PICTURE_IS_NOT_EXACT_AND_THE_LEAD_UP_IS_BEING_MADE_NOTE, THE_PICTURE_IS_NOT_EXACT_NOTE,
+    };
+    use crate::engine::{EngineEvent, LeadUpItem};
+    let Some(mut made) = a_window_that_is_making_a_lead_up() else {
+        return;
+    };
+    assert_eq!(made.generation, 1);
+    assert!(made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    // The line over the picture says what it waits for.
+    made.window.harness.step();
+    assert!(
+        made.window
+            .harness
+            .query_by_label(THE_PICTURE_IS_NOT_EXACT_AND_THE_LEAD_UP_IS_BEING_MADE_NOTE)
+            .is_some()
+    );
+    assert!(
+        made.window
+            .harness
+            .query_by_label(THE_PICTURE_IS_NOT_EXACT_NOTE)
+            .is_none()
+    );
+
+    // What it gives the engine, until its end.
+    let started = std::time::Instant::now();
+    let mut given: Vec<LeadUpItem> = Vec::new();
+    loop {
+        match made.items.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(item) => given.push(item),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(30),
+                    "the lead-up did not end"
+                );
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    assert!(matches!(given.last(), Some(LeadUpItem::End)), "it ends with its end");
+    let frames: Vec<&crate::engine::FrameDescription> = given
+        .iter()
+        .filter_map(|item| match item {
+            LeadUpItem::Frame(description) => Some(description),
+            _ => None,
+        })
+        .collect();
+    // The effect has gone on for 8 frames at frame 8, so the lead-up is those 8: frames 0 to 7 of the effect's own clock.
+    assert_eq!(frames.len(), 8);
+    let state_of = |description: &crate::engine::FrameDescription| {
+        let states: Vec<crate::engine::EffectState> = description
+            .flatten()
+            .layers
+            .iter()
+            .flat_map(|flat| flat.layer.effects.iter().filter_map(|effect| effect.state))
+            .collect();
+        assert_eq!(states.len(), 1, "one effect with a state");
+        states[0]
+    };
+    let state_of_the_preview = state_of(&made.the_frame_on_the_screen.1);
+    assert_eq!(state_of_the_preview.frame, 8, "the playhead is at frame 8");
+    for (number, description) in frames.iter().enumerate() {
+        let state = state_of(description);
+        assert_eq!(state.frame, number as u64, "the frames of the effect's clock, in order");
+        assert_eq!(
+            state.id, state_of_the_preview.id,
+            "**the same state**: the frame after the lead-up goes on from the state that it made"
+        );
+        assert_eq!(
+            description.render_size, made.the_frame_on_the_screen.1.render_size,
+            "made at the size of the picture on the screen"
+        );
+        assert_eq!(
+            description.colour, made.the_frame_on_the_screen.1.colour,
+            "and in its colour"
+        );
+    }
+    // The picture of the layer is the picture file that the window has decoded, as big as the preview made it (which is what a state is the size of), under an id that is not the preview's.
+    let pictures_of_the_lead_up: Vec<(crate::engine::PictureId, (u32, u32))> = given
+        .iter()
+        .filter_map(|item| match item {
+            LeadUpItem::Picture { id, data } => Some((*id, (data.width_in_pixels, data.height_in_pixels))),
+            _ => None,
+        })
+        .collect();
+    assert!(!pictures_of_the_lead_up.is_empty());
+    for (id, size) in &pictures_of_the_lead_up {
+        assert!(id.is_in_the_lead_up());
+        assert!(
+            made.asked.pictures.iter().any(|(_, preview_size)| preview_size == size),
+            "the preview sent a picture of {size:?}: {:?}",
+            made.asked.pictures
+        );
+        assert!(made.asked.pictures.iter().all(|(preview_id, _)| preview_id != id));
+    }
+
+    // The engine says that it is done: the frame on the screen is asked for again, and the line over the picture is gone when the frame is exact.
+    made.events
+        .send(EngineEvent::LeadUpDone {
+            generation: made.generation,
+            frames_made: 8,
+        })
+        .unwrap();
+    let asked_before = made.asked.frames.len();
+    draw_until_asked(
+        &mut made.window,
+        &made.requests,
+        &mut made.asked,
+        "the frame is asked for again",
+        |asked, _| asked.frames.len() > asked_before,
+    );
+    let (serial, again) = made.asked.frames.last().unwrap().clone();
+    assert_eq!(again, made.the_frame_on_the_screen.1, "the same frame");
+    assert!(!made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    made.events
+        .send(a_frame_that_the_scripted_engine_made(serial, false))
+        .unwrap();
+    draw_until_asked(
+        &mut made.window,
+        &made.requests,
+        &mut made.asked,
+        "the frame is shown",
+        |_, window| !is_not_exact(window),
+    );
+    assert!(
+        made.window
+            .harness
+            .query_by_label(THE_PICTURE_IS_NOT_EXACT_NOTE)
+            .is_none()
+    );
+    assert!(
+        made.window
+            .harness
+            .query_by_label(THE_PICTURE_IS_NOT_EXACT_AND_THE_LEAD_UP_IS_BEING_MADE_NOTE)
+            .is_none()
+    );
+}
+
+#[test]
+fn turning_the_checkbox_off_while_the_lead_up_is_made_cancels_it_and_the_engine_is_told() {
+    let Some(mut made) = a_window_that_is_making_a_lead_up() else {
+        return;
+    };
+    assert!(made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    made.window.do_this(Command::SetGenerateLeadUpOnSeek(false));
+    draw_until_asked(
+        &mut made.window,
+        &made.requests,
+        &mut made.asked,
+        "the lead-up is cancelled",
+        |asked, _| !asked.cancelled_lead_ups.is_empty(),
+    );
+    assert_eq!(made.asked.cancelled_lead_ups, [made.generation]);
+    assert!(!made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    // The thread that describes the frames finds that nobody is listening once the engine lets go (here: when the test does, which is what the engine does).
+    drop(made.items);
+}

@@ -7,10 +7,13 @@
 //! that was lost make the thread throw the device away and make a new one, put the effects that were given to the engine as shaders on it, and say so
 //! (`EngineEvent::DeviceReplaced`). What the thread knows about the frame that did not finish is which effects of strangers it had in it, and those are
 //! switched off for as long as the engine runs. If a new device is needed again and again the engine stops instead (see `replacement`).
+//!
+//! It also makes **the lead-up on a seek** (`lead_up`) when it is asked to: the frames before the one that the preview shows, one after another, for the states of the effects. What the window
+//! asks of it comes first, and the lead-up goes on in the moments when nothing has been asked.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::Instant;
 
 use super::device::{DeviceError, DeviceTrouble, EngineDevice};
@@ -24,6 +27,7 @@ use super::replacement::{
 };
 use super::shader_structure::ShaderStructure;
 use super::{FrameDescription, FrameStatistics, PictureData, PictureId, YuvColour};
+use lead_up::LeadUp;
 
 /// What the thread does after a batch of requests.
 enum Next {
@@ -61,12 +65,32 @@ pub(super) fn run(
     }
 
     loop {
-        // Wait for something to be asked, then take everything that is waiting.
-        let Ok(first) = requests.recv() else { return };
-        let mut batch = vec![first];
-        while let Ok(more) = requests.try_recv() {
-            batch.push(more);
-        }
+        // Wait for something to be asked, then take everything that is waiting. (While a lead-up is going on nothing is waited for: what has been asked is done first, and when nothing has
+        // been asked the lead-up goes on by one step.)
+        let batch = if worker.has_a_lead_up() {
+            match what_is_waiting(&requests) {
+                Waiting::Requests(batch) => batch,
+                Waiting::Nothing => {
+                    match worker.make_a_step_of_the_lead_up() {
+                        Next::GoOn => {}
+                        Next::Stop(problem) => {
+                            tell(EngineEvent::Stopped { problem });
+                            return;
+                        }
+                        Next::Quit => return,
+                    }
+                    continue;
+                }
+                Waiting::NobodyIsListening => return,
+            }
+        } else {
+            let Ok(first) = requests.recv() else { return };
+            let mut batch = vec![first];
+            while let Ok(more) = requests.try_recv() {
+                batch.push(more);
+            }
+            batch
+        };
         match worker.take(batch) {
             Next::GoOn => {}
             Next::Stop(problem) => {
@@ -75,6 +99,33 @@ pub(super) fn run(
             }
             Next::Quit => return,
         }
+    }
+}
+
+/// What the window has asked of the engine that nobody has looked at yet.
+enum Waiting {
+    Requests(Vec<EngineRequest>),
+    Nothing,
+    /// The window is gone: nothing will be asked again.
+    NobodyIsListening,
+}
+
+/// Takes everything that the window has asked and the engine has not looked at, without waiting for more. (If the window is gone, what it asked before it went is still done; the next look
+/// finds that it is gone.)
+fn what_is_waiting(requests: &Receiver<EngineRequest>) -> Waiting {
+    let mut batch = Vec::new();
+    loop {
+        match requests.try_recv() {
+            Ok(request) => batch.push(request),
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) if batch.is_empty() => return Waiting::NobodyIsListening,
+            Err(TryRecvError::Disconnected) => break,
+        }
+    }
+    if batch.is_empty() {
+        Waiting::Nothing
+    } else {
+        Waiting::Requests(batch)
     }
 }
 
@@ -107,6 +158,8 @@ struct Worker<'a> {
     on_their_way: VecDeque<OnItsWay>,
     /// How checkpoints of the states of effects are taken, which a new device is told again.
     rules_of_checkpoints: RulesOfCheckpoints,
+    /// The lead-up that is going on, if one is (see `lead_up`).
+    lead_up: Option<LeadUp>,
 }
 
 impl<'a> Worker<'a> {
@@ -126,6 +179,7 @@ impl<'a> Worker<'a> {
             ),
             on_their_way: VecDeque::new(),
             rules_of_checkpoints: RulesOfCheckpoints::NONE,
+            lead_up: None,
         })
     }
 
@@ -167,6 +221,14 @@ impl<'a> Worker<'a> {
                 }
                 EngineRequest::ForgetTheCheckpoints => {
                     self.renderer.forget_the_checkpoints();
+                    Ok(())
+                }
+                EngineRequest::StartTheLeadUp { generation, items } => {
+                    self.start_the_lead_up(generation, items);
+                    Ok(())
+                }
+                EngineRequest::CancelTheLeadUp { generation } => {
+                    self.cancel_the_lead_up(generation);
                     Ok(())
                 }
                 EngineRequest::Stop => {
@@ -463,6 +525,8 @@ impl<'a> Worker<'a> {
         tell_the_watcher_of_the_tests(self.settings, &new_device);
         let old_renderer = std::mem::replace(&mut self.renderer, FrameRenderer::new(new_device));
         self.renderer.set_the_rules_of_checkpoints(self.rules_of_checkpoints);
+        // (What a lead-up sent was on the old device, and so are the states that its frames made: it stops. Nobody listening is found out by what is told next.)
+        let _ = self.the_lead_up_stops("the graphics device was replaced");
         // (The frames that were on their way hold buffers of the old device, and are let go of with it, on the same thread: see below.)
         let_go_of_it_on_another_thread((old_renderer, abandoned));
         // (Frames that were made are of the effects the engine trusted then, and of the effects it trusts now.)
@@ -529,6 +593,8 @@ fn let_go_of_it_on_another_thread<T: Send + 'static>(renderer: T) {
 
 /// The name of the thread that an old device is let go of on.
 const THE_THREAD_THAT_LETS_GO_OF_OLD_DEVICES: &str = "old graphics device";
+
+mod lead_up;
 
 #[cfg(test)]
 mod tests;

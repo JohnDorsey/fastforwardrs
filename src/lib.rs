@@ -23,6 +23,7 @@
 //! * [`playback`] runs the live preview: the clock, and getting the right picture for each frame.
 //! * [`frame_scene`] says what a frame of the finished picture shows and what the engine is asked to draw for it, for the preview and the export alike.
 //! * [`video_export`] makes the finished video: ffmpeg decodes and encodes, and the engine draws every frame from the very description the preview is drawn from.
+//! * [`lead_up`] describes the frames before the one that the preview shows, for the engine to make them for the states of the effects that depend on earlier frames (EN-14, phase 6.4.3b).
 //! * [`plugin_host`] runs the sound plugins that are effects in the sound of the preview and of the export (phase 7).
 //! * [`plugin_scan`] finds the sound plugins that are installed, in a program of its own, so that a library that crashes does not take the editor with it (phase 7).
 //! * [`shader_files`] reads a shader file (ISF) into the kind of effect it is, with the images beside it, and finds the shaders that are in folders (phase 6.8: the plugin manager).
@@ -43,6 +44,7 @@ pub mod digest;
 pub mod engine;
 pub mod frame_scene;
 pub mod isf;
+pub mod lead_up;
 pub mod media;
 pub mod playback;
 pub mod plugin_bundles;

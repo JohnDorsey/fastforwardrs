@@ -100,6 +100,24 @@ pub const CORNERS_OF_THE_WHOLE_PICTURE: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PictureId(pub u64);
 
+impl PictureId {
+    /// The bit that is set in the id of every picture that a lead-up sends (EN-14, the lead-up on a seek). The ids that the window makes never have it: the kind of a picture is in the
+    /// four bits at the top (never 8 or more), and the colour of the picture of a video is in the sixteen below the number of the picture, which are lower. So **a picture of a lead-up is
+    /// never one that the preview sent**, and the lead-up can let go of its pictures without taking one from the preview.
+    const IN_THE_LEAD_UP: u64 = 1 << 63;
+
+    /// The id that a picture has when a lead-up sends it.
+    #[must_use]
+    pub fn in_the_lead_up(self) -> Self {
+        Self(self.0 | Self::IN_THE_LEAD_UP)
+    }
+
+    /// Whether this is the id of a picture that a lead-up sent.
+    pub fn is_in_the_lead_up(self) -> bool {
+        self.0 & Self::IN_THE_LEAD_UP != 0
+    }
+}
+
 /// What a layer is made of.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum LayerSource {
@@ -341,6 +359,25 @@ impl FrameDescription {
         used
     }
 
+    /// The same frame with every picture that it is made of numbered by `number` (the pictures of its layers, of the layers of its groups, and the images that its effects bring); it is the same
+    /// frame in every other way. What a lead-up makes its frames with, so that its pictures have ids of their own (see [`PictureId::in_the_lead_up`]).
+    #[must_use]
+    pub fn with_the_pictures_numbered_by(mut self, number: impl Fn(PictureId) -> PictureId) -> Self {
+        number_the_pictures_of(&mut self.layers, &number);
+        self
+    }
+
+    /// The most frames of their own clocks that the effects of the frame that have a state have gone on for (the highest [`EffectState::frame`] of the frame): how far back the frames that
+    /// its states are made of go. `None` if no effect of the frame has a state.
+    pub fn most_frames_a_state_has_gone_on_for(&self) -> Option<u64> {
+        self.flatten()
+            .layers
+            .iter()
+            .flat_map(|flat| flat.layer.effects.iter())
+            .filter_map(|effect| effect.state.map(|state| state.frame))
+            .max()
+    }
+
     /// What tells this description from every other one that looks different: equal descriptions have the same fingerprint, and a difference in
     /// any number, any layer, any key or any size is a different one (as far as a 64-bit hash goes). It is only the same from one run to the next
     /// of the same program, and is not for keeping in a file.
@@ -393,6 +430,22 @@ pub struct FlatLayer<'a> {
     pub container: usize,
     /// If the layer is a group, the container that its layers are.
     pub group: Option<usize>,
+}
+
+/// Numbers the pictures of `layers` with `number`: those of the layers, those of the layers of the groups among them, and the images that the effects of each bring.
+fn number_the_pictures_of(layers: &mut [LayerDescription], number: &dyn Fn(PictureId) -> PictureId) {
+    for layer in layers {
+        match &mut layer.source {
+            LayerSource::Picture(id) => *id = number(*id),
+            LayerSource::Group(group) => number_the_pictures_of(&mut group.layers, number),
+            LayerSource::Solid(_) => {}
+        }
+        for effect in &mut layer.effects {
+            for id in &mut effect.images {
+                *id = number(*id);
+            }
+        }
+    }
 }
 
 /// Hashes `layers` and everything in them, the layers of the groups among them too.
@@ -656,5 +709,120 @@ mod tests {
         let frame = FrameDescription::black((16, 9));
         assert_eq!(frame.render_size, (16, 9));
         assert!(frame.layers.is_empty());
+    }
+
+    fn stateful_at(id: u64, frame: u64) -> EffectCall {
+        EffectCall {
+            state: Some(EffectState { id, frame }),
+            ..EffectCall::exposure(1.0)
+        }
+    }
+
+    fn a_group_of(layers: Vec<LayerDescription>) -> LayerDescription {
+        LayerDescription {
+            source: LayerSource::Group(GroupDescription { layers }),
+            corners: CORNERS_OF_THE_WHOLE_PICTURE,
+            effects: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_frames_a_state_has_gone_on_for_are_the_most_of_the_effects_that_have_one_in_any_layer_or_group() {
+        assert_eq!(description().most_frames_a_state_has_gone_on_for(), None);
+        assert_eq!(
+            FrameDescription::black((8, 8)).most_frames_a_state_has_gone_on_for(),
+            None
+        );
+        let mut first = description();
+        first.layers[0].effects.push(stateful_at(1, 0));
+        assert_eq!(
+            first.most_frames_a_state_has_gone_on_for(),
+            Some(0),
+            "the first frame of an effect is a state that has gone on for no frame"
+        );
+        let mut one = description();
+        one.layers[0].effects.push(stateful_at(1, 40));
+        assert_eq!(one.most_frames_a_state_has_gone_on_for(), Some(40));
+        let mut two = one.clone();
+        two.layers[1].effects.push(stateful_at(2, 7));
+        assert_eq!(
+            two.most_frames_a_state_has_gone_on_for(),
+            Some(40),
+            "the most, not the last"
+        );
+        let mut in_a_group = two.clone();
+        in_a_group.layers.push(a_group_of(vec![LayerDescription {
+            effects: vec![stateful_at(3, 900)],
+            ..layer(4)
+        }]));
+        assert_eq!(in_a_group.most_frames_a_state_has_gone_on_for(), Some(900));
+        let mut in_a_group_in_a_group = description();
+        in_a_group_in_a_group
+            .layers
+            .push(a_group_of(vec![a_group_of(vec![LayerDescription {
+                effects: vec![stateful_at(4, 12)],
+                ..layer(5)
+            }])]));
+        assert_eq!(in_a_group_in_a_group.most_frames_a_state_has_gone_on_for(), Some(12));
+    }
+
+    #[test]
+    fn the_id_of_a_picture_of_a_lead_up_says_that_it_is_one_and_is_not_the_id_it_had() {
+        let id = PictureId(0x1234_5678);
+        assert!(!id.is_in_the_lead_up());
+        assert!(id.in_the_lead_up().is_in_the_lead_up());
+        assert_ne!(id.in_the_lead_up(), id);
+        assert_eq!(
+            id.in_the_lead_up().in_the_lead_up(),
+            id.in_the_lead_up(),
+            "a number that is in the lead-up already is the same"
+        );
+        // A number that is as high as a number can be but for the bit that says it, and one with the bits of its kind: neither is made another by it, besides the bit.
+        for number in [0, 1, (1 << 63) - 1, 5 << 60, (5 << 60) | 0xFFFF_FFFF_FFFF] {
+            let id = PictureId(number);
+            assert_eq!(id.in_the_lead_up().0 & !(1 << 63), number);
+            assert!(!id.is_in_the_lead_up());
+        }
+    }
+
+    #[test]
+    fn numbering_the_pictures_of_a_frame_numbers_those_of_its_layers_and_its_groups_and_the_images_its_effects_bring_and_changes_nothing_else()
+     {
+        let bringing = |ids: &[u64]| EffectCall {
+            images: ids.iter().map(|id| PictureId(*id)).collect(),
+            ..EffectCall::exposure(1.0)
+        };
+        let mut original = description();
+        original.layers[0].effects.push(bringing(&[30, 31]));
+        original.layers.push(a_group_of(vec![
+            LayerDescription {
+                effects: vec![bringing(&[32])],
+                ..layer(2)
+            },
+            LayerDescription {
+                source: LayerSource::Solid([1, 2, 3, 4]),
+                ..layer(0)
+            },
+            a_group_of(vec![layer(3)]),
+        ]));
+        let numbered = original
+            .clone()
+            .with_the_pictures_numbered_by(|id| PictureId(id.0 * 10 + 5));
+        assert_eq!(
+            numbered.pictures_used(),
+            original
+                .pictures_used()
+                .into_iter()
+                .map(|id| PictureId(id.0 * 10 + 5))
+                .collect::<Vec<_>>(),
+            "every picture, in the order they are met in"
+        );
+        assert_eq!(
+            original.pictures_used().len(),
+            6,
+            "the frame has the six pictures that the test counts on"
+        );
+        let back = numbered.with_the_pictures_numbered_by(|id| PictureId((id.0 - 5) / 10));
+        assert_eq!(back, original, "and nothing but the pictures is changed");
     }
 }

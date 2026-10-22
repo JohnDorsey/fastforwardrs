@@ -97,6 +97,9 @@ mod keyframe_loss_tests;
 mod keyframe_panel_tests;
 #[cfg(test)]
 mod keyframe_tests;
+mod lead_up_flow;
+#[cfg(test)]
+mod lead_up_flow_tests;
 mod losing_keyframes;
 #[cfg(test)]
 mod navigation_key_tests;

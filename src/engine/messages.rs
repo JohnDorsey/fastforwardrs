@@ -4,6 +4,7 @@
 //! What is said between the window and the engine's thread, both ways.
 
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use super::device::AdapterChoice;
@@ -15,6 +16,23 @@ use super::{FrameDescription, FrameStatistics, PictureData, PictureId, RenderedF
 /// What the engine calls when it has something to tell: the window's way of being asked to draw again, so that the engine's thread does not
 /// have to be waited for. (It is called from the engine's thread.)
 pub type WakeUp = Arc<dyn Fn() + Send + Sync>;
+
+/// What the thread that describes the frames of a lead-up says to the engine, in the order that the engine is to do it in (EN-14, the lead-up on a seek; `docs/engine-phase-6-6-design.md`,
+/// section 4).
+#[derive(Debug)]
+pub enum LeadUpItem {
+    /// A picture that the frames after it are made of. **Its id is one that [`PictureId::in_the_lead_up`] made**, so that it is never the id of a picture that the preview sent.
+    Picture { id: PictureId, data: Arc<PictureData> },
+    /// Pictures that none of the frames after this one are made of: let go of them.
+    Forget(Vec<PictureId>),
+    /// The next frame of the lead-up. The engine makes it for what it does to the states of the effects that depend on earlier frames, and takes no pixels of it.
+    Frame(FrameDescription),
+    /// There are no more frames: the lead-up is whole. (The engine says [`EngineEvent::LeadUpDone`].)
+    End,
+    /// The frames could not be described any more (a video that cannot be read, a project that cannot be planned): the lead-up stops, and the states are as the frames so far made them.
+    /// (The engine says [`EngineEvent::LeadUpFailed`].)
+    Failed(String),
+}
 
 /// What the window asks of the engine.
 #[derive(Debug)]
@@ -48,6 +66,17 @@ pub enum EngineRequest {
     SetTheRulesOfCheckpoints(RulesOfCheckpoints),
     /// Let go of every checkpoint: what they are copies of is not there any more (the project was edited or loaded, or the colours of the frames changed).
     ForgetTheCheckpoints,
+    /// Begin the lead-up `generation` (one that is going on is let go of first): **the frames that `items` brings are made, in the order they come in, for what they do to the states of the
+    /// effects that depend on earlier frames, and no pixels are taken of them** (EN-14, option 1). The frames are of the frames *before* the one the preview shows, so that the state that the
+    /// frame goes on from is the state of the frame before it. The engine takes what is waiting of what the window asks of it before it takes the next of the lead-up, so a frame of the preview
+    /// is not kept waiting for the lead-up; and it says [`EngineEvent::LeadUpDone`] or [`EngineEvent::LeadUpFailed`] when the lead-up ends, and nothing when it is cancelled.
+    StartTheLeadUp {
+        generation: u64,
+        items: Receiver<LeadUpItem>,
+    },
+    /// The lead-up `generation` is not wanted any more (the playhead moved, or the project was edited): it is let go of, and so are the pictures that it sent. (A lead-up that is not the one
+    /// going on is not touched.)
+    CancelTheLeadUp { generation: u64 },
     /// Stop.
     Stop,
 }
@@ -85,6 +114,10 @@ pub enum EngineEvent {
         why: String,
         effects_switched_off: Vec<String>,
     },
+    /// The lead-up `generation` was made to its end: `frames_made` frames went through the engine, and the states of the effects are what they made them.
+    LeadUpDone { generation: u64, frames_made: u64 },
+    /// The lead-up `generation` stopped before its end, for this reason: the states of the effects are as the frames so far made them.
+    LeadUpFailed { generation: u64, problem: String },
     /// The engine has stopped, and will make no more frames (it could not start, or could not go on, or was told to stop).
     Stopped { problem: String },
 }

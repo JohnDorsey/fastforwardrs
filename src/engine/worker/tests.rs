@@ -32,14 +32,14 @@ use crate::engine::{
 const A_LONG_TIME: Duration = Duration::from_secs(60);
 
 /// What the thread said, in order.
-type Told = Mutex<Vec<EngineEvent>>;
+pub(super) type Told = Mutex<Vec<EngineEvent>>;
 
-fn what_was_said(told: &Told) -> Vec<EngineEvent> {
+pub(super) fn what_was_said(told: &Told) -> Vec<EngineEvent> {
     std::mem::take(&mut *told.lock().unwrap())
 }
 
 /// A worker on the software adapter, and what it says.
-fn with_a_worker(settings: EngineSettings, body: impl FnOnce(&mut Worker<'_>, &Told)) {
+pub(super) fn with_a_worker(settings: EngineSettings, body: impl FnOnce(&mut Worker<'_>, &Told)) {
     let told = Told::default();
     let tell = |event: EngineEvent| {
         told.lock().unwrap().push(event);
@@ -49,7 +49,7 @@ fn with_a_worker(settings: EngineSettings, body: impl FnOnce(&mut Worker<'_>, &T
     body(&mut worker, &told);
 }
 
-fn software_settings() -> EngineSettings {
+pub(super) fn software_settings() -> EngineSettings {
     EngineSettings::new(AdapterChoice::SoftwareOnly)
 }
 
@@ -64,7 +64,7 @@ fn description_of_picture_1(effects: Vec<EffectCall>) -> FrameDescription {
     description
 }
 
-fn picture_1() -> TestPicture {
+pub(super) fn picture_1() -> TestPicture {
     TestPicture::gradient(8, 8)
 }
 
@@ -77,14 +77,14 @@ fn give_the_effect(worker: &mut Worker<'_>, key: &str, stage: &str) {
         .unwrap();
 }
 
-fn send_the_picture(worker: &mut Worker<'_>) {
+pub(super) fn send_the_picture(worker: &mut Worker<'_>) {
     worker
         .take_a_picture(PictureId(1), &picture_1().as_picture_data())
         .unwrap();
 }
 
 /// The frame in the event, and what it came to, if the event is a frame.
-fn the_frame_in(event: &EngineEvent) -> (&RenderedFrame, FrameStatistics) {
+pub(super) fn the_frame_in(event: &EngineEvent) -> (&RenderedFrame, FrameStatistics) {
     match event {
         EngineEvent::Frame { frame, statistics, .. } => (frame, *statistics),
         other => panic!("not a frame: {other:?}"),

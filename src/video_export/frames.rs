@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use super::pictures::{PicturesOfTheRuns, RunPictureProblem, RunStreamStarter};
 use super::plan::ExportPlan;
-use crate::engine::{FrameDescription, PictureData, PictureId};
+use crate::engine::{FrameColour, FrameDescription, PictureData, PictureId};
 use crate::frame_scene::{
     PreviewContent, SentPictures, TextPictures, VideoInThePicture, colour_of_a_picture_file, describe_frame,
     groups_of_a_section, layers_of_a_section, symbol_of_a_section,
@@ -47,6 +47,30 @@ pub enum FrameProblem {
     NoRunForAVideo(u64),
 }
 
+/// How a describer makes its frames, besides what the plan says of the project: the sizes that the picture is placed and the frame is made at, and the colour that the frame is put
+/// together in. **The export's frames are made as the plan says** ([`Self::of_the_export`]); a lead-up's are made as the preview's are (EN-14: a state is of the size and the colour of the
+/// frames that made it, so the frames that make it for the preview have to be those).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HowTheFramesAreDescribed {
+    /// The size of the picture that the layers are placed on and that the text is drawn for, in pixels.
+    pub picture_size: (u32, u32),
+    /// How many pixels across and down the frames are made at.
+    pub render_size: (u32, u32),
+    /// What the frames are put together in and encoded as.
+    pub colour: FrameColour,
+}
+
+impl HowTheFramesAreDescribed {
+    /// The way the export describes its frames: at the size of its picture, in the colour of its plan.
+    pub fn of_the_export(plan: &ExportPlan) -> Self {
+        Self {
+            picture_size: plan.picture_size(),
+            render_size: plan.picture_size(),
+            colour: plan.colour,
+        }
+    }
+}
+
 /// A frame to ask the engine to draw.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DescribedFrame {
@@ -65,6 +89,7 @@ pub struct FrameDescriber<'plan, Starter: RunStreamStarter> {
     text: Box<dyn TextPictures + 'plan>,
     /// The pictures that the engine has been sent and has not been told to let go of.
     sent: HashSet<PictureId>,
+    how: HowTheFramesAreDescribed,
 }
 
 impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
@@ -80,7 +105,15 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
             images,
             text,
             sent: HashSet::new(),
+            how: HowTheFramesAreDescribed::of_the_export(plan),
         }
+    }
+
+    /// The same describer, making its frames as `how` says and not as the plan does (a lead-up's frames are made as the preview's are).
+    #[must_use]
+    pub fn described_as(mut self, how: HowTheFramesAreDescribed) -> Self {
+        self.how = how;
+        self
     }
 
     /// How many pictures of video were made by repeating the last because a file had fewer than the project was told.
@@ -121,7 +154,7 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
 
         // (The layers and the symbol are made from the section by the very functions that the window makes them with.)
         let content = PreviewContent {
-            picture_size: Some(plan.picture_size()),
+            picture_size: Some(self.how.picture_size),
             layers: layers_of_a_section(
                 section,
                 frame,
@@ -154,10 +187,10 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
         };
         let description = describe_frame(
             &content,
-            plan.picture_size(),
+            self.how.render_size,
             GENERATION_OF_THE_PICTURES_OF_FILES,
             COLOUR_OF_A_LAYER_WITHOUT_A_PICTURE,
-            plan.colour,
+            self.how.colour,
             &mut supply,
         );
 

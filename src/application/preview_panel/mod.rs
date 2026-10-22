@@ -49,7 +49,7 @@ mod zooming;
 
 #[cfg(test)]
 pub use engine_preview::render_size_for;
-pub use engine_preview::{EnginePreview, HowTheClockGoes};
+pub use engine_preview::{EnginePreview, HowTheClockGoes, LeadUpWanted};
 pub use view::PreviewView;
 
 // (The content of the preview is described by `frame_scene`, which the export uses too: what the preview shows and what the export shows are the same picture.)
@@ -61,7 +61,9 @@ pub use crate::frame_scene::SymbolOnThePreview;
 pub use zooming::FIT_BUTTON_LABEL;
 // (The tests look the line up by what it says.)
 #[cfg(test)]
-pub use inexact_picture_note::THE_PICTURE_IS_NOT_EXACT_NOTE;
+pub use inexact_picture_note::{
+    THE_PICTURE_IS_NOT_EXACT_AND_THE_LEAD_UP_IS_BEING_MADE_NOTE, THE_PICTURE_IS_NOT_EXACT_NOTE,
+};
 
 // The names the layers and their handles are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
@@ -218,7 +220,7 @@ fn show_how(
             engine.update(ui.ctx(), content, render_size, filter, text_renderer, clock);
             engine.paint(&ui.painter().with_clip_rect(picture_rectangle), picture_rectangle);
             if engine.the_picture_shown_is_not_exact() {
-                inexact_picture_note::show(ui, picture_rectangle, panel_rectangle);
+                inexact_picture_note::show(ui, picture_rectangle, panel_rectangle, engine.a_lead_up_is_being_made());
             }
             layers::Drawing::ByTheEngine
         }

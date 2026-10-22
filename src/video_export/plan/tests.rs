@@ -607,3 +607,142 @@ fn a_picture_file_that_is_in_two_places_is_decoded_as_big_as_the_bigger_of_them_
         );
     }
 }
+
+// ---- the plan of a lead-up (EN-14) ----
+
+/// What is of a run that the lead-up tests look at: where it is on the timeline, and where in the file.
+fn the_runs_as_they_are(plan: &ExportPlan) -> Vec<(u64, u64, u64, u64)> {
+    plan.runs
+        .iter()
+        .map(|run| {
+            (
+                run.first_timeline_frame,
+                run.end_timeline_frame,
+                run.first_source_frame,
+                run.source_frame_count,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_plan_of_a_lead_up_cuts_the_run_of_a_video_to_the_frames_of_the_lead_up() {
+    let project = project_with_video(320, 180, false);
+    let whole = plan(&project).unwrap();
+    assert_eq!(the_runs_as_they_are(&whole), vec![(0, 300, 0, 300)]);
+    // A stretch inside it: the run begins where the lead-up does, at the picture of the video that is seen there.
+    assert_eq!(
+        the_runs_as_they_are(&whole.for_a_lead_up(100..250, (160, 90))),
+        vec![(100, 250, 100, 150)]
+    );
+    // One that begins before the run and ends inside it, and one that begins inside and ends after it.
+    assert_eq!(
+        the_runs_as_they_are(&whole.for_a_lead_up(0..40, (160, 90))),
+        vec![(0, 40, 0, 40)]
+    );
+    assert_eq!(
+        the_runs_as_they_are(&whole.for_a_lead_up(250..400, (160, 90))),
+        vec![(250, 300, 250, 50)],
+        "the video ends where it did"
+    );
+}
+
+#[test]
+fn the_plan_of_a_lead_up_counts_the_pictures_of_a_run_that_plays_fast_by_the_speed() {
+    let mut project = project_with_video(320, 180, false);
+    project.split_at(frame(100), None);
+    let second = clip_location(&project, 0, 1);
+    project.set_clip_speed(second, speed(4)).unwrap();
+    let whole = plan(&project).unwrap();
+    assert_eq!(
+        the_runs_as_they_are(&whole),
+        vec![(0, 100, 0, 100), (100, 150, 100, 200)]
+    );
+    // 20 frames into the run that plays at 4 times the speed is 80 frames into the file; 30 frames of it are 120 frames of the file.
+    assert_eq!(
+        the_runs_as_they_are(&whole.for_a_lead_up(120..150, (160, 90))),
+        vec![(120, 150, 180, 120)]
+    );
+    // And one that has frames of both.
+    assert_eq!(
+        the_runs_as_they_are(&whole.for_a_lead_up(90..110, (160, 90))),
+        vec![(90, 100, 90, 10), (100, 110, 100, 40)]
+    );
+}
+
+#[test]
+fn the_plan_of_a_lead_up_leaves_out_the_runs_that_are_not_seen_at_its_frames() {
+    let mut project = project_with_video(320, 180, false);
+    project.split_at(frame(100), None);
+    let whole = plan(&project).unwrap();
+    assert_eq!(whole.runs.len(), 2);
+    assert_eq!(
+        whole.for_a_lead_up(0..100, (160, 90)).runs.len(),
+        1,
+        "the one that ends where it begins"
+    );
+    assert_eq!(whole.for_a_lead_up(100..200, (160, 90)).runs.len(), 1, "and the other");
+    assert!(
+        whole.for_a_lead_up(300..400, (160, 90)).runs.is_empty(),
+        "after the end"
+    );
+    assert!(whole.for_a_lead_up(50..50, (160, 90)).runs.is_empty(), "no frames");
+}
+
+#[test]
+fn the_plan_of_a_lead_up_has_the_picture_size_of_the_preview_and_is_the_plan_in_every_other_way() {
+    let mut project = project_with_video(320, 180, false);
+    project.import_source(picture_source(2, 100, 50), frame(0)).unwrap();
+    let whole = plan(&project).unwrap();
+    let lead_up = whole.for_a_lead_up(10..20, (160, 90));
+    assert_eq!(lead_up.picture_size(), (160, 90));
+    assert_eq!(lead_up.total_frame_count, whole.total_frame_count);
+    assert_eq!(lead_up.frame_rate, whole.frame_rate);
+    assert_eq!(lead_up.source_files, whole.source_files);
+    assert_eq!(lead_up.videos, whole.videos);
+    assert_eq!(lead_up.images, whole.images);
+    assert_eq!(lead_up.colour, whole.colour);
+    assert_eq!(lead_up.symbol_layout, whole.symbol_layout);
+    assert_eq!(lead_up.pictures.sections.len(), whole.pictures.sections.len());
+}
+
+#[test]
+fn a_video_in_the_plan_of_a_lead_up_is_delivered_as_the_preview_delivers_it_which_is_as_big_as_it_can_be_inside_the_picture_of_the_preview()
+ {
+    use super::super::pictures::PicturesOfTheRuns;
+    use super::super::test_streams::{Script, locations};
+    use std::collections::HashMap;
+    // A picture of 4 by 3, a video of the same shape that is first, and one of 16 by 9 in front of it.
+    let mut project = project_with_video(640, 480, false);
+    project
+        .import_source(video_source(2, 1280, 720, 100, false), frame(0))
+        .unwrap();
+    let whole = plan(&project).unwrap();
+    let lead_up = whole.for_a_lead_up(0..100, (320, 240));
+    let delivered: Vec<(SourceMediaIdentifier, (u32, u32))> = lead_up
+        .runs
+        .iter()
+        .map(|run| (run.source, run.delivered_size_in_pixels))
+        .collect();
+    assert!(
+        delivered.contains(&(SourceMediaIdentifier::new(2), (320, 180))),
+        "the wide one is as wide as the picture: {delivered:?}"
+    );
+    // What the stream is asked for is the very request that the preview makes, and it delivers as big as the run says.
+    let script = Script::default();
+    let mut pictures = PicturesOfTheRuns::new(script.clone(), &lead_up, &locations(), &HashMap::new()).unwrap();
+    pictures.start_the_runs_that_begin_soon(0).unwrap();
+    let started = script.state().started.clone();
+    assert!(!started.is_empty());
+    for (request, delivered_size) in started {
+        assert_eq!(
+            request.delivered_size(),
+            delivered_size,
+            "the preview delivers a video as big as it can be inside its picture, which is what the run says"
+        );
+        assert_eq!(
+            (request.picture_width_in_pixels, request.picture_height_in_pixels),
+            (320, 240)
+        );
+    }
+}

@@ -1130,3 +1130,79 @@ fn a_transition_on_a_tag_is_on_each_clip_of_the_tag_and_each_clip_is_made_a_grou
         assert!(layer.effects[0].key.starts_with("isf:mix-"));
     }
 }
+
+// ---- how the frames of a lead-up are described (EN-14)
+
+#[test]
+fn the_frames_of_an_export_are_described_as_the_plan_says_at_the_size_of_its_picture() {
+    let plan = plan_in_linear_light_of(&project_with_video(320, 180, false));
+    assert_eq!(
+        HowTheFramesAreDescribed::of_the_export(&plan),
+        HowTheFramesAreDescribed {
+            picture_size: (320, 180),
+            render_size: (320, 180),
+            colour: plan.colour,
+        }
+    );
+}
+
+#[test]
+fn a_describer_that_is_told_how_to_describe_makes_the_frame_that_size_in_that_colour_and_draws_the_text_for_that_picture()
+ {
+    let (project, _) = video_with_a_text_and_a_picture_over_it(150);
+    let plan = plan_of(&project);
+    let linear = plan_in_linear_light_of(&project).colour;
+    assert_ne!(linear, plan.colour, "the colour of the plan is the compatibility mode");
+    let how = HowTheFramesAreDescribed {
+        picture_size: (200, 100),
+        render_size: (64, 36),
+        colour: linear,
+    };
+    let calls = TextCalls::default();
+    let mut as_told = describer_of(
+        &plan,
+        &script_of_pictures(255),
+        HashMap::new(),
+        text_pictures_that_are_recorded(&calls),
+    )
+    .described_as(how);
+    let (described, sent) = describe(&mut as_told, 50);
+    assert_eq!(described.description.render_size, (64, 36));
+    assert_eq!(described.description.colour, linear);
+    assert_eq!(
+        calls.borrow().as_slice(),
+        [("hello".to_owned(), 200, 100)],
+        "the text is drawn for the picture that it is told, and not for the one of the plan"
+    );
+    assert!(
+        sent.iter().all(|(_, data)| data.working == linear.working),
+        "the pictures are made for the working space of the colour that it is told"
+    );
+    // Where the layers are is in fractions of the picture, which the size says nothing of: it is where the export puts them.
+    let mut as_the_export = describer_of(
+        &plan,
+        &script_of_pictures(255),
+        HashMap::new(),
+        text_pictures_that_are_recorded(&TextCalls::default()),
+    );
+    let (exported, _) = describe(&mut as_the_export, 50);
+    let corners = |frame: &DescribedFrame| {
+        frame
+            .description
+            .layers
+            .iter()
+            .map(|layer| layer.corners)
+            .collect::<Vec<_>>()
+    };
+    // (Equal but for the last bits of a number: where a text is on the frame is worked out in pixels of the picture, which are not the same pixels at another size.)
+    let (told, usual) = (corners(&described), corners(&exported));
+    assert_eq!(told.len(), usual.len());
+    for (layer_told, layer_usual) in told.iter().zip(&usual) {
+        for ((across_told, down_told), (across_usual, down_usual)) in layer_told.iter().zip(layer_usual) {
+            assert!(
+                (across_told - across_usual).abs() < 1e-5 && (down_told - down_usual).abs() < 1e-5,
+                "{told:?} and {usual:?}"
+            );
+        }
+    }
+}

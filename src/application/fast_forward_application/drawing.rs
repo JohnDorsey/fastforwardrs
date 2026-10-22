@@ -128,6 +128,8 @@ impl FastForwardApplication {
             memory_budget_in_bytes: self.effective_settings().checkpoint_memory_budget.bytes(),
         };
         let state_of_the_project = self.document.history.state_of_the_project();
+        // (Whether a lead-up is made when a picture is not exact is the checkbox *Generate lead-up on seek* of the View menu.)
+        let lead_ups_are_wanted = self.environment.global_settings.generate_lead_up_on_seek;
         let preview = egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| match &mut self.interface.engine_preview {
@@ -135,6 +137,7 @@ impl FastForwardApplication {
                     engine_preview.set_the_colour(colour_of_the_frames);
                     engine_preview.set_the_rules_of_checkpoints(rules_of_checkpoints);
                     engine_preview.the_project_is_now(state_of_the_project);
+                    engine_preview.set_a_lead_up_is_wanted(lead_ups_are_wanted);
                     preview_panel::show_drawn_by_the_engine(
                         ui,
                         &content,
@@ -155,6 +158,8 @@ impl FastForwardApplication {
                 ),
             });
         self.interface.preview_panel_in_the_last_frame = Some(preview.response.rect);
+        // (The preview says what it wants of the project after it has been drawn; the project is here.)
+        self.start_the_lead_up_that_the_preview_wants(frame_state.current_frame);
     }
 
     /// Looks for the names of the fonts the computer has once a text object is selected, which it

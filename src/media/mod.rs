@@ -34,7 +34,8 @@ pub use ffmpeg_toolchain::{FFMPEG_DIRECTORY_ENVIRONMENT_VARIABLE, FfmpegToolchai
 pub use finer_thumbnails::FinerThumbnails;
 pub use frame_stream::{
     DecodedFrame, DecodedYuvFrame, FrameDelivery, FrameStream, FrameStreamError, FrameStreamEvent, FrameStreamRequest,
-    HowToReadColours, WaitedFor, frame_stream_arguments, frame_stream_arguments_delivering,
+    HowToReadColours, QUICK_SCALING_OF_THE_PREVIEW, WaitedFor, frame_stream_arguments,
+    frame_stream_arguments_delivering,
 };
 pub use location::{MediaLocation, Stretch};
 pub use picture_decoder::{PictureDecodeError, decode_picture, picture_decoding_arguments, size_to_decode_at};

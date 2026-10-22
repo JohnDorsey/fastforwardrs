@@ -13,7 +13,7 @@ use std::sync::Arc;
 use super::effect_shaders::{check_that_it_is_an_effect, published_effect_shader_with_structure};
 use super::effect_states::RulesOfCheckpoints;
 use super::guard::{ShaderProblem, guard_wgsl};
-use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
+use super::messages::{EngineEvent, EngineRequest, EngineSettings, LeadUpItem, WakeUp};
 use super::shader_structure::ShaderStructure;
 use super::worker;
 use super::{COLOUR_MATRIX_KEY, FrameDescription, PictureData, PictureId, YuvColour};
@@ -132,6 +132,17 @@ impl Engine {
     /// Tells the engine to let go of every checkpoint: what they are copies of is not there any more.
     pub fn forget_the_checkpoints(&self) {
         let _ = self.requests.send(EngineRequest::ForgetTheCheckpoints);
+    }
+
+    /// Begins the lead-up `generation` (EN-14): the frames that `items` brings are made in order for what they do to the states of the effects, and no pixels are taken of them (see
+    /// [`EngineRequest::StartTheLeadUp`]). The engine says [`EngineEvent::LeadUpDone`] or [`EngineEvent::LeadUpFailed`] when it ends.
+    pub fn start_the_lead_up(&self, generation: u64, items: Receiver<LeadUpItem>) {
+        let _ = self.requests.send(EngineRequest::StartTheLeadUp { generation, items });
+    }
+
+    /// Tells the engine that the lead-up `generation` is not wanted any more: it is let go of, with the pictures that it sent, and the engine says nothing of it.
+    pub fn cancel_the_lead_up(&self, generation: u64) {
+        let _ = self.requests.send(EngineRequest::CancelTheLeadUp { generation });
     }
 
     /// Sends a picture, which frames can then refer to by `id`. The bytes are not copied.

@@ -1274,3 +1274,529 @@ fn the_picture_that_is_shown_says_whether_the_engine_said_it_is_exact_and_a_pict
     scripted.draw(1, false, 3);
     assert!(!scripted.preview.the_picture_shown_is_not_exact());
 }
+
+// ---- the lead-up on a seek (EN-14, option 1) ----
+
+/// The layer `layer` with a shader that has a state (the state number 9) at this frame of its own clock.
+fn with_a_state_at(layer: PreviewLayer<'_>, frame_of_the_state: u64) -> PreviewLayer<'_> {
+    PreviewLayer {
+        operations: vec![crate::project::PictureOperation::Shader {
+            key: "file:test".to_owned(),
+            numbers: vec![0.0; 4],
+            state: Some((9, frame_of_the_state)),
+            images: Vec::new(),
+            reads_the_backdrop: false,
+        }],
+        ..layer
+    }
+}
+
+impl Scripted {
+    /// Draws picture `number` with a shader on it that has a state at `frame_of_the_state`, `milliseconds` after the start, with the clock stopped, and gives everything that the
+    /// preview asked of the engine while it did.
+    fn draw_with_a_state(&mut self, number: usize, frame_of_the_state: u64, milliseconds: u64) -> Vec<EngineRequest> {
+        let shown = content(vec![with_a_state_at(
+            showing(1, &self.pictures[number]),
+            frame_of_the_state,
+        )]);
+        self.preview.update(
+            &self.context,
+            &shown,
+            RENDER_SIZE,
+            PictureFilter::Smooth,
+            &mut self.text_renderer,
+            HowTheClockGoes {
+                is_playing: false,
+                how_long_a_frame_lasts: Duration::from_millis(100),
+                now: self.start + Duration::from_millis(milliseconds),
+            },
+        );
+        self.requests.try_iter().collect()
+    }
+
+    /// What the engine was asked since, other than the pictures it was sent.
+    fn the_requests_of_the_lead_up(requests: &[EngineRequest]) -> Vec<String> {
+        requests
+            .iter()
+            .filter_map(|request| match request {
+                EngineRequest::Render { serial, .. } => Some(format!("render {serial}")),
+                EngineRequest::StartTheLeadUp { generation, .. } => Some(format!("start {generation}")),
+                EngineRequest::CancelTheLeadUp { generation } => Some(format!("cancel {generation}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A preview that has been shown picture `number` with a state at `frame_of_the_state` for as long as it takes (`WAIT` milliseconds) with the engine saying that it
+    /// is not exact, and a lead-up is wanted of.
+    fn that_wants_a_lead_up(number: usize, frame_of_the_state: u64) -> (Self, LeadUpWanted) {
+        let mut scripted = Self::new();
+        scripted.preview.set_a_lead_up_is_wanted(true);
+        let asked = scripted.draw_with_a_state(number, frame_of_the_state, 0);
+        assert_eq!(Self::the_requests_of_the_lead_up(&asked), ["render 1"]);
+        scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+        scripted.draw_with_a_state(number, frame_of_the_state, WAIT);
+        let wanted = scripted
+            .preview
+            .the_lead_up_that_is_wanted()
+            .expect("a lead-up is wanted of a picture that is not exact and has stayed as it is");
+        (scripted, wanted)
+    }
+}
+
+/// A little more than the time that a picture stays as it is before a lead-up is wanted of it.
+const WAIT: u64 = 300;
+
+/// What the window gives the preview when it starts the lead-up that is wanted: the end of the channel that the engine takes it from, and what keeps the thread that makes it alive.
+fn a_lead_up_that_is_started() -> (std::sync::mpsc::Sender<LeadUpItem>, Receiver<LeadUpItem>) {
+    std::sync::mpsc::channel()
+}
+
+#[test]
+fn a_lead_up_is_wanted_of_a_picture_that_is_not_exact_has_a_state_and_has_stayed_as_it_is_for_a_quarter_of_a_second() {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.preview.set_the_colour(another_colour());
+    scripted.draw_with_a_state(0, 400, 0);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    scripted.draw_with_a_state(0, 400, 100);
+    assert!(scripted.preview.the_picture_shown_is_not_exact());
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None, "not yet");
+    scripted.draw_with_a_state(0, 400, 249);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "not before a quarter of a second"
+    );
+    scripted.draw_with_a_state(0, 400, 250);
+    let wanted = scripted.preview.the_lead_up_that_is_wanted().expect("now it is");
+    assert_eq!(
+        wanted.render_size, RENDER_SIZE,
+        "the size that the picture on the screen was made at"
+    );
+    assert_eq!(
+        wanted.colour,
+        another_colour(),
+        "the colour that the picture on the screen was made in"
+    );
+    assert_eq!(
+        wanted.most_frames_a_state_has_gone_on_for, 400,
+        "how far back the states of the frame on the screen go"
+    );
+    assert_eq!(wanted.generation, 1);
+    // (Asked again, it is the same: nothing has been done about it.)
+    scripted.draw_with_a_state(0, 400, 400);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), Some(wanted));
+}
+
+#[test]
+fn the_preview_asks_to_be_drawn_again_when_the_quarter_of_a_second_is_over_so_that_a_picture_that_is_still_is_looked_at_then()
+ {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.draw_with_a_state(0, 400, 0);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    let delays = Arc::new(std::sync::Mutex::new(Vec::new()));
+    {
+        let delays = Arc::clone(&delays);
+        scripted
+            .context
+            .set_request_repaint_callback(move |information| delays.lock().unwrap().push(information.delay));
+    }
+    scripted.draw_with_a_state(0, 400, 100);
+    // (The 150 milliseconds that are left, less what egui takes off for the frame that it is in the middle of.)
+    assert!(
+        delays
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|delay| *delay > Duration::from_millis(100) && *delay <= Duration::from_millis(150)),
+        "{:?}",
+        delays.lock().unwrap()
+    );
+}
+
+#[test]
+fn no_lead_up_is_wanted_unless_all_of_it_is_so() {
+    // The setting is off (the preview is not told it is on).
+    let mut scripted = Scripted::new();
+    scripted.draw_with_a_state(0, 400, 0);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    scripted.draw_with_a_state(0, 400, WAIT);
+    assert!(scripted.preview.the_picture_shown_is_not_exact());
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "the setting is off"
+    );
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.draw_with_a_state(0, 400, WAIT + 1);
+    assert!(
+        scripted.preview.the_lead_up_that_is_wanted().is_some(),
+        "and now it is on"
+    );
+
+    // The picture is exact.
+    let mut exact = Scripted::new();
+    exact.preview.set_a_lead_up_is_wanted(true);
+    exact.draw_with_a_state(0, 400, 0);
+    exact.events.send(a_frame_that_is_approximate(1, false)).unwrap();
+    exact.draw_with_a_state(0, 400, WAIT);
+    assert_eq!(exact.preview.the_lead_up_that_is_wanted(), None, "the picture is exact");
+
+    // The picture on the screen is not the one that was asked for last: the engine has not answered the last.
+    let mut late = Scripted::new();
+    late.preview.set_a_lead_up_is_wanted(true);
+    late.draw_with_a_state(0, 400, 0);
+    late.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    late.draw_with_a_state(0, 400, 1);
+    late.draw_with_a_state(1, 400, WAIT);
+    assert_eq!(
+        late.preview.the_lead_up_that_is_wanted(),
+        None,
+        "the frame that is asked for has not come"
+    );
+    late.draw_with_a_state(1, 400, 2 * WAIT);
+    assert_eq!(
+        late.preview.the_lead_up_that_is_wanted(),
+        None,
+        "and the picture on the screen is of the one before it, which is not what the lead-up would be for"
+    );
+
+    // Nothing in the picture depends on earlier frames.
+    let mut stateless = Scripted::new();
+    stateless.preview.set_a_lead_up_is_wanted(true);
+    stateless.draw(0, false, 0);
+    stateless.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    stateless.draw(0, false, WAIT);
+    assert_eq!(stateless.preview.the_lead_up_that_is_wanted(), None, "no state");
+
+    // The state is at the first frame of its effect: the picture is exact and there is nothing before it.
+    let mut at_the_first_frame = Scripted::new();
+    at_the_first_frame.preview.set_a_lead_up_is_wanted(true);
+    at_the_first_frame.draw_with_a_state(0, 0, 0);
+    at_the_first_frame
+        .events
+        .send(a_frame_that_is_approximate(1, true))
+        .unwrap();
+    at_the_first_frame.draw_with_a_state(0, 0, WAIT);
+    assert_eq!(
+        at_the_first_frame.preview.the_lead_up_that_is_wanted(),
+        None,
+        "no frame before it"
+    );
+}
+
+#[test]
+fn a_picture_that_keeps_changing_has_no_lead_up_wanted_until_it_stays_as_it_is() {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    // A playhead that is dragged: another frame every 100 milliseconds, each of them said to be not exact.
+    for step in 0..6_u64 {
+        scripted.draw_with_a_state(step as usize, 400 + step, step * 100);
+        scripted
+            .events
+            .send(a_frame_that_is_approximate(step + 1, true))
+            .unwrap();
+        scripted.draw_with_a_state(step as usize, 400 + step, step * 100 + 50);
+        assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None, "step {step}");
+    }
+    // And then it stays.
+    scripted.draw_with_a_state(5, 405, 600 + WAIT);
+    assert!(scripted.preview.the_lead_up_that_is_wanted().is_some());
+}
+
+#[test]
+fn a_lead_up_that_the_window_starts_is_given_to_the_engine_and_is_being_made_until_it_is_over() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    assert!(scripted.preview.a_lead_up_is_being_made());
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "it is not wanted when it is going on"
+    );
+    let asked: Vec<EngineRequest> = scripted.requests.try_iter().collect();
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), ["start 1"]);
+    // While it goes on the same frame is not asked for again, and no other lead-up is wanted.
+    let asked = scripted.draw_with_a_state(0, 400, 2 * WAIT);
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), Vec::<String>::new());
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    assert!(
+        scripted.preview.the_picture_shown_is_not_exact(),
+        "the picture is as it was until it is over"
+    );
+}
+
+#[test]
+fn a_lead_up_that_was_not_asked_for_or_is_not_the_one_that_was_is_not_started() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(
+        &LeadUpWanted {
+            generation: 99,
+            ..wanted
+        },
+        items,
+        (),
+    );
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    assert!(
+        scripted.requests.try_iter().next().is_none(),
+        "the engine is told nothing"
+    );
+    assert!(
+        sender.send(LeadUpItem::End).is_err(),
+        "and the thread that made it finds that it is let go of"
+    );
+    // One that is not wanted at all.
+    let mut nothing_wanted = Scripted::new();
+    let (sender, items) = a_lead_up_that_is_started();
+    nothing_wanted.preview.start_the_lead_up(&wanted, items, ());
+    assert!(!nothing_wanted.preview.a_lead_up_is_being_made());
+    assert!(sender.send(LeadUpItem::End).is_err());
+}
+
+#[test]
+fn another_frame_that_is_asked_for_cancels_the_lead_up_before_it_is_asked_for_and_the_same_frame_asked_for_again_does_not()
+ {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+
+    // The engine says that it has not got a picture of the frame: the same frame is asked for again, and the lead-up goes on.
+    scripted
+        .events
+        .send(EngineEvent::PicturesMissing {
+            serial: 1,
+            ids: Vec::new(),
+        })
+        .unwrap();
+    let asked = scripted.draw_with_a_state(0, 400, 2 * WAIT);
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), ["render 2"]);
+    assert!(scripted.preview.a_lead_up_is_being_made());
+
+    // Another frame: the lead-up is cancelled, and the engine is told so before it is asked for the other frame (so that it does not make the frame in the middle of it).
+    let asked = scripted.draw_with_a_state(1, 400, 3 * WAIT);
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), ["cancel 1", "render 3"]);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+}
+
+#[test]
+fn when_the_lead_up_is_done_the_frame_is_asked_for_again_and_no_other_lead_up_is_wanted_for_it() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+    scripted
+        .events
+        .send(EngineEvent::LeadUpDone {
+            generation: 1,
+            frames_made: 300,
+        })
+        .unwrap();
+    let asked = scripted.draw_with_a_state(0, 400, 2 * WAIT);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["render 2"],
+        "the same frame, now that the states are what the lead-up made them"
+    );
+    // Said to be exact, the picture is. And if it were said not to be, there would be no lead-up again for the same frame: that is a loop.
+    scripted.events.send(a_frame_that_is_approximate(2, true)).unwrap();
+    scripted.draw_with_a_state(0, 400, 3 * WAIT);
+    assert!(scripted.preview.the_picture_shown_is_not_exact());
+    scripted.draw_with_a_state(0, 400, 10 * WAIT);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    // A lead-up is wanted again when the picture has been another and comes back to this one, and is not exact.
+    scripted.draw_with_a_state(1, 401, 11 * WAIT);
+    scripted.events.send(a_frame_that_is_approximate(3, false)).unwrap();
+    scripted.draw_with_a_state(1, 401, 12 * WAIT);
+    scripted.draw_with_a_state(0, 400, 13 * WAIT);
+    scripted.events.send(a_frame_that_is_approximate(4, true)).unwrap();
+    scripted.draw_with_a_state(0, 400, 14 * WAIT);
+    scripted.draw_with_a_state(0, 400, 15 * WAIT);
+    let wanted_again = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("it came back to the frame");
+    assert_eq!(wanted_again.generation, 2, "another lead-up, another number");
+}
+
+#[test]
+fn a_lead_up_that_failed_is_not_made_again_for_the_same_frame_and_the_problem_is_kept_and_the_frame_is_not_asked_for_again()
+ {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+    scripted
+        .events
+        .send(EngineEvent::LeadUpFailed {
+            generation: 1,
+            problem: "the video cannot be read".to_owned(),
+        })
+        .unwrap();
+    let asked = scripted.draw_with_a_state(0, 400, 2 * WAIT);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), Vec::<String>::new());
+    assert!(
+        scripted
+            .preview
+            .last_problem()
+            .is_some_and(|problem| problem.contains("the video cannot be read")),
+        "{:?}",
+        scripted.preview.last_problem()
+    );
+    scripted.draw_with_a_state(0, 400, 10 * WAIT);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+}
+
+#[test]
+fn what_the_engine_says_of_another_lead_up_than_the_one_going_on_is_not_heeded() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+    for event in [
+        EngineEvent::LeadUpDone {
+            generation: 7,
+            frames_made: 1,
+        },
+        EngineEvent::LeadUpFailed {
+            generation: 8,
+            problem: "not this one".to_owned(),
+        },
+    ] {
+        scripted.events.send(event).unwrap();
+    }
+    let asked = scripted.draw_with_a_state(0, 400, 2 * WAIT);
+    assert!(scripted.preview.a_lead_up_is_being_made());
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), Vec::<String>::new());
+    assert_eq!(scripted.preview.last_problem(), None);
+}
+
+#[test]
+fn turning_the_setting_off_cancels_the_lead_up_that_is_going_on_and_one_that_is_wanted_is_not() {
+    let (mut scripted, _wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    scripted.preview.set_a_lead_up_is_wanted(false);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "it is not wanted any more"
+    );
+    let (mut going, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (_sender, items) = a_lead_up_that_is_started();
+    going.preview.start_the_lead_up(&wanted, items, ());
+    going.requests.try_iter().for_each(drop);
+    going.preview.set_a_lead_up_is_wanted(true);
+    assert!(going.preview.a_lead_up_is_being_made(), "the setting is still on");
+    going.preview.set_a_lead_up_is_wanted(false);
+    assert!(!going.preview.a_lead_up_is_being_made());
+    let asked: Vec<EngineRequest> = going.requests.try_iter().collect();
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), ["cancel 1"]);
+}
+
+/// Something done to the preview (or the engine it is told by) that cancels a lead-up, which gives what the preview asked of the engine in the drawing that it needed, if it needed one.
+type WhatChangesTheProject = fn(&mut Scripted) -> Vec<EngineRequest>;
+
+fn another_colour() -> FrameColour {
+    FrameColour {
+        working: crate::engine::WorkingSpace::Linear(crate::colour_space::StandardPrimaries::Rec709),
+        ..FrameColour::default()
+    }
+}
+
+#[test]
+fn a_lead_up_is_cancelled_when_the_colour_changes_the_files_are_let_go_of_the_project_is_not_what_it_was_and_the_device_is_replaced()
+ {
+    // Each change gives what the preview asked of the engine in the drawing that it needed, if it needed one.
+    let changes: [(&str, WhatChangesTheProject); 4] = [
+        ("the colour", |scripted| {
+            scripted.preview.set_the_colour(another_colour());
+            Vec::new()
+        }),
+        ("the files", |scripted| {
+            scripted.preview.forget_what_is_known_of_the_files();
+            Vec::new()
+        }),
+        ("the project", |scripted| {
+            scripted.preview.the_project_is_now((1, 1));
+            scripted.preview.the_project_is_now((1, 2));
+            Vec::new()
+        }),
+        ("the device", |scripted| {
+            scripted
+                .events
+                .send(EngineEvent::DeviceReplaced {
+                    why: "it was lost".to_owned(),
+                    effects_switched_off: Vec::new(),
+                })
+                .unwrap();
+            scripted.draw_with_a_state(0, 400, 2 * WAIT)
+        }),
+    ];
+    for (what, change) in changes {
+        let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+        let (_sender, items) = a_lead_up_that_is_started();
+        scripted.preview.start_the_lead_up(&wanted, items, ());
+        scripted.requests.try_iter().for_each(drop);
+        let mut asked = change(&mut scripted);
+        assert!(!scripted.preview.a_lead_up_is_being_made(), "{what}");
+        asked.extend(scripted.requests.try_iter());
+        assert!(
+            Scripted::the_requests_of_the_lead_up(&asked).contains(&"cancel 1".to_owned()),
+            "{what}: {:?}",
+            Scripted::the_requests_of_the_lead_up(&asked)
+        );
+    }
+}
+
+#[test]
+fn a_lead_up_that_the_window_could_not_make_is_not_wanted_again_for_the_frame_and_the_reason_is_kept() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    scripted
+        .preview
+        .the_lead_up_cannot_be_made(&wanted, "the project cannot be planned".to_owned());
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    assert!(
+        scripted
+            .preview
+            .last_problem()
+            .is_some_and(|problem| problem.contains("the project cannot be planned"))
+    );
+    scripted.draw_with_a_state(0, 400, 10 * WAIT);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "not again for this frame"
+    );
+    // (A call about a lead-up that is not the one that is wanted is nothing.)
+    let (mut other, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    other.preview.the_lead_up_cannot_be_made(
+        &LeadUpWanted {
+            generation: 99,
+            ..wanted
+        },
+        "not this one".to_owned(),
+    );
+    assert!(other.preview.the_lead_up_that_is_wanted().is_some());
+}
+
+#[test]
+fn dropping_what_keeps_the_thread_of_a_lead_up_alive_is_what_cancels_it_and_a_cancel_lets_go_of_it() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let alive = Arc::new(());
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, Arc::clone(&alive));
+    assert_eq!(Arc::strong_count(&alive), 2, "the preview keeps it");
+    scripted.draw_with_a_state(1, 400, 2 * WAIT);
+    assert_eq!(
+        Arc::strong_count(&alive),
+        1,
+        "and lets go of it when it cancels the lead-up"
+    );
+}

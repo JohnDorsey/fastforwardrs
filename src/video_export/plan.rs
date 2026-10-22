@@ -14,7 +14,7 @@ use crate::frame_scene::colour_of_the_export;
 use crate::media::export::{SoundGraphSpecification, sound_graph_specification, sources_of_sound};
 use crate::project::{
     FrameRate, InputColourOverride, OutputColourSpace, Project, Settings, SourceMediaIdentifier, SpeedIndicatorLayout,
-    TimelineFrameIndex,
+    TimelineFrameIndex, fit_inside_picture,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -109,11 +109,70 @@ impl ExportPlan {
             run.clip == clip && run.first_timeline_frame <= timeline_frame && timeline_frame < run.end_timeline_frame
         })
     }
+
+    /// This plan as a lead-up needs it (EN-14, the lead-up on a seek): **for the frames `frames` only, with the pictures made as the preview makes them**. The video of each run is cut to the
+    /// frames (a run that is not seen at any of them is left out, and the one that is begins at the picture that is seen at the first of them), and it is delivered as the preview delivers
+    /// it: as big as it can be inside `preview_picture_size`, which is the size of the picture of the plan from now on. So the pictures that the lead-up makes the states of the effects from are
+    /// the size of the pictures that the preview makes the next frame from, and a state is of the size of the picture that it was made from.
+    #[must_use]
+    pub fn for_a_lead_up(&self, frames: std::ops::Range<u64>, preview_picture_size: (u32, u32)) -> Self {
+        let runs = self
+            .runs
+            .iter()
+            .filter_map(|run| {
+                let first = run.first_timeline_frame.max(frames.start);
+                let end = run.end_timeline_frame.min(frames.end);
+                if first >= end {
+                    return None;
+                }
+                let speed = u64::from(run.speed.value());
+                let skipped = first - run.first_timeline_frame;
+                let (display_width, display_height) = self
+                    .videos
+                    .get(&run.source)
+                    .map_or(preview_picture_size, |video| video.display_size_in_pixels);
+                let fit = fit_inside_picture(
+                    display_width,
+                    display_height,
+                    preview_picture_size.0,
+                    preview_picture_size.1,
+                );
+                Some(VideoRun {
+                    first_source_frame: run.first_source_frame + skipped * speed,
+                    // (The file may have fewer pictures than the clip was told it has: what is left of the run is never more than there was.)
+                    source_frame_count: run
+                        .source_frame_count
+                        .saturating_sub(skipped * speed)
+                        .min((end - first) * speed),
+                    first_timeline_frame: first,
+                    end_timeline_frame: end,
+                    delivered_size_in_pixels: (fit.width_in_pixels, fit.height_in_pixels),
+                    ..run.clone()
+                })
+            })
+            .collect();
+        Self {
+            runs,
+            picture_width_in_pixels: preview_picture_size.0,
+            picture_height_in_pixels: preview_picture_size.1,
+            ..self.clone()
+        }
+    }
 }
 
 /// Plans the export of `project`.
 pub fn plan_export(project: &Project, settings: Settings) -> Result<ExportPlan, ExportPlanError> {
-    let pictures = plan_pictures(project, |_| true);
+    plan_export_of_the_files_that_can_be_read(project, settings, |_| true)
+}
+
+/// Plans the export of `project` as it would be if only the files for which `can_be_read` says so could be read: a video from a file that cannot has no pictures (as it has none where its file has no
+/// more). **What the window shows is planned so** (`plan_pictures` is given the same function), and a lead-up is made from this plan.
+pub fn plan_export_of_the_files_that_can_be_read(
+    project: &Project,
+    settings: Settings,
+    can_be_read: impl Fn(SourceMediaIdentifier) -> bool,
+) -> Result<ExportPlan, ExportPlanError> {
+    let pictures = plan_pictures(project, can_be_read);
     if pictures.total_frame_count == 0 {
         return Err(ExportPlanError::NothingToExport);
     }

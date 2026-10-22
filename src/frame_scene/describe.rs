@@ -685,4 +685,44 @@ mod tests {
     fn a_serial_number_that_has_no_room_for_the_colour_is_found_out() {
         let _ = id_of_a_video_picture(1 << 44, 1);
     }
+
+    /// Every kind of picture that there is. (The `match` has no other arm, so that a kind that is added makes this not compile, and what it means for the ids of a lead-up is looked at then.)
+    fn all_the_kinds_of_pictures() -> [KindOfPicture; 5] {
+        let kinds = [
+            KindOfPicture::Image,
+            KindOfPicture::Text,
+            KindOfPicture::Thumbnail,
+            KindOfPicture::Symbol,
+            KindOfPicture::Imported,
+        ];
+        for kind in kinds {
+            match kind {
+                KindOfPicture::Image
+                | KindOfPicture::Text
+                | KindOfPicture::Thumbnail
+                | KindOfPicture::Symbol
+                | KindOfPicture::Imported => {}
+            }
+        }
+        kinds
+    }
+
+    #[test]
+    fn no_id_that_is_made_here_is_in_the_numbers_of_a_lead_up_so_that_a_lead_up_never_sends_or_lets_go_of_a_picture_of_the_preview()
+     {
+        for kind in all_the_kinds_of_pictures() {
+            assert!(
+                (kind as u64) < 8,
+                "the kind is in the three bits under the one that a lead-up has"
+            );
+            for what in 0..500_u64 {
+                for colour_tag in [0, 1, 0xFFFF] {
+                    let id = id_of(kind, what, colour_tag);
+                    assert!(!id.is_in_the_lead_up(), "{id:?}");
+                }
+            }
+        }
+        // The most that the id of a video picture can have: the biggest serial number under the biggest colour tag.
+        assert!(!id_of_a_video_picture((1 << BITS_OF_THE_SERIAL_NUMBER_IN_AN_ID) - 1, 0xFFFF).is_in_the_lead_up());
+    }
 }

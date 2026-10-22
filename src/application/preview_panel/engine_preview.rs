@@ -11,9 +11,16 @@
 //! **If the engine stops** (it could not make a device, or lost it, or its thread ended) the preview says so ([`EnginePreview::why_it_stopped`]) and the
 //! window draws the preview the old way from then on. **If the engine replaces its graphics device** (it was lost, or a frame did not finish in time) it goes on,
 //! and the preview keeps what the user is to be told ([`EnginePreview::take_what_the_user_is_to_be_told`]).
+//!
+//! **The lead-up on a seek** (EN-14, option 1; `docs/engine-phase-6-6-design.md`, section 4): when the checkbox *Generate lead-up on seek* is on and the picture on the screen is not exact (an effect
+//! that depends on earlier frames went on from a state that is not the one of the frame before) **and has stayed as it is for a quarter of a second**, the preview says that it wants a lead-up
+//! made ([`EnginePreview::the_lead_up_that_is_wanted`]); the window, which has the project, starts it ([`EnginePreview::start_the_lead_up`]); the engine makes the frames before the one on the screen
+//! for the states of the effects, and says when it is done, and then the frame on the screen is asked for again and is exact. **Any other frame that is asked for cancels it**, before it is asked for.
+//! A picture that keeps changing (a playhead that is dragged, a project that plays) has none made: a lead-up is for the frame that stays.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use egui::{Color32, ColorImage, Context, Painter, Rect, TextureHandle, pos2};
@@ -22,8 +29,8 @@ use super::PreviewContent;
 use super::engine_view::{PictureSupply, PictureWanted, SentPictures, describe_frame_in_colour};
 use crate::application::textures::PictureFilter;
 use crate::engine::{
-    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameColour, FrameDescription, PictureId, QualityGovernor,
-    QualityRules, RenderedFrame, RulesOfCheckpoints, WakeUp,
+    AdapterChoice, Engine, EngineEvent, EngineSettings, FrameColour, FrameDescription, LeadUpItem, PictureId,
+    QualityGovernor, QualityRules, RenderedFrame, RulesOfCheckpoints, WakeUp,
 };
 use crate::project::FrameRate;
 use crate::text_rendering::LazyTextRenderer;
@@ -98,6 +105,47 @@ impl HowTheClockGoes {
     }
 }
 
+/// How long a picture has to stay as it is before a lead-up is wanted of it. (A playhead that is dragged or a project that plays changes the picture all the time, and a lead-up is for the frame
+/// that stays: it is made while a person looks at it.)
+const HOW_LONG_THE_PICTURE_STAYS_STILL_BEFORE_A_LEAD_UP: Duration = Duration::from_millis(250);
+
+/// What the preview asks the window to make a lead-up of (see the module documentation).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LeadUpWanted {
+    /// A number that tells this lead-up from every other that the preview has wanted; the engine says it when the lead-up ends.
+    pub generation: u64,
+    /// The size that the frame on the screen was made at, which the frames of the lead-up are made at too: **a state is of the size of the picture that made it**.
+    pub render_size: (u32, u32),
+    /// What the frame on the screen was put together in, which the frames of the lead-up are put together in too: a state is in the colour that made it.
+    pub colour: FrameColour,
+    /// The most frames of their own clocks that the effects of the frame on the screen that have a state have gone on for (see `FrameDescription::most_frames_a_state_has_gone_on_for`): how far
+    /// back the frames that its states are made of go. The lead-up has as many frames before the frame on the screen, but no more than `lead_up::MOST_FRAMES_OF_A_LEAD_UP`.
+    pub most_frames_a_state_has_gone_on_for: u64,
+}
+
+/// Where the preview is with a lead-up.
+enum LeadUpOfThePreview {
+    /// None is wanted or going on.
+    None,
+    /// The preview wants this one made for the frame with this fingerprint, and the window has not said whether it can.
+    Wanted { wanted: LeadUpWanted, for_the_frame: u64 },
+    /// The engine is making this one, from what the thread that `_keeps_alive` is describes. (Dropping it cancels the lead-up: the thread is let go of.)
+    Going {
+        generation: u64,
+        for_the_frame: u64,
+        _keeps_alive: Box<dyn Send>,
+    },
+}
+
+/// What the preview knows of the frame it has just described that has to do with a lead-up.
+struct FactsAboutTheFrame {
+    fingerprint: u64,
+    /// See [`LeadUpWanted::most_frames_a_state_has_gone_on_for`]; `None` if no effect of the frame has a state.
+    most_frames_a_state_has_gone_on_for: Option<u64>,
+    render_size: (u32, u32),
+    colour: FrameColour,
+}
+
 /// The frame that is on the preview.
 struct ShownFrame {
     texture: TextureHandle,
@@ -152,6 +200,16 @@ pub struct EnginePreview {
     rules_of_checkpoints: RulesOfCheckpoints,
     /// What the project was when the window last said (see [`Self::the_project_is_now`]).
     state_of_the_project: Option<(u64, u64)>,
+    /// Whether a lead-up is wanted of a picture that is not exact: the checkbox *Generate lead-up on seek* of the View menu, which the window says each time it draws.
+    lead_ups_are_wanted: bool,
+    lead_up: LeadUpOfThePreview,
+    /// The fingerprint of the frame that has been on the screen since a lead-up was last made for it (or could not be): none is made again for it, which would be a loop when what the lead-up
+    /// makes does not make the picture exact. It is forgotten when the picture is another.
+    last_lead_up_was_for: Option<u64>,
+    /// The fingerprint of the frame that was described last, and when it was first described as that.
+    the_picture_has_been_as_it_is_since: Option<(u64, Instant)>,
+    /// How many lead-ups have been wanted.
+    lead_ups_wanted: u64,
 }
 
 impl EnginePreview {
@@ -183,6 +241,11 @@ impl EnginePreview {
             colour: FrameColour::default(),
             rules_of_checkpoints: RulesOfCheckpoints::NONE,
             state_of_the_project: None,
+            lead_ups_are_wanted: false,
+            lead_up: LeadUpOfThePreview::None,
+            last_lead_up_was_for: None,
+            the_picture_has_been_as_it_is_since: None,
+            lead_ups_wanted: 0,
         }
     }
 
@@ -192,6 +255,7 @@ impl EnginePreview {
     pub fn set_the_colour(&mut self, colour: FrameColour) {
         if colour != self.colour {
             self.engine.forget_the_checkpoints();
+            self.cancel_the_lead_up();
         }
         self.colour = colour;
     }
@@ -214,12 +278,172 @@ impl EnginePreview {
             .is_some_and(|before| before != state)
         {
             self.engine.forget_the_checkpoints();
+            self.cancel_the_lead_up();
         }
+    }
+
+    /// For the tests of what the window does with a lead-up that the preview wants: a preview that wants `wanted` for the frame with this fingerprint, as it does when the picture on the screen is not
+    /// exact and has stayed so for long enough (which the tests of the preview itself bring about, with a scripted engine and the clock).
+    #[cfg(test)]
+    pub(crate) fn wanting_a_lead_up_for_tests(engine: Engine, wanted: LeadUpWanted, for_the_frame: u64) -> Self {
+        let mut preview = Self::with_engine(engine);
+        preview.lead_up = LeadUpOfThePreview::Wanted { wanted, for_the_frame };
+        preview
     }
 
     /// Whether the picture that is shown is not exact: the engine said so of the frame (EN-14). The window says so over it while it is.
     pub fn the_picture_shown_is_not_exact(&self) -> bool {
         self.shown.as_ref().is_some_and(|shown| shown.approximate)
+    }
+
+    /// Whether the picture that is shown is the answer to the frame that was asked for last, and is not exact: the picture that a lead-up is for.
+    fn the_picture_shown_is_the_one_asked_for_last_and_is_not_exact(&self) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|shown| shown.approximate && self.asked_for.is_some_and(|(_, serial)| shown.serial == serial))
+    }
+
+    /// Says whether a lead-up is wanted of a picture that is not exact: the checkbox *Generate lead-up on seek* of the View menu. The window says it each time it draws; when it is turned off
+    /// a lead-up that is going on or wanted is cancelled, and the picture goes on as it is (what it does with an inexact picture without a lead-up: the checkpoints).
+    pub fn set_a_lead_up_is_wanted(&mut self, wanted: bool) {
+        if !wanted {
+            self.cancel_the_lead_up();
+        }
+        self.lead_ups_are_wanted = wanted;
+    }
+
+    /// The lead-up that the preview wants the window to start, if it wants one that nobody has answered: the window starts it with [`Self::start_the_lead_up`], or says that it cannot
+    /// with [`Self::the_lead_up_cannot_be_made`]. (The frame that it is for is the one on the screen, which is the frame that the playhead is at.)
+    pub fn the_lead_up_that_is_wanted(&self) -> Option<LeadUpWanted> {
+        match &self.lead_up {
+            LeadUpOfThePreview::Wanted { wanted, .. } => Some(*wanted),
+            LeadUpOfThePreview::None | LeadUpOfThePreview::Going { .. } => None,
+        }
+    }
+
+    /// Whether the engine is making a lead-up. (The line over the picture says so.)
+    pub fn a_lead_up_is_being_made(&self) -> bool {
+        matches!(self.lead_up, LeadUpOfThePreview::Going { .. })
+    }
+
+    /// Starts the lead-up `wanted` that [`Self::the_lead_up_that_is_wanted`] gave: the engine makes it from what comes through `items`, which a thread of the window describes, and
+    /// `keeps_alive` is what keeps that thread (dropping it cancels the lead-up). If that is not the lead-up that is wanted any more nothing is started, and both are let go of.
+    pub fn start_the_lead_up(
+        &mut self,
+        wanted: &LeadUpWanted,
+        items: Receiver<LeadUpItem>,
+        keeps_alive: impl Send + 'static,
+    ) {
+        let LeadUpOfThePreview::Wanted {
+            wanted: asked_for,
+            for_the_frame,
+        } = &self.lead_up
+        else {
+            return;
+        };
+        if asked_for.generation != wanted.generation {
+            return;
+        }
+        let for_the_frame = *for_the_frame;
+        self.engine.start_the_lead_up(wanted.generation, items);
+        self.lead_up = LeadUpOfThePreview::Going {
+            generation: wanted.generation,
+            for_the_frame,
+            _keeps_alive: Box::new(keeps_alive),
+        };
+    }
+
+    /// Says that the lead-up `wanted` cannot be made (`why`): there is none for the frame that is on the screen until the picture is another.
+    pub fn the_lead_up_cannot_be_made(&mut self, wanted: &LeadUpWanted, why: String) {
+        let LeadUpOfThePreview::Wanted {
+            wanted: asked_for,
+            for_the_frame,
+        } = &self.lead_up
+        else {
+            return;
+        };
+        if asked_for.generation != wanted.generation {
+            return;
+        }
+        self.last_lead_up_was_for = Some(*for_the_frame);
+        self.lead_up = LeadUpOfThePreview::None;
+        self.last_problem = Some(why);
+    }
+
+    /// Cancels the lead-up that is going on, or wanted: the engine is told, and the thread that makes it is let go of.
+    fn cancel_the_lead_up(&mut self) {
+        if let LeadUpOfThePreview::Going { generation, .. } =
+            std::mem::replace(&mut self.lead_up, LeadUpOfThePreview::None)
+        {
+            self.engine.cancel_the_lead_up(generation);
+        }
+    }
+
+    /// The engine said that the lead-up `generation` ended, with a `problem` if it did not go to its end. (One that is not the one going on is nothing.) If it was whole the frame on the screen is
+    /// asked for again: the states are what the lead-up made them.
+    fn the_lead_up_ended(&mut self, generation: u64, problem: Option<String>) {
+        let LeadUpOfThePreview::Going {
+            generation: going,
+            for_the_frame,
+            ..
+        } = &self.lead_up
+        else {
+            return;
+        };
+        if *going != generation {
+            return;
+        }
+        self.last_lead_up_was_for = Some(*for_the_frame);
+        self.lead_up = LeadUpOfThePreview::None;
+        match problem {
+            None => self.asked_for = None,
+            Some(problem) => self.last_problem = Some(format!("the lead-up could not be made: {problem}")),
+        }
+    }
+
+    /// Looks at whether a lead-up is wanted of the frame that was just described (see the module documentation).
+    fn note_whether_a_lead_up_is_wanted(&mut self, context: &Context, facts: &FactsAboutTheFrame, now: Instant) {
+        let since = match self.the_picture_has_been_as_it_is_since {
+            Some((fingerprint, since)) if fingerprint == facts.fingerprint => since,
+            _ => {
+                self.the_picture_has_been_as_it_is_since = Some((facts.fingerprint, now));
+                now
+            }
+        };
+        // (A lead-up that was made for a frame that was left since is not a reason not to make one when the picture comes back to it.)
+        if self
+            .last_lead_up_was_for
+            .is_some_and(|fingerprint| fingerprint != facts.fingerprint)
+        {
+            self.last_lead_up_was_for = None;
+        }
+        let Some(most_frames_a_state_has_gone_on_for) = facts.most_frames_a_state_has_gone_on_for else {
+            return;
+        };
+        let is_worth_it = self.lead_ups_are_wanted
+            && matches!(self.lead_up, LeadUpOfThePreview::None)
+            && most_frames_a_state_has_gone_on_for > 0
+            && self.last_lead_up_was_for != Some(facts.fingerprint)
+            && self.the_picture_shown_is_the_one_asked_for_last_and_is_not_exact();
+        if !is_worth_it {
+            return;
+        }
+        let has_been_still_for = now.saturating_duration_since(since);
+        if has_been_still_for < HOW_LONG_THE_PICTURE_STAYS_STILL_BEFORE_A_LEAD_UP {
+            // (The window is not drawn when nothing changes: it is asked to be, when the time is over.)
+            context.request_repaint_after(HOW_LONG_THE_PICTURE_STAYS_STILL_BEFORE_A_LEAD_UP - has_been_still_for);
+            return;
+        }
+        self.lead_ups_wanted += 1;
+        self.lead_up = LeadUpOfThePreview::Wanted {
+            wanted: LeadUpWanted {
+                generation: self.lead_ups_wanted,
+                render_size: facts.render_size,
+                colour: facts.colour,
+                most_frames_a_state_has_gone_on_for,
+            },
+            for_the_frame: facts.fingerprint,
+        };
     }
 
     /// Why the engine has stopped, if it has: the preview is then to be drawn the old way.
@@ -299,6 +523,7 @@ impl EnginePreview {
         self.asked_for = None;
         self.first_serial_that_counts = self.last_serial + 1;
         self.engine.forget_the_checkpoints();
+        self.cancel_the_lead_up();
     }
 
     /// Takes what the engine has said, describes `content` as a frame made at `whole_size` (or the part of it that the quality of the preview says: see
@@ -336,7 +561,18 @@ impl EnginePreview {
         self.what_was_shown = Some(description.fingerprint_of_what_is_shown());
 
         let fingerprint = description.fingerprint();
+        let facts = FactsAboutTheFrame {
+            fingerprint,
+            most_frames_a_state_has_gone_on_for: description.most_frames_a_state_has_gone_on_for(),
+            render_size: description.render_size,
+            colour: description.colour,
+        };
         if self.asked_for.map(|(asked, _)| asked) != Some(fingerprint) {
+            // (A lead-up is for the frame that is on the screen. Another frame makes it of no use, and it is cancelled **before** the frame is asked for, so that the engine does not make the frame in
+            // the middle of it. The same frame asked for again, which it is when a picture it needs was lost, is not another frame.)
+            if !self.lead_up_is_for(fingerprint) {
+                self.cancel_the_lead_up();
+            }
             self.note_the_pictures_used(&description);
             let serial = self.engine.request_frame(description);
             self.asked_for = Some((fingerprint, serial));
@@ -349,9 +585,20 @@ impl EnginePreview {
             self.let_go_of_the_pictures_that_are_not_used_any_more();
         }
         self.put_the_frame_on_the_screen_the_way_it_is_asked_for(context, filter);
+        self.note_whether_a_lead_up_is_wanted(context, &facts, clock.now);
         // (A picture that is still is made whole after a while, and the window is not drawn when nothing changes: it is asked to be.)
         if let Some(wait) = self.governor.how_long_until_the_picture_is_made_whole(clock.now) {
             context.request_repaint_after(wait);
+        }
+    }
+
+    /// Whether the lead-up that is going on or wanted is for the frame with this fingerprint.
+    fn lead_up_is_for(&self, fingerprint: u64) -> bool {
+        match &self.lead_up {
+            LeadUpOfThePreview::None => false,
+            LeadUpOfThePreview::Wanted { for_the_frame, .. } | LeadUpOfThePreview::Going { for_the_frame, .. } => {
+                *for_the_frame == fingerprint
+            }
         }
     }
 
@@ -430,6 +677,8 @@ impl EnginePreview {
                     self.asked_for = None;
                 }
                 EngineEvent::EffectRejected { problem, .. } => self.last_problem = Some(problem),
+                EngineEvent::LeadUpDone { generation, .. } => self.the_lead_up_ended(generation, None),
+                EngineEvent::LeadUpFailed { generation, problem } => self.the_lead_up_ended(generation, Some(problem)),
                 EngineEvent::DeviceReplaced {
                     why,
                     effects_switched_off,
@@ -447,6 +696,8 @@ impl EnginePreview {
         self.sent.clear();
         self.last_used_in.clear();
         self.asked_for = None;
+        // (The lead-up was on the old device: the engine has let go of it, and it is not going on.)
+        self.cancel_the_lead_up();
         self.to_tell_the_user
             .push(the_words_about_a_replaced_device(&why, effects_switched_off));
         self.last_problem = Some(why);

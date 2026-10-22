@@ -21,15 +21,19 @@ mod runs;
 #[cfg(test)]
 pub(crate) mod test_projects;
 #[cfg(test)]
-mod test_streams;
+pub(crate) mod test_streams;
 
 pub use encoder::{
     Encoder, EncoderEnd, EncoderKiller, EncoderSpecification, SoundForTheEncoder, encoder_arguments,
     sound_graph_for_the_encoder,
 };
-pub use frames::{DescribedFrame, FrameDescriber, FrameProblem};
+pub use frames::{DescribedFrame, FrameDescriber, FrameProblem, HowTheFramesAreDescribed};
 pub use output_colour::{OutputColour, OutputTags, output_colour_for};
 pub use pictures::{FfmpegRunStreamStarter, PicturesOfTheRuns, RunPictureProblem, RunStream, RunStreamStarter};
-pub use plan::{ExportPlan, ExportPlanError, ImageToExport, VideoToExport, plan_export};
-pub use runner::{ExportError, ExportEvent, ExportOptions, ExportResult, VideoExport, words_about_held_pictures};
+pub use plan::{
+    ExportPlan, ExportPlanError, ImageToExport, VideoToExport, plan_export, plan_export_of_the_files_that_can_be_read,
+};
+pub use runner::{
+    ExportError, ExportEvent, ExportOptions, ExportResult, FontsOfTheComputer, VideoExport, words_about_held_pictures,
+};
 pub use runs::{VideoRun, find_the_runs};

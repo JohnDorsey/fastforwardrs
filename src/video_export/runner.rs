@@ -511,7 +511,7 @@ fn produce(job: Job) -> Result<(), Ending> {
     let pictures_of_the_runs = PicturesOfTheRuns::new(streams, &plan, &locations, &planes)?.with_readings(&readings);
     let text: Box<dyn TextPictures> = match text_pictures {
         Some(text_pictures) => text_pictures,
-        None => Box::new(FontsOfTheComputer(LazyTextRenderer::new(Arc::new(|| {})))),
+        None => Box::new(FontsOfTheComputer::new()),
     };
     let mut describer = FrameDescriber::new(&plan, pictures_of_the_runs, images, text);
 
@@ -720,13 +720,29 @@ fn what_to_do_with(event: EngineEvent, asked: &mut VecDeque<AskedFrame>) -> Resu
         ))),
         EngineEvent::Stopped { problem } => Err(Ending::failed(format!("the picture engine stopped: {problem}"))),
         EngineEvent::Frame { .. } => Err(Ending::failed("the picture engine answered a request for the preview")),
+        // (An export starts no lead-up: that is for the frames of the preview that follow a seek.)
+        EngineEvent::LeadUpDone { .. } | EngineEvent::LeadUpFailed { .. } => Err(Ending::failed(
+            "the picture engine answered a request that the export did not make",
+        )),
         // (The export installs no effects of its own.)
         EngineEvent::EffectRejected { .. } => Ok(None),
     }
 }
 
-/// The text pictures of the export when nothing else is asked for: drawn in the fonts of the computer, waiting for them to be loaded when the first text is wanted.
-struct FontsOfTheComputer(LazyTextRenderer);
+/// The text pictures of the export when nothing else is asked for: drawn in the fonts of the computer, waiting for them to be loaded when the first text is wanted. (A lead-up draws its text the same way.)
+pub struct FontsOfTheComputer(LazyTextRenderer);
+
+impl FontsOfTheComputer {
+    pub fn new() -> Self {
+        Self(LazyTextRenderer::new(Arc::new(|| {})))
+    }
+}
+
+impl Default for FontsOfTheComputer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl TextPictures for FontsOfTheComputer {
     fn text_picture(
