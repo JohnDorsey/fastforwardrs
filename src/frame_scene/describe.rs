@@ -411,31 +411,6 @@ fn describe_layer(
             colour,
             working,
         },
-        PreviewLayerContent::Solid(colour) => {
-            let rgba = [colour.red, colour.green, colour.blue, colour.alpha];
-            let effects: Vec<EffectCall> = layer.operations.iter().filter_map(call_of_an_operation).collect();
-            // (A colour has no picture of its own for effects to work on, so a solid colour that has effects is drawn over the whole frame into a picture of its own, which
-            // is what they work on, and that is put where the clip is: a blur or a crop of it is a blur or a crop of what it is, as it is of a picture.)
-            return Some(if effects.is_empty() {
-                LayerDescription {
-                    source: LayerSource::Solid(rgba),
-                    corners,
-                    effects,
-                }
-            } else {
-                LayerDescription {
-                    source: LayerSource::Group(GroupDescription {
-                        layers: vec![LayerDescription {
-                            source: LayerSource::Solid(rgba),
-                            corners: CORNERS_OF_THE_WHOLE_PICTURE,
-                            effects: Vec::new(),
-                        }],
-                    }),
-                    corners,
-                    effects,
-                }
-            });
-        }
         PreviewLayerContent::Video(VideoInThePicture::Waiting) | PreviewLayerContent::Image { picture: None, .. } => {
             return Some(LayerDescription {
                 source: LayerSource::Solid(colour_of_a_layer_without_a_picture),

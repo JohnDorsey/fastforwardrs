@@ -29,7 +29,6 @@ pub fn kind_name(kind: ClipKind) -> &'static str {
         ClipKind::Text => "Text object",
         ClipKind::Crate => "Keyframe crate",
         ClipKind::Adjustment => "Adjustment clip",
-        ClipKind::Generator => "Generator clip",
     }
 }
 
@@ -49,7 +48,6 @@ pub fn beginning_of(words: &str) -> String {
 pub fn detail_of_a_clip(clip: &Clip, source_looks: &SourceLooks<'_>) -> String {
     match clip {
         Clip::Text(text) => beginning_of(&text.object.text),
-        Clip::Generator(generator) => generator.kind().name().to_owned(),
         other => other
             .source()
             .and_then(|source| source_looks.get(&source))
@@ -180,8 +178,8 @@ mod tests {
 
     use super::*;
     use crate::project::{
-        EffectInstanceId, FrameRate, GeneratorKind, RackId, SourceMedia, SourceMediaLink, SourceVideoProperties,
-        TextObject, TimelineFrameIndex, TrackId,
+        EffectInstanceId, FrameRate, RackId, SourceMedia, SourceMediaLink, SourceVideoProperties, TextObject,
+        TimelineFrameIndex, TrackId,
     };
 
     /// A project whose one track has a text object, and on it as many hue shifts as `effects_on_the_clip` says. (And the target that is the
@@ -421,18 +419,5 @@ mod tests {
             what_a_rack_is_called(&project, &track_rack, video, &looks),
             format!("Muted of {}", project.tracks()[0].title())
         );
-    }
-
-    #[test]
-    fn a_generator_clip_is_told_from_the_others_of_its_kind_by_the_name_of_what_it_makes() {
-        let mut project = Project::empty();
-        let track = project.tracks()[0].id();
-        let (clip, _) = project
-            .try_insert_generator_clip(track, TimelineFrameIndex::new(0), GeneratorKind::SolidColour, 30)
-            .unwrap();
-        let found = project.placement_of(clip).unwrap().clip;
-
-        assert_eq!(kind_name(ClipKind::Generator), "Generator clip");
-        assert_eq!(detail_of_a_clip(found, &SourceLooks::new()), "Solid colour");
     }
 }

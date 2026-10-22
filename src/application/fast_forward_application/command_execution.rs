@@ -23,8 +23,8 @@ use crate::application::preview_panel::PreviewView;
 use crate::application::selection::{Selection, SelectionChange, SelectionItem};
 use crate::playback::SoundEffect;
 use crate::project::{
-    AnimationTarget, ClipId, ClipSide, EditError, FrameRate, GeneratorKind, Project, SpeedFactor, TextObject,
-    TimelineFrameIndex, TrackId, TrackSide,
+    AnimationTarget, ClipId, ClipSide, EditError, FrameRate, Project, SpeedFactor, TextObject, TimelineFrameIndex,
+    TrackId, TrackSide,
 };
 
 /// How long a text object lasts when it is made, in seconds (or less, if it would run into a clip).
@@ -32,9 +32,6 @@ const SECONDS_A_NEW_TEXT_OBJECT_LASTS: f64 = 3.0;
 
 /// How long a new adjustment clip lasts, in seconds, as a picture does (Q-11 of `docs/plugin-system-features.md`): it can be made longer or shorter.
 const SECONDS_A_NEW_ADJUSTMENT_CLIP_LASTS: f64 = 5.0;
-
-/// How many seconds a new generator clip lasts when there is room for that much (as long as an adjustment clip and a picture).
-const SECONDS_A_NEW_GENERATOR_CLIP_LASTS: f64 = 5.0;
 
 impl FastForwardApplication {
     /// Carries out the commands of one frame of the window, one after another, except the one that would lose keyframes if there is
@@ -200,10 +197,6 @@ impl FastForwardApplication {
 
             Command::NewTextObject { track, frame } => self.new_text_object(track, frame, now),
             Command::NewAdjustmentClip { track, frame } => self.new_adjustment_clip(track, frame, now),
-            Command::NewGeneratorClip { track, frame, kind } => self.new_generator_clip(track, frame, kind, now),
-            Command::SetGeneratorColour { clip, colour } => {
-                self.set_generator_colour_at_the_playhead(clip, colour, now)
-            }
             Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
                 if let Err(error) = self.document.project.set_clip_duration(clip, frames) {
@@ -602,16 +595,6 @@ impl FastForwardApplication {
             now,
             ("an adjustment clip", SECONDS_A_NEW_ADJUSTMENT_CLIP_LASTS),
             |project, wanted_frames| project.try_insert_adjustment_clip(track, frame, wanted_frames),
-        );
-    }
-
-    /// Puts a new generator clip of `kind` on `track`, starting at `frame`, and selects it, so that its properties show.
-    fn new_generator_clip(&mut self, track: TrackId, frame: TimelineFrameIndex, kind: GeneratorKind, now: Instant) {
-        self.new_clip_with_no_media(
-            frame,
-            now,
-            ("a generator clip", SECONDS_A_NEW_GENERATOR_CLIP_LASTS),
-            |project, wanted_frames| project.try_insert_generator_clip(track, frame, kind, wanted_frames),
         );
     }
 

@@ -10,7 +10,7 @@ use super::tests::{
     reason_for_unreadable_project, saved, valid_text_with, version_line,
 };
 use super::*;
-use crate::composition::test_projects::{random_project_with_effects, random_project_with_generators_and_effects};
+use crate::composition::test_projects::random_project_with_effects;
 use crate::project::{HUE_SHIFT_KEY, PropertyId, TimelineFrameIndex};
 use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use crate::test_support::{DeterministicRandomNumbers, make_a_keyframe};
@@ -184,25 +184,10 @@ fn the_effects_of_clips_that_were_cut_and_of_a_track_that_was_copied_are_still_w
 
 #[test]
 fn projects_made_at_random_with_effects_survive_a_trip_through_the_text() {
-    check_that_projects_made_at_random_survive_a_trip_through_the_text(41_000, random_project_with_effects);
-}
-
-#[test]
-fn projects_made_at_random_with_effects_and_solid_colours_survive_a_trip_through_the_text() {
-    check_that_projects_made_at_random_survive_a_trip_through_the_text(
-        43_000,
-        random_project_with_generators_and_effects,
-    );
-}
-
-fn check_that_projects_made_at_random_survive_a_trip_through_the_text(
-    first_seed_after: u64,
-    make_project: fn(&mut DeterministicRandomNumbers) -> Project,
-) {
     let (mut with_effects, mut with_animated_effects) = (0, 0);
     for seed in 1..=120u64 {
-        let mut random = DeterministicRandomNumbers::with_seed(seed + first_seed_after);
-        let project = make_project(&mut random);
+        let mut random = DeterministicRandomNumbers::with_seed(seed + 41_000);
+        let project = random_project_with_effects(&mut random);
 
         let text = saved(&project);
         let loaded = project_from_json_text(&text).unwrap_or_else(|error| panic!("seed {seed}: {error:?}\n{text}"));

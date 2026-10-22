@@ -109,37 +109,6 @@ pub const IMAGE_CLIP_TEXT: Color32 = Color32::from_rgb(240, 234, 250);
 pub const ADJUSTMENT_CLIP_BACKGROUND: Color32 = Color32::from_rgb(100, 84, 36);
 pub const ADJUSTMENT_CLIP_TEXT: Color32 = Color32::from_rgb(250, 244, 224);
 
-/// How much brighter the lighter of two colours is than the darker, as accessibility guidelines count it.
-pub fn contrast_ratio(first: Color32, second: Color32) -> f32 {
-    let luminance = |colour: Color32| {
-        let linear = |channel: u8| {
-            let value = f32::from(channel) / 255.0;
-            if value <= 0.03928 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * linear(colour.r()) + 0.7152 * linear(colour.g()) + 0.0722 * linear(colour.b())
-    };
-    let (lighter, darker) = (
-        luminance(first).max(luminance(second)),
-        luminance(first).min(luminance(second)),
-    );
-    (lighter + 0.05) / (darker + 0.05)
-}
-
-/// The words on a generator clip, over the colour it makes (which is its background): black or white, whichever has more contrast with it (never less than 4.5 to 1, which only these two can promise for every colour).
-pub fn generator_clip_text_over(background: Color32) -> Color32 {
-    const DARK: Color32 = Color32::BLACK;
-    const LIGHT: Color32 = Color32::WHITE;
-    if contrast_ratio(background, DARK) >= contrast_ratio(background, LIGHT) {
-        DARK
-    } else {
-        LIGHT
-    }
-}
-
 /// A keyframe crate: a box that is nothing but a drawer that is always open, a little darker than the strip it is on.
 pub const CRATE_CLIP_BACKGROUND: Color32 = Color32::from_rgb(24, 26, 31);
 
@@ -216,26 +185,31 @@ mod tests {
         (hue, saturation, lightness)
     }
 
+    /// How much brighter the lighter of two colours is than the darker, as accessibility guidelines count it.
+    fn contrast_ratio(first: Color32, second: Color32) -> f32 {
+        let luminance = |colour: Color32| {
+            let linear = |channel: u8| {
+                let value = f32::from(channel) / 255.0;
+                if value <= 0.03928 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(colour.r()) + 0.7152 * linear(colour.g()) + 0.0722 * linear(colour.b())
+        };
+        let (lighter, darker) = (
+            luminance(first).max(luminance(second)),
+            luminance(first).min(luminance(second)),
+        );
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
     #[test]
     fn the_name_on_a_picture_clip_and_the_words_of_a_text_clip_can_be_read() {
         assert!(contrast_ratio(IMAGE_CLIP_BACKGROUND, IMAGE_CLIP_TEXT) > 7.0);
         assert!(contrast_ratio(TEXT_CLIP_BACKGROUND, TEXT_CLIP_TEXT) > 4.5);
         assert!(contrast_ratio(ADJUSTMENT_CLIP_BACKGROUND, ADJUSTMENT_CLIP_TEXT) > 4.5);
-    }
-
-    #[test]
-    fn the_words_on_a_generator_clip_are_easy_to_read_over_any_colour_it_makes() {
-        for red in (0..=255).step_by(51) {
-            for green in (0..=255).step_by(51) {
-                for blue in (0..=255).step_by(51) {
-                    let background = Color32::from_rgb(red, green, blue);
-                    assert!(
-                        contrast_ratio(background, generator_clip_text_over(background)) > 4.5,
-                        "over {background:?}"
-                    );
-                }
-            }
-        }
     }
 
     #[test]

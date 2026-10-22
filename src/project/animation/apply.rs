@@ -8,7 +8,7 @@
 //! how far it is turned. (A place on the picture is what a [`Placement`] says all together: an area, and a turn.)
 
 use super::{Animation, PropertyId, PropertyValue};
-use crate::project::tracks::{Angle, CanvasArea, FontSize, Gain, Placement, TextColour, TextObject};
+use crate::project::tracks::{Angle, CanvasArea, FontSize, Gain, Placement, TextObject};
 
 /// The properties of where something is on the picture: those that [`placement_value`] has a value for.
 pub const PROPERTIES_OF_A_PLACEMENT: [PropertyId; 3] = [PropertyId::Position, PropertyId::Size, PropertyId::Rotation];
@@ -138,15 +138,6 @@ impl Animation {
                     None => object,
                 }
             })
-    }
-
-    /// The colour of a solid colour at `frame` of what the animation belongs to: as the animation says if it is animated, and `colour` if not.
-    #[must_use]
-    pub fn colour_at(&self, colour: TextColour, frame: u64) -> TextColour {
-        match self.value_at(PropertyId::Colour, frame) {
-            Some(PropertyValue::Colour(animated)) => animated,
-            _ => colour,
-        }
     }
 
     /// How loud something is at `frame`: as the animation says if it is animated, and `gain` if not.

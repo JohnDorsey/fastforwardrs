@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! A clip: one thing on a track. It is a piece of a video, a piece of a sound file, a picture, a
-//! text object, a keyframe crate, an adjustment clip or a generator clip.
+//! text object, a keyframe crate or an adjustment clip.
 
 use super::adjustment_clip::AdjustmentClip;
 use super::crate_clip::CrateClip;
-use super::generator_clip::GeneratorClip;
 use super::image_clip::ImageClip;
 use super::media_clip::MediaClip;
 use super::placement::Placement;
@@ -24,8 +23,6 @@ pub enum ClipKind {
     Crate,
     /// An adjustment clip: no picture of its own, its effects are done to the picture that everything behind it makes.
     Adjustment,
-    /// A generator clip: no media, a picture the program makes from a few values (a solid colour).
-    Generator,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,8 +38,6 @@ pub enum Clip {
     Crate(CrateClip),
     /// An adjustment clip: its effects are done to everything behind it, for as long as it lasts.
     Adjustment(AdjustmentClip),
-    /// A generator clip: a picture the program makes (a solid colour), shown for a while.
-    Generator(GeneratorClip),
 }
 
 impl Clip {
@@ -54,7 +49,6 @@ impl Clip {
             Self::Text(_) => ClipKind::Text,
             Self::Crate(_) => ClipKind::Crate,
             Self::Adjustment(_) => ClipKind::Adjustment,
-            Self::Generator(_) => ClipKind::Generator,
         }
     }
 
@@ -62,7 +56,7 @@ impl Clip {
     pub fn as_media(&self) -> Option<&MediaClip> {
         match self {
             Self::Video(media) | Self::Audio(media) => Some(media),
-            Self::Image(_) | Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Generator(_) => None,
+            Self::Image(_) | Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) => None,
         }
     }
 
@@ -80,23 +74,16 @@ impl Clip {
         }
     }
 
-    pub fn as_generator(&self) -> Option<&GeneratorClip> {
-        match self {
-            Self::Generator(generator) => Some(generator),
-            _ => None,
-        }
-    }
-
     /// The file the clip is made from, if it is made from one: a video, a sound or a picture.
     pub fn source(&self) -> Option<SourceMediaIdentifier> {
         match self {
             Self::Video(media) | Self::Audio(media) => Some(media.source()),
             Self::Image(image) => Some(image.source()),
-            Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Generator(_) => None,
+            Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) => None,
         }
     }
 
-    /// Where the clip is on the picture, if it says. A text clip and a generator clip always do; a video clip does
+    /// Where the clip is on the picture, if it says. A text clip always does; a video clip does
     /// once it has been moved, resized or turned (before that it is fitted inside the picture);
     /// a sound clip is not on the picture at all.
     pub fn placement(&self) -> Option<Placement> {
@@ -105,7 +92,6 @@ impl Clip {
             Self::Image(image) => image.placement(),
             Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) => None,
             Self::Text(text) => Some(text.object.placement()),
-            Self::Generator(generator) => Some(generator.placement()),
         }
     }
 
@@ -116,7 +102,6 @@ impl Clip {
             Self::Video(media) => Some(Self::Video(media.with_placement(Some(placement)))),
             Self::Image(image) => Some(Self::Image(image.with_placement(Some(placement)))),
             Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) => None,
-            Self::Generator(generator) => Some(Self::Generator(generator.with_placement(placement))),
             Self::Text(text) => {
                 let mut moved = text.clone();
                 moved.object = text.object.with_placement(placement);
@@ -133,7 +118,6 @@ impl Clip {
             Self::Text(text) => Some(text.duration_in_frames()),
             Self::Image(image) => Some(image.duration_in_frames()),
             Self::Adjustment(adjustment) => Some(adjustment.duration_in_frames()),
-            Self::Generator(generator) => Some(generator.duration_in_frames()),
             Self::Video(_) | Self::Audio(_) | Self::Crate(_) => None,
         }
     }
@@ -148,9 +132,6 @@ impl Clip {
             Self::Adjustment(adjustment) => adjustment
                 .with_duration_in_frames(duration_in_frames)
                 .map(Self::Adjustment),
-            Self::Generator(generator) => generator
-                .with_duration_in_frames(duration_in_frames)
-                .map(Self::Generator),
             Self::Video(_) | Self::Audio(_) | Self::Crate(_) => None,
         }
     }
@@ -162,7 +143,7 @@ impl Clip {
         match self {
             Self::Video(media) => Self::Video(media.retimed(from, to)),
             Self::Audio(media) => Self::Audio(media.retimed(from, to)),
-            Self::Image(_) | Self::Text(_) | Self::Adjustment(_) | Self::Generator(_) => {
+            Self::Image(_) | Self::Text(_) | Self::Adjustment(_) => {
                 let duration = self.duration_in_frames_it_says().unwrap_or(1);
                 let retimed = from.convert_frame_count_to(duration, to).max(1);
                 self.with_duration_in_frames_it_says(retimed)
@@ -198,7 +179,6 @@ impl Clip {
             Self::Text(text) => text.duration_in_frames(),
             Self::Crate(crate_clip) => crate_clip.duration_in_frames(),
             Self::Adjustment(adjustment) => adjustment.duration_in_frames(),
-            Self::Generator(generator) => generator.duration_in_frames(),
         }
     }
 
@@ -232,9 +212,6 @@ impl Clip {
             Self::Adjustment(adjustment) => adjustment
                 .split_after(frames_in)
                 .map(|(first, second)| (Self::Adjustment(first), Self::Adjustment(second))),
-            Self::Generator(generator) => generator
-                .split_after(frames_in)
-                .map(|(first, second)| (Self::Generator(first), Self::Generator(second))),
         }
     }
 }

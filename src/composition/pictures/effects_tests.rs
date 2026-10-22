@@ -7,9 +7,7 @@
 use super::tests::{frame, long_video, picture, text};
 use super::*;
 use crate::colour_effects::ColourMatrix;
-use crate::composition::test_projects::{
-    project_of, random_project_with_effects, random_project_with_generators_and_effects,
-};
+use crate::composition::test_projects::{project_of, random_project_with_effects};
 use crate::project::{AnimationTarget, EffectInstanceId, EffectKind, PropertyId, PropertyValue};
 use crate::test_support::{self, DeterministicRandomNumbers, put_a_hue_shift_on};
 
@@ -324,26 +322,10 @@ fn effects_by_looking_at_the_project(
 
 #[test]
 fn every_layer_has_the_effects_and_values_the_project_says_at_every_frame_it_is_seen_at() {
-    check_that_every_layer_has_the_effects_and_values_the_project_says(21_000, random_project_with_effects);
-}
-
-#[test]
-fn every_layer_has_the_effects_and_values_the_project_says_at_every_frame_it_is_seen_at_when_some_clips_are_solid_colours()
- {
-    check_that_every_layer_has_the_effects_and_values_the_project_says(
-        23_000,
-        random_project_with_generators_and_effects,
-    );
-}
-
-fn check_that_every_layer_has_the_effects_and_values_the_project_says(
-    first_seed_after: u64,
-    make_project: fn(&mut DeterministicRandomNumbers) -> Project,
-) {
     let (mut with_effects, mut animated, mut with_both_of_clip_and_track) = (0, 0, 0);
     for seed in 1..=150u64 {
-        let mut random = DeterministicRandomNumbers::with_seed(seed + first_seed_after);
-        let project = make_project(&mut random);
+        let mut random = DeterministicRandomNumbers::with_seed(seed + 21_000);
+        let project = random_project_with_effects(&mut random);
         let plan = plan(&project);
         for timeline_frame in 0..plan.total_frame_count {
             let section = plan.section_at(frame(timeline_frame)).unwrap();

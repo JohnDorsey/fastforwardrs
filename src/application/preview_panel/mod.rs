@@ -62,8 +62,8 @@ pub use zooming::FIT_BUTTON_LABEL;
 // The names the layers and their handles are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
 pub use names::{
-    catcher_id, corner_handle_id, corner_handle_label, picture_label, solid_colour_label, text_object_label,
-    turn_handle_label, turn_place_id, video_label,
+    catcher_id, corner_handle_id, corner_handle_label, picture_label, text_object_label, turn_handle_label,
+    turn_place_id, video_label,
 };
 
 use egui::{Rect, Ui, vec2};
@@ -76,20 +76,14 @@ use geometry::PictureOnScreen;
 use speed_indicator_overlay::SymbolOnScreen;
 
 impl PreviewLayer<'_> {
-    /// Whether the layer takes whatever shape it is dragged to when it is resized, as a text object and a solid colour do (a video and a picture keep their own).
-    fn takes_any_shape(&self) -> bool {
-        matches!(
-            self.content,
-            PreviewLayerContent::Text(_) | PreviewLayerContent::Solid(_)
-        )
+    fn is_text(&self) -> bool {
+        matches!(self.content, PreviewLayerContent::Text(_))
     }
 
-    /// Whether the layer is a video or a solid colour that is all of the picture, so that there is nothing outside it.
+    /// Whether the layer is a video that is all of the picture, so that there is nothing outside it.
     fn fills_the_picture(&self) -> bool {
-        matches!(
-            self.content,
-            PreviewLayerContent::Video(_) | PreviewLayerContent::Solid(_)
-        ) && self.placement.rotation.is_zero()
+        matches!(self.content, PreviewLayerContent::Video(_))
+            && self.placement.rotation.is_zero()
             && self.placement.area == crate::project::CanvasArea::WHOLE_PICTURE
     }
 
@@ -99,7 +93,6 @@ impl PreviewLayer<'_> {
             PreviewLayerContent::Text(_) => names::text_object_label(self.clip),
             PreviewLayerContent::Video(_) => names::video_label(self.clip),
             PreviewLayerContent::Image { .. } => names::picture_label(self.clip),
-            PreviewLayerContent::Solid(_) => names::solid_colour_label(self.clip),
         }
     }
 }

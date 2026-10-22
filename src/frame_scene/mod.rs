@@ -27,8 +27,7 @@ use crate::engine::PictureColour;
 use crate::media::ThumbnailLibrary;
 use crate::playback::SuppliedPicture;
 use crate::project::{
-    ClipId, PictureOperation, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextColour,
-    TextObject, TrackId,
+    ClipId, PictureOperation, Placement, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId,
 };
 use crate::rgba_picture::RgbaPicture;
 
@@ -58,8 +57,6 @@ pub enum PreviewLayerContent<'a> {
     },
     /// A text object as it is at the current frame: what the clip says, or, if it has keyframes, as they change it.
     Text(Cow<'a, TextObject>),
-    /// A solid colour (a generator clip) as it is at the current frame: the colour the clip says, or, if it has keyframes, as they change it.
-    Solid(TextColour),
 }
 
 /// A video, a picture or a text object that is seen, and where it is on the picture.

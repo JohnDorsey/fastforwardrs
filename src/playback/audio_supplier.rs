@@ -292,10 +292,8 @@ impl AudioContent<'_> {
             for entry in track.entries() {
                 let media = match entry.clip() {
                     Clip::Video(media) | Clip::Audio(media) => media,
-                    // Text, pictures, crates, adjustment clips and generator clips have no sound, and where they are changes nothing but the gaps (hashed below).
-                    Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => {
-                        continue;
-                    }
+                    // Text, pictures, crates and adjustment clips have no sound, and where they are changes nothing but the gaps (hashed below).
+                    Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) => continue,
                 };
                 entry.id().hash(&mut hasher);
                 entry.gap_before_frames().hash(&mut hasher);

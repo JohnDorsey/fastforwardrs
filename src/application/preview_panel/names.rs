@@ -28,11 +28,6 @@ pub fn picture_label(clip: ClipId) -> String {
     format!("Picture, {clip}")
 }
 
-/// The name a solid colour (a generator clip) on the preview is known by.
-pub fn solid_colour_label(clip: ClipId) -> String {
-    format!("Solid colour, {clip}")
-}
-
 /// The name the handle at a corner of the selected layer is known by.
 pub fn corner_handle_label(corner: Corner) -> String {
     format!("Resize handle at the {} corner", corner_name(corner))

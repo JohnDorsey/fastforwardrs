@@ -245,17 +245,6 @@ pub(super) fn draw_clips(
                 painter.rect_filled(rectangles.whole, corner_radius, theme::TEXT_CLIP_BACKGROUND);
                 draw_label(painter, rectangles, &text.object.text, theme::TEXT_CLIP_TEXT);
             }
-            Clip::Generator(generator) => {
-                // (The colour it makes, as it is, without how clear it is: a clear colour on a track would be the colour of the track, which says nothing.)
-                let background = Color32::from_rgb(generator.colour.red, generator.colour.green, generator.colour.blue);
-                painter.rect_filled(rectangles.whole, corner_radius, background);
-                draw_label(
-                    painter,
-                    rectangles,
-                    generator.kind().name(),
-                    theme::generator_clip_text_over(background),
-                );
-            }
             Clip::Crate(_) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::CRATE_CLIP_BACKGROUND);
             }

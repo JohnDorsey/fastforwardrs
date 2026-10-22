@@ -885,39 +885,3 @@ fn an_adjustment_clip_is_a_group_of_what_is_behind_it_over_black_with_its_effect
     );
     assert_eq!(held.layers.len(), 3, "the black, the video and the text");
 }
-
-#[test]
-fn a_solid_colour_is_a_layer_of_one_colour_for_as_long_as_it_lasts_and_one_that_has_effects_is_drawn_into_a_picture_of_its_own()
- {
-    let (mut project, _) = video_with_a_text_and_a_picture_over_it(150);
-    let front = project.add_track_in_front();
-    let (solid, _) = project
-        .try_insert_generator_clip(front, frame(60), crate::project::GeneratorKind::SolidColour, 30)
-        .unwrap();
-    project
-        .set_generator_colour(solid, crate::project::TextColour::new(255, 0, 0, 100))
-        .unwrap();
-
-    // Before it and after it the frame is what it was.
-    assert_eq!(described_at(&project, 55).layers.len(), 2, "the video and the text");
-    assert_eq!(described_at(&project, 95).layers.len(), 1, "the video");
-    let during = described_at(&project, 65);
-    let last = during.layers.last().unwrap();
-    assert_eq!(
-        last.source,
-        LayerSource::Solid([255, 0, 0, 100]),
-        "in front of the others"
-    );
-    assert!(last.effects.is_empty());
-
-    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(solid), 90.0);
-    let during = described_at(&project, 65);
-    let last = during.layers.last().unwrap();
-    assert_eq!(last.effects.len(), 1);
-    assert_eq!(last.effects[0].key, COLOUR_MATRIX_KEY);
-    let LayerSource::Group(held) = &last.source else {
-        panic!("a picture of its own for the effect to work on: {:?}", last.source);
-    };
-    assert_eq!(held.layers.len(), 1);
-    assert_eq!(held.layers[0].source, LayerSource::Solid([255, 0, 0, 100]));
-}

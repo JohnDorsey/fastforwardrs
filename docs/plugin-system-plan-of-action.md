@@ -248,7 +248,7 @@ file); the command line refuses what nobody approved. The real set of LMMS (119 
 
 ### Phase 5 — Group effects, adjustment clips and generator clips (size M)
 
-**BUILT 2026-10-21** (pieces 5.1 to 5.4; design `engine-phase-5-design.md`, report `engine-phase-5-report.md`). Differences from what is written below: a generator's content is a kind and the colour property a text object has, not an effect instance; the gate's "ungroup gives the same render" is met.
+**BUILT 2026-10-21** (pieces 5.1 to 5.4; design `engine-phase-5-design.md`, report `engine-phase-5-report.md`). Differences from what is written below: **generator clips were built (Solid colour) and taken out again the same day at the maintainer's request** (slim program, much done by non-built-ins): they come back with the ISF host in phase 6; the gate's "ungroup gives the same render" is met.
 
 GR-02, GR-06 to GR-10, EF-02, EF-03 (the backdrop slot, first use), EF-04, Q-33.
 

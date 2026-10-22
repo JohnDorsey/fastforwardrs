@@ -21,7 +21,7 @@ use crate::application::commands::Command;
 use crate::application::history::EditKey;
 use crate::project::{
     AnimationTarget, ClipId, Gain, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, Placement, PropertyId,
-    PropertyValue, TextColour, TextObject, TimelineFrameIndex, TrackId, placement_value, text_value,
+    PropertyValue, TextObject, TimelineFrameIndex, TrackId, placement_value, text_value,
 };
 
 impl FastForwardApplication {
@@ -78,9 +78,6 @@ impl FastForwardApplication {
             }
             Command::SetTextObject { clip, .. } => {
                 is_animated(AnimationTarget::Clip(*clip), &PROPERTIES_OF_A_TEXT_OBJECT)
-            }
-            Command::SetGeneratorColour { clip, .. } => {
-                is_animated(AnimationTarget::Clip(*clip), &[PropertyId::Colour])
             }
             Command::SetTrackGain { track, .. } => is_animated(AnimationTarget::Track(*track), &[PropertyId::Gain]),
             Command::SetTrackMuted { track, .. } => is_animated(AnimationTarget::Track(*track), &[PropertyId::Muted]),
@@ -161,16 +158,6 @@ impl FastForwardApplication {
     }
 
     /// Gives the text object `clip` the words, font, size, colour and place `object` says, at the playhead.
-    /// Gives the generator clip `clip` the colour `colour`: what it says if the colour has no keyframes, and otherwise a keyframe of it at the playhead.
-    pub(super) fn set_generator_colour_at_the_playhead(&mut self, clip: ClipId, colour: TextColour, now: Instant) {
-        let target = AnimationTarget::Clip(clip);
-        if self.document.project.is_animated(target, PropertyId::Colour) {
-            self.change_a_property_at_the_playhead(target, PropertyId::Colour, PropertyValue::Colour(colour), now);
-        } else {
-            let _ = self.document.project.set_generator_colour(clip, colour);
-        }
-    }
-
     pub(super) fn set_text_object_at_the_playhead(&mut self, clip: ClipId, object: TextObject, now: Instant) {
         let target = AnimationTarget::Clip(clip);
         if !PROPERTIES_OF_A_TEXT_OBJECT
