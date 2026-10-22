@@ -404,7 +404,7 @@ menu item or a window opened from one is marked.*
   macros; `TIME` is clip-local time and `FRAMEINDEX` clip-local frame number, never the wall clock; the y-axis flip.
 * **PH-13 [P] M** Filters, generators and transitions are told apart by their inputs (`inputImage`; none; `startImage`, `endImage`,
   `progress`) (EF-01 to EF-03).
-* **PH-14 [P] M** Imported images (`IMPORTED`) are resources (RS-08).
+* **PH-14 [P] M** Imported images (`IMPORTED`) are resources (RS-08). *(Built 2026-10-22, phase 6.4.4, **kept inside the shader and not as resources of the project**: see `engine-phase-6-4-design.md`, K15.)*
 * **PH-15 [P] M** A **golden corpus** of ISF shaders with expected pictures from a reference host guards correctness; the compile rate
   alone is not accepted as correctness. **The reference host is the ISF Editor on Windows, run by hand, for 10 to 20 shaders** (Q-24, 2026-10-15).
 * **PH-16 [D] M** What ships in the box (Q-25, 2026-10-15): **gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else**; the

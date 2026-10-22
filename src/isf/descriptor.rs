@@ -13,8 +13,8 @@ use std::borrow::Cow;
 use super::reader::{IsfFile, IsfInputKind};
 use crate::digest::Sha256Digest;
 use crate::project::{
-    ChoiceOption, EffectDescriptor, EffectDomain, ParameterControl, ParameterDescriptor, PropertyValue, ShaderLanguage,
-    ShaderSource, TextColour, UnknownFields, ValueScale,
+    ChoiceOption, EffectDescriptor, EffectDomain, ParameterControl, ParameterDescriptor, PropertyValue, ShaderImage,
+    ShaderLanguage, ShaderSource, TextColour, UnknownFields, ValueScale,
 };
 
 /// How many characters of the digest of a shader are in its key.
@@ -41,10 +41,31 @@ fn slug_of(words: &str) -> String {
     if slug.is_empty() { "shader".to_owned() } else { slug }
 }
 
+/// The digest of what a shader is, as hex: the digest of its text; and, if it brings images, of its text and then, for each image, its name and the digest of its bytes (so that the same
+/// text with other images is another shader, and a shader with none has the digest of its text, as it always had).
+fn digest_of_the_source(text: &str, images: &[ShaderImage]) -> String {
+    if images.is_empty() {
+        return Sha256Digest::of_bytes(text.as_bytes()).to_hex();
+    }
+    let mut bytes = text.as_bytes().to_vec();
+    for image in images {
+        bytes.push(0);
+        bytes.extend_from_slice(image.name().as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(Sha256Digest::of_bytes(image.bytes()).to_hex().as_bytes());
+    }
+    Sha256Digest::of_bytes(&bytes).to_hex()
+}
+
 /// The key of the kind of effect that `source` is, under the name `file_name`: **`isf:` the name, a minus and the first characters of the digest of the whole text**, so that two files of
 /// one name are two kinds, and one file is one kind wherever it is read.
 pub fn key_of(file_name: &str, source: &str) -> String {
-    let digest = Sha256Digest::of_bytes(source.as_bytes()).to_hex();
+    key_of_a_source_with_images(file_name, source, &[])
+}
+
+/// The same for a shader that brings `images` with it (they are a part of what the shader is: its digest is made of its text, and then of the name and the digest of the bytes of each image).
+pub fn key_of_a_source_with_images(file_name: &str, source: &str, images: &[ShaderImage]) -> String {
+    let digest = digest_of_the_source(source, images);
     format!(
         "isf:{}-{}",
         slug_of(&words_of(file_name)),
@@ -55,7 +76,12 @@ pub fn key_of(file_name: &str, source: &str) -> String {
 /// Whether `key` is the key of a shader whose text is `text`: it ends with the first characters of the digest of the text (see [`key_of`]). A project file that was changed by hand can
 /// have a text that is not the one its key was made from; two kinds of one key that are two texts must not be run as one.
 pub fn key_is_of_the_text(key: &str, text: &str) -> bool {
-    let digest = Sha256Digest::of_bytes(text.as_bytes()).to_hex();
+    key_is_of_the_source(key, text, &[])
+}
+
+/// The same for a shader that brings `images` with it.
+pub fn key_is_of_the_source(key: &str, text: &str, images: &[ShaderImage]) -> bool {
+    let digest = digest_of_the_source(text, images);
     key.rsplit_once('-')
         .is_some_and(|(_, ending)| ending == &digest[..CHARACTERS_OF_THE_DIGEST_IN_A_KEY])
 }
@@ -83,6 +109,16 @@ fn parameter(id: &str, label: &str, default: PropertyValue, control: ParameterCo
 /// The kind of effect that the file `file_name` (its text is `source`, which `file` was read from) is. It is not a kind that is installed until its shader is: that is for the host
 /// to say (`docs/engine-phase-6-design.md`, J3).
 pub fn descriptor_of(file: &IsfFile, file_name: &str, source: &str) -> EffectDescriptor {
+    descriptor_with_images_of(file, file_name, source, Vec::new())
+}
+
+/// The same for a shader that brings `images` with it: the ones that its header lists as `IMPORTED`, in that order (see [`ShaderSource::images`]); they are a part of the kind, and of its key.
+pub fn descriptor_with_images_of(
+    file: &IsfFile,
+    file_name: &str,
+    source: &str,
+    images: Vec<ShaderImage>,
+) -> EffectDescriptor {
     let mut parameters = Vec::new();
     for input in &file.inputs {
         let made = match &input.kind {
@@ -151,7 +187,7 @@ pub fn descriptor_of(file: &IsfFile, file_name: &str, source: &str) -> EffectDes
     }
     let words = words_of(file_name);
     EffectDescriptor {
-        key: Cow::Owned(key_of(file_name, source)),
+        key: Cow::Owned(key_of_a_source_with_images(file_name, source, &images)),
         version: (1, 0),
         name: Cow::Owned(if words.is_empty() { "shader".to_owned() } else { words }),
         description: Cow::Owned(file.description.clone()),
@@ -164,6 +200,7 @@ pub fn descriptor_of(file: &IsfFile, file_name: &str, source: &str) -> EffectDes
         shader: Some(ShaderSource {
             language: ShaderLanguage::Isf,
             text: Cow::Owned(source.to_owned()),
+            images,
         }),
     }
 }

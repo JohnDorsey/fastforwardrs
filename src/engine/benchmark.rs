@@ -517,6 +517,7 @@ fn calls_of(effect: Effect) -> Vec<EffectCall> {
         values: values.to_vec(),
         table: None,
         state: None,
+        images: Vec::new(),
     };
     match effect {
         Effect::ColourMatrix => vec![EffectCall::colour_matrix([

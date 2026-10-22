@@ -484,12 +484,31 @@ pub enum PictureOperation {
     ///
     /// A shader that depends on earlier frames (it has a buffer that lasts: phase 6.4.2) also says **which state it goes on with and at which frame of its own clock**, as `(id, frame)`
     /// (see `crate::engine::EffectState`); every other shader has none.
+    ///
+    /// A shader that brings images with it (phase 6.4.4) also carries them, in the order its file lists them.
     Shader {
         key: String,
         numbers: Vec<f32>,
         state: Option<(u64, u64)>,
+        images: Vec<ImportedPicture>,
     },
 }
+
+/// An image that a shader brings with it, as an operation carries it: the pixels, and a number that tells it from every other (the same for the same image of the same shader, whatever the
+/// frame): what the picture's id in the engine is made from. Two are equal if their numbers are.
+#[derive(Clone, Debug)]
+pub struct ImportedPicture {
+    pub id: u64,
+    pub picture: std::sync::Arc<crate::rgba_picture::RgbaPicture>,
+}
+
+impl PartialEq for ImportedPicture {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for ImportedPicture {}
 
 impl PictureOperation {
     /// Whether the operation changes no pixel, or none that can be told from the pixel it was: a mix that changes nothing, no exposure, all the opacity. (The same limit

@@ -16,7 +16,10 @@ mod structure;
 
 pub use compile::{CompiledShader, ENTRY_POINT, compile, compile_in_a_worker};
 
-pub use descriptor::{descriptor_of, key_is_of_the_text, key_of, numbers_of_the_values};
+pub use descriptor::{
+    descriptor_of, descriptor_with_images_of, key_is_of_the_source, key_is_of_the_text, key_of,
+    key_of_a_source_with_images, numbers_of_the_values,
+};
 pub use registry::{compiled_shader_of, depends_on_earlier_frames, is_usable, shape_of, why_not_usable};
 
 pub use reader::{

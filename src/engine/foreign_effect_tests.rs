@@ -150,6 +150,7 @@ pub(super) fn call(key: &str, numbers: &[f32]) -> EffectCall {
         values: numbers.to_vec(),
         table: None,
         state: None,
+        images: Vec::new(),
     }
 }
 

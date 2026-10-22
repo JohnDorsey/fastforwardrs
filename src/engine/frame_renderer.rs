@@ -325,7 +325,7 @@ impl FrameRenderer {
             },
         );
         self.effects_that_run
-            .add_shader_with_passes(key, structure.passes.len());
+            .add_shader_with_images(key, structure.passes.len(), structure.imported_images());
         Ok(())
     }
 
@@ -1083,13 +1083,21 @@ impl FrameRenderer {
                                                     .unwrap_or(&effect_views[effect_picture_numbers[layer][drawn]])
                                             }
                                             ImageSource::Clear => &self.clear_pixel,
+                                            // (The picture that the call names: it is on the card, or the frame was not begun.)
+                                            ImageSource::Imported(number) => {
+                                                &self
+                                                    .pictures
+                                                    .get(flat.layers[*layer].layer.effects[step_call(step)].images[*number])
+                                                    .expect("the pictures of the frame, those the shaders bring too, are on the card")
+                                                    .view
+                                            }
                                             // (A call that has no state to keep the buffer in reads nothing, as of a buffer that does not last.)
                                             ImageSource::FromTheFrameBefore => match installed.structure.images[place] {
                                                 ImageSlot::Buffer(buffer) => call_buffers
                                                     .get(&(*layer, step_call(step)))
                                                     .and_then(|buffers| buffers.base[buffer].as_ref())
                                                     .unwrap_or(&self.clear_pixel),
-                                                ImageSlot::Picture => &self.clear_pixel,
+                                                ImageSlot::Picture | ImageSlot::Imported(_) => &self.clear_pixel,
                                             },
                                         };
                                         entries.push(wgpu::BindGroupEntry {

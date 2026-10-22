@@ -33,6 +33,7 @@
 
 pub mod application;
 mod atomic_file;
+mod base64;
 pub mod colour_effects;
 pub mod colour_space;
 pub mod composition;

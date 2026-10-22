@@ -1008,6 +1008,91 @@ fn a_shader_with_passes_that_is_saved_and_read_again_exports_the_same() {
     assert_eq!(before.pictures, after.pictures);
 }
 
+// --- an image that a shader brings with it (phase 6.4.4) ---
+
+/// Makes the kind of effect that the shader `source` is, bringing `png` as its image `tex`, and puts one of it on `target`.
+fn put_a_shader_that_brings_an_image_on(project: &mut Project, target: AnimationTarget, source: &str, png: Vec<u8>) {
+    let file = fastforwardrs::isf::read(source).unwrap_or_else(|problem| panic!("{problem}"));
+    let kind = EffectKind::from_snapshot(fastforwardrs::isf::descriptor_with_images_of(
+        &file,
+        "textured.fs",
+        source,
+        vec![fastforwardrs::project::ShaderImage::new("tex", png)],
+    ))
+    .unwrap();
+    assert!(
+        kind.is_installed(),
+        "{:?}",
+        fastforwardrs::isf::why_not_usable(kind.descriptor())
+    );
+    project.add_effect(target, kind).unwrap();
+}
+
+/// Shows the image that the shader brings, over the whole picture, and nothing of the picture it is on.
+const SHOWS_ITS_IMAGE: &str = r#"/*{
+	"INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ],
+	"IMPORTED": { "tex": { "PATH": "tex.png" } }
+}*/
+void main() {
+	gl_FragColor = IMG_THIS_NORM_PIXEL(tex) + IMG_THIS_NORM_PIXEL(inputImage) * 0.0;
+}
+"#;
+
+#[test]
+fn a_shader_that_brings_an_image_shows_it_the_way_up_it_is_and_with_the_colours_its_file_has() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    // Red at the top left, green at the top right, blue at the bottom left, and the colour of the orange video's own, 200, 100, 50, at the bottom right.
+    let png = fastforwardrs::rgba_picture::RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 200, 100, 50, 255],
+    }
+    .to_png_bytes()
+    .unwrap();
+    put_a_shader_that_brings_an_image_on(&mut project, AnimationTarget::Clip(clip), SHOWS_ITS_IMAGE, png);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_image.mp4");
+
+    let at = |x: usize, y: usize| colour_at(&decoded.pictures[10], x, y);
+    assert_near(
+        at(WIDTH / 4, HEIGHT / 4),
+        (255, 0, 0),
+        "the top left of the image is at the top left",
+    );
+    assert_near(at(3 * WIDTH / 4, HEIGHT / 4), (0, 255, 0), "the top right");
+    assert_near(at(WIDTH / 4, 3 * HEIGHT / 4), (0, 0, 255), "the bottom left");
+    assert_near(
+        at(3 * WIDTH / 4, 3 * HEIGHT / 4),
+        (200, 100, 50),
+        "the bottom right has the colour its file has: the codes are read as they are, and not as light",
+    );
+}
+
+#[test]
+fn a_project_with_a_shader_that_brings_an_image_that_is_saved_and_read_again_exports_the_same() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let png = fastforwardrs::rgba_picture::RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 99, 199, 255],
+    }
+    .to_png_bytes()
+    .unwrap();
+    put_a_shader_that_brings_an_image_on(&mut project, AnimationTarget::Clip(clip), SHOWS_ITS_IMAGE, png);
+    let before = exported(&toolchain, &project, scratch.path(), "image_before_saving.mp4");
+
+    let text = fastforwardrs::project_file::project_to_json_text(&project, scratch.path()).unwrap();
+    assert!(text.contains("\"images\""), "the file carries the image");
+    let loaded = fastforwardrs::project_file::project_from_json_text(&text).unwrap();
+    let after = exported(&toolchain, &loaded, scratch.path(), "image_after_loading.mp4");
+
+    assert_eq!(before.pictures, after.pictures);
+}
+
 // --- a buffer that lasts from one frame to the next (phase 6.4.2) ---
 
 /// Adds a hundredth of red to what its buffer (half floats, kept from the frame before) held, and shows the buffer with a fifth of green and of blue.

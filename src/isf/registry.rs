@@ -12,17 +12,17 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use super::compile::{CompiledShader, compile_in_a_worker};
-use super::descriptor::key_is_of_the_text;
+use super::descriptor::key_is_of_the_source;
 use super::reader::{IsfFile, IsfProblem, Shape, read};
 use crate::engine::ShaderStructure;
-use crate::project::{EffectDescriptor, ShaderLanguage};
+use crate::project::{EffectDescriptor, ShaderLanguage, ShaderSource};
 
 /// What was made of the text of a shader.
 type Made = Arc<Result<CompiledShader, Vec<IsfProblem>>>;
 
 /// What was made of each text of a shader, by the key it was under: a key has one text if the key is the key of the text, and a project file that was changed by hand can have
 /// another text under it, so what is kept for a key is a list, and a text is looked for in it.
-type TextsOfAKey = Vec<(String, Made)>;
+type TextsOfAKey = Vec<(ShaderSource, Made)>;
 
 static COMPILED: Mutex<Option<HashMap<String, TextsOfAKey>>> = Mutex::new(None);
 
@@ -40,21 +40,53 @@ fn what_cannot_be_run_yet(file: &IsfFile) -> Option<IsfProblem> {
             "this shader reads a picture called {other}, which this version cannot give it yet"
         ));
     }
-    if !file.imported.is_empty() {
-        return says("this shader has images of its own (IMPORTED), which this version cannot run yet".to_owned());
+    None
+}
+
+/// What is wrong with the images that the shader of `file` brings with it, if anything is: the project must have the ones the header lists, in that order, and each must be a picture.
+fn what_is_wrong_with_the_images(file: &IsfFile, source: &ShaderSource) -> Option<IsfProblem> {
+    let says = |message: String| Some(IsfProblem::nowhere_in_particular(message));
+    for (number, wanted) in file.imported.iter().enumerate() {
+        let Some(image) = source.images.get(number) else {
+            return says(format!(
+                "this shader has an image of its own, {}, which the project does not have (it is kept with the shader, and this one was not given it)",
+                wanted.name
+            ));
+        };
+        if image.name() != wanted.name {
+            return says(format!(
+                "the images this shader brings are not the ones its header lists, in that order ({} where {} is expected)",
+                image.name(),
+                wanted.name
+            ));
+        }
+        if let Err(why) = image.pixels() {
+            return says(format!(
+                "the image {} of this shader cannot be used: {why}",
+                wanted.name
+            ));
+        }
+    }
+    if source.images.len() > file.imported.len() {
+        return says(format!(
+            "this shader brings {} images and its header lists {}",
+            source.images.len(),
+            file.imported.len()
+        ));
     }
     None
 }
 
 /// Reads and compiles the text of an ISF shader, and puts what compiled on the engine's shelf under `key`.
-fn make(key: &str, text: &str) -> Result<CompiledShader, Vec<IsfProblem>> {
-    if !key_is_of_the_text(key, text) {
+fn make(key: &str, source: &ShaderSource) -> Result<CompiledShader, Vec<IsfProblem>> {
+    let text: &str = &source.text;
+    if !key_is_of_the_source(key, text, &source.images) {
         return Err(vec![IsfProblem::nowhere_in_particular(
             "the text of this shader is not the one that its key was made from (the file of the project was changed by hand), so it is not run",
         )]);
     }
     let file = read(text).map_err(|problem| vec![problem])?;
-    if let Some(problem) = what_cannot_be_run_yet(&file) {
+    if let Some(problem) = what_cannot_be_run_yet(&file).or_else(|| what_is_wrong_with_the_images(&file, source)) {
         return Err(vec![problem]);
     }
     let compiled = compile_in_a_worker(&file)?;
@@ -81,21 +113,21 @@ pub fn compiled_shader_of(descriptor: &EffectDescriptor) -> Option<Made> {
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
         .and_then(|compiled| compiled.get(key))
-        .and_then(|texts| texts.iter().find(|(text, _)| *text == *source.text))
+        .and_then(|texts| texts.iter().find(|(kept, _)| kept == source))
         .map(|(_, made)| made)
     {
         return Some(Arc::clone(made));
     }
     // (Not under the lock: compiling takes a few milliseconds, and another thread that asks for another shader need not wait for it. Two threads that ask for one both compile it,
     // and the second to finish is the one that is kept: they made the same.)
-    let made: Made = Arc::new(make(key, &source.text));
+    let made: Made = Arc::new(make(key, source));
     COMPILED
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_with(HashMap::new)
         .entry(key.to_owned())
         .or_default()
-        .push((source.text.to_string(), Arc::clone(&made)));
+        .push((source.clone(), Arc::clone(&made)));
     Some(made)
 }
 

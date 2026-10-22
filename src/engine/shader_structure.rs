@@ -154,6 +154,8 @@ pub enum ImageSlot {
     Picture,
     /// The buffer with this number (see [`ShaderStructure::buffers`]).
     Buffer(usize),
+    /// The image with this number among the ones that the shader brings with it (phase 6.4.4): the call says which pictures they are (`EffectCall::images`).
+    Imported(usize),
 }
 
 /// A picture that a shader draws into in one pass and reads in the next.
@@ -215,6 +217,8 @@ pub enum ImageSource {
     DrawnByPass(usize),
     /// Nothing: a buffer that has not been drawn into yet in this frame, and keeps nothing from the frame before.
     Clear,
+    /// The image that the shader brings with it with this number: a picture that the call names.
+    Imported(usize),
     /// What the buffer held when the frame before ended: a buffer that lasts, and that no earlier pass of this frame drew into. (A call that has no state to keep it under reads nothing,
     /// as it would of a buffer that does not last.)
     FromTheFrameBefore,
@@ -267,6 +271,19 @@ impl ShaderStructure {
                 ));
             }
         }
+        let mut imported_seen = [false; MOST_IMAGES_OF_A_SHADER];
+        for image in &self.images {
+            if let ImageSlot::Imported(number) = image {
+                if *number >= MOST_IMAGES_OF_A_SHADER {
+                    return Err(format!(
+                        "a picture of the shader is imported image {number}, which there cannot be"
+                    ));
+                }
+                if std::mem::replace(&mut imported_seen[*number], true) {
+                    return Err(format!("imported image {number} is two of the pictures of the shader"));
+                }
+            }
+        }
         let mut drawn_into = vec![false; self.buffers.len()];
         for (number, pass) in self.passes.iter().enumerate() {
             let Some(target) = pass.target else { continue };
@@ -287,6 +304,18 @@ impl ShaderStructure {
             );
         }
         Ok(())
+    }
+
+    /// How many images the shader brings with it, which a call has to name the pictures of: the number after the largest of them.
+    pub fn imported_images(&self) -> usize {
+        self.images
+            .iter()
+            .filter_map(|image| match image {
+                ImageSlot::Imported(number) => Some(number + 1),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     /// Whether the shader keeps something from one frame to the next, so that what it shows depends on the frames before: some buffer of it lasts.
@@ -331,6 +360,7 @@ impl ShaderStructure {
             .iter()
             .map(|image| match image {
                 ImageSlot::Picture => ImageSource::Picture,
+                ImageSlot::Imported(number) => ImageSource::Imported(*number),
                 ImageSlot::Buffer(buffer) => self
                     .passes
                     .iter()

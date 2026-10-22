@@ -1195,11 +1195,13 @@ fn the_state_that_a_shader_goes_on_with_is_in_the_call_that_the_engine_is_asked_
             key: "isf:remembers-000000000000".to_owned(),
             numbers: vec![0.0; 4],
             state: Some((77, 12)),
+            images: Vec::new(),
         },
         crate::project::PictureOperation::Shader {
             key: "isf:forgets-000000000000".to_owned(),
             numbers: vec![0.0; 4],
             state: None,
+            images: Vec::new(),
         },
     ];
 
@@ -1223,6 +1225,7 @@ fn a_generator_is_drawn_into_a_picture_of_its_own_that_has_nothing_in_it_for_its
             key: "isf:made_up-000000000000".to_owned(),
             numbers: vec![0.5, 0.033, 15.0, 0.0, 1.0, 2.0],
             state: None,
+            images: Vec::new(),
         },
         crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(90.0)),
     ];
@@ -1262,4 +1265,126 @@ fn a_generator_that_has_no_effect_that_does_anything_is_not_drawn() {
 
     assert!(described.layers.is_empty());
     assert!(supply.asked.is_empty());
+}
+
+#[test]
+fn the_images_a_shader_brings_are_asked_of_the_supply_made_so_that_the_shader_reads_their_codes_and_are_named_in_the_call()
+ {
+    use crate::colour_space::{StandardPrimaries, TransferFunction};
+    use crate::project::ImportedPicture;
+    let place = Placement::upright(CanvasArea::WHOLE_PICTURE);
+    let picture = an_image();
+    let imported = |id: u64, level: u8| ImportedPicture {
+        id,
+        picture: Arc::new(RgbaPicture {
+            width_in_pixels: 1,
+            height_in_pixels: 1,
+            rgba_pixels: vec![level, 0, 0, 255],
+        }),
+    };
+    let operation = || crate::project::PictureOperation::Shader {
+        key: "isf:brings-000000000000".to_owned(),
+        numbers: vec![0.0; 4],
+        state: None,
+        images: vec![imported(5, 10), imported(6, 20)],
+    };
+    for working in [
+        WorkingSpace::DisplayReferred,
+        WorkingSpace::Linear(StandardPrimaries::Rec709),
+        WorkingSpace::Linear(StandardPrimaries::Rec2020),
+    ] {
+        let mut layer = image_layer(0, 1, Some(&picture), place);
+        layer.operations = vec![operation()];
+        let colour = FrameColour {
+            working,
+            ..FrameColour::default()
+        };
+        let mut supply = WritesItDown::default();
+        let described = super::engine_view::describe_frame_in_colour(
+            &content(vec![layer], None),
+            RENDER_SIZE,
+            0,
+            colour,
+            &mut supply,
+        );
+
+        let effects = &described.layers[0].effects;
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].images.len(), 2, "{working:?}");
+        assert_ne!(effects[0].images[0], effects[0].images[1]);
+        // (The kind of a picture is in the top four bits of its id: 5 is an image that a shader brings, and 1 is a picture file.)
+        assert!(
+            effects[0].images.iter().all(|id| id.0 >> 60 == 5),
+            "{:?}",
+            effects[0].images
+        );
+        assert_eq!(supply.asked[0].0 >> 60, 1);
+        // The layer's own picture, and then the two images, each as an image; made so that the numbers are read as they are.
+        assert_eq!(supply.asked.len(), 3, "{working:?}");
+        assert_eq!(&supply.asked[1..], &effects[0].images[..]);
+        assert_eq!(supply.kinds, ["image", "image", "image"]);
+        let (identity, made_for) = supply.colours[1];
+        assert_eq!(made_for, working);
+        assert_eq!(identity.curve, TransferFunction::Linear, "the codes are not decoded");
+        assert_eq!(
+            identity.primaries,
+            match working {
+                WorkingSpace::Linear(primaries) => primaries,
+                WorkingSpace::DisplayReferred => StandardPrimaries::Rec709,
+            },
+            "and not converted to the primaries of another space"
+        );
+        assert_eq!(supply.colours[1], supply.colours[2]);
+        assert_ne!(
+            supply.colours[0].0.curve,
+            TransferFunction::Linear,
+            "(a picture of a layer is sRGB)"
+        );
+        // The same images give the same ids at the next frame; another working space gives other ids.
+        let mut again = WritesItDown::default();
+        let mut layer = image_layer(0, 1, Some(&picture), place);
+        layer.operations = vec![operation()];
+        let second = super::engine_view::describe_frame_in_colour(
+            &content(vec![layer], None),
+            RENDER_SIZE,
+            0,
+            colour,
+            &mut again,
+        );
+        assert_eq!(second.layers[0].effects[0].images, effects[0].images);
+    }
+}
+
+#[test]
+fn a_shader_whose_image_the_supply_cannot_make_is_left_out_of_the_frame() {
+    use crate::project::ImportedPicture;
+    let place = Placement::upright(CanvasArea::WHOLE_PICTURE);
+    let picture = an_image();
+    let make = || crate::project::PictureOperation::Shader {
+        key: "isf:brings-000000000000".to_owned(),
+        numbers: vec![0.0; 4],
+        state: None,
+        images: vec![ImportedPicture {
+            id: 5,
+            picture: Arc::new(RgbaPicture {
+                width_in_pixels: 1,
+                height_in_pixels: 1,
+                rgba_pixels: vec![1, 2, 3, 255],
+            }),
+        }],
+    };
+    let mut layer = image_layer(0, 1, Some(&picture), place);
+    layer.operations = vec![make()];
+    let (probe, asked) = describe(&content(vec![layer], None));
+    assert_eq!(probe.layers[0].effects.len(), 1);
+
+    let mut refuses = WritesItDown::default();
+    refuses.refuses.insert(asked.asked[1]);
+    let mut layer = image_layer(0, 1, Some(&picture), place);
+    layer.operations = vec![make()];
+    let (described, _) = describe_with(&content(vec![layer], None), 0, refuses);
+    assert!(
+        described.layers[0].effects.is_empty(),
+        "the effect is not asked of the engine without the picture that it reads"
+    );
 }

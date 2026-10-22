@@ -13,12 +13,6 @@ use crate::engine::{BufferSpec, ImageSlot, PassSpec, ShaderStructure, SizeExpres
 /// the imported images).
 pub fn structure_of(file: &IsfFile, image_names: &[String]) -> Result<ShaderStructure, Vec<IsfProblem>> {
     let says = |message: String| vec![IsfProblem::nowhere_in_particular(message)];
-    if let Some(image) = file.imported.first() {
-        return Err(says(format!(
-            "this shader has images of its own (IMPORTED: {}), which this version cannot run yet",
-            image.name
-        )));
-    }
 
     // The buffers are the targets of the passes, in the order they are first drawn into; a buffer is to last if any pass that draws into it says so.
     let mut buffer_names: Vec<&str> = Vec::new();
@@ -97,6 +91,13 @@ pub fn structure_of(file: &IsfFile, image_names: &[String]) -> Result<ShaderStru
             Some(buffer) => ImageSlot::Buffer(buffer),
             // (The picture that the effect works on: the only picture that a shader is given, so far.)
             None if name == "inputImage" => ImageSlot::Picture,
+            // (The images the shader brings with it: the nth is the nth that its header lists.)
+            None if file.imported.iter().any(|image| image.name == *name) => ImageSlot::Imported(
+                file.imported
+                    .iter()
+                    .position(|image| image.name == *name)
+                    .expect("checked in the line above"),
+            ),
             None => {
                 return Err(says(format!(
                     "this shader reads a picture called {name}, which this version cannot give it yet"

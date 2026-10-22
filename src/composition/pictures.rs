@@ -25,9 +25,9 @@ use crate::colour_effects::ColourMatrix;
 use crate::cube_table::CubeTable;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, Member,
-    PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier, SpeedFactor,
-    TimelineFrameIndex,
+    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, ImportedPicture,
+    Member, PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier,
+    SpeedFactor, TimelineFrameIndex,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -264,6 +264,25 @@ fn state_id(seed: u64, place: usize, effect: &LayerEffect) -> u64 {
     hash_of((seed, place, effect.instance, effect.kind.key()))
 }
 
+/// The images that the shader of `effect` brings with it, as pictures, in the order its file lists them (none for an effect that is not a shader). One that cannot be read leaves the list
+/// short, and the effect is not run then: a shader that is not usable is not installed, so it does not come to this.
+fn imported_pictures_of(effect: &LayerEffect) -> Vec<ImportedPicture> {
+    let Some(source) = effect.kind.shader_source() else {
+        return Vec::new();
+    };
+    source
+        .images
+        .iter()
+        .enumerate()
+        .filter_map(|(number, image)| {
+            Some(ImportedPicture {
+                id: hash_of((effect.kind.key(), number)),
+                picture: image.pixels().ok()?,
+            })
+        })
+        .collect()
+}
+
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring
 /// effects that mix colours are one. `seed` is a number that tells what the effects are done to (a clip, or a group) from every other thing: the states of the effects that depend on
 /// earlier frames are told from each other by it.
@@ -295,6 +314,7 @@ pub fn operations_of_effects(
                     .kind
                     .depends_on_earlier_frames()
                     .then(|| (state_id(seed, place, effect), clock.frames_at(timeline_frame.value()))),
+                images: imported_pictures_of(effect),
             }
         } else {
             let Some(next) = effect.kind.picture_operation_with_tables(&values, &effect.tables) else {
@@ -821,6 +841,8 @@ mod effects_tests;
 mod generator_tests;
 #[cfg(test)]
 mod group_effects_tests;
+#[cfg(test)]
+mod imported_tests;
 #[cfg(test)]
 mod operations_tests;
 #[cfg(test)]

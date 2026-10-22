@@ -20,7 +20,10 @@ use super::table_flow::NOT_A_FILE_TITLE;
 use crate::application::commands::Command;
 use crate::application::file_chooser::{FileKind, FileQuestion};
 use crate::isf;
-use crate::project::{AnimationTarget, EffectKind, MOST_BYTES_OF_A_SHADER, Member, TimelineFrameIndex, TrackId};
+use crate::project::{
+    AnimationTarget, EffectKind, MOST_BYTES_OF_A_SHADER, MOST_IMAGES_A_SHADER_BRINGS, Member, ShaderImage,
+    TimelineFrameIndex, TrackId,
+};
 use crate::project_file::read_a_resource_file;
 
 /// What the message about a file that is not a shader that can be used says.
@@ -33,8 +36,55 @@ enum Wanted {
     Generator,
 }
 
-/// The kind of effect that the shader `text` of the file `file_name` is, if it is a good one and is what is `wanted` of it: **what is wrong with it, in words, if not.**
-fn kind_of_the_shader(file_name: &str, text: &str, wanted: Wanted) -> Result<EffectKind, String> {
+/// The images that the shader `text`, the file `path`, brings with it (an ISF file's `IMPORTED`), read from beside it: **each is a file in the folder of the shader or in a folder below it**
+/// (a path that is absolute, or goes up, or says nothing, is refused: a shader is not a way to read the files of a computer), and must be a PNG or a JPEG that the program can use.
+/// What is wrong, in words, with the first that is wrong, if anything is.
+fn images_of_the_shader(path: &Path, text: &str) -> Result<Vec<ShaderImage>, String> {
+    let Ok(file) = isf::read(text) else {
+        // (A file that cannot be read says so when it is made into a kind.)
+        return Ok(Vec::new());
+    };
+    if file.imported.len() > MOST_IMAGES_A_SHADER_BRINGS {
+        return Err(format!(
+            "the shader brings {} images, and {MOST_IMAGES_A_SHADER_BRINGS} are the most",
+            file.imported.len()
+        ));
+    }
+    let folder = path.parent().unwrap_or_else(|| Path::new("."));
+    file.imported
+        .iter()
+        .map(|imported| {
+            let relative = Path::new(&imported.path);
+            let stays_below = !imported.path.trim().is_empty()
+                && relative.is_relative()
+                && !relative.has_root()
+                && relative
+                    .components()
+                    .all(|part| matches!(part, std::path::Component::Normal(_) | std::path::Component::CurDir));
+            if !stays_below {
+                return Err(format!(
+                    "the image {} is at {:?}, which is not a file in the folder of the shader or below it",
+                    imported.name, imported.path
+                ));
+            }
+            let bytes = read_a_resource_file(&folder.join(relative))
+                .map_err(|problem| format!("the image {} ({}): {problem}", imported.name, imported.path))?;
+            let image = ShaderImage::new(imported.name.clone(), bytes);
+            image
+                .pixels()
+                .map_err(|why| format!("the image {} ({}): {why}", imported.name, imported.path))?;
+            Ok(image)
+        })
+        .collect()
+}
+
+/// The kind of effect that the shader `text` of the file `file_name`, which brings `images`, is, if it is a good one and is what is `wanted` of it: **what is wrong with it, in words, if not.**
+fn kind_of_the_shader(
+    file_name: &str,
+    text: &str,
+    images: Vec<ShaderImage>,
+    wanted: Wanted,
+) -> Result<EffectKind, String> {
     if text.len() > MOST_BYTES_OF_A_SHADER {
         return Err(format!(
             "the file is {} bytes, and {MOST_BYTES_OF_A_SHADER} are the most a shader can be",
@@ -42,7 +92,7 @@ fn kind_of_the_shader(file_name: &str, text: &str, wanted: Wanted) -> Result<Eff
         ));
     }
     let file = isf::read(text).map_err(|problem| problem.to_string())?;
-    let descriptor = isf::descriptor_of(&file, file_name, text);
+    let descriptor = isf::descriptor_with_images_of(&file, file_name, text, images);
     let kind = EffectKind::from_snapshot(descriptor)?;
     if let Some(why) = isf::why_not_usable(kind.descriptor()) {
         return Err(why);
@@ -71,7 +121,14 @@ impl FastForwardApplication {
             self.show_message(NOT_A_SHADER_TITLE, format!("{name}: the file is not text"));
             return;
         };
-        if let Err(why) = kind_of_the_shader(&name, &text, Wanted::Filter) {
+        let images = match images_of_the_shader(path, &text) {
+            Ok(images) => images,
+            Err(why) => {
+                self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
+                return;
+            }
+        };
+        if let Err(why) = kind_of_the_shader(&name, &text, images.clone(), Wanted::Filter) {
             self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
             return;
         }
@@ -80,6 +137,7 @@ impl FastForwardApplication {
                 owner,
                 file_name: name,
                 text: Arc::from(text),
+                images,
             }],
             now,
             context,
@@ -126,7 +184,14 @@ impl FastForwardApplication {
             self.show_message(NOT_A_SHADER_TITLE, format!("{name}: the file is not text"));
             return;
         };
-        if let Err(why) = kind_of_the_shader(&name, &text, Wanted::Generator) {
+        let images = match images_of_the_shader(&path, &text) {
+            Ok(images) => images,
+            Err(why) => {
+                self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
+                return;
+            }
+        };
+        if let Err(why) = kind_of_the_shader(&name, &text, images.clone(), Wanted::Generator) {
             self.show_message(NOT_A_SHADER_TITLE, format!("{name}: {why}"));
             return;
         }
@@ -136,6 +201,7 @@ impl FastForwardApplication {
                 frame,
                 file_name: name,
                 text: Arc::from(text),
+                images,
             }],
             now,
             context,
@@ -149,9 +215,10 @@ impl FastForwardApplication {
         frame: TimelineFrameIndex,
         file_name: &str,
         text: &str,
+        images: Vec<ShaderImage>,
         now: Instant,
     ) {
-        let Ok(kind) = kind_of_the_shader(file_name, text, Wanted::Generator) else {
+        let Ok(kind) = kind_of_the_shader(file_name, text, images, Wanted::Generator) else {
             return;
         };
         self.new_clip_with_no_media(
@@ -163,8 +230,8 @@ impl FastForwardApplication {
     }
 
     /// Puts a new effect of the kind that the shader `text` of the file `file_name` is on `owner`. (What [`Command::UseAShader`] is.)
-    pub(super) fn use_a_shader(&mut self, owner: Member, file_name: &str, text: &str) {
-        let Ok(kind) = kind_of_the_shader(file_name, text, Wanted::Filter) else {
+    pub(super) fn use_a_shader(&mut self, owner: Member, file_name: &str, text: &str, images: Vec<ShaderImage>) {
+        let Ok(kind) = kind_of_the_shader(file_name, text, images, Wanted::Filter) else {
             return;
         };
         let added = match owner {

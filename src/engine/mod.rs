@@ -85,6 +85,8 @@ mod guard_tests;
 #[cfg(test)]
 mod hang_tests;
 #[cfg(test)]
+mod imported_image_tests;
+#[cfg(test)]
 mod isf_pass_tests;
 #[cfg(test)]
 mod linear_light_tests;

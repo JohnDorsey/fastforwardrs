@@ -116,8 +116,9 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// `plugin_libraries` of the project (the libraries of native code that its sound effects come from, linked or with their builds inside the archive): see `plugin_libraries.rs`. A file
 /// of version 13 has none. Version 15 added the adjustment clip (`"kind": "adjustment"`): a clip with no picture of its own whose effects are done to everything behind it. A file of
 /// version 14 has none. Version 16 added the `shader` of a snapshot of an effect (`plugins`): the language (`isf`) and the whole text of a shader that runs the effect, so that a project
-/// carries what it uses. A file of version 15 has none.
-pub const FILE_FORMAT_VERSION: u32 = 16;
+/// carries what it uses. A file of version 15 has none. Version 17 added the `images` of that `shader`, when the shader brings images with it (an ISF file's `IMPORTED`): each a name
+/// and the bytes of its file (a PNG or a JPEG) in base 64. A file of version 16 has none.
+pub const FILE_FORMAT_VERSION: u32 = 17;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1361,6 +1362,8 @@ mod plugin_libraries_tests;
 mod plugins_tests;
 #[cfg(test)]
 mod resources_tests;
+#[cfg(test)]
+mod shader_image_tests;
 #[cfg(test)]
 mod shader_tests;
 #[cfg(test)]

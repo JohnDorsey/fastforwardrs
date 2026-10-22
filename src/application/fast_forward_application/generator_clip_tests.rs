@@ -220,6 +220,7 @@ fn a_generator_is_only_as_long_as_there_is_room_for_before_the_next_clip_and_is_
         frame: TimelineFrameIndex::new(0),
         file_name: "solid.fs".to_owned(),
         text: text.clone(),
+        images: Vec::new(),
     });
     let (_, duration) = generator_clip(&window, 0, 0);
     assert_eq!(duration, 30);
@@ -230,6 +231,7 @@ fn a_generator_is_only_as_long_as_there_is_room_for_before_the_next_clip_and_is_
         frame: TimelineFrameIndex::new(40),
         file_name: "solid.fs".to_owned(),
         text,
+        images: Vec::new(),
     });
     let (title, _) = the_message(&window).expect("it says why");
     assert_eq!(title, "There is no room for a generator clip there");
@@ -258,6 +260,7 @@ fn a_generator_is_not_made_inside_the_rectangle_of_a_clip_group_and_the_message_
         frame: TimelineFrameIndex::new(50),
         file_name: "solid.fs".to_owned(),
         text: std::sync::Arc::from(SOLID),
+        images: Vec::new(),
     });
 
     let (title, text) = the_message(&window).expect("it says why");
@@ -399,4 +402,61 @@ fn a_generator_on_the_preview_takes_any_shape_that_a_corner_is_dragged_to_and_is
         (after.height() - before.height()).abs() < 1e-3,
         "only one way changed, which a picture would not: {after:?}"
     );
+}
+
+#[test]
+fn a_generator_that_brings_an_image_is_made_into_a_clip_with_it() {
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(
+        folder.path().join("tex.png"),
+        crate::rgba_picture::RgbaPicture {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            rgba_pixels: [255, 128, 0, 255].repeat(4),
+        }
+        .to_png_bytes()
+        .unwrap(),
+    )
+    .unwrap();
+    let source = "/*{ \"IMPORTED\": { \"tex\": { \"PATH\": \"tex.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(tex); }\n";
+    let file = a_file_in(folder.path(), "pattern.fs", source);
+    let (mut window, chooser) = window_that_asks();
+
+    make_a_generator_at(&mut window, &chooser, &file, 0, 100);
+
+    assert_eq!(the_message(&window), None);
+    let (location, _) = generator_clip(&window, 0, 1);
+    let project = window.application().project();
+    let content = project
+        .placement_of(location)
+        .unwrap()
+        .clip
+        .as_generator()
+        .unwrap()
+        .content();
+    let kind = project
+        .effects_of(AnimationTarget::Clip(location))
+        .unwrap()
+        .iter()
+        .find(|effect| effect.instance() == content)
+        .unwrap()
+        .kind();
+    assert_eq!(
+        kind.shader_source().unwrap().images.len(),
+        1,
+        "the image came with the shader"
+    );
+    assert!(kind.is_installed());
+
+    // And one whose image is not there is not made into a clip, and says why.
+    let (mut other, other_chooser) = window_that_asks();
+    let missing = a_file_in(
+        folder.path(),
+        "missing.fs",
+        "/*{ \"IMPORTED\": { \"tex\": { \"PATH\": \"nowhere.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(tex); }\n",
+    );
+    make_a_generator_at(&mut other, &other_chooser, &missing, 0, 100);
+    let (title, text) = the_message(&other).expect("it was refused");
+    assert_eq!(title, NOT_A_SHADER_TITLE);
+    assert!(text.contains("the image tex (nowhere.png)"), "{text}");
 }

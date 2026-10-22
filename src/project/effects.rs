@@ -31,10 +31,11 @@ mod descriptor;
 mod installed;
 mod kind;
 
-pub use built_in::{HUE_SHIFT_KEY, LutOperation, LutSpace, PictureOperation};
+pub use built_in::{HUE_SHIFT_KEY, ImportedPicture, LutOperation, LutSpace, PictureOperation};
 pub use descriptor::{
-    ChoiceOption, EffectDescriptor, EffectDomain, MOST_BYTES_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT, ParameterControl,
-    ParameterDescriptor, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
+    ChoiceOption, EffectDescriptor, EffectDomain, MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER,
+    MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT,
+    ParameterControl, ParameterDescriptor, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
 };
 pub use installed::{InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, set_installed_plugins};
 pub use kind::EffectKind;
@@ -607,5 +608,7 @@ mod chain_tests;
 mod installed_tests;
 #[cfg(test)]
 mod kind_tests;
+#[cfg(test)]
+mod shader_image_tests;
 #[cfg(test)]
 mod tests;

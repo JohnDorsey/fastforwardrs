@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 John Dorsey
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# `ShaderImage` (an image that an ISF shader brings with it) keeps what its file is as pixels in a cell that is filled once, so that it is not read again for every frame. That cell is
+# not a part of what makes two images equal, and an image is never changed after it is made, so a kind of effect, which has a shader and so images, is as good a key of a map as it
+# was before an image had a cell. (Clippy does not know that, and `EffectKind` is in the key of `PropertyId`.)
+ignore-interior-mutability = ["bytes::Bytes", "fastforwardrs::project::effects::descriptor::ShaderImage"]

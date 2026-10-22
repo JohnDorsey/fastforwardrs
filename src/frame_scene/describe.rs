@@ -20,6 +20,7 @@ use std::hash::{Hash, Hasher};
 use egui::{Rect, pos2, vec2};
 
 use super::{PreviewContent, PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
+use crate::colour_space::{StandardPrimaries, TransferFunction};
 use crate::cube_table::Interpolation;
 use crate::engine::{
     CORNERS_OF_THE_WHOLE_PICTURE, EffectCall, EffectState, FrameColour, FrameDescription, GroupDescription,
@@ -185,6 +186,8 @@ enum KindOfPicture {
     Text = 2,
     Thumbnail = 3,
     Symbol = 4,
+    /// An image that a shader brings with it.
+    Imported = 5,
 }
 
 /// What an id says of the colour its picture is made in: **nothing** in the compatibility mode with a picture that is sRGB (the id is what it always was), and otherwise a
@@ -297,7 +300,11 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
                     .cloned()
                     .collect();
                 let mut children = self.describe_layers(group.first_layer, group.end_layer, &inside);
-                let effects: Vec<EffectCall> = group.operations.iter().filter_map(call_of_an_operation).collect();
+                let effects: Vec<EffectCall> = group
+                    .operations
+                    .iter()
+                    .filter_map(|operation| call_of_an_operation(operation, self.working, &mut *self.supply))
+                    .collect();
                 if effects.is_empty() {
                     // (A group whose effects do nothing at this frame is pass-through: its layers are drawn into what it is in. What is behind it is black already, if it
                     // is at the frame, so no black is put there.)
@@ -415,7 +422,11 @@ fn describe_layer(
         PreviewLayerContent::Generator => {
             // (Its shader reads no picture and makes one, so what the effects work on is a picture that has nothing in it, the size of the frame, and what they make of it is put where
             // the clip is. A generator whose shader cannot be run, which has no effect that does anything, is nothing.)
-            let effects: Vec<EffectCall> = layer.operations.iter().filter_map(call_of_an_operation).collect();
+            let effects: Vec<EffectCall> = layer
+                .operations
+                .iter()
+                .filter_map(|operation| call_of_an_operation(operation, working, &mut *supply))
+                .collect();
             if effects.is_empty() {
                 return None;
             }
@@ -444,7 +455,11 @@ fn describe_layer(
     }
     // A layer's effects are its operations, one call each (the colours that are mixed one after another are one operation already, and the window cuts the
     // colours off once, at the end), unless one changes nothing.
-    let effects = layer.operations.iter().filter_map(call_of_an_operation).collect();
+    let effects = layer
+        .operations
+        .iter()
+        .filter_map(|operation| call_of_an_operation(operation, working, &mut *supply))
+        .collect();
     Some(LayerDescription {
         source: LayerSource::Picture(wanted.id),
         corners,
@@ -452,8 +467,26 @@ fn describe_layer(
     })
 }
 
-/// The call of the engine that does an operation, or none if the operation changes nothing. (The call of a colour mix has nine numbers, or twelve if it has offsets.)
-fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
+/// How the numbers of an image that a shader brings with it are read: **as they are**. The engine makes a picture for the working space (it reads the codes, takes the light of them
+/// and keeps the light), and a shader works on the codes of a screen: with the curve of no curve, and the primaries that the working space has, the conversion is none and the shader reads
+/// the codes that its file has.
+fn colour_of_an_imported_image(working: WorkingSpace) -> PictureColour {
+    PictureColour {
+        primaries: match working {
+            WorkingSpace::Linear(primaries) => primaries,
+            WorkingSpace::DisplayReferred => StandardPrimaries::Rec709,
+        },
+        curve: TransferFunction::Linear,
+    }
+}
+
+/// The call of the engine that does an operation, or none if the operation changes nothing, or if a picture that it needs cannot be made now. (The call of a colour mix has nine numbers,
+/// or twelve if it has offsets.) `supply` has the engine be sent the images that a shader brings with it.
+fn call_of_an_operation(
+    operation: &PictureOperation,
+    working: WorkingSpace,
+    supply: &mut impl PictureSupply,
+) -> Option<EffectCall> {
     if operation.changes_nothing() {
         return None;
     }
@@ -473,12 +506,35 @@ fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
             },
         ),
         PictureOperation::Blur { radius } => EffectCall::blur(*radius),
-        PictureOperation::Shader { key, numbers, state } => EffectCall {
-            key: key.clone(),
-            values: numbers.clone(),
-            table: None,
-            state: state.map(|(id, frame)| EffectState { id, frame }),
-        },
+        PictureOperation::Shader {
+            key,
+            numbers,
+            state,
+            images,
+        } => {
+            let colour = colour_of_an_imported_image(working);
+            let tag = colour_tag_of(colour, working);
+            let mut ids = Vec::with_capacity(images.len());
+            for imported in images {
+                let wanted = PictureWanted {
+                    id: id_of(KindOfPicture::Imported, imported.id, tag),
+                    how: HowToMakeIt::Image(&imported.picture),
+                    colour,
+                    working,
+                };
+                if !supply.make_sure_the_engine_has(&wanted) {
+                    return None;
+                }
+                ids.push(wanted.id);
+            }
+            EffectCall {
+                key: key.clone(),
+                values: numbers.clone(),
+                table: None,
+                state: state.map(|(id, frame)| EffectState { id, frame }),
+                images: ids,
+            }
+        }
         PictureOperation::Crop {
             left,
             top,

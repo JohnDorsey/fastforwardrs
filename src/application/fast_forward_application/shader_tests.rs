@@ -432,3 +432,171 @@ fn the_box_of_a_shader_that_keeps_something_from_one_frame_to_the_next_says_so_a
         "a shader that keeps nothing says nothing of it"
     );
 }
+
+// --- the images that a shader brings with it (phase 6.4.4) ---
+
+/// A shader that reads the image `tex`, which is the file `tex.png` beside it (or where `path` says).
+fn a_shader_that_brings_an_image(path: &str) -> String {
+    format!(
+        "/*{{ \"INPUTS\": [ {{ \"NAME\": \"inputImage\", \"TYPE\": \"image\" }} ], \"IMPORTED\": {{ \"tex\": {{ \"PATH\": {path:?} }} }} }}*/\nvoid main() {{ gl_FragColor = IMG_THIS_PIXEL(inputImage) * IMG_THIS_PIXEL(tex); }}\n"
+    )
+}
+
+fn a_png_file_in(folder: &Path, name: &str) -> Vec<u8> {
+    let bytes = crate::rgba_picture::RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: [255, 128, 0, 255].repeat(4),
+    }
+    .to_png_bytes()
+    .unwrap();
+    if let Some(parent) = folder.join(name).parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(folder.join(name), &bytes).unwrap();
+    bytes
+}
+
+#[test]
+fn a_shader_that_brings_an_image_is_put_on_the_clip_with_the_image_that_is_beside_it() {
+    let folder = tempfile::tempdir().unwrap();
+    let png = a_png_file_in(folder.path(), "tex.png");
+    let file = a_file_in(folder.path(), "textured.fs", &a_shader_that_brings_an_image("tex.png"));
+    let (mut window, clip, chooser) = window_that_asks();
+
+    add_from_a_file(&mut window, &chooser, clip, &file);
+
+    assert_eq!(the_message(&window), None);
+    let kinds = the_kinds_of_the_effects_of(&window, clip);
+    assert_eq!(kinds.len(), 1);
+    let images = &kinds[0].shader_source().unwrap().images;
+    assert_eq!(images.len(), 1);
+    assert_eq!(
+        (images[0].name(), &**images[0].bytes()),
+        ("tex", png.as_slice()),
+        "the project carries the file of the image"
+    );
+    assert!(kinds[0].is_installed());
+}
+
+#[test]
+fn the_image_may_be_in_a_folder_below_the_shader_and_a_current_folder_in_the_path_is_nothing() {
+    let folder = tempfile::tempdir().unwrap();
+    a_png_file_in(folder.path(), "textures/inner/tex.png");
+    let file = a_file_in(
+        folder.path(),
+        "textured.fs",
+        &a_shader_that_brings_an_image("./textures/inner/tex.png"),
+    );
+    let (mut window, clip, chooser) = window_that_asks();
+
+    add_from_a_file(&mut window, &chooser, clip, &file);
+
+    assert_eq!(the_message(&window), None);
+    assert!(the_kinds_of_the_effects_of(&window, clip)[0].is_installed());
+}
+
+#[test]
+fn an_image_that_cannot_be_used_refuses_the_shader_and_says_which_and_why_and_changes_nothing() {
+    let folder = tempfile::tempdir().unwrap();
+    a_png_file_in(folder.path(), "tex.png");
+    std::fs::write(folder.path().join("text.png"), b"this is text").unwrap();
+    let absolute = folder.path().join("tex.png").to_string_lossy().into_owned();
+    for (path, expected) in [
+        ("missing.png", "the image tex (missing.png)"),
+        ("text.png", "is not a PNG or a JPEG"),
+        ("../tex.png", "not a file in the folder of the shader or below it"),
+        (
+            "textures/../../tex.png",
+            "not a file in the folder of the shader or below it",
+        ),
+        (absolute.as_str(), "not a file in the folder of the shader or below it"),
+        ("", "not a file in the folder of the shader or below it"),
+    ] {
+        let file = a_file_in(folder.path(), "textured.fs", &a_shader_that_brings_an_image(path));
+        let (mut window, clip, chooser) = window_that_asks();
+        window.application_mut().note_everything_is_saved();
+
+        add_from_a_file(&mut window, &chooser, clip, &file);
+
+        let (title, text) = the_message(&window).unwrap_or_else(|| panic!("{path:?}: nothing was said"));
+        assert_eq!(title, NOT_A_SHADER_TITLE, "{path:?}");
+        assert!(text.contains(expected), "{path:?}: {text}");
+        assert!(text.starts_with("textured.fs: "), "{path:?}: {text}");
+        assert!(the_kinds_of_the_effects_of(&window, clip).is_empty(), "{path:?}");
+        assert!(!window.application().has_unsaved_changes(), "{path:?}");
+    }
+}
+
+#[test]
+fn an_image_of_too_many_bytes_or_pixels_and_a_shader_with_too_many_images_are_refused() {
+    use crate::project::{
+        MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER,
+    };
+    let folder = tempfile::tempdir().unwrap();
+    // More bytes than an image may have.
+    let mut big = crate::rgba_picture::RgbaPicture {
+        width_in_pixels: 1,
+        height_in_pixels: 1,
+        rgba_pixels: vec![0, 0, 0, 255],
+    }
+    .to_png_bytes()
+    .unwrap();
+    big.resize(MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER + 1, 0);
+    std::fs::write(folder.path().join("big.png"), &big).unwrap();
+    // More pixels across than an image may have.
+    let wide = crate::rgba_picture::RgbaPicture {
+        width_in_pixels: MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER + 1,
+        height_in_pixels: 1,
+        rgba_pixels: vec![0; 4 * (MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER as usize + 1)],
+    }
+    .to_png_bytes()
+    .unwrap();
+    std::fs::write(folder.path().join("wide.png"), &wide).unwrap();
+    for (path, expected) in [("big.png", "are the most"), ("wide.png", "across or down are the most")] {
+        let file = a_file_in(folder.path(), "textured.fs", &a_shader_that_brings_an_image(path));
+        let (mut window, clip, chooser) = window_that_asks();
+        add_from_a_file(&mut window, &chooser, clip, &file);
+        let (_, text) = the_message(&window).unwrap_or_else(|| panic!("{path}: nothing was said"));
+        assert!(text.contains(expected), "{path}: {text}");
+        assert!(the_kinds_of_the_effects_of(&window, clip).is_empty());
+    }
+
+    // As many images as there may be are taken, and one more is not.
+    a_png_file_in(folder.path(), "tex.png");
+    let shader_with = |count: usize| {
+        let imported: Vec<String> = (0..count)
+            .map(|number| format!("\"tex{number}\": {{ \"PATH\": \"tex.png\" }}"))
+            .collect();
+        let uses: Vec<String> = (0..count)
+            .map(|number| format!("IMG_THIS_PIXEL(tex{number})"))
+            .collect();
+        format!(
+            "/*{{ \"INPUTS\": [ {{ \"NAME\": \"inputImage\", \"TYPE\": \"image\" }} ], \"IMPORTED\": {{ {} }} }}*/\nvoid main() {{ gl_FragColor = IMG_THIS_PIXEL(inputImage){}; }}\n",
+            imported.join(", "),
+            uses.iter().map(|call| format!(" + {call}")).collect::<String>()
+        )
+    };
+    let file = a_file_in(folder.path(), "many.fs", &shader_with(MOST_IMAGES_A_SHADER_BRINGS));
+    let (mut window, clip, chooser) = window_that_asks();
+    add_from_a_file(&mut window, &chooser, clip, &file);
+    // (Six images and the picture itself are seven pictures, which is as many as a shader may read.)
+    assert_eq!(the_message(&window), None);
+    assert_eq!(
+        the_kinds_of_the_effects_of(&window, clip)[0]
+            .shader_source()
+            .unwrap()
+            .images
+            .len(),
+        MOST_IMAGES_A_SHADER_BRINGS
+    );
+    let file = a_file_in(
+        folder.path(),
+        "too_many.fs",
+        &shader_with(MOST_IMAGES_A_SHADER_BRINGS + 1),
+    );
+    let (mut window, clip, chooser) = window_that_asks();
+    add_from_a_file(&mut window, &chooser, clip, &file);
+    let (_, text) = the_message(&window).expect("it was refused");
+    assert!(text.contains("brings 7 images, and 6 are the most"), "{text}");
+}

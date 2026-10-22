@@ -206,6 +206,8 @@ pub enum Command {
         frame: TimelineFrameIndex,
         file_name: String,
         text: std::sync::Arc<str>,
+        /// The images that the shader brings with it, read from beside its file (see `shader_flow`).
+        images: Vec<crate::project::ShaderImage>,
     },
     /// A text object was changed: what it says, how it looks, or where it is on the picture.
     SetTextObject {
@@ -270,6 +272,8 @@ pub enum Command {
         owner: Member,
         file_name: String,
         text: std::sync::Arc<str>,
+        /// The images that the shader brings with it, read from beside its file (see `shader_flow`).
+        images: Vec<crate::project::ShaderImage>,
     },
     /// Give a value of an effect of a clip or a track (a property of it) a value: at the playhead if it has keyframes, as for any
     /// property.

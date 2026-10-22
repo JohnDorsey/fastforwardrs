@@ -402,3 +402,36 @@ fn a_shader_depends_on_earlier_frames_if_any_of_its_buffers_lasts() {
     one_of_two.buffers[1].persistent = true;
     assert!(one_of_two.depends_on_earlier_frames());
 }
+
+#[test]
+fn the_images_a_shader_brings_are_each_one_of_its_pictures_once_and_there_are_no_more_than_there_may_be() {
+    let with = |images: Vec<ImageSlot>| ShaderStructure {
+        images,
+        buffers: Vec::new(),
+        passes: vec![pass(None)],
+        pass_index_number: Some(3),
+    };
+    assert_eq!(
+        with(vec![ImageSlot::Picture, ImageSlot::Imported(0), ImageSlot::Imported(1)]).check(),
+        Ok(())
+    );
+    let said = with(vec![ImageSlot::Picture, ImageSlot::Imported(0), ImageSlot::Imported(0)])
+        .check()
+        .unwrap_err();
+    assert!(said.contains("imported image 0 is two of the pictures"), "{said}");
+    // The largest number there can be is the one before the most pictures there can be.
+    assert_eq!(
+        with(vec![ImageSlot::Imported(MOST_IMAGES_OF_A_SHADER - 1)]).check(),
+        Ok(())
+    );
+    let said = with(vec![ImageSlot::Imported(MOST_IMAGES_OF_A_SHADER)])
+        .check()
+        .unwrap_err();
+    assert!(said.contains("which there cannot be"), "{said}");
+    assert_eq!(
+        with(vec![ImageSlot::Imported(2)]).imported_images(),
+        3,
+        "the number after the largest"
+    );
+    assert_eq!(with(vec![ImageSlot::Picture]).imported_images(), 0);
+}

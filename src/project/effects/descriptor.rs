@@ -8,10 +8,12 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 
 use crate::project::animation::{PropertyValue, ValueKind};
+use crate::rgba_picture::RgbaPicture;
 
 /// The most values that an effect can have (a value is named in the code by a small number, its *slot*: see
 /// [`PropertyId::EffectValue`](crate::project::PropertyId::EffectValue)).
@@ -165,6 +167,92 @@ impl ShaderLanguage {
 pub struct ShaderSource {
     pub language: ShaderLanguage,
     pub text: Cow<'static, str>,
+    /// The images that the shader brings with it (an ISF file's `IMPORTED`), in the order the file lists them: **kept in the shader, as its text is** (phase 6.4.4; see
+    /// `docs/engine-phase-6-4-design.md`, K15).
+    pub images: Vec<ShaderImage>,
+}
+
+/// The most images that a shader may bring with it.
+pub const MOST_IMAGES_A_SHADER_BRINGS: usize = 6;
+
+/// The most bytes that the file of one of those images may have (a PNG or a JPEG).
+pub const MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER: usize = 4 * 1024 * 1024;
+
+/// The most pixels across or down that one of those images may have.
+pub const MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER: u32 = 4096;
+
+/// An image that a shader brings with it: the name the shader reads it by, and the bytes of its file (a PNG or a JPEG), which are what the project carries.
+#[derive(Clone, Debug)]
+pub struct ShaderImage {
+    name: String,
+    bytes: Arc<[u8]>,
+    /// What the file is as pixels, read once (the first time it is asked for) and shared by the copies. **Not a part of what makes two images equal**: it is a function of the bytes.
+    pixels: Arc<OnceLock<Result<Arc<RgbaPicture>, String>>>,
+}
+
+impl PartialEq for ShaderImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.bytes == other.bytes
+    }
+}
+
+impl Eq for ShaderImage {}
+
+impl ShaderImage {
+    pub fn new(name: impl Into<String>, bytes: impl Into<Arc<[u8]>>) -> Self {
+        Self {
+            name: name.into(),
+            bytes: bytes.into(),
+            pixels: Arc::default(),
+        }
+    }
+
+    /// The name the shader reads the image by.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The bytes of the file, which the project keeps.
+    pub fn bytes(&self) -> &Arc<[u8]> {
+        &self.bytes
+    }
+
+    /// What the file is as pixels (straight, not multiplied by the opacity, top row first), or what is wrong with it: more bytes than an image may have, a file that is not a PNG or a
+    /// JPEG, a picture of more than [`MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER`] pixels across or down, or none. **Read once.**
+    pub fn pixels(&self) -> Result<Arc<RgbaPicture>, String> {
+        self.pixels
+            .get_or_init(|| {
+                if self.bytes.len() > MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER {
+                    return Err(format!(
+                        "the file has {} bytes, and {MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER} are the most",
+                        self.bytes.len()
+                    ));
+                }
+                let format =
+                    image::guess_format(&self.bytes).map_err(|_| "the file is not a PNG or a JPEG".to_owned())?;
+                if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Jpeg) {
+                    return Err("the file is not a PNG or a JPEG".to_owned());
+                }
+                let decoded = image::load_from_memory_with_format(&self.bytes, format)
+                    .map_err(|error| error.to_string())?
+                    .to_rgba8();
+                let (width, height) = (decoded.width(), decoded.height());
+                if width == 0 || height == 0 {
+                    return Err("the picture has no pixels".to_owned());
+                }
+                if width > MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER || height > MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER {
+                    return Err(format!(
+                        "the picture is {width} by {height} pixels, and {MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER} across or down are the most"
+                    ));
+                }
+                Ok(Arc::new(RgbaPicture {
+                    width_in_pixels: width,
+                    height_in_pixels: height,
+                    rgba_pixels: decoded.into_raw(),
+                }))
+            })
+            .clone()
+    }
 }
 
 /// The most bytes that the text of a shader may have.

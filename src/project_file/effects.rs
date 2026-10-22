@@ -24,8 +24,8 @@ use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
     ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
-    MOST_EFFECTS_ON_ONE_THING, ParameterControl, ParameterDescriptor, Project, ShaderLanguage, ShaderSource,
-    UnknownFields, ValueKind, ValueScale,
+    MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, ParameterControl,
+    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -50,8 +50,8 @@ pub(super) struct PluginDocument {
     /// Its values, in the order they are kept and shown in. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<ParameterDocument>,
-    /// The shader that runs the type of effect, if it is one (format 16): `{ "language": "isf", "source": "..." }`. One of a language that this version does not know is
-    /// **kept as it was**, in `unknown`.
+    /// The shader that runs the type of effect, if it is one (format 16): `{ "language": "isf", "source": "..." }`, and (format 17) `"images": [ { "name": "...", "data": "<base 64>" } ]` if
+    /// it brings images with it. One of a language that this version does not know is **kept as it was**, in `unknown`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shader: Option<Value>,
     /// What this version of the program does not know of the type of effect, which is kept as it was.
@@ -262,7 +262,7 @@ fn descriptor_from_document(document: PluginDocument) -> Result<EffectDescriptor
     let mut unknown = document.unknown;
     let shader = match document.shader {
         Some(Value::Object(object))
-            if object.len() == 2
+            if object.len() == 2 + usize::from(object.contains_key("images"))
                 && object
                     .get("language")
                     .and_then(Value::as_str)
@@ -277,6 +277,8 @@ fn descriptor_from_document(document: PluginDocument) -> Result<EffectDescriptor
             Some(ShaderSource {
                 language,
                 text: object["source"].as_str().unwrap_or_default().to_owned().into(),
+                images: shader_images_from_document(object.get("images"))
+                    .map_err(|reason| format!("the effect \"{}\": the images of its shader: {reason}", document.key))?,
             })
         }
         // (A language that this version does not know, or a shader that says more than it should: kept as it was, to be written back.)
@@ -541,13 +543,75 @@ fn plugin_document_of(descriptor: &EffectDescriptor) -> PluginDocument {
         changes_each_pixel_by_itself: descriptor.changes_each_pixel_by_itself,
         params: descriptor.parameters.iter().map(parameter_document_of).collect(),
         shader: descriptor.shader.as_ref().map(|shader| {
-            serde_json::json!({
+            let mut object = serde_json::json!({
                 "language": shader.language.name_in_a_file(),
                 "source": shader.text.as_ref(),
-            })
+            });
+            if !shader.images.is_empty() {
+                object["images"] = Value::Array(
+                    shader
+                        .images
+                        .iter()
+                        .map(|image| {
+                            serde_json::json!({
+                                "name": image.name(),
+                                "data": crate::base64::encode(image.bytes()),
+                            })
+                        })
+                        .collect(),
+                );
+            }
+            object
         }),
         unknown: descriptor.unknown_fields.fields().clone(),
     }
+}
+
+/// The images that a shader brings, from the `images` of its document: a list of `{ "name", "data" }` of at most as many as a shader may bring, each of at most as many bytes as an image
+/// may have. (Whether the bytes are a picture is for whoever runs the shader to find out; here they are bytes.)
+fn shader_images_from_document(images: Option<&Value>) -> Result<Vec<ShaderImage>, String> {
+    let Some(images) = images else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = images.as_array() else {
+        return Err("it is not a list".to_owned());
+    };
+    if items.len() > MOST_IMAGES_A_SHADER_BRINGS {
+        return Err(format!(
+            "it has {} and {MOST_IMAGES_A_SHADER_BRINGS} are the most",
+            items.len()
+        ));
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(number, item)| {
+            let place = number + 1;
+            let object = item
+                .as_object()
+                .filter(|object| object.len() == 2)
+                .ok_or_else(|| format!("image {place} is not a name and some data"))?;
+            let (Some(name), Some(data)) = (
+                object.get("name").and_then(Value::as_str),
+                object.get("data").and_then(Value::as_str),
+            ) else {
+                return Err(format!("image {place} is not a name and some data"));
+            };
+            // (A base 64 text that is more than a third as long again as the most bytes cannot be that many bytes: not decoded, to keep a file from making the program write a gigabyte.)
+            if data.len() > MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER.div_ceil(3) * 4 {
+                return Err(format!(
+                    "image {place} has more than {MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER} bytes"
+                ));
+            }
+            let bytes = crate::base64::decode(data).map_err(|reason| format!("image {place}: {reason}"))?;
+            if bytes.len() > MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER {
+                return Err(format!(
+                    "image {place} has more than {MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER} bytes"
+                ));
+            }
+            Ok(ShaderImage::new(name, bytes))
+        })
+        .collect()
 }
 
 fn parameter_document_of(parameter: &ParameterDescriptor) -> ParameterDocument {

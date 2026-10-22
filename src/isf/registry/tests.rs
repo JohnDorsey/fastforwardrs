@@ -58,8 +58,9 @@ void main() { gl_FragColor = IMG_THIS_PIXEL(a); }
     assert!(reason("bad_size.fs", bad_size).contains("the WIDTH of pass number 1"));
     let other_image = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"maskImage\", \"TYPE\": \"image\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
     assert!(reason("mask.fs", other_image).contains("maskImage"));
+    // (Rewritten on purpose in phase 6.4.4: a shader that brings an image is run now if the project has the image; one given none says that it does not have it.)
     let imported = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"IMPORTED\": { \"tex\": { \"PATH\": \"a.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
-    assert!(reason("imported.fs", imported).contains("IMPORTED"));
+    assert!(reason("imported.fs", imported).contains("an image of its own, tex, which the project does not have"));
 }
 
 #[test]
@@ -198,4 +199,108 @@ fn a_shader_with_a_buffer_that_lasts_is_usable_and_says_that_it_depends_on_earli
     // Neither a shader that is not usable nor an effect that is no shader depends on anything.
     assert!(!depends_on_earlier_frames(&descriptor_from("wipe.fs", WIPE)));
     assert!(!depends_on_earlier_frames(EffectKind::HUE_SHIFT.descriptor()));
+}
+
+/// A PNG of 2 by 2 pixels.
+fn a_png() -> Vec<u8> {
+    crate::rgba_picture::RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 9, 9, 255].to_vec(),
+    }
+    .to_png_bytes()
+    .unwrap()
+}
+
+const WITH_TWO_IMAGES: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"IMPORTED\": { \"noise\": { \"PATH\": \"n.png\" }, \"ramp\": { \"PATH\": \"r.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(noise) + IMG_THIS_PIXEL(ramp); }\n";
+
+fn with_images(name: &str, images: Vec<crate::project::ShaderImage>) -> EffectDescriptor {
+    crate::isf::descriptor_with_images_of(&read(WITH_TWO_IMAGES).unwrap(), name, WITH_TWO_IMAGES, images)
+}
+
+#[test]
+fn a_shader_that_brings_images_is_usable_when_it_has_all_of_them_in_the_order_of_its_header_and_each_is_a_picture() {
+    use crate::project::ShaderImage;
+    let both = || vec![ShaderImage::new("noise", a_png()), ShaderImage::new("ramp", a_png())];
+    let descriptor = with_images("brings_both.fs", both());
+    assert!(is_usable(&descriptor), "{:?}", why_not_usable(&descriptor));
+    let (_, structure) = crate::engine::published_effect_shader_with_structure(&descriptor.key).unwrap();
+    assert_eq!(structure.imported_images(), 2);
+
+    let said = |descriptor: &EffectDescriptor| {
+        assert!(!is_usable(descriptor));
+        why_not_usable(descriptor).unwrap()
+    };
+    let none = said(&with_images("brings_none.fs", Vec::new()));
+    assert!(
+        none.contains("an image of its own, noise, which the project does not have"),
+        "{none}"
+    );
+    let one = said(&with_images("brings_one.fs", vec![ShaderImage::new("noise", a_png())]));
+    assert!(
+        one.contains("an image of its own, ramp, which the project does not have"),
+        "{one}"
+    );
+    let wrong_order = said(&with_images(
+        "brings_them_the_other_way.fs",
+        vec![ShaderImage::new("ramp", a_png()), ShaderImage::new("noise", a_png())],
+    ));
+    assert!(wrong_order.contains("ramp where noise is expected"), "{wrong_order}");
+    let not_a_picture = said(&with_images(
+        "brings_text.fs",
+        vec![
+            ShaderImage::new("noise", a_png()),
+            ShaderImage::new("ramp", b"not a picture".to_vec()),
+        ],
+    ));
+    assert!(
+        not_a_picture.contains("the image ramp of this shader cannot be used"),
+        "{not_a_picture}"
+    );
+    let too_many = said(&with_images(
+        "brings_three.fs",
+        vec![
+            ShaderImage::new("noise", a_png()),
+            ShaderImage::new("ramp", a_png()),
+            ShaderImage::new("extra", a_png()),
+        ],
+    ));
+    assert!(
+        too_many.contains("brings 3 images and its header lists 2"),
+        "{too_many}"
+    );
+}
+
+#[test]
+fn the_same_shader_with_other_images_is_another_kind_and_both_are_run_each_with_its_own() {
+    use crate::project::ShaderImage;
+    let mut other_png = a_png();
+    // (Another picture: the pixels of the first are changed, and the file is made again.)
+    other_png = crate::rgba_picture::RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: [1, 2, 3, 255].repeat(4),
+    }
+    .to_png_bytes()
+    .map(|bytes| if bytes == other_png { Vec::new() } else { bytes })
+    .unwrap();
+    let first = with_images(
+        "same_name.fs",
+        vec![ShaderImage::new("noise", a_png()), ShaderImage::new("ramp", a_png())],
+    );
+    let second = with_images(
+        "same_name.fs",
+        vec![ShaderImage::new("noise", other_png), ShaderImage::new("ramp", a_png())],
+    );
+    assert_ne!(first.key, second.key);
+    assert!(is_usable(&first) && is_usable(&second));
+    // And a descriptor that was changed by hand so that its images are not the ones its key was made from is not run.
+    let mut forged = first.clone();
+    forged.shader.as_mut().unwrap().images = second.shader.as_ref().unwrap().images.clone();
+    assert!(!is_usable(&forged));
+    assert!(
+        why_not_usable(&forged)
+            .unwrap()
+            .contains("not the one that its key was made from")
+    );
 }

@@ -258,8 +258,8 @@ impl KindOfEffect {
 /// The effects the engine can run: the ones it has of its own, and the ones that were given to it as shaders.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectsThatRun {
-    /// The keys of the effects that shaders run, and how many passes each takes.
-    keys_of_shaders: HashMap<String, usize>,
+    /// The keys of the effects that shaders run: how many passes each takes, and how many images it brings with it (which a call has to name the pictures of).
+    keys_of_shaders: HashMap<String, (usize, usize)>,
     /// The tables that the card has, which a look-up table effect needs one of.
     tables: HashSet<TableId>,
 }
@@ -277,13 +277,24 @@ impl EffectsThatRun {
 
     /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one).
     pub fn add_shader_with_passes(&mut self, key: &str, passes: usize) {
-        self.keys_of_shaders.insert(key.to_owned(), passes.max(1));
+        self.add_shader_with_images(key, passes, 0);
+    }
+
+    /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one) and brings `imported` images with it: a call that does not name that many
+    /// pictures is not run.
+    pub fn add_shader_with_images(&mut self, key: &str, passes: usize, imported: usize) {
+        self.keys_of_shaders.insert(key.to_owned(), (passes.max(1), imported));
+    }
+
+    /// How many images the shader under `key` brings with it (none for anything that is not a shader that was given).
+    pub fn imported_images_of(&self, key: &str) -> usize {
+        self.keys_of_shaders.get(key).map_or(0, |(_, imported)| *imported)
     }
 
     /// How many passes of the card an effect takes: a shader, as many as it was given with; any other, as many as its kind takes.
     pub fn passes_of(&self, key: &str, kind: KindOfEffect) -> usize {
         match kind {
-            KindOfEffect::Shader => self.keys_of_shaders.get(key).copied().unwrap_or(1),
+            KindOfEffect::Shader => self.keys_of_shaders.get(key).map_or(1, |(passes, _)| *passes),
             _ => kind.passes(),
         }
     }
@@ -422,7 +433,9 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
                 }
             }
             Some(KindOfEffect::Shader)
-                if effect.values.len() <= MOST_NUMBERS_OF_A_FOREIGN_EFFECT && numbers_are_finite =>
+                if effect.values.len() <= MOST_NUMBERS_OF_A_FOREIGN_EFFECT
+                    && numbers_are_finite
+                    && effect.images.len() == effects_that_run.imported_images_of(&effect.key) =>
             {
                 calls.push(number);
             }
@@ -660,30 +673,35 @@ mod tests {
             values: vec![1.0, 2.0],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let too_few_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 8],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let too_many_numbers = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![1.0; 10],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let not_a_number = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::NAN, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let infinite = EffectCall {
             key: COLOUR_MATRIX_KEY.to_owned(),
             values: vec![f32::INFINITY, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let plan = plan_of_the_built_in_effects(&description_of(vec![
             layer_with(1, vec![unknown, redder(), too_few_numbers]),
@@ -867,12 +885,14 @@ mod tests {
             values: numbers.to_vec(),
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let crop = |numbers: &[f32]| EffectCall {
             key: CROP_KEY.to_owned(),
             values: numbers.to_vec(),
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let plan_of = |effects: Vec<EffectCall>| plan_frame(&description_of(vec![layer_with(1, effects)]), &known);
         // (A layer, its effects, the place and the output: two passes besides the effects.)
@@ -1049,6 +1069,7 @@ mod tests {
             values: vec![1.0],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let mut description = in_light();
         description.layers = vec![
@@ -1088,6 +1109,7 @@ mod tests {
             values: numbers.to_vec(),
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let with = |offsets: [f32; 3]| [nine.as_slice(), offsets.as_slice()].concat();
         for (numbers, runs) in [
@@ -1158,6 +1180,7 @@ mod tests {
             values: vec![1.0],
             table: None,
             state: None,
+            images: Vec::new(),
         };
         assert_eq!(known.passes_of("test:passes", KindOfEffect::Shader), 3);
         assert_eq!(known.passes_of("test:none", KindOfEffect::Shader), 1);
@@ -1207,6 +1230,7 @@ mod tests {
             values: [identity.as_slice(), offsets.as_slice()].concat(),
             table: None,
             state: None,
+            images: Vec::new(),
         };
         let plan = plan_of_the_built_in_effects(&description_of(vec![layer_with(1, vec![call([0.0; 3])])]));
         assert_eq!(

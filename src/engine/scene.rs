@@ -161,6 +161,10 @@ pub struct EffectCall {
     /// Which state the effect goes on with, if it is a shader that depends on earlier frames (see [`EffectState`]); nobody else has one.
     #[serde(default)]
     pub state: Option<EffectState>,
+    /// The pictures of the images that the shader brings with it (an ISF file's `IMPORTED`), in the order its file lists them (phase 6.4.4); none for any other effect. They are
+    /// pictures that the engine is sent, as those of the layers are, **made so that the shader reads their codes as they are** (they are not converted to light).
+    #[serde(default)]
+    pub images: Vec<PictureId>,
 }
 
 impl EffectCall {
@@ -171,6 +175,7 @@ impl EffectCall {
             values: rows.into_iter().flatten().collect(),
             table: None,
             state: None,
+            images: Vec::new(),
         }
     }
 
@@ -181,6 +186,7 @@ impl EffectCall {
             values: rows.into_iter().flatten().chain(offsets).collect(),
             table: None,
             state: None,
+            images: Vec::new(),
         }
     }
 
@@ -191,6 +197,7 @@ impl EffectCall {
             values: vec![stops],
             table: None,
             state: None,
+            images: Vec::new(),
         }
     }
 
@@ -201,6 +208,7 @@ impl EffectCall {
             values: vec![radius],
             table: None,
             state: None,
+            images: Vec::new(),
         }
     }
 
@@ -212,6 +220,7 @@ impl EffectCall {
             values: vec![left, top, right, bottom, feather],
             table: None,
             state: None,
+            images: Vec::new(),
         }
     }
 
@@ -229,6 +238,7 @@ impl EffectCall {
             values: vec![intensity, input.number(), output.number(), interpolation.number()],
             table: Some(table),
             state: None,
+            images: Vec::new(),
         }
     }
 
@@ -239,6 +249,7 @@ impl EffectCall {
             values: vec![opacity],
             table: None,
             state: None,
+            images: Vec::new(),
         }
     }
 }
@@ -315,6 +326,17 @@ impl FrameDescription {
             {
                 used.push(id);
             }
+            // (The images that the shaders of a layer bring with them are pictures of the frame too.)
+            for id in flat
+                .layer
+                .effects
+                .iter()
+                .flat_map(|effect| effect.images.iter().copied())
+            {
+                if !used.contains(&id) {
+                    used.push(id);
+                }
+            }
         }
         used
     }
@@ -387,6 +409,7 @@ fn hash_layers(layers: &[LayerDescription], hasher: &mut DefaultHasher) {
             effect.key.hash(hasher);
             effect.table.hash(hasher);
             effect.state.hash(hasher);
+            effect.images.hash(hasher);
             effect.values.len().hash(hasher);
             for value in &effect.values {
                 value.to_bits().hash(hasher);
@@ -594,6 +617,7 @@ mod tests {
                 values: vec![1.0, 2.0],
                 table: None,
                 state: None,
+                images: Vec::new(),
             }],
         });
         let mut second = FrameDescription::black((8, 8));
@@ -606,12 +630,14 @@ mod tests {
                     values: vec![1.0],
                     table: None,
                     state: None,
+                    images: Vec::new(),
                 },
                 EffectCall {
                     key: String::new(),
                     values: vec![2.0],
                     table: None,
                     state: None,
+                    images: Vec::new(),
                 },
             ],
         });

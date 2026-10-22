@@ -206,7 +206,8 @@ impl FastForwardApplication {
                 frame,
                 file_name,
                 text,
-            } => self.new_generator_clip(track, frame, &file_name, &text, now),
+                images,
+            } => self.new_generator_clip(track, frame, &file_name, &text, images, now),
             Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
                 if let Err(error) = self.document.project.set_clip_duration(clip, frames) {
@@ -244,7 +245,12 @@ impl FastForwardApplication {
                 bytes,
                 link,
             } => self.use_a_table(owner, instance, &wanted_name, bytes, link, now),
-            Command::UseAShader { owner, file_name, text } => self.use_a_shader(owner, &file_name, &text),
+            Command::UseAShader {
+                owner,
+                file_name,
+                text,
+                images,
+            } => self.use_a_shader(owner, &file_name, &text, images),
             Command::SetEffectValue {
                 target,
                 property,

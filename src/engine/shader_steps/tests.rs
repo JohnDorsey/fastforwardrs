@@ -20,6 +20,7 @@ fn call(key: &str, values: Vec<f32>) -> EffectCall {
         values,
         table: None,
         state: None,
+        images: Vec::new(),
     }
 }
 

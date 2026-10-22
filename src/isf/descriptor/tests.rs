@@ -266,3 +266,42 @@ fn the_options_of_a_choice_are_called_by_their_values_in_a_file_and_by_their_lab
     assert_eq!(descriptor.parameters[0].default, PropertyValue::Words("6".into()));
     assert_eq!(descriptor.problem(), None);
 }
+
+#[test]
+fn the_images_a_shader_brings_are_a_part_of_its_key_and_a_shader_with_none_has_the_key_it_always_had() {
+    use crate::project::ShaderImage;
+    let first = ShaderImage::new("tex", vec![1, 2, 3]);
+    let other_bytes = ShaderImage::new("tex", vec![1, 2, 4]);
+    let other_name = ShaderImage::new("map", vec![1, 2, 3]);
+    assert_eq!(
+        key_of_a_source_with_images("a.fs", PLASMA, &[]),
+        key_of("a.fs", PLASMA),
+        "none: as it was"
+    );
+    let key = key_of_a_source_with_images("a.fs", PLASMA, std::slice::from_ref(&first));
+    assert_ne!(key, key_of("a.fs", PLASMA));
+    assert_ne!(key, key_of_a_source_with_images("a.fs", PLASMA, &[other_bytes]));
+    assert_ne!(key, key_of_a_source_with_images("a.fs", PLASMA, &[other_name]));
+    assert_ne!(
+        key_of_a_source_with_images("a.fs", PLASMA, &[first.clone(), first.clone()]),
+        key,
+        "two images are not one"
+    );
+    assert_eq!(
+        key,
+        key_of_a_source_with_images("a.fs", PLASMA, std::slice::from_ref(&first))
+    );
+    assert!(key_is_of_the_source(&key, PLASMA, std::slice::from_ref(&first)));
+    assert!(!key_is_of_the_source(&key, PLASMA, &[]));
+    assert!(!key_is_of_the_source(&key, "other text", &[first]));
+}
+
+#[test]
+fn a_descriptor_made_with_images_carries_them_in_its_shader() {
+    use crate::project::ShaderImage;
+    let images = vec![ShaderImage::new("tex", vec![7, 7, 7])];
+    let descriptor = descriptor_with_images_of(&read(PLASMA).unwrap(), "a.fs", PLASMA, images.clone());
+    assert_eq!(descriptor.shader.as_ref().unwrap().images, images);
+    assert!(key_is_of_the_source(&descriptor.key, PLASMA, &images));
+    assert!(descriptor_from("a.fs", PLASMA).shader.unwrap().images.is_empty());
+}

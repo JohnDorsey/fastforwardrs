@@ -214,9 +214,7 @@ fn an_input_that_is_not_one_number_cannot_be_used_in_a_size() {
 
 #[test]
 fn what_this_version_cannot_give_a_shader_is_told_as_the_reason_it_has_no_structure() {
-    let imported = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"IMPORTED\": { \"tex\": { \"PATH\": \"a.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
-    assert!(why_not(imported).contains("IMPORTED: tex"), "{}", why_not(imported));
-
+    // (Rewritten on purpose in phase 6.4.4: the images that a shader brings are slots of its structure now: see the test of that.)
     let mask = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"maskImage\", \"TYPE\": \"image\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage) * IMG_THIS_PIXEL(maskImage); }\n";
     assert!(why_not(mask).contains("picture called maskImage"), "{}", why_not(mask));
 
@@ -236,4 +234,37 @@ fn a_shader_that_the_engine_would_refuse_still_has_the_structure_that_says_why()
     // More passes than there may be.
     let many = vec!["{}"; 17].join(", ");
     assert!(good(&shader("", &many)).check().unwrap_err().contains("17 passes"));
+}
+
+#[test]
+fn the_images_a_shader_brings_are_the_nth_that_its_header_lists_and_come_after_the_picture_and_the_buffers() {
+    let source = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"held\" }, {} ], \"IMPORTED\": { \"noise\": { \"PATH\": \"n.png\" }, \"ramp\": { \"PATH\": \"r.png\" } } }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(noise) + IMG_THIS_PIXEL(ramp) + IMG_THIS_PIXEL(held) + IMG_THIS_PIXEL(inputImage); }\n";
+    let structure = good(source);
+    assert_eq!(
+        structure.images,
+        vec![
+            ImageSlot::Picture,
+            ImageSlot::Buffer(0),
+            ImageSlot::Imported(0),
+            ImageSlot::Imported(1)
+        ]
+    );
+    assert_eq!(structure.imported_images(), 2);
+    assert_eq!(structure.check(), Ok(()));
+    assert_eq!(
+        structure.what_each_image_reads(1),
+        vec![
+            ImageSource::Picture,
+            ImageSource::DrawnByPass(0),
+            ImageSource::Imported(0),
+            ImageSource::Imported(1)
+        ]
+    );
+}
+
+#[test]
+fn a_shader_that_brings_no_image_has_none_to_name() {
+    assert_eq!(good(VIGNETTE).imported_images(), 0);
+    assert_eq!(good(PLASMA).imported_images(), 0);
+    assert_eq!(good(BLUR).imported_images(), 0);
 }
