@@ -76,10 +76,9 @@ fn what_became_of(renderer: &mut FrameRenderer, number: usize, name: &str, text:
     let frame = last.expect("three frames were drawn");
     if std::env::var_os("FASTFORWARDRS_ISF_CORPUS_SHOW").is_some() {
         let mut distinct: Vec<[u8; 4]> = Vec::new();
-        for pixel in frame.rgba_pixels.chunks_exact(4) {
-            let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
-            if !distinct.contains(&pixel) && distinct.len() < 12 {
-                distinct.push(pixel);
+        for pixel in frame.rgba_pixels.as_chunks::<4>().0 {
+            if !distinct.contains(pixel) && distinct.len() < 12 {
+                distinct.push(*pixel);
             }
         }
         println!("     numbers {numbers:?}");
@@ -87,7 +86,7 @@ fn what_became_of(renderer: &mut FrameRenderer, number: usize, name: &str, text:
     }
     let count = (frame.rgba_pixels.len() / 4) as f64;
     let mut sums = [0.0_f64; 4];
-    for pixel in frame.rgba_pixels.chunks_exact(4) {
+    for pixel in frame.rgba_pixels.as_chunks::<4>().0 {
         for (sum, value) in sums.iter_mut().zip(pixel) {
             *sum += f64::from(*value);
         }
