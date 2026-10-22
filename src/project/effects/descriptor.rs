@@ -135,6 +135,41 @@ impl ParameterDescriptor {
     }
 }
 
+/// The language of the shader that runs an effect that is one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShaderLanguage {
+    /// Interactive Shader Format: a JSON header and the GLSL after it (see `crate::isf`).
+    Isf,
+}
+
+impl ShaderLanguage {
+    /// What a project file calls it.
+    pub fn name_in_a_file(self) -> &'static str {
+        match self {
+            Self::Isf => "isf",
+        }
+    }
+
+    /// The language that a project file calls `name`, if there is one.
+    pub fn from_name_in_a_file(name: &str) -> Option<Self> {
+        match name {
+            "isf" => Some(Self::Isf),
+            _ => None,
+        }
+    }
+}
+
+/// What runs an effect that is a shader: **the whole text of its file**, kept in the descriptor so that a project that uses the effect carries it, and runs where it was never installed
+/// (a shader is data, which no prompt is asked about: see `docs/engine-phase-6-design.md`, J3). The most that a text of one can be is [`MOST_BYTES_OF_A_SHADER`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShaderSource {
+    pub language: ShaderLanguage,
+    pub text: Cow<'static, str>,
+}
+
+/// The most bytes that the text of a shader may have.
+pub const MOST_BYTES_OF_A_SHADER: usize = 256 * 1024;
+
 /// A type of effect: what is the same about all the effects of it that there are.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectDescriptor {
@@ -158,6 +193,8 @@ pub struct EffectDescriptor {
     pub parameters: Cow<'static, [ParameterDescriptor]>,
     /// What a file said of it that this version does not know.
     pub unknown_fields: UnknownFields,
+    /// The shader that runs it, if it is one (see [`ShaderSource`]); `None` for the effects of the program and of plugins.
+    pub shader: Option<ShaderSource>,
 }
 
 impl EffectDescriptor {
@@ -175,6 +212,15 @@ impl EffectDescriptor {
         }
         if self.name.is_empty() {
             return Some(format!("the effect \"{}\" has no name", self.key));
+        }
+        if let Some(shader) = &self.shader
+            && shader.text.len() > MOST_BYTES_OF_A_SHADER
+        {
+            return Some(format!(
+                "the shader of the effect \"{}\" is {} bytes, and {MOST_BYTES_OF_A_SHADER} are the most there can be",
+                self.key,
+                shader.text.len()
+            ));
         }
         if self.parameters.len() > MOST_VALUES_OF_AN_EFFECT {
             return Some(format!(

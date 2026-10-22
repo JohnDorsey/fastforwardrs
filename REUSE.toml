@@ -24,6 +24,7 @@ path = [
     "tools/linux/*.sh",
     "tools/ci/*.sh",
     "tools/spikes/**",
+    "src/isf/fixtures/**",
     "LICENSE-PLUGIN-CLARIFICATION",
 ]
 precedence = "closest"

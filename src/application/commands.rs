@@ -251,6 +251,13 @@ pub enum Command {
         bytes: std::sync::Arc<[u8]>,
         link: crate::project::SourceMediaLink,
     },
+    /// Put a new effect on `owner` that is the ISF shader whose file is called `file_name` and has this text (it was read and compiled before: see `shader_flow`). The text is
+    /// kept in the kind of the effect, and so in the file of the project.
+    UseAShader {
+        owner: Member,
+        file_name: String,
+        text: std::sync::Arc<str>,
+    },
     /// Give a value of an effect of a clip or a track (a property of it) a value: at the playhead if it has keyframes, as for any
     /// property.
     SetEffectValue {
@@ -435,6 +442,7 @@ impl Command {
             | Self::SetEffectEnabled { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }
+            | Self::UseAShader { .. }
             | Self::SetEffectValue { .. }
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }
@@ -561,6 +569,7 @@ impl Command {
             | Self::SetEffectEnabled { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }
+            | Self::UseAShader { .. }
             | Self::SetEffectValue { .. }
             | Self::CreateGroup { .. }
             | Self::AddToGroup { .. }

@@ -690,7 +690,7 @@ impl FrameRenderer {
                                         let effect = &effects[call];
                                         match self.effects_that_run.kind_of(&effect.key) {
                                             Some(KindOfEffect::Shader) => self.uniforms.add_slot(|writer| {
-                                                write_the_numbers_of_a_call(writer, &effect.values);
+                                                write_the_numbers_of_a_call(writer, &effect.values, picture_size);
                                             }),
                                             Some(kind @ (KindOfEffect::Exposure | KindOfEffect::Opacity)) => {
                                                 let factors = gain_factors(kind, effect.values[0]);

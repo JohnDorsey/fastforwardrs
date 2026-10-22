@@ -23,6 +23,7 @@ pub fn the_descriptor_of_an_effect_the_program_does_not_have(
     values: &[(&str, PropertyValue)],
 ) -> EffectDescriptor {
     EffectDescriptor {
+        shader: None,
         key: Cow::Owned(key.to_owned()),
         version: (1, 0),
         name: Cow::Owned(key.split_once(':').map_or(key, |(_, id)| id).replace('_', " ")),

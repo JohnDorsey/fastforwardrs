@@ -84,7 +84,8 @@ impl PreviewLayer<'_> {
                 | PictureOperation::Opacity { .. }
                 | PictureOperation::Blur { .. }
                 | PictureOperation::Crop { .. }
-                | PictureOperation::Lut(_) => None,
+                | PictureOperation::Lut(_)
+                | PictureOperation::Shader { .. } => None,
             })
             .fold(ColourMatrix::NOTHING_CHANGES, ColourMatrix::then)
     }

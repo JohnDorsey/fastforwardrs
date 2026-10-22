@@ -729,3 +729,207 @@ fn two_adjustment_clips_one_over_the_other_turn_the_colours_by_both_turns() {
 
     assert_every_picture_is(&decoded, turned(ORANGE, 130.0), "turned by 60 and then by 70 degrees");
 }
+
+// --- an ISF shader (phase 6) ---
+
+/// Makes the kind of effect that the ISF file `source` called `name` is, and puts one of it on `target`.
+fn put_a_shader_on(project: &mut Project, target: AnimationTarget, name: &str, source: &str) -> EffectInstanceId {
+    let file = fastforwardrs::isf::read(source).unwrap_or_else(|problem| panic!("{problem}"));
+    let kind = EffectKind::from_snapshot(fastforwardrs::isf::descriptor_of(&file, name, source)).unwrap();
+    assert!(
+        kind.is_installed(),
+        "{:?}",
+        fastforwardrs::isf::why_not_usable(kind.descriptor())
+    );
+    project.add_effect(target, kind).unwrap()
+}
+
+const TINT_SHADER: &str = r#"/*{
+	"DESCRIPTION": "mixes the picture with a colour",
+	"INPUTS": [
+		{ "NAME": "inputImage", "TYPE": "image" },
+		{ "NAME": "tint", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0] },
+		{ "NAME": "amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 }
+	]
+}*/
+void main() {
+	vec4 c = IMG_THIS_NORM_PIXEL(inputImage);
+	gl_FragColor = vec4(mix(c.rgb, tint.rgb, amount), c.a);
+}
+"#;
+
+#[test]
+fn a_shader_that_mixes_the_picture_with_a_colour_gives_the_colour_its_arithmetic_says_in_the_codes_of_the_screen() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_shader_on(&mut project, AnimationTarget::Clip(clip), "tint.fs", TINT_SHADER);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_tint.mp4");
+
+    // Half way from orange (200, 100, 50) to red (255, 0, 0): shaders work on the codes of a screen.
+    assert_every_picture_is(&decoded, (228, 50, 25), "orange, half red");
+}
+
+#[test]
+fn the_values_of_a_shader_are_the_values_of_its_effect_and_keyframes_of_them_change_the_picture() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let target = AnimationTarget::Clip(clip);
+    let instance = put_a_shader_on(&mut project, target, "tint.fs", TINT_SHADER);
+    let kind = project.effects_of(target).unwrap().instance(instance).unwrap().kind();
+    let amount = PropertyId::effect_value(kind, instance, 1);
+    make_a_keyframe(&mut project, target, amount, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, target, amount, 59, PropertyValue::Number(1.0));
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_amount.mp4");
+
+    assert_eq!(decoded.pictures.len(), 60);
+    assert_near(
+        colour_at(&decoded.pictures[0], WIDTH / 2, HEIGHT / 2),
+        ORANGE,
+        "none of the colour at the first keyframe",
+    );
+    assert_near(
+        colour_at(&decoded.pictures[59], WIDTH / 2, HEIGHT / 2),
+        (255, 0, 0),
+        "all of it at the last",
+    );
+    let halfway = colour_at(&decoded.pictures[30], WIDTH / 2, HEIGHT / 2);
+    assert!(
+        (225..=240).contains(&halfway.0) && (35..=65).contains(&halfway.1),
+        "{halfway:?}"
+    );
+}
+
+#[test]
+fn time_in_a_shader_is_the_time_of_the_clip_and_render_size_is_the_size_of_the_picture() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    // Red that is TIME over two (a clip of 60 frames at 30 a second ends at 2 seconds), and the size of the picture in the other two, as thousandths.
+    let source = r#"/*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/
+void main() {
+	vec4 c = IMG_THIS_NORM_PIXEL(inputImage);
+	gl_FragColor = vec4(TIME / 2.0, RENDERSIZE.x / 1000.0, RENDERSIZE.y / 1000.0, 1.0) + c * 0.0;
+}
+"#;
+    put_a_shader_on(&mut project, AnimationTarget::Clip(clip), "time.fs", source);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_time.mp4");
+
+    let at = |frame: usize| colour_at(&decoded.pictures[frame], WIDTH / 2, HEIGHT / 2);
+    assert_near(at(0), (0, 82, 46), "frame 0: no time, and a picture of 320 by 180");
+    assert_near(
+        at(30),
+        (127, 82, 46),
+        "frame 30 is a second in, which is half of two seconds",
+    );
+    assert_near(at(59), (251, 82, 46), "the last frame");
+}
+
+#[test]
+fn a_shader_has_the_y_axis_of_opengl_where_up_is_the_top_of_the_picture() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    // Red where the coordinate of the shader is more than a half, which is the top of the picture; green at the left; blue where gl_FragCoord is in the upper half.
+    let source = r#"/*{ "INPUTS": [ { "NAME": "inputImage", "TYPE": "image" } ] }*/
+void main() {
+	vec4 c = IMG_THIS_NORM_PIXEL(inputImage);
+	float top = isf_FragNormCoord.y > 0.5 ? 1.0 : 0.0;
+	float left = gl_FragCoord.x < RENDERSIZE.x * 0.5 ? 1.0 : 0.0;
+	float high = gl_FragCoord.y > RENDERSIZE.y * 0.5 ? 1.0 : 0.0;
+	gl_FragColor = vec4(top, left, high, 1.0) + c * 0.0;
+}
+"#;
+    put_a_shader_on(&mut project, AnimationTarget::Clip(clip), "axes.fs", source);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "shader_axes.mp4");
+
+    let picture = &decoded.pictures[10];
+    assert_near(
+        colour_at(picture, WIDTH / 4, HEIGHT / 4),
+        (255, 255, 255),
+        "top left: up, left, high",
+    );
+    assert_near(
+        colour_at(picture, WIDTH * 3 / 4, HEIGHT / 4),
+        (255, 0, 255),
+        "top right: up, not left, high",
+    );
+    assert_near(
+        colour_at(picture, WIDTH / 4, HEIGHT * 3 / 4),
+        (0, 255, 0),
+        "bottom left: down, left, low",
+    );
+    assert_near(
+        colour_at(picture, WIDTH * 3 / 4, HEIGHT * 3 / 4),
+        (0, 0, 0),
+        "bottom right",
+    );
+}
+
+#[test]
+fn a_shader_that_gives_the_picture_back_gives_it_back_the_way_up_it_went_in() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    // A text object in front, so that the picture is not flat.
+    let front = project.add_track_in_front();
+    let (text, _) = project
+        .insert_text(front, TimelineFrameIndex::new(0), TextObject::default(), 60)
+        .unwrap();
+    let pass_through = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_NORM_PIXEL(inputImage); }\n";
+    let without = exported(&toolchain, &project, scratch.path(), "text_alone.mp4");
+    put_a_shader_on(&mut project, AnimationTarget::Clip(text), "pass.fs", pass_through);
+    let with = exported(&toolchain, &project, scratch.path(), "text_through_a_shader.mp4");
+
+    assert_eq!(with.pictures.len(), without.pictures.len());
+    let difference = |first: &[u8], second: &[u8]| {
+        first
+            .iter()
+            .zip(second)
+            .map(|(one, other)| i32::from(*one).abs_diff(i32::from(*other)))
+            .max()
+            .unwrap_or(0)
+    };
+    let worst = (0..with.pictures.len())
+        .map(|frame| difference(&with.pictures[frame], &without.pictures[frame]))
+        .max()
+        .unwrap();
+    assert!(
+        worst <= 6,
+        "a shader that gives the picture back changes it by {worst} of 255 at the most"
+    );
+}
+
+#[test]
+fn a_project_that_is_saved_and_read_again_carries_the_shader_and_exports_the_same() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, clip) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_shader_on(&mut project, AnimationTarget::Clip(clip), "tint.fs", TINT_SHADER);
+    let before = exported(&toolchain, &project, scratch.path(), "before_saving.mp4");
+
+    let text = fastforwardrs::project_file::project_to_json_text(&project, scratch.path()).unwrap();
+    assert!(
+        text.contains("\"shader\"") && text.contains("\"language\": \"isf\""),
+        "the file carries the shader"
+    );
+    let loaded = fastforwardrs::project_file::project_from_json_text(&text).unwrap();
+    let kind = loaded.tracks()[0]
+        .placement_at_index(0)
+        .unwrap()
+        .effects
+        .iter()
+        .next()
+        .unwrap()
+        .kind();
+    assert_eq!(kind.shader_source().unwrap().text, TINT_SHADER);
+    assert!(kind.is_installed());
+    let after = exported(&toolchain, &loaded, scratch.path(), "after_loading.mp4");
+
+    assert_eq!(before.pictures, after.pictures);
+}

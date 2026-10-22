@@ -47,6 +47,7 @@ pub const LUT_KEY: &str = "builtin:lut";
 
 /// The hue shift: the hues of the colours of the picture are turned round the wheel of colours, as far as its one value says.
 pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(HUE_SHIFT_KEY),
     version: (1, 1),
     name: Cow::Borrowed("hue shift"),
@@ -73,6 +74,7 @@ pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
 
 /// Makes the colours more or less colourful.
 pub(super) static SATURATION: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(SATURATION_KEY),
     version: (1, 0),
     name: Cow::Borrowed("saturation"),
@@ -98,6 +100,7 @@ pub(super) static SATURATION: EffectDescriptor = EffectDescriptor {
 
 /// Makes the picture lighter or darker, and its lights and darks further apart or nearer together.
 pub(super) static BRIGHTNESS_AND_CONTRAST: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(BRIGHTNESS_AND_CONTRAST_KEY),
     version: (1, 0),
     name: Cow::Borrowed("brightness and contrast"),
@@ -140,6 +143,7 @@ pub(super) static BRIGHTNESS_AND_CONTRAST: EffectDescriptor = EffectDescriptor {
 
 /// Makes the light of the picture brighter or darker as the exposure of a camera does.
 pub(super) static EXPOSURE: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(EXPOSURE_KEY),
     version: (1, 0),
     name: Cow::Borrowed("exposure"),
@@ -167,6 +171,7 @@ pub(super) static EXPOSURE: EffectDescriptor = EffectDescriptor {
 
 /// Makes the picture more or less see-through.
 pub(super) static OPACITY: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(OPACITY_KEY),
     version: (1, 0),
     name: Cow::Borrowed("opacity"),
@@ -196,6 +201,7 @@ const NEAR_ENOUGH_TO_CHANGE_NOTHING: f32 = 1.0 / 256.0 / 100.0;
 
 /// Softens the picture with a Gaussian blur.
 pub(super) static BLUR: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(BLUR_KEY),
     version: (1, 0),
     name: Cow::Borrowed("blur"),
@@ -223,6 +229,7 @@ pub(super) static BLUR: EffectDescriptor = EffectDescriptor {
 
 /// Cuts the edges off the picture, with a soft edge if wanted.
 pub(super) static CROP: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(CROP_KEY),
     version: (1, 0),
     name: Cow::Borrowed("crop"),
@@ -361,6 +368,7 @@ static OPTIONS_OF_THE_WAY_TO_LOOK_UP: [ChoiceOption; 2] = [
 
 /// Looks the colours of the picture up in a table (a `.cube` file).
 pub(super) static LUT: EffectDescriptor = EffectDescriptor {
+    shader: None,
     key: Cow::Borrowed(LUT_KEY),
     version: (1, 0),
     name: Cow::Borrowed("look-up table"),
@@ -471,6 +479,9 @@ pub enum PictureOperation {
         bottom: f32,
         feather: f32,
     },
+    /// A shader (an ISF file) is run with these numbers: the four of the shader itself (`TIME`, `TIMEDELTA`, `FRAMEINDEX`, `PASSINDEX`) and then those of its inputs (see
+    /// `crate::isf::numbers_of_the_values`). The engine gives it the size of the picture. What it does is not known, so it is never an operation that changes nothing.
+    Shader { key: String, numbers: Vec<f32> },
 }
 
 impl PictureOperation {
@@ -482,6 +493,7 @@ impl PictureOperation {
             Self::Exposure { stops } => (stops.exp2() - 1.0).abs() < NEAR_ENOUGH_TO_CHANGE_NOTHING,
             Self::Opacity { opacity } => 1.0 - opacity < NEAR_ENOUGH_TO_CHANGE_NOTHING,
             Self::Lut(look) => look.intensity < NEAR_ENOUGH_TO_CHANGE_NOTHING,
+            Self::Shader { .. } => false,
             Self::Blur { radius } => *radius < MOST_THAT_A_BLUR_CAN_BE_AND_CHANGE_NOTHING,
             Self::Crop {
                 left,

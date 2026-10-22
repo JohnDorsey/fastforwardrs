@@ -894,3 +894,61 @@ fn a_stop_in_a_batch_of_the_export_stops_the_engine_without_waiting_for_the_fram
         assert!(worker.on_their_way.is_empty());
     });
 }
+
+#[test]
+fn an_effect_whose_shader_is_on_the_shelf_is_run_when_a_frame_asks_for_it_without_the_engine_being_given_it() {
+    let Some(_graphics) = software_graphics() else { return };
+    let (mut engine, _) = software_engine_with(software_settings());
+    crate::engine::publish_effect_shader("test:from_the_shelf", &effect_source(INVERT));
+    engine.upload_picture(PictureId(1), Arc::new(picture_1().as_picture_data()));
+
+    let (frame, statistics) = the_engine_makes_the_frame(
+        &mut engine,
+        description_of_picture_1(vec![call("test:from_the_shelf", &[1.0])]),
+    );
+
+    assert_eq!(statistics.effects_not_run, 0, "the effect was run");
+    assert!(is_within(&frame, &inverted(&picture_1(), 1.0), 1));
+
+    // A key that is not on the shelf is an effect that the engine does not have, as it was.
+    let (_, statistics) = the_engine_makes_the_frame(
+        &mut engine,
+        description_of_picture_1(vec![call("test:nowhere", &[1.0])]),
+    );
+    assert_eq!(statistics.effects_not_run, 1);
+    // And one that is put on the shelf later is run from then on.
+    crate::engine::publish_effect_shader("test:nowhere", &effect_source(INVERT));
+    let (_, statistics) = the_engine_makes_the_frame(
+        &mut engine,
+        description_of_picture_1(vec![call("test:nowhere", &[1.0])]),
+    );
+    assert_eq!(statistics.effects_not_run, 0);
+}
+
+#[test]
+fn a_shader_on_the_shelf_that_the_guard_refuses_is_a_frame_made_without_the_effect_and_not_a_stop() {
+    let Some(_graphics) = software_graphics() else { return };
+    let (mut engine, _) = software_engine_with(software_settings());
+    crate::engine::publish_effect_shader("test:shelf_typo", "this is not WGSL");
+    engine.upload_picture(PictureId(1), Arc::new(picture_1().as_picture_data()));
+
+    // (The numbers differ, so that the second frame is not the first again, which the engine would give from its cache.)
+    for number in [1.0, 2.0] {
+        let (frame, statistics) = the_engine_makes_the_frame(
+            &mut engine,
+            description_of_picture_1(vec![call("test:shelf_typo", &[number])]),
+        );
+        assert_eq!(statistics.effects_not_run, 1);
+        assert!(is_within(&frame, &picture_1().rgba, 1), "the picture as it was");
+    }
+}
+
+#[test]
+fn the_shelf_gives_back_what_was_put_on_it_and_a_second_shader_under_a_key_replaces_the_first() {
+    use crate::engine::{publish_effect_shader, published_effect_shader};
+    assert!(published_effect_shader("test:shelf_nothing").is_none());
+    publish_effect_shader("test:shelf_replaced", "first");
+    assert_eq!(&*published_effect_shader("test:shelf_replaced").unwrap(), "first");
+    publish_effect_shader("test:shelf_replaced", "second");
+    assert_eq!(&*published_effect_shader("test:shelf_replaced").unwrap(), "second");
+}

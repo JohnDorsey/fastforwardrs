@@ -194,6 +194,7 @@ pub fn effect_of_a_plugin(library: &Path, plugin: &ScannedPlugin) -> Result<Inst
         value_ports.push(number as u32);
     }
     let descriptor = EffectDescriptor {
+        shader: None,
         key: Cow::Owned(key_of(library, &description.label)),
         version: (1, 0),
         name: Cow::Owned(if description.name.trim().is_empty() {
@@ -426,6 +427,7 @@ pub fn effect_of_a_clap_plugin(
         about.push_str(". It keeps settings that only its own window can change, which cannot be shown here");
     }
     let descriptor = EffectDescriptor {
+        shader: None,
         key: Cow::Owned(key_of_a_clap_plugin(&description.id)),
         version: (1, 0),
         name: Cow::Owned(description.name.trim().to_lowercase()),

@@ -965,10 +965,13 @@ fn an_effect_the_program_does_not_have_has_a_box_with_its_name_a_note_that_it_do
         Some(0.5),
         "a number has a slider, with the label the effect gives it"
     );
-    assert!(
-        is_shown(&window, "Point: 0.5, 0.25"),
-        "a pair, which has no control yet, is said"
+    // (Rewritten on purpose in phase 6: a pair has two boxes to drag in now, which a shader's point needs, and not a line that says what it is.)
+    assert_eq!(
+        window.harness.query_all_by_label("Point").count(),
+        2,
+        "a pair has a box for across and one for down, with the label the effect gives it"
     );
+    assert!(!is_shown(&window, "Point: 0.5, 0.25"));
     // (Rewritten on purpose in phase 4: a flag has a switch now, made from what the effect says of the value, and not a line that says what it is.)
     assert_eq!(
         window.harness.get_by_label("On").accesskit_node().toggled(),
@@ -1103,15 +1106,21 @@ fn a_value_that_is_not_a_number_has_no_stopwatch_and_a_number_that_has_a_unit_sh
         1,
         "a number has the stopwatch"
     );
-    let middle_of_the_pair = window.rectangle_of("Point: 0.5, 0.25").center();
+    // (Rewritten on purpose in phase 6: a pair has boxes to drag in now, and so has the stopwatch, as the position of a clip has; a flag has none.)
+    let middle_of_the_pair = window.rectangle_of_the_nth("Point", 0).center();
     window.move_pointer_to(middle_of_the_pair);
-    for (name, what) in [("point", "a pair"), ("on", "a flag")] {
-        assert_eq!(
-            window.how_many_are_called(&keyframe_button_label(name, KeyframeButton::Stopwatch, false)),
-            0,
-            "{what} has none, as it has no control that changes it"
-        );
-    }
+    assert_eq!(
+        window.how_many_are_called(&keyframe_button_label("point", KeyframeButton::Stopwatch, false)),
+        1,
+        "a pair has the stopwatch"
+    );
+    let middle_of_the_flag = window.rectangle_of("On").center();
+    window.move_pointer_to(middle_of_the_flag);
+    assert_eq!(
+        window.how_many_are_called(&keyframe_button_label("on", KeyframeButton::Stopwatch, false)),
+        0,
+        "a flag has none, as it holds until the next keyframe"
+    );
 
     let (window, _) = window_with_the_video_selected();
     let mut window = window;

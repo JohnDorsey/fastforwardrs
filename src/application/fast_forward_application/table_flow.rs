@@ -50,9 +50,43 @@ impl FastForwardApplication {
         }
     }
 
-    /// Asks for a table of colours, and puts a new look-up table effect with it on `owner`.
+    /// Asks for a file, and puts a new effect made from it on `owner`: a look-up table effect if it is a table of colours (`.cube`), and otherwise the effect that an ISF shader is
+    /// (see `shader_flow`).
     pub(super) fn add_an_effect_from_a_file(&mut self, owner: Member, now: Instant, context: &Context) {
-        self.use_a_table_from_a_file(owner, None, now, context);
+        self.pause_playback_for_dialog();
+        let Some(path) = self.environment.file_chooser.choose_a_file_to_open(&FileQuestion {
+            title: "Choose a file for an effect",
+            suggested_file_name: None,
+            starting_directory: None,
+            kinds: &[
+                FileKind {
+                    name: "Tables of colours and shaders (.cube, .fs, .isf)",
+                    extensions: &["cube", "fs", "isf"],
+                },
+                FileKind {
+                    name: "Tables of colours (.cube)",
+                    extensions: &["cube"],
+                },
+                FileKind {
+                    name: "Shaders (.fs, .isf)",
+                    extensions: &["fs", "isf"],
+                },
+                FileKind {
+                    name: "All files",
+                    extensions: &["*"],
+                },
+            ],
+        }) else {
+            return;
+        };
+        let is_a_table = path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("cube"));
+        if is_a_table {
+            self.use_the_table_in(&path, owner, None, now, context);
+        } else {
+            self.use_the_shader_in(&path, owner, now, context);
+        }
     }
 
     /// Asks for a table of colours, and gives the look-up table effect `instance` of `owner` that table.

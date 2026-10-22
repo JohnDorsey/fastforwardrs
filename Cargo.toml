@@ -38,7 +38,8 @@ crc32fast = "1.5"
 # eframe's (the lock file has them already), and its shader front end to check and limit the shaders it is given. `pollster` waits for what wgpu
 # does in the background (the window's own renderer needs it too).
 wgpu = "30.0.1"
-naga = { version = "30.0.1", features = ["wgsl-in", "wgsl-out"] }
+# (`glsl-in` is the front end that reads the GLSL of ISF shaders (src/isf); it brings `pp-rs`, BSD-3-Clause, with it.)
+naga = { version = "30.0.1", features = ["wgsl-in", "wgsl-out", "glsl-in"] }
 pollster = "0.4.0"
 sha2 = "0.11.1"
 # Loads LADSPA plugins (the only crate with `unsafe` code in it; the scan of a plugin library is done by a program of its own, so that a library that crashes does not

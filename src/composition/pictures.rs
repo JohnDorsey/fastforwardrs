@@ -59,9 +59,40 @@ pub enum LayerContent {
     Adjustment,
 }
 
+/// The clock that an effect that is a shader (`TIME`, `FRAMEINDEX`) reads: **never the wall clock**, but the frames since the thing the effect is on began (a clip's first frame; for a
+/// track, a tag or a group, the first frame of the timeline), at the frame rate of the project (PH-12).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectClock {
+    pub first_frame: u64,
+    pub frames_per_second: f64,
+}
+
+impl Default for EffectClock {
+    fn default() -> Self {
+        Self {
+            first_frame: 0,
+            frames_per_second: 30.0,
+        }
+    }
+}
+
+impl EffectClock {
+    /// How many frames of the project there are since the clock began, at `timeline_frame` (none before it).
+    pub fn frames_at(self, timeline_frame: u64) -> u64 {
+        timeline_frame.saturating_sub(self.first_frame)
+    }
+
+    /// How many seconds there are since the clock began, at `timeline_frame`.
+    pub fn seconds_at(self, timeline_frame: u64) -> f64 {
+        self.frames_at(timeline_frame) as f64 / self.frames_per_second
+    }
+}
+
 /// An effect that is on a layer: one that its clip has, or that its track has, with what its values are and the keyframes of them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerEffect {
+    /// What `TIME` and `FRAMEINDEX` are for it, if it is a shader (see [`EffectClock`]).
+    pub clock: EffectClock,
     /// Which effect of the chain of its clip or its track it is, which its values are named by.
     pub instance: EffectInstanceId,
     pub kind: EffectKind,
@@ -219,11 +250,29 @@ pub(crate) fn effects_keep_the_opacity(effects: &[LayerEffect]) -> bool {
 pub fn operations_of_effects(effects: &[LayerEffect], timeline_frame: TimelineFrameIndex) -> Vec<PictureOperation> {
     let mut operations: Vec<PictureOperation> = Vec::new();
     for effect in effects {
-        let Some(next) = effect
-            .kind
-            .picture_operation_with_tables(&effect.values_at(timeline_frame.value()), &effect.tables)
-        else {
-            continue;
+        let values = effect.values_at(timeline_frame.value());
+        let next = if effect.kind.shader_source().is_some() {
+            // (A shader that cannot be run is an effect that does nothing, as an effect that the program does not have does.)
+            if !effect.kind.is_installed() {
+                continue;
+            }
+            let clock = effect.clock;
+            let mut numbers = vec![
+                clock.seconds_at(timeline_frame.value()) as f32,
+                (1.0 / clock.frames_per_second) as f32,
+                clock.frames_at(timeline_frame.value()) as f32,
+                0.0,
+            ];
+            numbers.extend(crate::isf::numbers_of_the_values(&values));
+            PictureOperation::Shader {
+                key: effect.kind.key().to_owned(),
+                numbers,
+            }
+        } else {
+            let Some(next) = effect.kind.picture_operation_with_tables(&values, &effect.tables) else {
+                continue;
+            };
+            next
         };
         if next.changes_nothing() {
             continue;
@@ -432,6 +481,15 @@ pub(crate) fn layer_effect_of(
             .restricted_to(|property| applied.effect.value_of(property).is_some())
     });
     LayerEffect {
+        clock: EffectClock {
+            first_frame: match applied.owner {
+                Member::Clip(clip) => project
+                    .placement_of(clip)
+                    .map_or(0, |placement| placement.first_timeline_frame.value()),
+                Member::Track(_) | Member::Group(_) => 0,
+            },
+            frames_per_second: project.frame_rate().frames_per_second(),
+        },
         instance: applied.effect.instance(),
         kind,
         values: applied.effect.values().to_vec(),
@@ -734,5 +792,7 @@ mod effects_tests;
 mod group_effects_tests;
 #[cfg(test)]
 mod operations_tests;
+#[cfg(test)]
+mod shader_tests;
 #[cfg(test)]
 mod tests;

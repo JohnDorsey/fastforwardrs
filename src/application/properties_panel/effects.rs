@@ -260,8 +260,12 @@ pub(super) fn show_the_control_of(
     else {
         return;
     };
-    // (A value that is not a number is not animated by the stopwatch: it has no buttons of keyframes, and holds until it is changed.)
-    if !matches!(shown, PropertyValue::Number(_)) {
+    // (What changes evenly between two keyframes, a number, a pair and a colour, is animated by the stopwatch. A switch and a choice are not: they have no buttons of keyframes,
+    // and hold until they are changed.)
+    if !matches!(
+        shown,
+        PropertyValue::Number(_) | PropertyValue::Pair(..) | PropertyValue::Colour(_)
+    ) {
         if let Some(change) = labelled_row(ui, |ui| control_for(ui, content.project, kind, property, &shown))
             && let Some(command) = command_for(member_of(target), property, change)
         {
@@ -303,8 +307,8 @@ pub(super) fn show_the_control_of_a_group_effect(
 
 /// The control that changes the value of an effect that `property` is, which shows `shown`: what it asks for if it was changed. A property that is not a value of an
 /// effect has none. **What the control looks like is what the effect says of its value** (its label, its control, the range it shows, what it is in): a number has a slider,
-/// or a box to drag in if it has no range; a choice is a list; a flag is a switch; a table is a button that chooses a file, with the name of the table and what is wrong
-/// with it if anything is.
+/// or a box to drag in if it has no range; a choice is a list; a flag is a switch; a colour is a colour button; a pair is two boxes to drag in; a table is a button that chooses a file,
+/// with the name of the table and what is wrong with it if anything is.
 fn control_for(
     ui: &mut Ui,
     project: &Project,
@@ -404,6 +408,32 @@ fn control_for(
                 }
             };
             changed.then_some(Change::Value(PropertyValue::Number(number)))
+        }
+        (_, PropertyValue::Colour(colour)) => {
+            let label = ui.label(&*parameter.label);
+            let mut rgba = [colour.red, colour.green, colour.blue, colour.alpha];
+            let changed = ui
+                .color_edit_button_srgba_unmultiplied(&mut rgba)
+                .labelled_by(label.id)
+                .changed();
+            changed.then(|| {
+                Change::Value(PropertyValue::Colour(crate::project::TextColour::new(
+                    rgba[0], rgba[1], rgba[2], rgba[3],
+                )))
+            })
+        }
+        (_, PropertyValue::Pair(across, down)) => {
+            let label = ui.label(&*parameter.label);
+            let (mut across, mut down) = (*across, *down);
+            let first = ui
+                .add(DragValue::new(&mut across).speed(1.0).suffix(&*parameter.unit))
+                .labelled_by(label.id)
+                .changed();
+            let second = ui
+                .add(DragValue::new(&mut down).speed(1.0).suffix(&*parameter.unit))
+                .labelled_by(label.id)
+                .changed();
+            (first || second).then_some(Change::Value(PropertyValue::Pair(across, down)))
         }
         _ => {
             ui.label(format!("{}: {}", parameter.label, what_a_value_says(shown)));

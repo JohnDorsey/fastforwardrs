@@ -81,6 +81,7 @@ fn a_layer_has_the_effects_of_its_clip_with_the_values_they_have_when_they_are_n
     assert_eq!(
         layer.effects,
         vec![LayerEffect {
+            clock: Default::default(),
             instance: crate::project::EffectInstanceId::FIRST,
             kind: EffectKind::HUE_SHIFT,
             values: vec![turn(90.0)],
@@ -498,6 +499,7 @@ fn what_an_effect_with_several_values_has_at_a_frame_is_what_the_keyframes_of_ea
     assert!(animation.set_keyframe(third, 10, turn(30.0)));
     assert!(animation.set_keyframe(third, 20, turn(50.0)));
     let effect = LayerEffect {
+        clock: Default::default(),
         instance,
         kind,
         values: vec![turn(1.0), turn(2.0), turn(3.0)],

@@ -49,9 +49,10 @@ pub use animation::{
 pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
     Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, InstalledPlugin, LutOperation, LutSpace,
+    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, InstalledPlugin, LutOperation, LutSpace, MOST_BYTES_OF_A_SHADER,
     MOST_EFFECTS_ON_ONE_THING, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor, PictureOperation,
-    PluginAddress, UnknownFields, ValueScale, installed_plugin_for, installed_plugins, set_installed_plugins,
+    PluginAddress, ShaderLanguage, ShaderSource, UnknownFields, ValueScale, installed_plugin_for, installed_plugins,
+    set_installed_plugins,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};

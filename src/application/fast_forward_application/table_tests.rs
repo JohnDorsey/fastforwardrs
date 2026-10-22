@@ -84,8 +84,16 @@ fn adding_an_effect_from_a_file_asks_for_a_cube_file_and_puts_a_look_up_table_wi
     let asked = chooser.questions_asked();
     assert_eq!(asked.len(), 1);
     assert!(!asked[0].saving);
+    // (Rewritten on purpose in phase 6: the first kind of file offered is the tables of colours and the shaders, and the tables alone are the second.)
     assert_eq!(
         asked[0].kinds[0],
+        (
+            "Tables of colours and shaders (.cube, .fs, .isf)".to_owned(),
+            vec!["cube".to_owned(), "fs".to_owned(), "isf".to_owned()]
+        )
+    );
+    assert_eq!(
+        asked[0].kinds[1],
         ("Tables of colours (.cube)".to_owned(), vec!["cube".to_owned()])
     );
     let effects = the_effects_of(&window, clip);

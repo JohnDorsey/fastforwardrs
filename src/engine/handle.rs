@@ -7,9 +7,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::effect_shaders::check_that_it_is_an_effect;
+use super::effect_shaders::{check_that_it_is_an_effect, published_effect_shader};
 use super::guard::{ShaderProblem, guard_wgsl};
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::worker;
@@ -34,6 +35,8 @@ pub struct Engine {
     thread: Option<JoinHandle<()>>,
     next_serial: u64,
     most_passes_of_a_loop: u32,
+    /// The keys of the effects that were taken off the shelf and given to the engine (see [`super::publish_effect_shader`]), so that each is only given once.
+    taken_off_the_shelf: HashSet<String>,
 }
 
 impl Engine {
@@ -53,6 +56,7 @@ impl Engine {
             thread: Some(thread),
             next_serial: 1,
             most_passes_of_a_loop,
+            taken_off_the_shelf: HashSet::new(),
         }
     }
 
@@ -89,6 +93,22 @@ impl Engine {
         Ok(report)
     }
 
+    /// Gives the engine the shaders that the effects of `description` need and that are on the shelf (see [`super::publish_effect_shader`]) and that it was not given yet.
+    /// (One that the guard refuses is not given again: the same text is refused every time.)
+    fn give_the_engine_the_shaders_the_frame_asks_for(&mut self, description: &FrameDescription) {
+        for layer in &description.flatten().layers {
+            for effect in &layer.layer.effects {
+                if effect.key.starts_with("engine:") || self.taken_off_the_shelf.contains(&effect.key) {
+                    continue;
+                }
+                if let Some(source) = published_effect_shader(&effect.key) {
+                    let _ = self.compile_effect_shader(&effect.key, &source);
+                    self.taken_off_the_shelf.insert(effect.key.clone());
+                }
+            }
+        }
+    }
+
     /// Sends a picture, which frames can then refer to by `id`. The bytes are not copied.
     pub fn upload_picture(&self, id: PictureId, data: Arc<PictureData>) {
         let _ = self.requests.send(EngineRequest::Upload { id, data });
@@ -101,6 +121,7 @@ impl Engine {
 
     /// Asks for a frame, and gives the serial number that its [`EngineEvent::Frame`] will have. Serial numbers go up by one for each request.
     pub fn request_frame(&mut self, description: FrameDescription) -> u64 {
+        self.give_the_engine_the_shaders_the_frame_asks_for(&description);
         let serial = self.next_serial;
         self.next_serial += 1;
         // (If the engine has stopped, nobody is listening, and the window will have been told so by a `Stopped` event.)
@@ -111,6 +132,7 @@ impl Engine {
     /// Asks for a frame of the export, as planes made the way `colour` says, and gives the serial number that its [`EngineEvent::ExportFrame`] will have. Unlike
     /// [`Self::request_frame`] **every one of these is made, in the order it was asked in**.
     pub fn request_export_frame(&mut self, description: FrameDescription, colour: YuvColour) -> u64 {
+        self.give_the_engine_the_shaders_the_frame_asks_for(&description);
         let serial = self.next_serial;
         self.next_serial += 1;
         let _ = self.requests.send(EngineRequest::RenderForExport {
@@ -148,6 +170,7 @@ impl Engine {
             thread: None,
             next_serial: 1,
             most_passes_of_a_loop: super::DEFAULT_MOST_PASSES_OF_A_LOOP,
+            taken_off_the_shelf: HashSet::new(),
         };
         (engine, event_sender, request_receiver)
     }

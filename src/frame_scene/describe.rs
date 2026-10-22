@@ -453,6 +453,11 @@ fn call_of_an_operation(operation: &PictureOperation) -> Option<EffectCall> {
             },
         ),
         PictureOperation::Blur { radius } => EffectCall::blur(*radius),
+        PictureOperation::Shader { key, numbers } => EffectCall {
+            key: key.clone(),
+            values: numbers.clone(),
+            table: None,
+        },
         PictureOperation::Crop {
             left,
             top,

@@ -36,6 +36,7 @@ fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version_and_the_o
     // (Rewritten on purpose in phase 4: the descriptor has a category and a way of showing each value now, so that the + menu can list the effect and the panel can make its
     // control. That is a change of the descriptor, so it is version 1.1, and this says what is the same: everything that the first version said.)
     let first_version = EffectDescriptor {
+        shader: None,
         key: Cow::Borrowed("builtin:hue_shift"),
         version: (1, 0),
         name: Cow::Borrowed("hue shift"),
@@ -58,6 +59,7 @@ fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version_and_the_o
         category: Cow::Borrowed("Colour"),
     };
     let first_version = EffectDescriptor {
+        shader: None,
         version: (1, 1),
         ..first_version
     };

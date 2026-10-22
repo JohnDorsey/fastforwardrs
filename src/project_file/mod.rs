@@ -115,8 +115,9 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// `resources.rs`. A file of version 12 has none; and a setting for how they are kept, `resource_storage`, that a project may have set for itself. Version 14 added the
 /// `plugin_libraries` of the project (the libraries of native code that its sound effects come from, linked or with their builds inside the archive): see `plugin_libraries.rs`. A file
 /// of version 13 has none. Version 15 added the adjustment clip (`"kind": "adjustment"`): a clip with no picture of its own whose effects are done to everything behind it. A file of
-/// version 14 has none.
-pub const FILE_FORMAT_VERSION: u32 = 15;
+/// version 14 has none. Version 16 added the `shader` of a snapshot of an effect (`plugins`): the language (`isf`) and the whole text of a shader that runs the effect, so that a project
+/// carries what it uses. A file of version 15 has none.
+pub const FILE_FORMAT_VERSION: u32 = 16;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1310,5 +1311,7 @@ mod plugin_libraries_tests;
 mod plugins_tests;
 #[cfg(test)]
 mod resources_tests;
+#[cfg(test)]
+mod shader_tests;
 #[cfg(test)]
 mod tests;

@@ -33,8 +33,8 @@ mod kind;
 
 pub use built_in::{HUE_SHIFT_KEY, LutOperation, LutSpace, PictureOperation};
 pub use descriptor::{
-    ChoiceOption, EffectDescriptor, EffectDomain, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
-    UnknownFields, ValueScale,
+    ChoiceOption, EffectDescriptor, EffectDomain, MOST_BYTES_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT, ParameterControl,
+    ParameterDescriptor, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
 };
 pub use installed::{InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, set_installed_plugins};
 pub use kind::EffectKind;

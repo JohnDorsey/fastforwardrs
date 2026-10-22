@@ -134,6 +134,9 @@ mod selection_tests;
 mod settings_flow;
 #[cfg(test)]
 mod settings_tests;
+mod shader_flow;
+#[cfg(test)]
+mod shader_tests;
 #[cfg(test)]
 mod sound_plugin_bundles_tests;
 #[cfg(test)]

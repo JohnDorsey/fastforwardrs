@@ -14,17 +14,44 @@
 //!   pixels, from the top left) and gives `@location(0) vec4<f32>`: the new colour of the pixel, **premultiplied** (its red, green and blue are already
 //!   multiplied by its opacity). The vertex stage is the engine's own (`shaders/full_screen_triangle.wgsl`): one triangle that covers the picture. It is run
 //!   on a picture the size of the layer's own picture, before the layer is put in its place.
-//! * It may use these three resources, and no others, all in `@group(0)`: `@binding(0)` a `var<uniform>` of at most [`FOREIGN_EFFECT_UNIFORM_BYTES`] bytes
-//!   that holds the numbers of the call, one `f32` after another from the first byte, and zeros after them; `@binding(1)` a `texture_2d<f32>`, the picture
+//! * It may use these three resources, and no others, all in `@group(0)`: `@binding(0)` a `var<uniform>` of [`FOREIGN_EFFECT_UNIFORM_BYTES`] bytes
+//!   that holds the numbers of the call, one `f32` after another from the first byte, zeros after them up to the [`MOST_NUMBERS_OF_A_FOREIGN_EFFECT`], and then
+//!   [`NUMBERS_THE_ENGINE_ADDS`] of the engine's own: **the width and the height, in pixels, of the picture the effect works on**, and two zeros (phase 6: an ISF shader's `RENDERSIZE`); `@binding(1)` a `texture_2d<f32>`, the picture
 //!   the effect works on (premultiplied, half-float); `@binding(2)` a filtering `sampler` that smooths between the pixels of the picture and uses
 //!   the pixel at the edge for what is beyond it.
 //! * A call gives it at most [`MOST_NUMBERS_OF_A_FOREIGN_EFFECT`] numbers, all of them finite; a call that gives more, or one that is not a number, is not run (and is
 //!   counted, as an effect the engine has not got is).
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
+
 use super::guard::GuardedShader;
 use super::pipelines::{ACCUMULATION_FORMAT, pipeline_of_two_modules, shader_module};
 use super::shaders;
 use super::uniform_bytes::SlotWriter;
+
+/// The shaders that were put on the shelf (see [`publish_effect_shader`]), by the key of the effect they run.
+static SHELF: Mutex<Option<HashMap<String, Arc<str>>>> = Mutex::new(None);
+
+/// Puts the WGSL `source` of the effect under `key` on the shelf, for **the engine to take when a frame asks for the effect**: whoever describes a frame does not need a
+/// handle of the engine to give it the shader (phase 6: the host of ISF shaders makes the WGSL and publishes it; the window's engine and the export's engine each take what they
+/// are asked for). A key that is on the shelf already has its shader replaced.
+pub fn publish_effect_shader(key: &str, source: &str) {
+    SHELF
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(key.to_owned(), Arc::from(source));
+}
+
+/// The shader that is on the shelf for the effect under `key`, if there is one.
+pub fn published_effect_shader(key: &str) -> Option<Arc<str>> {
+    SHELF
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(|shelf| shelf.get(key).cloned())
+}
 
 /// The name of the fragment entry point every effect shader has.
 pub const FOREIGN_EFFECT_ENTRY_POINT: &str = "fs_main";
@@ -32,9 +59,13 @@ pub const FOREIGN_EFFECT_ENTRY_POINT: &str = "fs_main";
 /// How many numbers a call of an effect that others wrote can give its shader.
 pub const MOST_NUMBERS_OF_A_FOREIGN_EFFECT: usize = 64;
 
-/// How many bytes of uniforms a pass of such an effect is given: room for the most numbers there can be. (A shader that wants more is refused when the
-/// graphics library is given it.)
-pub const FOREIGN_EFFECT_UNIFORM_BYTES: u64 = (MOST_NUMBERS_OF_A_FOREIGN_EFFECT * std::mem::size_of::<f32>()) as u64;
+/// How many numbers the engine puts after the ones of a call: the width and the height of the picture the effect works on, in pixels, and two zeros.
+pub const NUMBERS_THE_ENGINE_ADDS: usize = 4;
+
+/// How many bytes of uniforms a pass of such an effect is given: room for the most numbers there can be and the ones the engine adds. (A shader that wants more is
+/// refused when the graphics library is given it.)
+pub const FOREIGN_EFFECT_UNIFORM_BYTES: u64 =
+    ((MOST_NUMBERS_OF_A_FOREIGN_EFFECT + NUMBERS_THE_ENGINE_ADDS) * std::mem::size_of::<f32>()) as u64;
 
 /// What the pipelines of all the effects that others wrote are made from: the same bindings, the same vertex stage, the same sampler.
 pub struct ForeignEffectPass {
@@ -140,14 +171,19 @@ pub fn check_that_it_is_an_effect(shader: &GuardedShader) -> Result<(), String> 
     }
 }
 
-/// Writes the numbers of a call as the shader reads them: one `f32` after another, and zeros to fill the room a pass is given.
-pub fn write_the_numbers_of_a_call(writer: &mut SlotWriter, values: &[f32]) {
+/// Writes the numbers of a call as the shader reads them: one `f32` after another, zeros up to the most there can be, and then the engine's own: the size of the picture
+/// the effect works on, in pixels, and two zeros.
+pub fn write_the_numbers_of_a_call(writer: &mut SlotWriter, values: &[f32], picture_size_in_pixels: (u32, u32)) {
     for value in values {
         writer.f32(*value);
     }
-    while (writer.len() as u64) < FOREIGN_EFFECT_UNIFORM_BYTES {
+    while writer.len() < MOST_NUMBERS_OF_A_FOREIGN_EFFECT * std::mem::size_of::<f32>() {
         writer.f32(0.0);
     }
+    writer.f32(picture_size_in_pixels.0 as f32);
+    writer.f32(picture_size_in_pixels.1 as f32);
+    writer.f32(0.0);
+    writer.f32(0.0);
 }
 
 #[cfg(test)]
@@ -155,10 +191,12 @@ mod tests {
     use super::*;
     use crate::engine::UniformBytes;
 
+    // (Rewritten on purpose in phase 6: the room is the most numbers a call has, and then the four of the engine's: the size of the picture and two zeros. The numbers of a
+    // call are where they were.)
     #[test]
-    fn the_numbers_of_a_call_are_written_one_after_another_and_the_room_is_filled_with_zeros() {
+    fn the_numbers_of_a_call_are_written_one_after_another_zeros_fill_the_room_and_the_engines_own_come_last() {
         let mut bytes = UniformBytes::new(256);
-        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &[1.5, -2.0, 3.25]));
+        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &[1.5, -2.0, 3.25], (640, 360)));
         assert_eq!(u64::from(slot.size), FOREIGN_EFFECT_UNIFORM_BYTES);
         let numbers: Vec<f32> = bytes.as_bytes()[slot.offset as usize..(slot.offset + slot.size) as usize]
             .as_chunks::<4>()
@@ -166,9 +204,17 @@ mod tests {
             .iter()
             .map(|four| f32::from_le_bytes(*four))
             .collect();
-        assert_eq!(numbers.len(), MOST_NUMBERS_OF_A_FOREIGN_EFFECT);
+        assert_eq!(
+            numbers.len(),
+            MOST_NUMBERS_OF_A_FOREIGN_EFFECT + NUMBERS_THE_ENGINE_ADDS
+        );
         assert_eq!(numbers[..3], [1.5, -2.0, 3.25]);
-        assert!(numbers[3..].iter().all(|number| *number == 0.0));
+        assert!(
+            numbers[3..MOST_NUMBERS_OF_A_FOREIGN_EFFECT]
+                .iter()
+                .all(|number| *number == 0.0)
+        );
+        assert_eq!(numbers[MOST_NUMBERS_OF_A_FOREIGN_EFFECT..], [640.0, 360.0, 0.0, 0.0]);
     }
 
     #[test]
@@ -177,7 +223,7 @@ mod tests {
             .map(|number| number as f32)
             .collect();
         let mut bytes = UniformBytes::new(256);
-        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &values));
+        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &values, (2, 3)));
         assert_eq!(u64::from(slot.size), FOREIGN_EFFECT_UNIFORM_BYTES);
         let written: Vec<f32> = bytes.as_bytes()[..slot.size as usize]
             .as_chunks::<4>()
@@ -185,15 +231,31 @@ mod tests {
             .iter()
             .map(|four| f32::from_le_bytes(*four))
             .collect();
-        assert_eq!(written, values);
+        assert_eq!(written[..MOST_NUMBERS_OF_A_FOREIGN_EFFECT], values);
+        assert_eq!(written[MOST_NUMBERS_OF_A_FOREIGN_EFFECT..], [2.0, 3.0, 0.0, 0.0]);
     }
 
     #[test]
-    fn a_call_with_no_numbers_is_all_zeros() {
+    fn a_call_with_no_numbers_is_all_zeros_but_the_size_of_the_picture() {
         let mut bytes = UniformBytes::new(256);
-        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &[]));
+        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &[], (0, 0)));
         assert_eq!(u64::from(slot.size), FOREIGN_EFFECT_UNIFORM_BYTES);
         assert!(bytes.as_bytes().iter().all(|byte| *byte == 0));
+        let mut bytes = UniformBytes::new(256);
+        let slot = bytes.add_slot(|writer| write_the_numbers_of_a_call(writer, &[], (7, 9)));
+        assert_eq!(
+            slot.size as usize,
+            4 * (MOST_NUMBERS_OF_A_FOREIGN_EFFECT + NUMBERS_THE_ENGINE_ADDS)
+        );
+        let (before, engines) = bytes.as_bytes()[..slot.size as usize].split_at(4 * MOST_NUMBERS_OF_A_FOREIGN_EFFECT);
+        assert!(before.iter().all(|byte| *byte == 0));
+        let engines: Vec<f32> = engines
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|four| f32::from_le_bytes(*four))
+            .collect();
+        assert_eq!(engines, [7.0, 9.0, 0.0, 0.0]);
     }
 
     fn shader_with(entry_points: Vec<(&str, naga::ShaderStage)>) -> GuardedShader {

@@ -255,7 +255,8 @@ fn the_item_for_a_file_asks_for_one_and_a_menu_that_cannot_have_a_look_up_table_
     window.click(item);
 
     assert_eq!(chooser.questions_asked().len(), 1);
-    assert_eq!(chooser.questions_asked()[0].title, "Choose a table of colours");
+    // (Rewritten on purpose in phase 6: the file may be a shader as well as a table.)
+    assert_eq!(chooser.questions_asked()[0].title, "Choose a file for an effect");
 }
 
 // --- the controls ---

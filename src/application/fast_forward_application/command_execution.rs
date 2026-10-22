@@ -234,6 +234,7 @@ impl FastForwardApplication {
                 bytes,
                 link,
             } => self.use_a_table(owner, instance, &wanted_name, bytes, link, now),
+            Command::UseAShader { owner, file_name, text } => self.use_a_shader(owner, &file_name, &text),
             Command::SetEffectValue {
                 target,
                 property,

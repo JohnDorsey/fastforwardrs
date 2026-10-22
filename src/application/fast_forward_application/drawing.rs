@@ -104,6 +104,7 @@ impl FastForwardApplication {
                             self.environment
                                 .plugin_search
                                 .why_a_plugin_effect_does_nothing(kind, &self.environment.plugin_host)
+                                .or_else(|| crate::isf::why_not_usable(kind.descriptor()))
                         },
                     },
                     commands,

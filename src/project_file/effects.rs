@@ -24,7 +24,8 @@ use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
     ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
-    MOST_EFFECTS_ON_ONE_THING, ParameterControl, ParameterDescriptor, Project, UnknownFields, ValueKind, ValueScale,
+    MOST_EFFECTS_ON_ONE_THING, ParameterControl, ParameterDescriptor, Project, ShaderLanguage, ShaderSource,
+    UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -49,6 +50,10 @@ pub(super) struct PluginDocument {
     /// Its values, in the order they are kept and shown in. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<ParameterDocument>,
+    /// The shader that runs the type of effect, if it is one (format 16): `{ "language": "isf", "source": "..." }`. One of a language that this version does not know is
+    /// **kept as it was**, in `unknown`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shader: Option<Value>,
     /// What this version of the program does not know of the type of effect, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
@@ -254,7 +259,35 @@ fn descriptor_from_document(document: PluginDocument) -> Result<EffectDescriptor
             parameter_from_document(parameter).map_err(|reason| format!("the effect \"{}\": {reason}", document.key))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let mut unknown = document.unknown;
+    let shader = match document.shader {
+        Some(Value::Object(object))
+            if object.len() == 2
+                && object
+                    .get("language")
+                    .and_then(Value::as_str)
+                    .and_then(ShaderLanguage::from_name_in_a_file)
+                    .is_some()
+                && object.get("source").is_some_and(Value::is_string) =>
+        {
+            let language = object["language"]
+                .as_str()
+                .and_then(ShaderLanguage::from_name_in_a_file)
+                .expect("checked above");
+            Some(ShaderSource {
+                language,
+                text: object["source"].as_str().unwrap_or_default().to_owned().into(),
+            })
+        }
+        // (A language that this version does not know, or a shader that says more than it should: kept as it was, to be written back.)
+        Some(other) => {
+            unknown.insert("shader".to_owned(), other);
+            None
+        }
+        None => None,
+    };
     Ok(EffectDescriptor {
+        shader,
         key: document.key.into(),
         version: (document.version[0], document.version[1]),
         name: document.name.into(),
@@ -266,7 +299,7 @@ fn descriptor_from_document(document: PluginDocument) -> Result<EffectDescriptor
         },
         changes_each_pixel_by_itself: document.changes_each_pixel_by_itself,
         parameters: parameters.into(),
-        unknown_fields: UnknownFields::new(document.unknown),
+        unknown_fields: UnknownFields::new(unknown),
     })
 }
 
@@ -507,6 +540,12 @@ fn plugin_document_of(descriptor: &EffectDescriptor) -> PluginDocument {
         },
         changes_each_pixel_by_itself: descriptor.changes_each_pixel_by_itself,
         params: descriptor.parameters.iter().map(parameter_document_of).collect(),
+        shader: descriptor.shader.as_ref().map(|shader| {
+            serde_json::json!({
+                "language": shader.language.name_in_a_file(),
+                "source": shader.text.as_ref(),
+            })
+        }),
         unknown: descriptor.unknown_fields.fields().clone(),
     }
 }

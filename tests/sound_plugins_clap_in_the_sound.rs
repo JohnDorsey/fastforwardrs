@@ -68,6 +68,7 @@ fn the_kind_of(id: &str) -> EffectKind {
 
 fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
     LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
         values: vec![PropertyValue::Number(gain)],
@@ -275,6 +276,7 @@ fn a_clap_plugin_that_delays_the_sound_is_made_up_for_in_the_export_and_in_the_p
     let folder = scratch_directory();
     let sources = the_sources(folder.path());
     let delaying = LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind: the_kind_of(clap_test_plugins::LATENCY),
         values: Vec::new(),
@@ -363,6 +365,7 @@ fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_
         plugin.pre_roll_samples = pre_roll_samples;
         set_installed_plugins(vec![plugin]);
         LayerEffect {
+            clock: Default::default(),
             instance: EffectInstanceId::FIRST,
             kind: EffectKind::installed_plugin_kinds()[0],
             values: Vec::new(),

@@ -1203,6 +1203,7 @@ fn clip_that_has_sound_from_before(
         first_timeline_frame: 0,
         frames_of_the_clip_before: first_source_frame,
         effects: vec![crate::composition::LayerEffect {
+            clock: Default::default(),
             instance: EffectInstanceId::FIRST,
             kind: crate::project::EffectKind::installed_plugin_kinds()[0],
             values: Vec::new(),

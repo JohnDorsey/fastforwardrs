@@ -562,16 +562,16 @@ fn when_the_graphics_device_is_replaced_the_preview_sends_its_pictures_again_wit
 fn an_effect_that_the_graphics_library_will_not_take_is_noted_as_the_last_problem_and_the_preview_goes_on() {
     let Some(mut setup) = setup() else { return };
     // (The guard takes it: it is a shader that reads, and means something. It is the library that will not take a list of numbers that is bigger than an effect
-    // is given.)
+    // is given: 72 numbers, one more than the 68 of a pass since phase 6 (it asked for 68 before, and was rewritten on purpose).)
     setup
         .preview
         .engine
         .compile_effect_shader(
             "test:too_many_numbers",
-            "@group(0) @binding(0) var<uniform> numbers: array<vec4<f32>, 17>;
+            "@group(0) @binding(0) var<uniform> numbers: array<vec4<f32>, 18>;
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    return vec4<f32>(numbers[16].x, 0.0, 0.0, 1.0);
+    return vec4<f32>(numbers[17].x, 0.0, 0.0, 1.0);
 }
 ",
         )

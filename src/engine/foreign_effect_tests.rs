@@ -93,11 +93,12 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 ";
 
 /// Wants more numbers than a call can give.
+// (Wants 18 vec4: 72 numbers, one more than the 68 a pass has since phase 6, when the engine began to add its four. It wanted 17 before, and was rewritten on purpose.)
 pub(super) const TOO_MANY_NUMBERS: &str = "
-@group(0) @binding(0) var<uniform> numbers: array<vec4<f32>, 17>;
+@group(0) @binding(0) var<uniform> numbers: array<vec4<f32>, 18>;
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    return vec4<f32>(numbers[16].x, 0.0, 0.0, 1.0);
+    return vec4<f32>(numbers[17].x, 0.0, 0.0, 1.0);
 }
 ";
 

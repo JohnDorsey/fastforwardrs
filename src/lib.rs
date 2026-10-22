@@ -40,6 +40,7 @@ pub mod cube_table;
 pub mod digest;
 pub mod engine;
 pub mod frame_scene;
+pub mod isf;
 pub mod media;
 pub mod playback;
 pub mod plugin_bundles;

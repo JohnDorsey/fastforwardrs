@@ -20,7 +20,7 @@ use super::built_in::{
     self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, LUT, OPACITY, PictureOperation, SATURATION,
 };
 use super::installed::{InstalledPlugin, installed_plugin_for, installed_plugins};
-use super::{EffectDescriptor, EffectDomain, ParameterDescriptor};
+use super::{EffectDescriptor, EffectDomain, ParameterDescriptor, ShaderSource};
 use crate::colour_effects::ColourMatrix;
 use crate::project::animation::{PropertyValue, ValueKind};
 use crate::project::groups::GroupKind;
@@ -130,11 +130,17 @@ impl EffectKind {
         self.0.domain
     }
 
-    /// Whether the program has this effect in itself, or a plugin that is installed now can stand in for it, so that it does what it says. An effect that a file brought and that
+    /// Whether the program has this effect in itself, or a plugin that is installed now can stand in for it, or it is a shader that compiles and that this version can run, so that
+    /// it does what it says. An effect that a file brought and that
     /// the program does not have is *not installed*: it is kept, with its values and keyframes, and does nothing to a picture or a sound. (This can change while the program
     /// runs: the plugins are found in the background.)
     pub fn is_installed(self) -> bool {
-        Self::BUILT_IN.contains(&self) || self.installed_plugin().is_some()
+        Self::BUILT_IN.contains(&self) || self.installed_plugin().is_some() || crate::isf::is_usable(self.0)
+    }
+
+    /// The shader that runs the effect, if it is one (see [`ShaderSource`]): the text of its file, which the project carries.
+    pub fn shader_source(self) -> Option<&'static ShaderSource> {
+        self.0.shader.as_ref()
     }
 
     /// The plugin that is installed now and does what this effect says, if this is the type of effect of a plugin.
@@ -239,7 +245,8 @@ impl EffectKind {
             | PictureOperation::Opacity { .. }
             | PictureOperation::Blur { .. }
             | PictureOperation::Crop { .. }
-            | PictureOperation::Lut(_) => None,
+            | PictureOperation::Lut(_)
+            | PictureOperation::Shader { .. } => None,
         }
     }
 

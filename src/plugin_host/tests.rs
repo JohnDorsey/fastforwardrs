@@ -41,6 +41,7 @@ fn the_kind_of(label: &str) -> EffectKind {
 
 fn the_effect(kind: EffectKind, values: &[f32]) -> LayerEffect {
     LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
         values: values.iter().map(|value| PropertyValue::Number(*value)).collect(),
@@ -1323,6 +1324,7 @@ fn the_clap_kind_of(id: &str) -> EffectKind {
 
 fn the_clap_effect(id: &str, values: Vec<PropertyValue>) -> LayerEffect {
     LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind: the_clap_kind_of(id),
         values,
@@ -1552,6 +1554,7 @@ fn a_clap_plugin_that_says_process_failed_is_left_out_and_said_and_the_sound_is_
     set_installed_plugins(vec![plugin]);
     let kind = EffectKind::installed_plugin_kinds()[0];
     let effect = LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
         values: Vec::new(),
@@ -1804,6 +1807,7 @@ fn a_plugin_that_is_left_out_while_it_runs_says_why_on_the_board() {
     let key = plugin.descriptor.key.to_string();
     set_installed_plugins(vec![plugin]);
     let effect = LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind: EffectKind::installed_plugin_kinds()[0],
         values: Vec::new(),
@@ -2123,6 +2127,7 @@ fn a_plugin_whose_start_is_unreliable_says_so_once_in_the_sound_it_is_run_in_and
     set_installed_plugins(vec![plugin]);
     let kind = EffectKind::installed_plugin_kinds()[0];
     let effect = || LayerEffect {
+        clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
         values: kind.default_values(),
