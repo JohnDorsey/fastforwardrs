@@ -41,7 +41,7 @@ fn what_this_version_cannot_run_yet_is_not_usable_and_says_why() {
         assert!(!is_usable(&descriptor), "{name}");
         why_not_usable(&descriptor).unwrap_or_else(|| panic!("{name} says nothing"))
     };
-    assert!(reason("plasma.fs", PLASMA).contains("generator"));
+    // (Rewritten on purpose in phase 6: a generator is run now, so the example of what is not is the transition alone.)
     assert!(reason("wipe.fs", WIPE).contains("transition"));
     assert!(reason("blur.fs", BLUR).contains("passes of its own"));
     let other_image = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"maskImage\", \"TYPE\": \"image\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
@@ -130,8 +130,15 @@ fn the_kind_of_effect_a_shader_is_is_installed_if_the_shader_is_usable() {
     assert_eq!(usable.shader_source().unwrap().text, COLOR_CONTROLS);
     assert_eq!(usable.domain(), crate::project::EffectDomain::Picture);
 
-    let unusable = EffectKind::from_snapshot(descriptor_from("kind_plasma.fs", PLASMA)).unwrap();
-    assert!(!unusable.is_installed(), "a generator cannot be run yet");
+    // (Rewritten on purpose in phase 6: a generator is run now, and the kind that cannot be run is a transition.)
+    let unusable = EffectKind::from_snapshot(descriptor_from("kind_wipe.fs", WIPE)).unwrap();
+    assert!(!unusable.is_installed(), "a transition cannot be run yet");
+    assert!(!usable.is_a_generator());
+    let generator = EffectKind::from_snapshot(descriptor_from("kind_plasma.fs", PLASMA)).unwrap();
+    assert!(
+        generator.is_installed() && generator.is_a_generator(),
+        "a generator is run"
+    );
     // The kinds of the program and of plugins are as they were.
     assert!(EffectKind::HUE_SHIFT.is_installed());
     assert!(EffectKind::HUE_SHIFT.shader_source().is_none());

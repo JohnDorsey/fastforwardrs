@@ -43,7 +43,8 @@ mod track_properties;
 pub use effects::{
     ADD_EFFECT_LABEL, CHOOSE_A_TABLE_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, INCLUDE_TABLE_LABEL,
     NO_TABLE_CHOSEN_NOTE, NOT_RUNNING_NOTE, SWITCH_EFFECT_OFF_LABEL, SWITCHED_OFF_NOTE, TABLE_NOT_IN_THE_PROJECT_NOTE,
-    TAKE_TABLE_OUT_LABEL, VALUES_ARE_KEPT_NOTE, include_all_tables_label, take_all_tables_out_label,
+    TAKE_TABLE_OUT_LABEL, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE, include_all_tables_label,
+    take_all_tables_out_label,
 };
 #[cfg(test)]
 pub use keyframe_buttons::{KeyframeButton, keyframe_button_label};

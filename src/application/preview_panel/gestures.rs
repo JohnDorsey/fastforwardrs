@@ -198,12 +198,12 @@ fn carry_on(
         }
         Grab::Handle { layer, corner } => {
             let layer = content.layer(layer)?;
-            // Text takes whatever shape is dragged; a picture keeps its own.
+            // Text and a generator take whatever shape is dragged; a picture keeps its own.
             let resized = layer.placement.with_corner_dragged_to(
                 corner,
                 picture.fractions_at(pointer),
                 picture.size_in_pixels,
-                !layer.is_text(),
+                !layer.takes_any_shape(),
             );
             push_if_changed(commands, layer, resized);
         }

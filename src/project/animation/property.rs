@@ -22,11 +22,11 @@ pub enum PropertyId {
     Gain,
     /// Whether a clip or a track is silent.
     Muted,
-    /// Where the middle of a video, a picture or a text object is on the picture.
+    /// Where the middle of a video, a picture, a text object or a generator clip is on the picture.
     Position,
-    /// How wide and tall the box of a video, a picture or a text object is.
+    /// How wide and tall the box of a video, a picture, a text object or a generator clip is.
     Size,
-    /// How far a video, a picture or a text object is turned, in degrees.
+    /// How far a video, a picture, a text object or a generator clip is turned, in degrees.
     Rotation,
     /// What a text object says.
     Text,
@@ -166,13 +166,16 @@ impl PropertyId {
     }
 
     /// Whether a clip of this kind has this property: a video or a sound has its loudness and its mute switch, a
-    /// video, a picture and a text object are somewhere on the picture, and a text object has words with a font, a size
+    /// video, a picture, a text object and a generator clip are somewhere on the picture, and a text object has words with a font, a size
     /// and a colour.
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self {
             Self::Gain | Self::Muted => matches!(kind, ClipKind::Video | ClipKind::Audio),
             Self::Position | Self::Size | Self::Rotation => {
-                matches!(kind, ClipKind::Video | ClipKind::Image | ClipKind::Text)
+                matches!(
+                    kind,
+                    ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Generator
+                )
             }
             Self::Text | Self::FontFamily | Self::FontSize | Self::Colour => kind == ClipKind::Text,
             // (A value of an effect is a property of a clip that can have the kind of effect: whether it has this one is for `is_had_by_a_clip`.)

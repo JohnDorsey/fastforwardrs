@@ -10,7 +10,7 @@
 
 use naga::front::glsl::{Frontend, Options};
 
-use super::reader::{IsfFile, IsfProblem};
+use super::reader::{IsfFile, IsfProblem, Shape};
 use super::rewrite::{Rewritten, rewrite};
 
 /// The name of the entry point of a compiled shader: the one the engine looks for.
@@ -28,6 +28,8 @@ pub struct CompiledShader {
     pub image_names: Vec<String>,
     /// What was changed in the file that a person might want to know of.
     pub notes: Vec<String>,
+    /// What the shader is for (see [`Shape`]).
+    pub shape: Shape,
 }
 
 /// The place in the ISF file that a place of the rewritten GLSL is, if it is one: the generated beginning and the generated end are no place of the file.
@@ -122,6 +124,7 @@ pub fn compile(file: &IsfFile) -> Result<CompiledShader, Vec<IsfProblem>> {
         wgsl,
         image_names: rewritten.image_names,
         notes: rewritten.notes,
+        shape: file.shape(),
     })
 }
 

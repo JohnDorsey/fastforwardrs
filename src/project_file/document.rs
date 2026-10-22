@@ -374,6 +374,24 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         badges: Vec<BadgeDocument>,
     },
+    /// A generator clip (format 16): no media; what it makes is its effect number `content`, a shader that reads no picture. It is somewhere on the picture, like a text object.
+    Generator {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        duration_in_frames: u64,
+        /// The name, in the chain of `effects`, of the effect that the clip makes its picture with.
+        content: u32,
+        area: CanvasAreaDocument,
+        /// How far the area is turned, clockwise. Left out for one that is upright.
+        #[serde(default, skip_serializing_if = "is_not_turned")]
+        rotation_degrees: f32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
+    },
     /// An adjustment clip (format 15): no picture of its own; its effects are done to everything behind it, for as long as it lasts.
     Adjustment {
         #[serde(default, skip_serializing_if = "is_zero")]

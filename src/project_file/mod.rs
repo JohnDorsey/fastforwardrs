@@ -34,11 +34,11 @@ use thiserror::Error;
 use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
-    AdjustmentClip, Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectKind, Effects,
-    FontSize, ImageClip, InputColourOverride, MediaClip, Placement, Project, ProjectSettings, PropertyValue,
-    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
-    SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextObject, Track,
-    TrackHeight, TrackId, ValueKind,
+    AdjustmentClip, Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectInstanceId,
+    EffectKind, Effects, FontSize, GeneratorClip, ImageClip, InputColourOverride, MediaClip, Placement, Project,
+    ProjectSettings, PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier,
+    SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip,
+    TextObject, Track, TrackHeight, TrackId, ValueKind,
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
@@ -829,6 +829,44 @@ fn clip_from_document(
                 racks: drawer,
             })
         }
+        ClipDocument::Generator {
+            gap_before_frames,
+            duration_in_frames,
+            content,
+            area,
+            rotation_degrees,
+            drawer,
+            effects,
+            badges,
+        } => {
+            let content = EffectInstanceId::new(content);
+            let clip = GeneratorClip::new(duration_in_frames, content)
+                .map_err(|error| error.to_string())?
+                .with_placement(Placement::new(
+                    area_from_document(&area),
+                    Angle::from_degrees(rotation_degrees),
+                ));
+            let effects = groups::chain_from_documents(
+                effects,
+                badges,
+                kinds,
+                |kind| kind.applies_to_a_clip_of_kind(ClipKind::Generator),
+                group_count,
+            )?;
+            if effects.instance(content).is_none() {
+                return Err(format!(
+                    "the generator clip is made by the effect number {}, which it does not have",
+                    content.number()
+                ));
+            }
+            Ok(ClipFromDocument {
+                gap_before_frames,
+                clip: Clip::Generator(clip),
+                effects,
+                legacy_animation: AnimationDocument::default(),
+                racks: drawer,
+            })
+        }
         ClipDocument::Adjustment {
             gap_before_frames,
             duration_in_frames,
@@ -1245,6 +1283,16 @@ fn clip_document_of(
             drawer,
             badges,
         },
+        Clip::Generator(generator) => ClipDocument::Generator {
+            gap_before_frames,
+            duration_in_frames: generator.duration_in_frames(),
+            content: generator.content().number(),
+            area: area_document_of(generator.placement().area),
+            rotation_degrees: generator.placement().rotation.degrees(),
+            drawer,
+            effects,
+            badges,
+        },
         Clip::Adjustment(adjustment) => ClipDocument::Adjustment {
             gap_before_frames,
             duration_in_frames: adjustment.duration_in_frames(),
@@ -1301,6 +1349,8 @@ mod colour_tests;
 mod effects_tests;
 #[cfg(test)]
 mod format_13_tests;
+#[cfg(test)]
+mod generator_clip_tests;
 #[cfg(test)]
 mod groups_tests;
 #[cfg(test)]

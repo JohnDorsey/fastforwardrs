@@ -53,7 +53,7 @@ design keeps H8 to H10 as the record of what was asked.
 * **No blend modes**, and **no mask** on an adjustment clip.
 * **Nothing can embed a plugin from the program yet** (phase 8).
 * **I did not see an adjustment clip in a real window**, and none of it ran on a real graphics card.
-* **There is no clip that makes a picture** until the ISF host is built.
+* **There was no clip that makes a picture** until the ISF host was built: generator clips are phase 6.5 (2026-10-22), made by a shader.
 
 ## 6. What I need from you
 

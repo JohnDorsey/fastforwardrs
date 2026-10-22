@@ -933,3 +933,174 @@ fn a_project_that_is_saved_and_read_again_carries_the_shader_and_exports_the_sam
 
     assert_eq!(before.pictures, after.pictures);
 }
+
+// --- a generator clip (phase 6): an ISF shader that reads no picture ---
+
+const SOLID_GENERATOR: &str = r#"/*{
+	"DESCRIPTION": "one colour",
+	"INPUTS": [ { "NAME": "colour", "TYPE": "color", "DEFAULT": [0.2, 0.4, 0.9, 1.0] } ]
+}*/
+void main() {
+	gl_FragColor = colour;
+}
+"#;
+
+/// The colour that `SOLID_GENERATOR` makes, in the codes of a screen.
+const SOLID_GENERATOR_COLOUR: (u8, u8, u8) = (51, 102, 230);
+
+/// Puts a generator clip made by the shader `source` on a track in front of the project's video, from frame `first_frame` for `frames` frames, and gives it.
+fn put_a_generator_in_front(project: &mut Project, name: &str, source: &str, first_frame: u64, frames: u64) -> ClipId {
+    let file = fastforwardrs::isf::read(source).unwrap_or_else(|problem| panic!("{problem}"));
+    let kind = EffectKind::from_snapshot(fastforwardrs::isf::descriptor_of(&file, name, source)).unwrap();
+    assert!(
+        kind.is_installed() && kind.is_a_generator(),
+        "{:?}",
+        fastforwardrs::isf::why_not_usable(kind.descriptor())
+    );
+    let front = project.add_track_in_front();
+    let (clip, lasts) = project
+        .try_insert_generator_clip(front, TimelineFrameIndex::new(first_frame), kind, frames)
+        .unwrap();
+    assert_eq!(lasts, frames);
+    clip
+}
+
+#[test]
+fn a_generator_clip_covers_the_picture_with_what_its_shader_makes_for_as_long_as_it_lasts_and_not_before_or_after() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_generator_in_front(&mut project, "solid.fs", SOLID_GENERATOR, 20, 20);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "generator.mp4");
+
+    assert_eq!(decoded.pictures.len(), 60);
+    for (number, picture) in decoded.pictures.iter().enumerate() {
+        let wanted = if (20..40).contains(&number) {
+            SOLID_GENERATOR_COLOUR
+        } else {
+            ORANGE
+        };
+        for (x, y) in [(1, 1), (WIDTH / 2, HEIGHT / 2), (WIDTH - 2, HEIGHT - 2)] {
+            assert_near(colour_at(picture, x, y), wanted, &format!("frame {number}, at {x},{y}"));
+        }
+    }
+}
+
+#[test]
+fn the_values_of_a_generator_are_values_of_its_content_and_keyframes_of_them_change_what_it_makes() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let clip = put_a_generator_in_front(&mut project, "solid.fs", SOLID_GENERATOR, 0, 60);
+    let target = AnimationTarget::Clip(clip);
+    let content = project
+        .placement_of(clip)
+        .unwrap()
+        .clip
+        .as_generator()
+        .unwrap()
+        .content();
+    let kind = project.effects_of(target).unwrap().instance(content).unwrap().kind();
+    let colour = PropertyId::effect_value(kind, content, 0);
+    make_a_keyframe(
+        &mut project,
+        target,
+        colour,
+        0,
+        PropertyValue::Colour(TextColour::new(240, 20, 20, 255)),
+    );
+    make_a_keyframe(
+        &mut project,
+        target,
+        colour,
+        59,
+        PropertyValue::Colour(TextColour::new(20, 20, 240, 255)),
+    );
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "generator_changing.mp4");
+
+    let at = |frame: usize| colour_at(&decoded.pictures[frame], WIDTH / 2, HEIGHT / 2);
+    assert_near(at(0), (240, 20, 20), "at the first keyframe");
+    assert_near(at(59), (20, 20, 240), "at the last");
+    let halfway = at(30);
+    assert!(
+        (100..=160).contains(&halfway.0) && (100..=160).contains(&halfway.2),
+        "{halfway:?}"
+    );
+}
+
+#[test]
+fn a_generator_that_is_put_somewhere_is_a_rectangle_of_what_it_makes_over_what_is_behind_it() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let clip = put_a_generator_in_front(&mut project, "solid.fs", SOLID_GENERATOR, 0, 60);
+    project
+        .set_clip_placement(
+            clip,
+            fastforwardrs::project::Placement::upright(fastforwardrs::project::CanvasArea::new(0.0, 0.0, 0.5, 0.5)),
+        )
+        .unwrap();
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "generator_rectangle.mp4");
+
+    let picture = &decoded.pictures[10];
+    assert_near(
+        colour_at(picture, WIDTH / 4, HEIGHT / 4),
+        SOLID_GENERATOR_COLOUR,
+        "inside it",
+    );
+    assert_near(colour_at(picture, WIDTH * 3 / 4, HEIGHT * 3 / 4), ORANGE, "outside it");
+}
+
+#[test]
+fn an_effect_put_on_a_generator_is_done_to_what_it_makes() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    let clip = put_a_generator_in_front(&mut project, "solid.fs", SOLID_GENERATOR, 0, 60);
+    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(clip), 100.0);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "generator_turned.mp4");
+
+    assert_every_picture_is(&decoded, turned(SOLID_GENERATOR_COLOUR, 100.0), "what it makes, turned");
+}
+
+#[test]
+fn the_time_of_a_generator_is_the_time_of_its_clip() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    // Red is TIME over two seconds; the clip begins at frame 20 and lasts 40 frames.
+    let source = r#"/*{ "INPUTS": [] }*/
+void main() { gl_FragColor = vec4(TIME / 2.0, 0.0, 0.0, 1.0); }
+"#;
+    put_a_generator_in_front(&mut project, "time.fs", source, 20, 40);
+
+    let decoded = exported(&toolchain, &project, scratch.path(), "generator_time.mp4");
+
+    let at = |frame: usize| colour_at(&decoded.pictures[frame], WIDTH / 2, HEIGHT / 2);
+    assert_near(
+        at(20),
+        (0, 0, 0),
+        "the first frame of the clip is time 0, not the 20 frames of the timeline",
+    );
+    assert_near(at(50), (127, 0, 0), "30 frames in is a second");
+}
+
+#[test]
+fn a_project_with_a_generator_is_saved_and_read_again_and_exports_the_same() {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let scratch = scratch_directory();
+    let (mut project, _) = project_of_a_flat_colour_video(&toolchain, scratch.path(), ORANGE);
+    put_a_generator_in_front(&mut project, "solid.fs", SOLID_GENERATOR, 10, 30);
+    let before = exported(&toolchain, &project, scratch.path(), "generator_before.mp4");
+
+    let text = fastforwardrs::project_file::project_to_json_text(&project, scratch.path()).unwrap();
+    assert!(text.contains("\"kind\": \"generator\""), "{text}");
+    let loaded = fastforwardrs::project_file::project_from_json_text(&text).unwrap();
+    let after = exported(&toolchain, &loaded, scratch.path(), "generator_after.mp4");
+
+    assert_eq!(before.pictures, after.pictures);
+}

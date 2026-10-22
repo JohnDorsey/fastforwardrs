@@ -57,6 +57,8 @@ pub enum PreviewLayerContent<'a> {
     },
     /// A text object as it is at the current frame: what the clip says, or, if it has keyframes, as they change it.
     Text(Cow<'a, TextObject>),
+    /// A generator clip: its picture is made by the effects of the layer (the first is a shader that reads no picture), over a picture that has nothing in it.
+    Generator,
 }
 
 /// A video, a picture or a text object that is seen, and where it is on the picture.

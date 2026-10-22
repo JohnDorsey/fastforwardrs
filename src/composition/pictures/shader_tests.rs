@@ -12,7 +12,8 @@ use crate::test_support::make_a_keyframe;
 
 const TINT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"amount\", \"TYPE\": \"float\", \"DEFAULT\": 0.25 }, { \"NAME\": \"tint\", \"TYPE\": \"color\", \"DEFAULT\": [1.0, 0.0, 0.0, 1.0] }, { \"NAME\": \"flip\", \"TYPE\": \"bool\", \"DEFAULT\": true }, { \"NAME\": \"mode\", \"TYPE\": \"long\", \"VALUES\": [3, 7], \"DEFAULT\": 7 }, { \"NAME\": \"spot\", \"TYPE\": \"point2D\", \"DEFAULT\": [10, 20] } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
 
-const A_GENERATOR: &str = "/*{ \"INPUTS\": [] }*/\nvoid main() { gl_FragColor = vec4(1.0); }\n";
+// (A transition: the kind of shader that this version cannot run. It was a generator before phase 6, which is run now.)
+const A_TRANSITION: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
 
 fn kind_of(name: &str, source: &str) -> EffectKind {
     let file = crate::isf::read(source).unwrap();
@@ -110,9 +111,9 @@ fn the_values_of_a_shader_follow_their_keyframes_and_the_clock_goes_on() {
 fn a_shader_that_cannot_be_run_does_nothing_and_is_not_an_operation() {
     let mut project = project_of(vec![vec![(0, long_video(0, 60, 1))]]);
     let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
-    let generator = kind_of("generator.fs", A_GENERATOR);
-    assert!(!generator.is_installed());
-    project.add_effect(AnimationTarget::Clip(clip), generator).unwrap();
+    let transition = kind_of("transition.fs", A_TRANSITION);
+    assert!(!transition.is_installed());
+    project.add_effect(AnimationTarget::Clip(clip), transition).unwrap();
     let plan = plan(&project);
     let layer = plan.sections.iter().flat_map(|section| &section.layers).next().unwrap();
 
@@ -170,11 +171,11 @@ fn a_shader_on_a_group_or_a_tag_has_its_clock_from_the_start_of_the_timeline_and
 #[test]
 fn a_shader_that_is_not_installed_is_no_operation_even_when_it_is_in_the_effects_of_a_layer() {
     // (The plan leaves such an effect out of a layer, so this is the check that holds if one gets there: a layer of effects that are given by hand.)
-    let generator = kind_of("generator.fs", A_GENERATOR);
+    let transition = kind_of("transition.fs", A_TRANSITION);
     let effect = LayerEffect {
         clock: EffectClock::default(),
         instance: crate::project::EffectInstanceId::FIRST,
-        kind: generator,
+        kind: transition,
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),

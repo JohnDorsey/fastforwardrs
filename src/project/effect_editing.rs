@@ -11,7 +11,7 @@ use super::animating::AnimationTarget;
 use super::animation::PropertyId;
 use super::effects::{EffectInstanceId, EffectKind, Effects, MOST_EFFECTS_ON_ONE_THING};
 use super::tracks::{ClipEditError, KeyframeId, RackKeyframe};
-use super::{EditError, Project};
+use super::{EditError, Member, Project};
 
 impl Project {
     /// The effects of the clip or the track `target`, if it is there.
@@ -60,6 +60,11 @@ impl Project {
     /// kept (a rack that has none left, and a keyframe crate that has no rack left, go too). The other effects, of whatever kind, stay as they
     /// are, with their keyframes. It is an error, and nothing is changed, if there is no such clip or track, or it does not have the effect.
     pub fn remove_effect(&mut self, target: AnimationTarget, instance: EffectInstanceId) -> Result<(), EditError> {
+        if let AnimationTarget::Clip(clip) = target
+            && let Some(clip) = self.the_clip_whose_content_is(Member::Clip(clip), instance)
+        {
+            return Err(EditError::TheContentOfAGenerator { clip });
+        }
         let Some(effect) = self.effects_of_or_error(target)?.instance(instance) else {
             return Err(EditError::DoesNotHaveThatEffect { target, instance });
         };

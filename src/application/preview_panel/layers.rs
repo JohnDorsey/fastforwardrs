@@ -174,6 +174,8 @@ fn draw_layer(
             ));
             None
         }
+        // (The old drawing cannot run a shader: a generator is not drawn by it, as a blur is left out.)
+        PreviewLayerContent::Generator => None,
         PreviewLayerContent::Text(object) => {
             let (picture_width, picture_height) = picture.size_in_whole_pixels();
             let key = TextAppearance::of(object, picture_width, picture_height);

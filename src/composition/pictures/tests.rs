@@ -55,6 +55,8 @@ enum Seen {
     Video(u64, u64, u32),
     Text,
     Picture,
+    /// A generator clip.
+    Generator,
 }
 
 fn seen(layer: &Layer) -> Seen {
@@ -64,6 +66,7 @@ fn seen(layer: &Layer) -> Seen {
         }
         LayerContent::Text(_) => Seen::Text,
         LayerContent::Image { .. } => Seen::Picture,
+        LayerContent::Generator => Seen::Generator,
         LayerContent::Adjustment => unreachable!("an adjustment clip is not a layer of a section"),
     }
 }
@@ -702,6 +705,12 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<
                 location,
                 None,
                 plain_place(project, location, text.object.placement(), timeline_frame),
+            )),
+            // (What a generator makes is not known to the plan, so it hides nothing.)
+            Clip::Generator(generator) => front_to_back.push((
+                location,
+                None,
+                plain_place(project, location, generator.placement(), timeline_frame),
             )),
             Clip::Image(image) => {
                 let shown_size = project

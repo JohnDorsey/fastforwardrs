@@ -76,8 +76,12 @@ use geometry::PictureOnScreen;
 use speed_indicator_overlay::SymbolOnScreen;
 
 impl PreviewLayer<'_> {
-    fn is_text(&self) -> bool {
-        matches!(self.content, PreviewLayerContent::Text(_))
+    /// Whether the layer takes whatever shape it is dragged to when it is resized, as a text object and a generator do (a video and a picture keep their own).
+    fn takes_any_shape(&self) -> bool {
+        matches!(
+            self.content,
+            PreviewLayerContent::Text(_) | PreviewLayerContent::Generator
+        )
     }
 
     /// Whether the layer is a video that is all of the picture, so that there is nothing outside it.
@@ -93,6 +97,7 @@ impl PreviewLayer<'_> {
             PreviewLayerContent::Text(_) => names::text_object_label(self.clip),
             PreviewLayerContent::Video(_) => names::video_label(self.clip),
             PreviewLayerContent::Image { .. } => names::picture_label(self.clip),
+            PreviewLayerContent::Generator => names::generator_label(self.clip),
         }
     }
 }

@@ -55,6 +55,8 @@ pub enum LayerContent {
         source: SourceMediaIdentifier,
     },
     Text(TextObject),
+    /// A generator clip: what it makes is its first effect, which is a shader that reads no picture, and the layer has nothing to be drawn from but that (see [`GeneratorClip`](crate::project::GeneratorClip)).
+    Generator,
     /// An adjustment clip: no picture of its own. **It is not in the layers of a section**: what it does is a group of everything behind it (see [`GroupSpan`]).
     Adjustment,
 }
@@ -160,7 +162,9 @@ impl Layer {
     pub fn video(&self) -> Option<&VisibleVideo> {
         match &self.content {
             LayerContent::Video(video) => Some(video),
-            LayerContent::Image { .. } | LayerContent::Text(_) | LayerContent::Adjustment => None,
+            LayerContent::Image { .. } | LayerContent::Text(_) | LayerContent::Generator | LayerContent::Adjustment => {
+                None
+            }
         }
     }
 
@@ -524,7 +528,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 Clip::Video(_) => 0,
                 // A picture has no pictures to run out of: it is there or its file is not.
                 Clip::Image(image) => u64::from(is_usable(image.source())),
-                Clip::Text(_) | Clip::Adjustment(_) => 0,
+                Clip::Text(_) | Clip::Adjustment(_) | Clip::Generator(_) => 0,
                 // (Nothing is seen of a sound, or of a crate, which holds nothing but keyframes.)
                 Clip::Audio(_) | Clip::Crate(_) => continue,
             };
@@ -675,6 +679,7 @@ fn sections_between(
                     }
                 }
                 Clip::Text(text) => layers.push(candidate.entry(LayerContent::Text(text.object.clone()))),
+                Clip::Generator(_) => layers.push(candidate.entry(LayerContent::Generator)),
                 Clip::Adjustment(_) => layers.push(candidate.entry(LayerContent::Adjustment)),
                 Clip::Audio(_) | Clip::Crate(_) => {}
             }
@@ -788,6 +793,8 @@ mod animation_tests;
 mod conformance_tests;
 #[cfg(test)]
 mod effects_tests;
+#[cfg(test)]
+mod generator_tests;
 #[cfg(test)]
 mod group_effects_tests;
 #[cfg(test)]

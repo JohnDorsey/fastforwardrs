@@ -19,8 +19,9 @@ use super::badge::{self, BadgeLook};
 use super::effects::{
     ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE,
     NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
-    SWITCHED_OFF_NOTE, VALUES_ARE_KEPT_NOTE, effects_that_match, effects_to_offer, grouped_by_category,
-    grouped_by_source, items_for_where_the_tables_are_kept, show_the_control_of, show_the_control_of_a_group_effect,
+    SWITCHED_OFF_NOTE, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match, effects_to_offer,
+    grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept, show_the_control_of,
+    show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -152,6 +153,15 @@ fn show_an_effect(
             } else {
                 SWITCH_EFFECT_ON_LABEL
             };
+            // (What a generator makes is its first effect, which is not taken off, switched off, copied or moved: it has no such items in its menu.)
+            let is_what_a_generator_makes = content
+                .project
+                .the_clip_whose_content_is(owner, effect.instance())
+                .is_some();
+            if is_what_a_generator_makes {
+                ui.weak(WHAT_A_GENERATOR_MAKES_NOTE);
+                return;
+            }
             if ui.button(label).clicked() {
                 to_be_switched = true;
                 ui.close();

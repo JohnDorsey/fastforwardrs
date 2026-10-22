@@ -15,7 +15,7 @@ mod rewrite;
 pub use compile::{CompiledShader, ENTRY_POINT, compile, compile_in_a_worker};
 
 pub use descriptor::{descriptor_of, key_is_of_the_text, key_of, numbers_of_the_values};
-pub use registry::{compiled_shader_of, is_usable, why_not_usable};
+pub use registry::{compiled_shader_of, is_usable, shape_of, why_not_usable};
 
 pub use reader::{
     IsfFile, IsfImportedImage, IsfInput, IsfInputKind, IsfPass, IsfProblem, MOST_NUMBERS_OF_THE_INPUTS, Shape, read,

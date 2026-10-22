@@ -347,6 +347,9 @@ impl Project {
         instance: EffectInstanceId,
         enabled: bool,
     ) -> Result<(), EditError> {
+        if let Some(clip) = self.the_clip_whose_content_is(owner, instance) {
+            return Err(EditError::TheContentOfAGenerator { clip });
+        }
         let chain = self
             .chain_of_the_member_mut(owner)
             .ok_or_else(|| nothing_has_the_chain(owner))?;
@@ -368,6 +371,9 @@ impl Project {
         owner: EffectOwner,
         instance: EffectInstanceId,
     ) -> Result<EffectInstanceId, EditError> {
+        if let Some(clip) = self.the_clip_whose_content_is(owner, instance) {
+            return Err(EditError::TheContentOfAGenerator { clip });
+        }
         let has_the_track_badge = matches!(owner, Member::Clip(_));
         let chain = self
             .chain_of_the_member_mut(owner)
@@ -407,6 +413,14 @@ impl Project {
         item: ChainItemKey,
         before: Option<ChainItemKey>,
     ) -> Result<(), EditError> {
+        // (The content stays first: it is not moved, and nothing is moved in front of it.)
+        for key in [Some(item), before].into_iter().flatten() {
+            if let ChainItemKey::Effect(instance) = key
+                && let Some(clip) = self.the_clip_whose_content_is(owner, instance)
+            {
+                return Err(EditError::TheContentOfAGenerator { clip });
+            }
+        }
         let is_a_clip = matches!(owner, Member::Clip(_));
         let badge_of_the_track_is_hidden_at_the_end = is_a_clip
             && self

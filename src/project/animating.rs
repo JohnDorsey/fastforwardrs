@@ -63,6 +63,7 @@ impl Project {
                 )
             }
             Clip::Text(text) => Some(text.object.placement()),
+            Clip::Generator(generator) => Some(generator.placement()),
             Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => None,
         }
     }

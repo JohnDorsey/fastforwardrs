@@ -34,6 +34,9 @@ pub const DUPLICATE_EFFECT_LABEL: &str = "Duplicate effect";
 /// What the items of the menu of a box of an effect that switch it off (bypass it) and on say, and what the box says while it is off.
 pub const SWITCH_EFFECT_OFF_LABEL: &str = "Switch off";
 pub const SWITCH_EFFECT_ON_LABEL: &str = "Switch on";
+/// What the menu of the box of the effect that a generator clip makes its picture with says instead of its items: it cannot be switched off, copied or taken off.
+pub const WHAT_A_GENERATOR_MAKES_NOTE: &str =
+    "What the generator makes: it cannot be switched off, copied or taken off.";
 pub const SWITCHED_OFF_NOTE: &str = "Switched off: it is not done, and its values and keyframes are kept.";
 
 /// What the box of an effect that the program does not have says (a project file can bring one): that it does nothing, and that nothing of it is

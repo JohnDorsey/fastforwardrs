@@ -62,6 +62,8 @@ mod file_colour_tests;
 #[cfg(test)]
 mod file_question_tests;
 #[cfg(test)]
+mod generator_clip_tests;
+#[cfg(test)]
 mod grip_dot_tests;
 #[cfg(test)]
 mod group_box_tests;

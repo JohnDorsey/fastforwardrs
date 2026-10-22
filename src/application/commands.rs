@@ -194,6 +194,19 @@ pub enum Command {
         track: TrackId,
         frame: TimelineFrameIndex,
     },
+    /// Ask for a shader that is a generator (an ISF file that reads no picture), and put a new generator clip made by it on a track, starting at a frame (see `shader_flow`).
+    ChooseAGeneratorFile {
+        track: TrackId,
+        frame: TimelineFrameIndex,
+    },
+    /// Put a new generator clip on a track, starting at a frame, and select it, so that its properties show. What it makes is the effect that the shader `text` of the file `file_name`
+    /// is, which is the first of its chain and is kept in the project with it. (What the command above comes to when the file has been chosen and read.)
+    NewGeneratorClip {
+        track: TrackId,
+        frame: TimelineFrameIndex,
+        file_name: String,
+        text: std::sync::Arc<str>,
+    },
     /// A text object was changed: what it says, how it looks, or where it is on the picture.
     SetTextObject {
         clip: ClipId,
@@ -435,6 +448,8 @@ impl Command {
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
             | Self::NewAdjustmentClip { .. }
+            | Self::ChooseAGeneratorFile { .. }
+            | Self::NewGeneratorClip { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
             | Self::AddEffect { .. }
@@ -563,6 +578,8 @@ impl Command {
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
             | Self::NewAdjustmentClip { .. }
+            | Self::ChooseAGeneratorFile { .. }
+            | Self::NewGeneratorClip { .. }
             | Self::SetTextObject { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }

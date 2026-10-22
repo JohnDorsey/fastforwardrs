@@ -34,6 +34,9 @@ void main() {
 }
 "#;
 
+// (A transition: the kind of shader that this version cannot run.)
+const A_TRANSITION: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
+
 const A_GENERATOR: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"speed\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = vec4(speed); }\n";
 
 /// A window with a video that is selected, nothing unsaved, a chooser that will be asked for files, and the clip.
@@ -329,9 +332,10 @@ fn the_box_of_a_shaders_effect_has_a_control_for_each_input_called_by_its_label(
 
 #[test]
 fn a_kind_that_this_version_cannot_run_says_why_in_its_box_and_keeps_its_values() {
-    // A project that was made with a shader that this version cannot run (a generator, which it cannot yet): the effect stays, with its value, and says why it does nothing.
-    let file = crate::isf::read(A_GENERATOR).unwrap();
-    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "speedy.fs", A_GENERATOR)).unwrap();
+    // A project that was made with a shader that this version cannot run (a transition, which it cannot yet): the effect stays, with its value, and says why it does nothing.
+    // (Rewritten on purpose in phase 6: a generator is run now, so the kind that cannot be is a transition.)
+    let file = crate::isf::read(A_TRANSITION).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "fade.fs", A_TRANSITION)).unwrap();
     let (mut window, clip) = window_with_a_video();
     select(&mut window, clip);
     window
@@ -344,11 +348,11 @@ fn a_kind_that_this_version_cannot_run_says_why_in_its_box_and_keeps_its_values(
 
     assert!(!kind.is_installed());
     assert!(
-        window.harness.query_by_label_contains("generator").is_some(),
-        "the box says why: it is a generator, which this version cannot run yet"
+        window.harness.query_by_label_contains("transition").is_some(),
+        "the box says why: it is a transition, which this version cannot run yet"
     );
     assert!(
-        window.harness.query_by_label("speed").is_some(),
+        window.harness.query_by_label("progress").is_some(),
         "its value is still there"
     );
 }

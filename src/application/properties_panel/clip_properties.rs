@@ -17,8 +17,8 @@ use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
 use crate::application::timeline_panel::SourceLook;
 use crate::project::{
-    AdjustmentClip, AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, ImageClip, MediaClip, Member,
-    PropertyId, SpeedFactor,
+    AdjustmentClip, AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, GeneratorClip, ImageClip, MediaClip,
+    Member, PropertyId, SpeedFactor,
 };
 
 /// What the row of how big a video or a picture is is called.
@@ -38,6 +38,7 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         // (A crate has nothing of its own to change: what it holds is in its racks, which are shown in the timeline.)
         Clip::Crate(_) => {}
         Clip::Adjustment(adjustment) => show_an_adjustment_clip(ui, content, clip, adjustment, commands),
+        Clip::Generator(generator) => show_a_generator_clip(ui, content, clip, generator, commands),
     }
     chain::show(ui, content, Member::Clip(clip), commands);
 }
@@ -142,6 +143,24 @@ fn show_an_adjustment_clip(
         if let Some(frames) = shown_for(ui, content.project.frame_rate(), adjustment.duration_in_frames()) {
             commands.push(Command::SetClipDuration { clip, frames });
         }
+    });
+}
+
+/// How long a generator clip lasts and where it is on the picture. (What it makes is its first effect, which is shown after this, in the chain that every clip has.)
+fn show_a_generator_clip(
+    ui: &mut Ui,
+    content: &PropertiesContent<'_>,
+    clip: ClipId,
+    generator: &GeneratorClip,
+    commands: &mut Vec<Command>,
+) {
+    kind_box::show(ui, kind_name(ClipKind::Generator), |ui| {
+        ui.weak("What it makes is its first effect.");
+        ui.add_space(4.0);
+        if let Some(frames) = shown_for(ui, content.project.frame_rate(), generator.duration_in_frames()) {
+            commands.push(Command::SetClipDuration { clip, frames });
+        }
+        placement_controls::show(ui, content, clip, SIZE_LABEL, commands);
     });
 }
 

@@ -245,6 +245,15 @@ pub(super) fn draw_clips(
                 painter.rect_filled(rectangles.whole, corner_radius, theme::TEXT_CLIP_BACKGROUND);
                 draw_label(painter, rectangles, &text.object.text, theme::TEXT_CLIP_TEXT);
             }
+            Clip::Generator(generator) => {
+                painter.rect_filled(rectangles.whole, corner_radius, theme::GENERATOR_CLIP_BACKGROUND);
+                // (What it makes is its first effect, and the label is what that is called.)
+                let made_by = placement
+                    .effects
+                    .instance(generator.content())
+                    .map_or("Generator", |effect| effect.kind().name());
+                draw_label(painter, rectangles, made_by, theme::GENERATOR_CLIP_TEXT);
+            }
             Clip::Crate(_) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::CRATE_CLIP_BACKGROUND);
             }

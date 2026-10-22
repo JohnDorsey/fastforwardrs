@@ -89,10 +89,11 @@ pub use speed_indicator_layout::SpeedIndicatorLayout;
 pub use timecode::format_timecode;
 pub use tracks::{
     AdjustmentClip, Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner,
-    CrateClip, CutEdges, Drawer, EmptyAdjustmentClip, EmptyClip, EmptyCrate, EmptyImageClip, EmptyTextClip, FontSize,
-    Gain, ImageClip, InsertError, KeyframeId, MediaClip, PictureDimensions, PictureFit, PixelBox, Placement,
-    PointOnThePicture, Rack, RackCut, RackEditError, RackId, RackKeyframe, Room, SplitError, SplitOutcome, TextClip,
-    TextColour, TextObject, Track, TrackEntry, TrackHeight, TrackId, fit_inside_picture, fitted_placement,
+    CrateClip, CutEdges, Drawer, EmptyAdjustmentClip, EmptyClip, EmptyCrate, EmptyGeneratorClip, EmptyImageClip,
+    EmptyTextClip, FontSize, Gain, GeneratorClip, ImageClip, InsertError, KeyframeId, MediaClip, PictureDimensions,
+    PictureFit, PixelBox, Placement, PointOnThePicture, Rack, RackCut, RackEditError, RackId, RackKeyframe, Room,
+    SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track, TrackEntry, TrackHeight, TrackId,
+    fit_inside_picture, fitted_placement,
 };
 
 /// The frame rate of a project that has no video to take one from.
@@ -203,6 +204,10 @@ pub enum EditError {
     NotAPropertyOfTheTrack { track: TrackId, property: PropertyId },
     #[error("{track} cannot have the {kind} effect")]
     NotAnEffectOfTheTrack { track: TrackId, kind: EffectKind },
+    #[error(
+        "{clip} is a generator clip, and what it makes is its first effect, which cannot be taken off, switched off, copied or moved"
+    )]
+    TheContentOfAGenerator { clip: ClipId },
     #[error("{target} does not have the {instance}")]
     DoesNotHaveThatEffect {
         target: AnimationTarget,
@@ -334,7 +339,7 @@ impl Project {
                     Clip::Video(_) => SourceMediaKind::Video,
                     Clip::Audio(_) => SourceMediaKind::Audio,
                     Clip::Image(_) => SourceMediaKind::Image,
-                    Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) => continue,
+                    Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => continue,
                 };
                 if source.kind() != wanted_kind {
                     return Err(InconsistentProject::ClipUsesSourceOfTheWrongKind {
@@ -1088,6 +1093,34 @@ impl Project {
         })
     }
 
+    /// Adds a generator clip to a track at `timeline_frame`, lasting `wanted_frames` frames or as long as there is room for if that is less, whose content (what it makes, its
+    /// first effect) is of the kind `content`. Returns the new clip and how many frames it lasts, or why it could not: [`EditError::NoRoomThere`] if there is no such track or a clip is
+    /// at that frame, and [`EditError::BreaksTheRulesOfGroups`] if it would be in the rectangle of a clip group (where only what is in the group may be).
+    pub fn try_insert_generator_clip(
+        &mut self,
+        track: TrackId,
+        timeline_frame: TimelineFrameIndex,
+        content: EffectKind,
+        wanted_frames: u64,
+    ) -> Result<(ClipId, u64), EditError> {
+        self.keeping_the_groups_valid(|project| {
+            project
+                .track_mut(track)
+                .and_then(|track| track.insert_generator_clip_at(timeline_frame, content, wanted_frames))
+                .ok_or(EditError::NoRoomThere)
+        })
+    }
+
+    /// The clip whose content, what it makes, is the effect named `instance` in the chain of `owner`, if `owner` is a generator clip and that is its content. **The content of a
+    /// generator cannot be taken off, switched off, copied or moved.**
+    pub fn the_clip_whose_content_is(&self, owner: Member, instance: EffectInstanceId) -> Option<ClipId> {
+        let Member::Clip(clip) = owner else {
+            return None;
+        };
+        let placement = self.placement_of(clip)?;
+        (placement.clip.as_generator()?.content() == instance).then_some(clip)
+    }
+
     pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), EditError> {
         Ok(self.track_holding_mut_or_error(clip)?.set_text_object(clip, object)?)
     }
@@ -1128,6 +1161,8 @@ mod crates_tests;
 mod duplicating_tests;
 #[cfg(test)]
 mod effect_editing_tests;
+#[cfg(test)]
+mod generator_clip_tests;
 #[cfg(test)]
 mod keyframe_copying_tests;
 #[cfg(test)]

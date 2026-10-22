@@ -8,10 +8,12 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{Room, Track, TrackEntry};
+use crate::project::EffectInstanceId;
 use crate::project::tracks::adjustment_clip::AdjustmentClip;
 use crate::project::tracks::clip::Clip;
 use crate::project::tracks::drawer::Drawer;
 use crate::project::tracks::gain::Gain;
+use crate::project::tracks::generator_clip::GeneratorClip;
 use crate::project::tracks::ids::{ClipId, RackId};
 use crate::project::tracks::placement::Placement;
 use crate::project::tracks::text_object::{TextClip, TextObject};
@@ -270,7 +272,7 @@ impl Track {
         let changed = match &self.entries[index].clip {
             Clip::Video(media) => Clip::Video(change(media)),
             Clip::Audio(media) => Clip::Audio(change(media)),
-            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) => {
+            Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => {
                 return Err(ClipEditError::NotAMediaClip { clip });
             }
         };
@@ -457,6 +459,26 @@ impl Track {
         let duration = self.longest_new_text_clip_at(timeline_frame, wanted_frames)?;
         let clip = Clip::Adjustment(AdjustmentClip::new(duration).ok()?);
         let id = self.insert_clip_at(timeline_frame, clip).ok()?;
+        Some((id, duration))
+    }
+
+    /// Adds a generator clip at `timeline_frame` that lasts `wanted_frames` frames, or less if it would run into the next clip, **with an effect of the kind `content` on it, which is what
+    /// the clip makes** (the first of its chain: see `GeneratorClip`). Returns the clip's name and how many frames it lasts, or `None` if another clip is at that frame or the kind cannot be
+    /// the effect of a clip.
+    pub fn insert_generator_clip_at(
+        &mut self,
+        timeline_frame: TimelineFrameIndex,
+        content: EffectKind,
+        wanted_frames: u64,
+    ) -> Option<(ClipId, u64)> {
+        if !content.applies_to_a_clip_of_kind(crate::project::tracks::ClipKind::Generator) {
+            return None;
+        }
+        let duration = self.longest_new_text_clip_at(timeline_frame, wanted_frames)?;
+        let clip = Clip::Generator(GeneratorClip::new(duration, EffectInstanceId::FIRST).ok()?);
+        let id = self.insert_clip_at(timeline_frame, clip).ok()?;
+        let made = self.add_effect_to_the_clip(id, content).ok()?;
+        debug_assert_eq!(made, EffectInstanceId::FIRST, "a clip that is new has no effect yet");
         Some((id, duration))
     }
 

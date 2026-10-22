@@ -11,7 +11,7 @@
 //! * Right-clicking a clip selects it (unless it is one of the clips that are selected already), and the
 //!   settings of what is selected are in the properties panel. It also opens a menu to put a copy of the clip (or of all the
 //!   selected clips, if it is one of them) beside it, and to delete it (see [`super::clip_menu`]).
-//! * Right-clicking an empty part of the strip opens a menu with "New", which has "Text object" and "Adjustment clip".
+//! * Right-clicking an empty part of the strip opens a menu with "New", which has "Text object", "Adjustment clip" and "Generator from file...".
 //! * Under the strip hang the drawers that are open: those of its clips, and the one of the track (see [`super::drawers`]).
 //!
 //! Cutting a track is done with a key (see the `keyboard` module), not with the mouse.
@@ -177,6 +177,15 @@ pub(super) fn show(
                 if ui.button("Adjustment clip").clicked() {
                     if let Some(target) = state.new_menu_target {
                         commands.push(Command::NewAdjustmentClip {
+                            track: target.track,
+                            frame: target.frame,
+                        });
+                    }
+                    ui.close();
+                }
+                if ui.button("Generator from file...").clicked() {
+                    if let Some(target) = state.new_menu_target {
+                        commands.push(Command::ChooseAGeneratorFile {
                             track: target.track,
                             frame: target.frame,
                         });

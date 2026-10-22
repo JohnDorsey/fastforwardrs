@@ -138,6 +138,11 @@ impl EffectKind {
         Self::BUILT_IN.contains(&self) || self.installed_plugin().is_some() || crate::isf::is_usable(self.0)
     }
 
+    /// Whether the effect is a shader that makes a picture and reads none (a generator: see [`crate::isf::Shape`]), which a clip is made of and which is not put on a picture.
+    pub fn is_a_generator(self) -> bool {
+        crate::isf::shape_of(self.0) == Some(crate::isf::Shape::Generator)
+    }
+
     /// The shader that runs the effect, if it is one (see [`ShaderSource`]): the text of its file, which the project carries.
     pub fn shader_source(self) -> Option<&'static ShaderSource> {
         self.0.shader.as_ref()
@@ -199,7 +204,7 @@ impl EffectKind {
         match self.0.domain {
             EffectDomain::Picture => matches!(
                 kind,
-                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Adjustment
+                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Adjustment | ClipKind::Generator
             ),
             EffectDomain::Sound => matches!(kind, ClipKind::Audio | ClipKind::Video),
         }

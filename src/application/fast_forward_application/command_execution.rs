@@ -33,6 +33,9 @@ const SECONDS_A_NEW_TEXT_OBJECT_LASTS: f64 = 3.0;
 /// How long a new adjustment clip lasts, in seconds, as a picture does (Q-11 of `docs/plugin-system-features.md`): it can be made longer or shorter.
 const SECONDS_A_NEW_ADJUSTMENT_CLIP_LASTS: f64 = 5.0;
 
+/// How many seconds a new generator clip lasts when there is room for that much (Q-11: as long as a picture and an adjustment clip).
+pub(super) const SECONDS_A_NEW_GENERATOR_CLIP_LASTS: f64 = 5.0;
+
 impl FastForwardApplication {
     /// Carries out the commands of one frame of the window, one after another, except the one that would lose keyframes if there is
     /// one, which the user is asked about instead (see [`Self::ask_before_losing_keyframes`]).
@@ -197,6 +200,13 @@ impl FastForwardApplication {
 
             Command::NewTextObject { track, frame } => self.new_text_object(track, frame, now),
             Command::NewAdjustmentClip { track, frame } => self.new_adjustment_clip(track, frame, now),
+            Command::ChooseAGeneratorFile { track, frame } => self.choose_a_generator_file(track, frame, now, context),
+            Command::NewGeneratorClip {
+                track,
+                frame,
+                file_name,
+                text,
+            } => self.new_generator_clip(track, frame, &file_name, &text, now),
             Command::SetTextObject { clip, object } => self.set_text_object_at_the_playhead(clip, object, now),
             Command::SetClipDuration { clip, frames } => {
                 if let Err(error) = self.document.project.set_clip_duration(clip, frames) {
@@ -601,7 +611,7 @@ impl FastForwardApplication {
 
     /// Puts a new clip that has no media on a track, selects it and takes the playhead to it: `what` is what it is called in the words that say it could not be put there and for
     /// how many seconds it lasts, `insert` puts it in (with the number of frames wanted, and says why it could not).
-    fn new_clip_with_no_media(
+    pub(super) fn new_clip_with_no_media(
         &mut self,
         frame: TimelineFrameIndex,
         now: Instant,

@@ -1177,3 +1177,61 @@ fn a_group_that_is_over_black_has_an_opaque_black_layer_first_and_one_whose_effe
     let (described, _) = describe(&doing_nothing);
     assert_eq!(described.layers, flat.layers);
 }
+
+fn generator_layer<'a>(number: u32, placement: Placement) -> PreviewLayer<'a> {
+    PreviewLayer {
+        content: PreviewLayerContent::Generator,
+        ..layer(number, placement)
+    }
+}
+
+#[test]
+fn a_generator_is_drawn_into_a_picture_of_its_own_that_has_nothing_in_it_for_its_shader_to_make_and_that_is_put_in_its_place()
+ {
+    let turned = Placement::new(CanvasArea::new(0.1, 0.2, 0.5, 0.4), Angle::from_degrees(30.0));
+    let picture = an_image();
+    let mut layer = generator_layer(0, turned);
+    layer.operations = vec![
+        crate::project::PictureOperation::Shader {
+            key: "isf:made_up-000000000000".to_owned(),
+            numbers: vec![0.5, 0.033, 15.0, 0.0, 1.0, 2.0],
+        },
+        crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(90.0)),
+    ];
+
+    let (described, supply) = describe(&content(vec![layer], None));
+    let (as_a_picture, _) = describe(&content(vec![image_layer(0, 1, Some(&picture), turned)], None));
+
+    assert_eq!(described.layers.len(), 1);
+    let outside = &described.layers[0];
+    assert_eq!(outside.corners, as_a_picture.layers[0].corners, "put where the clip is");
+    assert_eq!(outside.effects.len(), 2);
+    assert_eq!(outside.effects[0].key, "isf:made_up-000000000000");
+    assert_eq!(
+        outside.effects[0].values,
+        [0.5, 0.033, 15.0, 0.0, 1.0, 2.0],
+        "the numbers of the call, as they are"
+    );
+    assert_eq!(
+        outside.effects[1],
+        EffectCall::colour_matrix(ColourMatrix::hue_rotation(90.0).rows())
+    );
+    let held = the_layers_of_the_group(outside);
+    assert_eq!(held.len(), 1);
+    assert_eq!(
+        held[0].source,
+        LayerSource::Solid([0, 0, 0, 0]),
+        "clear, which is what the shader is given"
+    );
+    assert_eq!(held[0].corners, CORNERS_OF_THE_WHOLE_PICTURE);
+    assert!(supply.asked.is_empty(), "nothing is sent");
+}
+
+#[test]
+fn a_generator_that_has_no_effect_that_does_anything_is_not_drawn() {
+    // (Its shader cannot be run, or it has none yet: it has nothing to make a picture of.)
+    let (described, supply) = describe(&content(vec![generator_layer(0, whole_picture())], None));
+
+    assert!(described.layers.is_empty());
+    assert!(supply.asked.is_empty());
+}

@@ -74,6 +74,7 @@ fn kind_of_the_layer_in_the_plan(layer: &Layer) -> &'static str {
         LayerContent::Video(_) => "video",
         LayerContent::Image { .. } => "picture file",
         LayerContent::Text(_) => "text",
+        LayerContent::Generator => "generator",
         LayerContent::Adjustment => "adjustment",
     }
 }
@@ -83,6 +84,7 @@ fn kind_of_the_layer_made(layer: &PreviewLayer<'_>) -> &'static str {
         PreviewLayerContent::Video(_) => "video",
         PreviewLayerContent::Image { .. } => "picture file",
         PreviewLayerContent::Text(_) => "text",
+        PreviewLayerContent::Generator => "generator",
     }
 }
 
@@ -156,6 +158,7 @@ fn a_video_is_asked_about_once_with_its_layer_and_a_picture_file_once_with_its_s
             }
             PreviewLayerContent::Video(shown) => assert!(matches!(shown, VideoInThePicture::Waiting)),
             PreviewLayerContent::Text(text) => assert_eq!(text.text, "hello"),
+            PreviewLayerContent::Generator => panic!("there is no generator in this project"),
         }
     }
     assert_eq!(picture_files, 1);

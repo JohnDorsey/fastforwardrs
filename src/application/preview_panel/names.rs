@@ -28,6 +28,11 @@ pub fn picture_label(clip: ClipId) -> String {
     format!("Picture, {clip}")
 }
 
+/// The name a generator clip on the preview is known by.
+pub fn generator_label(clip: ClipId) -> String {
+    format!("Generator, {clip}")
+}
+
 /// The name the handle at a corner of the selected layer is known by.
 pub fn corner_handle_label(corner: Corner) -> String {
     format!("Resize handle at the {} corner", corner_name(corner))

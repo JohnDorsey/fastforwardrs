@@ -4,7 +4,7 @@
 //! Which shaders are usable: the kinds of effect that are ISF shaders are compiled **once each** (by the key, which has the digest of the text in it), the result is kept, and what
 //! compiled is put on the engine's shelf (`engine::publish_effect_shader`) for it to take when a frame asks for the effect.
 //!
-//! A shader is **usable** if it compiles, and is one that this version can run: so far a filter of one picture with no passes of its own and no imported images (see
+//! A shader is **usable** if it compiles, and is one that this version can run: so far a filter of one picture or a generator, with no passes of its own and no imported images (see
 //! `docs/engine-phase-6-design.md`, J8). Any other is a kind of effect that is *not installed*: it is kept in the project with its values and does nothing, and the properties box says
 //! why ([`why_not_usable`]).
 
@@ -28,15 +28,11 @@ static COMPILED: Mutex<Option<HashMap<String, TextsOfAKey>>> = Mutex::new(None);
 /// The reasons that a file that was read cannot be run by this version, if there are any (the file reads and compiles, and still is not what the engine runs yet).
 fn what_cannot_be_run_yet(file: &IsfFile) -> Option<IsfProblem> {
     let says = |message: String| Some(IsfProblem::nowhere_in_particular(message));
-    if file.shape() != Shape::Filter {
-        return says(format!(
-            "this shader is a {}, which this version cannot run yet (only filters, which read inputImage)",
-            if file.shape() == Shape::Generator {
-                "generator"
-            } else {
-                "transition"
-            }
-        ));
+    if file.shape() == Shape::Transition {
+        return says(
+            "this shader is a transition, which this version cannot run yet (only filters, which read inputImage, and generators, which read no picture)"
+                .to_owned(),
+        );
     }
     if let Some(other) = file.other_image_inputs().first() {
         return says(format!(
@@ -96,6 +92,14 @@ pub fn compiled_shader_of(descriptor: &EffectDescriptor) -> Option<Made> {
         .or_default()
         .push((source.text.to_string(), Arc::clone(&made)));
     Some(made)
+}
+
+/// What the shader of `descriptor` is for, if it is an ISF shader that this version can run (a filter reads `inputImage`; a generator reads no picture).
+pub fn shape_of(descriptor: &EffectDescriptor) -> Option<Shape> {
+    match compiled_shader_of(descriptor)?.as_ref() {
+        Ok(compiled) => Some(compiled.shape),
+        Err(_) => None,
+    }
 }
 
 /// Whether the effect described by `descriptor` is an ISF shader that this version can run.

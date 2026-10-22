@@ -411,6 +411,25 @@ fn describe_layer(
             colour,
             working,
         },
+        PreviewLayerContent::Generator => {
+            // (Its shader reads no picture and makes one, so what the effects work on is a picture that has nothing in it, the size of the frame, and what they make of it is put where
+            // the clip is. A generator whose shader cannot be run, which has no effect that does anything, is nothing.)
+            let effects: Vec<EffectCall> = layer.operations.iter().filter_map(call_of_an_operation).collect();
+            if effects.is_empty() {
+                return None;
+            }
+            return Some(LayerDescription {
+                source: LayerSource::Group(GroupDescription {
+                    layers: vec![LayerDescription {
+                        source: LayerSource::Solid([0, 0, 0, 0]),
+                        corners: CORNERS_OF_THE_WHOLE_PICTURE,
+                        effects: Vec::new(),
+                    }],
+                }),
+                corners,
+                effects,
+            });
+        }
         PreviewLayerContent::Video(VideoInThePicture::Waiting) | PreviewLayerContent::Image { picture: None, .. } => {
             return Some(LayerDescription {
                 source: LayerSource::Solid(colour_of_a_layer_without_a_picture),
