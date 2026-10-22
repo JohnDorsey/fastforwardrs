@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use clap_host::scan::{scan_library, scan_library_checking_starts_for};
+use clap_host::scan::scan_library_checking_starts_for;
 use clap_host::start_check::{StartCheck, check_the_start};
 use clap_host::{Library, MainThread};
 use clap_test_plugins::{FAILS_TO_ACTIVATE, FAILS_TO_PROCESS, GAIN, INSTRUMENT, READS_GARBAGE, SINGLE_INSTANCE};
@@ -17,8 +17,10 @@ use clap_test_plugins::{FAILS_TO_ACTIVATE, FAILS_TO_PROCESS, GAIN, INSTRUMENT, R
 fn the_check_finds_the_plugin_that_reads_memory_it_did_not_write_and_no_other_of_the_test_plugins() {
     let file = clap_test_plugins::library_file_for_tests();
 
-    // The scan checks every plugin that can be run on audio.
-    let scan = scan_library(&file, |_| {}).expect("the library is scanned");
+    // The scan checks every plugin that can be run on audio. (With a time that no runner uses up: the plugins after the time given are not checked, and with the time that the scan
+    // is given for a real library, a computer twice as slow as the one this was made on left the later test plugins `NotChecked`, as the Windows runner of CI did once.)
+    let scan =
+        scan_library_checking_starts_for(&file, Duration::from_secs(600), |_| {}).expect("the library is scanned");
     for plugin in &scan.plugins {
         let id = plugin.description.id.as_str();
         if id == READS_GARBAGE {
