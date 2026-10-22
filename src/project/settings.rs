@@ -15,6 +15,11 @@
 //! not just on and off, make a type for them that implements [`SettingValue`]. The settings
 //! windows are built from the table, and a test that goes through the table makes sure the files
 //! keep every setting.
+//!
+//! **A global-only setting** describes the machine, or how the program is used, and not a project
+//! (the settings of the preview's lead-up on a jump, EN-14): it has a field in [`Settings`] and a
+//! row in [`GLOBAL_ONLY_SETTINGS`], no field in [`ProjectSettings`], and
+//! [`ProjectSettings::resolve`] takes it from the global settings whatever the project says.
 
 use serde::{Deserialize, Serialize};
 
@@ -233,6 +238,93 @@ impl ResourceStorage {
     }
 }
 
+/// How far apart, in frames, the preview keeps a copy of the state of an effect that depends on earlier frames (EN-14): a **checkpoint**. After a jump the preview goes on from
+/// the nearest checkpoint before the place it jumped to, so that a shorter interval is less to make again and more memory kept. **A global-only setting.**
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CheckpointInterval {
+    #[serde(rename = "every_30_frames")]
+    Every30Frames,
+    #[default]
+    #[serde(rename = "every_60_frames")]
+    Every60Frames,
+    #[serde(rename = "every_120_frames")]
+    Every120Frames,
+    #[serde(rename = "every_300_frames")]
+    Every300Frames,
+}
+
+impl CheckpointInterval {
+    pub const ALL: [Self; 4] = [
+        Self::Every30Frames,
+        Self::Every60Frames,
+        Self::Every120Frames,
+        Self::Every300Frames,
+    ];
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Every30Frames => "Every 30 frames",
+            Self::Every60Frames => "Every 60 frames",
+            Self::Every120Frames => "Every 120 frames",
+            Self::Every300Frames => "Every 300 frames",
+        }
+    }
+
+    /// The number of frames between one checkpoint and the next.
+    pub fn frames(self) -> u32 {
+        match self {
+            Self::Every30Frames => 30,
+            Self::Every60Frames => 60,
+            Self::Every120Frames => 120,
+            Self::Every300Frames => 300,
+        }
+    }
+}
+
+/// How much memory all the checkpoints of the preview may take together (EN-14): when they would take more, the oldest are dropped. **A global-only setting.**
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CheckpointMemoryBudget {
+    #[serde(rename = "256_mib")]
+    Mib256,
+    #[serde(rename = "512_mib")]
+    Mib512,
+    #[default]
+    #[serde(rename = "1_gib")]
+    Gib1,
+    #[serde(rename = "2_gib")]
+    Gib2,
+    #[serde(rename = "4_gib")]
+    Gib4,
+}
+
+impl CheckpointMemoryBudget {
+    pub const ALL: [Self; 5] = [Self::Mib256, Self::Mib512, Self::Gib1, Self::Gib2, Self::Gib4];
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Mib256 => "256 MiB",
+            Self::Mib512 => "512 MiB",
+            Self::Gib1 => "1 GiB",
+            Self::Gib2 => "2 GiB",
+            Self::Gib4 => "4 GiB",
+        }
+    }
+
+    /// The number of bytes.
+    pub fn bytes(self) -> u64 {
+        const MIB: u64 = 1024 * 1024;
+        match self {
+            Self::Mib256 => 256 * MIB,
+            Self::Mib512 => 512 * MIB,
+            Self::Gib1 => 1024 * MIB,
+            Self::Gib2 => 2 * 1024 * MIB,
+            Self::Gib4 => 4 * 1024 * MIB,
+        }
+    }
+}
+
 /// A value for every setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -250,6 +342,13 @@ pub struct Settings {
     pub output_colour_space: OutputColourSpace,
     /// How the files that effects use are kept when they are added.
     pub resource_storage: ResourceStorage,
+    /// After a jump in the timeline, make the frames that lead up to the playhead in the background, so that an effect that depends on earlier frames shows what the
+    /// export shows (EN-14, the View menu). Off: the preview goes on from the nearest checkpoint and says that the picture is approximate. **A global-only setting.**
+    pub generate_lead_up_on_seek: bool,
+    /// How far apart the checkpoints of the preview are. **A global-only setting.**
+    pub checkpoint_interval: CheckpointInterval,
+    /// How much memory the checkpoints may take together. **A global-only setting.**
+    pub checkpoint_memory_budget: CheckpointMemoryBudget,
 }
 
 impl Settings {
@@ -261,6 +360,9 @@ impl Settings {
         working_colour_space: WorkingColourSpace::LinearRec709,
         output_colour_space: OutputColourSpace::Rec709AsPreviewed,
         resource_storage: ResourceStorage::Embed,
+        generate_lead_up_on_seek: true,
+        checkpoint_interval: CheckpointInterval::Every60Frames,
+        checkpoint_memory_budget: CheckpointMemoryBudget::Gib1,
     };
 }
 
@@ -293,7 +395,7 @@ impl ProjectSettings {
     };
 
     /// The settings in effect for the project: its own where it has set them, the global ones
-    /// everywhere else.
+    /// everywhere else (and always for the global-only settings, which a project cannot set).
     pub fn resolve(&self, global: Settings) -> Settings {
         Settings {
             autosave: self.autosave.unwrap_or(global.autosave),
@@ -302,6 +404,9 @@ impl ProjectSettings {
             working_colour_space: self.working_colour_space.unwrap_or(global.working_colour_space),
             output_colour_space: self.output_colour_space.unwrap_or(global.output_colour_space),
             resource_storage: self.resource_storage.unwrap_or(global.resource_storage),
+            generate_lead_up_on_seek: global.generate_lead_up_on_seek,
+            checkpoint_interval: global.checkpoint_interval,
+            checkpoint_memory_budget: global.checkpoint_memory_budget,
         }
     }
 }
@@ -378,6 +483,24 @@ impl SettingValue for ResourceStorage {
     }
 }
 
+impl SettingValue for CheckpointInterval {
+    const ALL: &'static [Self] = &CheckpointInterval::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        CheckpointInterval::label(self)
+    }
+}
+
+impl SettingValue for CheckpointMemoryBudget {
+    const ALL: &'static [Self] = &CheckpointMemoryBudget::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        CheckpointMemoryBudget::label(self)
+    }
+}
+
 /// One setting, with the way to reach it in each of the two layers.
 pub struct Setting<Value: SettingValue> {
     /// What the checkbox, or the drop-down list, is called.
@@ -386,10 +509,16 @@ pub struct Setting<Value: SettingValue> {
     pub project: fn(&mut ProjectSettings) -> &mut Option<Value>,
 }
 
-/// A [`Setting`] of any kind of value, which is what lets the settings windows (and the tests of
-/// the files) go through all the settings in one list. A value is named by its number in the list
-/// of values the setting can have.
-pub trait AnySetting: Sync {
+/// One setting that only the global layer has: a project cannot set it for itself (it describes the machine, or how the program is used, and not the project).
+pub struct GlobalSetting<Value: SettingValue> {
+    /// What the checkbox, or the drop-down list, is called.
+    pub label: &'static str,
+    pub global: fn(&mut Settings) -> &mut Value,
+}
+
+/// A [`Setting`] or a [`GlobalSetting`] of any kind of value, as far as the global layer goes, which is what lets the Global settings window (and the tests of the files) go
+/// through all the settings in one list. A value is named by its number in the list of values the setting can have.
+pub trait AnyGlobalSetting: Sync {
     fn label(&self) -> &'static str;
     fn control(&self) -> SettingControlKind;
     /// The label of each value, in order.
@@ -397,21 +526,42 @@ pub trait AnySetting: Sync {
     /// The number of the value the global setting has.
     fn global_option(&self, settings: Settings) -> usize;
     fn set_global_option(&self, settings: &mut Settings, option: usize);
+}
+
+/// A [`Setting`] of any kind of value: one that a project can set for itself as well.
+pub trait AnySetting: AnyGlobalSetting {
     /// The number of the value the project has set for itself, or `None` if it follows the global one.
     fn project_option(&self, settings: ProjectSettings) -> Option<usize>;
     fn set_project_option(&self, settings: &mut ProjectSettings, option: Option<usize>);
 }
 
-impl<Value: SettingValue> Setting<Value> {
-    fn option_of(value: Value) -> usize {
-        Value::ALL
-            .iter()
-            .position(|candidate| *candidate == value)
-            .expect("every value is in the list of all values")
+/// The number of `value` in the list of the values of its kind.
+fn option_of<Value: SettingValue>(value: Value) -> usize {
+    Value::ALL
+        .iter()
+        .position(|candidate| *candidate == value)
+        .expect("every value is in the list of all values")
+}
+
+fn labels_of_the_values<Value: SettingValue>() -> Vec<&'static str> {
+    Value::ALL.iter().map(|value| value.label()).collect()
+}
+
+fn global_option_of<Value: SettingValue>(access: fn(&mut Settings) -> &mut Value, mut settings: Settings) -> usize {
+    option_of(*access(&mut settings))
+}
+
+fn set_global_option_of<Value: SettingValue>(
+    access: fn(&mut Settings) -> &mut Value,
+    settings: &mut Settings,
+    option: usize,
+) {
+    if let Some(value) = Value::ALL.get(option) {
+        *access(settings) = *value;
     }
 }
 
-impl<Value: SettingValue> AnySetting for Setting<Value> {
+impl<Value: SettingValue> AnyGlobalSetting for Setting<Value> {
     fn label(&self) -> &'static str {
         self.label
     }
@@ -421,21 +571,43 @@ impl<Value: SettingValue> AnySetting for Setting<Value> {
     }
 
     fn option_labels(&self) -> Vec<&'static str> {
-        Value::ALL.iter().map(|value| value.label()).collect()
+        labels_of_the_values::<Value>()
     }
 
-    fn global_option(&self, mut settings: Settings) -> usize {
-        Self::option_of(*(self.global)(&mut settings))
+    fn global_option(&self, settings: Settings) -> usize {
+        global_option_of(self.global, settings)
     }
 
     fn set_global_option(&self, settings: &mut Settings, option: usize) {
-        if let Some(value) = Value::ALL.get(option) {
-            *(self.global)(settings) = *value;
-        }
+        set_global_option_of(self.global, settings, option);
+    }
+}
+
+impl<Value: SettingValue> AnyGlobalSetting for GlobalSetting<Value> {
+    fn label(&self) -> &'static str {
+        self.label
     }
 
+    fn control(&self) -> SettingControlKind {
+        Value::CONTROL
+    }
+
+    fn option_labels(&self) -> Vec<&'static str> {
+        labels_of_the_values::<Value>()
+    }
+
+    fn global_option(&self, settings: Settings) -> usize {
+        global_option_of(self.global, settings)
+    }
+
+    fn set_global_option(&self, settings: &mut Settings, option: usize) {
+        set_global_option_of(self.global, settings, option);
+    }
+}
+
+impl<Value: SettingValue> AnySetting for Setting<Value> {
     fn project_option(&self, mut settings: ProjectSettings) -> Option<usize> {
-        (*(self.project)(&mut settings)).map(Self::option_of)
+        (*(self.project)(&mut settings)).map(option_of)
     }
 
     fn set_project_option(&self, settings: &mut ProjectSettings, option: Option<usize>) {
@@ -479,7 +651,22 @@ const RESOURCE_STORAGE: Setting<ResourceStorage> = Setting {
     project: |settings| &mut settings.resource_storage,
 };
 
-/// Every setting, in the order the settings windows show them.
+const GENERATE_LEAD_UP_ON_SEEK: GlobalSetting<bool> = GlobalSetting {
+    label: "Generate lead-up on seek",
+    global: |settings| &mut settings.generate_lead_up_on_seek,
+};
+
+const CHECKPOINT_INTERVAL: GlobalSetting<CheckpointInterval> = GlobalSetting {
+    label: "Checkpoint interval",
+    global: |settings| &mut settings.checkpoint_interval,
+};
+
+const CHECKPOINT_MEMORY_BUDGET: GlobalSetting<CheckpointMemoryBudget> = GlobalSetting {
+    label: "Checkpoint memory budget",
+    global: |settings| &mut settings.checkpoint_memory_budget,
+};
+
+/// Every setting that a project can set for itself too, in the order the settings windows show them.
 pub static SETTINGS: [&dyn AnySetting; 6] = [
     &AUTOSAVE,
     &SPED_UP_CLIP_SOUND,
@@ -489,12 +676,31 @@ pub static SETTINGS: [&dyn AnySetting; 6] = [
     &RESOURCE_STORAGE,
 ];
 
+/// Every setting that only the global layer has, in the order the Global settings window shows them (after those of [`SETTINGS`]).
+pub static GLOBAL_ONLY_SETTINGS: [&dyn AnyGlobalSetting; 3] = [
+    &GENERATE_LEAD_UP_ON_SEEK,
+    &CHECKPOINT_INTERVAL,
+    &CHECKPOINT_MEMORY_BUDGET,
+];
+
+/// Every setting that the global layer has: those of [`SETTINGS`], then those of [`GLOBAL_ONLY_SETTINGS`], in the order the Global settings window shows them.
+pub fn every_global_setting() -> impl Iterator<Item = &'static dyn AnyGlobalSetting> {
+    fn as_a_global_setting(setting: &'static dyn AnySetting) -> &'static dyn AnyGlobalSetting {
+        setting
+    }
+    SETTINGS
+        .iter()
+        .copied()
+        .map(as_a_global_setting)
+        .chain(GLOBAL_ONLY_SETTINGS.iter().copied())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every setting at the last of its values, which for these is not the default.
-    fn everything_at_its_last_value() -> Settings {
+    /// Every setting at a value that is not its default: the last of its values, except for the checkbox that is on to begin with, which is off.
+    fn everything_off_its_default() -> Settings {
         Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
@@ -502,6 +708,19 @@ mod tests {
             working_colour_space: WorkingColourSpace::AcesCg,
             output_colour_space: OutputColourSpace::Srgb,
             resource_storage: ResourceStorage::Ask,
+            generate_lead_up_on_seek: false,
+            checkpoint_interval: CheckpointInterval::Every300Frames,
+            checkpoint_memory_budget: CheckpointMemoryBudget::Gib4,
+        }
+    }
+
+    /// The number of a value of the setting that is not the one it has by default: the last, or the first where the last is the default (a checkbox that is on to begin with).
+    fn an_option_that_is_not_the_default(setting: &dyn AnyGlobalSetting) -> usize {
+        let last = setting.option_labels().len() - 1;
+        if setting.global_option(Settings::DEFAULT) == last {
+            0
+        } else {
+            last
         }
     }
 
@@ -528,7 +747,7 @@ mod tests {
 
     #[test]
     fn a_project_that_follows_everything_gets_the_global_settings() {
-        for global in [Settings::DEFAULT, everything_at_its_last_value()] {
+        for global in [Settings::DEFAULT, everything_off_its_default()] {
             assert_eq!(ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS.resolve(global), global);
         }
         assert_eq!(ProjectSettings::default(), ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS);
@@ -556,12 +775,12 @@ mod tests {
             ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         };
         assert_eq!(
-            project.resolve(everything_at_its_last_value()),
+            project.resolve(everything_off_its_default()),
             Settings {
                 autosave: false,
                 sped_up_clip_sound: SpedUpClipSound::Mute,
                 // (What the project does not set follows the global setting: the colour settings are at their last values there.)
-                ..everything_at_its_last_value()
+                ..everything_off_its_default()
             },
             "the project's own choices beat the global ones"
         );
@@ -572,33 +791,28 @@ mod tests {
             ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
         };
         assert_eq!(
-            project.resolve(everything_at_its_last_value()).sped_up_clip_sound,
+            project.resolve(everything_off_its_default()).sped_up_clip_sound,
             SpedUpClipSound::IncreasePitch,
             "the setting it does not set follows the global one"
         );
     }
 
     #[test]
-    fn the_table_reaches_every_setting_in_both_layers_and_each_row_reaches_a_different_one() {
-        // Giving one row at a time its last value in each layer must change exactly that much, so
+    fn the_tables_reach_every_setting_in_both_layers_and_each_row_reaches_a_different_one() {
+        // Giving one row at a time a value that is not its default, in each layer, must change exactly that much, so
         // that two rows can never point at the same setting, and no setting is missing a row.
         let mut changed_globally = Settings::DEFAULT;
         let mut changed_in_the_project = ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS;
         for setting in SETTINGS {
-            let last_option = setting.option_labels().len() - 1;
+            let option = an_option_that_is_not_the_default(setting);
 
             let before = changed_globally;
-            setting.set_global_option(&mut changed_globally, last_option);
+            setting.set_global_option(&mut changed_globally, option);
             assert_ne!(changed_globally, before, "{} reaches a global setting", setting.label());
-            assert_eq!(
-                setting.global_option(changed_globally),
-                last_option,
-                "{}",
-                setting.label()
-            );
+            assert_eq!(setting.global_option(changed_globally), option, "{}", setting.label());
 
             let before = changed_in_the_project;
-            setting.set_project_option(&mut changed_in_the_project, Some(last_option));
+            setting.set_project_option(&mut changed_in_the_project, Some(option));
             assert_ne!(
                 changed_in_the_project,
                 before,
@@ -607,20 +821,122 @@ mod tests {
             );
             assert_eq!(
                 setting.project_option(changed_in_the_project),
-                Some(last_option),
+                Some(option),
                 "{}",
                 setting.label()
             );
         }
+        let everything_a_project_can_set = changed_globally;
+        for setting in GLOBAL_ONLY_SETTINGS {
+            let option = an_option_that_is_not_the_default(setting);
+            let before = changed_globally;
+            setting.set_global_option(&mut changed_globally, option);
+            assert_ne!(changed_globally, before, "{} reaches a global setting", setting.label());
+            assert_eq!(setting.global_option(changed_globally), option, "{}", setting.label());
+        }
         assert_eq!(
             changed_globally,
-            everything_at_its_last_value(),
+            everything_off_its_default(),
             "every global setting has a row"
         );
+        // (What a project sets is never one of the global-only settings: those stay at the global values, here the defaults.)
         assert_eq!(
             changed_in_the_project.resolve(Settings::DEFAULT),
-            everything_at_its_last_value(),
+            everything_a_project_can_set,
             "every project setting has a row"
+        );
+        assert_eq!(
+            everything_a_project_can_set,
+            Settings {
+                generate_lead_up_on_seek: Settings::DEFAULT.generate_lead_up_on_seek,
+                checkpoint_interval: Settings::DEFAULT.checkpoint_interval,
+                checkpoint_memory_budget: Settings::DEFAULT.checkpoint_memory_budget,
+                ..everything_off_its_default()
+            },
+            "and the rows of the project's table are the first six"
+        );
+    }
+
+    #[test]
+    fn the_settings_of_the_lead_up_are_on_and_every_60_frames_and_1_gib_to_begin_with_and_no_project_can_set_them() {
+        assert!(Settings::default().generate_lead_up_on_seek, "on to begin with");
+        assert_eq!(Settings::DEFAULT.checkpoint_interval, CheckpointInterval::Every60Frames);
+        assert_eq!(Settings::DEFAULT.checkpoint_interval.frames(), 60);
+        assert_eq!(Settings::DEFAULT.checkpoint_memory_budget, CheckpointMemoryBudget::Gib1);
+        assert_eq!(Settings::DEFAULT.checkpoint_memory_budget.bytes(), 1 << 30);
+        assert_eq!(CheckpointInterval::default(), Settings::DEFAULT.checkpoint_interval);
+        assert_eq!(
+            CheckpointMemoryBudget::default(),
+            Settings::DEFAULT.checkpoint_memory_budget
+        );
+
+        // Whatever a project sets for itself, these come from the global settings.
+        let everything_set_by_the_project = ProjectSettings {
+            autosave: Some(true),
+            sped_up_clip_sound: Some(SpedUpClipSound::Mute),
+            display_transform: Some(DisplayTransform::Gamma22),
+            working_colour_space: Some(WorkingColourSpace::AcesCg),
+            output_colour_space: Some(OutputColourSpace::Srgb),
+            resource_storage: Some(ResourceStorage::Link),
+        };
+        for global in [Settings::DEFAULT, everything_off_its_default()] {
+            let in_effect = everything_set_by_the_project.resolve(global);
+            assert_eq!(in_effect.generate_lead_up_on_seek, global.generate_lead_up_on_seek);
+            assert_eq!(in_effect.checkpoint_interval, global.checkpoint_interval);
+            assert_eq!(in_effect.checkpoint_memory_budget, global.checkpoint_memory_budget);
+            assert!(in_effect.autosave, "(and what the project does set is its own)");
+        }
+    }
+
+    #[test]
+    fn the_checkpoint_settings_are_listed_from_the_least_to_the_most_and_say_what_they_mean() {
+        assert_eq!(
+            CheckpointInterval::ALL.map(CheckpointInterval::label),
+            [
+                "Every 30 frames",
+                "Every 60 frames",
+                "Every 120 frames",
+                "Every 300 frames"
+            ]
+        );
+        assert_eq!(
+            CheckpointInterval::ALL.map(CheckpointInterval::frames),
+            [30, 60, 120, 300]
+        );
+        assert_eq!(
+            CheckpointMemoryBudget::ALL.map(CheckpointMemoryBudget::label),
+            ["256 MiB", "512 MiB", "1 GiB", "2 GiB", "4 GiB"]
+        );
+        assert_eq!(
+            CheckpointMemoryBudget::ALL.map(CheckpointMemoryBudget::bytes),
+            [268_435_456, 536_870_912, 1_073_741_824, 2_147_483_648, 4_294_967_296]
+        );
+    }
+
+    #[test]
+    fn the_global_only_settings_are_one_checkbox_and_two_drop_down_lists_and_are_shown_after_the_others() {
+        let controls: Vec<(&str, SettingControlKind)> = GLOBAL_ONLY_SETTINGS
+            .iter()
+            .map(|setting| (setting.label(), setting.control()))
+            .collect();
+        assert_eq!(
+            controls,
+            [
+                ("Generate lead-up on seek", SettingControlKind::Checkbox),
+                ("Checkpoint interval", SettingControlKind::Dropdown),
+                ("Checkpoint memory budget", SettingControlKind::Dropdown),
+            ]
+        );
+        let order: Vec<&str> = every_global_setting().map(|setting| setting.label()).collect();
+        assert_eq!(order.len(), SETTINGS.len() + GLOBAL_ONLY_SETTINGS.len());
+        assert_eq!(order[0], "Autosave");
+        assert_eq!(
+            order[SETTINGS.len()..],
+            [
+                "Generate lead-up on seek",
+                "Checkpoint interval",
+                "Checkpoint memory budget"
+            ]
         );
     }
 
@@ -655,15 +971,20 @@ mod tests {
                 setting.label()
             );
         }
+        for setting in GLOBAL_ONLY_SETTINGS {
+            let mut global = Settings::DEFAULT;
+            setting.set_global_option(&mut global, 99);
+            assert_eq!(global, Settings::DEFAULT, "{}", setting.label());
+        }
     }
 
     #[test]
     fn every_setting_has_its_own_label_and_at_least_two_values_each_with_its_own_label() {
-        let mut labels: Vec<&str> = SETTINGS.iter().map(|setting| setting.label()).collect();
+        let mut labels: Vec<&str> = every_global_setting().map(|setting| setting.label()).collect();
         labels.sort_unstable();
         labels.dedup();
-        assert_eq!(labels.len(), SETTINGS.len());
-        for setting in SETTINGS {
+        assert_eq!(labels.len(), SETTINGS.len() + GLOBAL_ONLY_SETTINGS.len());
+        for setting in every_global_setting() {
             let mut option_labels = setting.option_labels();
             assert!(option_labels.len() >= 2, "{}", setting.label());
             option_labels.sort_unstable();
@@ -820,5 +1141,39 @@ mod tests {
             .collect();
         assert_eq!(words, ["\"mute\"", "\"maintain_pitch\"", "\"increase_pitch\""]);
         assert!(serde_json::from_str::<SpedUpClipSound>("\"loud\"").is_err());
+    }
+
+    #[test]
+    fn the_values_of_the_checkpoint_settings_are_serialised_as_words_that_say_the_number() {
+        let words: Vec<String> = CheckpointInterval::ALL
+            .iter()
+            .map(|value| serde_json::to_string(value).unwrap())
+            .collect();
+        assert_eq!(
+            words,
+            [
+                "\"every_30_frames\"",
+                "\"every_60_frames\"",
+                "\"every_120_frames\"",
+                "\"every_300_frames\""
+            ]
+        );
+        let words: Vec<String> = CheckpointMemoryBudget::ALL
+            .iter()
+            .map(|value| serde_json::to_string(value).unwrap())
+            .collect();
+        assert_eq!(
+            words,
+            ["\"256_mib\"", "\"512_mib\"", "\"1_gib\"", "\"2_gib\"", "\"4_gib\""]
+        );
+        for value in CheckpointInterval::ALL {
+            let again: CheckpointInterval = serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
+            assert_eq!(again, value);
+        }
+        for value in CheckpointMemoryBudget::ALL {
+            let again: CheckpointMemoryBudget = serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
+            assert_eq!(again, value);
+        }
+        assert!(serde_json::from_str::<CheckpointInterval>("\"every_7_frames\"").is_err());
     }
 }

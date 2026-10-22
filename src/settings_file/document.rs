@@ -10,7 +10,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::{DisplayTransform, OutputColourSpace, ResourceStorage, SpedUpClipSound, WorkingColourSpace};
+use crate::project::{
+    CheckpointInterval, CheckpointMemoryBudget, DisplayTransform, OutputColourSpace, ResourceStorage, SpedUpClipSound,
+    WorkingColourSpace,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct SettingsDocument {
@@ -42,4 +45,11 @@ pub(super) struct SettingsValuesDocument {
     /// How the files that effects use are kept when they are added (phase 4): not there in the files of earlier versions, which get the default.
     #[serde(default)]
     pub resource_storage: Option<ResourceStorage>,
+    /// What the preview does after a jump for the effects that depend on earlier frames (phase 6): not there in the files of earlier versions, which get the defaults.
+    #[serde(default)]
+    pub generate_lead_up_on_seek: Option<bool>,
+    #[serde(default)]
+    pub checkpoint_interval: Option<CheckpointInterval>,
+    #[serde(default)]
+    pub checkpoint_memory_budget: Option<CheckpointMemoryBudget>,
 }

@@ -19,6 +19,14 @@ The **global settings** (*Edit > Global settings*) are the same for every projec
 the operating system's folder for programs' settings (`%APPDATA%\fastforwardrs\settings.json` on Windows), which
 is written as soon as one is changed.
 
+Three more are **global only** (no project has them; they are under a line of their own in the global settings window), for the preview of effects that remember earlier frames (EN-14):
+
+| Setting | What it does | Default |
+|---|---|---|
+| Generate lead-up on seek | Also the checkbox of the **View** menu. After you jump to another place in the timeline, the frames that lead up to it are made in the background, so that an effect that remembers earlier frames (a shader with a `PERSISTENT` buffer: feedback, trails) shows what the exported video shows there; until it is done the picture is approximate. Off: the preview goes on from the nearest saved checkpoint instead, and says that the picture is approximate. **The export is never affected: it makes every frame in order.** *(The setting is kept and shown; what it switches on is built in phase 6.4.3, which is not finished.)* | on |
+| Checkpoint interval | How far apart, in frames, the preview keeps a copy of the state of such an effect: every 30, 60, 120 or 300 frames. | every 60 frames |
+| Checkpoint memory budget | How much memory the copies may take together (256 MiB, 512 MiB, 1, 2 or 4 GiB); the oldest are dropped first. | 1 GiB |
+
 The **project settings** (*Edit > Project settings*) have a checkbox, *Use global setting*, next to each
 setting. While it is ticked the project follows the global setting: the setting beside it is greyed out (showing
 the global value that is in use) and nothing about it is saved in the project file. Unticking it gives the

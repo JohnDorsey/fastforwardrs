@@ -106,6 +106,15 @@ pub fn settings_from_json_text(text: &str) -> Result<Settings, String> {
             .output_colour_space
             .unwrap_or(Settings::DEFAULT.output_colour_space),
         resource_storage: values.resource_storage.unwrap_or(Settings::DEFAULT.resource_storage),
+        generate_lead_up_on_seek: values
+            .generate_lead_up_on_seek
+            .unwrap_or(Settings::DEFAULT.generate_lead_up_on_seek),
+        checkpoint_interval: values
+            .checkpoint_interval
+            .unwrap_or(Settings::DEFAULT.checkpoint_interval),
+        checkpoint_memory_budget: values
+            .checkpoint_memory_budget
+            .unwrap_or(Settings::DEFAULT.checkpoint_memory_budget),
     })
 }
 
@@ -122,6 +131,9 @@ pub fn settings_to_json_text(settings: Settings) -> String {
             working_colour_space: Some(settings.working_colour_space),
             output_colour_space: Some(settings.output_colour_space),
             resource_storage: Some(settings.resource_storage),
+            generate_lead_up_on_seek: Some(settings.generate_lead_up_on_seek),
+            checkpoint_interval: Some(settings.checkpoint_interval),
+            checkpoint_memory_budget: Some(settings.checkpoint_memory_budget),
         },
     };
     let mut text = serde_json::to_string_pretty(&document).expect("settings can always be written as JSON");
@@ -132,9 +144,10 @@ pub fn settings_to_json_text(settings: Settings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::{SETTINGS, SpedUpClipSound};
+    use crate::project::{CheckpointInterval, CheckpointMemoryBudget, SpedUpClipSound, every_global_setting};
 
-    fn everything_at_its_last_value() -> Settings {
+    /// Every setting at a value that is not its default.
+    fn everything_off_its_default() -> Settings {
         Settings {
             autosave: true,
             sped_up_clip_sound: SpedUpClipSound::IncreasePitch,
@@ -142,6 +155,9 @@ mod tests {
             working_colour_space: crate::project::WorkingColourSpace::AcesCg,
             output_colour_space: crate::project::OutputColourSpace::Srgb,
             resource_storage: crate::project::ResourceStorage::Ask,
+            generate_lead_up_on_seek: false,
+            checkpoint_interval: CheckpointInterval::Every300Frames,
+            checkpoint_memory_budget: CheckpointMemoryBudget::Gib4,
         }
     }
 
@@ -163,7 +179,10 @@ mod tests {
     "display_transform": "srgb",
     "working_colour_space": "linear_rec709",
     "output_colour_space": "rec709_as_previewed",
-    "resource_storage": "embed"
+    "resource_storage": "embed",
+    "generate_lead_up_on_seek": true,
+    "checkpoint_interval": "every_60_frames",
+    "checkpoint_memory_budget": "1_gib"
   }
 }
 "#
@@ -172,7 +191,7 @@ mod tests {
 
     #[test]
     fn every_setting_in_the_table_survives_a_trip_through_text_in_every_state() {
-        for setting in SETTINGS {
+        for setting in every_global_setting() {
             for option in 0..setting.option_labels().len() {
                 let mut settings = Settings::DEFAULT;
                 setting.set_global_option(&mut settings, option);
@@ -189,8 +208,73 @@ mod tests {
         }
         // And all of them together.
         assert_eq!(
-            settings_from_json_text(&settings_to_json_text(everything_at_its_last_value())).unwrap(),
-            everything_at_its_last_value()
+            settings_from_json_text(&settings_to_json_text(everything_off_its_default())).unwrap(),
+            everything_off_its_default()
+        );
+    }
+
+    /// Regression test for the settings that were added in phase 6: the file of an earlier version has none of them, keeps what it had, and gets the lead-up on, a checkpoint
+    /// every 60 frames and a gibibyte for them.
+    #[test]
+    fn a_settings_file_from_before_the_lead_up_settings_keeps_what_it_had_and_gets_their_defaults() {
+        let text = r#"{
+  "file_format": "fastforwardrs-settings",
+  "file_format_version": 1,
+  "settings": {
+    "autosave": true,
+    "sped_up_clip_sound": "mute",
+    "display_transform": "gamma24",
+    "working_colour_space": "aces_cg",
+    "output_colour_space": "srgb",
+    "resource_storage": "link"
+  }
+}
+"#;
+        let settings = settings_from_json_text(text).unwrap();
+        assert_eq!(
+            settings,
+            Settings {
+                autosave: true,
+                sped_up_clip_sound: SpedUpClipSound::Mute,
+                display_transform: crate::project::DisplayTransform::Gamma24,
+                working_colour_space: crate::project::WorkingColourSpace::AcesCg,
+                output_colour_space: crate::project::OutputColourSpace::Srgb,
+                resource_storage: crate::project::ResourceStorage::Link,
+                generate_lead_up_on_seek: true,
+                checkpoint_interval: CheckpointInterval::Every60Frames,
+                checkpoint_memory_budget: CheckpointMemoryBudget::Gib1,
+            }
+        );
+    }
+
+    #[test]
+    fn the_lead_up_settings_are_read_by_their_own_names_one_at_a_time() {
+        let with = |name: &str, value: &str| {
+            settings_from_json_text(&format!(
+                r#"{{ "file_format": "fastforwardrs-settings", "file_format_version": 1, "settings": {{ "{name}": {value} }} }}"#
+            ))
+            .unwrap()
+        };
+        assert_eq!(
+            with("generate_lead_up_on_seek", "false"),
+            Settings {
+                generate_lead_up_on_seek: false,
+                ..Settings::DEFAULT
+            }
+        );
+        assert_eq!(
+            with("checkpoint_interval", "\"every_120_frames\""),
+            Settings {
+                checkpoint_interval: CheckpointInterval::Every120Frames,
+                ..Settings::DEFAULT
+            }
+        );
+        assert_eq!(
+            with("checkpoint_memory_budget", "\"512_mib\""),
+            Settings {
+                checkpoint_memory_budget: CheckpointMemoryBudget::Mib512,
+                ..Settings::DEFAULT
+            }
         );
     }
 
@@ -288,9 +372,9 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("a new folder").join("settings.json");
 
-        write_settings_file(everything_at_its_last_value(), &path).unwrap();
+        write_settings_file(everything_off_its_default(), &path).unwrap();
 
-        assert_eq!(read_settings_file(&path).unwrap(), everything_at_its_last_value());
+        assert_eq!(read_settings_file(&path).unwrap(), everything_off_its_default());
         write_settings_file(Settings::DEFAULT, &path).unwrap();
         assert_eq!(
             read_settings_file(&path).unwrap(),

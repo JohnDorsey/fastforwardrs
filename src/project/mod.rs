@@ -76,9 +76,9 @@ pub use resources::{
     why_not_the_name_of_a_resource,
 };
 pub use settings::{
-    AnySetting, DisplayTransform, HowToKeepAResource, OutputColourSpace, ProjectFileKind, ProjectSettings,
-    ResourceStorage, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
-    WorkingColourSpace,
+    AnyGlobalSetting, AnySetting, CheckpointInterval, CheckpointMemoryBudget, DisplayTransform, GLOBAL_ONLY_SETTINGS,
+    GlobalSetting, HowToKeepAResource, OutputColourSpace, ProjectFileKind, ProjectSettings, ResourceStorage, SETTINGS,
+    Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound, WorkingColourSpace, every_global_setting,
 };
 pub use source_colour::InputColourOverride;
 pub use source_media::{

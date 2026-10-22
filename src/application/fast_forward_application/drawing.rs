@@ -12,7 +12,7 @@ use egui::{Frame, Margin, Ui};
 
 use super::{FastForwardApplication, FrameState, SourceFileState};
 use crate::application::commands::Command;
-use crate::application::menu_bar::{self, MenuAvailability};
+use crate::application::menu_bar::{self, MenuState};
 use crate::application::preview_panel::{self, HowTheClockGoes, PreviewContent, VideoInThePicture};
 use crate::application::properties_panel::{self, PropertiesContent};
 use crate::application::theme;
@@ -177,8 +177,8 @@ impl FastForwardApplication {
     }
 
     /// Which menu items can be used right now.
-    fn menu_availability(&self) -> MenuAvailability {
-        MenuAvailability {
+    fn menu_availability(&self) -> MenuState {
+        MenuState {
             can_save: !self.document.project.sources().is_empty() || !self.document.project.has_no_clips(),
             can_export: self.environment.toolchain.is_some()
                 && !self.document.project.has_no_clips()
@@ -190,6 +190,7 @@ impl FastForwardApplication {
                 || self.jobs.running_save.is_some()
                 || !self.sources.openings.is_empty()
                 || self.interface.dialog.is_some(),
+            generate_lead_up_on_seek: self.environment.global_settings.generate_lead_up_on_seek,
         }
     }
 }

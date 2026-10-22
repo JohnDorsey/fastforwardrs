@@ -3,7 +3,8 @@
 
 //! The two little settings windows, opened from the Edit menu.
 //!
-//! * **Global settings** has a control for each setting: a checkbox, or a drop-down list.
+//! * **Global settings** has a control for each setting: a checkbox, or a drop-down list. After those that a project can set too come the ones that only the global layer has
+//!   ([`GLOBAL_ONLY_SETTINGS`]), under a line of their own.
 //! * **Project settings** has the same controls, and next to each a "Use global setting" checkbox.
 //!   While that is ticked the project follows the global setting: the control beside it is greyed
 //!   out and shows the global value that is being used, and nothing about it is saved in the
@@ -16,10 +17,15 @@
 use egui::{Align2, ComboBox, Context, Grid, Id, Ui, Vec2, Window, vec2};
 
 use super::commands::Command;
-use crate::project::{AnySetting, FrameRate, ProjectSettings, SETTINGS, SettingControlKind, Settings};
+use crate::project::{
+    AnyGlobalSetting, FrameRate, GLOBAL_ONLY_SETTINGS, ProjectSettings, SETTINGS, SettingControlKind, Settings,
+};
 
 /// What the checkbox next to each control in the project settings window says.
 const USE_GLOBAL_SETTING_LABEL: &str = "Use global setting";
+
+/// What the global settings window says above the settings that a project cannot set for itself.
+pub const GLOBAL_ONLY_NOTE: &str = "These are for the whole program: a project does not have them.";
 
 /// What the drop-down list of frame rates in the project settings window is called.
 pub const FRAME_RATE_LABEL: &str = "Frame rate";
@@ -94,7 +100,7 @@ fn small_window<'open>(title: &'static str, open: &'open mut bool, context: &Con
 
 /// Shows the control for `setting` with the value `option` (a number in the setting's list of
 /// values), greyed out if it is not `enabled`. Returns the value after whatever the user did.
-fn show_control(ui: &mut Ui, setting: &dyn AnySetting, option: usize, enabled: bool) -> usize {
+fn show_control(ui: &mut Ui, setting: &dyn AnyGlobalSetting, option: usize, enabled: bool) -> usize {
     let mut chosen = option;
     ui.add_enabled_ui(enabled, |ui| match setting.control() {
         SettingControlKind::Checkbox => {
@@ -124,6 +130,13 @@ fn show_global_settings(context: &Context, open: &mut bool, settings: Settings) 
     let mut edited = settings;
     small_window("Global settings", open, context, vec2(150.0, 70.0)).show(context, |ui| {
         for setting in SETTINGS {
+            let option = setting.global_option(edited);
+            let chosen = show_control(ui, setting, option, true);
+            setting.set_global_option(&mut edited, chosen);
+        }
+        ui.separator();
+        ui.weak(GLOBAL_ONLY_NOTE);
+        for setting in GLOBAL_ONLY_SETTINGS {
             let option = setting.global_option(edited);
             let chosen = show_control(ui, setting, option, true);
             setting.set_global_option(&mut edited, chosen);

@@ -52,6 +52,11 @@ pub enum Command {
     /// The global settings were changed in the global settings window.
     SetGlobalSettings(Settings),
 
+    // The View menu.
+    /// Whether, after a jump in the timeline, the frames that lead up to the playhead are made in the background (the checkbox "Generate lead-up on seek"), so that an effect
+    /// that depends on earlier frames shows what the export shows (EN-14). A global setting, kept in the settings file; nothing about the project changes.
+    SetGenerateLeadUpOnSeek(bool),
+
     // The play buttons.
     Pause,
     Play,
@@ -502,6 +507,7 @@ impl Command {
             | Self::SoundPlugins(_)
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
+            | Self::SetGenerateLeadUpOnSeek(_)
             | Self::Pause
             | Self::Play
             | Self::Stop
@@ -551,6 +557,7 @@ impl Command {
             | Self::SoundPlugins(_)
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
+            | Self::SetGenerateLeadUpOnSeek(_)
             | Self::Pause
             | Self::Play
             | Self::Stop

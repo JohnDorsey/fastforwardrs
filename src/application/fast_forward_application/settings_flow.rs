@@ -49,6 +49,14 @@ impl FastForwardApplication {
         }
     }
 
+    /// The checkbox of the View menu: one of the global settings, changed by itself.
+    pub(super) fn set_generate_lead_up_on_seek(&mut self, on: bool) {
+        self.set_global_settings(Settings {
+            generate_lead_up_on_seek: on,
+            ..self.environment.global_settings
+        });
+    }
+
     pub(super) fn set_project_settings(&mut self, settings: ProjectSettings) {
         if settings == self.document.project.settings() {
             return;

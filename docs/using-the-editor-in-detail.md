@@ -6,7 +6,7 @@ Everything the editor does, control by control, with the rules behind each. The 
 
 ## Using it
 
-**The menus** are File and Edit.
+**The menus** are File, Edit and View.
 
 * **File**, in this order: *New project*, *Save project*, *Save project as*, *Load project*, *Embed and import*, *Link and import*, *Export*.
   * *New project* asks for a video or sound file straight away.
@@ -34,6 +34,7 @@ Everything the editor does, control by control, with the rules behind each. The 
     saved, unless Autosave is on (see *Settings*).
 * **Edit**: *Undo* and *Redo*, *Deselect* (with its key, **Esc**, shown beside it; it can be used while a clip is
   selected), *Project settings* and *Global settings*, which open little windows (see *Settings*).
+* **View**: the checkbox *Generate lead-up on seek*, a global setting (see *Settings*); nothing else yet. Choosing it closes the menu, as the other items do.
 
 **The window** is divided into three **panels**, each in a lighter grey than the space between them (which is 6
 points wide, and goes round every panel too): the **properties panel** at the top left, the **preview** at the top

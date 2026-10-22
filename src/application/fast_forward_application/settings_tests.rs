@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Tests of the Edit menu, the two settings windows, how the settings are kept, and autosave.
+//! Tests of the Edit menu, the View menu, the two settings windows, how the settings are kept, and autosave.
 
 use std::time::{Duration, Instant};
 
@@ -10,10 +10,12 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use super::test_window::{Window, project_of};
 use crate::application::commands::Command;
 use crate::application::dialogs::{AfterConfirmation, Dialog};
-use crate::application::settings_windows::FRAME_RATE_LABEL;
+use crate::application::menu_bar::GENERATE_LEAD_UP_ON_SEEK_LABEL;
+use crate::application::settings_windows::{FRAME_RATE_LABEL, GLOBAL_ONLY_NOTE};
 use crate::project::{
-    FrameRate, Project, ProjectSettings, SETTINGS, SettingControlKind, Settings, SourceMedia, SourceMediaIdentifier,
-    SourceMediaLink, SourceVideoProperties, SpedUpClipSound, TimelineFrameIndex,
+    CheckpointInterval, CheckpointMemoryBudget, FrameRate, Project, ProjectSettings, SETTINGS, SettingControlKind,
+    Settings, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceVideoProperties, SpedUpClipSound,
+    TimelineFrameIndex,
 };
 use crate::project_file::read_project_file;
 use crate::settings_file::read_settings_file;
@@ -21,8 +23,14 @@ use crate::settings_file::read_settings_file;
 const AUTOSAVE: &str = "Autosave";
 const SPED_UP_CLIP_SOUND: &str = "Sound of sped-up clips";
 const USE_GLOBAL_SETTING: &str = "Use global setting";
+const GENERATE_LEAD_UP_ON_SEEK: &str = GENERATE_LEAD_UP_ON_SEEK_LABEL;
 
 impl Window {
+    fn open_the_view_menu(&mut self) {
+        self.harness.get_by_label("View").click();
+        self.settle();
+    }
+
     /// Opens a window from the Edit menu.
     fn open_from_the_edit_menu(&mut self, item: &str) {
         self.harness.get_by_label("Edit").click();
@@ -758,4 +766,265 @@ fn a_frame_rate_that_is_not_a_usual_one_is_shown_and_listed_in_its_place_among_t
     );
     let all_items = window.harness.get_all_by_label("17 fps").count();
     assert!(all_items >= 1);
+}
+
+// --- the View menu, and the settings that only the program has ---
+
+#[test]
+fn the_view_menu_comes_after_the_edit_menu_and_has_the_checkbox_of_the_lead_up_on_seek_ticked_to_begin_with() {
+    let mut window = Window::showing(project_of(300));
+    let lefts: Vec<f32> = ["File", "Edit", "View"]
+        .iter()
+        .map(|menu| window.rectangle_of(menu).left())
+        .collect();
+    assert!(
+        lefts.windows(2).all(|pair| pair[0] < pair[1]),
+        "in this order: {lefts:?}"
+    );
+    assert!(
+        window.harness.query_by_label(GENERATE_LEAD_UP_ON_SEEK).is_none(),
+        "it is in the menu, and the menu is closed"
+    );
+
+    window.open_the_view_menu();
+
+    assert!(
+        window.is_checked(GENERATE_LEAD_UP_ON_SEEK),
+        "on to begin with (the default of EN-14 is the one that makes the preview exact)"
+    );
+    assert!(!window.is_disabled(GENERATE_LEAD_UP_ON_SEEK));
+    assert_eq!(window.how_many_are_called(GENERATE_LEAD_UP_ON_SEEK), 1);
+}
+
+#[test]
+fn unticking_the_lead_up_on_seek_turns_the_global_setting_off_and_leaves_the_project_alone_and_ticking_turns_it_on() {
+    let mut window = Window::showing(project_of(300));
+    window.open_the_view_menu();
+    window.harness.get_by_label(GENERATE_LEAD_UP_ON_SEEK).click();
+    window.settle();
+
+    assert_eq!(
+        window.application().global_settings(),
+        Settings {
+            generate_lead_up_on_seek: false,
+            ..Settings::DEFAULT
+        },
+        "that setting and no other"
+    );
+    assert!(
+        !window.application().has_unsaved_changes(),
+        "a global setting is not a change to the project"
+    );
+    assert!(
+        window.harness.query_by_label(GENERATE_LEAD_UP_ON_SEEK).is_none(),
+        "the menu closes once a choice is made, as the other menus do"
+    );
+
+    window.open_the_view_menu();
+    assert!(
+        !window.is_checked(GENERATE_LEAD_UP_ON_SEEK),
+        "the menu shows what the setting is"
+    );
+    window.harness.get_by_label(GENERATE_LEAD_UP_ON_SEEK).click();
+    window.settle();
+    assert_eq!(window.application().global_settings(), Settings::DEFAULT);
+    window.open_the_view_menu();
+    assert!(window.is_checked(GENERATE_LEAD_UP_ON_SEEK));
+}
+
+#[test]
+fn the_command_of_the_checkbox_changes_that_global_setting_only_and_is_not_an_edit_to_undo() {
+    let mut window = Window::showing(project_of(300));
+    window.do_this(Command::SetGenerateLeadUpOnSeek(false));
+    assert_eq!(
+        window.application().global_settings(),
+        Settings {
+            generate_lead_up_on_seek: false,
+            ..Settings::DEFAULT
+        }
+    );
+    assert!(!window.application().has_unsaved_changes());
+    assert!(!Command::SetGenerateLeadUpOnSeek(true).may_change_the_project());
+
+    // Saying the same again changes nothing, and a global setting that was changed some other way is kept.
+    let other = Settings {
+        checkpoint_interval: CheckpointInterval::Every120Frames,
+        generate_lead_up_on_seek: false,
+        ..Settings::DEFAULT
+    };
+    window.do_this(Command::SetGlobalSettings(other));
+    window.do_this(Command::SetGenerateLeadUpOnSeek(true));
+    assert_eq!(
+        window.application().global_settings(),
+        Settings {
+            generate_lead_up_on_seek: true,
+            ..other
+        }
+    );
+}
+
+#[test]
+fn the_lead_up_on_seek_is_saved_in_the_settings_file_as_soon_as_it_changes() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("fastforwardrs").join("settings.json");
+    let mut window = Window::showing(project_of(300));
+    window.application_mut().keep_global_settings_in(path.clone());
+    assert!(!path.exists(), "nothing is written until there is something to write");
+
+    window.open_the_view_menu();
+    window.harness.get_by_label(GENERATE_LEAD_UP_ON_SEEK).click();
+    window.settle();
+
+    assert_eq!(
+        read_settings_file(&path).unwrap(),
+        Settings {
+            generate_lead_up_on_seek: false,
+            ..Settings::DEFAULT
+        }
+    );
+}
+
+#[test]
+fn the_menu_shows_the_lead_up_on_seek_as_the_settings_file_has_it_when_the_program_starts() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("settings.json");
+    crate::settings_file::write_settings_file(
+        Settings {
+            generate_lead_up_on_seek: false,
+            ..Settings::DEFAULT
+        },
+        &path,
+    )
+    .unwrap();
+    let mut window = Window::showing(project_of(300));
+    window.application_mut().keep_global_settings_in(path);
+    window.settle();
+
+    window.open_the_view_menu();
+
+    assert!(!window.is_checked(GENERATE_LEAD_UP_ON_SEEK));
+}
+
+#[test]
+fn the_global_settings_window_has_the_settings_that_only_the_program_has_under_a_note_and_the_project_window_has_none()
+{
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Global settings");
+
+    assert!(window.harness.query_by_label(GLOBAL_ONLY_NOTE).is_some());
+    assert!(
+        window.is_checked(GENERATE_LEAD_UP_ON_SEEK),
+        "on to begin with, here as in the View menu"
+    );
+    assert!(window.harness.query_by_label("Checkpoint interval").is_some());
+    assert!(
+        window.harness.query_by_value("Every 60 frames").is_some(),
+        "a checkpoint every 60 frames to begin with"
+    );
+    assert!(window.harness.query_by_label("Checkpoint memory budget").is_some());
+    assert!(
+        window.harness.query_by_value("1 GiB").is_some(),
+        "a gibibyte to begin with"
+    );
+    assert!(
+        window.rectangle_of("Autosave").top() < window.rectangle_of(GLOBAL_ONLY_NOTE).top()
+            && window.rectangle_of(GLOBAL_ONLY_NOTE).top() < window.rectangle_of(GENERATE_LEAD_UP_ON_SEEK).top()
+            && window.rectangle_of(GENERATE_LEAD_UP_ON_SEEK).top() < window.rectangle_of("Checkpoint interval").top()
+            && window.rectangle_of("Checkpoint interval").top() < window.rectangle_of("Checkpoint memory budget").top(),
+        "the settings of a project first, then the note, then these in order"
+    );
+
+    window.harness.get_by_label("Close window").click();
+    window.settle();
+    window.open_from_the_edit_menu("Project settings");
+    assert!(window.harness.query_by_label(GENERATE_LEAD_UP_ON_SEEK).is_none());
+    assert!(window.harness.query_by_label("Checkpoint interval").is_none());
+    assert!(window.harness.query_by_label("Checkpoint memory budget").is_none());
+    assert!(window.harness.query_by_label(GLOBAL_ONLY_NOTE).is_none());
+    assert_eq!(
+        window.harness.get_all_by_label(USE_GLOBAL_SETTING).count(),
+        SETTINGS.len(),
+        "a project still has a control, and a box to follow the global one, for each of its own settings"
+    );
+}
+
+#[test]
+fn the_checkbox_of_the_global_settings_window_and_the_one_of_the_view_menu_are_one_setting() {
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Global settings");
+    window.harness.get_by_label(GENERATE_LEAD_UP_ON_SEEK).click();
+    window.settle();
+    assert!(!window.application().global_settings().generate_lead_up_on_seek);
+    window.harness.get_by_label("Close window").click();
+    window.settle();
+
+    window.open_the_view_menu();
+    assert!(
+        !window.is_checked(GENERATE_LEAD_UP_ON_SEEK),
+        "ticked in the window, ticked in the menu"
+    );
+}
+
+#[test]
+fn choosing_a_checkpoint_interval_and_a_memory_budget_changes_those_global_settings_and_no_others() {
+    let mut window = Window::showing(project_of(300));
+    window.open_from_the_edit_menu("Global settings");
+
+    window.choose_from_the_dropdown_showing("Every 60 frames", "Every 120 frames");
+    assert_eq!(
+        window.application().global_settings(),
+        Settings {
+            checkpoint_interval: CheckpointInterval::Every120Frames,
+            ..Settings::DEFAULT
+        }
+    );
+    assert!(
+        window.harness.query_by_value("Every 120 frames").is_some(),
+        "and the box shows it"
+    );
+
+    window.choose_from_the_dropdown_showing("1 GiB", "512 MiB");
+    assert_eq!(
+        window.application().global_settings(),
+        Settings {
+            checkpoint_interval: CheckpointInterval::Every120Frames,
+            checkpoint_memory_budget: CheckpointMemoryBudget::Mib512,
+            ..Settings::DEFAULT
+        }
+    );
+
+    window.choose_from_the_dropdown_showing("Every 120 frames", "Every 30 frames");
+    window.choose_from_the_dropdown_showing("512 MiB", "4 GiB");
+    assert_eq!(
+        window.application().global_settings(),
+        Settings {
+            checkpoint_interval: CheckpointInterval::Every30Frames,
+            checkpoint_memory_budget: CheckpointMemoryBudget::Gib4,
+            ..Settings::DEFAULT
+        }
+    );
+    assert!(!window.application().has_unsaved_changes());
+}
+
+#[test]
+fn a_project_that_sets_everything_it_can_still_gets_the_lead_up_settings_of_the_global_layer() {
+    let mut window = Window::showing(project_of(300));
+    window.do_this(Command::SetGlobalSettings(Settings {
+        generate_lead_up_on_seek: false,
+        checkpoint_interval: CheckpointInterval::Every300Frames,
+        checkpoint_memory_budget: CheckpointMemoryBudget::Mib256,
+        ..Settings::DEFAULT
+    }));
+    window.do_this(Command::SetProjectSettings(ProjectSettings {
+        autosave: Some(true),
+        sped_up_clip_sound: Some(SpedUpClipSound::Mute),
+        ..ProjectSettings::FOLLOW_ALL_GLOBAL_SETTINGS
+    }));
+
+    let in_effect = window.application().settings_in_effect();
+
+    assert!(in_effect.autosave, "what the project sets is its own");
+    assert!(!in_effect.generate_lead_up_on_seek);
+    assert_eq!(in_effect.checkpoint_interval, CheckpointInterval::Every300Frames);
+    assert_eq!(in_effect.checkpoint_memory_budget, CheckpointMemoryBudget::Mib256);
 }

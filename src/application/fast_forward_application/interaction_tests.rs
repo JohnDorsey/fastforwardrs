@@ -42,10 +42,12 @@ fn the_file_menu_has_its_items_in_the_requested_order() {
 }
 
 #[test]
-fn the_menu_bar_has_the_file_and_edit_menus_in_that_order_and_no_others() {
+fn the_menu_bar_has_the_file_edit_and_view_menus_in_that_order_and_no_others() {
+    // (The View menu was asked for on 2026-10-22, for the checkbox of the lead-up on a seek: it has that and nothing else.)
     let window = Window::showing(project_of(300));
     assert!(window.rectangle_of("File").left() < window.rectangle_of("Edit").left());
-    for other in ["View", "Help", "Window", "Tools"] {
+    assert!(window.rectangle_of("Edit").left() < window.rectangle_of("View").left());
+    for other in ["Help", "Window", "Tools"] {
         assert!(window.harness.query_by_label(other).is_none(), "{other}");
     }
 }

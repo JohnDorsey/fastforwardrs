@@ -111,6 +111,7 @@ impl FastForwardApplication {
             Command::SetProjectSettings(settings) => self.set_project_settings(settings),
             Command::SetProjectFrameRate(frame_rate) => self.set_project_frame_rate(frame_rate, now),
             Command::SetGlobalSettings(settings) => self.set_global_settings(settings),
+            Command::SetGenerateLeadUpOnSeek(on) => self.set_generate_lead_up_on_seek(on),
 
             Command::Pause => self.playback.clock.pause(now, total_frames),
             Command::Play => self.playback.clock.play(now, total_frames),
