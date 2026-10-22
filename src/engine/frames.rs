@@ -92,6 +92,9 @@ pub struct FrameStatistics {
     pub came_from_the_cache: bool,
     /// How many effects were left out of the frame because the engine does not have an effect with the key that was asked for.
     pub effects_not_run: usize,
+    /// Whether the picture is not exact: an effect that depends on earlier frames went on from a state that is not the one of the frame before (the preview jumped, or skipped a frame), or from
+    /// one that was made from such a state not long ago (EN-14). Never for the export, which makes every frame in order.
+    pub approximate: bool,
 }
 
 #[cfg(test)]

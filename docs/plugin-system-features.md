@@ -273,7 +273,7 @@ can be supported. The design notes answer that at length; here is what the syste
   (or the clip's start) for **at most 300 frames** (fixed); if none is that near, it shows the nearest state, marked "depends on earlier frames,
   approximate", until playback has caught up. *Warm-up only*: a seek resets the effect and it re-converges while playing (cheapest, least faithful).
   Two more global settings tune *Bounded*: the **checkpoint interval** (default every 60 frames) and the **checkpoint memory budget** (default 1 GiB; the
-  oldest checkpoints are dropped when it is exceeded). They are not project settings and are not saved in a project.
+  oldest checkpoints are dropped when it is exceeded). They are not project settings and are not saved in a project. *(2026-10-22, the maintainer chose the two modes by the View menu's checkbox "Generate lead-up on seek": on = the lead-up, off = the checkpoints. **The checkpoints and the marker are built** (phase 6.4.3b-1: after a jump the preview goes on from the nearest state it has that is not after the frame before; it says over the picture that it is approximate, for 300 frames after a state that was not exact; the lead-up is not built yet): `engine-phase-6-6-design.md`, section 4.)*
 * **EN-15 [D] M** (2026-10-15, Q-30) The engine's **graph of passes stays the compile target** of the effect stacks (EN-04), so that a node-graph model or
   a node editor can be built on top later without changing the engine (design notes, section 2.4). Nothing for it is built now.
 * **EN-07 [D] M** Performance goals (2026-10-13: "acceptable for now"): a typical stack (four layers, two blurs and a LUT) plays at

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::device::AdapterChoice;
+use super::effect_states::RulesOfCheckpoints;
 use super::guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, GuardedShader};
 use super::shader_structure::ShaderStructure;
 use super::{FrameDescription, FrameStatistics, PictureData, PictureId, RenderedFrame, RenderedPlanes, YuvColour};
@@ -42,6 +43,11 @@ pub enum EngineRequest {
         description: FrameDescription,
         colour: YuvColour,
     },
+    /// From now on the frames of the preview take checkpoints of the states of effects that depend on earlier frames, and go on from them after a jump, as `RulesOfCheckpoints` say
+    /// (EN-14; `RulesOfCheckpoints::NONE` takes none, as the engine does until it is told). The export takes none.
+    SetTheRulesOfCheckpoints(RulesOfCheckpoints),
+    /// Let go of every checkpoint: what they are copies of is not there any more (the project was edited or loaded, or the colours of the frames changed).
+    ForgetTheCheckpoints,
     /// Stop.
     Stop,
 }

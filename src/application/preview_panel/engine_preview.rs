@@ -23,7 +23,7 @@ use super::engine_view::{PictureSupply, PictureWanted, SentPictures, describe_fr
 use crate::application::textures::PictureFilter;
 use crate::engine::{
     AdapterChoice, Engine, EngineEvent, EngineSettings, FrameColour, FrameDescription, PictureId, QualityGovernor,
-    QualityRules, RenderedFrame, WakeUp,
+    QualityRules, RenderedFrame, RulesOfCheckpoints, WakeUp,
 };
 use crate::project::FrameRate;
 use crate::text_rendering::LazyTextRenderer;
@@ -107,6 +107,8 @@ struct ShownFrame {
     filter: PictureFilter,
     /// The serial number of the request it came from.
     serial: u64,
+    /// Whether the engine said that the picture is not exact: an effect that depends on earlier frames went on from a state that is not the one of the frame before (EN-14).
+    approximate: bool,
 }
 
 /// See the module documentation.
@@ -146,6 +148,10 @@ pub struct EnginePreview {
     /// What the frames are put together in and encoded as (from the settings, which the window gives before it draws: [`Self::set_the_colour`]). The compatibility mode
     /// until it is given.
     colour: FrameColour,
+    /// How the engine was last told to take checkpoints of the states of effects that depend on earlier frames (it takes none until it is told).
+    rules_of_checkpoints: RulesOfCheckpoints,
+    /// What the project was when the window last said (see [`Self::the_project_is_now`]).
+    state_of_the_project: Option<(u64, u64)>,
 }
 
 impl EnginePreview {
@@ -175,13 +181,45 @@ impl EnginePreview {
             last_problem: None,
             to_tell_the_user: Vec::new(),
             colour: FrameColour::default(),
+            rules_of_checkpoints: RulesOfCheckpoints::NONE,
+            state_of_the_project: None,
         }
     }
 
     /// What the frames from now on are put together in and encoded as. (A frame of another colour is another frame: the pictures are made for the working space, and
-    /// their ids say which, so that the ones that were sent for the colour before are not used.)
+    /// their ids say which, so that the ones that were sent for the colour before are not used. **What the states of effects hold is in the colour that it was made in, so the
+    /// checkpoints are let go of.**)
     pub fn set_the_colour(&mut self, colour: FrameColour) {
+        if colour != self.colour {
+            self.engine.forget_the_checkpoints();
+        }
         self.colour = colour;
+    }
+
+    /// How the engine takes checkpoints of the states of effects that depend on earlier frames from now on (EN-14: the settings of the program). It is told when this is not what it
+    /// was told last, and not otherwise.
+    pub fn set_the_rules_of_checkpoints(&mut self, rules: RulesOfCheckpoints) {
+        if rules != self.rules_of_checkpoints {
+            self.rules_of_checkpoints = rules;
+            self.engine.set_the_rules_of_checkpoints(rules);
+        }
+    }
+
+    /// What the project is now, as a pair of numbers that differ whenever it does (another project, another edit, an undo or a redo): **when it is not what it was the checkpoints are
+    /// let go of**, because they are copies of what the effects made of a project that is not the one on the screen. The window says this each time it is drawn.
+    pub fn the_project_is_now(&mut self, state: (u64, u64)) {
+        if self
+            .state_of_the_project
+            .replace(state)
+            .is_some_and(|before| before != state)
+        {
+            self.engine.forget_the_checkpoints();
+        }
+    }
+
+    /// Whether the picture that is shown is not exact: the engine said so of the frame (EN-14). The window says so over it while it is.
+    pub fn the_picture_shown_is_not_exact(&self) -> bool {
+        self.shown.as_ref().is_some_and(|shown| shown.approximate)
     }
 
     /// Why the engine has stopped, if it has: the preview is then to be drawn the old way.
@@ -260,6 +298,7 @@ impl EnginePreview {
         self.generation += 1;
         self.asked_for = None;
         self.first_serial_that_counts = self.last_serial + 1;
+        self.engine.forget_the_checkpoints();
     }
 
     /// Takes what the engine has said, describes `content` as a frame made at `whole_size` (or the part of it that the quality of the preview says: see
@@ -370,7 +409,7 @@ impl EnginePreview {
                 } => {
                     self.frames_from_the_cache += u64::from(statistics.came_from_the_cache);
                     self.note_how_long_the_frame_took(serial, statistics.came_from_the_cache, clock);
-                    self.show(context, serial, frame, filter);
+                    self.show(context, serial, frame, filter, statistics.approximate);
                 }
                 // (The preview does not ask for frames of the export.)
                 EngineEvent::ExportFrame { .. } => {}
@@ -433,7 +472,14 @@ impl EnginePreview {
     }
 
     /// Makes the frame the one that is shown, unless a later one already is or it is of what has been let go of.
-    fn show(&mut self, context: &Context, serial: u64, frame: Arc<RenderedFrame>, filter: PictureFilter) {
+    fn show(
+        &mut self,
+        context: &Context,
+        serial: u64,
+        frame: Arc<RenderedFrame>,
+        filter: PictureFilter,
+        approximate: bool,
+    ) {
         if serial < self.first_serial_that_counts || self.shown.as_ref().is_some_and(|shown| shown.serial > serial) {
             return;
         }
@@ -447,6 +493,7 @@ impl EnginePreview {
                 shown.frame = frame;
                 shown.filter = filter;
                 shown.serial = serial;
+                shown.approximate = approximate;
             }
             _ => {
                 self.shown = Some(ShownFrame {
@@ -454,6 +501,7 @@ impl EnginePreview {
                     frame,
                     filter,
                     serial,
+                    approximate,
                 });
             }
         }

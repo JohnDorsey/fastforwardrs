@@ -36,6 +36,7 @@ mod engine_view_tests;
 mod geometry;
 mod gestures;
 mod grab;
+mod inexact_picture_note;
 mod layers;
 mod names;
 mod speed_indicator_overlay;
@@ -58,6 +59,9 @@ pub use crate::frame_scene::{PreviewContent, PreviewLayer, PreviewLayerContent, 
 pub use crate::frame_scene::SymbolOnThePreview;
 #[cfg(test)]
 pub use zooming::FIT_BUTTON_LABEL;
+// (The tests look the line up by what it says.)
+#[cfg(test)]
+pub use inexact_picture_note::THE_PICTURE_IS_NOT_EXACT_NOTE;
 
 // The names the layers and their handles are known by to screen readers, which the tests look them up by.
 #[cfg(test)]
@@ -213,6 +217,9 @@ fn show_how(
             let render_size = engine_preview::render_size_for(picture_rectangle.size(), pixels_per_point, picture_size);
             engine.update(ui.ctx(), content, render_size, filter, text_renderer, clock);
             engine.paint(&ui.painter().with_clip_rect(picture_rectangle), picture_rectangle);
+            if engine.the_picture_shown_is_not_exact() {
+                inexact_picture_note::show(ui, picture_rectangle, panel_rectangle);
+            }
             layers::Drawing::ByTheEngine
         }
     };

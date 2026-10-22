@@ -154,6 +154,22 @@ state and a marker that says the picture is approximate, with no catch-up). The 
 | E1.4 | **Every edit, a new project, a load, a change of the working space or of the size the preview is made at drops every checkpoint** (the window says so to the engine: `forget_the_checkpoints`), because a checkpoint is made from what was there, and a checkpoint of what is not there any more is a wrong picture. The size of a checkpoint is the size of the state's buffers: one that is not the size of the buffers that are asked for is not used. | The open design issue of 6.4.3 noted in the plan. |
 | E1.5 | **The export is never touched**: it makes every frame in order from the first and takes no checkpoint and restores none (it has no jump). | EN-14. |
 
+### What E1 became [V, built and verified 2026-10-22]
+
+Built as the table says, with four things decided on the way (each with a test):
+
+* **The state that the preview has is a candidate too, not only the checkpoints.** A call at frame `f` goes on from **the nearest state that is not after the frame before it** (`where_to_go_on_from`): the state it has if that is as near as the nearest checkpoint, else the checkpoint, else nothing (clear).
+  So a frame that is *skipped* (the preview could not keep up) goes on from the state there is, a frame short, and says that it is not exact; it does not go back to an older checkpoint. The state before the first frame of an effect is clear, and that is exact.
+* **Not exact is carried.** A frame that goes on from a state that is not the one of the frame before is *approximate*, and so is each frame after it for **300 frames of the effect's own clock** (`FRAMES_AFTER_A_STATE_IS_NOT_EXACT`: the length that the lead-up is at most); **a checkpoint taken from such a state is not exact either**, and a restore from it says so.
+* **Checkpoints are kept apart from the states**: a state that is not used for 600 frames is let go of, and a checkpoint is not (a jump back to it later is what it is for); they are let go of by the memory budget alone (the one used longest ago first, a restore counting as a use), by `forget_the_checkpoints`
+  and by rules that take none. A checkpoint of buffers that are not the size that the call wants is of no use and is not used.
+* **The preview only**: `StatesOfEffects::prepare_for_the_preview` takes checkpoints and restores; `prepare` (the export's) does neither, and the export is never given a note. The rules start as none, and until they are given the engine goes on as it always did.
+
+The pieces: `effect_states.rs` (the decision, the checkpoints, the pending commit: `RulesOfCheckpoints`, `Checkpoint`, `BuffersOfACall::{to_restore, to_checkpoint, approximate}`), `frame_renderer.rs` (the copies are recorded in the same batch, a restore before the first pass and a checkpoint after the last; `FrameStatistics::approximate`),
+`messages.rs`/`handle.rs`/`worker.rs` (`SetTheRulesOfCheckpoints`, `ForgetTheCheckpoints`; a new device is given the rules again), `engine_preview.rs` (the rules from the settings, `forget_the_checkpoints` when the colours change, the files are let go of, or the project is not what it was: `History::state_of_the_project`), and the line over the bottom of the picture
+(`inexact_picture_note.rs`: only while the picture is not exact). Tests: 17 new ones of the states, 9 of the renderer with the accumulating shader (the colour says which state a jump went on from), 3 of the engine's thread, 3 of the preview, one of a window with a real engine (a jump says it, an exact jump does not, an edit makes every jump say it); 46 planted mistakes (two were not noticed at first, and each got a test).
+**The checkbox *Generate lead-up on seek* still does nothing**: the checkpoints and the note work whatever it says (E2 is what On switches on).
+
 ### E2: option 1, the lead-up (6.4.3b-2)
 
 | | | why |

@@ -14,6 +14,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
 use super::device::{DeviceError, DeviceTrouble, EngineDevice};
+use super::effect_states::RulesOfCheckpoints;
 use super::frame_cache::FrameCache;
 use super::frame_renderer::{FinishedFrame, FrameOutput, FrameRenderer, PendingFrame, RenderProblem};
 use super::guard::GuardedShader;
@@ -104,6 +105,8 @@ struct Worker<'a> {
     replacements: ReplacementLimiter,
     /// The frames of the export that are on their way, the one asked for first at the front. (Always empty between batches.)
     on_their_way: VecDeque<OnItsWay>,
+    /// How checkpoints of the states of effects are taken, which a new device is told again.
+    rules_of_checkpoints: RulesOfCheckpoints,
 }
 
 impl<'a> Worker<'a> {
@@ -122,6 +125,7 @@ impl<'a> Worker<'a> {
                 settings.how_long_replacements_are_counted,
             ),
             on_their_way: VecDeque::new(),
+            rules_of_checkpoints: RulesOfCheckpoints::NONE,
         })
     }
 
@@ -156,6 +160,15 @@ impl<'a> Worker<'a> {
                     Next::Stop(problem) => Err(problem),
                     Next::Quit => return Next::Quit,
                 },
+                EngineRequest::SetTheRulesOfCheckpoints(rules) => {
+                    self.rules_of_checkpoints = rules;
+                    self.renderer.set_the_rules_of_checkpoints(rules);
+                    Ok(())
+                }
+                EngineRequest::ForgetTheCheckpoints => {
+                    self.renderer.forget_the_checkpoints();
+                    Ok(())
+                }
                 EngineRequest::Stop => {
                     stop = true;
                     Ok(())
@@ -449,6 +462,7 @@ impl<'a> Worker<'a> {
             .map_err(|error| format!("the graphics device could not be replaced ({why}): {error}"))?;
         tell_the_watcher_of_the_tests(self.settings, &new_device);
         let old_renderer = std::mem::replace(&mut self.renderer, FrameRenderer::new(new_device));
+        self.renderer.set_the_rules_of_checkpoints(self.rules_of_checkpoints);
         // (The frames that were on their way hold buffers of the old device, and are let go of with it, on the same thread: see below.)
         let_go_of_it_on_another_thread((old_renderer, abandoned));
         // (Frames that were made are of the effects the engine trusted then, and of the effects it trusts now.)

@@ -129,6 +129,12 @@ impl History {
         self.generation
     }
 
+    /// What the project is now, as a pair of numbers that differ whenever the project does: another project (a [`Self::reset`]), and every edit, undo and redo. (An undo that goes back to a
+    /// state that the project was in gives that state's numbers again, and the numbers do not say anything else: only whether it is the same as when they were last asked for.)
+    pub fn state_of_the_project(&self) -> (u64, u64) {
+        (self.generation, self.current.0)
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

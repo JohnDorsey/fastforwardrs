@@ -20,6 +20,7 @@ use crate::application::timeline_geometry::TimelineGeometry;
 use crate::application::timeline_panel::{self, SourceLook, TimelineContent};
 use crate::application::transport_bar::{self, TransportBarState};
 use crate::composition::{Layer, PictureSection, VisibleVideo};
+use crate::engine::RulesOfCheckpoints;
 use crate::frame_scene::{
     colour_of_a_picture_file, colour_of_the_preview, groups_of_a_section, layers_of_a_section, symbol_of_a_section,
 };
@@ -120,11 +121,20 @@ impl FastForwardApplication {
         );
         // (What the frames of the engine are put together in and encoded as comes from the settings, which are read each time: a changed setting is another frame.)
         let colour_of_the_frames = colour_of_the_preview(self.effective_settings());
+        // (How the engine takes checkpoints of the states of effects that depend on earlier frames comes from the settings too; and the checkpoints are copies of what the effects made of the project
+        // as it was, so the engine is told when the project is not what it was.)
+        let rules_of_checkpoints = RulesOfCheckpoints {
+            interval_in_frames: u64::from(self.effective_settings().checkpoint_interval.frames()),
+            memory_budget_in_bytes: self.effective_settings().checkpoint_memory_budget.bytes(),
+        };
+        let state_of_the_project = self.document.history.state_of_the_project();
         let preview = egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| match &mut self.interface.engine_preview {
                 Some(engine_preview) => {
                     engine_preview.set_the_colour(colour_of_the_frames);
+                    engine_preview.set_the_rules_of_checkpoints(rules_of_checkpoints);
+                    engine_preview.the_project_is_now(state_of_the_project);
                     preview_panel::show_drawn_by_the_engine(
                         ui,
                         &content,

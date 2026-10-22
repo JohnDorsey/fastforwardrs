@@ -726,3 +726,74 @@ fn a_window_that_is_made_with_no_engine_has_none_and_does_not_ask_for_pictures_i
     assert!(window.engine_preview().is_none());
     assert!(!window.application().playback.planes_wanted);
 }
+
+// ---- an effect that depends on earlier frames, and a jump (EN-14, option 3) ----
+
+/// A shader that keeps a buffer from one frame to the next: it depends on earlier frames.
+const REMEMBERS: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true }, {} ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(memory); }\n";
+
+fn go_to_the_frame(window: &mut Window, frame: u64) {
+    window.do_this(Command::SeekTo(TimelineFrameIndex::new(frame)));
+    window.wait_for_the_engine();
+}
+
+fn says_the_picture_is_not_exact(window: &Window) -> bool {
+    window
+        .harness
+        .query_by_label(crate::application::preview_panel::THE_PICTURE_IS_NOT_EXACT_NOTE)
+        .is_some()
+}
+
+#[test]
+fn a_jump_in_a_project_with_an_effect_that_depends_on_earlier_frames_says_over_the_picture_that_it_is_not_exact_and_an_edit_makes_every_jump_say_so()
+ {
+    let (mut project, source, clip) = project_with_a_picture_file(None);
+    let file = crate::isf::read(REMEMBERS).unwrap();
+    let kind =
+        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "remembers.fs", REMEMBERS)).unwrap();
+    assert!(kind.is_installed() && kind.depends_on_earlier_frames(), "a premise");
+    project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    let Some(mut window) = Window::showing_with_the_engine(project) else {
+        return;
+    };
+    decode_the_picture_file(&mut window, source, [200, 100, 50, 255]);
+    // A checkpoint every 30 frames of the effect, which begins with the clip (frame 0).
+    let global = window.application().global_settings();
+    window.do_this(Command::SetGlobalSettings(crate::project::Settings {
+        checkpoint_interval: crate::project::CheckpointInterval::Every30Frames,
+        ..global
+    }));
+
+    for frame in 0..=40 {
+        go_to_the_frame(&mut window, frame);
+    }
+    assert!(
+        !says_the_picture_is_not_exact(&window),
+        "it was played in order from the first frame"
+    );
+    assert!(!window.engine_preview().unwrap().the_picture_shown_is_not_exact());
+
+    // A jump to frame 35: the checkpoint is of frame 30, and frame 34 is the one before it. Not exact, and the window says so, over the picture.
+    go_to_the_frame(&mut window, 35);
+    assert!(window.engine_preview().unwrap().the_picture_shown_is_not_exact());
+    assert!(says_the_picture_is_not_exact(&window));
+
+    // A jump to frame 31: the checkpoint is of the frame before it: exact, and nothing is said.
+    go_to_the_frame(&mut window, 31);
+    assert!(!window.engine_preview().unwrap().the_picture_shown_is_not_exact());
+    assert!(!says_the_picture_is_not_exact(&window));
+
+    // An edit of the project makes the checkpoints go: what they are copies of is not the project that there is. (The title of a track changes nothing that is seen.) The same jump
+    // that was exact is not now: the effect starts clear.
+    let track = window.application().project().tracks()[0].id();
+    window.do_this(Command::SetTrackTitle {
+        track,
+        title: "an edit".to_owned(),
+    });
+    go_to_the_frame(&mut window, 38);
+    go_to_the_frame(&mut window, 31);
+    assert!(
+        says_the_picture_is_not_exact(&window),
+        "no checkpoint is left to go on from"
+    );
+}

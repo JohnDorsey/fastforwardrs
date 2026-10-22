@@ -292,3 +292,396 @@ fn a_state_that_alone_is_over_the_budget_is_let_go_of_too() {
         assert_eq!(states.len(), 0);
     });
 }
+
+// --- checkpoints and the state that is approximate (EN-14, option 3) ---
+
+#[test]
+fn where_a_call_goes_on_from_is_the_nearest_state_that_is_not_after_the_frame_and_it_is_exact_only_if_it_is_the_frame_before()
+ {
+    use GoesOnFrom::*;
+    // The same frame again is the same frame again, whatever else there is.
+    assert_eq!(where_to_go_on_from(Some(5), &[0, 3], 5), TheSameFrameAgain);
+    // The frame after the state it has: it goes on, exact.
+    assert_eq!(where_to_go_on_from(Some(5), &[0, 3], 6), TheState { exact: true });
+    // A frame that was skipped: it goes on from the state it has, which is not the frame before: not exact.
+    assert_eq!(where_to_go_on_from(Some(5), &[0, 3], 8), TheState { exact: false });
+    // A checkpoint that is nearer than the state it has is the one to go on from (here the frame is a step back, and the state it has is of a later frame).
+    assert_eq!(
+        where_to_go_on_from(Some(9), &[0, 3, 6], 5),
+        ACheckpoint { frame: 3, exact: false }
+    );
+    assert_eq!(
+        where_to_go_on_from(Some(9), &[0, 3, 6], 4),
+        ACheckpoint { frame: 3, exact: true },
+        "the checkpoint is of the frame before: nothing is lost"
+    );
+    assert_eq!(
+        where_to_go_on_from(Some(9), &[0, 3, 6], 7),
+        ACheckpoint { frame: 6, exact: true }
+    );
+    // A checkpoint of the frame itself, or after it, is no state before it.
+    assert_eq!(
+        where_to_go_on_from(None, &[0, 3, 6], 3),
+        ACheckpoint { frame: 0, exact: false }
+    );
+    assert_eq!(
+        where_to_go_on_from(None, &[3, 6], 2),
+        Nothing { exact: false },
+        "none is before it"
+    );
+    // When the state it has and a checkpoint are of the same frame, the state it has is gone on from.
+    assert_eq!(where_to_go_on_from(Some(3), &[3], 5), TheState { exact: false });
+    // The state before the first frame is clear, and that is what it is.
+    assert_eq!(where_to_go_on_from(Some(40), &[0, 3], 0), Nothing { exact: true });
+    assert_eq!(where_to_go_on_from(None, &[], 0), Nothing { exact: true });
+    // Without a checkpoint or a state, a later frame starts clear and is not exact.
+    assert_eq!(where_to_go_on_from(None, &[], 7), Nothing { exact: false });
+    // No overflow.
+    assert_eq!(
+        where_to_go_on_from(Some(u64::MAX), &[u64::MAX], 0),
+        Nothing { exact: true }
+    );
+}
+
+fn checkpoints_every(interval: u64) -> RulesOfCheckpoints {
+    RulesOfCheckpoints {
+        interval_in_frames: interval,
+        memory_budget_in_bytes: u64::MAX,
+    }
+}
+
+/// Makes the frames `frames` of the state 1 (one buffer, 4 by 4) as the preview does, and commits each.
+fn play(states: &mut StatesOfEffects, device: &wgpu::Device, frames: impl IntoIterator<Item = u64>) {
+    for frame in frames {
+        let call = states.prepare_for_the_preview(device, 1, frame, &[wanted(4, 4)]);
+        states.commit(1, frame, call.continuation);
+        states.end_frame();
+    }
+}
+
+#[test]
+fn a_checkpoint_is_taken_after_each_frame_whose_number_is_a_multiple_of_the_interval_and_not_after_the_others() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        let mut taken = Vec::new();
+        for frame in 0..8 {
+            let call = states.prepare_for_the_preview(device, 1, frame, &[wanted(4, 4)]);
+            taken.push(call.to_checkpoint.len());
+            states.commit(1, frame, call.continuation);
+            states.end_frame();
+        }
+        assert_eq!(
+            taken,
+            [1, 0, 0, 1, 0, 0, 1, 0],
+            "one buffer, a copy of it at frames 0, 3 and 6"
+        );
+        // Each is a texture of its own, 4 by 4 pixels, half floats: 128 bytes.
+        assert_eq!(states.checkpoints_kept(), (3, 3 * 128));
+        // The state itself is what it was: two textures.
+        assert_eq!(states.bytes(), 2 * 128);
+    });
+}
+
+#[test]
+fn a_frame_that_is_not_the_preview_takes_no_checkpoint_and_restores_none() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(1));
+        for frame in 0..4 {
+            let call = states.prepare(device, 1, frame, &[wanted(4, 4)]);
+            assert!(call.to_checkpoint.is_empty() && call.to_restore.is_empty() && !call.approximate);
+            states.commit(1, frame, call.continuation);
+            states.end_frame();
+        }
+        assert_eq!(states.checkpoints_kept(), (0, 0));
+        let jump = states.prepare(device, 1, 9, &[wanted(4, 4)]);
+        assert_eq!(
+            jump.continuation,
+            Continuation::StartClear,
+            "the export starts clear, as it always did"
+        );
+        assert_eq!(jump.to_clear.len(), 1);
+        assert!(jump.to_restore.is_empty() && !jump.approximate);
+    });
+}
+
+#[test]
+fn with_no_rules_the_preview_goes_on_as_it_always_did_and_takes_nothing() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        play(&mut states, device, 0..4);
+        let skip = states.prepare_for_the_preview(device, 1, 6, &[wanted(4, 4)]);
+        assert_eq!(skip.continuation, Continuation::StartClear);
+        assert!(skip.to_restore.is_empty() && skip.to_checkpoint.is_empty() && !skip.approximate);
+        assert_eq!(states.checkpoints_kept(), (0, 0));
+    });
+}
+
+#[test]
+fn a_jump_goes_on_from_the_nearest_checkpoint_before_the_frame_and_says_it_is_not_exact_unless_that_is_the_frame_before()
+ {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..8);
+        // A step back to frame 5: the state it has is of frame 7; the nearest checkpoint before it is of frame 3.
+        let back = states.prepare_for_the_preview(device, 1, 5, &[wanted(4, 4)]);
+        assert_eq!(
+            back.continuation,
+            Continuation::StartClear,
+            "it reads the state before the frame, which is restored"
+        );
+        assert_eq!(back.to_restore.len(), 1);
+        assert!(
+            back.to_clear.is_empty(),
+            "nothing is cleared: the checkpoint is copied over it"
+        );
+        assert!(
+            back.approximate,
+            "frame 4 is what the state should be of, and it is of frame 3"
+        );
+        states.abandon(1);
+        // Frame 4: the checkpoint is of the frame before: exact.
+        play(&mut states, device, 0..8);
+        let exact = states.prepare_for_the_preview(device, 1, 4, &[wanted(4, 4)]);
+        assert_eq!(exact.to_restore.len(), 1);
+        assert!(!exact.approximate);
+        states.abandon(1);
+        // Frame 0 again: the state before it is clear, and that is exact.
+        play(&mut states, device, 0..8);
+        let first = states.prepare_for_the_preview(device, 1, 0, &[wanted(4, 4)]);
+        assert_eq!(first.to_clear.len(), 1);
+        assert!(first.to_restore.is_empty() && !first.approximate);
+    });
+}
+
+#[test]
+fn a_frame_that_is_skipped_goes_on_from_the_state_there_is_and_not_from_an_older_checkpoint_and_says_it_is_not_exact() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..5);
+        // The state is of frame 4; frame 6 skips frame 5.
+        let skip = states.prepare_for_the_preview(device, 1, 6, &[wanted(4, 4)]);
+        assert_eq!(skip.continuation, Continuation::GoOn);
+        assert!(skip.to_restore.is_empty() && skip.to_clear.is_empty());
+        assert!(skip.approximate);
+    });
+}
+
+#[test]
+fn a_state_made_from_one_that_was_not_exact_stays_not_exact_for_three_hundred_frames_and_then_is_exact_again() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(1000));
+        play(&mut states, device, 0..2);
+        // A jump with nothing to go on from but the state it has: not exact from frame 20, for 300 frames.
+        let mut said = Vec::new();
+        for frame in 20..=(20 + FRAMES_AFTER_A_STATE_IS_NOT_EXACT + 1) {
+            let call = states.prepare_for_the_preview(device, 1, frame, &[wanted(4, 4)]);
+            said.push(call.approximate);
+            states.commit(1, frame, call.continuation);
+            states.end_frame();
+        }
+        assert!(
+            said[..300].iter().all(|approximate| *approximate),
+            "the first 300 frames after the jump"
+        );
+        assert!(!said[300] && !said[301], "and then it is exact: {:?}", &said[298..]);
+    });
+}
+
+#[test]
+fn a_checkpoint_taken_from_a_state_that_was_not_exact_is_not_exact_either() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(10));
+        // Frames 0 to 3, then a jump to 12 (not exact), and frame 13, and the checkpoint at 10 would have been taken at frame 10: it is the one at 20 that is, from a state that is not exact.
+        play(&mut states, device, 0..4);
+        play(&mut states, device, 12..24);
+        // A jump back to frame 22 restores the checkpoint of frame 20, which was made from a state that was not exact.
+        let back = states.prepare_for_the_preview(device, 1, 21, &[wanted(4, 4)]);
+        assert_eq!(back.to_restore.len(), 1);
+        assert!(
+            back.approximate,
+            "the checkpoint is of the frame before, and it is not exact"
+        );
+    });
+}
+
+#[test]
+fn the_checkpoints_that_are_forgotten_are_not_gone_on_from() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..8);
+        assert_eq!(states.checkpoints_kept().0, 3);
+        states.forget_the_checkpoints();
+        assert_eq!(states.checkpoints_kept(), (0, 0));
+        let back = states.prepare_for_the_preview(device, 1, 5, &[wanted(4, 4)]);
+        assert_eq!(back.continuation, Continuation::StartClear);
+        assert!(back.to_restore.is_empty());
+        assert!(back.approximate, "it starts clear at a frame that is not the first");
+    });
+}
+
+#[test]
+fn the_checkpoints_are_kept_within_the_memory_that_they_may_take_and_the_one_used_longest_ago_goes_first() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        // A checkpoint of one buffer of 4 by 4 is 128 bytes: room for two.
+        states.set_the_rules_of_checkpoints(RulesOfCheckpoints {
+            interval_in_frames: 3,
+            memory_budget_in_bytes: 2 * 128,
+        });
+        play(&mut states, device, 0..8);
+        assert_eq!(
+            states.checkpoints_kept(),
+            (2, 2 * 128),
+            "the checkpoints of frames 3 and 6 are kept, and that of frame 0 is gone"
+        );
+        // Frame 2 has no checkpoint before it any more (the only one before it was of frame 0): the state it has is of a later frame, so it starts clear.
+        let early = states.prepare_for_the_preview(device, 1, 2, &[wanted(4, 4)]);
+        assert!(early.to_restore.is_empty());
+        assert_eq!(early.continuation, Continuation::StartClear);
+        states.abandon(1);
+        play(&mut states, device, 0..8);
+        // Frame 5 is after the checkpoint of frame 3, which is there.
+        let later = states.prepare_for_the_preview(device, 1, 5, &[wanted(4, 4)]);
+        assert_eq!(later.to_restore.len(), 1);
+    });
+}
+
+#[test]
+fn a_checkpoint_made_for_buffers_of_another_size_is_not_used() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..8);
+        let bigger = states.prepare_for_the_preview(device, 1, 5, &[wanted(8, 8)]);
+        assert!(bigger.to_restore.is_empty(), "the checkpoints are of buffers of 4 by 4");
+        assert_eq!(bigger.continuation, Continuation::StartClear);
+        assert!(bigger.approximate);
+    });
+}
+
+#[test]
+fn a_frame_that_is_abandoned_leaves_no_checkpoint_and_the_checkpoints_of_the_frames_before_it_stay() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..3);
+        assert_eq!(states.checkpoints_kept().0, 1);
+        let failed = states.prepare_for_the_preview(device, 1, 3, &[wanted(4, 4)]);
+        assert_eq!(failed.to_checkpoint.len(), 1);
+        states.abandon(1);
+        assert_eq!(
+            states.checkpoints_kept().0,
+            1,
+            "the checkpoint of frame 3 was never made"
+        );
+        assert_eq!(states.len(), 0);
+    });
+}
+
+#[test]
+fn rules_that_take_none_let_go_of_those_there_are() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..8);
+        states.set_the_rules_of_checkpoints(RulesOfCheckpoints::NONE);
+        assert_eq!(states.checkpoints_kept(), (0, 0));
+    });
+}
+
+#[test]
+fn a_frame_made_again_takes_no_second_checkpoint_of_the_frame_that_has_one() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..4);
+        assert_eq!(states.checkpoints_kept().0, 2, "frames 0 and 3");
+        let again = states.prepare_for_the_preview(device, 1, 3, &[wanted(4, 4)]);
+        assert_eq!(again.continuation, Continuation::SameFrame);
+        assert!(again.to_checkpoint.is_empty(), "frame 3 has its checkpoint");
+    });
+}
+
+#[test]
+fn a_checkpoint_that_is_gone_on_from_is_used_again_and_the_one_that_is_not_goes_first() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        // Room for two checkpoints of 128 bytes.
+        states.set_the_rules_of_checkpoints(RulesOfCheckpoints {
+            interval_in_frames: 3,
+            memory_budget_in_bytes: 2 * 128,
+        });
+        play(&mut states, device, 0..4);
+        assert_eq!(states.checkpoints_kept().0, 2, "frames 0 and 3");
+        // A jump back to frame 1 goes on from the checkpoint of frame 0, which is used now, and later than the checkpoint of frame 3 was made.
+        let back = states.prepare_for_the_preview(device, 1, 1, &[wanted(4, 4)]);
+        assert_eq!(back.to_restore.len(), 1);
+        states.commit(1, 1, back.continuation);
+        states.end_frame();
+        // Going on to frame 6 takes a third checkpoint, and the one used longest ago goes: that of frame 3, and not that of frame 0.
+        play(&mut states, device, 2..=6);
+        assert_eq!(states.checkpoints_kept().0, 2);
+        let jump = states.prepare_for_the_preview(device, 1, 2, &[wanted(4, 4)]);
+        assert_eq!(
+            jump.to_restore.len(),
+            1,
+            "the checkpoint of frame 0 is still there, for it was used"
+        );
+    });
+}
+
+#[test]
+fn buffers_that_change_size_are_a_start_from_nothing_at_a_frame_after_the_one_the_state_was_made_at_and_say_it_is_not_exact()
+ {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(30));
+        play(&mut states, device, 0..4);
+        // The next frame, with buffers that are another size: the state it had is gone, and the new one is clear. It is not the state of the frame before, and the call says so (and does
+        // not go on from what is not there).
+        let bigger = states.prepare_for_the_preview(device, 1, 4, &[wanted(8, 8)]);
+        assert_eq!(bigger.continuation, Continuation::StartClear);
+        assert_eq!(bigger.to_clear.len(), 1);
+        assert!(bigger.approximate);
+    });
+}
+
+#[test]
+fn rules_with_no_interval_take_no_checkpoint_and_let_go_of_those_there_are_whatever_the_memory_they_may_take() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut states = StatesOfEffects::default();
+        states.set_the_rules_of_checkpoints(checkpoints_every(3));
+        play(&mut states, device, 0..8);
+        assert_eq!(states.checkpoints_kept().0, 3);
+        states.set_the_rules_of_checkpoints(RulesOfCheckpoints {
+            interval_in_frames: 0,
+            memory_budget_in_bytes: u64::MAX,
+        });
+        assert_eq!(states.checkpoints_kept(), (0, 0));
+        let call = states.prepare_for_the_preview(device, 1, 8, &[wanted(4, 4)]);
+        assert!(call.to_checkpoint.is_empty());
+    });
+}

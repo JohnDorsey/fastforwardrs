@@ -396,6 +396,7 @@ fn after_the_window_lets_go_of_its_files_the_frame_is_asked_for_again_and_frames
             rgba_pixels: [9, 9, 9, 255].repeat(4),
         }),
         PictureFilter::Smooth,
+        false,
     );
     assert_eq!(setup.preview.shown.as_ref().unwrap().serial, before);
     let frame = setup.preview.the_frame_shown().unwrap();
@@ -608,6 +609,9 @@ fn what_was_asked_and_what_was_forgotten(
             EngineRequest::Upload { id, .. } => pictures.push(id),
             EngineRequest::Render { serial, description } => frames.push((serial, description)),
             EngineRequest::Forget(ids) => forgotten.extend(ids),
+            // (Rewritten on purpose in EN-14: what is said about the checkpoints has tests of its own, which read it with `what_was_said_of_the_checkpoints`; here it is not what is asked
+            // for or let go of.)
+            EngineRequest::SetTheRulesOfCheckpoints(_) | EngineRequest::ForgetTheCheckpoints => {}
             other => panic!("it asked for something else: {other:?}"),
         }
     }
@@ -1160,4 +1164,113 @@ fn the_words_about_a_replaced_device_say_why_that_the_engine_goes_on_and_which_e
     assert!(with_effects.contains("a frame did not finish"), "{with_effects}");
     assert!(with_effects.contains("not drawn again"), "{with_effects}");
     assert!(with_effects.contains("file:one, file:two"), "{with_effects}");
+}
+
+// ---- the checkpoints of the states of effects, and the picture that is not exact (EN-14) ----
+
+/// What a scripted engine was told about the checkpoints since this was last looked at: `Ok(rules)` for each time it was given rules, and `Err(())` for each time it was told to forget them.
+fn what_was_said_of_the_checkpoints(requests: &Receiver<EngineRequest>) -> Vec<Result<RulesOfCheckpoints, ()>> {
+    let mut said = Vec::new();
+    while let Ok(request) = requests.try_recv() {
+        match request {
+            EngineRequest::SetTheRulesOfCheckpoints(rules) => said.push(Ok(rules)),
+            EngineRequest::ForgetTheCheckpoints => said.push(Err(())),
+            _ => {}
+        }
+    }
+    said
+}
+
+const EVERY_SIXTY_FRAMES_AND_A_GIB: RulesOfCheckpoints = RulesOfCheckpoints {
+    interval_in_frames: 60,
+    memory_budget_in_bytes: 1 << 30,
+};
+
+#[test]
+fn the_rules_of_checkpoints_are_sent_when_they_are_not_what_the_engine_was_told_last_and_only_then() {
+    let (engine, _events, requests) = Engine::scripted_for_tests();
+    let mut preview = EnginePreview::with_engine(engine);
+    // (The engine takes none until it is told, so telling it none is nothing to say.)
+    preview.set_the_rules_of_checkpoints(RulesOfCheckpoints::NONE);
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), []);
+    preview.set_the_rules_of_checkpoints(EVERY_SIXTY_FRAMES_AND_A_GIB);
+    preview.set_the_rules_of_checkpoints(EVERY_SIXTY_FRAMES_AND_A_GIB);
+    assert_eq!(
+        what_was_said_of_the_checkpoints(&requests),
+        [Ok(EVERY_SIXTY_FRAMES_AND_A_GIB)]
+    );
+    let more = RulesOfCheckpoints {
+        interval_in_frames: 30,
+        ..EVERY_SIXTY_FRAMES_AND_A_GIB
+    };
+    preview.set_the_rules_of_checkpoints(more);
+    preview.set_the_rules_of_checkpoints(RulesOfCheckpoints::NONE);
+    assert_eq!(
+        what_was_said_of_the_checkpoints(&requests),
+        [Ok(more), Ok(RulesOfCheckpoints::NONE)]
+    );
+}
+
+#[test]
+fn the_checkpoints_are_forgotten_when_the_colours_of_the_frames_change_or_the_files_are_let_go_of_or_the_project_is_not_what_it_was()
+ {
+    let (engine, _events, requests) = Engine::scripted_for_tests();
+    let mut preview = EnginePreview::with_engine(engine);
+    // The colour it has, again: nothing.
+    preview.set_the_colour(FrameColour::default());
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), []);
+    // Another colour: what the states hold is in the other colour.
+    let other = FrameColour {
+        working: crate::engine::WorkingSpace::Linear(crate::colour_space::StandardPrimaries::Rec709),
+        ..FrameColour::default()
+    };
+    preview.set_the_colour(other);
+    preview.set_the_colour(other);
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), [Err(())], "once");
+    // The window lets go of its files: another project, or a file that was replaced.
+    preview.forget_what_is_known_of_the_files();
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), [Err(())]);
+    // The project: the first state is not a change, and the same state again is not, and another is.
+    preview.the_project_is_now((1, 1));
+    preview.the_project_is_now((1, 1));
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), []);
+    preview.the_project_is_now((1, 2));
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), [Err(())]);
+    // (Undo goes to a state it was in before: that is another state too, and so is another project that has the same number of edits.)
+    preview.the_project_is_now((1, 1));
+    preview.the_project_is_now((2, 1));
+    assert_eq!(what_was_said_of_the_checkpoints(&requests), [Err(()), Err(())]);
+}
+
+/// A frame that the engine made, as an event says it, that is exact or not.
+fn a_frame_that_is_approximate(serial: u64, approximate: bool) -> EngineEvent {
+    EngineEvent::Frame {
+        serial,
+        frame: Arc::new(RenderedFrame {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            rgba_pixels: [0, 0, 0, 255].repeat(4),
+        }),
+        statistics: crate::engine::FrameStatistics {
+            approximate,
+            ..Default::default()
+        },
+    }
+}
+
+#[test]
+fn the_picture_that_is_shown_says_whether_the_engine_said_it_is_exact_and_a_picture_that_is_not_there_is_not_said_to_be_inexact()
+ {
+    let mut scripted = Scripted::new();
+    assert!(!scripted.preview.the_picture_shown_is_not_exact(), "nothing is shown");
+    scripted.draw(0, false, 0);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    scripted.draw(0, false, 1);
+    assert!(scripted.preview.has_a_frame_to_show());
+    assert!(scripted.preview.the_picture_shown_is_not_exact());
+    // The next frame is exact, and the picture is.
+    scripted.draw(1, false, 2);
+    scripted.events.send(a_frame_that_is_approximate(2, false)).unwrap();
+    scripted.draw(1, false, 3);
+    assert!(!scripted.preview.the_picture_shown_is_not_exact());
 }

@@ -14,7 +14,7 @@ use thiserror::Error;
 use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, OutputConversion};
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, numbers_of_a_pass, write_the_numbers_of_a_call};
-use super::effect_states::{BufferWanted, BuffersOfACall, Continuation, StatesOfEffects};
+use super::effect_states::{BufferWanted, BuffersOfACall, Continuation, RulesOfCheckpoints, StatesOfEffects};
 use super::guard::GuardedShader;
 use super::own_effects::{LutNumbers, blur_numbers, crop_numbers, gain_factors};
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
@@ -107,6 +107,7 @@ pub struct PendingFrame {
     deadline: Instant,
     passes_recorded: usize,
     effects_not_run: usize,
+    approximate: bool,
 }
 
 enum PendingReadbacks {
@@ -265,6 +266,21 @@ impl FrameRenderer {
     /// How many states of effects that depend on earlier frames the card keeps, and how many bytes of textures they take up.
     pub fn effect_states_kept(&self) -> (usize, u64) {
         (self.effect_states.len(), self.effect_states.bytes())
+    }
+
+    /// From now on the frames of the preview take checkpoints of the states of effects that depend on earlier frames, and go on from them after a jump, as `rules` say (EN-14). The export takes none.
+    pub fn set_the_rules_of_checkpoints(&mut self, rules: RulesOfCheckpoints) {
+        self.effect_states.set_the_rules_of_checkpoints(rules);
+    }
+
+    /// Lets go of every checkpoint: what they are copies of is not there any more (the project was edited or loaded, or the colours of the frames changed).
+    pub fn forget_the_checkpoints(&mut self) {
+        self.effect_states.forget_the_checkpoints();
+    }
+
+    /// How many checkpoints the card keeps, and how many bytes of textures they take up.
+    pub fn checkpoints_kept(&self) -> (usize, u64) {
+        self.effect_states.checkpoints_kept()
     }
 
     /// How many tables of colours the card has now.
@@ -778,9 +794,14 @@ impl FrameRenderer {
                             .flatten()
                     })
                     .collect();
-                let buffers = self
-                    .effect_states
-                    .prepare(&self.device.device, state.id, state.frame, &wanted);
+                // (The preview jumps and may take checkpoints; the export makes every frame in order and takes none.)
+                let buffers = if matches!(output_kind, FrameOutput::Rgba8) {
+                    self.effect_states
+                        .prepare_for_the_preview(&self.device.device, state.id, state.frame, &wanted)
+                } else {
+                    self.effect_states
+                        .prepare(&self.device.device, state.id, state.frame, &wanted)
+                };
                 states_used.push((state.id, state.frame, buffers.continuation));
                 call_buffers.insert((*layer, *call), buffers);
             }
@@ -795,6 +816,7 @@ impl FrameRenderer {
             effect_picture_numbers.insert(*layer, numbers);
         }
         self.uniforms.clear();
+        let approximate = call_buffers.values().any(|buffers| buffers.approximate);
 
         let (readbacks, mistake) = self.device.catching_errors(|| {
             let accumulation_view = accumulation.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1010,7 +1032,7 @@ impl FrameRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("engine frame"),
                 });
-            // The state before the frame of each effect that starts again is clear.
+            // The state before the frame of each effect that starts again is clear, or is the checkpoint that it goes on from.
             for buffers in call_buffers.values() {
                 for view in &buffers.to_clear {
                     drop(begin_pass(
@@ -1019,6 +1041,9 @@ impl FrameRenderer {
                         view,
                         wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                     ));
+                }
+                for (checkpoint, state_before_the_frame) in &buffers.to_restore {
+                    copy_a_texture(&mut encoder, checkpoint, state_before_the_frame);
                 }
             }
             for (pass_number, pass) in plan.passes.iter().enumerate() {
@@ -1353,6 +1378,12 @@ impl FrameRenderer {
                     }
                 }
             }
+            // What the states are after the frame is copied, for the checkpoints that this frame takes.
+            for buffers in call_buffers.values() {
+                for (state_after_the_frame, checkpoint) in &buffers.to_checkpoint {
+                    copy_a_texture(&mut encoder, state_after_the_frame, checkpoint);
+                }
+            }
             match (&planes_textures, planes_slot) {
                 (Some((luma, chroma)), Some(slot)) => {
                     let uniform_buffer = uniform_buffer.expect("a frame with planes has uniforms");
@@ -1445,6 +1476,7 @@ impl FrameRenderer {
             deadline,
             passes_recorded: plan.passes_recorded() + planes_passes,
             effects_not_run: plan.effects_not_run,
+            approximate,
         })
     }
 
@@ -1462,6 +1494,7 @@ impl FrameRenderer {
             deadline,
             passes_recorded,
             effects_not_run,
+            approximate,
         } = pending;
         let waiting_since = Instant::now();
         let mut collect = |pending: PendingReadback| {
@@ -1499,6 +1532,7 @@ impl FrameRenderer {
                 passes_recorded,
                 came_from_the_cache: false,
                 effects_not_run,
+                approximate,
             },
         ))
     }
@@ -1607,6 +1641,19 @@ fn shader_numbers(shaders: &HashMap<String, InstalledShader>, effect: &super::Ef
         }
         _ => effect.values.clone(),
     }
+}
+
+/// Copies the whole of the texture `from` into the texture `to`, which is the same size and in the same format (a checkpoint and the state it is of).
+fn copy_a_texture(encoder: &mut wgpu::CommandEncoder, from: &wgpu::Texture, to: &wgpu::Texture) {
+    encoder.copy_texture_to_texture(
+        from.as_image_copy(),
+        to.as_image_copy(),
+        wgpu::Extent3d {
+            width: from.width(),
+            height: from.height(),
+            depth_or_array_layers: 1,
+        },
+    );
 }
 
 /// A render pass that draws into `view`, beginning by `load`ing it as that says.

@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::effect_shaders::{check_that_it_is_an_effect, published_effect_shader_with_structure};
+use super::effect_states::RulesOfCheckpoints;
 use super::guard::{ShaderProblem, guard_wgsl};
 use super::messages::{EngineEvent, EngineRequest, EngineSettings, WakeUp};
 use super::shader_structure::ShaderStructure;
@@ -121,6 +122,16 @@ impl Engine {
                 }
             }
         }
+    }
+
+    /// Tells the engine how checkpoints of the states of effects that depend on earlier frames are to be taken from now on (EN-14: see [`RulesOfCheckpoints`]).
+    pub fn set_the_rules_of_checkpoints(&self, rules: RulesOfCheckpoints) {
+        let _ = self.requests.send(EngineRequest::SetTheRulesOfCheckpoints(rules));
+    }
+
+    /// Tells the engine to let go of every checkpoint: what they are copies of is not there any more.
+    pub fn forget_the_checkpoints(&self) {
+        let _ = self.requests.send(EngineRequest::ForgetTheCheckpoints);
     }
 
     /// Sends a picture, which frames can then refer to by `id`. The bytes are not copied.

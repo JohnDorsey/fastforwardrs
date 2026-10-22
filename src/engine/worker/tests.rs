@@ -998,3 +998,104 @@ fn a_frame_with_an_effect_that_depends_on_earlier_frames_is_neither_taken_from_t
         assert!(the_frame_in(&what_was_said(told)[0]).1.came_from_the_cache);
     });
 }
+
+// ---- checkpoints of the states of effects (EN-14) ----
+
+use crate::engine::RulesOfCheckpoints;
+use crate::engine::persistent_buffer_tests::{
+    ADD_A_TENTH_OF_RED, THE_PICTURE_AND_A_BUFFER, near, one_buffer_that_lasts, stateful, tenths,
+};
+
+/// An engine that has the picture 1 and the shader that adds a tenth of red to what it kept in each frame (a picture of how many frames it has been through).
+fn engine_with_the_accumulating_shader() -> (Engine, DevicesMade) {
+    let (mut engine, devices) = engine_that_shows_its_devices(software_settings());
+    give_the_accumulating_shader_and_the_picture(&mut engine);
+    (engine, devices)
+}
+
+fn give_the_accumulating_shader_and_the_picture(engine: &mut Engine) {
+    engine
+        .compile_effect_shader_with_structure(
+            "test:accumulate",
+            &format!("{THE_PICTURE_AND_A_BUFFER}\n{ADD_A_TENTH_OF_RED}"),
+            one_buffer_that_lasts(),
+        )
+        .expect("the guard takes it");
+    engine.upload_picture(PictureId(1), Arc::new(picture_1().as_picture_data()));
+}
+
+/// The red of the middle of the frame `frame` of the effect, and whether the engine says that it is not exact.
+fn the_red_of(engine: &mut Engine, frame: u64) -> (i32, bool) {
+    let (picture, statistics) = the_engine_makes_the_frame(
+        engine,
+        description_of_picture_1(vec![stateful("test:accumulate", 1, frame)]),
+    );
+    (i32::from(picture.pixel(4, 4)[0]), statistics.approximate)
+}
+
+const EVERY_THIRD: RulesOfCheckpoints = RulesOfCheckpoints {
+    interval_in_frames: 3,
+    memory_budget_in_bytes: u64::MAX,
+};
+
+#[test]
+fn the_rules_of_checkpoints_that_the_window_gives_are_what_a_jump_of_the_preview_goes_on_from_and_forgetting_them_is_heard()
+ {
+    let Some(_graphics) = software_graphics() else { return };
+    let (mut engine, _) = engine_with_the_accumulating_shader();
+    engine.set_the_rules_of_checkpoints(EVERY_THIRD);
+    for frame in 0..8 {
+        let (red, approximate) = the_red_of(&mut engine, frame);
+        assert!(
+            near(red, tenths(frame as i32 + 1)) && !approximate,
+            "frame {frame}: {red}"
+        );
+    }
+    // A jump back to frame 5: from the checkpoint of frame 3, not exact.
+    let (red, approximate) = the_red_of(&mut engine, 5);
+    assert!(near(red, tenths(5)), "{red}");
+    assert!(approximate);
+    // And with the checkpoints forgotten, a jump starts clear (and says it is not exact: the frame is not the first).
+    for frame in 0..8 {
+        the_red_of(&mut engine, frame);
+    }
+    engine.forget_the_checkpoints();
+    let (red, approximate) = the_red_of(&mut engine, 5);
+    assert!(near(red, tenths(1)), "{red}");
+    assert!(approximate);
+}
+
+#[test]
+fn an_engine_that_was_told_nothing_goes_on_as_it_always_did_after_a_jump() {
+    let Some(_graphics) = software_graphics() else { return };
+    let (mut engine, _) = engine_with_the_accumulating_shader();
+    for frame in 0..8 {
+        the_red_of(&mut engine, frame);
+    }
+    let (red, approximate) = the_red_of(&mut engine, 5);
+    assert!(near(red, tenths(1)), "{red}");
+    assert!(!approximate);
+}
+
+#[test]
+fn the_rules_of_checkpoints_are_on_the_new_device_when_the_device_is_replaced() {
+    let Some(_graphics) = software_graphics() else { return };
+    let (mut engine, devices) = engine_with_the_accumulating_shader();
+    engine.set_the_rules_of_checkpoints(EVERY_THIRD);
+    the_red_of(&mut engine, 0);
+
+    devices.nth(1, A_LONG_TIME).destroy();
+    engine.request_frame(description_of_picture_1(vec![stateful("test:accumulate", 1, 1)]));
+    let events = events_of(&engine, 2);
+    assert!(matches!(&events[0], EngineEvent::DeviceReplaced { .. }), "{events:?}");
+    engine.upload_picture(PictureId(1), Arc::new(picture_1().as_picture_data()));
+    for frame in 0..8 {
+        the_red_of(&mut engine, frame);
+    }
+    let (red, approximate) = the_red_of(&mut engine, 5);
+    assert!(
+        near(red, tenths(5)),
+        "{red}: the new device takes checkpoints as the old one did"
+    );
+    assert!(approximate);
+}

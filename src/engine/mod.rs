@@ -61,6 +61,8 @@ mod yuv;
 #[cfg(test)]
 mod blur_and_crop_tests;
 #[cfg(test)]
+mod checkpoint_tests;
+#[cfg(test)]
 mod chroma_tests;
 #[cfg(test)]
 mod colour_tests;
@@ -123,6 +125,7 @@ pub use effect_shaders::{
     FOREIGN_EFFECT_UNIFORM_BYTES, MOST_NUMBERS_OF_A_FOREIGN_EFFECT, NUMBERS_THE_ENGINE_ADDS, publish_effect_shader,
     publish_effect_shader_with, published_effect_shader, published_effect_shader_with_structure,
 };
+pub use effect_states::RulesOfCheckpoints;
 pub use frame_cache::FrameCache;
 pub use frame_renderer::{FinishedFrame, FrameOutput, FrameRenderer, PendingFrame, RenderProblem};
 pub use frames::{FrameStatistics, RenderedFrame, RenderedPlanes};
