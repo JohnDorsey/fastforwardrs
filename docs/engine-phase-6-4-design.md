@@ -67,3 +67,21 @@ Each is committed, pushed for CI, and reported alone. 6.4.2 does not make the pr
   that the same frame can be made again. Bookkeeping is done **after** the frame was recorded without a mistake; a mistake drops the states it touched.
 * **A pass that reads a persistent buffer before the pass that draws it reads `base`** (the state before the frame), and a pass after it reads what was drawn: `ImageSource` gets a third kind for it, and the plan, not the renderer, says which (K7).
 * **The preview drops frames** (only the newest `Render` of a batch is made): that is a seek as far as a state can tell, which is what K8 does with it (a clear start) until 6.4.3 catches up.
+
+## 6. 6.4.3 (EN-14) is not built, and why (2026-10-22, read, not run)
+
+6.4.2 makes the export exact and the preview **start the effect again after a jump** (what EN-14 calls *Warm-up only*, with no marker and no setting). The rest of EN-14 is **Bounded**: checkpoints of the state, and after a seek a **simulation forward from the nearest checkpoint for at most 300 frames**. I read the code for it and stopped, because **the simulation needs the pictures of the frames it passes through, and the preview has no way to get them**:
+
+* The preview's pictures come from `PreviewPictures`: one ffmpeg stream **per track** that keeps up with the playhead and gives *the current picture* (and thumbnails while it is behind); it cannot be asked for frame *n − 200*. `preview_content` is built from that, for the one frame at the playhead.
+* The export has what is needed (`video_export::frames::FrameDescriber::describe(timeline_frame)`, with its runs of decoded video), but it is built for a whole sequential export, from an `ExportPlan` and the ffmpeg toolchain, and is not something the preview holds.
+* The engine cannot do it alone: its state at frame *n* is a function of the *pictures* and values of the frames before, which it was never given.
+
+**What can be built without that, and is not worth much on its own:** the three global settings (UI-11), checkpoints (a copy of the state every *interval* frames, within a byte budget, dropped when the project is edited, since an edit makes them wrong), and **restoring the nearest earlier checkpoint on a jump and marking the picture *approximate*** (EN-14 itself says what to show when no checkpoint is near enough). That is the fallback of *Bounded*, not *Bounded*.
+
+**What *Bounded* itself needs, three ways (my opinion first):**
+
+1. **A background catch-up with the export's describer** *(recommended [B, moderate])*: on a jump, a worker thread builds a `FrameDescriber` for the project as it is, makes the frames from the checkpoint to just before the playhead (decoding the videos for them with their own ffmpegs, as an export does), and sends them to the preview's engine as frames that are made and not shown; the preview shows the approximate picture meanwhile and the true one when the catch-up is done; an edit or another jump cancels it. About 1500 lines and the most careful threading of the program; it reuses what the export does and is exact.
+2. **Catch up only effects that need no video** (generators, and filters of a picture that is still): their frames are made from the plan alone, with no decoding, which is every generator with feedback (the commonest use). Smaller (about 600 lines) and leaves a filter over a moving video approximate after a jump.
+3. **Leave it at warm-up, with the marker and the settings** (the three settings, the checkpoints and the approximate marker, and no catch-up): the least, and *Bounded* would be a name for something it is not.
+
+I need your word on which. Nothing else of phase 6.4 waits on it.
