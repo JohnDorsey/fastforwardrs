@@ -132,3 +132,33 @@ fn the_blur_changes_a_picture_that_is_not_flat_and_leaves_one_that_is_flat_as_it
         );
     });
 }
+
+/// A shader with a point of its own, normalised as nearly all that are in the wild are (`MAX` 1 and a centre of 0.5): it shows the point as a colour.
+const A_POINT: &str = "/*{ \"ISFVSN\": \"2\", \"INPUTS\": [ { \"NAME\": \"spot\", \"TYPE\": \"point2D\", \"DEFAULT\": [0.5, 0.25], \"MIN\": [0, 0], \"MAX\": [1, 1] } ] }*/
+void main() { gl_FragColor = vec4(spot.x, spot.y, 0.0, 1.0); }
+";
+
+/// Regression test for what the corpus of the Vidvox shaders found (phase 6.7): a point was multiplied by the height of the picture over 1080, which is right for a point in pixels
+/// and wrong for the 79 of 90 points of those shaders that are fractions of the picture (`MAX` [1, 1]), whose pictures came out all black. A point reaches the shader as the file says it,
+/// whatever the size of the picture.
+#[test]
+fn a_point_reaches_the_shader_as_the_file_wrote_it_at_every_size_of_the_picture() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        installed_from_isf(&mut renderer, "isf:spot", A_POINT);
+        for (width, height) in [(16, 9), (64, 36), (96, 54)] {
+            let picture = flat(width, height, [10, 20, 30, 255]);
+            let (frame, _) = frame_of(
+                &mut renderer,
+                (width, height),
+                &[(1, &picture)],
+                vec![whole_frame(1, vec![call("isf:spot", &[0.0, 0.0, 0.0, 0.0, 0.5, 0.25])])],
+            );
+            assert!(
+                frame.every_pixel_is([128, 64, 0, 255]),
+                "{width} by {height}: {:?}",
+                frame.pixel(0, 0)
+            );
+        }
+    });
+}

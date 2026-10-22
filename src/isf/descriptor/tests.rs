@@ -122,7 +122,7 @@ fn a_choice_has_an_option_for_each_value_called_by_the_value_and_begins_as_its_d
 #[test]
 fn a_point_is_a_pair_and_a_generator_has_the_values_of_its_inputs_and_no_picture() {
     let vignette = descriptor_from("vignette.fs", VIGNETTE);
-    // (In pixels of a picture 1080 high, as ISF has a point; the file of the spike had it as a fraction, and was changed on purpose in phase 6.)
+    // (As the file says it, in whatever units the shader means: this fixture says pixels, and most shaders in the wild a fraction of the picture, with `MAX` [1, 1].)
     assert_eq!(vignette.parameters[0].default, PropertyValue::Pair(960.0, 540.0));
     assert_eq!(vignette.parameters[0].range, None);
 

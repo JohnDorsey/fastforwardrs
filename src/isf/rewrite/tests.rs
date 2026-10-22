@@ -81,11 +81,8 @@ fn a_colour_that_does_not_begin_a_vec4_is_made_of_the_numbers_it_is_and_a_choice
         &made.glsl,
         "#define c (vec4(_isf_u[1].y, _isf_u[1].z, _isf_u[1].w, _isf_u[2].x))"
     ));
-    // The point is numbers 9 and 10, in points of a picture 1080 high, so scaled by the size of this picture.
-    assert!(has_line(
-        &made.glsl,
-        "#define p ((vec2(_isf_u[2].y, _isf_u[2].z) * (RENDERSIZE.y / 1080.0)))"
-    ));
+    // The point is numbers 9 and 10, as they are (it is not scaled by the size of the picture: see `a_point_reaches_the_shader_as_the_file_wrote_it_at_every_size_of_the_picture`).
+    assert!(has_line(&made.glsl, "#define p (vec2(_isf_u[2].y, _isf_u[2].z))"));
     assert!(has_line(&made.glsl, "#define l (int(_isf_u[2].w))"));
     assert!(has_line(&made.glsl, "#define e ((_isf_u[3].x != 0.0))"));
 }

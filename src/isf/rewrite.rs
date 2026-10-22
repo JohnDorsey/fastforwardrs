@@ -286,8 +286,9 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
             IsfInputKind::Long { .. } => Some(format!("int({})", n(0))),
             IsfInputKind::Bool { .. } | IsfInputKind::Event => Some(format!("({} != 0.0)", n(0))),
             IsfInputKind::Color { .. } => Some(format!("vec4({}, {}, {}, {})", n(0), n(1), n(2), n(3))),
-            // (In points of a picture 1080 high, which is how the project keeps a place, so that it is in the same place at any size of the picture.)
-            IsfInputKind::Point2D { .. } => Some(format!("(vec2({}, {}) * (RENDERSIZE.y / 1080.0))", n(0), n(1))),
+            // (As the file says it, whatever the size of the picture: a point is a fraction of the picture in 79 of the 90 points of the Vidvox shaders (`MAX` [1, 1]), and a number of
+            // cells or squares in the rest, never a place in pixels. The first design scaled it by the height of the picture over 1080 and was wrong: the corpus found it, phase 6.7.)
+            IsfInputKind::Point2D { .. } => Some(format!("vec2({}, {})", n(0), n(1))),
             IsfInputKind::Image => None,
             IsfInputKind::Audio => {
                 notes.push(format!(
