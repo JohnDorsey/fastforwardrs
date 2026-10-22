@@ -1291,3 +1291,26 @@ fn a_scan_does_not_find_the_plugins_of_a_set_that_is_being_made_by_a_download() 
         .collect();
     assert_eq!(names, ["done/a.clap", "done/nested/a.clap"], "{names:?}");
 }
+
+#[test]
+fn the_time_the_scan_program_checks_the_start_of_plugins_for_is_whole_seconds_from_its_variable_and_nothing_else_changes_it()
+ {
+    use super::program::start_check_time_from;
+    assert_eq!(
+        start_check_time_from(None),
+        None,
+        "no variable: the time the library is given"
+    );
+    assert_eq!(start_check_time_from(Some("600")), Some(Duration::from_secs(600)));
+    assert_eq!(start_check_time_from(Some(" 7 ")), Some(Duration::from_secs(7)));
+    assert_eq!(start_check_time_from(Some("0")), Some(Duration::ZERO));
+    assert_eq!(start_check_time_from(Some("86400")), Some(Duration::from_secs(86_400)));
+    assert_eq!(
+        start_check_time_from(Some("86401")),
+        None,
+        "more than a day is not believed"
+    );
+    for not_seconds in ["", "soon", "-3", "1.5", "12s"] {
+        assert_eq!(start_check_time_from(Some(not_seconds)), None, "{not_seconds:?}");
+    }
+}

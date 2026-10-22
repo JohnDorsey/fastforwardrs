@@ -6,6 +6,7 @@
 
 use std::io::{self, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use super::folders::is_a_clap_file;
 use super::protocol::{ScanAnswer, answer_line, step_line};
@@ -19,6 +20,16 @@ output (lines that begin with \"ffrs-scan-step: \" say what it is about to do, a
 that begins with \"ffrs-scan-result: \" is the answer). It exists so that a library that
 crashes or never returns does that to this program and not to the editor.
 ";
+
+/// The environment variable that gives the program the time, in whole seconds, to check the start of the plugins of a CLAP library for (instead of the time that `clap_host` gives a
+/// library): **for the tests**, whose answers must not depend on how fast the computer is (a check that is not made says `NotChecked`).
+pub const START_CHECK_SECONDS_VARIABLE: &str = "FASTFORWARDRS_START_CHECK_SECONDS";
+
+/// The time to check the start of the plugins of a CLAP library for, if `variable` (the value of [`START_CHECK_SECONDS_VARIABLE`]) says one: whole seconds, at most a day.
+pub fn start_check_time_from(variable: Option<&str>) -> Option<Duration> {
+    let seconds: u64 = variable?.trim().parse().ok()?;
+    (seconds <= 24 * 60 * 60).then(|| Duration::from_secs(seconds))
+}
 
 /// Scans the library at `library`, writing the steps and then the answer to `out`. Every line is flushed when it is written: if the library crashes the program, the last step is
 /// already out. (Each line begins on a new line, because a library may have written something that does not end in one.) **A file that ends in `.clap` is read as a CLAP
@@ -37,7 +48,11 @@ pub fn run(library: &Path, out: &mut impl Write) -> io::Result<()> {
         }
     };
     let answer = if is_a_clap_file(library) {
-        match clap_host::scan::scan_library(library, &mut step) {
+        let result = match start_check_time_from(std::env::var(START_CHECK_SECONDS_VARIABLE).ok().as_deref()) {
+            Some(longest) => clap_host::scan::scan_library_checking_starts_for(library, longest, &mut step),
+            None => clap_host::scan::scan_library(library, &mut step),
+        };
+        match result {
             Ok(scan) => ScanAnswer::ScannedClap(scan),
             Err(error) => ScanAnswer::from(error),
         }

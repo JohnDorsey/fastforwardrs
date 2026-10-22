@@ -27,7 +27,11 @@ fn good_library_in(folder: &Path) -> PathBuf {
 }
 
 fn scanner() -> PluginScanner {
-    PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory()).with_time_limit(Duration::from_secs(30))
+    // (The check of the start of each plugin is given all the time it wants: it is given 12 seconds for a whole library otherwise, and a computer that is slow, as a runner of CI was
+    // once, has the plugins at the end of the library not checked, which says `NotChecked`. The time limit of the scan is what stops a library that never ends.)
+    PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory())
+        .with_time_limit(Duration::from_secs(30))
+        .with_environment_variable(fastforwardrs::plugin_scan::program::START_CHECK_SECONDS_VARIABLE, "600")
 }
 
 fn misbehaving(how: &str) -> PluginScanner {
