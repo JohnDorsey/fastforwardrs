@@ -443,8 +443,8 @@ fn the_places_to_look_for_the_libraries_that_plugins_need_are_told_to_the_host()
         (vec![folder.path().to_owned()], true)
     );
 
-    window.do_this(crate::application::commands::Command::SoundPlugins(
-        crate::application::sound_plugins_window::SoundPluginsCommand::SetSearchParentFolders(false),
+    window.do_this(crate::application::commands::Command::PluginManager(
+        crate::application::plugin_manager_window::PluginManagerCommand::SetSearchParentFolders(false),
     ));
     assert_eq!(
         window.application().plugin_host().where_dependencies_are_looked_for(),

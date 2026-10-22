@@ -7,7 +7,7 @@ use egui::{Button, MenuBar, Ui};
 
 use super::commands::Command;
 use super::keyboard::{DESELECT_KEY, REDO_SHORTCUT, UNDO_SHORTCUT};
-use super::sound_plugins_window::SoundPluginsCommand;
+use super::plugin_manager_window::PluginManagerCommand;
 
 /// The label of the checkbox of the View menu.
 pub const GENERATE_LEAD_UP_ON_SEEK_LABEL: &str = "Generate lead-up on seek";
@@ -89,8 +89,8 @@ pub fn show(ui: &mut Ui, availability: &MenuState, commands: &mut Vec<Command>) 
             if ui.add_enabled(idle, Button::new("Global settings")).clicked() {
                 commands.push(Command::ShowGlobalSettings);
             }
-            if ui.add_enabled(idle, Button::new("Sound plugins...")).clicked() {
-                commands.push(Command::SoundPlugins(SoundPluginsCommand::Show));
+            if ui.add_enabled(idle, Button::new("Plugin manager...")).clicked() {
+                commands.push(Command::PluginManager(PluginManagerCommand::Show));
             }
         });
         ui.menu_button("View", |ui| {

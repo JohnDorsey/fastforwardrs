@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! What the tests of fetching plugins share (here and in the window of sound plugins): a fetcher that serves archives made on the spot, a way to make a zip, and a manifest of a few
+//! What the tests of fetching plugins share (here and in the plugin manager): a fetcher that serves archives made on the spot, a way to make a zip, and a manifest of a few
 //! sets that is true to them.
 
 use std::collections::{BTreeMap, HashMap};

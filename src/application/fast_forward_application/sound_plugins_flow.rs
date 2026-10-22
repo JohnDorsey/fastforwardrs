@@ -14,7 +14,7 @@ use std::thread;
 
 use super::FastForwardApplication;
 use crate::application::commands::Command;
-use crate::application::sound_plugins_window::{SoundPluginsCommand, SoundPluginsView};
+use crate::application::plugin_manager_window::{PluginManagerCommand, PluginManagerView};
 use crate::plugin_host::PluginHost;
 use crate::plugin_scan::ScanFailure;
 use crate::plugin_scan::is_a_clap_file;
@@ -214,10 +214,10 @@ impl PluginSearch {
         }
         match library_stem {
             Some(stem) => {
-                format!("No library called {stem} was found in the folders that are looked in (see Sound plugins...).")
+                format!("No library called {stem} was found in the folders that are looked in (see Plugin manager...).")
             }
             None => {
-                "No plugin with this id was found in the folders that are looked in (see Sound plugins...).".to_owned()
+                "No plugin with this id was found in the folders that are looked in (see Plugin manager...).".to_owned()
             }
         }
     }
@@ -310,7 +310,7 @@ impl FastForwardApplication {
                 self.add_to_message(
                     "The editor ended badly",
                     format!(
-                        "The last time the editor ran, it ended while it was using the sound plugin library {}{others}. That library will not be loaded again until the file changes; the Sound plugins window says so.",
+                        "The last time the editor ran, it ended while it was using the sound plugin library {}{others}. That library will not be loaded again until the file changes; the Plugin manager says so.",
                         recovery.failed.display()
                     ),
                 );
@@ -420,7 +420,7 @@ impl FastForwardApplication {
     }
 
     /// Starts the scan of the plugin library at `file`, which was written out of the project file after a person said yes to it, on a thread of its own (nothing is kept of it: the
-    /// plugins it has are installed until another project is opened). Where there is no scan program nothing is scanned: the window of sound plugins says so.
+    /// plugins it has are installed until another project is opened). Where there is no scan program nothing is scanned: the plugin manager says so.
     pub(super) fn start_scanning_an_embedded_plugin(&mut self, file: PathBuf) {
         let search = &mut self.environment.plugin_search;
         let Some(program) = search.scanner_program.clone() else {
@@ -508,14 +508,14 @@ impl FastForwardApplication {
         self.apply_what_a_scan_found(libraries, Vec::new());
     }
 
-    /// What the window of sound plugins shows.
-    pub(super) fn show_the_window_of_sound_plugins(&mut self, context: &egui::Context, commands: &mut Vec<Command>) {
+    /// What the plugin manager shows.
+    pub(super) fn show_the_plugin_manager(&mut self, context: &egui::Context, commands: &mut Vec<Command>) {
         let other_folders = self.environment.plugin_search.other_folders();
         let bundled_folder = bundled_plugins_folder();
         let (rows, has_builds, total_bytes, hosts) = self.what_the_bundles_tab_shows();
         let fetched_folder = self.folder_of_the_bundles();
         let search = &self.environment.plugin_search;
-        let bundles = crate::application::sound_plugins_bundles::BundlesView {
+        let bundles = crate::application::plugin_manager_bundles::BundlesView {
             rows: &rows,
             has_builds,
             total_bytes,
@@ -523,12 +523,12 @@ impl FastForwardApplication {
             folder: fetched_folder.as_deref(),
             state: super::plugin_bundles_flow::state_of(&search.bundles.download),
         };
-        let view = SoundPluginsView {
+        let view = PluginManagerView {
             settings: &search.settings,
             other_folders: &other_folders,
             bundled_folder: bundled_folder.as_deref(),
             fetched_folder: fetched_folder.as_deref(),
-            tab: self.interface.sound_plugins_tab,
+            tab: self.interface.plugin_manager_tab,
             bundles,
             is_scanning: search.running.is_some(),
             has_scanned: search.has_scanned,
@@ -537,55 +537,55 @@ impl FastForwardApplication {
             effect_count: search.result.effect_count,
             problems: &search.result.problems,
         };
-        crate::application::sound_plugins_window::show(
+        crate::application::plugin_manager_window::show(
             context,
-            &mut self.interface.sound_plugins_window_open,
+            &mut self.interface.plugin_manager_open,
             &view,
             commands,
         );
     }
 
-    /// Does what the window of sound plugins asked for.
-    pub(super) fn do_what_the_window_of_sound_plugins_asked(&mut self, command: SoundPluginsCommand) {
+    /// Does what the plugin manager asked for.
+    pub(super) fn do_what_the_plugin_manager_asked(&mut self, command: PluginManagerCommand) {
         match command {
-            SoundPluginsCommand::Show => self.interface.sound_plugins_window_open = true,
-            SoundPluginsCommand::AddFolder => {
+            PluginManagerCommand::Show => self.interface.plugin_manager_open = true,
+            PluginManagerCommand::AddFolder => {
                 if let Some(folder) = self.ask_for_a_folder("Choose a folder with sound plugins") {
                     self.add_plugin_folder(folder);
                 }
             }
-            SoundPluginsCommand::RemoveFolder(number) => {
+            PluginManagerCommand::RemoveFolder(number) => {
                 let folders = &mut self.environment.plugin_search.settings.folders;
                 if number < folders.len() {
                     folders.remove(number);
                     self.the_places_to_look_for_plugins_changed();
                 }
             }
-            SoundPluginsCommand::AddDependencyFolder => {
+            PluginManagerCommand::AddDependencyFolder => {
                 if let Some(folder) = self.ask_for_a_folder("Choose a folder with libraries that plugins need") {
                     self.add_dependency_folder(folder);
                 }
             }
-            SoundPluginsCommand::RemoveDependencyFolder(number) => {
+            PluginManagerCommand::RemoveDependencyFolder(number) => {
                 let folders = &mut self.environment.plugin_search.settings.dependency_folders;
                 if number < folders.len() {
                     folders.remove(number);
                     self.the_places_to_look_for_plugins_changed();
                 }
             }
-            SoundPluginsCommand::SetSearchParentFolders(on) => {
+            PluginManagerCommand::SetSearchParentFolders(on) => {
                 if self.environment.plugin_search.settings.search_parent_folders != on {
                     self.environment.plugin_search.settings.search_parent_folders = on;
                     self.the_places_to_look_for_plugins_changed();
                 }
             }
-            SoundPluginsCommand::ScanAgain => self.start_scanning_plugins(),
-            SoundPluginsCommand::SelectTab(tab) => self.interface.sound_plugins_tab = tab,
-            SoundPluginsCommand::AskToDownloadBundles => self.ask_whether_to_download_the_bundles(),
-            SoundPluginsCommand::CancelAskingToDownloadBundles => self.do_not_download_the_bundles(),
-            SoundPluginsCommand::DownloadBundles => self.download_the_bundles(),
-            SoundPluginsCommand::CancelBundleDownload => self.cancel_the_download_of_the_bundles(),
-            SoundPluginsCommand::DismissBundleMessage => self.dismiss_what_the_download_said(),
+            PluginManagerCommand::ScanAgain => self.start_scanning_plugins(),
+            PluginManagerCommand::SelectTab(tab) => self.interface.plugin_manager_tab = tab,
+            PluginManagerCommand::AskToDownloadBundles => self.ask_whether_to_download_the_bundles(),
+            PluginManagerCommand::CancelAskingToDownloadBundles => self.do_not_download_the_bundles(),
+            PluginManagerCommand::DownloadBundles => self.download_the_bundles(),
+            PluginManagerCommand::CancelBundleDownload => self.cancel_the_download_of_the_bundles(),
+            PluginManagerCommand::DismissBundleMessage => self.dismiss_what_the_download_said(),
         }
     }
 
@@ -648,8 +648,8 @@ impl FastForwardApplication {
         &self.environment.plugin_search.result.problems
     }
 
-    /// Whether the window of sound plugins is open.
-    pub fn sound_plugins_window_is_open(&self) -> bool {
-        self.interface.sound_plugins_window_open
+    /// Whether the plugin manager is open.
+    pub fn plugin_manager_is_open(&self) -> bool {
+        self.interface.plugin_manager_open
     }
 }

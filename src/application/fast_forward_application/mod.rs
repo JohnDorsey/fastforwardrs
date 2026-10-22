@@ -107,6 +107,8 @@ mod playing_edit_tests;
 mod plugin_bundles_flow;
 mod plugin_flow;
 #[cfg(test)]
+mod plugin_manager_bundles_tests;
+#[cfg(test)]
 mod plugin_tests;
 #[cfg(test)]
 mod preview_layer_tests;
@@ -139,8 +141,6 @@ mod settings_tests;
 mod shader_flow;
 #[cfg(test)]
 mod shader_tests;
-#[cfg(test)]
-mod sound_plugin_bundles_tests;
 #[cfg(test)]
 mod sound_plugin_folder_tests;
 mod sound_plugins_flow;
@@ -784,7 +784,7 @@ impl FastForwardApplication {
             self.environment.global_settings,
             &mut commands,
         );
-        self.show_the_window_of_sound_plugins(&context, &mut commands);
+        self.show_the_plugin_manager(&context, &mut commands);
         colour_of_a_file_window::show(
             &context,
             &mut self.interface.colours_of_a_file_window_open_for,

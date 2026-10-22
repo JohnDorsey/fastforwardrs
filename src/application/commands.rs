@@ -41,8 +41,8 @@ pub enum Command {
     Deselect,
     ShowProjectSettings,
     ShowGlobalSettings,
-    /// Something about the sound plugins: open their window, or what was done in it.
-    SoundPlugins(super::sound_plugins_window::SoundPluginsCommand),
+    /// Something about the plugin manager: open its window, or what was done in it.
+    PluginManager(super::plugin_manager_window::PluginManagerCommand),
 
     /// The project's own settings were changed in the project settings window.
     SetProjectSettings(ProjectSettings),
@@ -504,7 +504,7 @@ impl Command {
             | Self::Deselect
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
-            | Self::SoundPlugins(_)
+            | Self::PluginManager(_)
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
             | Self::SetGenerateLeadUpOnSeek(_)
@@ -554,7 +554,7 @@ impl Command {
             | Self::Deselect
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
-            | Self::SoundPlugins(_)
+            | Self::PluginManager(_)
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
             | Self::SetGenerateLeadUpOnSeek(_)

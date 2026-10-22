@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The window of sound plugins, opened from the Edit menu (G17 of `docs/engine-phase-7-design.md`): where plugins are looked for (the folders a person adds; those of
+//! The plugin manager, opened from the Edit menu (G17 of `docs/engine-phase-7-design.md`): where plugins are looked for (the folders a person adds; those of
 //! `LADSPA_PATH`, `CLAP_PATH` and the usual ones are shown and cannot be removed), where the libraries that plugins need are looked for, and what the scan found and what failed. It is a
 //! window that is opened, not a control that is always there. It changes nothing itself: it hands back commands.
 
@@ -10,11 +10,11 @@ use std::path::{Path, PathBuf};
 use egui::{Align2, Context, Id, RichText, ScrollArea, Ui, Window, vec2};
 
 use super::commands::Command;
-use super::sound_plugins_bundles::{BundlesView, show as show_bundles};
+use super::plugin_manager_bundles::{BundlesView, show as show_bundles};
 use crate::plugin_scan::{LibraryOutcome, LibraryReport, NotUsed, PluginSearchSettings};
 
 /// The title of the window, and what its buttons and the checkbox say.
-pub const TITLE: &str = "Sound plugins";
+pub const TITLE: &str = "Plugin manager";
 pub const ADD_FOLDER_LABEL: &str = "Add folder...";
 pub const REMOVE_LABEL: &str = "Remove";
 pub const SCAN_AGAIN_LABEL: &str = "Scan again";
@@ -34,7 +34,7 @@ pub const FETCHED_LABEL: &str = "fetched with Bundles";
 
 /// What the window can ask for.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SoundPluginsCommand {
+pub enum PluginManagerCommand {
     /// Open the window.
     Show,
     /// Ask which folder to add to those plugins are looked for in.
@@ -47,7 +47,7 @@ pub enum SoundPluginsCommand {
     /// Scan the folders again (the libraries that did not change are not scanned again, and those that failed for want of a library are, if the places to look for them changed).
     ScanAgain,
     /// Show the other tab.
-    SelectTab(SoundPluginsTab),
+    SelectTab(PluginManagerTab),
     /// The button of the *Bundles* tab was pressed: the question that comes before the download is shown.
     AskToDownloadBundles,
     CancelAskingToDownloadBundles,
@@ -61,7 +61,7 @@ pub enum SoundPluginsCommand {
 
 /// The two tabs of the window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SoundPluginsTab {
+pub enum PluginManagerTab {
     /// Where plugins are looked for, and what the scan found.
     #[default]
     Plugins,
@@ -69,7 +69,7 @@ pub enum SoundPluginsTab {
     Bundles,
 }
 
-impl SoundPluginsTab {
+impl PluginManagerTab {
     /// What the tab is called.
     pub const fn label(self) -> &'static str {
         match self {
@@ -80,7 +80,7 @@ impl SoundPluginsTab {
 }
 
 /// What the window shows.
-pub struct SoundPluginsView<'a> {
+pub struct PluginManagerView<'a> {
     pub settings: &'a PluginSearchSettings,
     /// The folders that are looked in besides those a person added: those of `LADSPA_PATH` and `CLAP_PATH`, and the usual ones.
     pub other_folders: &'a [PathBuf],
@@ -88,7 +88,7 @@ pub struct SoundPluginsView<'a> {
     pub bundled_folder: Option<&'a Path>,
     /// The folder that the *Bundles* tab fetches into (it is one of those, where it is there).
     pub fetched_folder: Option<&'a Path>,
-    pub tab: SoundPluginsTab,
+    pub tab: PluginManagerTab,
     pub bundles: BundlesView<'a>,
     pub is_scanning: bool,
     pub has_scanned: bool,
@@ -101,7 +101,7 @@ pub struct SoundPluginsView<'a> {
 }
 
 /// Shows the window if it is `open`, and adds the commands for what is done in it.
-pub fn show(context: &Context, open: &mut bool, view: &SoundPluginsView<'_>, commands: &mut Vec<Command>) {
+pub fn show(context: &Context, open: &mut bool, view: &PluginManagerView<'_>, commands: &mut Vec<Command>) {
     if !*open {
         return;
     }
@@ -121,22 +121,22 @@ pub fn show(context: &Context, open: &mut bool, view: &SoundPluginsView<'_>, com
         });
 }
 
-fn show_contents(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Command>) {
+fn show_contents(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mut Vec<Command>) {
     ui.horizontal(|ui| {
-        for tab in [SoundPluginsTab::Plugins, SoundPluginsTab::Bundles] {
+        for tab in [PluginManagerTab::Plugins, PluginManagerTab::Bundles] {
             if ui.selectable_label(view.tab == tab, tab.label()).clicked() && view.tab != tab {
-                commands.push(Command::SoundPlugins(SoundPluginsCommand::SelectTab(tab)));
+                commands.push(Command::PluginManager(PluginManagerCommand::SelectTab(tab)));
             }
         }
     });
     ui.separator();
     match view.tab {
-        SoundPluginsTab::Plugins => show_the_plugins_tab(ui, view, commands),
-        SoundPluginsTab::Bundles => show_bundles(ui, &view.bundles, commands),
+        PluginManagerTab::Plugins => show_the_plugins_tab(ui, view, commands),
+        PluginManagerTab::Bundles => show_bundles(ui, &view.bundles, commands),
     }
 }
 
-fn show_the_plugins_tab(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut Vec<Command>) {
+fn show_the_plugins_tab(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mut Vec<Command>) {
     ui.label(RichText::new(FOLDERS_HEADING).strong());
     show_folders(
         ui,
@@ -165,7 +165,7 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut
     );
     let mut search_parents = view.settings.search_parent_folders;
     if ui.checkbox(&mut search_parents, SEARCH_PARENT_FOLDERS_LABEL).changed() {
-        commands.push(Command::SoundPlugins(SoundPluginsCommand::SetSearchParentFolders(
+        commands.push(Command::PluginManager(PluginManagerCommand::SetSearchParentFolders(
             search_parents,
         )));
     }
@@ -175,7 +175,7 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut
             .add_enabled(!view.is_scanning, egui::Button::new(SCAN_AGAIN_LABEL))
             .clicked()
         {
-            commands.push(Command::SoundPlugins(SoundPluginsCommand::ScanAgain));
+            commands.push(Command::PluginManager(PluginManagerCommand::ScanAgain));
         }
         if view.is_scanning {
             ui.label(SCANNING_NOTE);
@@ -192,7 +192,7 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &SoundPluginsView<'_>, commands: &mut
 }
 
 /// What the scan came to, in a line.
-pub fn summary(view: &SoundPluginsView<'_>) -> String {
+pub fn summary(view: &PluginManagerView<'_>) -> String {
     let failed = view
         .libraries
         .iter()
@@ -228,10 +228,10 @@ fn show_folders(
         for (number, folder) in folders.iter().enumerate() {
             ui.horizontal(|ui| {
                 if ui.button(REMOVE_LABEL).clicked() {
-                    commands.push(Command::SoundPlugins(if for_plugins {
-                        SoundPluginsCommand::RemoveFolder(number)
+                    commands.push(Command::PluginManager(if for_plugins {
+                        PluginManagerCommand::RemoveFolder(number)
                     } else {
-                        SoundPluginsCommand::RemoveDependencyFolder(number)
+                        PluginManagerCommand::RemoveDependencyFolder(number)
                     }));
                 }
                 ui.add(egui::Label::new(folder.display().to_string()).truncate())
@@ -250,10 +250,10 @@ fn show_folders(
                 .on_hover_text(folder.display().to_string());
         }
         if ui.button(ADD_FOLDER_LABEL).clicked() {
-            commands.push(Command::SoundPlugins(if for_plugins {
-                SoundPluginsCommand::AddFolder
+            commands.push(Command::PluginManager(if for_plugins {
+                PluginManagerCommand::AddFolder
             } else {
-                SoundPluginsCommand::AddDependencyFolder
+                PluginManagerCommand::AddDependencyFolder
             }));
         }
     });
@@ -266,7 +266,7 @@ fn file_name(path: &Path) -> String {
     )
 }
 
-fn show_libraries(ui: &mut Ui, view: &SoundPluginsView<'_>) {
+fn show_libraries(ui: &mut Ui, view: &PluginManagerView<'_>) {
     for library in view.libraries {
         let name = file_name(&library.path);
         match &library.outcome {

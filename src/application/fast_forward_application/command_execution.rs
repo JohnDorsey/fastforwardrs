@@ -107,7 +107,7 @@ impl FastForwardApplication {
             Command::Deselect => self.interface.selection.clear(),
             Command::ShowProjectSettings => self.interface.settings_windows_open.project = true,
             Command::ShowGlobalSettings => self.interface.settings_windows_open.global = true,
-            Command::SoundPlugins(command) => self.do_what_the_window_of_sound_plugins_asked(command),
+            Command::PluginManager(command) => self.do_what_the_plugin_manager_asked(command),
             Command::SetProjectSettings(settings) => self.set_project_settings(settings),
             Command::SetProjectFrameRate(frame_rate) => self.set_project_frame_rate(frame_rate, now),
             Command::SetGlobalSettings(settings) => self.set_global_settings(settings),

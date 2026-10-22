@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The *Bundles* tab of the window of sound plugins: what it shows, the question before a download, a download with archives made on the spot (nothing comes from the network), what
+//! The *Bundles* tab of the plugin manager: what it shows, the question before a download, a download with archives made on the spot (nothing comes from the network), what
 //! is done when it is over, a failure, and a download that is stopped.
 
 use std::path::Path;
@@ -13,16 +13,16 @@ use egui_kittest::kittest::Queryable;
 use super::sound_plugins_tests::{is_shown, open_the_window, shows_containing};
 use super::test_window::Window;
 use crate::application::commands::Command;
-use crate::application::sound_plugins_bundles::{
+use crate::application::plugin_manager_bundles::{
     ASK_NO_LABEL, ASK_YES_LABEL, CANCEL_LABEL, FETCHED_NOTE, NO_BUILD_FOR_THIS_COMPUTER_NOTE, NO_BUILDS_NOTE,
     NOT_FETCHED_NOTE, OK_LABEL,
 };
-use crate::application::sound_plugins_window::SoundPluginsCommand;
+use crate::application::plugin_manager_window::PluginManagerCommand;
 use crate::plugin_bundles::test_support::{FakeFetcher, a_fixture};
 use crate::plugin_bundles::{CANCELLED, Fetcher, Manifest};
 use crate::test_support::the_installed_plugins_to_myself;
 
-/// A window with its sound plugins window open on the *Bundles* tab, the manifest of `a_fixture` for `windows-x86_64` (whatever this system is), a folder of its own to put plugins in,
+/// A window with its plugin manager open on the *Bundles* tab, the manifest of `a_fixture` for `windows-x86_64` (whatever this system is), a folder of its own to put plugins in,
 /// and `fetcher` in place of the network.
 fn window_on_the_bundles_tab(fetcher: Arc<dyn Fetcher>) -> (Window, tempfile::TempDir) {
     let mut window = Window::showing(super::test_window::project_of(100));
@@ -158,7 +158,7 @@ fn a_download_that_nobody_asked_about_is_never_begun() {
     let fetcher = the_fake_fetcher();
     let (mut window, folder) = window_on_the_bundles_tab(fetcher.clone());
 
-    window.do_this(Command::SoundPlugins(SoundPluginsCommand::DownloadBundles));
+    window.do_this(Command::PluginManager(PluginManagerCommand::DownloadBundles));
     window.settle();
     std::thread::sleep(Duration::from_millis(100));
     window.settle();

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! What the *Bundles* tab of the window of sound plugins does: the question before a download, the download on a thread of its own with its progress and a way to stop it, and what
+//! What the *Bundles* tab of the plugin manager does: the question before a download, the download on a thread of its own with its progress and a way to stop it, and what
 //! is done when it is over (the plugins are trusted as the program's own, and found by a scan). The download itself is `crate::plugin_bundles`.
 
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use super::FastForwardApplication;
-use crate::application::sound_plugins_bundles::{BundleRow, BundleState, size_in_words};
+use crate::application::plugin_manager_bundles::{BundleRow, BundleState, size_in_words};
 use crate::plugin_bundles::{
     CANCELLED, Curl, Fetcher, Manifest, Outcome, Progress, bytes_to_download, fetch_plugins, fetched_plugins_folder,
     is_fetched, this_platform,

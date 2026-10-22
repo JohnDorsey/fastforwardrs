@@ -174,10 +174,10 @@ pub(super) struct Interface {
     /// Where the preview panel was in the last frame, for the keys that mean something else when the pointer is over it.
     pub(super) preview_panel_in_the_last_frame: Option<egui::Rect>,
     pub(super) settings_windows_open: SettingsWindowsOpen,
-    /// Whether the window of sound plugins is open.
-    pub(super) sound_plugins_window_open: bool,
+    /// Whether the plugin manager is open.
+    pub(super) plugin_manager_open: bool,
     /// Which tab of that window is showing.
-    pub(super) sound_plugins_tab: crate::application::sound_plugins_window::SoundPluginsTab,
+    pub(super) plugin_manager_tab: crate::application::plugin_manager_window::PluginManagerTab,
     /// The source file whose colours the window of its colour space is open for, if there is one.
     pub(super) colours_of_a_file_window_open_for: Option<SourceMediaIdentifier>,
     pub(super) dialog: Option<Dialog>,
@@ -213,8 +213,8 @@ impl Interface {
             preview_view: PreviewView::default(),
             preview_panel_in_the_last_frame: None,
             settings_windows_open: SettingsWindowsOpen::default(),
-            sound_plugins_window_open: false,
-            sound_plugins_tab: crate::application::sound_plugins_window::SoundPluginsTab::default(),
+            plugin_manager_open: false,
+            plugin_manager_tab: crate::application::plugin_manager_window::PluginManagerTab::default(),
             colours_of_a_file_window_open_for: None,
             dialog: startup_dialog,
             missing_sources_warning_open: false,

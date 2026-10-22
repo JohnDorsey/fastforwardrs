@@ -1366,6 +1366,6 @@ fn write_screenshots_of_the_sound_plugins_window_and_a_plugin_on_a_clip() {
 
     journey.harness.get_by_label("Edit").click();
     journey.settle();
-    journey.harness.get_by_label("Sound plugins...").click();
+    journey.harness.get_by_label("Plugin manager...").click();
     save(&mut journey, &folder, "10_sound_plugins_window");
 }

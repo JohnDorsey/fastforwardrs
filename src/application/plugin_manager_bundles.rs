@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The *Bundles* tab of the window of sound plugins: the plugins that the program can fetch from their authors' own release pages, who made each and under which licence, whether each is
-//! fetched already, and a button that fetches them all after a question. It changes nothing itself: it hands back commands (`SoundPluginsCommand`).
+//! The *Bundles* tab of the plugin manager: the plugins that the program can fetch from their authors' own release pages, who made each and under which licence, whether each is
+//! fetched already, and a button that fetches them all after a question. It changes nothing itself: it hands back commands (`PluginManagerCommand`).
 
 use std::path::Path;
 
 use egui::{ProgressBar, RichText, Ui};
 
 use super::commands::Command;
-use super::sound_plugins_window::SoundPluginsCommand;
+use super::plugin_manager_window::PluginManagerCommand;
 use crate::plugin_bundles::Progress;
 
 /// What the tab says.
@@ -138,18 +138,18 @@ fn show_the_download(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Com
     match &view.state {
         BundleState::Idle => {
             if ui.button(download_button_label(view)).clicked() {
-                commands.push(Command::SoundPlugins(SoundPluginsCommand::AskToDownloadBundles));
+                commands.push(Command::PluginManager(PluginManagerCommand::AskToDownloadBundles));
             }
         }
         BundleState::Asking => {
             ui.label(question(view));
             ui.horizontal(|ui| {
                 if ui.button(ASK_YES_LABEL).clicked() {
-                    commands.push(Command::SoundPlugins(SoundPluginsCommand::DownloadBundles));
+                    commands.push(Command::PluginManager(PluginManagerCommand::DownloadBundles));
                 }
                 if ui.button(ASK_NO_LABEL).clicked() {
-                    commands.push(Command::SoundPlugins(
-                        SoundPluginsCommand::CancelAskingToDownloadBundles,
+                    commands.push(Command::PluginManager(
+                        PluginManagerCommand::CancelAskingToDownloadBundles,
                     ));
                 }
             });
@@ -162,7 +162,7 @@ fn show_the_download(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Com
             };
             ui.add(ProgressBar::new(fraction).text(progress.step.clone()));
             if ui.button(CANCEL_LABEL).clicked() {
-                commands.push(Command::SoundPlugins(SoundPluginsCommand::CancelBundleDownload));
+                commands.push(Command::PluginManager(PluginManagerCommand::CancelBundleDownload));
             }
         }
         BundleState::Done(message) | BundleState::Failed(message) => {
@@ -172,7 +172,7 @@ fn show_the_download(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Com
                 ui.label(*message);
             }
             if ui.button(OK_LABEL).clicked() {
-                commands.push(Command::SoundPlugins(SoundPluginsCommand::DismissBundleMessage));
+                commands.push(Command::PluginManager(PluginManagerCommand::DismissBundleMessage));
             }
         }
     }

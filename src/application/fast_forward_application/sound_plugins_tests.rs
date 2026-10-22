@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Sound plugins as effects (phase 7, piece 7.5): the menu of the plus button offers the plugins that are installed under the heading of their maker, a plugin put on a clip has
-//! the controls its ports make, and one that is not installed is kept and says so; and the window of sound plugins, where a person says where to look.
+//! the controls its ports make, and one that is not installed is kept and says so; and the plugin manager, where a person says where to look.
 
 use egui_kittest::kittest::{NodeT, Queryable};
 
@@ -15,9 +15,9 @@ use crate::application::properties_panel::{ADD_EFFECT_LABEL, NOT_RUNNING_NOTE, V
 
 /// What the box of an effect says when the program does not have the effect.
 const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";
-use crate::application::sound_plugins_window::{
-    ADD_FOLDER_LABEL, DEPENDENCY_FOLDERS_HEADING, FOLDERS_HEADING, REMOVE_LABEL, SCAN_AGAIN_LABEL,
-    SEARCH_PARENT_FOLDERS_LABEL, SoundPluginsCommand, TITLE,
+use crate::application::plugin_manager_window::{
+    ADD_FOLDER_LABEL, DEPENDENCY_FOLDERS_HEADING, FOLDERS_HEADING, PluginManagerCommand, REMOVE_LABEL,
+    SCAN_AGAIN_LABEL, SEARCH_PARENT_FOLDERS_LABEL, TITLE,
 };
 use crate::plugin_scan::{LibraryOutcome, LibraryReport, ScanFailure};
 use crate::project::{AnimationTarget, ClipId, EffectKind, PropertyValue, set_installed_plugins};
@@ -463,16 +463,16 @@ fn the_placeholder_of_an_installed_plugin_says_when_its_folder_is_not_trusted_or
 pub(super) fn open_the_window(window: &mut Window) {
     window.harness.get_by_label("Edit").click();
     window.settle();
-    window.harness.get_by_label("Sound plugins...").click();
+    window.harness.get_by_label("Plugin manager...").click();
     window.settle();
 }
 
 #[test]
-fn the_window_of_sound_plugins_is_opened_from_the_edit_menu_and_shows_where_plugins_are_looked_for() {
+fn the_plugin_manager_is_opened_from_the_edit_menu_and_shows_where_plugins_are_looked_for() {
     let mut window = Window::showing(super::test_window::project_of(100));
     assert!(!is_shown(&window, TITLE));
     open_the_window(&mut window);
-    assert!(window.application().sound_plugins_window_is_open());
+    assert!(window.application().plugin_manager_is_open());
     assert!(is_shown(&window, TITLE));
     assert!(is_shown(&window, FOLDERS_HEADING));
     assert!(is_shown(&window, DEPENDENCY_FOLDERS_HEADING));
@@ -649,7 +649,7 @@ fn the_window_says_what_the_scan_found_the_libraries_that_failed_with_the_reason
 fn asking_to_scan_again_with_no_scan_program_does_nothing_and_does_not_fail() {
     let mut window = Window::showing(super::test_window::project_of(100));
     open_the_window(&mut window);
-    window.do_this(Command::SoundPlugins(SoundPluginsCommand::ScanAgain));
+    window.do_this(Command::PluginManager(PluginManagerCommand::ScanAgain));
     assert!(!window.application().is_scanning_plugins());
 }
 
@@ -813,20 +813,20 @@ fn the_view<'a>(
     settings: &'a crate::plugin_scan::PluginSearchSettings,
     is_scanning: bool,
     has_scanned: bool,
-) -> crate::application::sound_plugins_window::SoundPluginsView<'a> {
-    crate::application::sound_plugins_window::SoundPluginsView {
+) -> crate::application::plugin_manager_window::PluginManagerView<'a> {
+    crate::application::plugin_manager_window::PluginManagerView {
         settings,
         other_folders: &[],
         bundled_folder: None,
         fetched_folder: None,
-        tab: crate::application::sound_plugins_window::SoundPluginsTab::Plugins,
-        bundles: crate::application::sound_plugins_bundles::BundlesView {
+        tab: crate::application::plugin_manager_window::PluginManagerTab::Plugins,
+        bundles: crate::application::plugin_manager_bundles::BundlesView {
             rows: &[],
             has_builds: true,
             total_bytes: 0,
             hosts: "",
             folder: None,
-            state: crate::application::sound_plugins_bundles::BundleState::Idle,
+            state: crate::application::plugin_manager_bundles::BundleState::Idle,
         },
         is_scanning,
         has_scanned,
@@ -842,7 +842,7 @@ fn what_the_window_asks_for_when_the_button_is_pressed(is_scanning: bool) -> (Ve
     let mut open = true;
     let commands = std::cell::RefCell::new(Vec::new());
     let mut harness = egui_kittest::Harness::new_ui(|ui| {
-        crate::application::sound_plugins_window::show(
+        crate::application::plugin_manager_window::show(
             ui.ctx(),
             &mut open,
             &the_view(&settings, is_scanning, !is_scanning),
@@ -861,7 +861,7 @@ fn what_the_window_asks_for_when_the_button_is_pressed(is_scanning: bool) -> (Ve
 #[test]
 fn scan_again_can_be_pressed_when_no_scan_is_going_on_and_not_while_one_is() {
     let (asked, disabled, says_scanning) = what_the_window_asks_for_when_the_button_is_pressed(false);
-    assert_eq!(asked, [Command::SoundPlugins(SoundPluginsCommand::ScanAgain)]);
+    assert_eq!(asked, [Command::PluginManager(PluginManagerCommand::ScanAgain)]);
     assert!(!disabled && !says_scanning);
     let (asked, disabled, says_scanning) = what_the_window_asks_for_when_the_button_is_pressed(true);
     assert_eq!(
@@ -966,7 +966,7 @@ fn the_window_calls_the_bundled_folder_bundled_and_the_others_usual() {
         let mut view = the_view(&settings, false, true);
         view.other_folders = &others;
         view.bundled_folder = Some(std::path::Path::new("/the/program/plugins"));
-        crate::application::sound_plugins_window::show(ui.ctx(), &mut open, &view, &mut commands);
+        crate::application::plugin_manager_window::show(ui.ctx(), &mut open, &view, &mut commands);
     });
     harness.run();
 
@@ -978,7 +978,7 @@ fn the_window_calls_the_bundled_folder_bundled_and_the_others_usual() {
     assert!(shown(format!(
         "{} ({})",
         std::path::Path::new("/the/program/plugins").display(),
-        crate::application::sound_plugins_window::BUNDLED_LABEL
+        crate::application::plugin_manager_window::BUNDLED_LABEL
     )));
     assert!(!shown(format!(
         "{} (usual)",
