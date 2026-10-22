@@ -14,6 +14,9 @@
 //!   a picture is read at are flipped, and a shader never knows.
 //! * **`textureLod(..., 0.0)` and never `texture`**: shaders sample inside branches all the time, which a call that needs derivatives cannot.
 //! * Taken out: `#version`, and a `uniform` of the shader's own that the header already has; `varying` becomes a plain global (nothing gives it a value, so it reads zero).
+//! * **A global is given its initialiser by a generated function that runs before the shader's `main`** (`_isf_set_up_globals`), and not where it is declared: **naga drops the initialiser of a
+//!   global that is not a constant, without a word**, so `float ratio = RENDERSIZE.x / RENDERSIZE.y;` made `ratio` zero. (Found by the corpus of the Vidvox shaders, phase 6.6: Circle Crop was black
+//!   at every progress.) A `const`, an array and a declaration inside a condition of the preprocessor are left alone.
 //!
 //! What is refused, with the line: a `sampler2D` anywhere in the code (an image is read by its name, in the macros), and brackets nested more deeply than a compiler's stack is known
 //! to take.
@@ -229,6 +232,224 @@ fn names_declared_by(line: &str) -> Vec<String> {
         .collect()
 }
 
+/// A variable at the top level of the shader's code that is given a value where it is declared.
+struct Initialised {
+    name: String,
+    /// Where in the code the name ends: what is taken off the declaration begins here (so that nothing but `float name;` is left).
+    name_end: usize,
+    /// Where the initialiser is: after the `=`, up to the comma or the semicolon.
+    initialiser: std::ops::Range<usize>,
+}
+
+/// Words that make a statement at the top level something other than a type and the names of variables of it: such a statement is left as it is.
+const NOT_A_PLAIN_VARIABLE: [&str; 15] = [
+    "const",
+    "uniform",
+    "varying",
+    "attribute",
+    "in",
+    "out",
+    "inout",
+    "layout",
+    "struct",
+    "precision",
+    "typedef",
+    "buffer",
+    "shared",
+    "flat",
+    "smooth",
+];
+
+fn skip_whitespace(code: &[char], mut at: usize) -> usize {
+    while at < code.len() && code[at].is_whitespace() {
+        at += 1;
+    }
+    at
+}
+
+/// Where the line of a directive of the preprocessor that begins at `at` ends (a line that ends with a backslash goes on), if `at` is the `#` that begins one: the first character
+/// of its line that is not a space.
+fn end_of_the_directive_at(code: &[char], at: usize) -> Option<usize> {
+    if code[at] != '#'
+        || !code[..at]
+            .iter()
+            .rev()
+            .take_while(|character| **character != '\n')
+            .all(|character| *character == ' ' || *character == '\t' || *character == '\r')
+    {
+        return None;
+    }
+    let mut end = at;
+    loop {
+        while end < code.len() && code[end] != '\n' {
+            end += 1;
+        }
+        if end < code.len() && end > 0 && code[end - 1] == '\\' {
+            end += 1;
+            continue;
+        }
+        return Some(end);
+    }
+}
+
+/// The variables that a statement of the top level, `code[start..semicolon]` (and the semicolon), declares with an initialiser, if it is a plain declaration of variables (a type and the names
+/// of some, each with an initialiser or none); and nothing if it is anything else, or if one of the names is an array (an array whose size comes from its initialiser cannot lose it).
+fn variables_declared_with_initialisers(code: &[char], start: usize, semicolon: usize) -> Option<Vec<Initialised>> {
+    let is_the_start_of_a_word = |character: char| character.is_ascii_alphabetic() || character == '_';
+    // The words before the first thing that is not one: qualifiers, the type, and the first name.
+    let mut words: Vec<(String, usize)> = Vec::new();
+    let mut at = skip_whitespace(code, start);
+    loop {
+        let word_start = at;
+        while at < semicolon && is_identifier_character(code[at]) {
+            at += 1;
+        }
+        if at == word_start || !is_the_start_of_a_word(code[word_start]) {
+            return None;
+        }
+        words.push((code[word_start..at].iter().collect(), at));
+        let after = skip_whitespace(code, at);
+        if after > at && after < semicolon && is_the_start_of_a_word(code[after]) {
+            at = after;
+        } else {
+            break;
+        }
+    }
+    if words.len() < 2
+        || words[..words.len() - 1]
+            .iter()
+            .any(|(word, _)| NOT_A_PLAIN_VARIABLE.contains(&word.as_str()))
+    {
+        return None;
+    }
+    let (first_name, first_name_end) = words.last().cloned()?;
+    let mut found = Vec::new();
+    let (mut name, mut name_end) = (first_name, first_name_end);
+    let mut at = skip_whitespace(code, first_name_end);
+    loop {
+        match code.get(at) {
+            Some('=') if code.get(at + 1) != Some(&'=') => {
+                let initialiser_start = at + 1;
+                let mut depth = 0usize;
+                let mut end = initialiser_start;
+                while end < semicolon {
+                    match code[end] {
+                        '(' | '[' | '{' => depth += 1,
+                        ')' | ']' | '}' => depth = depth.saturating_sub(1),
+                        ',' if depth == 0 => break,
+                        _ => {}
+                    }
+                    end += 1;
+                }
+                found.push(Initialised {
+                    name: name.clone(),
+                    name_end,
+                    initialiser: initialiser_start..end,
+                });
+                at = end;
+            }
+            Some('[' | '(') => return None,
+            _ => {}
+        }
+        if at >= semicolon {
+            break;
+        }
+        if code[at] != ',' {
+            return None;
+        }
+        at = skip_whitespace(code, at + 1);
+        let name_start = at;
+        while at < semicolon && is_identifier_character(code[at]) {
+            at += 1;
+        }
+        if at == name_start {
+            return None;
+        }
+        name = code[name_start..at].iter().collect();
+        name_end = at;
+        at = skip_whitespace(code, at);
+    }
+    (!found.is_empty()).then_some(found)
+}
+
+/// Every variable at the top level of `code` that is declared with an initialiser, in the order they are in the code: not those inside a function or a structure, and not those inside a
+/// condition of the preprocessor (`#if`, `#ifdef`, `#ifndef`), which this scanner does not follow.
+fn globals_with_initialisers(code: &[char]) -> Vec<Initialised> {
+    let mut found = Vec::new();
+    let (mut braces, mut brackets, mut conditions) = (0usize, 0usize, 0usize);
+    let mut statement_start = 0;
+    let mut at = 0;
+    while at < code.len() {
+        if let Some(end) = end_of_the_directive_at(code, at) {
+            let directive: String = code[at + 1..end].iter().collect();
+            match directive
+                .trim_start()
+                .chars()
+                .take_while(char::is_ascii_alphabetic)
+                .collect::<String>()
+                .as_str()
+            {
+                "if" | "ifdef" | "ifndef" => conditions += 1,
+                "endif" => conditions = conditions.saturating_sub(1),
+                _ => {}
+            }
+            at = end;
+            statement_start = at;
+            continue;
+        }
+        match code[at] {
+            '{' => braces += 1,
+            '}' => {
+                braces = braces.saturating_sub(1);
+                if braces == 0 {
+                    statement_start = at + 1;
+                }
+            }
+            '(' | '[' => brackets += 1,
+            ')' | ']' => brackets = brackets.saturating_sub(1),
+            ';' if braces == 0 && brackets == 0 => {
+                if conditions == 0
+                    && let Some(mut these) = variables_declared_with_initialisers(code, statement_start, at)
+                {
+                    found.append(&mut these);
+                }
+                statement_start = at + 1;
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    found
+}
+
+/// `body` with the initialiser of every variable at its top level taken off the declaration (`float ratio = RENDERSIZE.x / RENDERSIZE.y;` becomes `float ratio;`), and what each was, as the
+/// name and the text of the initialiser, in order. What was taken off leaves its line ends, so that every line of the file is the line it was.
+fn lift_the_initialisers_of_globals(body: &str) -> (String, Vec<(String, String)>) {
+    let original: Vec<char> = body.chars().collect();
+    // (The same characters, with the comments blanked: where the declarations are is found in these, and what the initialisers say is read from them.)
+    let code: Vec<char> = without_comments(body).chars().collect();
+    let found = globals_with_initialisers(&code);
+    if found.is_empty() {
+        return (body.to_owned(), Vec::new());
+    }
+    let mut lifted = String::with_capacity(body.len());
+    let mut assignments = Vec::with_capacity(found.len());
+    let mut copied = 0;
+    for variable in &found {
+        lifted.extend(&original[copied..variable.name_end]);
+        lifted.extend(
+            original[variable.name_end..variable.initialiser.end]
+                .iter()
+                .filter(|character| **character == '\n'),
+        );
+        copied = variable.initialiser.end;
+        let text: String = code[variable.initialiser.clone()].iter().collect();
+        assignments.push((variable.name.clone(), text.trim().to_owned()));
+    }
+    lifted.extend(&original[copied..]);
+    (lifted, assignments)
+}
+
 /// Rewrites the shader of `file`.
 pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
     let code = without_comments(&file.body);
@@ -360,11 +581,28 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
         }
     }
     let body = replace_word(&lines.join("\n"), "main", "_isf_user_main");
+    let (body, set_up) = lift_the_initialisers_of_globals(&body);
+    if !set_up.is_empty() {
+        let names: Vec<&str> = set_up.iter().map(|(name, _)| name.as_str()).collect();
+        notes.push(format!(
+            "{} {} set before main runs: a compiler does not keep the initialiser of a global that is not a constant",
+            names.join(", "),
+            if names.len() == 1 { "is" } else { "are" }
+        ));
+    }
     let mut glsl = prelude;
     glsl.push_str(&body);
+    if !set_up.is_empty() {
+        glsl.push_str("\nvoid _isf_set_up_globals() {\n");
+        for (name, initialiser) in &set_up {
+            glsl.push_str(&format!("    {name} = {initialiser};\n"));
+        }
+        glsl.push_str("}\n");
+    }
     glsl.push_str(&format!(
-        "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
-        last = VEC4S_OF_THE_UNIFORM_BLOCK - 1
+        "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n{set_up_call}    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
+        last = VEC4S_OF_THE_UNIFORM_BLOCK - 1,
+        set_up_call = if set_up.is_empty() { "" } else { "    _isf_set_up_globals();\n" }
     ));
     Ok(Rewritten {
         glsl,

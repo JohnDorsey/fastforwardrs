@@ -486,11 +486,15 @@ pub enum PictureOperation {
     /// (see `crate::engine::EffectState`); every other shader has none.
     ///
     /// A shader that brings images with it (phase 6.4.4) also carries them, in the order its file lists them.
+    ///
+    /// A shader that is a transition (phase 6.6) says that it **reads what is behind the clip** as well as the clip's own picture, so that whoever describes the frame can see to it
+    /// that it is done in the space of the frame (see `docs/engine-phase-6-6-design.md`, T1a and T8).
     Shader {
         key: String,
         numbers: Vec<f32>,
         state: Option<(u64, u64)>,
         images: Vec<ImportedPicture>,
+        reads_the_backdrop: bool,
     },
 }
 

@@ -206,7 +206,10 @@ fn the_shaders_own_main_is_renamed_as_a_word_and_a_generated_one_calls_it() {
     );
     let made = rewritten(&file);
 
-    assert!(made.glsl.contains("float domain = 1.0;"));
+    // (Rewritten on purpose in phase 6.6: a global is declared without its initialiser, which a generated function gives it before main runs. What this test is about stays: the word `main`
+    // is renamed, and `domain` and `mainColour`, which have it in them, are not touched.)
+    assert!(has_line(&made.glsl, "float domain;"));
+    assert_eq!(what_it_sets_up(&made.glsl), ["domain = 1.0;"]);
     assert!(made.glsl.contains("float mainColour()"));
     assert!(made.glsl.contains("void _isf_user_main() {"));
     let end = made.glsl.rfind("void main() {").expect("a generated main");
@@ -319,4 +322,158 @@ fn every_spike_shader_that_is_good_is_rewritten() {
         assert!(made.glsl.ends_with("}\n"));
         assert!(made.prelude_lines > 20);
     }
+}
+
+// --- globals with initialisers that need the call (phase 6.6, found by the corpus: naga drops them) ---
+
+/// The text of the function that the rewriting step makes to set the globals up, and of the line of the generated `main` that calls it.
+const SETS_UP: &str = "void _isf_set_up_globals() {";
+const CALLS_THE_SETTING_UP: &str = "    _isf_set_up_globals();";
+
+/// The lines of the function that sets the globals up (the lines between its first and its closing brace).
+fn what_it_sets_up(glsl: &str) -> Vec<String> {
+    glsl.lines()
+        .skip_while(|line| !line.starts_with(SETS_UP))
+        .skip(1)
+        .take_while(|line| *line != "}")
+        .map(|line| line.trim().to_owned())
+        .collect()
+}
+
+#[test]
+fn a_global_whose_initialiser_needs_the_numbers_of_the_call_is_declared_without_it_and_given_it_before_the_shaders_main_runs()
+ {
+    let file = filter(
+        "{ \"NAME\": \"gain\", \"TYPE\": \"float\" }",
+        "float half_gain = gain * 0.5;\nfloat aspect = RENDERSIZE.x / RENDERSIZE.y;\nvoid main() { gl_FragColor = vec4(half_gain, aspect, 0.0, 1.0); }",
+    );
+    let made = rewritten(&file);
+
+    assert!(
+        has_line(&made.glsl, "float half_gain;"),
+        "declared, and with nothing in it"
+    );
+    assert!(has_line(&made.glsl, "float aspect;"));
+    assert_eq!(
+        what_it_sets_up(&made.glsl),
+        ["half_gain = gain * 0.5;", "aspect = RENDERSIZE.x / RENDERSIZE.y;"],
+        "each is given its initialiser, in the order they were declared in"
+    );
+    let calls_it = made
+        .glsl
+        .find(CALLS_THE_SETTING_UP)
+        .expect("the generated main calls it");
+    let calls_the_shader = made.glsl.find("    _isf_user_main();").expect("and then the shader");
+    let sets_the_coordinates = made
+        .glsl
+        .find("    isf_FragNormCoord = ")
+        .expect("after the coordinates are set");
+    assert!(sets_the_coordinates < calls_it && calls_it < calls_the_shader);
+    assert!(
+        made.notes.iter().any(|note| note.contains("half_gain")),
+        "{:?}",
+        made.notes
+    );
+}
+
+#[test]
+fn a_shader_with_no_global_to_set_up_has_no_function_that_does_and_is_as_it_was() {
+    for source in [COLOR_CONTROLS, VIGNETTE, BLUR, POSTERIZE] {
+        let made = rewritten(&read(source).unwrap());
+        assert!(!made.glsl.contains("_isf_set_up_globals"), "{source:.40}");
+    }
+}
+
+#[test]
+fn what_is_not_a_variable_with_an_initialiser_is_left_where_it_is() {
+    let file = filter(
+        "{ \"NAME\": \"gain\", \"TYPE\": \"float\" }",
+        "const float PI = 3.14159;\nfloat weights[2] = float[2](0.25, 0.75);\nfloat first = gain, tail[2] = float[2](0.25, 0.75);\nfloat plain;\nfloat scale(float x);\nstruct Spot { float size; };\nprecision mediump float;\nfloat scale(float x) { float inside = gain * x; return inside; }\nvoid main() { float local = gain; gl_FragColor = vec4(PI, weights[1], plain + local + scale(1.0), 1.0); }",
+    );
+    let made = rewritten(&file);
+
+    for line in [
+        "const float PI = 3.14159;",
+        "float weights[2] = float[2](0.25, 0.75);",
+        "float first = gain, tail[2] = float[2](0.25, 0.75);",
+        "float plain;",
+        "float scale(float x);",
+        "struct Spot { float size; };",
+        "precision mediump float;",
+        "float scale(float x) { float inside = gain * x; return inside; }",
+    ] {
+        assert!(has_line(&made.glsl, line), "{line}");
+    }
+    assert!(!made.glsl.contains("_isf_set_up_globals"), "nothing is set up");
+    assert!(
+        made.glsl.contains("float local = gain;"),
+        "what is in a function is not a global: it is as it was"
+    );
+}
+
+#[test]
+fn several_variables_in_one_declaration_are_set_up_in_order_and_each_is_declared() {
+    let file = filter(
+        "",
+        "float a = 1.0, b = a * 2.0, c;\nvec2 where = vec2(a, b), other = where.yx;\nvoid main() {}",
+    );
+    let made = rewritten(&file);
+
+    assert!(has_line(&made.glsl, "float a, b, c;"), "{}", made.glsl);
+    assert!(has_line(&made.glsl, "vec2 where, other;"));
+    assert_eq!(
+        what_it_sets_up(&made.glsl),
+        ["a = 1.0;", "b = a * 2.0;", "where = vec2(a, b);", "other = where.yx;"]
+    );
+}
+
+#[test]
+fn an_initialiser_that_runs_over_several_lines_leaves_the_lines_of_the_file_where_they_were() {
+    let file = filter(
+        "",
+        "float long_one = max(1.0,\n    2.0 *\n    3.0);\nvoid main() { gl_FragColor = vec4(long_one); }",
+    );
+    let made = rewritten(&file);
+
+    let lines: Vec<&str> = made.glsl.lines().collect();
+    let main_in_the_file = file.body.lines().position(|line| line.contains("void main")).unwrap();
+    assert!(
+        lines[made.prelude_lines as usize + main_in_the_file].contains("void _isf_user_main"),
+        "the shader's main is on the line it was on, whatever was taken off the lines before it"
+    );
+    assert_eq!(what_it_sets_up(&made.glsl).join(" "), "long_one = max(1.0, 2.0 * 3.0);");
+}
+
+#[test]
+fn a_declaration_inside_a_condition_of_the_preprocessor_is_left_as_it_is_and_a_comment_is_not_a_declaration() {
+    let file = filter(
+        "{ \"NAME\": \"gain\", \"TYPE\": \"float\" }",
+        "#ifdef SOMETHING\nfloat guarded = gain;\n#endif\n// float commented = gain;\n/* float also_commented = gain; */\nfloat set = gain;\nvoid main() {}",
+    );
+    let made = rewritten(&file);
+
+    assert!(has_line(&made.glsl, "float guarded = gain;"));
+    assert!(has_line(&made.glsl, "// float commented = gain;"));
+    assert!(has_line(&made.glsl, "/* float also_commented = gain; */"));
+    assert_eq!(what_it_sets_up(&made.glsl), ["set = gain;"]);
+}
+
+#[test]
+fn what_an_initialiser_says_is_given_without_the_comments_that_are_in_it() {
+    // (A comment that ends at the end of its line would take the rest of the line of the function that sets the globals up with it, if it were kept.)
+    let file = filter(
+        "{ \"NAME\": \"gain\", \"TYPE\": \"float\" }",
+        "float lifted = max(gain, // the least\n    /* and the most */ 2.0);\nvoid main() {}",
+    );
+    let made = rewritten(&file);
+
+    let set_up = what_it_sets_up(&made.glsl).join(" ");
+    assert!(
+        !set_up.contains("//") && !set_up.contains("/*") && !set_up.contains("least"),
+        "{set_up}"
+    );
+    assert!(
+        set_up.starts_with("lifted = max(gain,") && set_up.ends_with("2.0);"),
+        "{set_up}"
+    );
 }

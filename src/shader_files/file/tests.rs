@@ -10,6 +10,7 @@ use super::*;
 const VIGNETTE: &str = include_str!("../../isf/fixtures/vignette.fs");
 const PLASMA: &str = include_str!("../../isf/fixtures/plasma.fs");
 const WIPE: &str = include_str!("../../isf/fixtures/wipe_transition.fs");
+const NEEDS_A_MASK: &str = include_str!("../../isf/fixtures/needs_a_mask.fs");
 const BAD: &str = include_str!("../../isf/fixtures/bad_syntax.fs");
 
 fn written(folder: &Path, name: &str, text: &str) -> PathBuf {
@@ -51,10 +52,16 @@ fn a_filter_a_generator_and_a_transition_are_read_each_with_what_it_is_for() {
     assert!(generator.why_not_usable.is_none(), "{:?}", generator.why_not_usable);
     assert!(generator.kind.is_a_generator());
 
-    // (A transition is read, and is kept with the reason that this version does not run it: it is still a shader.)
+    // (Rewritten on purpose in phase 6.6: a transition is run now.)
     let transition = read_a_shader_file(&written(folder.path(), "Wipe.fs", WIPE)).unwrap();
     assert_eq!(transition.shape, Shape::Transition);
-    assert!(transition.why_not_usable.is_some());
+    assert!(transition.why_not_usable.is_none(), "{:?}", transition.why_not_usable);
+    assert!(transition.kind.is_a_transition());
+
+    // A shader that wants a picture that this version cannot give it is read, and is kept with the reason that it is not run: it is still a shader.
+    let masked = read_a_shader_file(&written(folder.path(), "Mask.fs", NEEDS_A_MASK)).unwrap();
+    assert_eq!(masked.shape, Shape::Filter);
+    assert!(masked.why_not_usable.as_deref().unwrap().contains("maskImage"));
 }
 
 #[test]

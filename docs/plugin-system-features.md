@@ -309,7 +309,7 @@ can be supported. The design notes answer that at length; here is what the syste
 * **EF-02 [P] M** **Generators** *(2026-10-21, maintainer: **no built-in generator, not even a solid colour**; **built 2026-10-22 as a clip whose first effect is an ISF shader that reads no picture**, phase 6.5; the text generator is not)*: take no picture; give one (ISF source shaders; later the text generator). A generator clip has no media,
   has a duration the user sets (like a picture clip, **5 seconds by default, and it can be dragged longer**: Q-11, 2026-10-15), and its content is an effect instance.
 * **EF-03 [D] M** **Transitions** are effects with a **backdrop** input on the front clip (2026-10-13: acceptable): the clip is the
-  "end" picture, what is composited behind it is the "start" picture, and `progress` is a number. (Q-09: where `progress` comes from.)
+  "end" picture, what is composited behind it is the "start" picture, and `progress` is a number. (Q-09: where `progress` comes from.) *(Built 2026-10-22, phase 6.6, as the maintainer said: "putting one clip on a track above another and applying an effect to the clip on top"; `progress` is an ordinary value that a person animates; the transition is done in the space of the picture, so the clip need not be the whole of it: `engine-phase-6-6-design.md`, section 3.)*
 * **EF-04 [P] S** Other users of the backdrop slot: blend modes, glass and blur-behind effects, adjustment-style effects.
 * **EF-05 [P] M** **Sound effects** (inserts on a clip or a track; generators later): in section 12.
 * **EF-06 [D] L** The **text object** becomes a generator effect with the parameters it has today (text, font, size, colour), as a
@@ -409,7 +409,7 @@ menu item or a window opened from one is marked.*
   alone is not accepted as correctness. **The reference host is the ISF Editor on Windows, run by hand, for 10 to 20 shaders** (Q-24, 2026-10-15).
 * **PH-16 [D] M** What ships in the box (Q-25, 2026-10-15): **gl-transitions and the clearly MIT original Vidvox shaders, our own LUTs, nothing else**; the
   licence policy of LG-02 decides anything beyond that. *(2026-10-22, the maintainer: "I'd like a bundle downloader for license-compatible ISFs": the shaders are **fetched** by the *Bundles* tab of the plugin manager after a question
-  and are not in the box; `bundled-plugins/shaders.json`, 157 shaders of Vidvox's collection, which already holds 68 of the gl-transitions, converted by Vidvox with their MIT lines kept: see `engine-phase-6-6-design.md`, section 2.)*
+  and are not in the box; `bundled-plugins/shaders.json`, 218 shaders of Vidvox's collection (61 of them transitions, which the collection holds as 68 of the gl-transitions, converted by Vidvox with their MIT lines kept): see `engine-phase-6-6-design.md`, section 2.)*
 * **PH-17 [P] L** `audio` and `audioFFT` inputs (AN-05).
 
 ### 11.3 Built-in host

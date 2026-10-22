@@ -268,3 +268,33 @@ fn a_shader_that_brings_no_image_has_none_to_name() {
     assert_eq!(good(PLASMA).imported_images(), 0);
     assert_eq!(good(BLUR).imported_images(), 0);
 }
+
+const WIPE: &str = include_str!("../fixtures/wipe_transition.fs");
+
+#[test]
+fn a_transition_reads_what_is_behind_the_layer_as_start_image_and_the_layers_picture_as_end_image() {
+    let structure = good(WIPE);
+    assert_eq!(structure.images, vec![ImageSlot::Backdrop, ImageSlot::Picture]);
+    assert!(structure.reads_the_backdrop());
+    assert_eq!(structure.check(), Ok(()));
+    assert_eq!(
+        structure.what_each_image_reads(0),
+        vec![ImageSource::Backdrop, ImageSource::Picture]
+    );
+    assert_eq!(structure.passes.len(), 1);
+    assert_eq!(structure.pass_index_number, Some(3));
+}
+
+#[test]
+fn the_pictures_of_a_transition_are_bound_in_the_order_the_header_lists_them_in() {
+    let end_first = "/*{ \"INPUTS\": [ { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
+    let structure = good(end_first);
+    assert_eq!(structure.images, vec![ImageSlot::Picture, ImageSlot::Backdrop]);
+}
+
+#[test]
+fn a_filter_and_a_generator_do_not_read_the_backdrop() {
+    assert!(!good(VIGNETTE).reads_the_backdrop());
+    assert!(!good(BLUR).reads_the_backdrop());
+    assert!(!good(PLASMA).reads_the_backdrop());
+}

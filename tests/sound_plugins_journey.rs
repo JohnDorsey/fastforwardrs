@@ -203,12 +203,19 @@ fn a_scan_with_no_program_to_scan_with_finds_nothing_and_a_plugin_folder_is_stil
     let _alone = the_installed_plugins_to_myself();
     let mut journey = Journey::start(&toolchain);
     journey.application_mut().add_plugin_folder(PathBuf::from("/nowhere"));
-    assert!(!journey.application().is_scanning_plugins());
+    // (Rewritten on purpose in phase 6.8: the folders are also looked at for shaders, which needs no program to scan with and is done on a thread of its own, so the scan goes on for a
+    // moment: it is waited for, and what it finds is nothing.)
+    let began = Instant::now();
+    while journey.application().is_scanning_plugins() {
+        assert!(began.elapsed() < Duration::from_secs(60), "the scan did not end");
+        journey.keep_drawing_for(Duration::from_millis(50));
+    }
     assert_eq!(
         journey.application().plugin_search_settings().folders,
         [PathBuf::from("/nowhere")]
     );
     assert!(EffectKind::installed_plugin_kinds().is_empty());
+    assert!(EffectKind::installed_shader_kinds().is_empty());
 }
 
 // --- the sound of a plugin in an export made by the editor ---

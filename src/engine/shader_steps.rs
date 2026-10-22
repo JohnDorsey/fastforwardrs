@@ -21,6 +21,9 @@ pub struct ShaderStep {
     pub pass: usize,
     /// The place, among the steps of the layer's effects, of the step of the first pass of this call: the pass `p` of the call is the step `first_step + p`.
     pub first_step: usize,
+    /// The place, among the steps of the layer's effects, of the step that made the backdrop into codes for this call (phase 6.6), if the shader reads the backdrop and the plan put such
+    /// a step before the call.
+    pub backdrop_step: Option<usize>,
     /// How many pictures the shader reads (the bindings the step needs).
     pub images: usize,
     /// The format of what the step draws into.
@@ -43,17 +46,20 @@ pub struct StepPlan {
 }
 
 /// What each of `steps` draws and reads. `effects` are the effects of the layer, which the steps are numbered among; `structure_of` says what a shader that was given to the engine is
-/// made of; `base_shape` is the shape of the picture that the effects work on (what a step that is not a pass of a shader draws into); `picture_size` is its size; `largest_side` is
-/// the most pixels across that the card allows a texture to be.
+/// made of; `base_shape` is the shape of the picture that the effects work on (what a step that is not a pass of a shader draws into); `picture_size` is its size; `frame_shape` is the
+/// shape of the picture that the layers are put together in (what the step that makes the backdrop into codes draws into: the backdrop is the size of the frame, whatever the picture
+/// of the layer is); `largest_side` is the most pixels across that the card allows a texture to be.
 pub fn plan_the_steps(
     steps: &[EffectStep],
     effects: &[EffectCall],
     structure_of: impl Fn(&str) -> Option<Arc<ShaderStructure>>,
     base_shape: TextureShape,
     picture_size: (u32, u32),
+    frame_shape: TextureShape,
     largest_side: u32,
 ) -> Vec<StepPlan> {
     let mut first_step_of_the_call: Vec<(usize, usize)> = Vec::new();
+    let mut backdrop_step_of_the_call: Vec<(usize, usize)> = Vec::new();
     steps
         .iter()
         .enumerate()
@@ -63,6 +69,14 @@ pub fn plan_the_steps(
                     return StepPlan {
                         shape: base_shape,
                         size: picture_size,
+                        shader: None,
+                    };
+                }
+                EffectStep::Backdrop { call } => {
+                    backdrop_step_of_the_call.push((call, place));
+                    return StepPlan {
+                        shape: frame_shape,
+                        size: (frame_shape.width_in_pixels, frame_shape.height_in_pixels),
                         shader: None,
                     };
                 }
@@ -97,6 +111,11 @@ pub fn plan_the_steps(
                 shader: Some(ShaderStep {
                     pass,
                     first_step,
+                    backdrop_step: backdrop_step_of_the_call
+                        .iter()
+                        .rev()
+                        .find(|(of, _)| *of == call)
+                        .map(|(_, backdrop)| *backdrop),
                     images: structure.images.len(),
                     target_format: facts.format,
                     target_buffer: facts.target,

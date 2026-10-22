@@ -1196,12 +1196,14 @@ fn the_state_that_a_shader_goes_on_with_is_in_the_call_that_the_engine_is_asked_
             numbers: vec![0.0; 4],
             state: Some((77, 12)),
             images: Vec::new(),
+            reads_the_backdrop: false,
         },
         crate::project::PictureOperation::Shader {
             key: "isf:forgets-000000000000".to_owned(),
             numbers: vec![0.0; 4],
             state: None,
             images: Vec::new(),
+            reads_the_backdrop: false,
         },
     ];
 
@@ -1226,6 +1228,7 @@ fn a_generator_is_drawn_into_a_picture_of_its_own_that_has_nothing_in_it_for_its
             numbers: vec![0.5, 0.033, 15.0, 0.0, 1.0, 2.0],
             state: None,
             images: Vec::new(),
+            reads_the_backdrop: false,
         },
         crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(90.0)),
     ];
@@ -1287,6 +1290,7 @@ fn the_images_a_shader_brings_are_asked_of_the_supply_made_so_that_the_shader_re
         numbers: vec![0.0; 4],
         state: None,
         images: vec![imported(5, 10), imported(6, 20)],
+        reads_the_backdrop: false,
     };
     for working in [
         WorkingSpace::DisplayReferred,
@@ -1372,6 +1376,7 @@ fn a_shader_whose_image_the_supply_cannot_make_is_left_out_of_the_frame() {
                 rgba_pixels: vec![1, 2, 3, 255],
             }),
         }],
+        reads_the_backdrop: false,
     };
     let mut layer = image_layer(0, 1, Some(&picture), place);
     layer.operations = vec![make()];
@@ -1387,4 +1392,166 @@ fn a_shader_whose_image_the_supply_cannot_make_is_left_out_of_the_frame() {
         described.layers[0].effects.is_empty(),
         "the effect is not asked of the engine without the picture that it reads"
     );
+}
+
+// --- a transition (phase 6.6; the design is docs/engine-phase-6-6-design.md, T1a and T8) ---
+
+const A_TRANSITION_KEY: &str = "isf:transition-000000000000";
+
+fn the_shader(key: &str, reads_the_backdrop: bool) -> crate::project::PictureOperation {
+    crate::project::PictureOperation::Shader {
+        key: key.to_owned(),
+        numbers: vec![0.0; 5],
+        state: None,
+        images: Vec::new(),
+        reads_the_backdrop,
+    }
+}
+
+fn the_transition() -> crate::project::PictureOperation {
+    the_shader(A_TRANSITION_KEY, true)
+}
+
+fn a_hue_shift(degrees: f32) -> crate::project::PictureOperation {
+    crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(degrees))
+}
+
+fn the_call_of_a_hue_shift(degrees: f32) -> EffectCall {
+    EffectCall::colour_matrix(ColourMatrix::hue_rotation(degrees).rows())
+}
+
+#[test]
+fn a_clip_with_a_transition_is_made_a_group_of_the_clip_over_the_whole_frame_and_the_transition_and_what_comes_after_it_are_the_effects_of_the_group()
+ {
+    // A clip that is not the whole frame, which is why the transition has to be done in the space of the frame.
+    let place = Placement::new(CanvasArea::new(0.5, 0.0, 0.5, 0.5), Angle::from_degrees(0.0));
+    let picture = an_image();
+    let mut layer = image_layer(0, 1, Some(&picture), place);
+    layer.operations = vec![a_hue_shift(30.0), the_transition(), a_hue_shift(60.0)];
+    let (without, _) = describe(&content(vec![image_layer(0, 1, Some(&picture), place)], None));
+
+    let (described, _) = describe(&content(vec![layer], None));
+
+    assert_eq!(described.layers.len(), 1);
+    let outside = &described.layers[0];
+    assert_eq!(
+        outside.corners, CORNERS_OF_THE_WHOLE_PICTURE,
+        "the group is over the whole frame"
+    );
+    assert_eq!(
+        outside.effects.iter().map(|call| call.key.as_str()).collect::<Vec<_>>(),
+        [A_TRANSITION_KEY, COLOUR_MATRIX_KEY],
+        "the transition and what comes after it"
+    );
+    assert_eq!(outside.effects[1], the_call_of_a_hue_shift(60.0));
+    let held = the_layers_of_the_group(outside);
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].source, without.layers[0].source, "the clip's own picture");
+    assert_eq!(held[0].corners, without.layers[0].corners, "put where the clip is");
+    assert_eq!(
+        held[0].effects,
+        vec![the_call_of_a_hue_shift(30.0)],
+        "the effects before the transition are the clip's own"
+    );
+}
+
+#[test]
+fn a_transition_that_is_the_first_effect_leaves_the_clip_in_the_group_with_none() {
+    let picture = an_image();
+    let mut layer = image_layer(0, 1, Some(&picture), whole_picture());
+    layer.operations = vec![the_transition()];
+    let (described, _) = describe(&content(vec![layer], None));
+    let outside = &described.layers[0];
+    assert_eq!(outside.effects.len(), 1);
+    assert_eq!(the_layers_of_the_group(outside)[0].effects, Vec::new());
+}
+
+#[test]
+fn a_clip_whose_shaders_do_not_read_what_is_behind_it_is_not_made_a_group() {
+    let picture = an_image();
+    let mut layer = image_layer(0, 1, Some(&picture), whole_picture());
+    layer.operations = vec![the_shader("isf:filter-000000000000", false), a_hue_shift(30.0)];
+    let (described, _) = describe(&content(vec![layer], None));
+    assert_eq!(described.layers.len(), 1);
+    assert!(matches!(described.layers[0].source, LayerSource::Picture(_)));
+    assert_eq!(described.layers[0].effects.len(), 2);
+}
+
+#[test]
+fn the_first_transition_of_a_clip_with_two_is_where_the_group_begins() {
+    let picture = an_image();
+    let mut layer = image_layer(0, 1, Some(&picture), whole_picture());
+    layer.operations = vec![
+        the_transition(),
+        a_hue_shift(30.0),
+        the_shader("isf:another-000000000000", true),
+    ];
+    let (described, _) = describe(&content(vec![layer], None));
+    let outside = &described.layers[0];
+    assert_eq!(
+        outside.effects.len(),
+        3,
+        "everything from the first transition on is the group's"
+    );
+    assert!(the_layers_of_the_group(outside)[0].effects.is_empty());
+}
+
+#[test]
+fn a_generator_that_has_a_transition_is_the_group_of_the_generator_over_the_whole_frame() {
+    let turned = Placement::new(CanvasArea::new(0.1, 0.2, 0.5, 0.4), Angle::from_degrees(30.0));
+    let picture = an_image();
+    let mut layer = generator_layer(0, turned);
+    layer.operations = vec![the_shader("isf:made_up-000000000000", false), the_transition()];
+    let (described, _) = describe(&content(vec![layer], None));
+    let (as_a_picture, _) = describe(&content(vec![image_layer(0, 1, Some(&picture), turned)], None));
+
+    let outside = &described.layers[0];
+    assert_eq!(outside.corners, CORNERS_OF_THE_WHOLE_PICTURE);
+    assert_eq!(outside.effects.len(), 1);
+    assert_eq!(outside.effects[0].key, A_TRANSITION_KEY);
+    let held = the_layers_of_the_group(outside);
+    assert_eq!(held.len(), 1);
+    assert_eq!(
+        held[0].corners, as_a_picture.layers[0].corners,
+        "the generator is put where the clip is"
+    );
+    assert_eq!(held[0].effects.len(), 1, "the generator's own shader");
+    assert_eq!(held[0].effects[0].key, "isf:made_up-000000000000");
+    assert_eq!(
+        the_layers_of_the_group(&held[0])[0].source,
+        LayerSource::Solid([0, 0, 0, 0]),
+        "and what it is drawn into is the clear picture the size of the frame, as it was"
+    );
+}
+
+#[test]
+fn a_group_with_a_transition_is_a_group_already_and_is_not_made_another() {
+    let picture = an_image();
+    let layers = (0..2)
+        .map(|number| image_layer(number, number + 1, Some(&picture), whole_picture()))
+        .collect();
+    let mut shown = content(layers, None);
+    shown.groups = vec![crate::frame_scene::PreviewGroup {
+        operations: vec![a_hue_shift(30.0), the_transition()],
+        ..a_group_of(0, 2, 90.0)
+    }];
+    let (described, _) = describe(&shown);
+    assert_eq!(described.layers.len(), 1);
+    assert_eq!(described.layers[0].effects.len(), 2);
+    let held = the_layers_of_the_group(&described.layers[0]);
+    assert_eq!(held.len(), 2);
+    assert!(
+        held.iter().all(|layer| matches!(layer.source, LayerSource::Picture(_))),
+        "the layers of the group are its own: no group in the group"
+    );
+}
+
+#[test]
+fn a_clip_that_waits_for_its_picture_is_a_colour_and_is_not_made_a_group() {
+    let mut layer = layer(0, whole_picture());
+    layer.operations = vec![the_transition()];
+    let (described, _) = describe(&content(vec![layer], None));
+    assert_eq!(described.layers.len(), 1);
+    assert!(matches!(described.layers[0].source, LayerSource::Solid(_)));
+    assert!(described.layers[0].effects.is_empty());
 }

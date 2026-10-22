@@ -4,8 +4,8 @@
 //! Which shaders are usable: the kinds of effect that are ISF shaders are compiled **once each** (by the key, which has the digest of the text in it), the result is kept, and what
 //! compiled is put on the engine's shelf (`engine::publish_effect_shader`) for it to take when a frame asks for the effect.
 //!
-//! A shader is **usable** if it compiles, and is one that this version can run: so far a filter of one picture or a generator, with passes and buffers of its own (not ones that last
-//! from one frame to the next) and no imported images (see `docs/engine-phase-6-design.md`, J8, and `docs/engine-phase-6-4-design.md`). Any other is a kind of effect that is *not installed*: it is kept in the project with its values and does nothing, and the properties box says
+//! A shader is **usable** if it compiles, and is one that this version can run: a filter (it reads `inputImage`), a generator (it reads no picture) or a transition (it reads `startImage`, what is behind the
+//! clip, and `endImage`, the clip: phase 6.6), with passes and buffers of its own and the images it brings (see `docs/engine-phase-6-design.md`, J8, `docs/engine-phase-6-4-design.md` and `docs/engine-phase-6-6-design.md`). Any other is a kind of effect that is *not installed*: it is kept in the project with its values and does nothing, and the properties box says
 //! why ([`why_not_usable`]).
 
 use std::collections::HashMap;
@@ -29,9 +29,25 @@ static COMPILED: Mutex<Option<HashMap<String, TextsOfAKey>>> = Mutex::new(None);
 /// The reasons that a file that was read cannot be run by this version, if there are any (the file reads and compiles, and still is not what the engine runs yet).
 fn what_cannot_be_run_yet(file: &IsfFile) -> Option<IsfProblem> {
     let says = |message: String| Some(IsfProblem::nowhere_in_particular(message));
-    if file.shape() == Shape::Transition {
+    // A transition reads two pictures, startImage (what is behind the layer) and endImage (the layer's own); one of them alone is not a transition, and a filter has inputImage.
+    let (start, end, input) = (
+        file.has_image_input("startImage"),
+        file.has_image_input("endImage"),
+        file.has_image_input("inputImage"),
+    );
+    if start != end {
+        let (has, lacks) = if start {
+            ("startImage", "endImage")
+        } else {
+            ("endImage", "startImage")
+        };
+        return says(format!(
+            "this shader reads a picture called {has} and none called {lacks}: a transition reads both (startImage is what is behind the clip, endImage is the clip)"
+        ));
+    }
+    if start && input {
         return says(
-            "this shader is a transition, which this version cannot run yet (only filters, which read inputImage, and generators, which read no picture)"
+            "this shader reads inputImage as well as startImage and endImage: a filter reads inputImage and a transition reads the other two, and which picture this one works on is not said"
                 .to_owned(),
         );
     }
@@ -131,7 +147,7 @@ pub fn compiled_shader_of(descriptor: &EffectDescriptor) -> Option<Made> {
     Some(made)
 }
 
-/// What the shader of `descriptor` is for, if it is an ISF shader that this version can run (a filter reads `inputImage`; a generator reads no picture).
+/// What the shader of `descriptor` is for, if it is an ISF shader that this version can run (a filter reads `inputImage`; a generator reads no picture; a transition reads `startImage` and `endImage`).
 pub fn shape_of(descriptor: &EffectDescriptor) -> Option<Shape> {
     match compiled_shader_of(descriptor)?.as_ref() {
         Ok(compiled) => Some(compiled.shape),

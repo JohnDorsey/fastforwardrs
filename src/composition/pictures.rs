@@ -315,6 +315,7 @@ pub fn operations_of_effects(
                     .depends_on_earlier_frames()
                     .then(|| (state_id(seed, place, effect), clock.frames_at(timeline_frame.value()))),
                 images: imported_pictures_of(effect),
+                reads_the_backdrop: effect.kind.is_a_transition(),
             }
         } else {
             let Some(next) = effect.kind.picture_operation_with_tables(&values, &effect.tables) else {

@@ -89,8 +89,10 @@ pub fn structure_of(file: &IsfFile, image_names: &[String]) -> Result<ShaderStru
     for name in image_names {
         images.push(match buffer_names.iter().position(|buffer| *buffer == name) {
             Some(buffer) => ImageSlot::Buffer(buffer),
-            // (The picture that the effect works on: the only picture that a shader is given, so far.)
-            None if name == "inputImage" => ImageSlot::Picture,
+            // (The picture that the effect works on: what a filter reads, and what a transition reads as its end.)
+            None if name == "inputImage" || name == "endImage" => ImageSlot::Picture,
+            // (What is behind the layer: what a transition reads as its start. The registry sees to it that a shader has both of the two pictures of a transition or neither.)
+            None if name == "startImage" => ImageSlot::Backdrop,
             // (The images the shader brings with it: the nth is the nth that its header lists.)
             None if file.imported.iter().any(|image| image.name == *name) => ImageSlot::Imported(
                 file.imported

@@ -41,8 +41,20 @@ fn what_this_version_cannot_run_yet_is_not_usable_and_says_why() {
         assert!(!is_usable(&descriptor), "{name}");
         why_not_usable(&descriptor).unwrap_or_else(|| panic!("{name} says nothing"))
     };
-    // (Rewritten on purpose in phase 6: a generator is run now, so the example of what is not is the transition alone.)
-    assert!(reason("wipe.fs", WIPE).contains("transition"));
+    // (Rewritten on purpose in phase 6.6: a transition is run now. A shader that reads one of the two pictures of a transition and not the other is not one, and says so.)
+    let only_start = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" } ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(startImage); }
+";
+    assert!(reason("only_start.fs", only_start).contains("startImage"));
+    assert!(reason("only_start.fs", only_start).contains("endImage"));
+    let only_end = "/*{ \"INPUTS\": [ { \"NAME\": \"endImage\", \"TYPE\": \"image\" } ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(endImage); }
+";
+    assert!(reason("only_end.fs", only_end).contains("startImage"));
+    let all_three = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" } ] }*/
+void main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }
+";
+    assert!(reason("all_three.fs", all_three).contains("inputImage"));
     // (Rewritten on purpose in phase 6.4: a shader with passes of its own is run now, and since 6.4.2 so is one with a buffer that lasts: see the tests that say so.)
     let two_writers = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"a\" }, { \"TARGET\": \"a\" }, {} ] }*/
 void main() { gl_FragColor = IMG_THIS_PIXEL(a); }
@@ -167,10 +179,16 @@ fn the_kind_of_effect_a_shader_is_is_installed_if_the_shader_is_usable() {
     assert_eq!(usable.shader_source().unwrap().text, COLOR_CONTROLS);
     assert_eq!(usable.domain(), crate::project::EffectDomain::Picture);
 
-    // (Rewritten on purpose in phase 6: a generator is run now, and the kind that cannot be run is a transition.)
-    let unusable = EffectKind::from_snapshot(descriptor_from("kind_wipe.fs", WIPE)).unwrap();
-    assert!(!unusable.is_installed(), "a transition cannot be run yet");
+    // (Rewritten on purpose in phase 6.6: a transition is run now, and the kind that cannot be run is one that does not compile.)
+    let unusable = EffectKind::from_snapshot(descriptor_from("kind_bad.fs", BAD_SYNTAX)).unwrap();
+    assert!(!unusable.is_installed(), "a shader that does not compile cannot be run");
     assert!(!usable.is_a_generator());
+    assert!(!usable.is_a_transition());
+    let transition = EffectKind::from_snapshot(descriptor_from("kind_wipe.fs", WIPE)).unwrap();
+    assert!(
+        transition.is_installed() && transition.is_a_transition() && !transition.is_a_generator(),
+        "a transition is run"
+    );
     let generator = EffectKind::from_snapshot(descriptor_from("kind_plasma.fs", PLASMA)).unwrap();
     assert!(
         generator.is_installed() && generator.is_a_generator(),
@@ -196,8 +214,8 @@ fn a_shader_with_a_buffer_that_lasts_is_usable_and_says_that_it_depends_on_earli
         assert!(is_usable(&descriptor));
         assert!(!depends_on_earlier_frames(&descriptor), "{name}");
     }
-    // Neither a shader that is not usable nor an effect that is no shader depends on anything.
-    assert!(!depends_on_earlier_frames(&descriptor_from("wipe.fs", WIPE)));
+    // Neither a shader that is not usable nor an effect that is no shader depends on anything. (Rewritten on purpose in phase 6.6: the example of a shader that is not usable is one that does not compile.)
+    assert!(!depends_on_earlier_frames(&descriptor_from("bad.fs", BAD_SYNTAX)));
     assert!(!depends_on_earlier_frames(EffectKind::HUE_SHIFT.descriptor()));
 }
 
@@ -303,4 +321,64 @@ fn the_same_shader_with_other_images_is_another_kind_and_both_are_run_each_with_
             .unwrap()
             .contains("not the one that its key was made from")
     );
+}
+
+#[test]
+fn a_transition_is_usable_and_is_on_the_shelf_of_the_engine_as_a_shader_that_reads_what_is_behind_the_layer() {
+    let wipe = descriptor_from("shelf_wipe.fs", WIPE);
+    assert!(is_usable(&wipe), "{:?}", why_not_usable(&wipe));
+    assert_eq!(why_not_usable(&wipe), None);
+    assert_eq!(shape_of(&wipe), Some(Shape::Transition));
+    let (_, structure) = crate::engine::published_effect_shader_with_structure(&wipe.key).expect("it is on the shelf");
+    assert!(structure.reads_the_backdrop());
+    assert_eq!(
+        structure.images,
+        vec![crate::engine::ImageSlot::Backdrop, crate::engine::ImageSlot::Picture]
+    );
+    // A filter is on the shelf as one that does not.
+    let filter = descriptor_from("shelf_filter_for_the_wipe.fs", COLOR_CONTROLS);
+    assert!(is_usable(&filter));
+    let (_, structure) = crate::engine::published_effect_shader_with_structure(&filter.key).unwrap();
+    assert!(!structure.reads_the_backdrop());
+}
+
+#[test]
+fn a_transition_is_for_the_clips_that_are_seen_and_for_groups_and_not_for_a_track_or_an_adjustment_clip() {
+    use crate::project::{ClipKind, GroupKind};
+    let transition = EffectKind::from_snapshot(descriptor_from("rules_wipe.fs", WIPE)).unwrap();
+    assert!(transition.is_a_transition());
+    for seen in [ClipKind::Video, ClipKind::Image, ClipKind::Text, ClipKind::Generator] {
+        assert!(transition.applies_to_a_clip_of_kind(seen), "{seen:?}");
+    }
+    // (An adjustment clip has no picture of its own for a transition to bring over what is behind it, and a sound is not seen.)
+    for not_for in [ClipKind::Adjustment, ClipKind::Audio] {
+        assert!(!transition.applies_to_a_clip_of_kind(not_for), "{not_for:?}");
+    }
+    assert!(
+        !transition.applies_to_a_track(),
+        "a track has no picture of its own: it is the clips on it"
+    );
+    // (A tag has it done to each of its members, and a group, which is a picture of its own, has it done to that.)
+    for group in [GroupKind::Tag, GroupKind::ClipGroup, GroupKind::TrackGroup] {
+        assert!(transition.applies_to_a_group_of_kind(group), "{group:?}");
+    }
+
+    // A filter is for all that it was for before.
+    let filter = EffectKind::from_snapshot(descriptor_from("rules_filter.fs", COLOR_CONTROLS)).unwrap();
+    assert!(!filter.is_a_transition());
+    for kind in [
+        ClipKind::Video,
+        ClipKind::Image,
+        ClipKind::Text,
+        ClipKind::Generator,
+        ClipKind::Adjustment,
+    ] {
+        assert!(filter.applies_to_a_clip_of_kind(kind), "{kind:?}");
+    }
+    assert!(!filter.applies_to_a_clip_of_kind(ClipKind::Audio));
+    assert!(filter.applies_to_a_track());
+    // And the effects of the program are as they were.
+    assert!(!EffectKind::HUE_SHIFT.is_a_transition());
+    assert!(EffectKind::HUE_SHIFT.applies_to_a_track());
+    assert!(EffectKind::HUE_SHIFT.applies_to_a_clip_of_kind(ClipKind::Adjustment));
 }

@@ -6,8 +6,8 @@ files that may be bundled (`engine::isf_corpus_tests`: read, compile, install an
 
 ## What came of it
 
-* **In the manifest: 157 shaders** (132 filters, 25 generators).
-* Left out: **170** of the 327 shaders of the repository: 47 that may not be bundled, and 123 that may be and that this build does not run yet.
+* **In the manifest: 218 shaders** (132 filters, 25 generators, 61 transitions).
+* Left out: **109** of the 327 shaders of the repository: 47 that may not be bundled, and 62 that may be and that this build does not run yet.
 
 ### Why the ones that may not be bundled are not
 
@@ -17,8 +17,8 @@ files that may be bundled (`engine::isf_corpus_tests`: read, compile, install an
 
 ### What stops this build from running the others
 
-* 74: structure: this shader reads a picture called X, which this version cannot give it yet
 * 20: structure: the last pass draws into a buffer and not into the picture the effect makes, which is not run yet
+* 13: structure: this shader reads a picture called X, which this version cannot give it yet
 * 8: structure: the shader reads N pictures, and N are the most
 * 6: compile: Expected RightParen, found LeftParen
 * 3: compile: Unknown variable: fftImage
@@ -29,7 +29,7 @@ files that may be bundled (`engine::isf_corpus_tests`: read, compile, install an
 * 1: compile: Unknown variable: _maskImage_imgRect
 * 1: compile: Unknown variable: audio
 * 1: compile: Unknown variable: audioFlow
-* 1: compile: the shader is not valid: Handle N of naga::ir::LocalVariable is either not present, or inaccessible y
+* 1: draw: at progress N the frame is not what is behind the layer (its mean is (N, N, N, N), and what is behind is
 * 1: read: the input size: MIN (N) is more than MAX (N.N)
 * 1: structure: the WIDTH of pass number N: $buffQuality is not something that a size can use ($WIDTH and $HEIGHT a
 * 1: structure: the WIDTH of pass number N: $trailCount is not something that a size can use ($WIDTH and $HEIGHT ar
@@ -55,7 +55,7 @@ files that may be bundled (`engine::isf_corpus_tests`: read, compile, install an
 | FFT Filled Waveform.fs | may be bundled, and this build does not run it: compile: line 83, column 28: Unknown variable: fftImage |
 | Trail Mask.fs | may be bundled, and this build does not run it: compile: line 83, column 71: Unknown variable: _maskImage_imgRect |
 | FFT Spectrogram.fs | may be bundled, and this build does not run it: compile: line 99, column 36: Unknown variable: fftImage |
-| Pixelize.fs | may be bundled, and this build does not run it: compile: the shader is not valid: Handle 0 of naga::ir::LocalVariable is either not present, or inaccessible yet |
+| Crazy Parametric Fun.fs | may be bundled, and this build does not run it: draw: at progress 0 the frame is not what is behind the layer (its mean is (30, 60, 200, 255), and what is behind is (135, 140, 120, 255)) |
 | Radial Spectrogram.fs | may be bundled, and this build does not run it: read: line 18, column 21: the input size: MIN (1) is more than MAX (0.05) |
 | Circle Trails.fs | may be bundled, and this build does not run it: structure: the WIDTH of pass number 1: $trailCount is not something that a size can use ($WIDTH and $HEIGHT are) (at character 1 of the expression) |
 | Key Frame Artifacts.fs | may be bundled, and this build does not run it: structure: the WIDTH of pass number 2: $buffQuality is not something that a size can use ($WIDTH and $HEIGHT are) (at character 22 of the expression) |
@@ -89,78 +89,17 @@ files that may be bundled (`engine::isf_corpus_tests`: read, compile, install an
 | MultiFrame 3x3.fs | may be bundled, and this build does not run it: structure: the shader reads 9 pictures, and 7 are the most |
 | Glitch Shifter.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called altImage, which this version cannot give it yet |
 | Displace.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called displaceImage, which this version cannot give it yet |
+| Displacement.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called displacementMap, which this version cannot give it yet |
 | Histogram Viewer.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called histogramImage, which this version cannot give it yet |
 | Micro Buffer RGB.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called inputDelayImage, which this version cannot give it yet |
 | v002 Light Leak.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called leakImage, which this version cannot give it yet |
 | Color Relookup.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called lookupImage, which this version cannot give it yet |
 | Multi Gradient.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called lookupImage, which this version cannot give it yet |
 | RE RGB Gradient Generator.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called lookupImage, which this version cannot give it yet |
+| Luma Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called luma, which this version cannot give it yet |
 | Layer Mask.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called maskImage, which this version cannot give it yet |
 | Auto Colors Histogram.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called sourceHistogram, which this version cannot give it yet |
 | Duotone From Histogram.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called sourceHistogram, which this version cannot give it yet |
-| Angular.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Bounce.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Bow Tie Horizontal.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Bow Tie Vertical.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Burn.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Circle Crop.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Circle Open.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Circle.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Color Phase.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Colour Distance.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Crazy Parametric Fun.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Crosshatch.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Crosswarp.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Directional Warp.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Directional Wipe.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Directional.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Displacement.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Doom Screen Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Doorway.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Dreamy Zoom.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Fade Color.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Fade Gray Scale.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Fade.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Film Burn.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Fly Eye.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Glitch Displace.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Glitch Memories.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Grid Flip.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Heart Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Hexagonalize.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Inverted Page Curl.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Kaleidoscope Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Linear Blur.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Luma Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Luminance Melt.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Morph.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Mosaic.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Multiply Blend.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Perlin Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Pinwheel.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Polar Function.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Polka Dots Curtain.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Radial.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Random Squares.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Ripple Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Rotate Scale Fade.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Simple Zoom Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Squares Wire.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Squeeze.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Stereo Viewer.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Swap Transition.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Swirl.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| TV Static.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Undulating Burn Out.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Water Drop.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Wind.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Window Blinds.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Window Slice.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Wipe Down.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Wipe Left.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Wipe Right.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Wipe Up.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
-| Zoom In Circles.fs | may be bundled, and this build does not run it: structure: this shader reads a picture called startImage, which this version cannot give it yet |
 | Cursor Overlay.fs | not bundled: brings pictures of its own, whose licence is not said |
 | Cursor.fs | not bundled: brings pictures of its own, whose licence is not said |
 | Night Vision.fs | not bundled: brings pictures of its own, whose licence is not said |

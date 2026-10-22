@@ -156,6 +156,9 @@ pub enum ImageSlot {
     Buffer(usize),
     /// The image with this number among the ones that the shader brings with it (phase 6.4.4): the call says which pictures they are (`EffectCall::images`).
     Imported(usize),
+    /// What is behind the layer (phase 6.6): the picture that the layers behind it make, as it is when the effect runs, which a transition reads as `startImage` (and reads the layer's own
+    /// picture, [`Self::Picture`], as `endImage`). Only a layer of the frame itself has anything behind it that is opaque, and a shader that reads this is not run on any other.
+    Backdrop,
 }
 
 /// A picture that a shader draws into in one pass and reads in the next.
@@ -222,6 +225,8 @@ pub enum ImageSource {
     /// What the buffer held when the frame before ended: a buffer that lasts, and that no earlier pass of this frame drew into. (A call that has no state to keep it under reads nothing,
     /// as it would of a buffer that does not last.)
     FromTheFrameBefore,
+    /// The picture that the layers behind the layer make, which the step before the call made into codes (see [`EffectStep::Backdrop`](super::EffectStep)): the same in every pass of the call.
+    Backdrop,
 }
 
 impl ShaderStructure {
@@ -323,6 +328,11 @@ impl ShaderStructure {
         self.buffers.iter().any(|buffer| buffer.persistent)
     }
 
+    /// Whether the shader reads what is behind its layer (phase 6.6): one of its pictures is [`ImageSlot::Backdrop`].
+    pub fn reads_the_backdrop(&self) -> bool {
+        self.images.contains(&ImageSlot::Backdrop)
+    }
+
     /// What each pass draws into and how big that is, for a picture the effect works on of `picture_size` and a call with these `numbers`; `largest_side` is the most pixels
     /// the card allows a texture to be across.
     pub fn facts_of_the_passes(&self, picture_size: (u32, u32), numbers: &[f32], largest_side: u32) -> Vec<PassFacts> {
@@ -360,6 +370,7 @@ impl ShaderStructure {
             .iter()
             .map(|image| match image {
                 ImageSlot::Picture => ImageSource::Picture,
+                ImageSlot::Backdrop => ImageSource::Backdrop,
                 ImageSlot::Imported(number) => ImageSource::Imported(*number),
                 ImageSlot::Buffer(buffer) => self
                     .passes

@@ -15,6 +15,9 @@ const TINT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"im
 // (A transition: the kind of shader that this version cannot run. It was a generator before phase 6, which is run now.)
 const A_TRANSITION: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
 
+/// A filter that wants a second picture of its own, which this version cannot give a shader: the example of one that cannot be run. (Rewritten on purpose in phase 6.6: it was the transition.)
+const A_SHADER_THAT_CANNOT_BE_RUN: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"maskImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage) * IMG_THIS_PIXEL(maskImage) * progress; }\n";
+
 fn kind_of(name: &str, source: &str) -> EffectKind {
     let file = crate::isf::read(source).unwrap();
     EffectKind::from_snapshot(crate::isf::descriptor_of(&file, name, source)).unwrap()
@@ -111,9 +114,9 @@ fn the_values_of_a_shader_follow_their_keyframes_and_the_clock_goes_on() {
 fn a_shader_that_cannot_be_run_does_nothing_and_is_not_an_operation() {
     let mut project = project_of(vec![vec![(0, long_video(0, 60, 1))]]);
     let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
-    let transition = kind_of("transition.fs", A_TRANSITION);
-    assert!(!transition.is_installed());
-    project.add_effect(AnimationTarget::Clip(clip), transition).unwrap();
+    let cannot_be_run = kind_of("mask.fs", A_SHADER_THAT_CANNOT_BE_RUN);
+    assert!(!cannot_be_run.is_installed());
+    project.add_effect(AnimationTarget::Clip(clip), cannot_be_run).unwrap();
     let plan = plan(&project);
     let layer = plan.sections.iter().flat_map(|section| &section.layers).next().unwrap();
 
@@ -171,11 +174,11 @@ fn a_shader_on_a_group_or_a_tag_has_its_clock_from_the_start_of_the_timeline_and
 #[test]
 fn a_shader_that_is_not_installed_is_no_operation_even_when_it_is_in_the_effects_of_a_layer() {
     // (The plan leaves such an effect out of a layer, so this is the check that holds if one gets there: a layer of effects that are given by hand.)
-    let transition = kind_of("transition.fs", A_TRANSITION);
+    let cannot_be_run = kind_of("mask.fs", A_SHADER_THAT_CANNOT_BE_RUN);
     let effect = LayerEffect {
         clock: EffectClock::default(),
         instance: crate::project::EffectInstanceId::FIRST,
-        kind: transition,
+        kind: cannot_be_run,
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),
@@ -185,4 +188,27 @@ fn a_shader_that_is_not_installed_is_no_operation_even_when_it_is_in_the_effects
         operations_of_effects(&[effect], frame(3), 0),
         Vec::<PictureOperation>::new()
     );
+}
+
+#[test]
+fn the_operation_of_a_transition_says_that_it_reads_what_is_behind_the_clip_and_that_of_a_filter_does_not() {
+    let mut project = project_of(vec![vec![(0, long_video(0, 60, 1))]]);
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    let target = AnimationTarget::Clip(clip);
+    project.add_effect(target, kind_of("tint.fs", TINT)).unwrap();
+    project
+        .add_effect(target, kind_of("transition.fs", A_TRANSITION))
+        .unwrap();
+    let plan = plan(&project);
+    let layer = plan.sections.iter().flat_map(|section| &section.layers).next().unwrap();
+
+    let reads: Vec<bool> = layer
+        .operations_at(frame(5))
+        .iter()
+        .map(|operation| match operation {
+            PictureOperation::Shader { reads_the_backdrop, .. } => *reads_the_backdrop,
+            other => panic!("a shader was expected: {other:?}"),
+        })
+        .collect();
+    assert_eq!(reads, [false, true]);
 }

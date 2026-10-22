@@ -34,8 +34,8 @@ void main() {
 }
 "#;
 
-// (A transition: the kind of shader that this version cannot run.)
-const A_TRANSITION: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
+/// A filter that wants a second picture of its own, which this version cannot give a shader: the example of a kind that cannot be run. (Rewritten on purpose in phase 6.6: it was a transition.)
+const A_FILTER_THAT_CANNOT_BE_RUN: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"maskImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage) * IMG_THIS_PIXEL(maskImage) * progress; }\n";
 
 const A_GENERATOR: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"speed\", \"TYPE\": \"float\" } ] }*/\nvoid main() { gl_FragColor = vec4(speed); }\n";
 
@@ -332,10 +332,11 @@ fn the_box_of_a_shaders_effect_has_a_control_for_each_input_called_by_its_label(
 
 #[test]
 fn a_kind_that_this_version_cannot_run_says_why_in_its_box_and_keeps_its_values() {
-    // A project that was made with a shader that this version cannot run (a transition, which it cannot yet): the effect stays, with its value, and says why it does nothing.
-    // (Rewritten on purpose in phase 6: a generator is run now, so the kind that cannot be is a transition.)
-    let file = crate::isf::read(A_TRANSITION).unwrap();
-    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "fade.fs", A_TRANSITION)).unwrap();
+    // A project that was made with a shader that this version cannot run (one that wants a picture it cannot be given): the effect stays, with its value, and says why it does nothing.
+    // (Rewritten on purpose in phase 6: a generator is run now, so the kind that cannot be was a transition; and in phase 6.6 a transition is run too.)
+    let file = crate::isf::read(A_FILTER_THAT_CANNOT_BE_RUN).unwrap();
+    let kind =
+        EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "fade.fs", A_FILTER_THAT_CANNOT_BE_RUN)).unwrap();
     let (mut window, clip) = window_with_a_video();
     select(&mut window, clip);
     window
@@ -348,8 +349,8 @@ fn a_kind_that_this_version_cannot_run_says_why_in_its_box_and_keeps_its_values(
 
     assert!(!kind.is_installed());
     assert!(
-        window.harness.query_by_label_contains("transition").is_some(),
-        "the box says why: it is a transition, which this version cannot run yet"
+        window.harness.query_by_label_contains("maskImage").is_some(),
+        "the box says why: it wants a picture called maskImage, which this version cannot give it yet"
     );
     assert!(
         window.harness.query_by_label("progress").is_some(),
@@ -599,4 +600,81 @@ fn an_image_of_too_many_bytes_or_pixels_and_a_shader_with_too_many_images_are_re
     add_from_a_file(&mut window, &chooser, clip, &file);
     let (_, text) = the_message(&window).expect("it was refused");
     assert!(text.contains("brings 7 images, and 6 are the most"), "{text}");
+}
+
+// --- a transition (phase 6.6) ---
+
+/// A transition that is the mix of its two pictures by its progress.
+const A_MIX_TRANSITION: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"LABEL\": \"How far in\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.0 } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
+
+#[test]
+fn a_transition_from_a_file_is_put_on_a_clip_and_its_box_says_what_it_reads_and_where_it_is_not_run() {
+    let folder = tempfile::tempdir().unwrap();
+    let (mut window, clip, chooser) = window_that_asks();
+
+    add_from_a_file(
+        &mut window,
+        &chooser,
+        clip,
+        &a_file_in(folder.path(), "mix.fs", A_MIX_TRANSITION),
+    );
+    window.settle();
+
+    assert_eq!(the_message(&window), None);
+    let kinds = the_kinds_of_the_effects_of(&window, clip);
+    assert_eq!(kinds.len(), 1);
+    assert!(kinds[0].is_installed() && kinds[0].is_a_transition());
+    assert!(
+        window
+            .harness
+            .query_by_label_contains("it reads what is behind the clip")
+            .is_some(),
+        "the box says what a transition reads"
+    );
+    assert!(
+        window
+            .harness
+            .query_by_label_contains("not run on a clip in a group that has effects")
+            .is_some(),
+        "and where it is not run"
+    );
+    assert!(
+        window.harness.query_by_label("How far in").is_some(),
+        "its progress is a value like any other"
+    );
+
+    // A filter says nothing of it.
+    let (mut other, other_clip, other_chooser) = window_that_asks();
+    add_from_a_file(
+        &mut other,
+        &other_chooser,
+        other_clip,
+        &a_file_in(folder.path(), "mixer.fs", TINT),
+    );
+    other.settle();
+    assert!(
+        other
+            .harness
+            .query_by_label_contains("it reads what is behind the clip")
+            .is_none(),
+        "a filter does not read what is behind the clip"
+    );
+}
+
+#[test]
+fn a_transition_from_a_file_is_not_put_on_a_track_and_a_message_says_why() {
+    let folder = tempfile::tempdir().unwrap();
+    let (mut window, _clip, chooser) = window_that_asks();
+    let track = window.application().project().tracks()[0].id();
+    chooser.will_answer(Some(a_file_in(folder.path(), "mix.fs", A_MIX_TRANSITION)));
+    let before = window.application().project().clone();
+
+    window.do_this(Command::AddEffectFromFile {
+        owner: Member::Track(track),
+    });
+
+    assert_eq!(*window.application().project(), before, "nothing was put on the track");
+    let (title, text) = the_message(&window).expect("the person is told");
+    assert_eq!(title, "The effect cannot be added");
+    assert!(text.contains("transition") && text.contains("clip"), "{text}");
 }

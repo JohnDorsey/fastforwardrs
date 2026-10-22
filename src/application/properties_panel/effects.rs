@@ -39,6 +39,8 @@ pub const WHAT_A_GENERATOR_MAKES_NOTE: &str =
     "What the generator makes: it cannot be switched off, copied or taken off.";
 /// What the box of a shader that keeps something from one frame to the next says (EN-06): its picture is made from the frames before it.
 pub const DEPENDS_ON_EARLIER_FRAMES_NOTE: &str = "Depends on earlier frames: it goes on from the frame before, so after a jump in the preview it starts again from nothing. The export is exact.";
+/// What the box of a transition says (phase 6.6): what it reads, how it is used, and where it is not run.
+pub const TRANSITION_NOTE: &str = "A transition: it reads what is behind the clip. Animate its progress from 0 to 1 to bring the clip in over what is behind it. It is not run on a clip in a group that has effects.";
 pub const SWITCHED_OFF_NOTE: &str = "Switched off: it is not done, and its values and keyframes are kept.";
 
 /// What the box of an effect that the program does not have says (a project file can bring one): that it does nothing, and that nothing of it is

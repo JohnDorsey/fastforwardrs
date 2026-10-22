@@ -10,6 +10,7 @@ use super::*;
 const VIGNETTE: &str = include_str!("../../isf/fixtures/vignette.fs");
 const PLASMA: &str = include_str!("../../isf/fixtures/plasma.fs");
 const WIPE: &str = include_str!("../../isf/fixtures/wipe_transition.fs");
+const NEEDS_A_MASK: &str = include_str!("../../isf/fixtures/needs_a_mask.fs");
 const BAD: &str = include_str!("../../isf/fixtures/bad_syntax.fs");
 
 fn write(folder: &Path, name: &str, text: &str) -> PathBuf {
@@ -32,12 +33,13 @@ fn the_shaders_of_a_folder_are_listed_in_the_order_of_their_names_each_with_what
     write(folder.path(), "a vignette.fs", VIGNETTE);
     write(folder.path(), "c wipe.isf", WIPE);
     write(folder.path(), "d broken.fs", BAD);
+    write(folder.path(), "e mask.fs", NEEDS_A_MASK);
 
     let scan = scan_folders(&[folder.path().to_owned()]);
 
     assert_eq!(
         names(&scan),
-        ["a vignette.fs", "b plasma.fs", "c wipe.isf", "d broken.fs"]
+        ["a vignette.fs", "b plasma.fs", "c wipe.isf", "d broken.fs", "e mask.fs"]
     );
     let shapes: Vec<Option<Shape>> = scan.shaders.iter().map(|shader| shader.shape).collect();
     assert_eq!(
@@ -46,22 +48,18 @@ fn the_shaders_of_a_folder_are_listed_in_the_order_of_their_names_each_with_what
             Some(Shape::Filter),
             Some(Shape::Generator),
             Some(Shape::Transition),
+            Some(Shape::Filter),
             Some(Shape::Filter)
         ]
     );
     let usable: Vec<bool> = scan.shaders.iter().map(FoundShader::can_be_used).collect();
-    assert_eq!(usable, [true, true, false, false]);
-    // (Each that cannot be used says why: the transition is not run yet, the other has a mistake with a place in it.)
-    assert!(
-        scan.shaders[2]
-            .why_not_usable
-            .as_deref()
-            .unwrap()
-            .contains("transition")
-    );
+    // (Rewritten on purpose in phase 6.6: a transition is run now, so it can be used.)
+    assert_eq!(usable, [true, true, true, false, false]);
+    // (Each that cannot be used says why: the one that has a mistake has a place in it, the other wants a picture that this version cannot give it.)
     assert!(scan.shaders[3].why_not_usable.as_deref().unwrap().contains("line"));
+    assert!(scan.shaders[4].why_not_usable.as_deref().unwrap().contains("maskImage"));
     assert!(scan.problems.is_empty(), "{:?}", scan.problems);
-    assert_eq!((scan.usable_count(), scan.unusable_count()), (2, 2));
+    assert_eq!((scan.usable_count(), scan.unusable_count()), (3, 2));
     assert_eq!(scan.shaders[0].path, folder.path().join("a vignette.fs"));
 }
 

@@ -47,15 +47,22 @@ fn what_became_of(renderer: &mut FrameRenderer, number: usize, name: &str, text:
         .map_err(|problem| format!("install: {problem}"))?;
     let shape = format!("{:?}", compiled.shape);
     let passes = structure.passes.len();
-    if compiled.shape == Shape::Transition {
-        // (A transition reads two pictures, and the engine does not give a shader two yet: it is only installed.)
-        return Ok(format!("{shape}, {passes} passes, installed (not drawn: a transition)"));
-    }
-    let mut numbers = vec![1.0, 1.0 / 30.0, 30.0, 0.0];
-    numbers.extend(numbers_of_the_values(&kind.default_values()));
+    let is_a_transition = compiled.shape == Shape::Transition;
+    let mut values = kind.default_values();
+    // (A transition is drawn over a picture of its own, the backdrop, as it is on a clip over another; its progress goes from 0 to 1 in the three frames. Its other values are what
+    // they begin as.)
+    let progress_place = kind.slot_of_the_value_with_id("progress");
     let picture = TestPicture::gradient(SIZE.0, SIZE.1);
+    let backdrop = TestPicture::checkers(SIZE.0, SIZE.1, 6);
     let mut last = None;
+    let mut numbers = Vec::new();
+    let mut means: Vec<[f64; 4]> = Vec::new();
     for frame_number in 0..3_u64 {
+        if is_a_transition && let Some(place) = progress_place {
+            values[place] = crate::project::PropertyValue::Number(frame_number as f32 / 2.0);
+        }
+        numbers = vec![1.0 + frame_number as f32 / 30.0, 1.0 / 30.0, 30.0, 0.0];
+        numbers.extend(numbers_of_the_values(&values));
         let mut effect = call(&key, &numbers);
         if structure.depends_on_earlier_frames() {
             effect.state = Some(EffectState {
@@ -63,14 +70,19 @@ fn what_became_of(renderer: &mut FrameRenderer, number: usize, name: &str, text:
                 frame: frame_number,
             });
         }
-        numbers[0] = 1.0 + frame_number as f32 / 30.0;
-        let (frame, statistics) = frame_of(renderer, SIZE, &[(1, &picture)], vec![whole_frame(1, vec![effect])]);
+        let layers = if is_a_transition {
+            vec![whole_frame(2, Vec::new()), whole_frame(1, vec![effect])]
+        } else {
+            vec![whole_frame(1, vec![effect])]
+        };
+        let (frame, statistics) = frame_of(renderer, SIZE, &[(1, &picture), (2, &backdrop)], layers);
         if statistics.effects_not_run != 0 {
             return Err(format!(
                 "draw: the engine did not run the effect ({})",
                 statistics.effects_not_run
             ));
         }
+        means.push(mean_of(&frame));
         last = Some(frame);
     }
     let frame = last.expect("three frames were drawn");
@@ -84,6 +96,73 @@ fn what_became_of(renderer: &mut FrameRenderer, number: usize, name: &str, text:
         println!("     numbers {numbers:?}");
         println!("     first colours {distinct:?}");
     }
+    let in_words = |mean: &[f64; 4]| format!("({:.0}, {:.0}, {:.0}, {:.0})", mean[0], mean[1], mean[2], mean[3]);
+    // A transition is one that begins as what is behind it and ends as the picture it brings (by the mean of the colours: a soft edge or a few pixels of a shape change it a little, and a shader that
+    // reads the pictures wrongly, or whose values it begins with make it draw nothing, change it a lot).
+    if is_a_transition {
+        let far_from = |frame: &[f64; 4], picture: &TestPicture| {
+            let wanted = mean_of_a_picture(picture);
+            frame
+                .iter()
+                .zip(wanted)
+                .map(|(got, wanted)| (got - wanted).abs())
+                .fold(0.0, f64::max)
+                > MOST_THE_MEAN_OF_A_TRANSITION_MAY_BE_OFF
+        };
+        if far_from(&means[0], &backdrop) {
+            return Err(format!(
+                "draw: at progress 0 the frame is not what is behind the layer (its mean is {}, and what is behind is {})",
+                in_words(&means[0]),
+                in_words(&mean_of_a_picture(&backdrop))
+            ));
+        }
+        if far_from(&means[2], &picture) {
+            return Err(format!(
+                "draw: at progress 1 the frame is not the layer (its mean is {}, and the layer is {})",
+                in_words(&means[2]),
+                in_words(&mean_of_a_picture(&picture))
+            ));
+        }
+    }
+    // (A transition is said at its three progresses: 0 should be what is behind it, and 1 the picture it brings, whatever comes between.)
+    let colours = if is_a_transition {
+        format!(
+            "mean rgba at progress 0 {}, 0.5 {}, 1 {}",
+            in_words(&means[0]),
+            in_words(&means[1]),
+            in_words(&means[2])
+        )
+    } else {
+        format!("mean rgba {}", in_words(&means[2]))
+    };
+    Ok(format!(
+        "{shape}, {passes} passes{}, {colours}",
+        if structure.depends_on_earlier_frames() {
+            ", remembers"
+        } else {
+            ""
+        }
+    ))
+}
+
+/// How far, in levels of 8 bits, the mean of a frame of a transition may be from the mean of the picture that it begins as and ends as (the pictures are of 48 by 30 pixels, and the means
+/// of the transitions of the Vidvox collection that work are off by one or two).
+const MOST_THE_MEAN_OF_A_TRANSITION_MAY_BE_OFF: f64 = 6.0;
+
+/// The mean of each of the four numbers of the pixels of `picture`.
+fn mean_of_a_picture(picture: &TestPicture) -> [f64; 4] {
+    let count = (picture.rgba.len() / 4) as f64;
+    let mut sums = [0.0_f64; 4];
+    for pixel in picture.rgba.as_chunks::<4>().0 {
+        for (sum, value) in sums.iter_mut().zip(pixel) {
+            *sum += f64::from(*value);
+        }
+    }
+    sums.map(|sum| sum / count)
+}
+
+/// The mean of each of the four numbers of the pixels of `frame`.
+fn mean_of(frame: &super::RenderedFrame) -> [f64; 4] {
     let count = (frame.rgba_pixels.len() / 4) as f64;
     let mut sums = [0.0_f64; 4];
     for pixel in frame.rgba_pixels.as_chunks::<4>().0 {
@@ -91,18 +170,7 @@ fn what_became_of(renderer: &mut FrameRenderer, number: usize, name: &str, text:
             *sum += f64::from(*value);
         }
     }
-    Ok(format!(
-        "{shape}, {passes} passes{}, mean rgba ({:.0}, {:.0}, {:.0}, {:.0})",
-        if structure.depends_on_earlier_frames() {
-            ", remembers"
-        } else {
-            ""
-        },
-        sums[0] / count,
-        sums[1] / count,
-        sums[2] / count,
-        sums[3] / count
-    ))
+    sums.map(|sum| sum / count)
 }
 
 #[test]

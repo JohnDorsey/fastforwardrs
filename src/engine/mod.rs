@@ -105,6 +105,10 @@ mod picture_tests;
 #[cfg(test)]
 mod planes_out_tests;
 #[cfg(test)]
+mod transition_plan_tests;
+#[cfg(test)]
+mod transition_tests;
+#[cfg(test)]
 mod yuv_tests;
 
 pub use colour::{

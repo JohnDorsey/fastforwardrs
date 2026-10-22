@@ -24,6 +24,7 @@ use crate::test_support::the_installed_plugins_to_myself;
 const VIGNETTE: &str = include_str!("../../isf/fixtures/vignette.fs");
 const PLASMA: &str = include_str!("../../isf/fixtures/plasma.fs");
 const WIPE: &str = include_str!("../../isf/fixtures/wipe_transition.fs");
+const NEEDS_A_MASK: &str = include_str!("../../isf/fixtures/needs_a_mask.fs");
 const BAD: &str = include_str!("../../isf/fixtures/bad_syntax.fs");
 
 fn write(folder: &Path, name: &str, text: &str) {
@@ -84,7 +85,7 @@ fn the_effects(window: &Window, clip: ClipId) -> Vec<EffectKind> {
 // --- what is found and installed ---
 
 #[test]
-fn the_shaders_of_a_folder_that_was_added_are_found_and_the_filters_and_generators_that_run_are_installed_and_nothing_else()
+fn the_shaders_of_a_folder_that_was_added_are_found_and_the_filters_the_transitions_and_the_generators_that_run_are_installed_and_nothing_else()
  {
     let _alone = the_installed_plugins_to_myself();
     let folder = tempfile::tempdir().unwrap();
@@ -92,6 +93,7 @@ fn the_shaders_of_a_folder_that_was_added_are_found_and_the_filters_and_generato
     write(folder.path(), "Plasma.fs", PLASMA);
     write(folder.path(), "Wipe.fs", WIPE);
     write(folder.path(), "Broken.fs", BAD);
+    write(folder.path(), "Mask.fs", NEEDS_A_MASK);
 
     let window = window_that_found_the_shaders_in(folder.path());
 
@@ -101,6 +103,11 @@ fn the_shaders_of_a_folder_that_was_added_are_found_and_the_filters_and_generato
         names_of(&offered).contains(&"vignette"),
         "a filter is an effect that is offered"
     );
+    // (Rewritten on purpose in phase 6.6: a transition is run now, and is an effect that is put on a clip.)
+    assert!(
+        names_of(&offered).contains(&"wipe"),
+        "a transition is an effect that is offered"
+    );
     assert!(
         !names_of(&offered).contains(&"plasma"),
         "a generator is not an effect: it is made into a clip"
@@ -108,8 +115,8 @@ fn the_shaders_of_a_folder_that_was_added_are_found_and_the_filters_and_generato
     assert_eq!(names_of(&EffectKind::installed_generators()), ["plasma"]);
     assert_eq!(
         names_of(&EffectKind::installed_shader_kinds()),
-        ["plasma", "vignette"],
-        "the two that run, in the order of their file names; the transition (not run yet) and the broken one are not installed"
+        ["plasma", "vignette", "wipe"],
+        "the three that run, in the order of their file names; the broken one and the one that wants a picture it is not given are not installed"
     );
 }
 
@@ -359,28 +366,34 @@ fn the_window_says_how_many_shaders_can_be_used_lists_them_and_lists_those_that_
     write(folder.path(), "Plasma.fs", PLASMA);
     write(folder.path(), "Wipe.fs", WIPE);
     write(folder.path(), "Broken.fs", BAD);
+    write(folder.path(), "Mask.fs", NEEDS_A_MASK);
     let mut window = window_that_found_the_shaders_in(folder.path());
 
     open_the_plugin_manager(&mut window);
 
+    // (Rewritten on purpose in phase 6.6: a transition can be used now, so three can and two cannot.)
     assert!(
-        is_shown_containing(&window, "2 shaders can be used, 2 cannot"),
+        is_shown_containing(&window, "3 shaders can be used, 2 cannot"),
         "the line under the button that scans again"
     );
-    assert!(is_shown(&window, &heading_of_the_shaders_that_can_be_used(2)));
+    assert!(is_shown(&window, &heading_of_the_shaders_that_can_be_used(3)));
     assert!(is_shown(&window, &heading_of_the_shaders_that_cannot_be_used(2)));
     // The list of those that cannot be used is open: each says why.
     assert!(is_shown_containing(&window, "Broken.fs: "), "the file and why");
-    assert!(is_shown_containing(&window, "Wipe.fs: this shader is a transition"));
+    assert!(
+        is_shown_containing(&window, "Mask.fs: this shader reads a picture called maskImage"),
+        "the one that wants a picture it is not given"
+    );
     // The list of those that can is closed, and opened by its heading.
     assert!(!is_shown(&window, "Vignette (filter): Vignette.fs"));
     window
         .harness
-        .get_by_label(&heading_of_the_shaders_that_can_be_used(2))
+        .get_by_label(&heading_of_the_shaders_that_can_be_used(3))
         .click();
     window.settle();
     assert!(is_shown(&window, "Vignette (filter): Vignette.fs"));
     assert!(is_shown(&window, "Plasma (generator): Plasma.fs"));
+    assert!(is_shown(&window, "Wipe (transition): Wipe.fs"));
 }
 
 #[test]
@@ -492,4 +505,37 @@ fn where_the_scan_program_is_not_found_the_window_says_so_and_the_shaders_are_fo
         window.application().plugin_scan_problems().is_empty(),
         "the note is the window's, and the scans said nothing"
     );
+}
+
+#[test]
+fn a_transition_is_in_the_menu_of_the_plus_button_of_a_clip_and_not_in_that_of_a_track() {
+    let _alone = the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    write(folder.path(), "Vignette.fs", VIGNETTE);
+    write(folder.path(), "Wipe.fs", WIPE);
+    let (mut window, clip) = window_with_a_video();
+    window.application_mut().add_plugin_folder(folder.path().to_owned());
+    wait_for_the_scan(&mut window);
+
+    // A clip is offered both, and a transition chosen is put on it.
+    select(&mut window, clip);
+    let plus = window.rectangle_of(ADD_EFFECT_LABEL).center();
+    window.click(plus);
+    window.open_the_smaller_menu("ISF");
+    assert!(is_shown(&window, "Vignette"), "the filter is offered");
+    assert!(is_shown(&window, "Wipe"), "and so is the transition");
+    window.harness.get_by_label("Wipe").click();
+    window.settle();
+    let kinds = the_effects(&window, clip);
+    assert_eq!(names_of(&kinds), ["wipe"]);
+    assert!(kinds[0].is_installed() && kinds[0].is_a_transition());
+
+    // A track is offered the filter and not the transition: a track is the clips on it, and has no picture of its own for the transition to bring over what is behind.
+    let (mut other, _) = window_with_a_video();
+    other.select_the_track_at(0);
+    let plus = other.rectangle_of(ADD_EFFECT_LABEL).center();
+    other.click(plus);
+    other.open_the_smaller_menu("ISF");
+    assert!(is_shown(&other, "Vignette"), "the filter is offered to a track");
+    assert!(!is_shown(&other, "Wipe"), "the transition is not");
 }

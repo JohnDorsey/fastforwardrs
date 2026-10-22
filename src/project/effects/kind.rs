@@ -143,6 +143,12 @@ impl EffectKind {
         crate::isf::shape_of(self.0) == Some(crate::isf::Shape::Generator)
     }
 
+    /// Whether the effect is a shader that reads what is behind a clip and the clip itself (a transition: see [`crate::isf::Shape`]), which is put on the clip that is on top, with
+    /// its progress animated, so that the clip comes over what is behind it.
+    pub fn is_a_transition(self) -> bool {
+        crate::isf::shape_of(self.0) == Some(crate::isf::Shape::Transition)
+    }
+
     /// Whether the effect is a shader that this version runs and that keeps something from one frame to the next (a buffer with `PERSISTENT`), so that what it shows depends on the
     /// frames before it.
     pub fn depends_on_earlier_frames(self) -> bool {
@@ -219,21 +225,23 @@ impl EffectKind {
     }
 
     /// Whether a clip of this kind can have the effect: a picture effect can be on what is seen (a video, a picture, a text object, and an adjustment clip, which is what
-    /// is behind it, seen), and a
+    /// is behind it, seen: **but not a transition, which is put on a clip that has a picture of its own, phase 6.6**), and a
     /// sound effect on what is heard (a sound, **and a video, which has a soundtrack**: it was only a sound until phase 7).
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self.0.domain {
-            EffectDomain::Picture => matches!(
-                kind,
-                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Adjustment | ClipKind::Generator
-            ),
+            EffectDomain::Picture => match kind {
+                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Generator => true,
+                // (An adjustment clip is what is behind it, seen: it has no picture of its own for a transition to bring over what is behind it.)
+                ClipKind::Adjustment => !self.is_a_transition(),
+                _ => false,
+            },
             EffectDomain::Sound => matches!(kind, ClipKind::Audio | ClipKind::Video),
         }
     }
 
-    /// Whether a track can have the effect.
+    /// Whether a track can have the effect. (Not a transition: a track has no picture of its own, it is the clips on it, and a transition is put on the clip that is on top.)
     pub fn applies_to_a_track(self) -> bool {
-        true
+        !self.is_a_transition()
     }
 
     /// Whether a group of kind `kind` can have the effect: a tag, which has it applied to each member, can have any; and a clip group or a track

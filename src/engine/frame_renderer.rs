@@ -324,8 +324,16 @@ impl FrameRenderer {
                 structure: Arc::new(structure.clone()),
             },
         );
-        self.effects_that_run
-            .add_shader_with_images(key, structure.passes.len(), structure.imported_images());
+        if structure.reads_the_backdrop() {
+            self.effects_that_run.add_shader_that_reads_the_backdrop(
+                key,
+                structure.passes.len(),
+                structure.imported_images(),
+            );
+        } else {
+            self.effects_that_run
+                .add_shader_with_images(key, structure.passes.len(), structure.imported_images());
+        }
         Ok(())
     }
 
@@ -728,6 +736,7 @@ impl FrameRenderer {
                 },
                 shape,
                 (shape.width_in_pixels, shape.height_in_pixels),
+                accumulation_shape,
                 largest,
             );
             // The buffers that last, of the calls that have a state (phase 6.4.2). A state that two calls of a frame have is kept by the first: the second runs as a call that has none.
@@ -936,8 +945,10 @@ impl FrameRenderer {
                                             writer.i32(0).i32(1).f32(sigma).i32(half_width);
                                         })
                                     }
-                                    // (A pass of the colour matrix that only converts: it mixes nothing and cuts nothing off.)
-                                    EffectStep::Conversion { into_display } => {
+                                    // (A pass of the colour matrix that only converts: it mixes nothing and cuts nothing off. The step that makes the backdrop into codes is one that
+                                    // converts into them.)
+                                    EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } => {
+                                        let into_display = !matches!(*step, EffectStep::Conversion { into_display: false });
                                         let parts = MixingParts {
                                             offsets: [0.0; 3],
                                             converts_into_the_domain: into_display,
@@ -958,7 +969,9 @@ impl FrameRenderer {
                                 .collect(),
                         );
                     }
-                    PassPlan::PlaceLayers { layers } | PassPlan::PlaceGroup { layers, .. } => {
+                    PassPlan::PlaceLayers { layers }
+                    | PassPlan::PlaceLayersOver { layers }
+                    | PassPlan::PlaceGroup { layers, .. } => {
                         effect_slots.push(Vec::new());
                         let mut slots = Vec::new();
                         for &number in layers {
@@ -1049,7 +1062,9 @@ impl FrameRenderer {
                                 EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. } => self
                                     .effects_that_run
                                     .kind_of(&flat.layers[*layer].layer.effects[call].key),
-                                EffectStep::Conversion { .. } => Some(KindOfEffect::ColourMatrix),
+                                EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } => {
+                                    Some(KindOfEffect::ColourMatrix)
+                                }
                             };
                             let uniform_binding = wgpu::BindGroupEntry {
                                 binding: 0,
@@ -1059,9 +1074,15 @@ impl FrameRenderer {
                                     size: NonZeroU64::new(u64::from(slot.size)),
                                 }),
                             };
+                            // (What a step works on: the picture the step before it made, or, for the step that makes the backdrop into codes, what the layers behind the layer made.)
+                            let works_on = if matches!(step, EffectStep::Backdrop { .. }) {
+                                &accumulation_view
+                            } else {
+                                input_view
+                            };
                             let picture_binding = wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::TextureView(input_view),
+                                resource: wgpu::BindingResource::TextureView(works_on),
                             };
                             // (The effect that mixes colours reads its picture with no sampler; one that a shader runs also has the sampler of the effects.)
                             let (pipeline, bind_group, label) = match kind {
@@ -1083,6 +1104,10 @@ impl FrameRenderer {
                                                     .unwrap_or(&effect_views[effect_picture_numbers[layer][drawn]])
                                             }
                                             ImageSource::Clear => &self.clear_pixel,
+                                            // (What the layers behind the layer made, as the step before the call made it into codes.)
+                                            ImageSource::Backdrop => &effect_views[effect_picture_numbers[layer][shader_step
+                                                .backdrop_step
+                                                .expect("a call that reads the backdrop has the step that makes it")]],
                                             // (The picture that the call names: it is on the card, or the frame was not begun.)
                                             ImageSource::Imported(number) => {
                                                 &self
@@ -1097,7 +1122,9 @@ impl FrameRenderer {
                                                     .get(&(*layer, step_call(step)))
                                                     .and_then(|buffers| buffers.base[buffer].as_ref())
                                                     .unwrap_or(&self.clear_pixel),
-                                                ImageSlot::Picture | ImageSlot::Imported(_) => &self.clear_pixel,
+                                                ImageSlot::Picture | ImageSlot::Imported(_) | ImageSlot::Backdrop => {
+                                                    &self.clear_pixel
+                                                }
                                             },
                                         };
                                         entries.push(wgpu::BindGroupEntry {
@@ -1200,10 +1227,13 @@ impl FrameRenderer {
                             render_pass.set_bind_group(0, &bind_group, &[slot.offset]);
                             render_pass.draw(0..3, 0..1);
                             drop(render_pass);
-                            input_view = &effect_views[picture_number];
+                            // (The backdrop is made for the call that comes next, which works on the picture that the step before made, as it would have.)
+                            if !matches!(step, EffectStep::Backdrop { .. }) {
+                                input_view = &effect_views[picture_number];
+                            }
                         }
                     }
-                    PassPlan::PlaceLayers { .. } | PassPlan::PlaceGroup { .. } => {
+                    PassPlan::PlaceLayers { .. } | PassPlan::PlaceLayersOver { .. } | PassPlan::PlaceGroup { .. } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with layers has uniforms");
                         let slots = &place_slots[pass_number];
                         let mut bind_groups = Vec::with_capacity(slots.len());
@@ -1258,20 +1288,26 @@ impl FrameRenderer {
                                 ],
                             }));
                         }
-                        // The frame is put together over opaque black; a group over nothing, so that what is not covered is clear.
-                        let (label, target, cleared_to) = match pass {
+                        // The frame is put together over opaque black; a group over nothing, so that what is not covered is clear; and the layers that come after one that read what
+                        // was behind it over what the layers before made (and what that one made of it), which is there.
+                        let (label, target, load) = match pass {
                             PassPlan::PlaceGroup { container, .. } => (
                                 "engine: put the layers of a group in their places",
                                 &group_views[container - 1],
-                                wgpu::Color::TRANSPARENT,
+                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            ),
+                            PassPlan::PlaceLayersOver { .. } => (
+                                "engine: put more layers in their places, over what is there",
+                                &accumulation_view,
+                                wgpu::LoadOp::Load,
                             ),
                             _ => (
                                 "engine: put the layers in their places",
                                 &accumulation_view,
-                                wgpu::Color::BLACK,
+                                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                             ),
                         };
-                        let mut render_pass = begin_pass(&mut encoder, label, target, wgpu::LoadOp::Clear(cleared_to));
+                        let mut render_pass = begin_pass(&mut encoder, label, target, load);
                         render_pass.set_pipeline(&self.pipelines.place.pipeline);
                         for (&(_, slot), bind_group) in slots.iter().zip(&bind_groups) {
                             render_pass.set_bind_group(0, bind_group, &[slot.offset]);
@@ -1501,7 +1537,9 @@ fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
 fn step_call(step: &EffectStep) -> usize {
     match step {
         EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. } => *call,
-        EffectStep::Conversion { .. } => unreachable!("a conversion is not run by a shader"),
+        EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } => {
+            unreachable!("a conversion, and the step that makes the backdrop, are not run by a shader")
+        }
     }
 }
 

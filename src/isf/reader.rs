@@ -160,7 +160,8 @@ pub struct IsfFile {
 }
 
 impl IsfFile {
-    fn has_image_input(&self, name: &str) -> bool {
+    /// Whether the header lists an image input called `name`.
+    pub fn has_image_input(&self, name: &str) -> bool {
         self.inputs
             .iter()
             .any(|input| input.name == name && input.kind == IsfInputKind::Image)

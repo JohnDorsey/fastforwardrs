@@ -684,7 +684,7 @@ fn a_shader_that_says_something_has_other_bytes_than_one_that_says_another() {
 /// the kind of shader the manifest says, and must be one that this build can use. (Every checksum is checked by the download itself.) This is what keeps a shader that does not run out
 /// of the manifest (B7 of `docs/engine-phase-6-6-design.md`).
 #[test]
-#[ignore = "downloads about 0.4 MB from the network"]
+#[ignore = "downloads about 0.5 MB from the network"]
 fn fetch_the_real_shaders_from_the_network_and_find_every_one_of_them_usable_and_of_the_kind_the_manifest_says() {
     let manifest = ShaderManifest::embedded();
     let folder = tempfile::tempdir().unwrap();

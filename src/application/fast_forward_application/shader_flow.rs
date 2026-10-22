@@ -195,6 +195,10 @@ impl FastForwardApplication {
         let Ok(kind) = kind_of_the_shader(file_name, text, images, Wanted::Filter) else {
             return;
         };
+        if let Some(why) = self.why_a_transition_cannot_go_on(owner, kind) {
+            self.show_message("The effect cannot be added", why.to_owned());
+            return;
+        }
         let added = match owner {
             Member::Clip(clip) => self.document.project.add_effect(AnimationTarget::Clip(clip), kind),
             Member::Track(track) => self.document.project.add_effect(AnimationTarget::Track(track), kind),
@@ -202,6 +206,31 @@ impl FastForwardApplication {
         };
         if let Err(error) = added {
             self.say_why_an_effect_was_refused("The effect cannot be added", &error);
+        }
+    }
+
+    /// Why the effect `kind` cannot be put on `owner`, in words, if it is a transition and `owner` is not what one is put on: a transition is put on a clip that has a picture of its own,
+    /// not on a track (which is the clips on it) or on an adjustment clip (which is what is behind it, seen).
+    fn why_a_transition_cannot_go_on(&self, owner: Member, kind: EffectKind) -> Option<&'static str> {
+        if !kind.is_a_transition() {
+            return None;
+        }
+        match owner {
+            Member::Track(_) => Some(
+                "A transition is put on the clip that is on top, and not on a track: it brings that clip in over what is behind it.",
+            ),
+            Member::Clip(clip)
+                if self
+                    .document
+                    .project
+                    .placement_of(clip)
+                    .is_some_and(|placement| !kind.applies_to_a_clip_of_kind(placement.clip.kind())) =>
+            {
+                Some(
+                    "A transition is put on a clip that has a picture of its own, and an adjustment clip has none: it is what is behind it, seen.",
+                )
+            }
+            Member::Clip(_) | Member::Group(_) => None,
         }
     }
 }

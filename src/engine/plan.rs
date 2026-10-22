@@ -47,6 +47,9 @@ pub enum PassPlan {
     /// Clears the picture that the layers are put together in to opaque black and then puts the layers in their places on it, back to front. `layers`
     /// are the numbers of the layers in the description.
     PlaceLayers { layers: Vec<usize> },
+    /// Puts the layers in their places **over what is in the picture that the layers are put together in**, back to front, without clearing it first (phase 6.6): what comes after a layer that
+    /// read what was behind it, which was made by the passes before. `layers` are the numbers of the layers in the description.
+    PlaceLayersOver { layers: Vec<usize> },
     /// Clears the picture of the group that is container number `container` (see `FlatLayers`) to **clear** and puts the layers of the group in their places on it, back to front.
     /// `layers` are their numbers in the list of every layer (the frame's first): those of a group are numbered after those of the frame. It comes before the layer that is
     /// made of the group has its effects run, and before the layers of the container that it is in are put in their places.
@@ -77,6 +80,7 @@ impl FramePlan {
                 PassPlan::Effects { .. } => steps.len(),
                 PassPlan::ClearAccumulation
                 | PassPlan::PlaceLayers { .. }
+                | PassPlan::PlaceLayersOver { .. }
                 | PassPlan::PlaceGroup { .. }
                 | PassPlan::Output => 1,
             })
@@ -108,6 +112,10 @@ pub enum EffectStep {
     LaterPass { call: usize, pass: usize },
     /// A pass of its own that only converts, light to display codes (`into_display`) or display codes to light.
     Conversion { into_display: bool },
+    /// A pass of its own that makes **the picture that the layers behind this one make** (what the picture that the layers are put together in holds now: the *backdrop*) into a picture of
+    /// display codes, for the call with this number among the layer's effects that reads it (phase 6.6). It is right before that call and **does not change the picture that the next
+    /// effect works on**: the call reads this picture and the layer's own. (In the compatibility mode the numbers already are codes, and the pass copies.)
+    Backdrop { call: usize },
 }
 
 /// What [`steps_of_a_run_of_effects`] needs to know of an effect that runs.
@@ -120,6 +128,9 @@ pub struct EffectToRun {
     pub passes: usize,
     /// Whether the effect's own pass can do the conversion before it (when it is the first of its domain) and after it (when it is the last): the engine's colour matrix can.
     pub converts_itself: bool,
+    /// Whether the effect reads what is behind the layer (a shader that was given with a picture of that kind: see [`EffectsThatRun::reads_the_backdrop`]), so that a step makes
+    /// the backdrop into codes before it. Only a shader does, and a shader works on the codes of a screen.
+    pub reads_the_backdrop: bool,
 }
 
 /// The steps that run `effects`, in order, on a picture of light (`working_space_is_light`) or of codes already (the compatibility mode), and give light back.
@@ -144,13 +155,16 @@ pub fn steps_of_a_run_of_effects(effects: &[EffectToRun], working_space_is_light
             _ => steps.push(EffectStep::Conversion { into_display: false }),
         }
     }
-    // The call of an effect, and the second pass after it if it takes two.
+    // The call of an effect, and the second pass after it if it takes two. The effect that reads the backdrop has the step that makes it before the call, once, and not before its later passes.
     fn call(
         steps: &mut Vec<EffectStep>,
         effect: &EffectToRun,
         converts_into_display: bool,
         converts_out_of_display: bool,
     ) {
+        if effect.reads_the_backdrop {
+            steps.push(EffectStep::Backdrop { call: effect.call });
+        }
         steps.push(EffectStep::Call {
             call: effect.call,
             converts_into_display,
@@ -255,11 +269,22 @@ impl KindOfEffect {
     }
 }
 
+/// What the plan needs to know of a shader that was given to the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FactsOfAShader {
+    /// How many passes of the card the shader takes.
+    passes: usize,
+    /// How many images it brings with it (which a call has to name the pictures of).
+    imported_images: usize,
+    /// Whether it reads what is behind its layer (phase 6.6).
+    reads_the_backdrop: bool,
+}
+
 /// The effects the engine can run: the ones it has of its own, and the ones that were given to it as shaders.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectsThatRun {
-    /// The keys of the effects that shaders run: how many passes each takes, and how many images it brings with it (which a call has to name the pictures of).
-    keys_of_shaders: HashMap<String, (usize, usize)>,
+    /// The keys of the effects that shaders run, and what the plan needs to know of each.
+    keys_of_shaders: HashMap<String, FactsOfAShader>,
     /// The tables that the card has, which a look-up table effect needs one of.
     tables: HashSet<TableId>,
 }
@@ -283,18 +308,41 @@ impl EffectsThatRun {
     /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one) and brings `imported` images with it: a call that does not name that many
     /// pictures is not run.
     pub fn add_shader_with_images(&mut self, key: &str, passes: usize, imported: usize) {
-        self.keys_of_shaders.insert(key.to_owned(), (passes.max(1), imported));
+        self.keys_of_shaders.insert(
+            key.to_owned(),
+            FactsOfAShader {
+                passes: passes.max(1),
+                imported_images: imported,
+                reads_the_backdrop: false,
+            },
+        );
+    }
+
+    /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one), brings `imported` images with it, and **reads what is behind its layer** as well as the
+    /// layer's own picture (phase 6.6: a transition). It is run only on a layer of the frame itself: a layer of a group is not behind anything that is opaque.
+    pub fn add_shader_that_reads_the_backdrop(&mut self, key: &str, passes: usize, imported: usize) {
+        self.add_shader_with_images(key, passes, imported);
+        if let Some(facts) = self.keys_of_shaders.get_mut(key) {
+            facts.reads_the_backdrop = true;
+        }
+    }
+
+    /// Whether the shader under `key` reads what is behind its layer (nothing that is not a shader that was given does).
+    pub fn reads_the_backdrop(&self, key: &str) -> bool {
+        self.keys_of_shaders
+            .get(key)
+            .is_some_and(|facts| facts.reads_the_backdrop)
     }
 
     /// How many images the shader under `key` brings with it (none for anything that is not a shader that was given).
     pub fn imported_images_of(&self, key: &str) -> usize {
-        self.keys_of_shaders.get(key).map_or(0, |(_, imported)| *imported)
+        self.keys_of_shaders.get(key).map_or(0, |facts| facts.imported_images)
     }
 
     /// How many passes of the card an effect takes: a shader, as many as it was given with; any other, as many as its kind takes.
     pub fn passes_of(&self, key: &str, kind: KindOfEffect) -> usize {
         match kind {
-            KindOfEffect::Shader => self.keys_of_shaders.get(key).map_or(1, |(passes, _)| *passes),
+            KindOfEffect::Shader => self.keys_of_shaders.get(key).map_or(1, |facts| facts.passes),
             _ => kind.passes(),
         }
     }
@@ -383,8 +431,9 @@ pub fn lut_changes_nothing(values: &[f32]) -> bool {
         .is_some_and(|intensity| *intensity < NEAR_ENOUGH_TO_CHANGE_NOTHING)
 }
 
-/// Which effects of `layer` run, and how many cannot.
-fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (Vec<usize>, usize) {
+/// Which effects of `layer` run, and how many cannot. A shader that reads what is behind its layer runs only `in_the_frame` (the layer is one of the frame's own: what is behind it is
+/// opaque, as every frame is put together over opaque black); in a group the picture that the layers are put together in begins clear, and the effect is counted as one that is not run.
+fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun, in_the_frame: bool) -> (Vec<usize>, usize) {
     // (The picture of a group is a picture for the effects to work on; a colour has none.)
     if matches!(layer.source, LayerSource::Solid(_)) {
         return (Vec::new(), layer.effects.len());
@@ -435,7 +484,8 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
             Some(KindOfEffect::Shader)
                 if effect.values.len() <= MOST_NUMBERS_OF_A_FOREIGN_EFFECT
                     && numbers_are_finite
-                    && effect.images.len() == effects_that_run.imported_images_of(&effect.key) =>
+                    && effect.images.len() == effects_that_run.imported_images_of(&effect.key)
+                    && (in_the_frame || !effects_that_run.reads_the_backdrop(&effect.key)) =>
             {
                 calls.push(number);
             }
@@ -445,15 +495,16 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun) -> (V
     (calls, not_run)
 }
 
-/// The pass that runs the effects of the layer `layer`, which is number `number` in the list of every layer, and the steps of it, if any of its effects runs; and how many of its
-/// effects cannot.
+/// The pass that runs the effects of the layer `layer`, which is number `number` in the list of every layer and is one of the frame's own if `in_the_frame`, and the steps of it, if
+/// any of its effects runs; and how many of its effects cannot.
 fn effects_pass_of(
     number: usize,
     layer: &LayerDescription,
     effects_that_run: &EffectsThatRun,
     working_space_is_light: bool,
+    in_the_frame: bool,
 ) -> (Option<(PassPlan, Vec<EffectStep>)>, usize) {
-    let (calls, not_run) = effects_of(layer, effects_that_run);
+    let (calls, not_run) = effects_of(layer, effects_that_run, in_the_frame);
     if calls.is_empty() {
         return (None, not_run);
     }
@@ -469,6 +520,8 @@ fn effects_pass_of(
                 domain: kind.domain_of_a_call(call_itself),
                 passes: effects_that_run.passes_of(&call_itself.key, kind),
                 converts_itself: kind.converts_itself_for_a_call(call_itself),
+                reads_the_backdrop: kind == KindOfEffect::Shader
+                    && effects_that_run.reads_the_backdrop(&call_itself.key),
             }
         })
         .collect();
@@ -489,15 +542,22 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
     let working_space_is_light = matches!(description.colour.working, WorkingSpace::Linear(_));
     for container in (0..flat.containers.len()).rev() {
         let numbers = flat.containers[container].clone();
+        // The layers that have an effect that reads what is behind them, with the pass that runs their effects: it is not run with the others but when what is behind each of them has been put
+        // together (see below).
+        let mut reading_the_backdrop: Vec<(usize, PassPlan, Vec<EffectStep>)> = Vec::new();
         for number in numbers.clone() {
             let (pass, not_run) = effects_pass_of(
                 number,
                 flat.layers[number].layer,
                 effects_that_run,
                 working_space_is_light,
+                container == 0,
             );
             effects_not_run += not_run;
-            if let Some((pass, steps)) = pass {
+            let Some((pass, steps)) = pass else { continue };
+            if steps.iter().any(|step| matches!(step, EffectStep::Backdrop { .. })) {
+                reading_the_backdrop.push((number, pass, steps));
+            } else {
                 passes.push(pass);
                 steps_of_passes.push(steps);
             }
@@ -512,9 +572,34 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
         } else if numbers.is_empty() {
             passes.push(PassPlan::ClearAccumulation);
             steps_of_passes.push(Vec::new());
-        } else {
+        } else if reading_the_backdrop.is_empty() {
             passes.push(PassPlan::PlaceLayers {
                 layers: numbers.collect(),
+            });
+            steps_of_passes.push(Vec::new());
+        } else {
+            // The layers behind each layer that reads the backdrop are put in their places (the first of them clearing; if there are none, the picture is cleared) before the effects of the layer
+            // run, and the layers from it up to the next one that reads the backdrop are put over what is there afterwards.
+            let mut next_to_put = numbers.start;
+            for (number, pass, steps) in reading_the_backdrop {
+                if number > next_to_put {
+                    let layers = (next_to_put..number).collect();
+                    passes.push(if next_to_put == numbers.start {
+                        PassPlan::PlaceLayers { layers }
+                    } else {
+                        PassPlan::PlaceLayersOver { layers }
+                    });
+                    steps_of_passes.push(Vec::new());
+                } else if next_to_put == numbers.start {
+                    passes.push(PassPlan::ClearAccumulation);
+                    steps_of_passes.push(Vec::new());
+                }
+                passes.push(pass);
+                steps_of_passes.push(steps);
+                next_to_put = number;
+            }
+            passes.push(PassPlan::PlaceLayersOver {
+                layers: (next_to_put..numbers.end).collect(),
             });
             steps_of_passes.push(Vec::new());
         }
@@ -806,6 +891,7 @@ mod tests {
             domain: CallDomain::DisplayReferred,
             passes: 1,
             converts_itself: true,
+            reads_the_backdrop: false,
         }
     }
 
@@ -815,6 +901,7 @@ mod tests {
             domain: CallDomain::DisplayReferred,
             passes: 1,
             converts_itself: false,
+            reads_the_backdrop: false,
         }
     }
 
@@ -824,6 +911,7 @@ mod tests {
             domain: CallDomain::SceneLinear,
             passes: 1,
             converts_itself: false,
+            reads_the_backdrop: false,
         }
     }
 

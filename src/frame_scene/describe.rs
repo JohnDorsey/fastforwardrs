@@ -300,11 +300,8 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
                     .cloned()
                     .collect();
                 let mut children = self.describe_layers(group.first_layer, group.end_layer, &inside);
-                let effects: Vec<EffectCall> = group
-                    .operations
-                    .iter()
-                    .filter_map(|operation| call_of_an_operation(operation, self.working, &mut *self.supply))
-                    .collect();
+                // (A group is a picture the size of the frame already: a transition among its effects needs no group made for it.)
+                let (effects, _) = calls_of_the_operations(&group.operations, self.working, &mut *self.supply);
                 if effects.is_empty() {
                     // (A group whose effects do nothing at this frame is pass-through: its layers are drawn into what it is in. What is behind it is black already, if it
                     // is at the frame, so no black is put there.)
@@ -422,25 +419,24 @@ fn describe_layer(
         PreviewLayerContent::Generator => {
             // (Its shader reads no picture and makes one, so what the effects work on is a picture that has nothing in it, the size of the frame, and what they make of it is put where
             // the clip is. A generator whose shader cannot be run, which has no effect that does anything, is nothing.)
-            let effects: Vec<EffectCall> = layer
-                .operations
-                .iter()
-                .filter_map(|operation| call_of_an_operation(operation, working, &mut *supply))
-                .collect();
+            let (effects, reads_the_backdrop) = calls_of_the_operations(&layer.operations, working, &mut *supply);
             if effects.is_empty() {
                 return None;
             }
-            return Some(LayerDescription {
-                source: LayerSource::Group(GroupDescription {
-                    layers: vec![LayerDescription {
-                        source: LayerSource::Solid([0, 0, 0, 0]),
-                        corners: CORNERS_OF_THE_WHOLE_PICTURE,
-                        effects: Vec::new(),
-                    }],
-                }),
-                corners,
-                effects,
-            });
+            return Some(with_the_transition_done_in_the_frame(
+                LayerDescription {
+                    source: LayerSource::Group(GroupDescription {
+                        layers: vec![LayerDescription {
+                            source: LayerSource::Solid([0, 0, 0, 0]),
+                            corners: CORNERS_OF_THE_WHOLE_PICTURE,
+                            effects: Vec::new(),
+                        }],
+                    }),
+                    corners,
+                    effects,
+                },
+                &reads_the_backdrop,
+            ));
         }
         PreviewLayerContent::Video(VideoInThePicture::Waiting) | PreviewLayerContent::Image { picture: None, .. } => {
             return Some(LayerDescription {
@@ -455,16 +451,67 @@ fn describe_layer(
     }
     // A layer's effects are its operations, one call each (the colours that are mixed one after another are one operation already, and the window cuts the
     // colours off once, at the end), unless one changes nothing.
-    let effects = layer
-        .operations
-        .iter()
-        .filter_map(|operation| call_of_an_operation(operation, working, &mut *supply))
-        .collect();
-    Some(LayerDescription {
-        source: LayerSource::Picture(wanted.id),
+    let (effects, reads_the_backdrop) = calls_of_the_operations(&layer.operations, working, &mut *supply);
+    Some(with_the_transition_done_in_the_frame(
+        LayerDescription {
+            source: LayerSource::Picture(wanted.id),
+            corners,
+            effects,
+        },
+        &reads_the_backdrop,
+    ))
+}
+
+/// The calls of the engine that do `operations`, in order (see [`call_of_an_operation`]; an operation that has no call is left out), and for each call whether it **reads what is behind
+/// the layer**: a transition.
+fn calls_of_the_operations(
+    operations: &[PictureOperation],
+    working: WorkingSpace,
+    supply: &mut impl PictureSupply,
+) -> (Vec<EffectCall>, Vec<bool>) {
+    let mut calls = Vec::with_capacity(operations.len());
+    let mut reads_the_backdrop = Vec::with_capacity(operations.len());
+    for operation in operations {
+        if let Some(call) = call_of_an_operation(operation, working, supply) {
+            calls.push(call);
+            reads_the_backdrop.push(matches!(
+                operation,
+                PictureOperation::Shader {
+                    reads_the_backdrop: true,
+                    ..
+                }
+            ));
+        }
+    }
+    (calls, reads_the_backdrop)
+}
+
+/// `layer`, if none of its effects reads what is behind it; otherwise **a group of one layer over the whole frame, with the effects from the first that does on**, and the layer, with the
+/// effects before it, in the group (`reads_the_backdrop` says, for each of the layer's effects in order, whether it does). A shader reads a picture by the coordinates of the picture
+/// it works on, so a transition on the picture of a clip that is not the whole frame would be given the whole backdrop squeezed into the clip's rectangle; in the group, the clip is where it is
+/// in a picture the size of the frame, the backdrop is the frame behind it, and the two lie on each other (see `docs/engine-phase-6-6-design.md`, T1a).
+fn with_the_transition_done_in_the_frame(layer: LayerDescription, reads_the_backdrop: &[bool]) -> LayerDescription {
+    debug_assert_eq!(layer.effects.len(), reads_the_backdrop.len());
+    let Some(first) = reads_the_backdrop.iter().position(|reads| *reads) else {
+        return layer;
+    };
+    let LayerDescription {
+        source,
         corners,
-        effects,
-    })
+        mut effects,
+    } = layer;
+    let from_the_transition_on = effects.split_off(first);
+    LayerDescription {
+        source: LayerSource::Group(GroupDescription {
+            layers: vec![LayerDescription {
+                source,
+                corners,
+                effects,
+            }],
+        }),
+        corners: CORNERS_OF_THE_WHOLE_PICTURE,
+        effects: from_the_transition_on,
+    }
 }
 
 /// How the numbers of an image that a shader brings with it are read: **as they are**. The engine makes a picture for the working space (it reads the codes, takes the light of them
@@ -511,6 +558,7 @@ fn call_of_an_operation(
             numbers,
             state,
             images,
+            reads_the_backdrop: _,
         } => {
             let colour = colour_of_an_imported_image(working);
             let tag = colour_tag_of(colour, working);

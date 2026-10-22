@@ -17,7 +17,7 @@ const BLUR: &str = include_str!("../isf/fixtures/gaussian_blur.fs");
 const WEIGHTS: [f32; 5] = [0.227_027_03, 0.194_594_6, 0.121_621_62, 0.054_054_054, 0.016_216_217];
 
 /// Installs the ISF shader `source` in the renderer under `key`, the way the program does: compiled, with the structure that its header says.
-fn installed_from_isf(renderer: &mut FrameRenderer, key: &str, source: &str) {
+pub(super) fn installed_from_isf(renderer: &mut FrameRenderer, key: &str, source: &str) {
     let compiled = compile(&read(source).unwrap()).unwrap_or_else(|problems| panic!("{problems:?}"));
     let structure = compiled
         .structure
@@ -159,6 +159,49 @@ fn a_point_reaches_the_shader_as_the_file_wrote_it_at_every_size_of_the_picture(
                 "{width} by {height}: {:?}",
                 frame.pixel(0, 0)
             );
+        }
+    });
+}
+
+/// A shader that has, at the top of its code, variables whose initialisers need what the call gives (an input, the size of the picture): **naga drops such initialisers
+/// without a word** (a global is given only an initialiser that is a constant), so the variables were zero, and every transition that begins with `float ratio = RENDERSIZE.x / RENDERSIZE.y;`
+/// drew nothing right. The corpus of the Vidvox shaders found it (phase 6.6: Circle Crop was black at every progress).
+const GLOBALS_THAT_NEED_THE_CALL: &str =
+    "/*{ \"INPUTS\": [ { \"NAME\": \"gain\", \"TYPE\": \"float\", \"DEFAULT\": 0.5, \"MIN\": 0.0, \"MAX\": 1.0 } ] }*/
+float half_gain = gain * 0.5;
+float aspect = RENDERSIZE.x / RENDERSIZE.y;
+vec2 both = vec2(half_gain, aspect / 4.0);
+void main() { gl_FragColor = vec4(both, 0.0, 1.0); }
+";
+
+/// Regression test for what the corpus found: a global whose initialiser needs the numbers of the call is given it, at every size of the picture and for every value of the input.
+#[test]
+fn a_global_whose_initialiser_needs_the_numbers_of_the_call_has_it_when_the_shader_runs() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        installed_from_isf(&mut renderer, "isf:globals", GLOBALS_THAT_NEED_THE_CALL);
+        for ((width, height), gain) in [((48, 30), 0.5_f32), ((64, 36), 0.5), ((48, 30), 1.0)] {
+            let picture = flat(width, height, [10, 20, 30, 255]);
+            let (frame, _) = frame_of(
+                &mut renderer,
+                (width, height),
+                &[(1, &picture)],
+                vec![whole_frame(1, vec![call("isf:globals", &[0.0, 0.0, 0.0, 0.0, gain])])],
+            );
+            let aspect = width as f32 / height as f32;
+            let wanted = [
+                (gain * 0.5 * 255.0).round() as u8,
+                (aspect / 4.0 * 255.0).round() as u8,
+                0,
+                255,
+            ];
+            let got = frame.pixel(width / 2, height / 2);
+            let off = (0..4).map(|number| got[number].abs_diff(wanted[number])).max().unwrap();
+            assert!(
+                off <= 1,
+                "{width} by {height}, gain {gain}: the pixel is {got:?} where {wanted:?} is wanted"
+            );
+            assert!(frame.every_pixel_is(got), "one colour all over: the picture is flat");
         }
     });
 }

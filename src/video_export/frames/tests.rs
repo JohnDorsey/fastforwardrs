@@ -885,3 +885,248 @@ fn an_adjustment_clip_is_a_group_of_what_is_behind_it_over_black_with_its_effect
     );
     assert_eq!(held.layers.len(), 3, "the black, the video and the text");
 }
+
+// --- a transition, from the project to the pixels (phase 6.6) ---
+
+/// A transition that is the mix of its two pictures by its progress.
+const A_TRANSITION: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.0 } ] }*/\nvoid main() { gl_FragColor = mix(IMG_THIS_PIXEL(startImage), IMG_THIS_PIXEL(endImage), progress); }\n";
+
+fn a_flat_opaque_picture(width: u32, height: u32, colour: [u8; 3]) -> RgbaPicture {
+    RgbaPicture {
+        width_in_pixels: width,
+        height_in_pixels: height,
+        rgba_pixels: [colour[0], colour[1], colour[2], 255].repeat((width * height) as usize),
+    }
+}
+
+/// Describes `timeline_frame` of the export of `plan` and draws it on the software adapter, with the pictures that the describer sends (kept from one frame to the next, as the engine
+/// keeps them) and the shaders that the frame asks for, which are taken off the shelf as the engine does. Gives the finished frame and the description.
+fn drawn_by_the_engine(
+    renderer: &mut crate::engine::FrameRenderer,
+    describer: &mut FrameDescriber<'_, Script>,
+    timeline_frame: u64,
+) -> (crate::engine::RenderedFrame, FrameDescription) {
+    let (described, sent) = describe(describer, timeline_frame);
+    for (id, data) in &sent {
+        renderer.upload_picture(*id, data).unwrap();
+    }
+    for layer in &described.description.flatten().layers {
+        for effect in &layer.layer.effects {
+            if let Some((source, structure)) = crate::engine::published_effect_shader_with_structure(&effect.key) {
+                renderer
+                    .install_effect_with_structure(
+                        &effect.key,
+                        &crate::engine::guard_wgsl(&source, crate::engine::DEFAULT_MOST_PASSES_OF_A_LOOP).unwrap(),
+                        &structure,
+                    )
+                    .unwrap();
+            }
+        }
+    }
+    let (frame, statistics) = renderer
+        .render(&described.description, std::time::Duration::from_secs(60))
+        .unwrap();
+    assert_eq!(statistics.effects_not_run, 0, "frame {timeline_frame}");
+    (frame, described.description)
+}
+
+#[test]
+fn a_clip_over_another_that_has_a_transition_with_its_progress_animated_comes_over_it_as_the_progress_goes_from_0_to_1()
+{
+    // The way that transitions are made: one clip on a track above another, and the effect on the clip on top. The one below is red, the one on top green, both are picture files that
+    // are not the whole frame (100 by 50, in a frame that is 16 by 9), and the progress is 0 at the first frame of the clip on top and 1 forty frames later.
+    let mut project = Project::empty();
+    project.import_source(picture_source(2, 100, 50), frame(0)).unwrap();
+    project.import_source(picture_source(3, 100, 50), frame(0)).unwrap();
+    assert_eq!(
+        project.tracks().len(),
+        2,
+        "a premise: the second picture file is on a track of its own, in front"
+    );
+    // (The tracks are listed from the front: the first is the one that was made last, which has the green picture.)
+    let on_top = project.tracks()[0].placement_at_index(0).unwrap().id;
+    assert_eq!(
+        project
+            .source(SourceMediaIdentifier::new(3))
+            .map(|source| source.identifier),
+        Some(SourceMediaIdentifier::new(3)),
+        "a premise: the green picture is a source of the project"
+    );
+    let target = AnimationTarget::Clip(on_top);
+    let file = crate::isf::read(A_TRANSITION).unwrap();
+    let kind =
+        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "mix.fs", A_TRANSITION)).unwrap();
+    assert!(kind.is_installed() && kind.is_a_transition(), "a premise");
+    let instance = project.add_effect(target, kind).unwrap();
+    let progress = PropertyId::effect_value(kind, instance, 0);
+    make_a_keyframe(&mut project, target, progress, 0, PropertyValue::Number(0.0));
+    make_a_keyframe(&mut project, target, progress, 40, PropertyValue::Number(1.0));
+
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let script = script_of_pictures(0);
+    let images = HashMap::from([
+        (
+            SourceMediaIdentifier::new(2),
+            a_flat_opaque_picture(100, 50, [200, 40, 40]),
+        ),
+        (
+            SourceMediaIdentifier::new(3),
+            a_flat_opaque_picture(100, 50, [40, 200, 40]),
+        ),
+    ]);
+    let mut describer = describer_of(&plan, &script, images, Box::new(NoFontsYet));
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = crate::engine::FrameRenderer::new(graphics.device.clone());
+        let mut centre_of = |timeline_frame: u64| {
+            let (frame, description) = drawn_by_the_engine(&mut renderer, &mut describer, timeline_frame);
+            assert!(
+                description
+                    .layers
+                    .iter()
+                    .any(|layer| matches!(layer.source, LayerSource::Group(_)) && layer.effects.len() == 1),
+                "the clip with the transition is a group that has the transition: {description:?}"
+            );
+            frame.pixel(frame.width_in_pixels / 2, frame.height_in_pixels / 2)
+        };
+        let near = |got: [u8; 4], wanted: [u8; 4], when: &str| {
+            let off = (0..4).map(|number| got[number].abs_diff(wanted[number])).max().unwrap();
+            assert!(off <= 3, "{when}: {got:?} where {wanted:?} is wanted");
+        };
+        near(
+            centre_of(0),
+            [200, 40, 40, 255],
+            "at progress 0 what is behind (the red one) is all that is seen",
+        );
+        near(
+            centre_of(20),
+            [120, 120, 40, 255],
+            "at progress 0.5 the two are mixed half and half",
+        );
+        near(centre_of(10), [160, 80, 40, 255], "at progress 0.25");
+        near(
+            centre_of(40),
+            [40, 200, 40, 255],
+            "at progress 1 the clip on top is all that is seen",
+        );
+        near(centre_of(41), [40, 200, 40, 255], "and it stays so");
+    });
+}
+
+#[test]
+fn a_transition_on_a_clip_group_brings_the_picture_of_the_group_over_what_is_behind_it() {
+    // Red at the back, and in front of it a group of a green clip and a blue one over it (which covers it): the group has the transition, at progress 0.5, which a group does not animate.
+    let mut project = Project::empty();
+    project.import_source(picture_source(2, 100, 50), frame(0)).unwrap();
+    project.import_source(picture_source(3, 100, 50), frame(0)).unwrap();
+    project.import_source(picture_source(4, 100, 50), frame(0)).unwrap();
+    assert_eq!(project.tracks().len(), 3, "a premise");
+    let (blue, green) = (
+        project.tracks()[0].placement_at_index(0).unwrap().id,
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    let group = project
+        .create_group(
+            crate::project::GroupKind::ClipGroup,
+            &[crate::project::Member::Clip(green), crate::project::Member::Clip(blue)],
+        )
+        .unwrap();
+    let file = crate::isf::read(A_TRANSITION).unwrap();
+    let kind =
+        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "mix.fs", A_TRANSITION)).unwrap();
+    assert!(
+        kind.applies_to_a_group_of_kind(crate::project::GroupKind::ClipGroup),
+        "a premise"
+    );
+    let instance = project.add_effect_to_the_group(group, kind).unwrap();
+    project
+        .set_effect_value_of_the_group(
+            group,
+            PropertyId::effect_value(kind, instance, 0),
+            &PropertyValue::Number(0.5),
+        )
+        .unwrap();
+
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let script = script_of_pictures(0);
+    let images = HashMap::from([
+        (
+            SourceMediaIdentifier::new(2),
+            a_flat_opaque_picture(100, 50, [200, 40, 40]),
+        ),
+        (
+            SourceMediaIdentifier::new(3),
+            a_flat_opaque_picture(100, 50, [40, 200, 40]),
+        ),
+        (
+            SourceMediaIdentifier::new(4),
+            a_flat_opaque_picture(100, 50, [40, 40, 200]),
+        ),
+    ]);
+    let mut describer = describer_of(&plan, &script, images, Box::new(NoFontsYet));
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = crate::engine::FrameRenderer::new(graphics.device.clone());
+        let (frame, description) = drawn_by_the_engine(&mut renderer, &mut describer, 0);
+        assert_eq!(
+            description.layers.len(),
+            2,
+            "the red clip, and the group over it: {description:?}"
+        );
+        assert!(
+            matches!(description.layers[1].source, LayerSource::Group(_)) && description.layers[1].effects.len() == 1,
+            "the group has the transition, and it was not made a group of another"
+        );
+        let got = frame.pixel(frame.width_in_pixels / 2, frame.height_in_pixels / 2);
+        let wanted = [120, 40, 120, 255];
+        let off = (0..4).map(|number| got[number].abs_diff(wanted[number])).max().unwrap();
+        assert!(
+            off <= 3,
+            "{got:?} where the red and the blue (the picture of the group) mixed half and half is {wanted:?}"
+        );
+    });
+}
+
+#[test]
+fn a_transition_on_a_tag_is_on_each_clip_of_the_tag_and_each_clip_is_made_a_group_for_it() {
+    let mut project = Project::empty();
+    project.import_source(picture_source(2, 100, 50), frame(0)).unwrap();
+    project.import_source(picture_source(3, 100, 50), frame(0)).unwrap();
+    let (front, back) = (
+        project.tracks()[0].placement_at_index(0).unwrap().id,
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    let tag = project
+        .create_group(
+            crate::project::GroupKind::Tag,
+            &[crate::project::Member::Clip(front), crate::project::Member::Clip(back)],
+        )
+        .unwrap();
+    let file = crate::isf::read(A_TRANSITION).unwrap();
+    let kind =
+        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "mix.fs", A_TRANSITION)).unwrap();
+    project.add_effect_to_the_group(tag, kind).unwrap();
+
+    let plan = plan_export(&project, Settings::DEFAULT).unwrap();
+    let script = script_of_pictures(0);
+    let images = HashMap::from([
+        (
+            SourceMediaIdentifier::new(2),
+            a_flat_opaque_picture(100, 50, [200, 40, 40]),
+        ),
+        (
+            SourceMediaIdentifier::new(3),
+            a_flat_opaque_picture(100, 50, [40, 200, 40]),
+        ),
+    ]);
+    let mut describer = describer_of(&plan, &script, images, Box::new(NoFontsYet));
+    let (described, _) = describe(&mut describer, 0);
+    let layers = &described.description.layers;
+    assert_eq!(layers.len(), 2);
+    for layer in layers {
+        assert!(
+            matches!(layer.source, LayerSource::Group(_)),
+            "each clip is made a group: {layer:?}"
+        );
+        assert_eq!(layer.effects.len(), 1, "with the transition of the tag: {layer:?}");
+        assert!(layer.effects[0].key.starts_with("isf:mix-"));
+    }
+}
