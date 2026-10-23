@@ -1,0 +1,181 @@
+cut_in_two: 90 frames, the picture is (1920, 1080), 1 track(s)
+frame 0
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 10, green: 20, blue: 30, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 10, green: 20, blue: 30, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 fb841e9161d27d70
+  layer 0: picture 960x324 bb4a46b27bc0dd26
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 1
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 13, green: 22, blue: 32, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 13, green: 22, blue: 32, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 6bdeb9c4f2fbe18f
+  layer 0: picture 960x324 c44822aa59557df9
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 2
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 15, green: 25, blue: 34, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 15, green: 25, blue: 34, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 966bd5fe0099278a
+  layer 0: picture 960x324 85c97c1d2e07279e
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 5
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 23, green: 32, blue: 41, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 23, green: 32, blue: 41, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 8442e6685f423d86
+  layer 0: picture 960x324 a4119ebdd3044e51
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 9
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 34, green: 42, blue: 50, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 34, green: 42, blue: 50, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 c3af43f507b6b856
+  layer 0: picture 960x324 0bd6b4ba1622fab2
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 10
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 37, green: 45, blue: 52, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 37, green: 45, blue: 52, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 d0a091e330fdd35e
+  layer 0: picture 960x324 3da840b37fb60da4
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 11
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 40, green: 47, blue: 55, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 40, green: 47, blue: 55, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 a862865d920453ae
+  layer 0: picture 960x324 844122648a6b0963
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 19
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 61, green: 67, blue: 73, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 61, green: 67, blue: 73, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 af81fc2a93fde9dd
+  layer 0: picture 960x324 91b44161c35e6bca
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 20
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 64, green: 70, blue: 75, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 64, green: 70, blue: 75, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 d3de50771fc70525
+  layer 0: picture 960x324 a774db6b12523469
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 21
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 66, green: 72, blue: 77, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 66, green: 72, blue: 77, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 f9ccbf4ea35d189f
+  layer 0: picture 960x324 fcfc9e2edeafb3f7
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 29
+  text clip of track TrackId(0) at 0: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 88, green: 92, blue: 95, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 88, green: 92, blue: 95, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 d3cdce0e4eab814b
+  layer 0: picture 960x324 64ade8f78fd5f1ed
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 30
+  text clip of track TrackId(0) at 30: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 91, green: 94, blue: 97, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 91, green: 94, blue: 97, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 5eed59812a3e08ec
+  layer 0: picture 960x324 6adb3e28494e188f
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 31
+  text clip of track TrackId(0) at 30: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 94, green: 96, blue: 99, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 94, green: 96, blue: 99, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 aaf6ff829b74c6e5
+  layer 0: picture 960x324 71ae96eebc6c26a6
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 39
+  text clip of track TrackId(0) at 30: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 115, green: 116, blue: 117, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 115, green: 116, blue: 117, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 2f889bb2511905d2
+  layer 0: picture 960x324 6af8b418284a7340
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 40
+  text clip of track TrackId(0) at 30: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 118, green: 119, blue: 120, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 118, green: 119, blue: 120, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 34535ce478a572e3
+  layer 0: picture 960x324 ecb86b083fdea1ca
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 41
+  text clip of track TrackId(0) at 30: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 121, green: 121, blue: 122, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 121, green: 121, blue: 122, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 14d0d588a9589914
+  layer 0: picture 960x324 3408ca8848cc4a59
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 44
+  text clip of track TrackId(0) at 30: TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 129, green: 129, blue: 129, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Before", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 129, green: 129, blue: 129, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 60b6078f294ed28f
+  layer 0: picture 960x324 afa051e02e95da70
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 45
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 131, green: 131, blue: 131, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 131, green: 131, blue: 131, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 43c8df8fba704da0
+  layer 0: picture 960x324 70ac71f0bf2959c4
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 46
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 134, green: 134, blue: 133, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 134, green: 134, blue: 133, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 7387494efa132b6c
+  layer 0: picture 960x324 32397caccf1d8718
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 49
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 142, green: 141, blue: 140, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 142, green: 141, blue: 140, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 d2252f83ddb74c7c
+  layer 0: picture 960x324 6c578cc614195d0f
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 50
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 145, green: 143, blue: 142, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 145, green: 143, blue: 142, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 29572a30b5fbd55b
+  layer 0: picture 960x324 f88e2a9fcb7d6c82
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 51
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 148, green: 146, blue: 144, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 148, green: 146, blue: 144, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 b0ec74c9b6da1a5b
+  layer 0: picture 960x324 d70ec8a59ce54c0e
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 54
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 156, green: 153, blue: 151, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 156, green: 153, blue: 151, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 9d8dbac1dce02b21
+  layer 0: picture 960x324 43bcdf1619b7e181
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 55
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 158, green: 156, blue: 153, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 158, green: 156, blue: 153, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 a8edad6b8851995e
+  layer 0: picture 960x324 8ae53d03eb01e8ac
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 56
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 161, green: 158, blue: 156, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 161, green: 158, blue: 156, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 3c81c292f297e116
+  layer 0: picture 960x324 1a407df409b6fdc5
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 59
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 169, green: 166, blue: 162, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 169, green: 166, blue: 162, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 a36955c1a1c5b3e8
+  layer 0: picture 960x324 eb5468a43596318d
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 60
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 172, green: 168, blue: 165, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 172, green: 168, blue: 165, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 a1d1a31df8b9c65c
+  layer 0: picture 960x324 2f84f47885f9ad8e
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 61
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 175, green: 171, blue: 167, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 175, green: 171, blue: 167, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 2f01dcc6533eab08
+  layer 0: picture 960x324 8f7a1fce9868ce0b
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 69
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 196, green: 191, blue: 185, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 196, green: 191, blue: 185, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 48665b8a77e1a635
+  layer 0: picture 960x324 a9c7a310d4280cd2
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 70
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 199, green: 193, blue: 187, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 199, green: 193, blue: 187, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 13071d65739b3506
+  layer 0: picture 960x324 97570c9a65ff6a3b
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 71
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 201, green: 195, blue: 189, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 201, green: 195, blue: 189, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 21d9487077ab2468
+  layer 0: picture 960x324 711ca744c0eb507b
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 79
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 223, green: 215, blue: 207, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 223, green: 215, blue: 207, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 0866af68657bcc84
+  layer 0: picture 960x324 a5c0686202f3d52b
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 80
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 226, green: 218, blue: 210, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 226, green: 218, blue: 210, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 8d3e8e2ad533e527
+  layer 0: picture 960x324 68ed8da14804c825
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 81
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 228, green: 220, blue: 212, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 228, green: 220, blue: 212, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 7b3870279f4f4841
+  layer 0: picture 960x324 65f956df137619fc
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 88
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 247, green: 238, blue: 228, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 247, green: 238, blue: 228, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 9e25c408566913d8
+  layer 0: picture 960x324 041d4f7206ca27dd
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 89
+  text clip of track TrackId(0) at 30: TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 250, green: 240, blue: 230, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "After", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 250, green: 240, blue: 230, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 f183c24455a35eb9
+  layer 0: picture 960x324 3b945aa792cc9995
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]

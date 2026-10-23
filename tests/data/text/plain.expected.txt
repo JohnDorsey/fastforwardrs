@@ -1,0 +1,159 @@
+plain: 100 frames, the picture is (1920, 1080), 1 track(s)
+frame 0
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  the drawer was asked for TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } } on 1920x1080, made 1536x173 f597ca743ac9aa06
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 1
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 2
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 5
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 9
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 10
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 11
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 19
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 20
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 21
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 29
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 30
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 31
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 39
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 40
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 41
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 44
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 45
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 46
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 49
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 50
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 51
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 54
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 55
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 56
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 59
+  text clip of track TrackId(0) at 0: TextObject { text: "Text", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.1, top: 0.74, width: 0.8, height: 0.16 }, rotation: Angle { degrees: 0.0 } }
+  layer 0: picture 1536x173 a9c556a0bebafba2
+    corners [0.10000, 0.74000, 0.90000, 0.74000, 0.90000, 0.90000, 0.10000, 0.90000]
+frame 60
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 66697782357362cc
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 61
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 69
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 70
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 71
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 79
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 80
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 81
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 88
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 89
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 90
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 91
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+frame 99
+  text clip of track TrackId(0) at 60: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]

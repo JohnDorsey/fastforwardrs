@@ -1,0 +1,95 @@
+{
+  "file_format": "fastforwardrs-project",
+  "file_format_version": 17,
+  "sources": [],
+  "tracks": [
+    {
+      "title": "track 1",
+      "gain_decibels": 0.0,
+      "speed_factor": 1,
+      "muted": false,
+      "clips": [
+        {
+          "kind": "crate",
+          "gap_before_frames": 5,
+          "duration_in_frames": 56,
+          "drawer": [
+            {
+              "property": "colour",
+              "target": {
+                "track": 1,
+                "clip": 0
+              },
+              "keyframes": [
+                {
+                  "frame": 0,
+                  "value": "#FFFFFFFF"
+                },
+                {
+                  "frame": 55,
+                  "value": "#00FF00FF"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "track 0",
+      "gain_decibels": 0.0,
+      "speed_factor": 1,
+      "muted": false,
+      "clips": [
+        {
+          "kind": "text",
+          "duration_in_frames": 90,
+          "text": "Hello,\nworld",
+          "font_family": "Arial",
+          "font_size_fraction_of_frame_height": 0.037037037,
+          "colour": "#FFC80080",
+          "area": {
+            "left_fraction_of_frame_width": 0.1,
+            "top_fraction_of_frame_height": 0.2,
+            "width_fraction_of_frame_width": 0.5,
+            "height_fraction_of_frame_height": 0.3
+          },
+          "rotation_degrees": 15.0,
+          "drawer": [
+            {
+              "property": "text",
+              "keyframes": [
+                {
+                  "frame": 0,
+                  "value": "First"
+                },
+                {
+                  "frame": 20,
+                  "value": "Second"
+                }
+              ]
+            },
+            {
+              "property": "font size",
+              "keyframes": [
+                {
+                  "frame": 30,
+                  "value": 0.1
+                },
+                {
+                  "frame": 50,
+                  "value": 0.15
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "speed_indicator": {
+    "left_fraction_of_frame_width": 0.03,
+    "top_fraction_of_frame_height": 0.04,
+    "height_fraction_of_frame_height": 0.08
+  }
+}

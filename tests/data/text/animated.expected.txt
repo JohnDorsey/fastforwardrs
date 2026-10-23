@@ -1,0 +1,161 @@
+animated: 90 frames, the picture is (1920, 1080), 1 track(s)
+frame 0
+frame 1
+frame 2
+frame 5
+frame 9
+frame 10
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.050000012, top: 0.25, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06 }, colour: TextColour { red: 255, green: 255, blue: 255, alpha: 255 }, area: CanvasArea { left: 0.050000012, top: 0.25, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 a2276e04dd22ac2f
+  layer 0: picture 960x324 d077052beca684db
+    corners [0.08036, 0.14008, 0.56332, 0.37014, 0.51964, 0.65992, 0.03668, 0.42986]
+frame 11
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06177215 }, colour: TextColour { red: 255, green: 249, blue: 249, alpha: 255 }, area: CanvasArea { left: 0.05316457, top: 0.25126582, width: 0.5037975, height: 0.30253166 }, rotation: Angle { degrees: 14.303798 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.06177215 }, colour: TextColour { red: 255, green: 249, blue: 249, alpha: 255 }, area: CanvasArea { left: 0.05316457, top: 0.25126582, width: 0.5037975, height: 0.30253166 }, rotation: Angle { degrees: 14.303798 } } on 1920x1080, made 967x327 84c725195c6578a2
+  layer 0: picture 967x327 68442ee92fb3d764
+    corners [0.08200, 0.14532, 0.57017, 0.36660, 0.52813, 0.65975, 0.03995, 0.43847]
+frame 19
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.07594936 }, colour: TextColour { red: 255, green: 198, blue: 198, alpha: 255 }, area: CanvasArea { left: 0.07848102, top: 0.2613924, width: 0.53417724, height: 0.3227848 }, rotation: Angle { degrees: 8.734177 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.07594936 }, colour: TextColour { red: 255, green: 198, blue: 198, alpha: 255 }, area: CanvasArea { left: 0.07848102, top: 0.2613924, width: 0.53417724, height: 0.3227848 }, rotation: Angle { degrees: 8.734177 } } on 1920x1080, made 1026x349 a8cc731705d9c0b4
+  layer 0: picture 1026x349 4c8dff3305a0282a
+    corners [0.09536, 0.19116, 0.62335, 0.33537, 0.59578, 0.65441, 0.06779, 0.51020]
+frame 20
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.07772152 }, colour: TextColour { red: 255, green: 191, blue: 191, alpha: 255 }, area: CanvasArea { left: 0.08164555, top: 0.26265824, width: 0.5379747, height: 0.32531646 }, rotation: Angle { degrees: 8.037975 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.07772152 }, colour: TextColour { red: 255, green: 191, blue: 191, alpha: 255 }, area: CanvasArea { left: 0.08164555, top: 0.26265824, width: 0.5379747, height: 0.32531646 }, rotation: Angle { degrees: 8.037975 } } on 1920x1080, made 1033x351 0ae4da6e3b48292b
+  layer 0: picture 1033x351 ed9118cde4948738
+    corners [0.09708, 0.19739, 0.62977, 0.33112, 0.60418, 0.65324, 0.07149, 0.51951]
+frame 21
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.07949367 }, colour: TextColour { red: 255, green: 185, blue: 185, alpha: 255 }, area: CanvasArea { left: 0.08481014, top: 0.26392406, width: 0.5417721, height: 0.3278481 }, rotation: Angle { degrees: 7.341772 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.07949367 }, colour: TextColour { red: 255, green: 185, blue: 185, alpha: 255 }, area: CanvasArea { left: 0.08481014, top: 0.26392406, width: 0.5417721, height: 0.3278481 }, rotation: Angle { degrees: 7.341772 } } on 1920x1080, made 1040x354 840975c3eb00451f
+  layer 0: picture 1040x354 b7b6aaf1f3c21fc0
+    corners [0.09881, 0.20373, 0.63614, 0.32681, 0.61258, 0.65197, 0.07525, 0.52889]
+frame 29
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.09367089 }, colour: TextColour { red: 255, green: 134, blue: 134, alpha: 255 }, area: CanvasArea { left: 0.110126585, top: 0.27405065, width: 0.5721519, height: 0.3481013 }, rotation: Angle { degrees: 1.772152 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.09367089 }, colour: TextColour { red: 255, green: 134, blue: 134, alpha: 255 }, area: CanvasArea { left: 0.110126585, top: 0.27405065, width: 0.5721519, height: 0.3481013 }, rotation: Angle { degrees: 1.772152 } } on 1920x1080, made 1099x376 2141398097c95811
+  layer 0: picture 1099x376 2e3fd3f6922b6192
+    corners [0.11329, 0.25841, 0.68517, 0.28986, 0.67911, 0.63780, 0.10724, 0.60634]
+frame 30
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.09544304 }, colour: TextColour { red: 255, green: 128, blue: 128, alpha: 255 }, area: CanvasArea { left: 0.113291144, top: 0.27531648, width: 0.5759494, height: 0.3506329 }, rotation: Angle { degrees: 1.0759497 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.09544304 }, colour: TextColour { red: 255, green: 128, blue: 128, alpha: 255 }, area: CanvasArea { left: 0.113291144, top: 0.27531648, width: 0.5759494, height: 0.3506329 }, rotation: Angle { degrees: 1.0759497 } } on 1920x1080, made 1106x379 5c962fd893bbe2aa
+  layer 0: picture 1106x379 e9f914a5f2c0738f
+    corners [0.11519, 0.26573, 0.69104, 0.28496, 0.68734, 0.63553, 0.11149, 0.61631]
+frame 31
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.09721519 }, colour: TextColour { red: 255, green: 121, blue: 121, alpha: 255 }, area: CanvasArea { left: 0.116455704, top: 0.2765823, width: 0.57974684, height: 0.35316455 }, rotation: Angle { degrees: 0.37974644 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.09721519 }, colour: TextColour { red: 255, green: 121, blue: 121, alpha: 255 }, area: CanvasArea { left: 0.116455704, top: 0.2765823, width: 0.57974684, height: 0.35316455 }, rotation: Angle { degrees: 0.37974644 } } on 1920x1080, made 1113x381 7e8aa65ff2d0ad58
+  layer 0: picture 1113x381 ca70f06808e9663b
+    corners [0.11712, 0.27317, 0.69685, 0.28000, 0.69554, 0.63316, 0.11580, 0.62633]
+frame 39
+  text clip of track TrackId(0) at 10: TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.11139241 }, colour: TextColour { red: 255, green: 70, blue: 70, alpha: 255 }, area: CanvasArea { left: 0.14177215, top: 0.28670886, width: 0.6101266, height: 0.37341774 }, rotation: Angle { degrees: -5.1898746 } }
+  the drawer was asked for TextObject { text: "One", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.11139241 }, colour: TextColour { red: 255, green: 70, blue: 70, alpha: 255 }, area: CanvasArea { left: 0.14177215, top: 0.28670886, width: 0.6101266, height: 0.37341774 }, rotation: Angle { degrees: -5.1898746 } } on 1920x1080, made 1171x403 9495c73243e91ce9
+  layer 0: picture 1171x403 6edd66a70df909e0
+    corners [0.13352, 0.33653, 0.74115, 0.23842, 0.76015, 0.61030, 0.15252, 0.70842]
+frame 40
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.11316456 }, colour: TextColour { red: 255, green: 64, blue: 64, alpha: 255 }, area: CanvasArea { left: 0.14493674, top: 0.2879747, width: 0.613924, height: 0.37594938 }, rotation: Angle { degrees: -5.886076 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.11316456 }, colour: TextColour { red: 255, green: 64, blue: 64, alpha: 255 }, area: CanvasArea { left: 0.14493674, top: 0.2879747, width: 0.613924, height: 0.37594938 }, rotation: Angle { degrees: -5.886076 } } on 1920x1080, made 1179x406 4a01c30f6033f370
+  layer 0: picture 1179x406 37a177a7eac00074
+    corners [0.13571, 0.34493, 0.74640, 0.23300, 0.76809, 0.60697, 0.15740, 0.71890]
+frame 41
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.11493671 }, colour: TextColour { red: 255, green: 57, blue: 57, alpha: 255 }, area: CanvasArea { left: 0.1481013, top: 0.2892405, width: 0.6177215, height: 0.37848103 }, rotation: Angle { degrees: -6.582279 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.11493671 }, colour: TextColour { red: 255, green: 57, blue: 57, alpha: 255 }, area: CanvasArea { left: 0.1481013, top: 0.2892405, width: 0.6177215, height: 0.37848103 }, rotation: Angle { degrees: -6.582279 } } on 1920x1080, made 1186x409 284b98c3ea48673a
+  layer 0: picture 1186x409 ea747182d5137e50
+    corners [0.13794, 0.35343, 0.75158, 0.22755, 0.77599, 0.60353, 0.16234, 0.72942]
+frame 44
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12025316 }, colour: TextColour { red: 255, green: 38, blue: 38, alpha: 255 }, area: CanvasArea { left: 0.15759495, top: 0.29303798, width: 0.6291139, height: 0.38607597 }, rotation: Angle { degrees: -8.670887 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12025316 }, colour: TextColour { red: 255, green: 38, blue: 38, alpha: 255 }, area: CanvasArea { left: 0.15759495, top: 0.29303798, width: 0.6291139, height: 0.38607597 }, rotation: Angle { degrees: -8.670887 } } on 1920x1080, made 1208x417 a8f8a4c946d74e07
+  layer 0: picture 1208x417 5acb7f6af7729fa9
+    corners [0.14482, 0.37955, 0.76674, 0.21094, 0.79948, 0.59260, 0.17756, 0.76121]
+frame 45
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12202532 }, colour: TextColour { red: 255, green: 32, blue: 32, alpha: 255 }, area: CanvasArea { left: 0.16075951, top: 0.2943038, width: 0.6329114, height: 0.38860762 }, rotation: Angle { degrees: -9.367088 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12202532 }, colour: TextColour { red: 255, green: 32, blue: 32, alpha: 255 }, area: CanvasArea { left: 0.16075951, top: 0.2943038, width: 0.6329114, height: 0.38860762 }, rotation: Angle { degrees: -9.367088 } } on 1920x1080, made 1215x420 d0d58085a8d1e126
+  layer 0: picture 1215x420 395e2b636d75c572
+    corners [0.14719, 0.38846, 0.77166, 0.20533, 0.80724, 0.58875, 0.18277, 0.77189]
+frame 46
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12379746 }, colour: TextColour { red: 255, green: 26, blue: 26, alpha: 255 }, area: CanvasArea { left: 0.16392404, top: 0.29556966, width: 0.63670886, height: 0.39113924 }, rotation: Angle { degrees: -10.063292 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12379746 }, colour: TextColour { red: 255, green: 26, blue: 26, alpha: 255 }, area: CanvasArea { left: 0.16392404, top: 0.29556966, width: 0.63670886, height: 0.39113924 }, rotation: Angle { degrees: -10.063292 } } on 1920x1080, made 1222x422 844f94331825bbe5
+  layer 0: picture 1222x422 1cf2430047f19745
+    corners [0.14960, 0.39747, 0.77651, 0.19968, 0.81496, 0.58481, 0.18804, 0.78259]
+frame 49
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12911393 }, colour: TextColour { red: 255, green: 6, blue: 6, alpha: 255 }, area: CanvasArea { left: 0.17341772, top: 0.29936707, width: 0.6481013, height: 0.39873418 }, rotation: Angle { degrees: -12.151899 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.12911393 }, colour: TextColour { red: 255, green: 6, blue: 6, alpha: 255 }, area: CanvasArea { left: 0.17341772, top: 0.29936707, width: 0.6481013, height: 0.39873418 }, rotation: Angle { degrees: -12.151899 } } on 1920x1080, made 1244x431 ebb669c73774badc
+  layer 0: picture 1244x431 bf27f65715422b9a
+    corners [0.15707, 0.42510, 0.79065, 0.18256, 0.83786, 0.57236, 0.20429, 0.81490]
+frame 50
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.13088608 }, colour: TextColour { red: 255, green: 0, blue: 0, alpha: 255 }, area: CanvasArea { left: 0.17658228, top: 0.3006329, width: 0.65189874, height: 0.40126583 }, rotation: Angle { degrees: -12.848101 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.13088608 }, colour: TextColour { red: 255, green: 0, blue: 0, alpha: 255 }, area: CanvasArea { left: 0.17658228, top: 0.3006329, width: 0.65189874, height: 0.40126583 }, rotation: Angle { degrees: -12.848101 } } on 1920x1080, made 1252x433 7a25b03b55a336bc
+  layer 0: picture 1252x433 7daa248ff36b8f88
+    corners [0.15965, 0.43451, 0.79522, 0.17680, 0.84542, 0.56802, 0.20984, 0.82573]
+frame 51
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.13265823 }, colour: TextColour { red: 248, green: 0, blue: 7, alpha: 250 }, area: CanvasArea { left: 0.17974684, top: 0.30189872, width: 0.6556962, height: 0.40379748 }, rotation: Angle { degrees: -13.544304 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.13265823 }, colour: TextColour { red: 248, green: 0, blue: 7, alpha: 250 }, area: CanvasArea { left: 0.17974684, top: 0.30189872, width: 0.6556962, height: 0.40379748 }, rotation: Angle { degrees: -13.544304 } } on 1920x1080, made 1259x436 92de2a551dadfa29
+  layer 0: picture 1259x436 db129fb0460852b3
+    corners [0.16227, 0.44401, 0.79973, 0.17101, 0.85292, 0.56358, 0.21546, 0.83658]
+frame 54
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.13797468 }, colour: TextColour { red: 229, green: 0, blue: 26, alpha: 235 }, area: CanvasArea { left: 0.18924052, top: 0.30569622, width: 0.6670886, height: 0.4113924 }, rotation: Angle { degrees: -15.632912 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "", font_size: FontSize { fraction_of_picture_height: 0.13797468 }, colour: TextColour { red: 229, green: 0, blue: 26, alpha: 235 }, area: CanvasArea { left: 0.18924052, top: 0.30569622, width: 0.6670886, height: 0.4113924 }, rotation: Angle { degrees: -15.632912 } } on 1920x1080, made 1281x444 a6a83c98dfd50eec
+  layer 0: picture 1281x444 9b6a5207bc835262
+    corners [0.17040, 0.47309, 0.81281, 0.15352, 0.87517, 0.54969, 0.23276, 0.86927]
+frame 55
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.13974683 }, colour: TextColour { red: 222, green: 0, blue: 33, alpha: 231 }, area: CanvasArea { left: 0.19240507, top: 0.30696204, width: 0.6708861, height: 0.41392404 }, rotation: Angle { degrees: -16.329113 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.13974683 }, colour: TextColour { red: 222, green: 0, blue: 33, alpha: 231 }, area: CanvasArea { left: 0.19240507, top: 0.30696204, width: 0.6708861, height: 0.41392404 }, rotation: Angle { degrees: -16.329113 } } on 1920x1080, made 1288x447 c877e5601b49c043
+  layer 0: picture 1288x447 8c1f7885798bb7ed
+    corners [0.17321, 0.48297, 0.81703, 0.14765, 0.88249, 0.54487, 0.23867, 0.88020]
+frame 56
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.14151898 }, colour: TextColour { red: 216, green: 0, blue: 39, alpha: 226 }, area: CanvasArea { left: 0.19556963, top: 0.30822787, width: 0.6746836, height: 0.4164557 }, rotation: Angle { degrees: -17.025318 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.14151898 }, colour: TextColour { red: 216, green: 0, blue: 39, alpha: 226 }, area: CanvasArea { left: 0.19556963, top: 0.30822787, width: 0.6746836, height: 0.4164557 }, rotation: Angle { degrees: -17.025318 } } on 1920x1080, made 1295x450 7f390b62e766371e
+  layer 0: picture 1295x450 6a8cced02ab0107b
+    corners [0.17606, 0.49295, 0.82117, 0.14176, 0.88976, 0.53996, 0.24465, 0.89115]
+frame 59
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.14683545 }, colour: TextColour { red: 196, green: 0, blue: 59, alpha: 211 }, area: CanvasArea { left: 0.20506328, top: 0.31202534, width: 0.6860759, height: 0.42405063 }, rotation: Angle { degrees: -19.113922 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.14683545 }, colour: TextColour { red: 196, green: 0, blue: 59, alpha: 211 }, area: CanvasArea { left: 0.20506328, top: 0.31202534, width: 0.6860759, height: 0.42405063 }, rotation: Angle { degrees: -19.113922 } } on 1920x1080, made 1317x458 d05d6403d3935c26
+  layer 0: picture 1317x458 d127735fff2e4256
+    corners [0.18492, 0.52341, 0.83317, 0.12402, 0.91128, 0.52469, 0.26303, 0.92408]
+frame 60
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.1486076 }, colour: TextColour { red: 190, green: 0, blue: 65, alpha: 206 }, area: CanvasArea { left: 0.20822781, top: 0.31329116, width: 0.68987346, height: 0.42658228 }, rotation: Angle { degrees: -19.810127 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.1486076 }, colour: TextColour { red: 190, green: 0, blue: 65, alpha: 206 }, area: CanvasArea { left: 0.20822781, top: 0.31329116, width: 0.68987346, height: 0.42658228 }, rotation: Angle { degrees: -19.810127 } } on 1920x1080, made 1325x461 1386b2c72a51622d
+  layer 0: picture 1325x461 8ba0bd15909e502f
+    corners [0.18798, 0.53374, 0.83703, 0.11809, 0.91835, 0.51943, 0.26930, 0.93507]
+frame 61
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.15037975 }, colour: TextColour { red: 183, green: 0, blue: 72, alpha: 201 }, area: CanvasArea { left: 0.2113924, top: 0.314557, width: 0.69367087, height: 0.42911392 }, rotation: Angle { degrees: -20.506329 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.15037975 }, colour: TextColour { red: 183, green: 0, blue: 72, alpha: 201 }, area: CanvasArea { left: 0.2113924, top: 0.314557, width: 0.69367087, height: 0.42911392 }, rotation: Angle { degrees: -20.506329 } } on 1920x1080, made 1332x463 53f5d7802c4bae2e
+  layer 0: picture 1332x463 9bd8090e83de1135
+    corners [0.19109, 0.54415, 0.84081, 0.11215, 0.92536, 0.51407, 0.27565, 0.94608]
+frame 69
+  text clip of track TrackId(0) at 10: TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.16455697 }, colour: TextColour { red: 131, green: 0, blue: 124, alpha: 162 }, area: CanvasArea { left: 0.23670882, top: 0.32468358, width: 0.72405064, height: 0.4493671 }, rotation: Angle { degrees: -26.07595 } }
+  the drawer was asked for TextObject { text: "Two\nlines", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.16455697 }, colour: TextColour { red: 131, green: 0, blue: 124, alpha: 162 }, area: CanvasArea { left: 0.23670882, top: 0.32468358, width: 0.72405064, height: 0.4493671 }, rotation: Angle { degrees: -26.07595 } } on 1920x1080, made 1390x485 55b1f5188b431f7a
+  layer 0: picture 1390x485 4764b7d82301bcb8
+    corners [0.21800, 0.63046, 0.86836, 0.06465, 0.97946, 0.46828, 0.32911, 1.03408]
+frame 70
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.16632912 }, colour: TextColour { red: 124, green: 0, blue: 131, alpha: 157 }, area: CanvasArea { left: 0.23987338, top: 0.32594934, width: 0.7278481, height: 0.45189875 }, rotation: Angle { degrees: -26.772152 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.16632912 }, colour: TextColour { red: 124, green: 0, blue: 131, alpha: 157 }, area: CanvasArea { left: 0.23987338, top: 0.32594934, width: 0.7278481, height: 0.45189875 }, rotation: Angle { degrees: -26.772152 } } on 1920x1080, made 1397x488 257c18ba880e395c
+  layer 0: picture 1397x488 d04d3a61892011ec
+    corners [0.22163, 0.64160, 0.87146, 0.05874, 0.98596, 0.46220, 0.33613, 1.04505]
+frame 71
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.16810127 }, colour: TextColour { red: 118, green: 0, blue: 137, alpha: 152 }, area: CanvasArea { left: 0.24303794, top: 0.32721516, width: 0.7316456, height: 0.4544304 }, rotation: Angle { degrees: -27.468353 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.16810127 }, colour: TextColour { red: 118, green: 0, blue: 137, alpha: 152 }, area: CanvasArea { left: 0.24303794, top: 0.32721516, width: 0.7316456, height: 0.4544304 }, rotation: Angle { degrees: -27.468353 } } on 1920x1080, made 1405x491 e04691f3ef60573c
+  layer 0: picture 1405x491 3436fb81562eaec4
+    corners [0.22533, 0.65281, 0.87449, 0.05285, 0.99240, 0.45605, 0.34323, 1.05601]
+frame 79
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.18227848 }, colour: TextColour { red: 65, green: 0, blue: 190, alpha: 113 }, area: CanvasArea { left: 0.26835442, top: 0.3373418, width: 0.76202536, height: 0.47468355 }, rotation: Angle { degrees: -33.037975 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.18227848 }, colour: TextColour { red: 65, green: 0, blue: 190, alpha: 113 }, area: CanvasArea { left: 0.26835442, top: 0.3373418, width: 0.76202536, height: 0.47468355 }, rotation: Angle { degrees: -33.037975 } } on 1920x1080, made 1463x513 7060336fd0101d0d
+  layer 0: picture 1463x513 0010005791fe0ac9
+    corners [0.25717, 0.74501, 0.89599, 0.00643, 1.04156, 0.40436, 0.40275, 1.14294]
+frame 80
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.18405063 }, colour: TextColour { red: 59, green: 0, blue: 196, alpha: 108 }, area: CanvasArea { left: 0.271519, top: 0.3386076, width: 0.76582277, height: 0.4772152 }, rotation: Angle { degrees: -33.734177 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.18405063 }, colour: TextColour { red: 59, green: 0, blue: 196, alpha: 108 }, area: CanvasArea { left: 0.271519, top: 0.3386076, width: 0.76582277, height: 0.4772152 }, rotation: Angle { degrees: -33.734177 } } on 1920x1080, made 1470x515 7287be01f140957a
+  layer 0: picture 1470x515 3272e24483c987ef
+    corners [0.26146, 0.75682, 0.89833, 0.00075, 1.04740, 0.39761, 0.41053, 1.15368]
+frame 81
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.18582278 }, colour: TextColour { red: 52, green: 0, blue: 203, alpha: 103 }, area: CanvasArea { left: 0.27468354, top: 0.33987343, width: 0.7696203, height: 0.47974682 }, rotation: Angle { degrees: -34.430378 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.18582278 }, colour: TextColour { red: 52, green: 0, blue: 203, alpha: 103 }, area: CanvasArea { left: 0.27468354, top: 0.33987343, width: 0.7696203, height: 0.47974682 }, rotation: Angle { degrees: -34.430378 } } on 1920x1080, made 1478x518 8ef23981d837d97b
+  layer 0: picture 1478x518 6cca357b3f966301
+    corners [0.26581, 0.76869, 0.90060, -0.00490, 1.05318, 0.39080, 0.41839, 1.16439]
+frame 88
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.19822785 }, colour: TextColour { red: 7, green: 0, blue: 248, alpha: 69 }, area: CanvasArea { left: 0.29683542, top: 0.3487342, width: 0.79620254, height: 0.49746835 }, rotation: Angle { degrees: -39.3038 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.19822785 }, colour: TextColour { red: 7, green: 0, blue: 248, alpha: 69 }, area: CanvasArea { left: 0.29683542, top: 0.3487342, width: 0.79620254, height: 0.49746835 }, rotation: Angle { degrees: -39.3038 } } on 1920x1080, made 1529x537 8d85e7566817c169
+  layer 0: picture 1529x537 a2c330f61a63ec90
+    corners [0.29826, 0.85330, 0.91436, -0.04330, 1.09161, 0.34164, 0.47551, 1.23824]
+frame 89
+  text clip of track TrackId(0) at 10: TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.2 }, colour: TextColour { red: 0, green: 0, blue: 255, alpha: 64 }, area: CanvasArea { left: 0.29999998, top: 0.35000002, width: 0.8, height: 0.5 }, rotation: Angle { degrees: -40.0 } }
+  the drawer was asked for TextObject { text: "Three", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.2 }, colour: TextColour { red: 0, green: 0, blue: 255, alpha: 64 }, area: CanvasArea { left: 0.29999998, top: 0.35000002, width: 0.8, height: 0.5 }, rotation: Angle { degrees: -40.0 } } on 1920x1080, made 1536x540 a396a816a32c15b3
+  layer 0: picture 1536x540 344a722558c6ae38
+    corners [0.30319, 0.86558, 0.91603, -0.04860, 1.09681, 0.33442, 0.48397, 1.24860]

@@ -1,0 +1,49 @@
+{
+  "file_format": "fastforwardrs-project",
+  "file_format_version": 17,
+  "sources": [],
+  "tracks": [
+    {
+      "title": "track 0",
+      "gain_decibels": 0.0,
+      "speed_factor": 1,
+      "muted": false,
+      "clips": [
+        {
+          "kind": "text",
+          "duration_in_frames": 60,
+          "text": "Text",
+          "font_family": "",
+          "font_size_fraction_of_frame_height": 0.06,
+          "colour": "#FFFFFFFF",
+          "area": {
+            "left_fraction_of_frame_width": 0.1,
+            "top_fraction_of_frame_height": 0.74,
+            "width_fraction_of_frame_width": 0.8,
+            "height_fraction_of_frame_height": 0.16
+          }
+        },
+        {
+          "kind": "text",
+          "duration_in_frames": 40,
+          "text": "Hello,\nworld",
+          "font_family": "Arial",
+          "font_size_fraction_of_frame_height": 0.037037037,
+          "colour": "#FFC80080",
+          "area": {
+            "left_fraction_of_frame_width": 0.1,
+            "top_fraction_of_frame_height": 0.2,
+            "width_fraction_of_frame_width": 0.5,
+            "height_fraction_of_frame_height": 0.3
+          },
+          "rotation_degrees": 15.0
+        }
+      ]
+    }
+  ],
+  "speed_indicator": {
+    "left_fraction_of_frame_width": 0.03,
+    "top_fraction_of_frame_height": 0.04,
+    "height_fraction_of_frame_height": 0.08
+  }
+}

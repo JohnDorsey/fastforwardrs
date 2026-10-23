@@ -1,0 +1,236 @@
+with_effects: 60 frames, the picture is (1920, 1080), 1 track(s)
+frame 0
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  the drawer was asked for TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } } on 1920x1080, made 960x324 66697782357362cc
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.60630, 0.35760, 0.03610, 0.10630, 0.85760, 0.03610, 0.10630, 0.35760, 0.53610] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 1
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.60008, 0.33907, 0.06085, 0.11026, 0.86112, 0.02862, 0.08551, 0.37713, 0.53736] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 2
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.59276, 0.32161, 0.08563, 0.11451, 0.86422, 0.02127, 0.06509, 0.39761, 0.53730] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 5
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.56444, 0.27610, 0.15946, 0.12889, 0.87096, 0.00015, 0.00655, 0.46422, 0.52923] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 9
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.51293, 0.23296, 0.25411, 0.15133, 0.87375, -0.02508, -0.06308, 0.56264, 0.50044] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 10
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.49783, 0.22552, 0.27665, 0.15741, 0.87333, -0.03074, -0.07865, 0.58851, 0.49015] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 11
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.48192, 0.21948, 0.29861, 0.16366, 0.87246, -0.03611, -0.09339, 0.61473, 0.47867] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 19
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.33140, 0.22225, 0.44634, 0.21709, 0.84987, -0.06696, -0.17711, 0.82838, 0.34872] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 20
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.31049, 0.22898, 0.46053, 0.22392, 0.84522, -0.06914, -0.18285, 0.85444, 0.32841] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 21
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.28929, 0.23709, 0.47362, 0.23072, 0.84020, -0.07091, -0.18746, 0.88009, 0.30737] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 29
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.11709, 0.34798, 0.53492, 0.28172, 0.78864, -0.07036, -0.18312, 1.06273, 0.12039] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 30
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.09615, 0.36701, 0.53684, 0.28740, 0.78105, -0.06845, -0.17744, 1.08176, 0.09568] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 31
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [0.07554, 0.38703, 0.53743, 0.29287, 0.77327, -0.06614, -0.17065, 1.09975, 0.07090] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 39
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.07066, 0.57534, 0.49532, 0.32732, 0.70702, -0.03434, -0.07944, 1.20079, -0.12135] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 40
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.08583, 0.60140, 0.48443, 0.33028, 0.69859, -0.02887, -0.06392, 1.20753, -0.14361] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 41
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.10014, 0.62778, 0.47236, 0.33291, 0.69021, -0.02312, -0.04760, 1.21287, -0.16526] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 44
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.13762, 0.70811, 0.42951, 0.33872, 0.66558, -0.00430, 0.00557, 1.22037, -0.22595] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 45
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.14817, 0.73502, 0.41315, 0.33996, 0.65762, 0.00243, 0.02454, 1.22002, -0.24456] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 46
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.15769, 0.76188, 0.39581, 0.34083, 0.64982, 0.00935, 0.04405, 1.21823, -0.26227] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 49
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.17987, 0.84136, 0.33851, 0.34127, 0.62761, 0.03112, 0.10520, 1.20434, -0.30955] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 50
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.18506, 0.86724, 0.31782, 0.34069, 0.62068, 0.03863, 0.12628, 1.19692, -0.32320] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 51
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.18912, 0.89268, 0.29644, 0.33974, 0.61402, 0.04624, 0.14760, 1.18813, -0.33573] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 54
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.19444, 0.96571, 0.22873, 0.33477, 0.59581, 0.06942, 0.21243, 1.15383, -0.36627] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 55
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.19391, 0.98873, 0.20518, 0.33242, 0.59039, 0.07719, 0.23413, 1.13987, -0.37399] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 56
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.19222, 1.01096, 0.18126, 0.32973, 0.58533, 0.08494, 0.25576, 1.12469, -0.38046] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
+frame 59
+  text clip of track TrackId(0) at 0: TextObject { text: "Hello,\nworld", font_family: "Arial", font_size: FontSize { fraction_of_picture_height: 0.037037037 }, colour: TextColour { red: 255, green: 200, blue: 0, alpha: 128 }, area: CanvasArea { left: 0.1, top: 0.2, width: 0.5, height: 0.3 }, rotation: Angle { degrees: 15.0 } }
+  layer 0: picture 960x324 f104feefe8995158
+    corners [0.13036, 0.09008, 0.61332, 0.32014, 0.56964, 0.60992, 0.08668, 0.37986]
+    effect engine:colour_matrix [-0.18030, 1.07240, 0.10790, 0.31970, 0.57240, 0.10790, 0.31970, 1.07240, -0.39210] table None state None images 0
+    effect engine:opacity [0.60000] table None state None images 0
+    effect engine:blur [3.00000] table None state None images 0
+    effect engine:colour_matrix [1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.00000, 0.00000, 0.00000, 1.30000, 0.05000, 0.05000, 0.05000] table None state None images 0
+    effect engine:exposure [0.50000] table None state None images 0
