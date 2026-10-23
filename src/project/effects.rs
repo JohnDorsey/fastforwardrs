@@ -615,3 +615,5 @@ mod kind_tests;
 mod shader_image_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_tests;

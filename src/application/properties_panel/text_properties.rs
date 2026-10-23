@@ -9,17 +9,12 @@
 use egui::{ComboBox, DragValue, TextEdit, Ui};
 
 use super::animatable::{self, Animatable};
+use super::effects::{DEFAULT_FONT_LABEL, LINES_OF_WORDS_SHOWN};
 use super::{PropertiesContent, kind_box, placement_controls};
 use crate::application::commands::Command;
 use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
 use crate::project::{ClipId, ClipKind, FontSize, PropertyId, TextClip, TextColour};
-
-/// How many lines of words show without scrolling.
-const LINES_OF_WORDS_SHOWN: usize = 4;
-
-/// The label of the font that is chosen when no font is: the editor's own choice.
-const DEFAULT_FONT_LABEL: &str = "Default font";
 
 /// What the row of how big a text object's box is is called (its letters have a size of their own).
 const BOX_SIZE_LABEL: &str = "Box size";

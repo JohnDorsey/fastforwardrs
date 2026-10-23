@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, PoisonError};
 
 use super::built_in::{
-    self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, LUT, OPACITY, PictureOperation, SATURATION,
+    self, BLUR, BRIGHTNESS_AND_CONTRAST, CROP, EXPOSURE, HUE_SHIFT, LUT, OPACITY, PictureOperation, SATURATION, TEXT,
 };
 use super::installed::{InstalledPlugin, installed_plugin_for, installed_plugins, installed_shaders};
 use super::{EffectDescriptor, EffectDomain, ParameterDescriptor, ShaderSource};
@@ -58,6 +58,13 @@ impl EffectKind {
     /// The look-up table, which looks the colours of the picture up in a table (a `.cube` file).
     pub const LUT: EffectKind = EffectKind(&LUT);
 
+    /// The text, which a text clip is made of (phase 9): words, in a font, of a size and a colour. **It is not one of the effects that the program offers** ([`Self::BUILT_IN`] has not got it):
+    /// only a text clip can have it, as its content, and it asks nothing of a picture.
+    pub const TEXT: EffectKind = EffectKind(&TEXT);
+
+    /// The effects that the program has in itself that are what a clip is made of and not something that is done to a picture: they are not offered as effects, and are found by their key.
+    pub const BUILT_IN_CONTENTS: [EffectKind; 1] = [Self::TEXT];
+
     /// The effects that the program has in itself, in the order they are offered in.
     pub const BUILT_IN: [EffectKind; 8] = [
         Self::HUE_SHIFT,
@@ -80,6 +87,7 @@ impl EffectKind {
         }
         if let Some(own) = Self::BUILT_IN
             .into_iter()
+            .chain(Self::BUILT_IN_CONTENTS)
             .find(|own| own.descriptor().can_stand_in_for(&snapshot))
         {
             return Ok(own);
@@ -98,7 +106,10 @@ impl EffectKind {
 
     /// The effect of the program that has this key, if there is one.
     pub fn built_in_with_key(key: &str) -> Option<Self> {
-        Self::BUILT_IN.into_iter().find(|own| own.key() == key)
+        Self::BUILT_IN
+            .into_iter()
+            .chain(Self::BUILT_IN_CONTENTS)
+            .find(|own| own.key() == key)
     }
 
     /// The descriptor of the type of effect.
@@ -135,7 +146,10 @@ impl EffectKind {
     /// the program does not have is *not installed*: it is kept, with its values and keyframes, and does nothing to a picture or a sound. (This can change while the program
     /// runs: the plugins are found in the background.)
     pub fn is_installed(self) -> bool {
-        Self::BUILT_IN.contains(&self) || self.installed_plugin().is_some() || crate::isf::is_usable(self.0)
+        Self::BUILT_IN.contains(&self)
+            || Self::BUILT_IN_CONTENTS.contains(&self)
+            || self.installed_plugin().is_some()
+            || crate::isf::is_usable(self.0)
     }
 
     /// Whether the effect is a shader that makes a picture and reads none (a generator: see [`crate::isf::Shape`]), which a clip is made of and which is not put on a picture.
@@ -228,6 +242,10 @@ impl EffectKind {
     /// is behind it, seen: **but not a transition, which is put on a clip that has a picture of its own, phase 6.6**), and a
     /// sound effect on what is heard (a sound, **and a video, which has a soundtrack**: it was only a sound until phase 7).
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
+        // (The text is what a text clip is made of, and nothing else can have it.)
+        if self == Self::TEXT {
+            return kind == ClipKind::Text;
+        }
         match self.0.domain {
             EffectDomain::Picture => match kind {
                 ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Generator => true,
@@ -241,13 +259,16 @@ impl EffectKind {
 
     /// Whether a track can have the effect. (Not a transition: a track has no picture of its own, it is the clips on it, and a transition is put on the clip that is on top.)
     pub fn applies_to_a_track(self) -> bool {
-        !self.is_a_transition()
+        self != Self::TEXT && !self.is_a_transition()
     }
 
     /// Whether a group of kind `kind` can have the effect: a tag, which has it applied to each member, can have any; and a clip group or a track
     /// group, which have it done to the picture that their members make together (phase 5: the engine makes that picture), any picture effect. (A sound effect is not for a picture
     /// of a group.)
     pub fn applies_to_a_group_of_kind(self, kind: GroupKind) -> bool {
+        if self == Self::TEXT {
+            return false;
+        }
         match kind {
             GroupKind::Tag => true,
             GroupKind::ClipGroup | GroupKind::TrackGroup => self.0.domain == EffectDomain::Picture,

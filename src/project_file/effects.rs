@@ -358,6 +358,9 @@ fn control_from_document(document: Option<Value>, unknown: &mut BTreeMap<String,
             "slider" => Some(ParameterControl::Slider),
             "integer" => Some(ParameterControl::Integer),
             "toggle" => Some(ParameterControl::Toggle),
+            "multiline" => Some(ParameterControl::Multiline),
+            "font" => Some(ParameterControl::Font),
+            "points_of_the_picture_height" => Some(ParameterControl::PointsOfThePictureHeight),
             _ => None,
         },
         Value::Object(object) if object.len() == 1 => {
@@ -653,5 +656,8 @@ fn control_document_of(control: &ParameterControl) -> Option<Value> {
                 .collect::<Vec<_>>()
         })),
         ParameterControl::Resource(kind) => Some(serde_json::json!({ "resource": kind })),
+        ParameterControl::Multiline => Some(Value::String("multiline".to_owned())),
+        ParameterControl::Font => Some(Value::String("font".to_owned())),
+        ParameterControl::PointsOfThePictureHeight => Some(Value::String("points_of_the_picture_height".to_owned())),
     }
 }

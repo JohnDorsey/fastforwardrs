@@ -11,16 +11,25 @@
 //! like any other, so it is an edit that is undone with one step, and a value that has keyframes is changed at the playhead. (The values of
 //! the effect of a group have no keyframes: they are not animated.)
 
-use egui::{ComboBox, DragValue, RichText, Slider, SliderClamping, Ui};
+use egui::{ComboBox, DragValue, RichText, Slider, SliderClamping, TextEdit, Ui};
 
 use super::PropertiesContent;
 use super::animatable::{self, Animatable};
 use super::controls::labelled_row;
 use crate::application::commands::Command;
 use crate::project::{
-    AnimationTarget, Effect, EffectKind, GroupId, Member, ParameterControl, Project, PropertyId, PropertyValue,
-    Resource, ValueScale,
+    AnimationTarget, Effect, EffectKind, FontSize, GroupId, Member, ParameterControl, Project, PropertyId,
+    PropertyValue, Resource, ValueScale,
 };
+
+/// How many lines of words show without scrolling in a box of lines.
+pub(super) const LINES_OF_WORDS_SHOWN: usize = 4;
+
+/// The label of the font that is chosen when no font is: the editor's own choice.
+pub(super) const DEFAULT_FONT_LABEL: &str = "Default font";
+
+/// What the list of fonts says while the computer has not been asked for its fonts yet.
+pub(super) const LOOKING_FOR_THE_FONTS_NOTE: &str = "Looking for the fonts...";
 
 /// What the plus button that puts an effect on is called, which it says when the pointer rests on it, and to screen readers.
 pub const ADD_EFFECT_LABEL: &str = "Add an effect";
@@ -273,15 +282,18 @@ pub(super) fn show_the_control_of(
         shown,
         PropertyValue::Number(_) | PropertyValue::Pair(..) | PropertyValue::Colour(_)
     ) {
-        if let Some(change) = labelled_row(ui, |ui| control_for(ui, content.project, kind, property, &shown))
-            && let Some(command) = command_for(member_of(target), property, change)
+        if let Some(change) = labelled_row(ui, |ui| {
+            control_for(ui, content.project, content.font_families, kind, property, &shown)
+        }) && let Some(command) = command_for(member_of(target), property, change)
         {
             commands.push(command);
         }
         return;
     }
     let changed = animatable::row(ui, content, Animatable { target, property }, commands, |ui, _| {
-        labelled_row(ui, |ui| control_for(ui, content.project, kind, property, &shown))
+        labelled_row(ui, |ui| {
+            control_for(ui, content.project, content.font_families, kind, property, &shown)
+        })
     });
     if let Some(Change::Value(value)) = changed {
         commands.push(Command::SetEffectValue {
@@ -305,7 +317,7 @@ pub(super) fn show_the_control_of_a_group_effect(
     let Some(shown) = effect.value_of(property) else {
         return;
     };
-    if let Some(change) = labelled_row(ui, |ui| control_for(ui, project, effect.kind(), property, shown))
+    if let Some(change) = labelled_row(ui, |ui| control_for(ui, project, None, effect.kind(), property, shown))
         && let Some(command) = command_for(Member::Group(group), property, change)
     {
         commands.push(command);
@@ -315,10 +327,13 @@ pub(super) fn show_the_control_of_a_group_effect(
 /// The control that changes the value of an effect that `property` is, which shows `shown`: what it asks for if it was changed. A property that is not a value of an
 /// effect has none. **What the control looks like is what the effect says of its value** (its label, its control, the range it shows, what it is in): a number has a slider,
 /// or a box to drag in if it has no range; a choice is a list; a flag is a switch; a colour is a colour button; a pair is two boxes to drag in; a table is a button that chooses a file,
-/// with the name of the table and what is wrong with it if anything is.
+/// with the name of the table and what is wrong with it if anything is; **a box of lines is for words that may have more than one line, a list of fonts is for the name of a font (from `fonts`,
+/// the fonts of the computer, if they are known yet), and a size in points is for a fraction of the picture's height that is shown as the points it would be on a picture 1080 tall** (the three
+/// of the text effect, which a text clip is made of).
 fn control_for(
     ui: &mut Ui,
     project: &Project,
+    fonts: Option<&[String]>,
     kind: EffectKind,
     property: PropertyId,
     shown: &PropertyValue,
@@ -352,6 +367,62 @@ fn control_for(
             picked
                 .filter(|id| id != chosen)
                 .map(|id| Change::Value(PropertyValue::Words(id)))
+        }
+        (ParameterControl::Multiline, PropertyValue::Words(words)) => {
+            let label = ui.label(&*parameter.label);
+            let mut typed = words.clone();
+            let changed = ui
+                .add(
+                    TextEdit::multiline(&mut typed)
+                        .desired_rows(LINES_OF_WORDS_SHOWN)
+                        .desired_width(f32::INFINITY),
+                )
+                .labelled_by(label.id)
+                .changed();
+            changed.then_some(Change::Value(PropertyValue::Words(typed)))
+        }
+        (ParameterControl::Font, PropertyValue::Words(family)) => {
+            let label = ui.label(&*parameter.label);
+            let Some(fonts) = fonts else {
+                ui.weak(LOOKING_FOR_THE_FONTS_NOTE);
+                return None;
+            };
+            let shown_name = if family.is_empty() { DEFAULT_FONT_LABEL } else { family };
+            let mut chosen = family.clone();
+            ComboBox::from_id_salt(("the font of", property))
+                .selected_text(shown_name)
+                .width((ui.available_width() - 4.0).max(60.0))
+                .height(320.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut chosen, String::new(), DEFAULT_FONT_LABEL);
+                    for name in fonts {
+                        ui.selectable_value(&mut chosen, name.clone(), name);
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+            (chosen != *family).then_some(Change::Value(PropertyValue::Words(chosen)))
+        }
+        (ParameterControl::PointsOfThePictureHeight, PropertyValue::Number(fraction)) => {
+            let label = ui.label(&*parameter.label);
+            let mut points = FontSize::from_fraction_of_picture_height(*fraction).points();
+            let smallest = FontSize::SMALLEST_FRACTION * FontSize::REFERENCE_PICTURE_HEIGHT;
+            let largest = FontSize::LARGEST_FRACTION * FontSize::REFERENCE_PICTURE_HEIGHT;
+            let changed = ui
+                .add(
+                    DragValue::new(&mut points)
+                        .range(smallest..=largest)
+                        .speed(0.5)
+                        .max_decimals(1)
+                        .suffix(" pt"),
+                )
+                .labelled_by(label.id)
+                .changed();
+            changed.then(|| {
+                Change::Value(PropertyValue::Number(
+                    FontSize::from_points(points).fraction_of_picture_height(),
+                ))
+            })
         }
         (ParameterControl::Resource(_), PropertyValue::Words(name)) => {
             ui.label(&*parameter.label);
@@ -463,6 +534,9 @@ fn what_a_value_says(value: &PropertyValue) -> String {
         PropertyValue::Words(words) => words.clone(),
     }
 }
+
+#[cfg(test)]
+mod controls_tests;
 
 #[cfg(test)]
 mod tests {

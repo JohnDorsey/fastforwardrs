@@ -20,6 +20,7 @@ use super::{
 use crate::colour_effects::ColourMatrix;
 use crate::cube_table::{CubeTable, Interpolation};
 use crate::project::animation::PropertyValue;
+use crate::project::tracks::TextColour;
 
 /// The key of the hue shift.
 pub const HUE_SHIFT_KEY: &str = "builtin:hue_shift";
@@ -44,6 +45,77 @@ pub const CROP_KEY: &str = "builtin:crop";
 
 /// The key of the look-up table.
 pub const LUT_KEY: &str = "builtin:lut";
+
+/// The key of the text: what a text clip is made of (phase 9).
+pub const TEXT_KEY: &str = "builtin:text";
+
+/// The text (phase 9, `docs/engine-phase-9-design.md`): **what a text clip is made of**, as a generator clip is made of its first effect: words, in a font, of a size and a colour, drawn by the
+/// program (on the processor, and given to the engine as a picture) where a shader would draw. It is not one of the effects that everything is offered (`EffectKind::BUILT_IN` has
+/// not got it): only a text clip has it, as its content, and it asks nothing of a picture.
+pub(super) static TEXT: EffectDescriptor = EffectDescriptor {
+    shader: None,
+    key: Cow::Borrowed(TEXT_KEY),
+    version: (1, 0),
+    name: Cow::Borrowed("text"),
+    description: Cow::Borrowed("Words, in a font, of a size and a colour"),
+    category: Cow::Borrowed("Generators"),
+    domain: EffectDomain::Picture,
+    changes_each_pixel_by_itself: false,
+    parameters: Cow::Borrowed(&[
+        ParameterDescriptor {
+            id: Cow::Borrowed("text"),
+            name: Cow::Borrowed("text"),
+            label: Cow::Borrowed("Text"),
+            // (A word cannot be made in a static: the words of a new text, `TextObject::NEW_TEXT`, are put in by whoever makes the clip.)
+            default: PropertyValue::Words(String::new()),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Multiline,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("font"),
+            name: Cow::Borrowed("font"),
+            label: Cow::Borrowed("Font"),
+            // (No name is the program's own font.)
+            default: PropertyValue::Words(String::new()),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Font,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("size"),
+            name: Cow::Borrowed("font size"),
+            label: Cow::Borrowed("Size"),
+            // (A fraction of the height of the picture, as it is kept: a little under a twelfth, which is easy to read as a caption. It is shown as the points that it would be on a picture 1080 tall.)
+            default: PropertyValue::Number(0.06),
+            range: Some((0.01, 0.5)),
+            unit: Cow::Borrowed("pt"),
+            decimals: Some(1),
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::PointsOfThePictureHeight,
+        },
+        ParameterDescriptor {
+            id: Cow::Borrowed("colour"),
+            name: Cow::Borrowed("colour"),
+            label: Cow::Borrowed("Colour"),
+            default: PropertyValue::Colour(TextColour::WHITE),
+            range: None,
+            unit: Cow::Borrowed(""),
+            decimals: None,
+            unknown_fields: UnknownFields::none(),
+            scale: ValueScale::Linear,
+            control: ParameterControl::Automatic,
+        },
+    ]),
+    unknown_fields: UnknownFields::none(),
+};
 
 /// The hue shift: the hues of the colours of the picture are turned round the wheel of colours, as far as its one value says.
 pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {

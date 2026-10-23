@@ -1368,3 +1368,5 @@ mod shader_image_tests;
 mod shader_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_effect_tests;

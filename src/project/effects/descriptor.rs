@@ -86,6 +86,12 @@ pub enum ParameterControl {
     Choice(Cow<'static, [ChoiceOption]>),
     /// Words that are the name of a resource of this kind (`cube`), chosen with a file chooser, which the project keeps (see `docs/engine-phase-4-design.md`).
     Resource(Cow<'static, str>),
+    /// Words that may have more than a line: a box of a few lines (what a text says).
+    Multiline,
+    /// Words that are the name of a font, chosen from the fonts of the computer (an empty name is the program's own font; a name that the computer does not have is kept as it is).
+    Font,
+    /// A number that is **a fraction of the height of the picture**, which is what it is kept as and shown as the points that it would be on a picture 1080 tall (what a font's size is: `FontSize`).
+    PointsOfThePictureHeight,
 }
 
 /// One of the values that a type of effect has.
@@ -419,6 +425,14 @@ fn problem_with_how_it_is_shown(key: &str, parameter: &ParameterDescriptor) -> O
         }
         ParameterControl::Resource(resource_kind) if resource_kind.is_empty() => wrong("is a resource with no kind"),
         ParameterControl::Resource(_) => None,
+        ParameterControl::Multiline if kind == ValueKind::Words => None,
+        ParameterControl::Multiline => wrong("is a box of lines, and is not words"),
+        ParameterControl::Font if kind == ValueKind::Words => None,
+        ParameterControl::Font => wrong("is a font, and is not words (it is named by the name of the font)"),
+        ParameterControl::PointsOfThePictureHeight if kind == ValueKind::Number => None,
+        ParameterControl::PointsOfThePictureHeight => {
+            wrong("is a size in points, and is not a number (it is a fraction of the picture's height)")
+        }
     }
 }
 
