@@ -12,7 +12,8 @@ use super::FastForwardApplication;
 use crate::application::preview_panel::LeadUpWanted;
 use crate::frame_scene::TextPictures;
 use crate::lead_up::{
-    PreviewRunStreamStarter, StartedLeadUp, WhatALeadUpIsMadeFrom, frames_of_the_lead_up_to, start_a_lead_up,
+    PreviewRunStreamStarter, StartedLeadUp, WhatALeadUpIsMadeFrom, frames_of_a_chase_from, frames_of_the_lead_up_to,
+    start_a_lead_up,
 };
 use crate::playback::{VideoReading, preview_picture_size, reading_of_a_video};
 use crate::project::TimelineFrameIndex;
@@ -55,6 +56,7 @@ impl FastForwardApplication {
     }
 
     /// Everything that the thread that describes the frames of the lead-up that is wanted needs, for the frame `frame`, gathered from the project and from what the window knows of its files.
+    /// The frames of a lead-up are those before `frame`; those of **a chase** (the project plays) go on from there to the end of the project, because the frame on the screen moves.
     /// `starter` is what starts the decode process of a run of video (the tests give one that is made up).
     pub(super) fn what_the_lead_up_is_made_from<Starter: RunStreamStarter>(
         &self,
@@ -62,7 +64,15 @@ impl FastForwardApplication {
         frame: u64,
         starter: Starter,
     ) -> Result<WhatALeadUpIsMadeFrom<Starter>, String> {
-        let frames = frames_of_the_lead_up_to(frame, wanted.most_frames_a_state_has_gone_on_for);
+        let frames = if wanted.is_a_chase {
+            frames_of_a_chase_from(
+                frame,
+                wanted.most_frames_a_state_has_gone_on_for,
+                self.document.project.total_frame_count(),
+            )
+        } else {
+            frames_of_the_lead_up_to(frame, wanted.most_frames_a_state_has_gone_on_for)
+        };
         if frames.is_empty() {
             return Err("there are no frames before the frame that is shown".to_owned());
         }

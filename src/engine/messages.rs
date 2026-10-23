@@ -74,8 +74,18 @@ pub enum EngineRequest {
         generation: u64,
         items: Receiver<LeadUpItem>,
     },
-    /// The lead-up `generation` is not wanted any more (the playhead moved, or the project was edited): it is let go of, and so are the pictures that it sent. (A lead-up that is not the one
-    /// going on is not touched.)
+    /// Begin the lead-up `generation` **as a chase** (the lead-up of a seek while the project plays; EN-14; `docs/engine-phase-6-6-design.md`, section 4): `items` brings the frames from before the frame
+    /// that the preview shows **on to the end of the project**, in order, and the engine makes them for the states of the effects **in a store of states of its own**, so that the frames of the
+    /// preview, which go on being made, are not touched. After each frame it looks whether those states are of the same frame as the ones that the last frame of the preview used; **when they are
+    /// they go over to the preview's, which goes on from them exactly**, and the engine says [`EngineEvent::LeadUpDone`]. If the frames are over before that, or the states can never be the same
+    /// (they are of a later frame, or of other sizes), it says [`EngineEvent::LeadUpFailed`]. Otherwise it is as [`Self::StartTheLeadUp`]: what the window asks comes first, and the chase goes on
+    /// in the moments between.
+    StartTheChase {
+        generation: u64,
+        items: Receiver<LeadUpItem>,
+    },
+    /// The lead-up `generation` (a chase too) is not wanted any more (the playhead moved, or the project was edited): it is let go of, and so are the pictures that it sent. (A lead-up that is not
+    /// the one going on is not touched.)
     CancelTheLeadUp { generation: u64 },
     /// Stop.
     Stop,

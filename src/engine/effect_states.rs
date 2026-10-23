@@ -106,6 +106,17 @@ pub fn where_to_go_on_from(kept_at: Option<u64>, checkpoints: &[u64], frame: u64
     }
 }
 
+/// What came of looking whether the states that a chase made have caught up with the ones of the preview (see [`StatesOfEffects::take_over_what_has_caught_up`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CatchingUp {
+    /// Not yet: a state that the last frame of the preview used is not in the chase's store, or is made at an earlier frame. Nothing was taken.
+    NotYet,
+    /// The states that the last frame of the preview used (as many as this; none if it used none) went over from the chase's store to the preview's, and are exact.
+    TakenOver(usize),
+    /// They never will, for this reason: a state of the chase is at a later frame than the preview's, or has other buffers. Nothing was taken.
+    NeverWill(String),
+}
+
 /// What a buffer that lasts is: how big, and in what format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferWanted {
@@ -183,6 +194,14 @@ fn is_still_approximate(until: Option<u64>, frame: u64) -> bool {
 }
 
 impl State {
+    /// Whether the buffers of this state and of `other` are the same: the same places that last, each of the same size and format.
+    fn has_the_buffers_of(&self, other: &State) -> bool {
+        self.buffers.len() == other.buffers.len()
+            && self.buffers.iter().zip(&other.buffers).all(|(ours, theirs)| {
+                ours.as_ref().map(|buffer| buffer.wanted) == theirs.as_ref().map(|buffer| buffer.wanted)
+            })
+    }
+
     fn bytes(&self) -> u64 {
         self.buffers
             .iter()
@@ -452,6 +471,60 @@ impl StatesOfEffects {
             to_checkpoint,
             approximate,
         }
+    }
+
+    /// **The chase** (EN-14, the lead-up while the project plays): `chasing` is a store of its own whose states were made from frames before the frame that the preview shows, one after another, to
+    /// catch up with the preview's. When every state that **the last frame of the preview used** is in it, **at the same frame** as the preview's and with the same buffers, they are what the
+    /// preview's would be if it had made all the frames before: they go over to this store, in place of the preview's, and are exact. (All together or not at all: an effect that is exact next to
+    /// one that is not would be a picture that is half right.) What the last frame did not use stays where it is, and is let go of with `chasing`.
+    ///
+    /// A state of `chasing` is at the same frame as the preview's after the frame that makes it so, whichever frames the preview made in the meantime, because it advances by one frame at a time and
+    /// this is asked after each: it can only pass the preview's frame if the preview went back, which is a jump and ends the chase.
+    pub fn take_over_what_has_caught_up(&mut self, chasing: &mut StatesOfEffects) -> CatchingUp {
+        let Some(last_frame) = self.frames_made.checked_sub(1) else {
+            return CatchingUp::TakenOver(0);
+        };
+        let needed: Vec<u64> = self
+            .states
+            .iter()
+            .filter(|(_, state)| state.last_used == last_frame)
+            .map(|(id, _)| *id)
+            .collect();
+        let mut all_have_caught_up = true;
+        for id in &needed {
+            let ours = &self.states[id];
+            let Some(theirs) = chasing.states.get(id) else {
+                all_have_caught_up = false;
+                continue;
+            };
+            if !ours.has_the_buffers_of(theirs) {
+                return CatchingUp::NeverWill(format!(
+                    "the state {id:x} of the chase has other buffers than the preview's"
+                ));
+            }
+            match theirs.frame.cmp(&ours.frame) {
+                std::cmp::Ordering::Less => all_have_caught_up = false,
+                std::cmp::Ordering::Equal => {}
+                std::cmp::Ordering::Greater => {
+                    return CatchingUp::NeverWill(format!(
+                        "the state {id:x} of the chase is at a later frame than the preview's"
+                    ));
+                }
+            }
+        }
+        if !all_have_caught_up {
+            return CatchingUp::NotYet;
+        }
+        for id in &needed {
+            let Some(mut state) = chasing.states.remove(id) else {
+                continue;
+            };
+            state.last_used = self.frames_made;
+            state.approximate_until = None;
+            state.pending = None;
+            self.states.insert(*id, state);
+        }
+        CatchingUp::TakenOver(needed.len())
     }
 
     /// The frame `frame` was made with the state `id`, as [`Self::prepare`] said: from now on the state is of that frame (and the checkpoint that the frame took is kept).

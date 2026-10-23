@@ -815,6 +815,11 @@ void main() {
 /// A window with a picture file that has the effect that counts the frames on it (and nothing else: **no video, which would need ffmpeg to be decoded for the lead-up**, and a window of a test has
 /// none; the lead-up of a video has tests with the real one), a checkpoint every 30 frames, and the lead-up on a seek as `lead_up_on_seek` says.
 fn a_window_whose_picture_counts_its_frames(lead_up_on_seek: bool) -> Option<Window> {
+    a_window_whose_picture_has_the_effect(COUNTS_THE_FRAMES, lead_up_on_seek)
+}
+
+/// The same, with the effect that `shader` is (an ISF shader that depends on earlier frames).
+fn a_window_whose_picture_has_the_effect(shader: &str, lead_up_on_seek: bool) -> Option<Window> {
     let mut project = Project::empty();
     let picture_file = picture_source();
     let source = picture_file.identifier;
@@ -823,10 +828,9 @@ fn a_window_whose_picture_counts_its_frames(lead_up_on_seek: bool) -> Option<Win
         .unwrap()
         .clip
         .expect("a picture makes a clip");
-    let file = crate::isf::read(COUNTS_THE_FRAMES).unwrap();
+    let file = crate::isf::read(shader).unwrap();
     let kind =
-        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "counts.fs", COUNTS_THE_FRAMES))
-            .unwrap();
+        crate::project::EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "counts.fs", shader)).unwrap();
     assert!(kind.is_installed() && kind.depends_on_earlier_frames(), "a premise");
     project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
     let mut window = Window::showing_with_the_engine(project)?;
@@ -947,6 +951,8 @@ struct WhatTheWindowAsked {
     pictures: Vec<(crate::engine::PictureId, (u32, u32))>,
     frames: Vec<(u64, crate::engine::FrameDescription)>,
     lead_ups: Vec<(u64, std::sync::mpsc::Receiver<crate::engine::LeadUpItem>)>,
+    /// The chases that the engine was asked for (they go on to the end of the project, and not up to a frame).
+    chases: Vec<(u64, std::sync::mpsc::Receiver<crate::engine::LeadUpItem>)>,
     cancelled_lead_ups: Vec<u64>,
 }
 
@@ -960,6 +966,7 @@ impl WhatTheWindowAsked {
                 }
                 EngineRequest::Render { serial, description } => self.frames.push((serial, description)),
                 EngineRequest::StartTheLeadUp { generation, items } => self.lead_ups.push((generation, items)),
+                EngineRequest::StartTheChase { generation, items } => self.chases.push((generation, items)),
                 EngineRequest::CancelTheLeadUp { generation } => self.cancelled_lead_ups.push(generation),
                 _ => {}
             }
@@ -1216,4 +1223,346 @@ fn turning_the_checkbox_off_while_the_lead_up_is_made_cancels_it_and_the_engine_
     assert!(!made.window.engine_preview().unwrap().a_lead_up_is_being_made());
     // The thread that describes the frames finds that nobody is listening once the engine lets go (here: when the test does, which is what the engine does).
     drop(made.items);
+}
+
+// ---- the chase: the lead-up of a jump while the project plays (EN-14) ----
+
+/// A shader that adds a sixteenth of red to what it kept in every frame, in a buffer of half floats, and starts again at nothing when there is a whole: the red of the picture is how many frames of the effect
+/// have gone into it **modulo 16**, so it does not stop at the most there is, as the red of the shader that counts tenths does (which is why playing for longer than ten frames cannot tell an exact picture
+/// from one that is not).
+const COUNTS_THE_FRAMES_IN_A_CYCLE: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"memory\", \"PERSISTENT\": true, \"FLOAT\": true }, {} ] }*/
+void main() {
+    if (PASSINDEX == 0) {
+        vec4 held = IMG_THIS_PIXEL(memory);
+        gl_FragColor = vec4(fract(held.r + 0.0625), 0.0, 0.0, 1.0);
+    } else {
+        gl_FragColor = IMG_THIS_PIXEL(memory);
+    }
+}
+";
+
+/// The same window as [`a_window_whose_picture_counts_its_frames`], with the shader that counts in a cycle, and a project of five frames a second (a frame lasts a fifth of a second, which the software
+/// adapter makes a frame in with a great deal of time to spare, so that the engine has the time that a chase takes between the frames of the preview: a chase that has to catch up with a playhead
+/// that moves as fast as the engine makes frames never does).
+fn a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() -> Option<Window> {
+    let mut window = a_window_whose_picture_has_the_effect(COUNTS_THE_FRAMES_IN_A_CYCLE, true)?;
+    window.do_this(Command::SetProjectFrameRate(
+        crate::project::FrameRate::from_whole_frames_per_second(5).unwrap(),
+    ));
+    assert_eq!(
+        window.application().project().total_frame_count(),
+        25,
+        "a premise: five seconds of picture at five frames a second"
+    );
+    Some(window)
+}
+
+/// The red of the picture of each of the frames 0 to 15 of the effect when it is made in order, which is what the red of the picture of any frame is, modulo 16, when the picture is exact.
+/// The window is paused, and ends up at frame 15.
+fn the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(window: &mut Window) -> [u8; 16] {
+    let mut reds = [0; 16];
+    for frame in 0..16 {
+        go_to_the_frame(window, frame);
+        assert!(!is_not_exact(window), "frame {frame} was made in order from the first");
+        reds[frame as usize] = the_red_of_the_picture(window);
+    }
+    let mut different = reds.to_vec();
+    different.sort_unstable();
+    different.dedup();
+    assert_eq!(
+        different.len(),
+        16,
+        "a premise: a picture that is exact can be told from one that is a few frames short: {reds:?}"
+    );
+    reds
+}
+
+/// Plays the project from where it is until it has gone on to `frame`, and then jumps to `to`: **a jump while the project plays**, which leaves the picture not exact.
+fn play_to_and_then_jump_while_playing(window: &mut Window, frame: u64, to: u64) {
+    window.do_this(Command::Play);
+    window.draw_frames_until("the project has played on", |window| {
+        window.application().current_frame().value() >= frame
+    });
+    assert!(window.application().is_playing());
+    assert!(!is_not_exact(window), "it was played in order from frame 15");
+    window.do_this(Command::SeekTo(TimelineFrameIndex::new(to)));
+    window.draw_frames_until("the picture of the jump is not exact", is_not_exact);
+}
+
+#[test]
+fn a_jump_while_the_project_plays_is_made_exact_by_a_chase_that_catches_up_with_the_playhead_and_the_pictures_after_it_are_those_that_playing_makes()
+ {
+    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() else {
+        return;
+    };
+    let reds = the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
+    play_to_and_then_jump_while_playing(&mut window, 17, 10);
+    assert!(window.application().is_playing(), "the project plays on");
+
+    // The picture keeps changing for a quarter of a second, and then the chase is made, and the engine hands over its states when it has caught up with the playhead.
+    let started = std::time::Instant::now();
+    let mut the_chase_was_made = false;
+    loop {
+        window.harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        let preview = window.engine_preview().unwrap();
+        the_chase_was_made |= preview.a_lead_up_is_being_made();
+        if the_chase_was_made && !preview.a_lead_up_is_being_made() && !preview.the_picture_shown_is_not_exact() {
+            break;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(30),
+            "the picture did not become exact: the chase was made: {the_chase_was_made}, playing: {}",
+            window.application().is_playing()
+        );
+    }
+    assert_eq!(window.engine_preview().unwrap().why_it_stopped(), None);
+    assert!(!says_the_picture_is_not_exact(&window));
+    assert!(
+        window.application().is_playing(),
+        "the chase caught up with the playhead while the project played, and not when it had stopped at the end"
+    );
+
+    // Looked at where it stands: the picture of a frame that is asked for again from the states that the chase handed over is the picture that playing from the first frame makes.
+    window.do_this(Command::Pause);
+    window.wait_for_the_engine();
+    let frame = window.application().current_frame().value();
+    if is_not_exact(&window) {
+        // (A frame of the preview was passed over after the chase, as a card that is late passes frames over, and goes on from the state it has: not exact, as it always was. Nothing is wrong with the chase.)
+        return;
+    }
+    assert!(
+        the_red_of_the_picture(&window).abs_diff(reds[(frame % 16) as usize]) <= 1,
+        "frame {frame}: {} and the exact {}",
+        the_red_of_the_picture(&window),
+        reds[(frame % 16) as usize]
+    );
+}
+
+#[test]
+fn a_chase_that_the_project_is_paused_during_catches_up_with_the_frame_that_stays_and_the_picture_is_exact_when_it_does()
+ {
+    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() else {
+        return;
+    };
+    let reds = the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
+    play_to_and_then_jump_while_playing(&mut window, 17, 10);
+    window.draw_frames_until("the chase is made", |window| {
+        window.engine_preview().unwrap().a_lead_up_is_being_made()
+    });
+    // The project is paused while the chase goes on: the frame stays, and the chase has a frame to catch up with.
+    window.do_this(Command::Pause);
+    let frame = window.application().current_frame().value();
+    window.draw_frames_until("the picture is exact", |window| {
+        !window.engine_preview().unwrap().a_lead_up_is_being_made() && !is_not_exact(window)
+    });
+    assert_eq!(window.engine_preview().unwrap().why_it_stopped(), None);
+    assert_eq!(
+        window.application().current_frame().value(),
+        frame,
+        "the project is paused: the frame that stayed is the frame of the picture"
+    );
+    assert!(
+        the_red_of_the_picture(&window).abs_diff(reds[(frame % 16) as usize]) <= 1,
+        "frame {frame}: {} and the exact {}",
+        the_red_of_the_picture(&window),
+        reds[(frame % 16) as usize]
+    );
+}
+
+#[test]
+fn with_the_checkbox_off_a_jump_while_the_project_plays_makes_no_chase() {
+    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() else {
+        return;
+    };
+    the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
+    window.do_this(Command::SetGenerateLeadUpOnSeek(false));
+    play_to_and_then_jump_while_playing(&mut window, 17, 10);
+    draw_the_window_for(&mut window, std::time::Duration::from_millis(700));
+    assert!(!window.engine_preview().unwrap().a_lead_up_is_being_made());
+    assert!(
+        is_not_exact(&window),
+        "it goes on as it did, from the nearest state, and says so"
+    );
+}
+
+/// A window of the picture that counts its frames (at thirty frames a second, which is a project of 150 frames) with a preview made with a scripted engine (it makes no frame, and what the window asks of it is read), **while the project
+/// plays after a jump to frame 20**, with the engine saying that the picture is not exact, and the chase that the window makes of that, started and waiting for the engine to take what it describes.
+struct WindowWithAChaseThatIsBeingMade {
+    window: Window,
+    events: std::sync::mpsc::Sender<crate::engine::EngineEvent>,
+    requests: std::sync::mpsc::Receiver<crate::engine::EngineRequest>,
+    asked: WhatTheWindowAsked,
+    generation: u64,
+    items: std::sync::mpsc::Receiver<crate::engine::LeadUpItem>,
+}
+
+fn a_window_that_is_making_a_chase() -> Option<WindowWithAChaseThatIsBeingMade> {
+    use crate::application::preview_panel::EnginePreview;
+    use crate::engine::Engine;
+    let mut window = a_window_whose_picture_counts_its_frames(true)?;
+    let (engine, events, requests) = Engine::scripted_for_tests();
+    window.application_mut().interface.engine_preview = Some(EnginePreview::with_engine(engine));
+    let mut asked = WhatTheWindowAsked::default();
+    window.do_this(Command::Play);
+    window.do_this(Command::SeekTo(TimelineFrameIndex::new(20)));
+    draw_until_asked(
+        &mut window,
+        &requests,
+        &mut asked,
+        "a frame is asked for after the jump",
+        |asked, _| !asked.frames.is_empty(),
+    );
+    let serial = asked.frames.last().unwrap().0;
+    events
+        .send(a_frame_that_the_scripted_engine_made(serial, true))
+        .unwrap();
+    draw_until_asked(
+        &mut window,
+        &requests,
+        &mut asked,
+        "the chase is started",
+        |asked, _| !asked.chases.is_empty(),
+    );
+    let (generation, items) = asked.chases.remove(0);
+    Some(WindowWithAChaseThatIsBeingMade {
+        window,
+        events,
+        requests,
+        asked,
+        generation,
+        items,
+    })
+}
+
+#[test]
+fn the_chase_that_the_window_makes_is_of_the_frames_from_before_the_frame_on_the_screen_to_the_end_of_the_project_and_is_asked_of_the_engine_as_a_chase()
+ {
+    use crate::engine::LeadUpItem;
+    let Some(mut made) = a_window_that_is_making_a_chase() else {
+        return;
+    };
+    assert_eq!(made.generation, 1);
+    assert!(made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    assert!(
+        made.asked.lead_ups.is_empty(),
+        "the engine was not asked for a lead-up for a frame: the project plays"
+    );
+    let the_frame_on_the_screen = made.asked.frames.last().unwrap().1.clone();
+
+    let started = std::time::Instant::now();
+    let mut given: Vec<LeadUpItem> = Vec::new();
+    loop {
+        match made.items.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(item) => given.push(item),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(30),
+                    "the chase did not end"
+                );
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    assert!(matches!(given.last(), Some(LeadUpItem::End)));
+    let frames: Vec<&crate::engine::FrameDescription> = given
+        .iter()
+        .filter_map(|item| match item {
+            LeadUpItem::Frame(description) => Some(description),
+            _ => None,
+        })
+        .collect();
+    let state_of = |description: &crate::engine::FrameDescription| {
+        let states: Vec<crate::engine::EffectState> = description
+            .flatten()
+            .layers
+            .iter()
+            .flat_map(|flat| flat.layer.effects.iter().filter_map(|effect| effect.state))
+            .collect();
+        assert_eq!(states.len(), 1, "one effect with a state");
+        states[0]
+    };
+    // The effect began with the clip, so the chase begins there, whatever frame the playhead was at when it was wanted (it has gone on from 20), and goes on to the last frame of the project (150 frames).
+    assert_eq!(frames.len(), 150, "every frame of the project");
+    for (number, description) in frames.iter().enumerate() {
+        let state = state_of(description);
+        assert_eq!(
+            state.frame, number as u64,
+            "the frames of the effect's clock, in order, from the first"
+        );
+        assert_eq!(state.id, state_of(&the_frame_on_the_screen).id, "the same state");
+        assert_eq!(description.render_size, the_frame_on_the_screen.render_size);
+        assert_eq!(description.colour, the_frame_on_the_screen.colour);
+    }
+    assert!(
+        state_of(&the_frame_on_the_screen).frame >= 20,
+        "the playhead went on from the jump to frame 20, and the chase is for the frames before it, wherever it is"
+    );
+    // (The line over the picture says what it waits for, as it does for a lead-up.)
+    made.window.harness.step();
+    assert!(
+        made.window
+            .harness
+            .query_by_label(
+                crate::application::preview_panel::THE_PICTURE_IS_NOT_EXACT_AND_THE_LEAD_UP_IS_BEING_MADE_NOTE
+            )
+            .is_some()
+    );
+}
+
+#[test]
+fn another_jump_while_the_chase_is_made_cancels_it_and_the_engine_is_told() {
+    let Some(mut made) = a_window_that_is_making_a_chase() else {
+        return;
+    };
+    let frames_asked_before = made.asked.frames.len();
+    made.window.do_this(Command::SeekTo(TimelineFrameIndex::new(60)));
+    draw_until_asked(
+        &mut made.window,
+        &made.requests,
+        &mut made.asked,
+        "the chase is cancelled",
+        |asked, _| !asked.cancelled_lead_ups.is_empty() && asked.frames.len() > frames_asked_before,
+    );
+    assert_eq!(made.asked.cancelled_lead_ups, [made.generation]);
+    assert!(!made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    // (The window goes on: the frame that is asked for after the jump is the frame at 60 or after.)
+    assert!(made.window.application().current_frame().value() >= 60);
+    drop(made.items);
+}
+
+#[test]
+fn a_frame_that_follows_the_one_before_does_not_cancel_the_chase_that_the_window_makes() {
+    let Some(mut made) = a_window_that_is_making_a_chase() else {
+        return;
+    };
+    let frames_asked_before = made.asked.frames.len();
+    draw_until_asked(
+        &mut made.window,
+        &made.requests,
+        &mut made.asked,
+        "more frames are asked for as the project plays",
+        |asked, _| asked.frames.len() >= frames_asked_before + 3,
+    );
+    assert!(
+        made.asked.cancelled_lead_ups.is_empty(),
+        "the project plays on, and the chase with it"
+    );
+    assert!(made.window.engine_preview().unwrap().a_lead_up_is_being_made());
+    made.events
+        .send(crate::engine::EngineEvent::LeadUpDone {
+            generation: made.generation,
+            frames_made: 100,
+        })
+        .unwrap();
+    let frames_asked_before = made.asked.frames.len();
+    draw_until_asked(
+        &mut made.window,
+        &made.requests,
+        &mut made.asked,
+        "the frame is asked for again, and the chase is over",
+        |asked, window| {
+            asked.frames.len() > frames_asked_before && !window.engine_preview().unwrap().a_lead_up_is_being_made()
+        },
+    );
 }

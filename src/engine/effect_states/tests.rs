@@ -685,3 +685,294 @@ fn rules_with_no_interval_take_no_checkpoint_and_let_go_of_those_there_are_whate
         assert!(call.to_checkpoint.is_empty());
     });
 }
+
+// ---- The chase: states made in a store of their own are taken over by the store of the preview when they have caught up with it (EN-14, the lead-up while the project plays).
+
+/// Makes the frames `frames` of the state `id` (one buffer of `size`) as a frame that is not of the preview does, and commits each.
+fn go_through(
+    states: &mut StatesOfEffects,
+    device: &wgpu::Device,
+    id: u64,
+    frames: impl IntoIterator<Item = u64>,
+    size: (u32, u32),
+) {
+    for frame in frames {
+        let call = states.prepare_for_the_preview(device, id, frame, &[wanted(size.0, size.1)]);
+        states.commit(id, frame, call.continuation);
+        states.end_frame();
+    }
+}
+
+/// A frame of the preview that uses all of the states `ids` at `frame`, so that they are what the last frame used.
+fn a_frame_of_the_preview_using(states: &mut StatesOfEffects, device: &wgpu::Device, ids: &[u64], frame: u64) {
+    for id in ids {
+        let call = states.prepare_for_the_preview(device, *id, frame, &[wanted(4, 4)]);
+        states.commit(*id, frame, call.continuation);
+    }
+    states.end_frame();
+}
+
+#[test]
+fn a_store_that_has_not_reached_the_frame_of_the_preview_is_not_taken_over_and_one_that_has_is() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        live.set_the_rules_of_checkpoints(checkpoints_every(1000));
+        // The preview jumped to frame 5 and went on to 7: from nothing, so it is not exact.
+        go_through(&mut live, device, 1, 5..=7, (4, 4));
+        let next = live.prepare_for_the_preview(device, 1, 8, &[wanted(4, 4)]);
+        assert!(next.approximate, "a state that started at frame 5 is not exact");
+        live.abandon(1);
+        go_through(&mut live, device, 1, 5..=7, (4, 4));
+
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=6, (4, 4));
+        assert_eq!(live.take_over_what_has_caught_up(&mut chasing), CatchingUp::NotYet);
+        assert_eq!(chasing.len(), 1, "nothing was taken");
+
+        go_through(&mut chasing, device, 1, 7..=7, (4, 4));
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(1)
+        );
+        assert_eq!(chasing.len(), 0, "it went over to the other store");
+        assert_eq!(live.len(), 1);
+        // The state is the one of frame 7 and exact: the next frame goes on from it and says so.
+        let next = live.prepare_for_the_preview(device, 1, 8, &[wanted(4, 4)]);
+        assert_eq!(next.continuation, Continuation::GoOn);
+        assert!(!next.approximate, "what the chase made is exact");
+        // And the same frame again, which is what a picture that is asked for again is, reads the state before it.
+        live.commit(1, 8, next.continuation);
+        let again = live.prepare_for_the_preview(device, 1, 8, &[wanted(4, 4)]);
+        assert_eq!(again.continuation, Continuation::SameFrame);
+        assert!(!again.approximate);
+    });
+}
+
+#[test]
+fn a_state_that_is_taken_over_replaces_the_one_that_the_preview_had_at_the_same_frame() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        live.set_the_rules_of_checkpoints(checkpoints_every(1000));
+        go_through(&mut live, device, 1, 5..=7, (4, 4));
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=7, (4, 4));
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(1)
+        );
+        // Two textures for the buffer, as a state always has, and not four: the one that the preview had is let go of.
+        assert_eq!(live.bytes(), 2 * 128);
+        assert_eq!(live.len(), 1);
+    });
+}
+
+#[test]
+fn only_the_states_that_the_last_frame_of_the_preview_used_are_needed_and_taken() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        // State 2 was used by a frame before the last, and the last frame used state 1 only.
+        a_frame_of_the_preview_using(&mut live, device, &[2], 6);
+        a_frame_of_the_preview_using(&mut live, device, &[1], 7);
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=7, (4, 4));
+        go_through(&mut chasing, device, 2, 0..=3, (4, 4));
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(1)
+        );
+        assert_eq!(chasing.len(), 1, "state 2, which nothing needed, is where it was");
+        assert_eq!(live.len(), 2);
+        // The preview's own state 2 (at frame 6) was not touched: frame 7 goes on from it.
+        let two = live.prepare_for_the_preview(device, 2, 7, &[wanted(4, 4)]);
+        assert_eq!(two.continuation, Continuation::GoOn);
+    });
+}
+
+#[test]
+fn the_states_are_taken_all_together_or_not_at_all() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1, 2], 4);
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=4, (4, 4));
+        go_through(&mut chasing, device, 2, 0..=3, (4, 4));
+        assert_eq!(live.take_over_what_has_caught_up(&mut chasing), CatchingUp::NotYet);
+        assert_eq!(
+            chasing.len(),
+            2,
+            "state 1 is at the frame but state 2 is not, so neither went"
+        );
+        go_through(&mut chasing, device, 2, 4..=4, (4, 4));
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(2)
+        );
+        assert_eq!(chasing.len(), 0);
+    });
+}
+
+#[test]
+fn a_state_that_the_chase_has_not_made_at_all_is_not_yet() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1, 2], 4);
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=4, (4, 4));
+        assert_eq!(live.take_over_what_has_caught_up(&mut chasing), CatchingUp::NotYet);
+        assert_eq!(chasing.len(), 1);
+    });
+}
+
+#[test]
+fn a_state_that_is_at_a_later_frame_than_the_preview_never_catches_up() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1], 4);
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=5, (4, 4));
+        let CatchingUp::NeverWill(why) = live.take_over_what_has_caught_up(&mut chasing) else {
+            panic!("a state that is ahead of the preview cannot be taken over");
+        };
+        assert!(why.contains("later"), "{why}");
+        assert_eq!(chasing.len(), 1, "nothing was taken");
+    });
+}
+
+#[test]
+fn a_later_state_is_never_even_when_another_is_not_yet() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1, 2], 4);
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=2, (4, 4));
+        go_through(&mut chasing, device, 2, 0..=5, (4, 4));
+        assert!(matches!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::NeverWill(_)
+        ));
+    });
+}
+
+#[test]
+fn a_state_whose_buffers_are_not_the_ones_of_the_preview_never_catches_up() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1], 4);
+        let mut chasing = StatesOfEffects::default();
+        // (At an earlier frame already: waiting would be for nothing.)
+        go_through(&mut chasing, device, 1, 0..=2, (8, 8));
+        let CatchingUp::NeverWill(why) = live.take_over_what_has_caught_up(&mut chasing) else {
+            panic!("states of another size cannot be taken over");
+        };
+        assert!(why.contains("buffers"), "{why}");
+        assert_eq!(chasing.len(), 1);
+        assert_eq!(live.len(), 1);
+    });
+}
+
+#[test]
+fn when_the_last_frame_used_no_state_there_is_nothing_to_take_and_the_chase_is_over() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1], 3);
+        live.end_frame();
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 0..=2, (4, 4));
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(0)
+        );
+        assert_eq!(chasing.len(), 1, "nothing was taken");
+        // (A preview that has made no frame at all needs nothing either.)
+        assert_eq!(
+            StatesOfEffects::default().take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(0)
+        );
+    });
+}
+
+#[test]
+fn a_state_that_is_taken_over_counts_as_used_just_now_by_the_store_that_has_it() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        for _ in 0..(2 * FRAMES_BEFORE_A_STATE_IS_LET_GO_OF) {
+            live.end_frame();
+        }
+        a_frame_of_the_preview_using(&mut live, device, &[1], 700);
+        let mut chasing = StatesOfEffects::default();
+        go_through(&mut chasing, device, 1, 699..=700, (4, 4));
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(1)
+        );
+        live.end_frame();
+        assert_eq!(
+            live.len(),
+            1,
+            "it was last used at the chase's own count of frames, 2, which is long ago at the preview's, and it is not let go of for that"
+        );
+    });
+}
+
+#[test]
+fn a_state_with_another_number_of_buffers_than_the_preview_s_never_catches_up_either() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1], 4);
+        let mut chasing = StatesOfEffects::default();
+        // (The same first buffer and one more: the shader of the effect was another when the chase was made.)
+        for frame in 0..=4 {
+            let call = chasing.prepare_for_the_preview(device, 1, frame, &[wanted(4, 4), wanted(4, 4)]);
+            chasing.commit(1, frame, call.continuation);
+            chasing.end_frame();
+        }
+        let CatchingUp::NeverWill(why) = live.take_over_what_has_caught_up(&mut chasing) else {
+            panic!("a state with more buffers is not the state of an effect with fewer");
+        };
+        assert!(why.contains("buffers"), "{why}");
+        assert_eq!(chasing.len(), 1);
+    });
+}
+
+#[test]
+fn what_is_taken_over_is_exact_whatever_the_store_that_made_it_said_of_it() {
+    with_software_graphics!(graphics, {
+        let device = &graphics.device.device;
+        let a_chase_that_started_from_nothing = |device: &wgpu::Device| {
+            let mut chasing = StatesOfEffects::default();
+            // (A store that is given rules says whether what it makes is exact; the chase's own never is.)
+            chasing.set_the_rules_of_checkpoints(checkpoints_every(1000));
+            go_through(&mut chasing, device, 1, 5..=7, (4, 4));
+            chasing
+        };
+        // A premise: what that store made is not exact.
+        let mut probe = a_chase_that_started_from_nothing(device);
+        assert!(probe.prepare_for_the_preview(device, 1, 8, &[wanted(4, 4)]).approximate);
+
+        let mut live = StatesOfEffects::default();
+        a_frame_of_the_preview_using(&mut live, device, &[1], 7);
+        let mut chasing = a_chase_that_started_from_nothing(device);
+        assert_eq!(
+            live.take_over_what_has_caught_up(&mut chasing),
+            CatchingUp::TakenOver(1)
+        );
+        live.set_the_rules_of_checkpoints(checkpoints_every(1000));
+        let next = live.prepare_for_the_preview(device, 1, 8, &[wanted(4, 4)]);
+        assert_eq!(next.continuation, Continuation::GoOn);
+        assert!(
+            !next.approximate,
+            "a state that went over is the state of the frame before, and exact"
+        );
+    });
+}

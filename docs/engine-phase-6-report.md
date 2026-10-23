@@ -52,7 +52,7 @@ Written 2026-10-22, at the end of phase 6 of [the plan of action](plugin-system-
 
 ## 5. Limits
 
-* **Seeks while the project plays** have no lead-up: the preview goes on from the nearest copy and says that the picture is approximate, for 300 frames of the effect (a lead-up is made for a picture that stays still; a chase of a moving playhead was not built).
+* **Seeks while the project plays** have a **chase** since the report was written (2026-10-22, at the maintainer's request: design in `engine-phase-6-6-design.md`, E3): the frames from before the jump on to the end of the project are made for states of their own, and the preview's take them over when they have caught up with the playhead. It is verified on the software adapter only (a jump while the project plays at five frames a second is made exact while it plays); on a card whose frames leave no time to spare it never catches up, and is given up after 20 seconds.
 * **A transition is not run on a clip inside a group that has effects of its own** (what is behind the clip is then only what is in the group); the box says so and the effect is counted as not run.
 * The old drawing of the window (the fallback of a computer with no usable graphics adapter) leaves out what the engine does: blur, crop, the effects of groups, and every shader.
 * Shaders that the program cannot run yet are listed as *cannot be used* with the reason: one that has a function with the name of one of GLSL's own (naga refuses it), one that is not UTF-8, one that reads more than 7 pictures, and *Crazy Parametric Fun*. Each is a small piece of work if you meet one that matters.
@@ -63,5 +63,5 @@ Written 2026-10-22, at the end of phase 6 of [the plan of action](plugin-system-
 
 * **6.7, the golden corpus.** If you say go, I make the pictures of 15 shaders (five filters, five generators, five transitions of the manifest, at fixed values) and the list of what to set in the ISF Editor, so that you compare them with it; what you accept is frozen as expected pictures and becomes a test.
 * **Look at it in the window**, with a real card: a transition (put a clip on a track above another, put a transition from the Bundles tab on the top one, animate its `progress`), a feedback shader after a seek (the line over the picture, then exact after a moment), and the View menu's checkbox.
-* **Say whether seeks while the project plays should have a lead-up** (it needs a chase and a handover that is exact only when the lead-up meets the playhead; I would rather not build it unless you miss it).
+* ~~Say whether seeks while the project plays should have a lead-up~~ answered: yes, built (E3).
 * The next piece in the order of the plan is **phase 9 (text objects become generators, file format 12)**, size M-L; I suggest **high effort**, with a design first. (The plugin manager of phase 8 exists as *Edit > Plugin manager...*, which finds sound plugins and, since 6.8, shaders; I have not compared it line by line with phase 8 of the plan.)

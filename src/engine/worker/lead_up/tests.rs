@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 const A_LONG_TIME: Duration = Duration::from_secs(60);
 
-fn checkpoints_every(interval: u64) -> RulesOfCheckpoints {
+pub(super) fn checkpoints_every(interval: u64) -> RulesOfCheckpoints {
     RulesOfCheckpoints {
         interval_in_frames: interval,
         memory_budget_in_bytes: u64::MAX,
@@ -37,14 +37,14 @@ fn checkpoints_every(interval: u64) -> RulesOfCheckpoints {
 }
 
 /// The frame of the effect at `frame` of its own clock, made of the picture `picture`: 8 by 8.
-fn frame_of_the_effect_at(picture: u64, frame: u64) -> FrameDescription {
+pub(super) fn frame_of_the_effect_at(picture: u64, frame: u64) -> FrameDescription {
     let mut description = FrameDescription::black((8, 8));
     description.layers = vec![whole_frame(picture, vec![stateful("test:accumulate", 1, frame)])];
     description
 }
 
 /// A worker that has the effect that adds a tenth of red to what it kept, the picture 1 (which is what the preview sent), and the rules of checkpoints that are given.
-fn with_the_accumulating_effect(rules: RulesOfCheckpoints, body: impl FnOnce(&mut Worker<'_>, &Told)) {
+pub(super) fn with_the_accumulating_effect(rules: RulesOfCheckpoints, body: impl FnOnce(&mut Worker<'_>, &Told)) {
     let Some(_graphics) = software_graphics() else { return };
     with_a_worker(software_settings(), |worker, told| {
         worker
@@ -77,7 +77,7 @@ fn start_a_lead_up(worker: &mut Worker<'_>, generation: u64) -> Sender<LeadUpIte
 }
 
 /// Steps the lead-up until it is over, which it is when it has been given an end (or a failure, or nobody to be given anything).
-fn go_on_until_the_lead_up_is_over(worker: &mut Worker<'_>) {
+pub(super) fn go_on_until_the_lead_up_is_over(worker: &mut Worker<'_>) {
     let mut steps = 0;
     while worker.has_a_lead_up() {
         assert!(matches!(worker.make_a_step_of_the_lead_up(), Next::GoOn));
@@ -86,7 +86,7 @@ fn go_on_until_the_lead_up_is_over(worker: &mut Worker<'_>) {
     }
 }
 
-fn red_in(frame: &RenderedFrame) -> i32 {
+pub(super) fn red_in(frame: &RenderedFrame) -> i32 {
     i32::from(frame.pixel(4, 4)[0])
 }
 
@@ -381,7 +381,7 @@ fn what_is_waiting_is_all_that_the_window_has_asked_and_the_engine_has_not_looke
 // ---- the thread ----
 
 /// The engine of the window's kind: its own thread, the effect that adds a tenth of red, the picture 1, and rules of checkpoints.
-fn an_engine_with_the_accumulating_effect() -> Option<crate::engine::Engine> {
+pub(super) fn an_engine_with_the_accumulating_effect() -> Option<crate::engine::Engine> {
     let _graphics = software_graphics()?;
     let (engine, _woken) = software_engine();
     engine
@@ -397,7 +397,7 @@ fn an_engine_with_the_accumulating_effect() -> Option<crate::engine::Engine> {
 }
 
 /// The frame that the engine makes next (any other thing it says fails the test).
-fn the_next_frame(engine: &crate::engine::Engine) -> (Arc<RenderedFrame>, FrameStatistics) {
+pub(super) fn the_next_frame(engine: &crate::engine::Engine) -> (Arc<RenderedFrame>, FrameStatistics) {
     match events_of(engine, 1).remove(0) {
         EngineEvent::Frame { frame, statistics, .. } => (frame, statistics),
         other => panic!("not a frame: {other:?}"),

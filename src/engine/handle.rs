@@ -140,6 +140,13 @@ impl Engine {
         let _ = self.requests.send(EngineRequest::StartTheLeadUp { generation, items });
     }
 
+    /// Begins the lead-up `generation` as a chase (EN-14): the frames that `items` brings, from before the frame that the preview shows on to the end of the project, are made for the states of
+    /// the effects in a store of their own, which goes over to the preview's when it has caught up with it (see [`EngineRequest::StartTheChase`]). The engine says [`EngineEvent::LeadUpDone`] or
+    /// [`EngineEvent::LeadUpFailed`] when it ends.
+    pub fn start_the_chase(&self, generation: u64, items: Receiver<LeadUpItem>) {
+        let _ = self.requests.send(EngineRequest::StartTheChase { generation, items });
+    }
+
     /// Tells the engine that the lead-up `generation` is not wanted any more: it is let go of, with the pictures that it sent, and the engine says nothing of it.
     pub fn cancel_the_lead_up(&self, generation: u64) {
         let _ = self.requests.send(EngineRequest::CancelTheLeadUp { generation });

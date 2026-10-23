@@ -88,6 +88,14 @@ pub fn frames_of_the_lead_up_to(frame: u64, most_frames_a_state_has_gone_on_for:
     frame.saturating_sub(length)..frame
 }
 
+/// The frames that **a chase** that begins at the frame `frame` has (the lead-up of a jump while the project plays; see `EnginePreview`): the same frames before it as a lead-up to it, and then the
+/// frames from it **to the end of the project**, which has `total_frames` frames. The frame that is shown moves on while the chase is made, and the chase ends when it has caught up with it, so it is not
+/// known where that will be.
+pub fn frames_of_a_chase_from(frame: u64, most_frames_a_state_has_gone_on_for: u64, total_frames: u64) -> Range<u64> {
+    let before_it = frames_of_the_lead_up_to(frame, most_frames_a_state_has_gone_on_for);
+    before_it.start..total_frames.max(frame.saturating_add(1))
+}
+
 /// Everything the thread that describes the frames of a lead-up needs, which it is given because it has no window to ask.
 pub struct WhatALeadUpIsMadeFrom<Starter> {
     /// The plan of the project as the window shows it (see `plan_export_of_the_files_that_can_be_read`), which the thread cuts to its frames.

@@ -14,7 +14,9 @@ use thiserror::Error;
 use super::colour::{DisplayDomainConversion, IngestConversion, MixingParts, OutputConversion};
 use super::device::EngineDevice;
 use super::effect_shaders::{check_that_it_is_an_effect, numbers_of_a_pass, write_the_numbers_of_a_call};
-use super::effect_states::{BufferWanted, BuffersOfACall, Continuation, RulesOfCheckpoints, StatesOfEffects};
+use super::effect_states::{
+    BufferWanted, BuffersOfACall, CatchingUp, Continuation, RulesOfCheckpoints, StatesOfEffects,
+};
 use super::guard::GuardedShader;
 use super::own_effects::{LutNumbers, blur_numbers, crop_numbers, gain_factors};
 use super::picture_cache::{DEFAULT_BUDGET_IN_BYTES, GpuPicture, PictureCache};
@@ -164,6 +166,9 @@ pub struct FrameRenderer {
     shader_effects: HashMap<String, InstalledShader>,
     /// What the shaders that depend on earlier frames keep from one frame to the next (phase 6.4.2).
     effect_states: StatesOfEffects,
+    /// The states that a chase makes (the lead-up while the project plays), apart from the preview's, until they have caught up with it and go over to `effect_states`; none while no chase has
+    /// made a frame.
+    chase_states: Option<StatesOfEffects>,
     /// Which effects the engine can run: its own, and the keys of `shader_effects`.
     effects_that_run: EffectsThatRun,
     /// The look-up tables the card has, taken from the shelf (see `tables`) when a frame needed them, and let go of when there are too many.
@@ -255,6 +260,7 @@ impl FrameRenderer {
             upload_arena: UniformArena::default(),
             shader_effects: HashMap::new(),
             effect_states: StatesOfEffects::default(),
+            chase_states: None,
             effects_that_run: EffectsThatRun::built_in_only(),
             tables: HashMap::new(),
             table_use_order: Vec::new(),
@@ -281,6 +287,41 @@ impl FrameRenderer {
     /// How many checkpoints the card keeps, and how many bytes of textures they take up.
     pub fn checkpoints_kept(&self) -> (usize, u64) {
         self.effect_states.checkpoints_kept()
+    }
+
+    /// The frame that `description` describes, made as [`Self::render`] makes it **for the states of a chase** (the lead-up while the project plays; see `docs/engine-phase-6-6-design.md`, section 4):
+    /// its effects go on from the states of a store of their own, which the preview's frames do not touch and which takes no checkpoints, and not from the preview's. (The frames of the chase are in
+    /// order from before the frame that the preview shows, and the states are meant to be taken over by the preview's when they have caught up: [`Self::take_over_what_the_chase_has_caught_up_with`].)
+    pub fn render_for_a_chase(
+        &mut self,
+        description: &FrameDescription,
+        timeout: Duration,
+    ) -> Result<(RenderedFrame, FrameStatistics), RenderProblem> {
+        let chasing = self.chase_states.take().unwrap_or_default();
+        let the_preview_s = std::mem::replace(&mut self.effect_states, chasing);
+        let made = self.render(description, timeout);
+        self.chase_states = Some(std::mem::replace(&mut self.effect_states, the_preview_s));
+        made
+    }
+
+    /// Looks whether the states that the chase made have caught up with those of the preview, and if they have, they go over to the preview's (see
+    /// `StatesOfEffects::take_over_what_has_caught_up`).
+    pub fn take_over_what_the_chase_has_caught_up_with(&mut self) -> CatchingUp {
+        let chasing = self.chase_states.get_or_insert_with(StatesOfEffects::default);
+        self.effect_states.take_over_what_has_caught_up(chasing)
+    }
+
+    /// Lets go of the states that a chase made (it ended, or was cancelled).
+    pub fn let_go_of_what_a_chase_made(&mut self) {
+        self.chase_states = None;
+    }
+
+    /// How many states the chase has, and how many bytes of textures they take up.
+    #[cfg(test)]
+    pub fn states_of_a_chase_kept(&self) -> (usize, u64) {
+        self.chase_states
+            .as_ref()
+            .map_or((0, 0), |states| (states.len(), states.bytes()))
     }
 
     /// How many tables of colours the card has now.

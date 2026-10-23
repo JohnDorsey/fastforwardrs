@@ -227,6 +227,10 @@ impl<'a> Worker<'a> {
                     self.start_the_lead_up(generation, items);
                     Ok(())
                 }
+                EngineRequest::StartTheChase { generation, items } => {
+                    self.start_the_chase(generation, items);
+                    Ok(())
+                }
                 EngineRequest::CancelTheLeadUp { generation } => {
                     self.cancel_the_lead_up(generation);
                     Ok(())

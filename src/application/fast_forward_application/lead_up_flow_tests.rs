@@ -31,6 +31,15 @@ fn wanted(most_frames_a_state_has_gone_on_for: u64) -> LeadUpWanted {
         render_size: (96, 54),
         colour: another_colour(),
         most_frames_a_state_has_gone_on_for,
+        is_a_chase: false,
+    }
+}
+
+/// The same, as a chase (the project plays).
+fn a_chase(most_frames_a_state_has_gone_on_for: u64) -> LeadUpWanted {
+    LeadUpWanted {
+        is_a_chase: true,
+        ..wanted(most_frames_a_state_has_gone_on_for)
     }
 }
 
@@ -66,6 +75,24 @@ fn the_frames_are_the_frames_before_the_one_on_the_screen_as_many_as_the_states_
             .is_some_and(|why| why.contains("no frames before")),
         "there is nothing before the first frame"
     );
+}
+
+#[test]
+fn the_frames_of_a_chase_go_on_from_before_the_frame_on_the_screen_to_the_end_of_the_project() {
+    let window = Window::showing(project_of(900));
+    assert_eq!(made_from(&window, &a_chase(50), 500).unwrap().frames, 450..900);
+    assert_eq!(
+        made_from(&window, &a_chase(5000), 500).unwrap().frames,
+        200..900,
+        "no more than 300 before it"
+    );
+    assert_eq!(
+        made_from(&window, &a_chase(8), 0).unwrap().frames,
+        0..900,
+        "a chase of a frame that has nothing before it is not refused: it is the frames that follow"
+    );
+    // (And one that is not a chase is, as it was.)
+    assert!(made_from(&window, &wanted(8), 0).is_err());
 }
 
 #[test]

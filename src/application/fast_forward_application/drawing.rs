@@ -130,6 +130,8 @@ impl FastForwardApplication {
         let state_of_the_project = self.document.history.state_of_the_project();
         // (Whether a lead-up is made when a picture is not exact is the checkbox *Generate lead-up on seek* of the View menu.)
         let lead_ups_are_wanted = self.environment.global_settings.generate_lead_up_on_seek;
+        // (A jump of the playhead while the project plays is what a chase of the lead-up is for: the clock counts its jumps.)
+        let jumps_of_the_playhead = self.playback.clock.jumps();
         let preview = egui::CentralPanel::default()
             .frame(panel_frame(Margin::ZERO, PanelSides::AtTheRight))
             .show(ui, |ui| match &mut self.interface.engine_preview {
@@ -144,7 +146,8 @@ impl FastForwardApplication {
                         &mut self.interface.preview_view,
                         engine_preview,
                         &mut self.environment.text_renderer,
-                        HowTheClockGoes::new(frame_state.is_playing, frame_state.frame_rate, Instant::now()),
+                        HowTheClockGoes::new(frame_state.is_playing, frame_state.frame_rate, Instant::now())
+                            .after_jumps(jumps_of_the_playhead),
                         commands,
                     )
                 }

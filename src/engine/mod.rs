@@ -61,6 +61,8 @@ mod yuv;
 #[cfg(test)]
 mod blur_and_crop_tests;
 #[cfg(test)]
+mod chase_tests;
+#[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
 mod chroma_tests;

@@ -31,6 +31,7 @@ fn the_clock_is_stopped() -> HowTheClockGoes {
         is_playing: false,
         how_long_a_frame_lasts: Duration::from_millis(33),
         now: Instant::now(),
+        jumps: 0,
     }
 }
 
@@ -107,6 +108,7 @@ impl Setup {
             is_playing: self.is_playing,
             how_long_a_frame_lasts: self.how_long_a_frame_lasts,
             now: Instant::now(),
+            jumps: 0,
         };
         self.preview.update(
             &self.context,
@@ -784,6 +786,7 @@ impl Scripted {
                 is_playing,
                 how_long_a_frame_lasts: Duration::from_millis(100),
                 now: self.start + Duration::from_millis(milliseconds),
+                jumps: 0,
             },
         );
         let (_, frames, mut told_to_let_go_of) = what_was_asked_and_what_was_forgotten(&self.requests);
@@ -1309,6 +1312,7 @@ impl Scripted {
                 is_playing: false,
                 how_long_a_frame_lasts: Duration::from_millis(100),
                 now: self.start + Duration::from_millis(milliseconds),
+                jumps: 0,
             },
         );
         self.requests.try_iter().collect()
@@ -1321,6 +1325,7 @@ impl Scripted {
             .filter_map(|request| match request {
                 EngineRequest::Render { serial, .. } => Some(format!("render {serial}")),
                 EngineRequest::StartTheLeadUp { generation, .. } => Some(format!("start {generation}")),
+                EngineRequest::StartTheChase { generation, .. } => Some(format!("start chase {generation}")),
                 EngineRequest::CancelTheLeadUp { generation } => Some(format!("cancel {generation}")),
                 _ => None,
             })
@@ -1799,4 +1804,626 @@ fn dropping_what_keeps_the_thread_of_a_lead_up_alive_is_what_cancels_it_and_a_ca
         1,
         "and lets go of it when it cancels the lead-up"
     );
+}
+
+// ---- The chase: the lead-up of a jump of the playhead while the project plays (EN-14).
+
+impl Scripted {
+    /// Draws picture `number` (with a state at `frame_of_the_state`, if it has one) `milliseconds` after the start, with the clock going or not, the playhead having jumped `jumps` times, and
+    /// the picture made as big as `size` at the most; gives everything that the preview asked of the engine while it did.
+    fn draw_with_the_clock(
+        &mut self,
+        number: usize,
+        frame_of_the_state: Option<u64>,
+        milliseconds: u64,
+        is_playing: bool,
+        jumps: u64,
+        size: (u32, u32),
+    ) -> Vec<EngineRequest> {
+        let picture = showing(1, &self.pictures[number]);
+        let layer = match frame_of_the_state {
+            Some(frame) => with_a_state_at(picture, frame),
+            None => picture,
+        };
+        let shown = content(vec![layer]);
+        self.preview.update(
+            &self.context,
+            &shown,
+            size,
+            PictureFilter::Smooth,
+            &mut self.text_renderer,
+            HowTheClockGoes {
+                is_playing,
+                how_long_a_frame_lasts: Duration::from_millis(100),
+                now: self.start + Duration::from_millis(milliseconds),
+                jumps,
+            },
+        );
+        self.requests.try_iter().collect()
+    }
+
+    /// The project plays, and the playhead has jumped `jumps` times: draws picture `number` with a state at `frame_of_the_state`.
+    fn draw_playing(
+        &mut self,
+        number: usize,
+        frame_of_the_state: u64,
+        milliseconds: u64,
+        jumps: u64,
+    ) -> Vec<EngineRequest> {
+        self.draw_with_the_clock(number, Some(frame_of_the_state), milliseconds, true, jumps, RENDER_SIZE)
+    }
+
+    /// A preview of a project that plays, whose playhead jumped (the clock says it jumped once, at the first drawing), and that has been shown a picture that is not exact for as long as
+    /// it takes (`WAIT` milliseconds): a chase is wanted of it.
+    fn that_wants_a_chase() -> (Self, LeadUpWanted) {
+        let mut scripted = Self::new();
+        scripted.preview.set_a_lead_up_is_wanted(true);
+        let asked = scripted.draw_playing(0, 400, 0, 1);
+        assert_eq!(Self::the_requests_of_the_lead_up(&asked), ["render 1"]);
+        scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+        scripted.draw_playing(1, 401, 100, 1);
+        assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None, "not yet");
+        scripted.draw_playing(2, 402, WAIT, 1);
+        let wanted = scripted
+            .preview
+            .the_lead_up_that_is_wanted()
+            .expect("a chase is wanted when the project plays and the picture of the jump is not exact");
+        (scripted, wanted)
+    }
+
+    /// The same, started: the engine is making it. What the engine was asked is taken away.
+    fn that_goes_on_a_chase() -> Self {
+        let (mut scripted, wanted) = Self::that_wants_a_chase();
+        let (_sender, items) = a_lead_up_that_is_started();
+        scripted.preview.start_the_lead_up(&wanted, items, ());
+        scripted.requests.try_iter().for_each(drop);
+        scripted
+    }
+}
+
+#[test]
+fn a_chase_is_wanted_when_the_project_plays_and_the_playhead_jumped_a_quarter_of_a_second_ago_and_the_picture_of_the_jump_is_not_exact()
+ {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.preview.set_the_colour(another_colour());
+    scripted.draw_playing(0, 400, 0, 1);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    scripted.draw_playing(1, 401, 100, 1);
+    assert!(scripted.preview.the_picture_shown_is_not_exact());
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None, "not yet");
+    scripted.draw_playing(2, 402, 249, 1);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "not before a quarter of a second after the jump"
+    );
+    scripted.draw_playing(3, 403, 250, 1);
+    let wanted = scripted.preview.the_lead_up_that_is_wanted().expect("now it is");
+    assert!(
+        wanted.is_a_chase,
+        "the picture keeps changing: it is a chase and not a lead-up for a frame"
+    );
+    assert_eq!(wanted.render_size, RENDER_SIZE);
+    assert_eq!(wanted.colour, another_colour());
+    assert_eq!(
+        wanted.most_frames_a_state_has_gone_on_for, 403,
+        "of the frame that was described last, which is the frame that the project is at"
+    );
+    assert_eq!(wanted.generation, 1);
+    // (The frames go on in order and it is wanted still: nothing has been done about it.)
+    scripted.draw_playing(4, 404, 300, 1);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), Some(wanted));
+}
+
+/// What is wanted when the project plays (or not) after a jump of the playhead, with the setting, the picture and the state that are given: the first picture is shown at the start, the
+/// picture of the jump comes at the second drawing, and the last is `WAIT` milliseconds after the first.
+fn what_is_wanted_after_a_jump(
+    setting: bool,
+    picture_is_not_exact: bool,
+    frame_of_the_state: Option<u64>,
+    playing_at_the_end: bool,
+    jumps: u64,
+) -> Option<LeadUpWanted> {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(setting);
+    scripted.draw_with_the_clock(0, frame_of_the_state, 0, true, jumps, RENDER_SIZE);
+    scripted
+        .events
+        .send(a_frame_that_is_approximate(1, picture_is_not_exact))
+        .unwrap();
+    scripted.draw_with_the_clock(1, frame_of_the_state, 100, true, jumps, RENDER_SIZE);
+    scripted.draw_with_the_clock(2, frame_of_the_state, WAIT, playing_at_the_end, jumps, RENDER_SIZE);
+    scripted.preview.the_lead_up_that_is_wanted()
+}
+
+#[test]
+fn no_chase_is_wanted_unless_all_of_it_is_so() {
+    assert!(
+        what_is_wanted_after_a_jump(true, true, Some(400), true, 1).is_some(),
+        "a premise: with all of it so, one is"
+    );
+    assert_eq!(
+        what_is_wanted_after_a_jump(false, true, Some(400), true, 1),
+        None,
+        "the setting is off"
+    );
+    assert_eq!(
+        what_is_wanted_after_a_jump(true, false, Some(400), true, 1),
+        None,
+        "the picture is exact"
+    );
+    assert_eq!(
+        what_is_wanted_after_a_jump(true, true, None, true, 1),
+        None,
+        "the picture has no effect that depends on earlier frames"
+    );
+    assert_eq!(
+        what_is_wanted_after_a_jump(true, true, Some(0), true, 1),
+        None,
+        "the effect is at its first frame: it has no frames before it"
+    );
+    assert_eq!(
+        what_is_wanted_after_a_jump(true, true, Some(400), false, 1),
+        None,
+        "the project does not play (a lead-up for a frame that stays is the way then)"
+    );
+    assert_eq!(
+        what_is_wanted_after_a_jump(true, true, Some(400), true, 0),
+        None,
+        "the playhead did not jump"
+    );
+}
+
+#[test]
+fn a_picture_that_is_not_the_answer_to_a_frame_asked_for_after_the_jump_is_not_the_picture_of_the_jump() {
+    // Nothing has come yet.
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.draw_playing(0, 400, 0, 1);
+    scripted.draw_playing(1, 401, WAIT, 1);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "there is no picture to look at"
+    );
+    scripted.events.send(a_frame_that_is_approximate(2, true)).unwrap();
+    scripted.draw_playing(2, 402, 2 * WAIT, 1);
+    assert!(
+        scripted.preview.the_lead_up_that_is_wanted().is_some(),
+        "the picture of the second frame asked for has come, and the jump is looked at then"
+    );
+
+    // A picture of before the jump comes after it.
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.draw_playing(0, 400, 0, 0);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    scripted.draw_playing(1, 401, 50, 0);
+    // The playhead jumps: the frames asked for from now on are those of the jump, and the picture that is shown is that of the first frame, which is of before it.
+    scripted.draw_playing(2, 402, 100, 1);
+    scripted.draw_playing(3, 403, 2 * WAIT, 1);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "a picture that is not exact is shown, but it is not the picture of the jump"
+    );
+    // The picture of the last frame that was asked for before the jump comes after it: it is not the picture of the jump either.
+    scripted.events.send(a_frame_that_is_approximate(2, true)).unwrap();
+    scripted.draw_playing(3, 403, 2 * WAIT + 100, 1);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "the frame that was asked for last before the jump is of before it"
+    );
+    scripted.events.send(a_frame_that_is_approximate(3, true)).unwrap();
+    scripted.draw_playing(4, 404, 3 * WAIT, 1);
+    assert!(scripted.preview.the_lead_up_that_is_wanted().is_some());
+}
+
+#[test]
+fn a_jump_is_looked_at_once_and_a_chase_is_not_wanted_again_for_it() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_chase();
+    let (sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+    scripted
+        .events
+        .send(EngineEvent::LeadUpFailed {
+            generation: 1,
+            problem: "it did not catch up".to_owned(),
+        })
+        .unwrap();
+    scripted.draw_playing(3, 403, 2 * WAIT, 1);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    scripted.events.send(a_frame_that_is_approximate(5, true)).unwrap();
+    scripted.draw_playing(4, 404, 3 * WAIT, 1);
+    scripted.draw_playing(5, 405, 10 * WAIT, 1);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "the chase of this jump failed, and there is no other for it"
+    );
+    drop(sender);
+
+    // The same when the window could not make it.
+    let (mut scripted, wanted) = Scripted::that_wants_a_chase();
+    scripted
+        .preview
+        .the_lead_up_cannot_be_made(&wanted, "ffmpeg was not found".to_owned());
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    scripted.events.send(a_frame_that_is_approximate(3, true)).unwrap();
+    scripted.draw_playing(3, 403, 2 * WAIT, 1);
+    scripted.draw_playing(4, 404, 10 * WAIT, 1);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+
+    // And the next jump is another matter.
+    scripted.draw_playing(5, 405, 11 * WAIT, 2);
+    scripted.events.send(a_frame_that_is_approximate(6, true)).unwrap();
+    scripted.draw_playing(6, 406, 12 * WAIT, 2);
+    scripted.draw_playing(7, 407, 13 * WAIT, 2);
+    let again = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("a chase for the jump");
+    assert_eq!(again.generation, 2);
+}
+
+#[test]
+fn the_chase_that_the_window_starts_is_given_to_the_engine_as_a_chase_and_the_frames_that_follow_one_another_do_not_cancel_it()
+ {
+    let (mut scripted, wanted) = Scripted::that_wants_a_chase();
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    assert!(scripted.preview.a_lead_up_is_being_made());
+    let asked: Vec<EngineRequest> = scripted.requests.try_iter().collect();
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["start chase 1"],
+        "a chase is not a lead-up for a frame"
+    );
+    for (step, number) in (3..8).enumerate() {
+        let asked = scripted.draw_playing(number, 400 + number as u64, 2 * WAIT + 20 * step as u64, 1);
+        assert_eq!(
+            Scripted::the_requests_of_the_lead_up(&asked),
+            [format!("render {}", 4 + step)],
+            "a frame that follows the one before is asked for, and the chase is not cancelled"
+        );
+        assert!(scripted.preview.a_lead_up_is_being_made());
+    }
+}
+
+#[test]
+fn another_jump_cancels_the_chase_before_the_frame_that_it_leads_to_is_asked_for_and_the_next_jump_has_a_chase_of_its_own()
+ {
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    let asked = scripted.draw_playing(5, 450, 2 * WAIT, 2);
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["cancel 1", "render 4"],
+        "the engine is told before it is asked for the frame of the jump, so that it does not make the frame while it goes on with the frames before the jump"
+    );
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    // The picture that comes after the jump is not exact, and a quarter of a second after it a chase is wanted again.
+    scripted.events.send(a_frame_that_is_approximate(4, true)).unwrap();
+    scripted.draw_playing(6, 451, 2 * WAIT + 100, 2);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    scripted.draw_playing(7, 452, 2 * WAIT + 260, 2);
+    let wanted = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("a chase for the second jump");
+    assert_eq!(wanted.generation, 2);
+}
+
+#[test]
+fn a_jump_cancels_a_chase_that_was_wanted_and_not_started_too() {
+    let (mut scripted, _wanted) = Scripted::that_wants_a_chase();
+    scripted.draw_playing(3, 450, 2 * WAIT, 2);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "it was for the frames before the jump that there is not any more"
+    );
+}
+
+#[test]
+fn a_chase_is_for_the_size_that_the_frames_were_made_at_when_it_was_wanted_and_another_size_cancels_it() {
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    let asked = scripted.draw_with_the_clock(3, Some(403), 2 * WAIT, true, 1, RENDER_SIZE);
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["render 4"],
+        "the same size: it goes on"
+    );
+    let asked = scripted.draw_with_the_clock(4, Some(404), 3 * WAIT, true, 1, HALF);
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["cancel 1", "render 5"],
+        "the states that it makes are of the size that it was started at, and are of no use to frames of another"
+    );
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+
+    // One that is wanted and not started too.
+    let (mut scripted, _wanted) = Scripted::that_wants_a_chase();
+    scripted.draw_with_the_clock(3, Some(403), 2 * WAIT, true, 1, HALF);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+}
+
+#[test]
+fn a_chase_that_goes_on_for_more_than_twenty_seconds_while_the_project_plays_is_given_up_and_a_paused_project_does_not_give_it_up()
+ {
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    // It was started at the drawing at `WAIT` milliseconds.
+    let asked = scripted.draw_playing(3, 403, WAIT + 20_000, 1);
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["render 4"],
+        "twenty seconds exactly is not more"
+    );
+    assert!(scripted.preview.a_lead_up_is_being_made());
+    // A project that is paused is looked at for a picture that stays: the chase has a frame to catch up with and goes on.
+    let asked = scripted.draw_with_the_clock(4, Some(404), WAIT + 100_000, false, 1, RENDER_SIZE);
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), ["render 5"]);
+    assert!(scripted.preview.a_lead_up_is_being_made());
+
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    let asked = scripted.draw_playing(3, 403, WAIT + 20_001, 1);
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["cancel 1", "render 4"],
+        "more than twenty seconds"
+    );
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    scripted.events.send(a_frame_that_is_approximate(4, true)).unwrap();
+    scripted.draw_playing(4, 404, WAIT + 30_000, 1);
+    scripted.draw_playing(5, 405, WAIT + 31_000, 1);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "it is not made again for the jump"
+    );
+}
+
+#[test]
+fn when_a_chase_is_done_the_frame_is_asked_for_again_and_no_other_lead_up_is_wanted_for_the_jump() {
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    scripted
+        .events
+        .send(EngineEvent::LeadUpDone {
+            generation: 1,
+            frames_made: 400,
+        })
+        .unwrap();
+    // The same frame as the last one that was asked for (the project is at it: nothing else is, in the time that a drawing takes): it is asked for again, with the states that the chase handed over.
+    let asked = scripted.draw_playing(2, 402, 2 * WAIT, 1);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        ["render 4"],
+        "the frame is asked for again, and in the same drawing nothing else is asked"
+    );
+    // (It was not exact when the chase was wanted, and if it were said not to be after it, there is no chase again for the same jump: that would be a loop.)
+    scripted.events.send(a_frame_that_is_approximate(4, true)).unwrap();
+    scripted.draw_playing(3, 403, 3 * WAIT, 1);
+    scripted.draw_playing(4, 404, 10 * WAIT, 1);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+}
+
+#[test]
+fn a_chase_that_failed_says_why_and_is_not_made_again_for_the_jump_and_a_picture_that_stays_may_have_a_lead_up_of_its_own()
+ {
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    scripted
+        .events
+        .send(EngineEvent::LeadUpFailed {
+            generation: 1,
+            problem: "its frames were over before it had caught up with the picture".to_owned(),
+        })
+        .unwrap();
+    scripted.draw_playing(3, 403, 2 * WAIT, 1);
+    assert!(
+        scripted
+            .preview
+            .last_problem()
+            .is_some_and(|problem| problem.contains("caught up")),
+        "{:?}",
+        scripted.preview.last_problem()
+    );
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    // The project is paused on a picture that is not exact: it stays, and a lead-up for it is wanted as it always was (and is not a chase).
+    scripted.events.send(a_frame_that_is_approximate(4, true)).unwrap();
+    scripted.draw_with_the_clock(3, Some(403), 3 * WAIT, false, 1, RENDER_SIZE);
+    scripted.draw_with_the_clock(3, Some(403), 4 * WAIT, false, 1, RENDER_SIZE);
+    let wanted = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("a picture that stays has a lead-up wanted of it");
+    assert!(!wanted.is_a_chase);
+}
+
+#[test]
+fn a_picture_that_stays_after_a_jump_while_the_project_played_has_a_lead_up_for_it_and_no_chase() {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.draw_playing(0, 400, 0, 1);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    // The project was paused a moment after the jump, and the picture stays.
+    scripted.draw_with_the_clock(1, Some(401), 50, false, 1, RENDER_SIZE);
+    scripted.draw_with_the_clock(1, Some(401), 100, false, 1, RENDER_SIZE);
+    scripted.events.send(a_frame_that_is_approximate(2, true)).unwrap();
+    scripted.draw_with_the_clock(1, Some(401), 200, false, 1, RENDER_SIZE);
+    assert_eq!(
+        scripted.preview.the_lead_up_that_is_wanted(),
+        None,
+        "a quarter of a second has not passed"
+    );
+    scripted.draw_with_the_clock(1, Some(401), 50 + WAIT, false, 1, RENDER_SIZE);
+    let wanted = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("the picture has stayed");
+    assert!(
+        !wanted.is_a_chase,
+        "the project is paused: the frame stays, and the lead-up is for it"
+    );
+    // (The jump is looked at once: when the project plays again no chase is wanted for it.)
+    let (sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+    scripted
+        .events
+        .send(EngineEvent::LeadUpDone {
+            generation: 1,
+            frames_made: 300,
+        })
+        .unwrap();
+    scripted.draw_playing(2, 402, 3 * WAIT, 1);
+    scripted.draw_playing(3, 403, 4 * WAIT, 1);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+    drop(sender);
+}
+
+#[test]
+fn a_jump_while_the_setting_is_off_is_not_a_reason_for_a_chase_when_it_is_turned_on() {
+    let mut scripted = Scripted::new();
+    scripted.preview.set_a_lead_up_is_wanted(false);
+    scripted.draw_playing(0, 400, 0, 1);
+    scripted.events.send(a_frame_that_is_approximate(1, true)).unwrap();
+    scripted.draw_playing(1, 401, WAIT, 1);
+    scripted.preview.set_a_lead_up_is_wanted(false);
+    scripted.preview.set_a_lead_up_is_wanted(true);
+    scripted.draw_playing(2, 402, 2 * WAIT, 1);
+    scripted.draw_playing(3, 403, 3 * WAIT, 1);
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+}
+
+#[test]
+fn a_chase_is_cancelled_when_the_setting_is_turned_off_the_colour_changes_the_files_are_let_go_of_the_project_is_not_what_it_was_and_the_device_is_replaced()
+ {
+    let changes: [(&str, WhatChangesTheProject); 5] = [
+        ("the setting", |scripted| {
+            scripted.preview.set_a_lead_up_is_wanted(false);
+            Vec::new()
+        }),
+        ("the colour", |scripted| {
+            scripted.preview.set_the_colour(another_colour());
+            Vec::new()
+        }),
+        ("the files", |scripted| {
+            scripted.preview.forget_what_is_known_of_the_files();
+            Vec::new()
+        }),
+        ("the project", |scripted| {
+            scripted.preview.the_project_is_now((1, 1));
+            scripted.preview.the_project_is_now((1, 2));
+            Vec::new()
+        }),
+        ("the device", |scripted| {
+            scripted
+                .events
+                .send(EngineEvent::DeviceReplaced {
+                    why: "the card was lost".to_owned(),
+                    effects_switched_off: Vec::new(),
+                })
+                .unwrap();
+            scripted.draw_playing(3, 403, 2 * WAIT, 1)
+        }),
+    ];
+    for (what, change) in changes {
+        let mut scripted = Scripted::that_goes_on_a_chase();
+        let asked = change(&mut scripted);
+        assert!(
+            !scripted.preview.a_lead_up_is_being_made(),
+            "it is not going on after {what}"
+        );
+        let mut asked = asked;
+        asked.extend(scripted.requests.try_iter());
+        assert_eq!(
+            Scripted::the_requests_of_the_lead_up(&asked)
+                .into_iter()
+                .filter(|request| request.starts_with("cancel"))
+                .collect::<Vec<_>>(),
+            ["cancel 1"],
+            "the engine was told, once, after {what}"
+        );
+    }
+}
+
+#[test]
+fn a_jump_that_leaves_the_picture_as_it_is_neither_cancels_the_lead_up_of_a_frame_that_stays_nor_is_a_chase_beside_it()
+{
+    let (mut scripted, wanted) = Scripted::that_wants_a_lead_up(0, 400);
+    let (_sender, items) = a_lead_up_that_is_started();
+    scripted.preview.start_the_lead_up(&wanted, items, ());
+    scripted.requests.try_iter().for_each(drop);
+    // The clock says that the playhead jumped and goes on, and the frame asked for is the same (the content did not change).
+    let asked = scripted.draw_with_the_clock(0, Some(400), 2 * WAIT, true, 1, RENDER_SIZE);
+    assert_eq!(
+        Scripted::the_requests_of_the_lead_up(&asked),
+        Vec::<String>::new(),
+        "a lead-up is for the frame that stays, and it is the same frame: nothing is cancelled"
+    );
+    assert!(scripted.preview.a_lead_up_is_being_made());
+    // The frame is asked for again (the engine lost a picture of it), and the picture that answers that is of after the jump, is not exact, and the jump is old enough, and the project
+    // plays: a chase is not wanted beside the lead-up that is going on.
+    scripted
+        .events
+        .send(EngineEvent::PicturesMissing {
+            serial: 1,
+            ids: Vec::new(),
+        })
+        .unwrap();
+    let asked = scripted.draw_with_the_clock(0, Some(400), 3 * WAIT, true, 1, RENDER_SIZE);
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), ["render 2"]);
+    scripted.events.send(a_frame_that_is_approximate(2, true)).unwrap();
+    let asked = scripted.draw_with_the_clock(0, Some(400), 5 * WAIT, true, 1, RENDER_SIZE);
+    assert_eq!(Scripted::the_requests_of_the_lead_up(&asked), Vec::<String>::new());
+    assert!(
+        scripted.preview.a_lead_up_is_being_made(),
+        "the lead-up that is going on is not let go of without the engine being told"
+    );
+    assert_eq!(scripted.preview.the_lead_up_that_is_wanted(), None);
+}
+
+#[test]
+fn a_picture_that_stays_where_a_chase_was_wanted_has_a_lead_up_of_the_frame_when_the_chase_ends_without_catching_up() {
+    // The chase is wanted at the third drawing, started, and the project is paused at once: the frame stays. The chase fails, and the lead-up for a frame that stays is made.
+    let mut scripted = Scripted::that_goes_on_a_chase();
+    scripted.draw_with_the_clock(2, Some(402), WAIT + 10, false, 1, RENDER_SIZE);
+    scripted.events.send(a_frame_that_is_approximate(3, true)).unwrap();
+    scripted
+        .events
+        .send(EngineEvent::LeadUpFailed {
+            generation: 1,
+            problem: "its frames were over before it had caught up with the picture".to_owned(),
+        })
+        .unwrap();
+    scripted.draw_with_the_clock(2, Some(402), WAIT + 100, false, 1, RENDER_SIZE);
+    assert!(!scripted.preview.a_lead_up_is_being_made());
+    scripted.draw_with_the_clock(2, Some(402), WAIT + 400, false, 1, RENDER_SIZE);
+    let wanted = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("the chase did not make the frame exact and the frame stays: the lead-up for it is wanted");
+    assert!(!wanted.is_a_chase);
+}
+
+#[test]
+fn a_picture_that_stays_where_a_chase_was_wanted_has_a_lead_up_of_the_frame_when_the_chase_could_not_be_made() {
+    let (mut scripted, wanted) = Scripted::that_wants_a_chase();
+    scripted
+        .preview
+        .the_lead_up_cannot_be_made(&wanted, "ffmpeg was not found".to_owned());
+    // The project is paused at once, on the frame that the chase was wanted for.
+    scripted.draw_with_the_clock(2, Some(402), WAIT + 10, false, 1, RENDER_SIZE);
+    scripted.events.send(a_frame_that_is_approximate(3, true)).unwrap();
+    scripted.draw_with_the_clock(2, Some(402), WAIT + 100, false, 1, RENDER_SIZE);
+    scripted.draw_with_the_clock(2, Some(402), WAIT + 400, false, 1, RENDER_SIZE);
+    let wanted = scripted
+        .preview
+        .the_lead_up_that_is_wanted()
+        .expect("the frame stays, and a lead-up for it is wanted as it always was");
+    assert!(!wanted.is_a_chase);
 }

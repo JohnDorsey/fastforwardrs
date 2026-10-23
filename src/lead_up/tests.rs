@@ -160,6 +160,38 @@ fn the_frames_of_a_lead_up_to_a_frame_are_as_many_before_it_as_a_state_has_gone_
 }
 
 #[test]
+fn the_frames_of_a_chase_start_where_those_of_a_lead_up_do_and_go_on_to_the_end_of_the_project() {
+    assert_eq!(frames_of_a_chase_from(1000, 50, 5000), 950..5000);
+    assert_eq!(
+        frames_of_a_chase_from(1000, 5000, 5000),
+        700..5000,
+        "no more than 300 before it"
+    );
+    assert_eq!(
+        frames_of_a_chase_from(100, 5000, 900),
+        0..900,
+        "and none before the first of the project"
+    );
+    assert_eq!(
+        frames_of_a_chase_from(899, 0, 900),
+        899..900,
+        "an effect at its first frame has nothing before it, and the chase is the frame itself"
+    );
+    assert_eq!(
+        frames_of_a_chase_from(10, 3, 5),
+        7..11,
+        "a frame that is past the end that the project has (it was cut short since) is in the chase all the same"
+    );
+    // Whatever the start, it is the start of the lead-up to the same frame.
+    for (frame, most) in [(0, 0), (5, 3), (1000, 7), (1000, 300), (1000, 400)] {
+        assert_eq!(
+            frames_of_a_chase_from(frame, most, 9000).start,
+            frames_of_the_lead_up_to(frame, most).start
+        );
+    }
+}
+
+#[test]
 fn the_thread_gives_each_frame_after_the_pictures_it_is_made_of_and_a_picture_is_let_go_of_only_after_the_last_frame_that_uses_it()
  {
     let plan = a_video_with_a_text_and_a_picture_over_it();

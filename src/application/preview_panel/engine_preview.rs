@@ -17,6 +17,12 @@
 //! made ([`EnginePreview::the_lead_up_that_is_wanted`]); the window, which has the project, starts it ([`EnginePreview::start_the_lead_up`]); the engine makes the frames before the one on the screen
 //! for the states of the effects, and says when it is done, and then the frame on the screen is asked for again and is exact. **Any other frame that is asked for cancels it**, before it is asked for.
 //! A picture that keeps changing (a playhead that is dragged, a project that plays) has none made: a lead-up is for the frame that stays.
+//!
+//! **The chase** is the lead-up of a jump of the playhead while the project plays: the picture keeps changing, so it is not for a frame that stays. A quarter of a second after the playhead jumped (the
+//! clock counts its jumps: [`HowTheClockGoes::jumps`]), if the picture that answers a frame asked for after the jump is not exact, the preview wants a lead-up that is a chase
+//! ([`LeadUpWanted::is_a_chase`]): the frames from before the frame that is shown on to the end of the project are made by the engine for states of their own, and when those have caught up with the
+//! preview's they go over to it and the pictures are exact. Frames asked for in order do not cancel it; **another jump does**, and so does a change of the size of the frames, and so does
+//! the chase going on for too long ([`HOW_LONG_A_CHASE_MAY_GO_ON_WHILE_THE_PROJECT_PLAYS`]). There is one chase for a jump.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -90,10 +96,17 @@ pub struct HowTheClockGoes {
     pub how_long_a_frame_lasts: Duration,
     /// What time it is.
     pub now: Instant,
+    /// How many times the playhead has jumped (see `PlaybackClock::jumps`): a number that is another when it has. What depends on earlier frames is not what a frame asks for after a jump.
+    pub jumps: u64,
 }
 
 impl HowTheClockGoes {
-    /// How the clock of a project that has `frame_rate` goes at `now`, playing or not.
+    /// The same clock after this many jumps of the playhead.
+    pub fn after_jumps(self, jumps: u64) -> Self {
+        Self { jumps, ..self }
+    }
+
+    /// How the clock of a project that has `frame_rate` goes at `now`, playing or not, with no jump of the playhead.
     pub fn new(is_playing: bool, frame_rate: FrameRate, now: Instant) -> Self {
         Self {
             is_playing,
@@ -101,6 +114,7 @@ impl HowTheClockGoes {
             how_long_a_frame_lasts: Duration::try_from_secs_f64(1.0 / frame_rate.frames_per_second())
                 .unwrap_or(Duration::ZERO),
             now,
+            jumps: 0,
         }
     }
 }
@@ -108,6 +122,13 @@ impl HowTheClockGoes {
 /// How long a picture has to stay as it is before a lead-up is wanted of it. (A playhead that is dragged or a project that plays changes the picture all the time, and a lead-up is for the frame
 /// that stays: it is made while a person looks at it.)
 const HOW_LONG_THE_PICTURE_STAYS_STILL_BEFORE_A_LEAD_UP: Duration = Duration::from_millis(250);
+
+/// How long after the playhead jumped a chase is wanted, if the picture is not exact then. (A person who drags the playhead while the project plays jumps all the time; a chase is for where it lands.)
+const HOW_LONG_AFTER_A_JUMP_A_CHASE_WAITS: Duration = Duration::from_millis(250);
+
+/// How long a chase may go on while the project plays before it is given up. (A chase catches up with the playhead if the card has time to spare, and then it takes seconds; on a card that has none it
+/// never does, and is not to go on taking the time of the frames.) A project that is paused does not cancel it: the picture is still, and the chase has a frame to catch up with.
+const HOW_LONG_A_CHASE_MAY_GO_ON_WHILE_THE_PROJECT_PLAYS: Duration = Duration::from_secs(20);
 
 /// What the preview asks the window to make a lead-up of (see the module documentation).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -121,6 +142,26 @@ pub struct LeadUpWanted {
     /// The most frames of their own clocks that the effects of the frame on the screen that have a state have gone on for (see `FrameDescription::most_frames_a_state_has_gone_on_for`): how far
     /// back the frames that its states are made of go. The lead-up has as many frames before the frame on the screen, but no more than `lead_up::MOST_FRAMES_OF_A_LEAD_UP`.
     pub most_frames_a_state_has_gone_on_for: u64,
+    /// Whether it is a chase (the project plays): its frames go **on to the end of the project**, and not up to the frame on the screen, which is moving.
+    pub is_a_chase: bool,
+}
+
+/// What a chase that is going on is for.
+#[derive(Clone, Copy, Debug)]
+struct Chase {
+    /// When it was started, by the time that the preview was last drawn at.
+    started_at: Instant,
+    /// The size that the frames were made at when it was wanted: the states that it makes are of that size, and are of no use to frames of another.
+    render_size: (u32, u32),
+}
+
+/// A jump of the playhead that the preview has not looked at the picture of yet.
+#[derive(Clone, Copy, Debug)]
+struct AJump {
+    /// When the preview saw that the playhead had jumped.
+    at: Instant,
+    /// The serial number of the request that was the last one before the jump: a picture of a request after it is the picture of the jump.
+    last_request_before_it: u64,
 }
 
 /// Where the preview is with a lead-up.
@@ -133,6 +174,8 @@ enum LeadUpOfThePreview {
     Going {
         generation: u64,
         for_the_frame: u64,
+        /// `Some` if it is a chase.
+        chase: Option<Chase>,
         _keeps_alive: Box<dyn Send>,
     },
 }
@@ -210,6 +253,12 @@ pub struct EnginePreview {
     the_picture_has_been_as_it_is_since: Option<(u64, Instant)>,
     /// How many lead-ups have been wanted.
     lead_ups_wanted: u64,
+    /// How many jumps of the playhead the clock had made when the preview was last drawn.
+    jumps_seen: u64,
+    /// The last jump of the playhead, until the preview has decided whether a chase is wanted for it.
+    a_jump_to_look_at: Option<AJump>,
+    /// What time it was when the preview was last drawn.
+    the_time_of_the_last_drawing: Option<Instant>,
 }
 
 impl EnginePreview {
@@ -246,6 +295,9 @@ impl EnginePreview {
             last_lead_up_was_for: None,
             the_picture_has_been_as_it_is_since: None,
             lead_ups_wanted: 0,
+            jumps_seen: 0,
+            a_jump_to_look_at: None,
+            the_time_of_the_last_drawing: None,
         }
     }
 
@@ -308,6 +360,8 @@ impl EnginePreview {
     pub fn set_a_lead_up_is_wanted(&mut self, wanted: bool) {
         if !wanted {
             self.cancel_the_lead_up();
+            // (A jump that happened while it was off is not a reason for a chase when it is turned on.)
+            self.a_jump_to_look_at = None;
         }
         self.lead_ups_are_wanted = wanted;
     }
@@ -345,10 +399,19 @@ impl EnginePreview {
             return;
         }
         let for_the_frame = *for_the_frame;
-        self.engine.start_the_lead_up(wanted.generation, items);
+        let chase = asked_for.is_a_chase.then(|| Chase {
+            started_at: self.the_time_of_the_last_drawing.unwrap_or_else(Instant::now),
+            render_size: asked_for.render_size,
+        });
+        if chase.is_some() {
+            self.engine.start_the_chase(wanted.generation, items);
+        } else {
+            self.engine.start_the_lead_up(wanted.generation, items);
+        }
         self.lead_up = LeadUpOfThePreview::Going {
             generation: wanted.generation,
             for_the_frame,
+            chase,
             _keeps_alive: Box::new(keeps_alive),
         };
     }
@@ -365,7 +428,10 @@ impl EnginePreview {
         if asked_for.generation != wanted.generation {
             return;
         }
-        self.last_lead_up_was_for = Some(*for_the_frame);
+        // (A chase is not for the frame: there is one for each jump, which is decided when it is wanted.)
+        if !asked_for.is_a_chase {
+            self.last_lead_up_was_for = Some(*for_the_frame);
+        }
         self.lead_up = LeadUpOfThePreview::None;
         self.last_problem = Some(why);
     }
@@ -385,6 +451,7 @@ impl EnginePreview {
         let LeadUpOfThePreview::Going {
             generation: going,
             for_the_frame,
+            chase,
             ..
         } = &self.lead_up
         else {
@@ -393,7 +460,9 @@ impl EnginePreview {
         if *going != generation {
             return;
         }
-        self.last_lead_up_was_for = Some(*for_the_frame);
+        if chase.is_none() {
+            self.last_lead_up_was_for = Some(*for_the_frame);
+        }
         self.lead_up = LeadUpOfThePreview::None;
         match problem {
             None => self.asked_for = None,
@@ -441,9 +510,88 @@ impl EnginePreview {
                 render_size: facts.render_size,
                 colour: facts.colour,
                 most_frames_a_state_has_gone_on_for,
+                is_a_chase: false,
             },
             for_the_frame: facts.fingerprint,
         };
+        // (It is for the jump, if there was one that was not looked at.)
+        self.a_jump_to_look_at = None;
+    }
+
+    /// Looks at the jump of the playhead that was seen, once it is old enough: whether a chase is wanted for it (see the module documentation). The picture that is looked at is the one that answers a
+    /// frame asked for after the jump, so that a picture of before it is not taken for the picture of the jump. A jump is looked at once.
+    fn note_whether_a_chase_is_wanted(
+        &mut self,
+        context: &Context,
+        facts: &FactsAboutTheFrame,
+        clock: HowTheClockGoes,
+    ) {
+        let Some(jump) = self.a_jump_to_look_at else { return };
+        if !self.lead_ups_are_wanted || !matches!(self.lead_up, LeadUpOfThePreview::None) {
+            return;
+        }
+        let age = clock.now.saturating_duration_since(jump.at);
+        if age < HOW_LONG_AFTER_A_JUMP_A_CHASE_WAITS {
+            context.request_repaint_after(HOW_LONG_AFTER_A_JUMP_A_CHASE_WAITS - age);
+            return;
+        }
+        let Some(shown) = self
+            .shown
+            .as_ref()
+            .filter(|shown| shown.serial > jump.last_request_before_it)
+        else {
+            return;
+        };
+        let the_picture_is_not_exact = shown.approximate;
+        self.a_jump_to_look_at = None;
+        let Some(most_frames_a_state_has_gone_on_for) = facts.most_frames_a_state_has_gone_on_for else {
+            return;
+        };
+        if !(clock.is_playing && the_picture_is_not_exact && most_frames_a_state_has_gone_on_for > 0) {
+            return;
+        }
+        self.lead_ups_wanted += 1;
+        self.lead_up = LeadUpOfThePreview::Wanted {
+            wanted: LeadUpWanted {
+                generation: self.lead_ups_wanted,
+                render_size: facts.render_size,
+                colour: facts.colour,
+                most_frames_a_state_has_gone_on_for,
+                is_a_chase: true,
+            },
+            for_the_frame: facts.fingerprint,
+        };
+    }
+
+    /// Notes that the playhead jumped, if the clock says it did since the preview was drawn last: **a chase is for the frames before the jump, and is cancelled**; what a jump leaves is a picture to
+    /// look at when it is old enough. And a chase that has gone on for too long while the project plays is given up.
+    fn note_what_the_clock_did(&mut self, clock: HowTheClockGoes) {
+        self.the_time_of_the_last_drawing = Some(clock.now);
+        if clock.jumps != self.jumps_seen {
+            self.jumps_seen = clock.jumps;
+            self.a_jump_to_look_at = Some(AJump {
+                at: clock.now,
+                last_request_before_it: self.last_serial,
+            });
+            if self.a_chase_is_wanted_or_going() {
+                self.cancel_the_lead_up();
+            }
+        }
+        if let LeadUpOfThePreview::Going { chase: Some(chase), .. } = &self.lead_up
+            && clock.is_playing
+            && clock.now.saturating_duration_since(chase.started_at)
+                > HOW_LONG_A_CHASE_MAY_GO_ON_WHILE_THE_PROJECT_PLAYS
+        {
+            self.cancel_the_lead_up();
+        }
+    }
+
+    fn a_chase_is_wanted_or_going(&self) -> bool {
+        match &self.lead_up {
+            LeadUpOfThePreview::None => false,
+            LeadUpOfThePreview::Wanted { wanted, .. } => wanted.is_a_chase,
+            LeadUpOfThePreview::Going { chase, .. } => chase.is_some(),
+        }
     }
 
     /// Why the engine has stopped, if it has: the preview is then to be drawn the old way.
@@ -546,6 +694,7 @@ impl EnginePreview {
             self.stopped = Some("the picture engine's thread ended without saying why".to_owned());
             return;
         }
+        self.note_what_the_clock_did(clock);
         // The frame is described at the size the quality of the preview has now; what is shown (apart from its size) tells the quality whether the picture is
         // being changed, and the quality may say that the size is another, which makes it be described again at that.
         let scale_before = self.governor.scale();
@@ -570,7 +719,7 @@ impl EnginePreview {
         if self.asked_for.map(|(asked, _)| asked) != Some(fingerprint) {
             // (A lead-up is for the frame that is on the screen. Another frame makes it of no use, and it is cancelled **before** the frame is asked for, so that the engine does not make the frame in
             // the middle of it. The same frame asked for again, which it is when a picture it needs was lost, is not another frame.)
-            if !self.lead_up_is_for(fingerprint) {
+            if !self.lead_up_is_for(fingerprint, facts.render_size) {
                 self.cancel_the_lead_up();
             }
             self.note_the_pictures_used(&description);
@@ -586,16 +735,20 @@ impl EnginePreview {
         }
         self.put_the_frame_on_the_screen_the_way_it_is_asked_for(context, filter);
         self.note_whether_a_lead_up_is_wanted(context, &facts, clock.now);
+        self.note_whether_a_chase_is_wanted(context, &facts, clock);
         // (A picture that is still is made whole after a while, and the window is not drawn when nothing changes: it is asked to be.)
         if let Some(wait) = self.governor.how_long_until_the_picture_is_made_whole(clock.now) {
             context.request_repaint_after(wait);
         }
     }
 
-    /// Whether the lead-up that is going on or wanted is for the frame with this fingerprint.
-    fn lead_up_is_for(&self, fingerprint: u64) -> bool {
+    /// Whether the lead-up that is going on or wanted suits the frame that is asked for, which has this fingerprint and is made at this size: one for a frame that stays is for that frame; a chase is for
+    /// the frames that follow one another, whichever they are, and is for the size that it was wanted at.
+    fn lead_up_is_for(&self, fingerprint: u64, render_size: (u32, u32)) -> bool {
         match &self.lead_up {
             LeadUpOfThePreview::None => false,
+            LeadUpOfThePreview::Wanted { wanted, .. } if wanted.is_a_chase => wanted.render_size == render_size,
+            LeadUpOfThePreview::Going { chase: Some(chase), .. } => chase.render_size == render_size,
             LeadUpOfThePreview::Wanted { for_the_frame, .. } | LeadUpOfThePreview::Going { for_the_frame, .. } => {
                 *for_the_frame == fingerprint
             }

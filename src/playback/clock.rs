@@ -30,6 +30,8 @@ enum ClockState {
 pub struct PlaybackClock {
     frame_rate: FrameRate,
     state: ClockState,
+    /// How many times the current frame has jumped (see [`Self::jumps`]).
+    jumps: u64,
 }
 
 impl PlaybackClock {
@@ -38,7 +40,15 @@ impl PlaybackClock {
         Self {
             frame_rate,
             state: ClockState::Paused { position: 0 },
+            jumps: 0,
         }
+    }
+
+    /// How many times the current frame has **jumped**: gone to a frame that is not the one that it was at or the one that playing would have brought it to (a seek to another frame; stopping, which
+    /// goes back to the first; playing again from the last frame, which starts at the first). Playing, pausing and the time going by are not jumps. What depends on earlier frames (the states of
+    /// effects) is no longer what the frame asks for after one, and the preview looks at this number to know when that has happened.
+    pub fn jumps(&self) -> u64 {
+        self.jumps
     }
 
     pub fn is_playing(&self) -> bool {
@@ -115,6 +125,9 @@ impl PlaybackClock {
         } else {
             position
         };
+        if start != position {
+            self.jumps = self.jumps.saturating_add(1);
+        }
         self.state = ClockState::Playing {
             started_at: now,
             started_position: start,
@@ -129,12 +142,23 @@ impl PlaybackClock {
 
     /// Stops playing and goes back to the first frame.
     pub fn stop(&mut self) {
+        self.go_back_to_the_first_frame();
+    }
+
+    /// Paused on the first frame. (It is a jump unless the clock was paused on it: while playing nobody knows without the time that it is on it.)
+    fn go_back_to_the_first_frame(&mut self) {
+        if !matches!(self.state, ClockState::Paused { position: 0 }) {
+            self.jumps = self.jumps.saturating_add(1);
+        }
         self.state = ClockState::Paused { position: 0 };
     }
 
     /// Jumps to `position`. If playing, playing carries on from there.
     pub fn seek(&mut self, now: Instant, position: TimelineFrameIndex, total_frame_count: u64) {
         let position = position.value().min(total_frame_count.saturating_sub(1));
+        if position != self.position(now, total_frame_count).value() {
+            self.jumps = self.jumps.saturating_add(1);
+        }
         self.state = if self.is_playing() {
             ClockState::Playing {
                 started_at: now,
@@ -148,7 +172,7 @@ impl PlaybackClock {
     /// Changes the frame rate (when a different video is loaded) and goes back to the start.
     pub fn reset_for_frame_rate(&mut self, frame_rate: FrameRate) {
         self.frame_rate = frame_rate;
-        self.state = ClockState::Paused { position: 0 };
+        self.go_back_to_the_first_frame();
     }
 }
 
@@ -358,6 +382,102 @@ mod tests {
         clock.play(start, TOTAL_FRAMES);
         assert_eq!(position(&clock, start), 0);
         assert_eq!(position(&clock, after(start, 1000)), 30);
+    }
+
+    #[test]
+    fn a_new_clock_has_not_jumped_and_playing_pausing_and_the_time_going_by_are_not_jumps() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        assert_eq!(clock.jumps(), 0);
+        clock.play(start, TOTAL_FRAMES);
+        let _ = clock.position(after(start, 5000), TOTAL_FRAMES);
+        clock.pause(after(start, 5000), TOTAL_FRAMES);
+        clock.play(after(start, 6000), TOTAL_FRAMES);
+        clock.stop_at_the_end(after(start, 100_000), TOTAL_FRAMES);
+        assert_eq!(
+            clock.jumps(),
+            0,
+            "the frame went on by itself, and the end is not a jump"
+        );
+    }
+
+    #[test]
+    fn a_seek_to_another_frame_is_a_jump_while_paused_and_while_playing() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.seek(start, TimelineFrameIndex::new(400), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1);
+        clock.seek(start, TimelineFrameIndex::new(100), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 2);
+        clock.play(start, TOTAL_FRAMES);
+        clock.seek(after(start, 500), TimelineFrameIndex::new(400), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 3, "while playing, from frame 115 to frame 400");
+    }
+
+    #[test]
+    fn a_seek_to_the_frame_that_the_clock_is_on_is_not_a_jump() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.seek(start, TimelineFrameIndex::new(400), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1);
+        clock.seek(start, TimelineFrameIndex::new(400), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1, "paused on frame 400, and it stays there");
+        clock.play(start, TOTAL_FRAMES);
+        // (An edit that makes the window seek to the frame it is playing at again moves nothing.)
+        let at_frame_430 = after(start, 1000);
+        clock.seek(at_frame_430, TimelineFrameIndex::new(430), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1, "playing, and the frame is the one it is at");
+        clock.seek(at_frame_430, TimelineFrameIndex::new(431), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 2, "one frame ahead is another frame");
+    }
+
+    #[test]
+    fn a_seek_beyond_the_end_is_a_jump_to_the_last_frame_and_not_a_jump_when_it_is_on_it() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.seek(start, TimelineFrameIndex::new(5000), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1);
+        clock.seek(start, TimelineFrameIndex::new(6000), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1, "it is on the last frame already");
+    }
+
+    #[test]
+    fn stopping_and_changing_the_frame_rate_are_jumps_to_the_first_frame_unless_it_is_there() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.stop();
+        assert_eq!(clock.jumps(), 0, "paused on the first frame already");
+        clock.seek(start, TimelineFrameIndex::new(50), TOTAL_FRAMES);
+        clock.stop();
+        assert_eq!(clock.jumps(), 2, "the seek and the stop");
+        clock.reset_for_frame_rate(FrameRate::new(60, 1).unwrap());
+        assert_eq!(clock.jumps(), 2, "on the first frame already");
+        clock.play(start, TOTAL_FRAMES);
+        clock.stop();
+        assert_eq!(
+            clock.jumps(),
+            3,
+            "while playing it is not known to be on the first frame"
+        );
+        clock.play(start, TOTAL_FRAMES);
+        clock.reset_for_frame_rate(FrameRate::new(30, 1).unwrap());
+        assert_eq!(clock.jumps(), 4);
+    }
+
+    #[test]
+    fn playing_again_from_the_last_frame_is_a_jump_to_the_first() {
+        let start = Instant::now();
+        let mut clock = clock(30, 1);
+        clock.seek(start, TimelineFrameIndex::new(TOTAL_FRAMES - 1), TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 1);
+        clock.play(start, TOTAL_FRAMES);
+        assert_eq!(clock.jumps(), 2, "from the last frame to the first");
+        // (With one frame the last is the first, and nothing moves.)
+        let mut one_frame = clock;
+        one_frame.pause(start, 1);
+        let before = one_frame.jumps();
+        one_frame.play(start, 1);
+        assert_eq!(one_frame.jumps(), before);
     }
 
     #[test]
