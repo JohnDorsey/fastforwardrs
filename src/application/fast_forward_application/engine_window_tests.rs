@@ -1241,18 +1241,27 @@ void main() {
 }
 ";
 
-/// The same window as [`a_window_whose_picture_counts_its_frames`], with the shader that counts in a cycle, and a project of five frames a second (a frame lasts a fifth of a second, which the software
-/// adapter makes a frame in with a great deal of time to spare, so that the engine has the time that a chase takes between the frames of the preview: a chase that has to catch up with a playhead
-/// that moves as fast as the engine makes frames never does).
-fn a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() -> Option<Window> {
+/// How many frames the picture of the window of [`a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second`] lasts: forty seconds.
+const FRAMES_OF_THE_SLOW_PROJECT: u64 = 40;
+
+/// The same window as [`a_window_whose_picture_counts_its_frames`], with the shader that counts in a cycle, and a project of **one frame a second**, which lasts forty frames. A frame lasts a second,
+/// which the software adapter makes a frame in with a great deal of time to spare even when the computer is busy: these tests play in real time, and the machines that run them are not all
+/// as fast as the one they were written on (at ten frames a second a frame took about the time that a frame lasts, and a chase caught up with the playhead only after the project had stopped). A chase that
+/// has to catch up with a playhead needs the engine to make more than one frame for each that the playhead moves, and a second is a long time for it.
+fn a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() -> Option<Window> {
     let mut window = a_window_whose_picture_has_the_effect(COUNTS_THE_FRAMES_IN_A_CYCLE, true)?;
     window.do_this(Command::SetProjectFrameRate(
-        crate::project::FrameRate::from_whole_frames_per_second(5).unwrap(),
+        crate::project::FrameRate::from_whole_frames_per_second(1).unwrap(),
     ));
+    let clip = window.clip(0, 0);
+    window.do_this(Command::SetClipDuration {
+        clip,
+        frames: FRAMES_OF_THE_SLOW_PROJECT,
+    });
     assert_eq!(
         window.application().project().total_frame_count(),
-        25,
-        "a premise: five seconds of picture at five frames a second"
+        FRAMES_OF_THE_SLOW_PROJECT,
+        "a premise: forty seconds of picture at one frame a second"
     );
     Some(window)
 }
@@ -1292,7 +1301,7 @@ fn play_to_and_then_jump_while_playing(window: &mut Window, frame: u64, to: u64)
 #[test]
 fn a_jump_while_the_project_plays_is_made_exact_by_a_chase_that_catches_up_with_the_playhead_and_the_pictures_after_it_are_those_that_playing_makes()
  {
-    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() else {
+    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
         return;
     };
     let reds = the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
@@ -1342,7 +1351,7 @@ fn a_jump_while_the_project_plays_is_made_exact_by_a_chase_that_catches_up_with_
 #[test]
 fn a_chase_that_the_project_is_paused_during_catches_up_with_the_frame_that_stays_and_the_picture_is_exact_when_it_does()
  {
-    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() else {
+    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
         return;
     };
     let reds = the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
@@ -1372,7 +1381,7 @@ fn a_chase_that_the_project_is_paused_during_catches_up_with_the_frame_that_stay
 
 #[test]
 fn with_the_checkbox_off_a_jump_while_the_project_plays_makes_no_chase() {
-    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_five_frames_a_second() else {
+    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
         return;
     };
     the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
