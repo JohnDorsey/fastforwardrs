@@ -29,7 +29,7 @@ use crate::application::textures::Textures;
 use crate::application::theme;
 use crate::application::timeline_geometry::{TileLayout, WaveformColumn, tile_width_for};
 use crate::media::ThumbnailLibrary;
-use crate::project::{Clip, ClipPlacement, SourceMediaIdentifier, Track};
+use crate::project::{Clip, ClipPlacement, SourceMediaIdentifier, Track, words_of_a_text_clip};
 
 /// The part of a picture a tile shows: from the left edge to this fraction of the picture's width.
 fn picture_part_up_to(fraction_of_width: f32) -> Rect {
@@ -243,7 +243,12 @@ pub(super) fn draw_clips(
             },
             Clip::Text(text) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::TEXT_CLIP_BACKGROUND);
-                draw_label(painter, rectangles, &text.object.text, theme::TEXT_CLIP_TEXT);
+                draw_label(
+                    painter,
+                    rectangles,
+                    &words_of_a_text_clip(text, placement.effects),
+                    theme::TEXT_CLIP_TEXT,
+                );
             }
             Clip::Generator(generator) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::GENERATOR_CLIP_BACKGROUND);

@@ -342,15 +342,27 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         badges: Vec<BadgeDocument>,
     },
+    /// A text (what it says, its font, its size and its colour are the values of its text effect since format 18: `content` names that effect, in the chain of `effects`, as a generator's
+    /// `content` does). A file of an earlier version has no `content` and says all of that in the clip itself, in the four fields that are only read.
     Text {
         #[serde(default, skip_serializing_if = "is_zero")]
         gap_before_frames: u64,
         duration_in_frames: u64,
-        text: String,
-        /// Empty for the program's own default font.
-        font_family: String,
-        font_size_fraction_of_frame_height: f32,
-        colour: ColourDocument,
+        /// The name, in the chain of `effects`, of the text effect that the clip is made of.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<u32>,
+        /// What the text said, in a file of format 17 or earlier (it is the value `text` of the text effect since then). Never written.
+        #[serde(default, skip_serializing)]
+        text: Option<String>,
+        /// Its font, in a file of format 17 or earlier: empty for the program's own default font. Never written.
+        #[serde(default, skip_serializing)]
+        font_family: Option<String>,
+        /// Its size, in a file of format 17 or earlier. Never written.
+        #[serde(default, skip_serializing)]
+        font_size_fraction_of_frame_height: Option<f32>,
+        /// Its colour, in a file of format 17 or earlier. Never written.
+        #[serde(default, skip_serializing)]
+        colour: Option<ColourDocument>,
         area: CanvasAreaDocument,
         /// How far the area is turned, clockwise. Left out for a text that is upright.
         #[serde(default, skip_serializing_if = "is_not_turned")]

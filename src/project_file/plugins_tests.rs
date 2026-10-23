@@ -30,6 +30,27 @@ fn the_snapshot_of_the_hue_shift() -> Value {
     })
 }
 
+/// The snapshot of the text effect that the program writes (the project of everything has a text, which is made of it).
+fn the_snapshot_of_the_text_effect() -> Value {
+    json!({
+        "key": "builtin:text",
+        "version": [1, 0],
+        "name": "text",
+        "description": "Words, in a font, of a size and a colour",
+        "category": "Generators",
+        "domain": "picture",
+        "params": [
+            {"id": "text", "name": "text", "label": "Text", "type": "words", "default": "", "control": "multiline"},
+            {"id": "font", "name": "font", "label": "Font", "type": "words", "default": "", "control": "font"},
+            {
+                "id": "size", "name": "font size", "label": "Size", "type": "number", "default": 0.06,
+                "range": [0.01, 0.5], "unit": "pt", "decimals": 1, "control": "points_of_the_picture_height"
+            },
+            {"id": "colour", "name": "colour", "label": "Colour", "type": "colour", "default": "#FFFFFFFF"}
+        ]
+    })
+}
+
 /// The snapshot of an effect that the program does not have, with a value of each kind, and with things that this version of the program does not
 /// know in it at the level of the effect and at that of a value.
 fn a_snapshot_of(key: &str) -> Value {
@@ -52,8 +73,8 @@ fn a_snapshot_of(key: &str) -> Value {
     })
 }
 
-/// The file of the project of everything that has this snapshot among its `plugins` (after the snapshot of the hue shift, which is there
-/// already, as the key of the hue shift comes before those of the others), and `change` made to it.
+/// The file of the project of everything that has this snapshot among its `plugins` (after the snapshots of the hue shift and of the text effect, which are there
+/// already, as their keys come before those of the others), and `change` made to it.
 fn the_file_with_a_snapshot_and(snapshot: Value, change: impl FnOnce(&mut Value)) -> String {
     the_file_of_everything_with(|file| {
         file["plugins"].as_array_mut().unwrap().push(snapshot);
@@ -77,8 +98,8 @@ fn a_file_that_has_effects_has_a_snapshot_of_each_type_of_effect_that_it_uses_on
 
     assert_eq!(
         file["plugins"],
-        json!([the_snapshot_of_the_hue_shift()]),
-        "one snapshot, though there are hue shifts on several things, and two on one"
+        json!([the_snapshot_of_the_hue_shift(), the_snapshot_of_the_text_effect()]),
+        "one snapshot of each, though there are hue shifts on several things, and two on one (and the text effect that the text is made of)"
     );
 }
 
@@ -103,7 +124,15 @@ fn a_type_of_effect_that_only_a_group_uses_has_its_snapshot_too() {
     project.add_effect_to_the_group(tag, only_a_group_uses_it).unwrap();
     for track in project.tracks().to_owned() {
         for entry in track.entries() {
-            for instance in entry.effects().iter().map(Effect::instance).collect::<Vec<_>>() {
+            // (What a clip is made of, which a text's text effect is, is not taken off.)
+            let content = entry.clip().content();
+            for instance in entry
+                .effects()
+                .iter()
+                .map(Effect::instance)
+                .filter(|instance| Some(*instance) != content)
+                .collect::<Vec<_>>()
+            {
                 project
                     .remove_effect(AnimationTarget::Clip(entry.id()), instance)
                     .unwrap();
@@ -124,7 +153,11 @@ fn a_type_of_effect_that_only_a_group_uses_has_its_snapshot_too() {
         .iter()
         .map(|plugin| plugin["key"].as_str().unwrap())
         .collect();
-    assert_eq!(keys, ["isf:only_a_group_has_this"]);
+    assert_eq!(
+        keys,
+        ["builtin:text", "isf:only_a_group_has_this"],
+        "the text effect that the text is made of is still there"
+    );
 }
 
 // --- an effect that the program does not have ---
@@ -345,11 +378,12 @@ fn a_snapshot_of_the_hue_shift_of_another_minor_version_that_has_nothing_the_pro
     older["version"] = json!([1, 7]);
     older["params"][0]["label"] = json!("What an earlier program called it");
     let text = the_file_of_everything_with(|file| {
-        file["plugins"] = json!([older]);
+        file["plugins"] = json!([older, the_snapshot_of_the_text_effect()]);
         file["tracks"][0]["effects"][0]["version"] = json!([1, 7]);
         file["tracks"][2]["clips"][0]["effects"][0]["version"] = json!([1, 7]);
         file["tracks"][2]["clips"][1]["effects"][0]["version"] = json!([1, 7]);
-        file["tracks"][0]["clips"][0]["effects"][0]["version"] = json!([1, 7]);
+        // (The hue shift of the text is the second effect of its chain, after the text effect that it is made of.)
+        file["tracks"][0]["clips"][0]["effects"][1]["version"] = json!([1, 7]);
     });
 
     let project = project_from_json_text(&text).unwrap();
@@ -364,7 +398,7 @@ fn a_snapshot_of_the_hue_shift_of_another_minor_version_that_has_nothing_the_pro
     let written = as_json(&saved(&project));
     assert_eq!(
         written["plugins"],
-        json!([the_snapshot_of_the_hue_shift()]),
+        json!([the_snapshot_of_the_hue_shift(), the_snapshot_of_the_text_effect()]),
         "it is written as the program has it now"
     );
     assert_eq!(written["tracks"][2]["clips"][0]["effects"][0]["version"], json!([1, 1]));
@@ -380,10 +414,12 @@ fn a_snapshot_of_the_hue_shift_of_another_major_version_is_an_effect_the_program
         {"effect": "builtin:hue_shift", "version": [2, 0], "instance": 0, "values": {"angle": 12.0}}
     ]);
     let text = the_file_of_everything_with(|file| {
-        file["plugins"] = json!([snapshot.clone()]);
+        file["plugins"] = json!([snapshot.clone(), the_snapshot_of_the_text_effect()]);
         file["tracks"][1]["effects"] = effects.clone();
         file["tracks"][0].as_object_mut().unwrap().remove("effects");
-        file["tracks"][0]["clips"][0].as_object_mut().unwrap().remove("effects");
+        // (The text keeps the text effect that it is made of, and loses its hue shift.)
+        let text_effect = file["tracks"][0]["clips"][0]["effects"][0].clone();
+        file["tracks"][0]["clips"][0]["effects"] = json!([text_effect]);
         file["tracks"][2]["clips"][0].as_object_mut().unwrap().remove("effects");
         file["tracks"][2]["clips"][1].as_object_mut().unwrap().remove("effects");
     });
@@ -396,7 +432,7 @@ fn a_snapshot_of_the_hue_shift_of_another_major_version_is_an_effect_the_program
     assert_ne!(effect.kind(), EffectKind::HUE_SHIFT);
     assert_eq!(effect.values(), [PropertyValue::Number(12.0)]);
     let written = as_json(&saved(&project));
-    assert_eq!(written["plugins"], json!([snapshot]));
+    assert_eq!(written["plugins"], json!([snapshot, the_snapshot_of_the_text_effect()]));
     assert_eq!(written["tracks"][1]["effects"], effects);
 }
 
@@ -435,7 +471,7 @@ fn what_is_wrong_with_the_plugins_of_a_file_is_refused_and_the_reason_says_which
 
     let reason = with_the_snapshot_changed(&|snapshot| snapshot["key"] = json!("no namespace"));
     assert!(
-        reason.contains("plugin number 2") && reason.contains("is not a namespace, a colon and an id"),
+        reason.contains("plugin number 3") && reason.contains("is not a namespace, a colon and an id"),
         "{reason}"
     );
     let reason = with_the_snapshot_changed(&|snapshot| snapshot["params"][1]["id"] = json!("amount"));

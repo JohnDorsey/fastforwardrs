@@ -795,10 +795,7 @@ fn text_is_added_to_a_track_and_changed_through_its_location() {
         ..TextObject::default()
     };
     project.set_text_object(location, object.clone()).unwrap();
-    assert_eq!(
-        project.placement_of(location).unwrap().clip.as_text().unwrap().object,
-        object
-    );
+    assert_eq!(project.text_object_of(location).unwrap(), object);
     assert_eq!(project.set_clip_duration(location, 10).unwrap(), 10);
 
     let video_clip = first_clip_location(&project, 1);
@@ -1632,7 +1629,7 @@ fn project_of_tracks(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
 }
 
 fn text_clip(frames: u64) -> Clip {
-    Clip::Text(TextClip::new(TextObject::default(), frames).unwrap())
+    Clip::Text(TextClip::new(frames, EffectInstanceId::FIRST).unwrap())
 }
 
 fn move_to(clip: ClipId, to_track: TrackId, start: u64) -> ClipMove {

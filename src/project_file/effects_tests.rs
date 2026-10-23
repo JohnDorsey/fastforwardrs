@@ -5,6 +5,7 @@
 //! something that cannot be.
 
 use super::effects::{EffectDocument, KindsOfEffects, ValuesDocument, effects_from_documents};
+use super::old_text_files_tests::as_a_file_of_a_version_before_18;
 use super::tests::{
     assert_same_content, current_version_line, edited_project, link_to_missing_video, project_with_everything,
     reason_for_unreadable_project, saved, valid_text_with, version_line,
@@ -59,10 +60,26 @@ fn effects_are_saved_with_the_key_of_the_effect_and_the_values_it_has_when_they_
         file["tracks"][2]["clips"][1]["effects"],
         serde_json::json!([hue_shift(serde_json::json!({"values": {"degrees": 90.0}}))])
     );
-    // The text object as it begins, and the track of the text turned back.
+    // The text object: first the text effect that it is made of (with what it says, as it is not what a new text says), then its hue shift as it begins, which is the second effect of
+    // its chain (so its `instance` is 1). And the track of the text turned back. (Rewritten on purpose in phase 9.4: the text was not an effect before.)
+    let mut hue_shift_of_the_text = hue_shift(serde_json::json!({}));
+    hue_shift_of_the_text["instance"] = serde_json::json!(1);
     assert_eq!(
         file["tracks"][0]["clips"][0]["effects"],
-        serde_json::json!([hue_shift(serde_json::json!({}))])
+        serde_json::json!([
+            {
+                "effect": "builtin:text",
+                "version": [1, 0],
+                "instance": 0,
+                "values": {
+                    "text": "Hello\nthere \"world\"",
+                    "font": "Arial",
+                    "size": 0.05,
+                    "colour": "#FFC80080"
+                }
+            },
+            hue_shift_of_the_text
+        ])
     );
     assert_eq!(
         file["tracks"][0]["effects"],
@@ -114,9 +131,21 @@ fn the_effects_of_clips_and_of_tracks_with_their_values_survive_a_trip_through_t
     let clip_at = |track: usize, clip: usize| AnimationTarget::Clip(loaded.tracks()[track].entries()[clip].id());
     let value_of_the_hue_shift_of =
         |target: AnimationTarget| loaded.effects_of(target).and_then(|effects| effects.value_of(HUE));
+    // (The hue shift of the text is the second effect of its chain, the first being the text effect that it is made of.)
+    let hue_shift_of_the_text = PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(1), 0);
     assert_eq!(value_of_the_hue_shift_of(clip_at(2, 0)), Some(turn(0.0)));
     assert_eq!(value_of_the_hue_shift_of(clip_at(2, 1)), Some(turn(90.0)));
-    assert_eq!(value_of_the_hue_shift_of(clip_at(0, 0)), Some(turn(0.0)));
+    assert_eq!(
+        loaded
+            .effects_of(clip_at(0, 0))
+            .and_then(|effects| effects.value_of(hue_shift_of_the_text)),
+        Some(turn(0.0))
+    );
+    assert_eq!(
+        value_of_the_hue_shift_of(clip_at(0, 0)),
+        None,
+        "the first effect of the text is not a hue shift"
+    );
     assert_eq!(
         value_of_the_hue_shift_of(AnimationTarget::Track(loaded.tracks()[0].id())),
         Some(turn(-30.0))
@@ -235,6 +264,8 @@ fn a_file_of_version_7_has_no_effects_and_is_saved_in_the_current_layout() {
 fn a_file_of_version_7_that_has_everything_a_version_8_file_has_but_effects_loads_as_it_was() {
     // (The file of today of a project with everything, with the effects taken out and the version put back.)
     let text = the_file_of_everything_with(|file| {
+        // (A text of a version before 18 says what it says in the clip, and its chain has no text effect in it: it is that that has "no effects" in a file of version 7.)
+        as_a_file_of_a_version_before_18(file);
         for track in file["tracks"].as_array_mut().unwrap() {
             track.as_object_mut().unwrap().remove("effects");
             for clip in track["clips"].as_array_mut().unwrap() {
@@ -625,7 +656,8 @@ const OLD_NAME_OF_THE_HUE_SHIFT: &str = "hue shift";
 /// The text of `project` as the old files had it: the effects are called by name (`hue shift`, where a file of today has a key), their values are
 /// a list, there are no snapshots of descriptors, and a rack of the keyframes of the value of an effect calls the value by its name. A file of
 /// version 10 had no names for the effects in their chains and did not say which effect a rack was of (`with_instances` is `false`); a file
-/// of version 11 as it was written while the effects were being given names of their own in their chains did (`true`).
+/// of version 11 as it was written while the effects were being given names of their own in their chains did (`true`). (A text says what it says in its clip, as it did before
+/// version 18: see [`as_a_file_of_a_version_before_18`].)
 fn saved_the_way_the_old_files_did(project: &Project, with_instances: bool) -> String {
     fn change(value: &mut serde_json::Value, with_instances: bool) {
         match value {
@@ -656,15 +688,20 @@ fn saved_the_way_the_old_files_did(project: &Project, with_instances: bool) -> S
         }
     }
     let mut file: serde_json::Value = serde_json::from_str(&saved(project)).unwrap();
+    as_a_file_of_a_version_before_18(&mut file);
     file.as_object_mut().unwrap().remove("plugins");
     change(&mut file, with_instances);
     file["file_format_version"] = serde_json::json!(if with_instances { 11 } else { 10 });
     serde_json::to_string_pretty(&file).unwrap()
 }
 
-/// The project of everything with keyframes of the values of two of its hue shifts: the video's first, and the captions track's.
+/// The project of everything with keyframes of the values of two of its hue shifts: the video's first, and the captions track's. (The text has no hue shift in it: a text that a file of a
+/// version before 18 had is given a text effect that has the name that comes after those of its other effects, and a file of version 10 names the effects in the order they are in, so the
+/// text effect of a text that has one has another name than the one that a text that was made today has; what these files are about is the effects that have names of their own.)
 fn project_with_keyframes_of_hue_shifts() -> Project {
     let mut project = project_with_everything();
+    let text = AnimationTarget::Clip(project.tracks()[0].entries()[0].id());
+    project.remove_effect(text, EffectInstanceId::new(1)).unwrap();
     let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
     let captions = AnimationTarget::Track(project.tracks()[0].id());
     make_a_keyframe(&mut project, video, HUE, 15, turn(-90.0));

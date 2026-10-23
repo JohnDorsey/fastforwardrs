@@ -65,7 +65,8 @@ fn the_layer_of_each_clip_that_is_in_a_tag_has_the_effects_of_the_tag_and_no_oth
 #[test]
 fn the_effects_of_a_tag_are_applied_where_its_badge_is_in_the_chain_of_the_clip_and_the_colours_change_in_that_order() {
     let (mut project, [first, ..]) = three_texts();
-    put_a_hue_shift_on(&mut project, AnimationTarget::Clip(first), 30.0);
+    // (The hue shift is the second effect of the chain of the clip: the first is the text effect that the text is made of.)
+    let its_hue_shift = put_a_hue_shift_on(&mut project, AnimationTarget::Clip(first), 30.0);
     let front_track = project.tracks()[0].id();
     put_a_hue_shift_on(&mut project, AnimationTarget::Track(front_track), 15.0);
     let tag = project.create_group(GroupKind::Tag, &[Member::Clip(first)]).unwrap();
@@ -80,7 +81,7 @@ fn the_effects_of_a_tag_are_applied_where_its_badge_is_in_the_chain_of_the_clip_
         .move_chain_item(
             Member::Clip(first),
             ChainItemKey::Badge(Badge::Tag(tag)),
-            Some(ChainItemKey::Effect(crate::project::EffectInstanceId::FIRST)),
+            Some(ChainItemKey::Effect(its_hue_shift)),
         )
         .unwrap();
     let plan = plan(&project);

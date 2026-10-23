@@ -11,7 +11,7 @@ use super::image_clip::ImageClip;
 use super::media_clip::MediaClip;
 use super::placement::Placement;
 use super::text_object::TextClip;
-use crate::project::{FrameRate, SourceMediaIdentifier, SpeedFactor};
+use crate::project::{EffectInstanceId, FrameRate, SourceMediaIdentifier, SpeedFactor};
 
 /// What kind of thing a clip is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -87,6 +87,16 @@ impl Clip {
         }
     }
 
+    /// Which effect of the chain of the clip is what it is made of, if it is made of one (**its content**: a generator clip, and a text clip, which has the text effect). The content
+    /// cannot be taken off, switched off, copied or moved (see `Project::the_clip_whose_content_is`).
+    pub fn content(&self) -> Option<EffectInstanceId> {
+        match self {
+            Self::Text(text) => Some(text.content()),
+            Self::Generator(generator) => Some(generator.content()),
+            Self::Video(_) | Self::Audio(_) | Self::Image(_) | Self::Crate(_) | Self::Adjustment(_) => None,
+        }
+    }
+
     /// The file the clip is made from, if it is made from one: a video, a sound or a picture.
     pub fn source(&self) -> Option<SourceMediaIdentifier> {
         match self {
@@ -104,7 +114,7 @@ impl Clip {
             Self::Video(media) => media.placement(),
             Self::Image(image) => image.placement(),
             Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) => None,
-            Self::Text(text) => Some(text.object.placement()),
+            Self::Text(text) => Some(text.placement()),
             Self::Generator(generator) => Some(generator.placement()),
         }
     }
@@ -117,11 +127,7 @@ impl Clip {
             Self::Image(image) => Some(Self::Image(image.with_placement(Some(placement)))),
             Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) => None,
             Self::Generator(generator) => Some(Self::Generator(generator.with_placement(placement))),
-            Self::Text(text) => {
-                let mut moved = text.clone();
-                moved.object = text.object.with_placement(placement);
-                Some(Self::Text(moved))
-            }
+            Self::Text(text) => Some(Self::Text(text.with_placement(placement))),
         }
     }
 
@@ -261,7 +267,7 @@ mod tests {
     }
 
     fn text(duration: u64) -> Clip {
-        Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
+        Clip::Text(TextClip::new(duration, EffectInstanceId::FIRST).unwrap())
     }
 
     const PICTURE_FILE: SourceMediaIdentifier = SourceMediaIdentifier::new(4);
@@ -306,19 +312,10 @@ mod tests {
             video.timeline_frame_count(speed(1))
         );
 
-        let words = Clip::Text(
-            TextClip::new(
-                TextObject {
-                    text: "Hello".to_owned(),
-                    ..TextObject::default()
-                },
-                90,
-            )
-            .unwrap(),
-        );
+        let words = Clip::Text(TextClip::new(90, EffectInstanceId::new(2)).unwrap());
         let moved = words.with_placement(somewhere()).unwrap();
         assert_eq!(moved.placement(), Some(somewhere()));
-        assert_eq!(moved.as_text().unwrap().object.text, "Hello");
+        assert_eq!(moved.as_text().unwrap().content(), EffectInstanceId::new(2));
         assert_eq!(moved.timeline_frame_count(speed(1)), 90);
     }
 

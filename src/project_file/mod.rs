@@ -34,11 +34,12 @@ use thiserror::Error;
 use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
-    AdjustmentClip, Angle, AnimationTarget, CanvasArea, Clip, ClipId, ClipKind, CrateClip, Drawer, EffectInstanceId,
-    EffectKind, Effects, FontSize, GeneratorClip, ImageClip, InputColourOverride, MediaClip, Placement, Project,
-    ProjectSettings, PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier,
-    SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip,
-    TextObject, Track, TrackHeight, TrackId, ValueKind,
+    AdjustmentClip, Angle, AnimationTarget, CanvasArea, ChainEntry, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect,
+    EffectInstanceId, EffectKind, Effects, FontSize, GeneratorClip, ImageClip, InputColourOverride, MediaClip,
+    Placement, Project, ProjectSettings, PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia,
+    SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound,
+    SpeedIndicatorLayout, TextClip, TextColour, TextObject, Track, TrackHeight, TrackId, ValueKind,
+    values_of_a_text_object,
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
@@ -117,8 +118,11 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// of version 13 has none. Version 15 added the adjustment clip (`"kind": "adjustment"`): a clip with no picture of its own whose effects are done to everything behind it. A file of
 /// version 14 has none. Version 16 added the `shader` of a snapshot of an effect (`plugins`): the language (`isf`) and the whole text of a shader that runs the effect, so that a project
 /// carries what it uses. A file of version 15 has none. Version 17 added the `images` of that `shader`, when the shader brings images with it (an ISF file's `IMPORTED`): each a name
-/// and the bytes of its file (a PNG or a JPEG) in base 64. A file of version 16 has none.
-pub const FILE_FORMAT_VERSION: u32 = 17;
+/// and the bytes of its file (a PNG or a JPEG) in base 64. A file of version 16 has none. **Version 18 made a text a clip with a content, as a generator is** (phase 9): what a text says, its
+/// font, its size and its colour are the values `text`, `font`, `size` and `colour` of its effect `builtin:text`, which is the first of its chain and which the clip names in `content`
+/// (an earlier file has the four in the clip itself, and keyframes of them, in racks or in the `animation` of a file of version 6 or earlier, that call them `"text"`, `"font"`, `"font size"`
+/// and `"colour"`: it is read as a text whose chain has that effect first, with those values and those keyframes, and the badges of its chain after it).
+pub const FILE_FORMAT_VERSION: u32 = 18;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -796,6 +800,7 @@ fn clip_from_document(
         ClipDocument::Text {
             gap_before_frames,
             duration_in_frames,
+            content,
             text,
             font_family,
             font_size_fraction_of_frame_height,
@@ -807,25 +812,60 @@ fn clip_from_document(
             effects,
             badges,
         } => {
-            let object = TextObject {
-                text,
-                font_family,
-                font_size: FontSize::from_fraction_of_picture_height(font_size_fraction_of_frame_height),
-                colour: colour.0,
-                area: area_from_document(&area),
-                rotation: Angle::from_degrees(rotation_degrees),
+            let placement = Placement::new(area_from_document(&area), Angle::from_degrees(rotation_degrees));
+            let chain = groups::chain_from_documents(
+                effects,
+                badges,
+                kinds,
+                |kind| kind.applies_to_a_clip_of_kind(ClipKind::Text),
+                group_count,
+            )?;
+            let (content, chain) = match content {
+                Some(content) => {
+                    let content = EffectInstanceId::new(content);
+                    if !chain
+                        .instance(content)
+                        .is_some_and(|effect| effect.kind() == EffectKind::TEXT)
+                    {
+                        return Err(format!(
+                            "the text is made by the effect number {}, which is not a text effect that it has",
+                            content.number()
+                        ));
+                    }
+                    (content, chain)
+                }
+                // A file of format 17 or earlier: what the text says is in the clip, and becomes the values of a text effect, **the first of its chain** (the badges that were before the
+                // first effect come after it: what they do is done to what the text makes). Its keyframes are of the properties of the clip, which are the values of that effect now: see
+                // `drawers::FileContents`.
+                None => {
+                    let object = TextObject {
+                        text: text.ok_or("a text that has no content must say what it says")?,
+                        font_family: font_family.unwrap_or_default(),
+                        font_size: FontSize::from_fraction_of_picture_height(
+                            font_size_fraction_of_frame_height
+                                .unwrap_or(FontSize::DEFAULT.fraction_of_picture_height()),
+                        ),
+                        colour: colour.map_or(TextColour::WHITE, |colour| colour.0),
+                        ..TextObject::default()
+                    };
+                    let effect = Effect::with_values(EffectKind::TEXT, values_of_a_text_object(&object).to_vec())
+                        .ok_or("the values of a text could not be made into the text effect")?
+                        .named(chain.next_instance());
+                    let content = effect.instance();
+                    let mut entries = chain.entries();
+                    entries.insert(0, ChainEntry::Effect(effect));
+                    let chain =
+                        Effects::from_entries(entries).ok_or("the effects of a text could not be put in a chain")?;
+                    (content, chain)
+                }
             };
-            let clip = TextClip::new(object, duration_in_frames).map_err(|error| error.to_string())?;
+            let clip = TextClip::new(duration_in_frames, content)
+                .map_err(|error| error.to_string())?
+                .with_placement(placement);
             Ok(ClipFromDocument {
                 gap_before_frames,
                 clip: Clip::Text(clip),
-                effects: groups::chain_from_documents(
-                    effects,
-                    badges,
-                    kinds,
-                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Text),
-                    group_count,
-                )?,
+                effects: chain,
                 legacy_animation: animation,
                 racks: drawer,
             })
@@ -993,6 +1033,10 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
         effects_of_the_tracks: loaded_tracks
             .iter()
             .map(|(track, ..)| track.effects().clone())
+            .collect(),
+        contents_of_the_clips: loaded_tracks
+            .iter()
+            .map(|(_, _, _, clips)| clips.iter().map(|clip| clip.clip.content()).collect())
             .collect(),
     };
 
@@ -1267,12 +1311,13 @@ fn clip_document_of(
         Clip::Text(text) => ClipDocument::Text {
             gap_before_frames,
             duration_in_frames: text.duration_in_frames(),
-            text: text.object.text.clone(),
-            font_family: text.object.font_family.clone(),
-            font_size_fraction_of_frame_height: text.object.font_size.fraction_of_picture_height(),
-            colour: ColourDocument(text.object.colour),
-            area: area_document_of(text.object.area),
-            rotation_degrees: text.object.rotation.degrees(),
+            content: Some(text.content().number()),
+            text: None,
+            font_family: None,
+            font_size_fraction_of_frame_height: None,
+            colour: None,
+            area: area_document_of(text.placement().area),
+            rotation_degrees: text.placement().rotation.degrees(),
             animation,
             drawer,
             effects,
@@ -1356,6 +1401,8 @@ mod generator_clip_tests;
 mod groups_tests;
 #[cfg(test)]
 mod included_files_tests;
+#[cfg(test)]
+mod old_text_files_tests;
 #[cfg(test)]
 mod plugin_libraries_tests;
 #[cfg(test)]

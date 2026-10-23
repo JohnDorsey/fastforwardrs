@@ -152,9 +152,10 @@ mod tests {
 
     use super::*;
     use crate::composition::plan_pictures;
+    use crate::project::EffectInstanceId;
     use crate::project::{
         CanvasArea, Clip, FrameRate, MediaClip, Placement, Project, SourceMedia, SourceMediaLink,
-        SourceVideoProperties, SpeedIndicatorLayout, TextClip, TextObject, Track,
+        SourceVideoProperties, SpeedIndicatorLayout, TextClip, Track,
     };
 
     const VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
@@ -186,7 +187,7 @@ mod tests {
     }
 
     fn text(duration: u64) -> Clip {
-        Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
+        Clip::Text(TextClip::new(duration, EffectInstanceId::FIRST).unwrap())
     }
 
     /// A project whose tracks (the front one first) have these clips, each with the empty frames before it.
@@ -205,7 +206,11 @@ mod tests {
         let tracks = tracks
             .into_iter()
             .enumerate()
-            .map(|(number, clips)| Track::new(TrackId::new(number as u32), "track").with_clips(clips))
+            .map(|(number, clips)| {
+                crate::test_support::with_the_text_effect_on_every_text(
+                    Track::new(TrackId::new(number as u32), "track").with_clips(clips),
+                )
+            })
             .collect();
         let project = Project::from_parts(vec![source], tracks, SpeedIndicatorLayout::DEFAULT).unwrap();
         plan_pictures(&project, |_| true)

@@ -9,7 +9,7 @@ mod support;
 use fastforwardrs::media::FfmpegToolchain;
 use fastforwardrs::project::{
     Angle, AnimationTarget, CanvasArea, ClipId, Placement, Project, PropertyId, PropertyValue, TextColour, TextObject,
-    TimelineFrameIndex, with_placement_value,
+    TimelineFrameIndex, properties_of_the_text_effect, with_placement_value,
 };
 use support::{
     ClipOfTheVideo, clip_number, counter_video, decode_video, export, export_with_text_pictures, make_a_keyframe,
@@ -407,8 +407,11 @@ fn text_that_moves_and_changes_colour_is_exported_as_it_is_at_each_frame_over_a_
         .insert_text(front, TimelineFrameIndex::new(20), object, 50)
         .expect("there is room");
     let colour = |level: u8| PropertyValue::Colour(TextColour::new(level, level, level, 255));
-    keyframe(&mut project, text, PropertyId::Colour, 20, colour(0));
-    keyframe(&mut project, text, PropertyId::Colour, 60, colour(255));
+    // (The colour of a text is the fourth value of its text effect, which is what the clip is made of.)
+    let content = project.placement_of(text).unwrap().clip.as_text().unwrap().content();
+    let colour_of_the_text = properties_of_the_text_effect(content)[3];
+    keyframe(&mut project, text, colour_of_the_text, 20, colour(0));
+    keyframe(&mut project, text, colour_of_the_text, 60, colour(255));
     keyframe(
         &mut project,
         text,

@@ -5,6 +5,7 @@
 
 use super::tests::{audio_source, first_clip_location, frame, project_with_a_video};
 use super::*;
+use crate::test_support::{COLOUR_OF_A_TEXT, TEXT_OF_A_TEXT};
 
 fn clip_target(project: &Project) -> AnimationTarget {
     AnimationTarget::Clip(first_clip_location(project, 0))
@@ -77,11 +78,11 @@ fn a_text_object_is_what_it_says_until_it_has_keyframes_for_how_it_looks() {
     let (mut project, text, _) = a_project_with_a_text_object();
     let target = AnimationTarget::Clip(text);
     for (at, words) in [(100, "First"), (125, "Second")] {
-        project.add_keyframe(target, PropertyId::Text, frame(at)).unwrap();
+        project.add_keyframe(target, TEXT_OF_A_TEXT, frame(at)).unwrap();
         project
             .set_property_at(
                 target,
-                PropertyId::Text,
+                TEXT_OF_A_TEXT,
                 PropertyValue::Words(words.to_owned()),
                 frame(at),
             )
@@ -159,8 +160,8 @@ fn something_that_does_not_have_a_property_has_no_value_for_it() {
         None
     );
     let video = project_with_a_video(300);
-    assert_eq!(project_value(&video, PropertyId::Text), None, "a video has no words");
-    assert_eq!(project_value(&video, PropertyId::Colour), None);
+    assert_eq!(project_value(&video, TEXT_OF_A_TEXT), None, "a video has no words");
+    assert_eq!(project_value(&video, COLOUR_OF_A_TEXT), None);
 
     let mut with_a_sound = Project::empty();
     with_a_sound.import_source(audio_source(2, 10), frame(0)).unwrap();
@@ -421,16 +422,16 @@ fn a_keyframe_cannot_be_made_where_the_clip_is_not_and_taking_one_away_there_is_
 fn what_a_text_object_says_can_be_animated_and_changes_at_the_keyframe() {
     let (mut project, text, _) = a_project_with_a_text_object();
     let target = AnimationTarget::Clip(text);
-    project.add_keyframe(target, PropertyId::Text, frame(100)).unwrap();
+    project.add_keyframe(target, TEXT_OF_A_TEXT, frame(100)).unwrap();
     project
         .set_property_at(
             target,
-            PropertyId::Text,
+            TEXT_OF_A_TEXT,
             PropertyValue::Words("Goodbye".to_owned()),
             frame(120),
         )
         .unwrap();
-    let words = |at| project.property_value_at(target, PropertyId::Text, frame(at));
+    let words = |at| project.property_value_at(target, TEXT_OF_A_TEXT, frame(at));
     assert_eq!(words(100), Some(PropertyValue::Words("Hello".to_owned())));
     assert_eq!(
         words(119),
@@ -439,7 +440,7 @@ fn what_a_text_object_says_can_be_animated_and_changes_at_the_keyframe() {
     );
     assert_eq!(words(120), Some(PropertyValue::Words("Goodbye".to_owned())));
     assert_eq!(
-        project.placement_of(text).unwrap().clip.as_text().unwrap().object.text,
+        project.text_object_of(text).unwrap().text,
         "Hello",
         "the object itself says what it did"
     );

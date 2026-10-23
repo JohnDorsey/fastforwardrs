@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::project::groups::test_projects::{Laid, lay_out};
+use crate::project::groups::test_projects::{Laid, lay_out, lay_out_whole_texts};
 use crate::project::racks_tests::{db, put_a_rack_in};
 use crate::project::{
     AnimationTarget, ClipMove, ClipSide, Effect, EffectInstanceId, EffectKind, FrameRate, Project, PropertyId,
@@ -132,6 +132,15 @@ struct Randomly {
 
 impl Randomly {
     fn new(seed: u64) -> Self {
+        Self::of_texts(seed, false)
+    }
+
+    /// A run whose texts are whole (see [`lay_out_whole_texts`]), which a project that is saved has to be made of.
+    fn of_whole_texts(seed: u64) -> Self {
+        Self::of_texts(seed, true)
+    }
+
+    fn of_texts(seed: u64, whole: bool) -> Self {
         let mut random = DeterministicRandomNumbers::with_seed(seed);
         // Five tracks, each with a few clips one after another, with gaps between them.
         let mut layout: Vec<Vec<(u64, u64)>> = Vec::new();
@@ -148,7 +157,11 @@ impl Randomly {
         let layout_as_slices: Vec<&[(u64, u64)]> = layout.iter().map(Vec::as_slice).collect();
         Self {
             random,
-            laid: lay_out(&layout_as_slices),
+            laid: if whole {
+                lay_out_whole_texts(&layout_as_slices)
+            } else {
+                lay_out(&layout_as_slices)
+            },
             log: Vec::new(),
             tally: Tally::default(),
         }
@@ -654,6 +667,15 @@ impl Randomly {
 /// projects that have groups of every kind in them, in every state.
 pub(crate) fn project_after_random_edits(seed: u64, edits: usize) -> Project {
     let mut run = Randomly::new(seed);
+    for _ in 0..edits {
+        run.edit_at_random();
+    }
+    run.laid.project
+}
+
+/// [`project_after_random_edits`] with texts that are whole, each with the text effect that a text that the program makes has: a project that can be saved and loaded again.
+pub(crate) fn project_after_random_edits_of_whole_texts(seed: u64, edits: usize) -> Project {
+    let mut run = Randomly::of_whole_texts(seed);
     for _ in 0..edits {
         run.edit_at_random();
     }

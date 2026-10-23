@@ -8,12 +8,12 @@ use super::tests::{frame, frame_rate};
 use super::*;
 use crate::test_support::{make_a_keyframe, put_a_hue_shift_on};
 
-/// A project with one track that has a text object from frame 10 to 40, and the track.
+/// A project with one track that has a text object from frame 10 to 40, and the track. (The text clip has no text effect: what is tried here is not about what a text is made of.)
 fn a_track_with_a_text_object() -> (Project, TrackId) {
     let mut project = Project::empty();
     let track = project.add_track_in_front();
     project
-        .try_insert_text(track, frame(10), TextObject::default(), 30)
+        .insert_a_text_clip_that_has_no_text_effect(track, frame(10), 30)
         .unwrap();
     (project, track)
 }

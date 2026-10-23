@@ -20,6 +20,7 @@ use crate::project::{
     AnimationTarget, Clip, ClipId, GroupKind, Member, PropertyId, RackDestination, RackId, TextObject,
     TimelineFrameIndex,
 };
+use crate::test_support::{COLOUR_OF_A_TEXT, SIZE_OF_A_TEXT};
 
 fn assert_close(actual: f32, expected: f32, what: &str) {
     assert!((actual - expected).abs() < 1.5, "{what}: {actual} is not {expected}");
@@ -954,8 +955,8 @@ fn a_rack_let_go_where_two_open_drawers_overlap_goes_in_the_one_that_is_on_top()
         PropertyId::Position,
         PropertyId::Size,
         PropertyId::Rotation,
-        PropertyId::FontSize,
-        PropertyId::Colour,
+        SIZE_OF_A_TEXT,
+        COLOUR_OF_A_TEXT,
     ] {
         make_a_keyframe(&mut window, AnimationTarget::Clip(text), property, 50);
     }

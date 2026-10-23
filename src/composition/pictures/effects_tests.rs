@@ -299,6 +299,10 @@ fn effects_by_looking_at_the_project(
     layer: &Layer,
     timeline_frame: u64,
 ) -> Vec<(EffectKind, Vec<PropertyValue>)> {
+    // (What a text clip is made of, its text effect, is the layer's content and not one of what is done to its picture.)
+    let content = project
+        .placement_of(layer.clip)
+        .and_then(|placement| placement.clip.content());
     [AnimationTarget::Clip(layer.clip), AnimationTarget::Track(layer.track)]
         .into_iter()
         .flat_map(|target| {
@@ -306,6 +310,9 @@ fn effects_by_looking_at_the_project(
                 .effects_of(target)
                 .expect("the clip and its track are there")
                 .iter()
+                .filter(move |effect| {
+                    !(target == AnimationTarget::Clip(layer.clip) && Some(effect.instance()) == content)
+                })
                 .map(move |effect| {
                     let values = effect
                         .properties()
@@ -401,10 +408,18 @@ fn effects_that_only_change_colours_do_not_change_where_the_sections_of_the_plan
         let mut without = project.clone();
         let mut had_one = false;
         for &target in &targets {
+            // (What a clip is made of, which a text's text effect is, is not taken off: it is not an effect that is done to a picture.)
+            let content = match target {
+                AnimationTarget::Clip(clip) => project
+                    .placement_of(clip)
+                    .and_then(|placement| placement.clip.content()),
+                AnimationTarget::Track(_) => None,
+            };
             let on_it: Vec<(EffectInstanceId, bool)> = project
                 .effects_of(target)
                 .unwrap()
                 .iter()
+                .filter(|effect| Some(effect.instance()) != content)
                 .map(|effect| {
                     (
                         effect.instance(),

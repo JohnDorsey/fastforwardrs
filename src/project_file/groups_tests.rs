@@ -204,10 +204,11 @@ fn a_badge_is_saved_with_how_many_effects_of_its_chain_come_before_it_and_which_
         file["tracks"][1]["clips"][0]["badges"],
         serde_json::json!([{"of": {"tag": 0}}])
     );
-    // The text object has its effect, and then the badge of the tag, which is after one of them.
+    // The text object has its two effects (the text effect that it is made of, and the hue shift), and then the badge of the tag, which is after both of them. (It was after one of them
+    // before phase 9.4, when the text was not an effect.)
     assert_eq!(
         file["tracks"][0]["clips"][1]["badges"],
-        serde_json::json!([{"of": {"tag": 0}, "effects_before": 1}])
+        serde_json::json!([{"of": {"tag": 0}, "effects_before": 2}])
     );
     // The crate is in the tag too.
     assert_eq!(
@@ -234,8 +235,8 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    // (Rewritten on purpose in phase 6.4.4: 17, the version that has the images of a shader; it was 16 for the shader of an effect, 15 for the adjustment clip, 14 for the plugin libraries, and 13 for the shown-ness of the effects.)
-    assert_eq!(FILE_FORMAT_VERSION, 17);
+    // (Rewritten on purpose in phase 9.4: 18, the version that has a text made of an effect; it was 17 for the images of a shader, 16 for the shader of an effect, 15 for the adjustment clip, 14 for the plugin libraries, and 13 for the shown-ness of the effects.)
+    assert_eq!(FILE_FORMAT_VERSION, 18);
 }
 
 // --- the trip through the file ---
@@ -326,7 +327,7 @@ fn projects_that_have_had_random_edits_made_to_them_survive_a_trip_through_the_t
     let mut projects_with_groups = 0;
     let mut most_groups = 0;
     for seed in 1..=60 {
-        let project = crate::project::groups::random_edits_tests::project_after_random_edits(seed, 120);
+        let project = crate::project::groups::random_edits_tests::project_after_random_edits_of_whole_texts(seed, 120);
         let text = saved(&project);
         let loaded = project_from_json_text(&text).unwrap_or_else(|error| panic!("seed {seed}: {error}\n{text}"));
         assert_eq!(saved(&loaded), text, "seed {seed}");

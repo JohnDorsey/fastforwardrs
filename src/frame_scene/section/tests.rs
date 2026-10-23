@@ -262,7 +262,7 @@ fn a_text_is_as_its_keyframes_make_it_at_the_frame_asked_for() {
         make_a_keyframe(
             &mut project,
             AnimationTarget::Clip(text),
-            PropertyId::FontSize,
+            crate::test_support::SIZE_OF_A_TEXT,
             at,
             PropertyValue::Number(size),
         );

@@ -43,8 +43,9 @@ use thiserror::Error;
 
 pub use animating::AnimationTarget;
 pub use animation::{
-    Animation, Keyframe, Keyframes, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, PropertyId, PropertyValue,
-    ValueKind, placement_value, text_value, with_placement_value, with_text_value,
+    Animation, Keyframe, Keyframes, PROPERTIES_OF_A_PLACEMENT, PropertyId, PropertyValue, ValueKind, placement_value,
+    properties_of_a_text_object, properties_of_the_text_effect, text_object_of_values, values_of_a_text_object,
+    with_placement_value, words_of_a_text_clip,
 };
 pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
@@ -1077,6 +1078,33 @@ impl Project {
         })
     }
 
+    /// [`Self::insert_text`] for the tests of what is not about texts, which use a text clip as the clip that is seen and needs no file and lasts as long as it is asked to: **the clip
+    /// has no text effect** (which a text that the program makes always has, as the first of its chain), so its chain is empty, as it is for any clip that is new but a generator, and it
+    /// makes no picture. Its content is the name `EffectInstanceId::new(u32::MAX)`, which no chain gives to an effect, so that an effect that the test puts on the clip is never taken
+    /// for what the clip is made of. A text that is whole is made by [`Self::insert_text`].
+    #[cfg(test)]
+    pub(crate) fn insert_a_text_clip_that_has_no_text_effect(
+        &mut self,
+        track: TrackId,
+        timeline_frame: TimelineFrameIndex,
+        wanted_frames: u64,
+    ) -> Option<(ClipId, u64)> {
+        self.keeping_the_groups_valid(|project| {
+            let track = project.track_mut(track).ok_or(EditError::NoRoomThere)?;
+            let duration = track
+                .longest_new_text_clip_at(timeline_frame, wanted_frames)
+                .ok_or(EditError::NoRoomThere)?;
+            let clip = Clip::Text(
+                TextClip::new(duration, EffectInstanceId::new(u32::MAX)).map_err(|_| EditError::NoRoomThere)?,
+            );
+            let id = track
+                .insert_clip_at(timeline_frame, clip)
+                .map_err(|_| EditError::NoRoomThere)?;
+            Ok((id, duration))
+        })
+        .ok()
+    }
+
     /// Adds an adjustment clip to a track at `timeline_frame`, lasting `wanted_frames` frames or as long as there is room for if that is less. Returns the new clip and how many
     /// frames it lasts, or why it could not: [`EditError::NoRoomThere`] if there is no such track or a clip is at that frame, and [`EditError::BreaksTheRulesOfGroups`] if it would
     /// be in the rectangle of a clip group (where only what is in the group may be).
@@ -1112,14 +1140,14 @@ impl Project {
         })
     }
 
-    /// The clip whose content, what it makes, is the effect named `instance` in the chain of `owner`, if `owner` is a generator clip and that is its content. **The content of a
-    /// generator cannot be taken off, switched off, copied or moved.**
+    /// The clip whose content, what it makes, is the effect named `instance` in the chain of `owner`, if `owner` is a generator clip or a text clip and that is its content. **The content of a
+    /// generator, or of a text, cannot be taken off, switched off, copied or moved.**
     pub fn the_clip_whose_content_is(&self, owner: Member, instance: EffectInstanceId) -> Option<ClipId> {
         let Member::Clip(clip) = owner else {
             return None;
         };
         let placement = self.placement_of(clip)?;
-        (placement.clip.as_generator()?.content() == instance).then_some(clip)
+        (placement.clip.content()? == instance).then_some(clip)
     }
 
     pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), EditError> {

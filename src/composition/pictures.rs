@@ -27,7 +27,7 @@ use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, Tr
 use crate::project::{
     Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, ImportedPicture,
     Member, PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier,
-    SpeedFactor, TimelineFrameIndex,
+    SpeedFactor, TimelineFrameIndex, text_object_of_values,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -55,7 +55,9 @@ pub enum LayerContent {
     Image {
         source: SourceMediaIdentifier,
     },
-    Text(TextObject),
+    /// A text: its text effect, as a layer has an effect, with the keyframes of its values (what it says and how it looks); where it is on the picture is the layer's [`Layer::placement`].
+    /// (The text effect is not among the layer's `effects`: it makes the picture and is not done to one.)
+    Text(LayerEffect),
     /// A generator clip: what it makes is its first effect, which is a shader that reads no picture, and the layer has nothing to be drawn from but that (see [`GeneratorClip`](crate::project::GeneratorClip)).
     Generator,
     /// An adjustment clip: no picture of its own. **It is not in the layers of a section**: what it does is a group of everything behind it (see [`GroupSpan`]).
@@ -215,17 +217,16 @@ impl Layer {
         self.animation.placement_at(self.placement, timeline_frame.value())
     }
 
-    /// The text object the layer is at `timeline_frame`: what the object says, changed as the keyframes say. `None` if the
+    /// The text object the layer is at `timeline_frame`: what it says and how it looks, which are the values of its text effect, and where it is, each changed as the keyframes say. `None` if the
     /// layer is not a text object.
     pub fn text_at(&self, timeline_frame: TimelineFrameIndex) -> Option<Cow<'_, TextObject>> {
-        let LayerContent::Text(object) = &self.content else {
+        let LayerContent::Text(effect) = &self.content else {
             return None;
         };
-        Some(if self.animation.is_empty() {
-            Cow::Borrowed(object)
-        } else {
-            Cow::Owned(self.animation.text_object_at(object, timeline_frame.value()))
-        })
+        Some(Cow::Owned(text_object_of_values(
+            &effect.values_at(timeline_frame.value()),
+            self.placement_at(timeline_frame),
+        )))
     }
 
     /// Whether the layer fills all of the picture with pictures and is not turned, so that nothing
@@ -468,6 +469,8 @@ struct Candidate<'project> {
     /// What is done to its picture by itself: the effects that are applied to the clip (those of its groups are done to the picture of the group, see
     /// [`Layer::effects`]).
     effects: Vec<LayerEffect>,
+    /// For a text clip, its text effect, which is not among `effects` (it makes the picture and is not done to one).
+    text: Option<LayerEffect>,
     /// The clip groups and track groups that make a picture of their own that the clip is in, the outermost first.
     shapes: Vec<GroupId>,
 }
@@ -584,6 +587,24 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                     .placement_on_the_picture(clip)
                     .expect("a clip that is not a sound is on the picture"),
             };
+            let effects_of_the_picture = {
+                let mut effects: Vec<LayerEffect> = applied_effects
+                    .get(&placement.id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|applied| applied.effect.kind().is_installed())
+                    .map(|applied| layer_effect_of(project, &animations, applied))
+                    .collect();
+                // (A text clip's text effect makes its picture: it is taken out of what is done to the picture, so that nothing about the places of the others changes.)
+                let text = match placement.clip {
+                    Clip::Text(text) => effects
+                        .iter()
+                        .position(|effect| effect.kind == EffectKind::TEXT && effect.instance == text.content())
+                        .map(|place| effects.remove(place)),
+                    _ => None,
+                };
+                (effects, text)
+            };
             candidates.push(Candidate {
                 track_position,
                 track: track.id(),
@@ -601,13 +622,8 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                     .restricted_to(|property| property.is_seen() && !property.is_a_value_of_an_effect()),
                 // (An effect that the program does not have, which a project file brought, does nothing to the picture: it is not here, so
                 // that its keyframes do not make the picture different at every frame, which makes the export slower.)
-                effects: applied_effects
-                    .get(&placement.id)
-                    .into_iter()
-                    .flatten()
-                    .filter(|applied| applied.effect.kind().is_installed())
-                    .map(|applied| layer_effect_of(project, &animations, applied))
-                    .collect(),
+                effects: effects_of_the_picture.0,
+                text: effects_of_the_picture.1,
                 shapes: project
                     .shapes_round_the_clip_outermost_first(placement.id)
                     .into_iter()
@@ -723,7 +739,12 @@ fn sections_between(
                         layers.push(candidate.entry(LayerContent::Image { source: image.source() }));
                     }
                 }
-                Clip::Text(text) => layers.push(candidate.entry(LayerContent::Text(text.object.clone()))),
+                // (A text clip that has no text effect, which a project that is consistent does not have, makes no picture.)
+                Clip::Text(_) => {
+                    if let Some(effect) = &candidate.text {
+                        layers.push(candidate.entry(LayerContent::Text(effect.clone())));
+                    }
+                }
                 Clip::Generator(_) => layers.push(candidate.entry(LayerContent::Generator)),
                 Clip::Adjustment(_) => layers.push(candidate.entry(LayerContent::Adjustment)),
                 Clip::Audio(_) | Clip::Crate(_) => {}

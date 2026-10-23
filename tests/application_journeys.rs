@@ -787,7 +787,11 @@ fn a_text_object_made_with_the_mouse_is_saved_and_drawn_over_the_picture_in_the_
     let Clip::Text(text_clip) = text.clip else {
         panic!("a text clip")
     };
-    assert_eq!(text_clip.object.text, "HELLO WORLD");
+    // (What a text says is the value of its text effect since phase 9: the project says what it is.)
+    assert_eq!(
+        journey.application().project().text_object_of(text.id).unwrap().text,
+        "HELLO WORLD"
+    );
     assert_eq!(text_clip.duration_in_frames(), 60);
     let text_middle = text.first_timeline_frame.value() as usize + 30;
 
@@ -796,7 +800,11 @@ fn a_text_object_made_with_the_mouse_is_saved_and_drawn_over_the_picture_in_the_
     journey.application_mut().save_project_to(project_path.clone());
     let (text_of_file, saved) = read_project_file_as_json(&project_path);
     assert_eq!(saved["tracks"][0]["clips"][0]["kind"], "text", "{text_of_file}");
-    assert_eq!(saved["tracks"][0]["clips"][0]["text"], "HELLO WORLD", "{text_of_file}");
+    // (What a text says is the `text` value of its text effect in the file since format 18.)
+    assert_eq!(
+        saved["tracks"][0]["clips"][0]["effects"][0]["values"]["text"], "HELLO WORLD",
+        "{text_of_file}"
+    );
     let mut fresh = Journey::start(&toolchain);
     fresh.application_mut().load_project_from(project_path);
     fresh.wait_until_idle();

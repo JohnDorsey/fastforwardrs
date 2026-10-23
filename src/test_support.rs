@@ -6,14 +6,64 @@
 use std::borrow::Cow;
 
 use crate::project::{
-    AnimationTarget, ClipId, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, ParameterDescriptor,
-    Project, PropertyId, PropertyValue, RackDestination, TimelineFrameIndex, TrackId, UnknownFields,
+    AnimationTarget, Clip, ClipId, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
+    ParameterDescriptor, Project, PropertyId, PropertyValue, RackDestination, TextClip, TextObject, TimelineFrameIndex,
+    Track, TrackId, UnknownFields, properties_of_the_text_effect, values_of_a_text_object,
 };
 
 /// The property that is the one value of the hue shift when the hue shift is the first effect of the chain it is in, which is what it is
 /// when it is the only effect, as it is in nearly every test (see [`EffectInstanceId::FIRST`]).
 pub const HUE_SHIFT_AS_THE_FIRST_EFFECT: PropertyId =
     PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::FIRST, 0);
+
+/// What a new text says, its font, its size and its colour, as the properties that they are since phase 9: the values `text`, `font`, `size` and `colour` of the text effect that is
+/// the first of the chain of a text clip that is new (and of every clip that was cut from it or copied). A text was given these as properties of the clip itself before, and the tests that
+/// went through them go through these.
+pub const TEXT_OF_A_TEXT: PropertyId = PropertyId::effect_value(EffectKind::TEXT, EffectInstanceId::FIRST, 0);
+pub const FONT_OF_A_TEXT: PropertyId = PropertyId::effect_value(EffectKind::TEXT, EffectInstanceId::FIRST, 1);
+pub const SIZE_OF_A_TEXT: PropertyId = PropertyId::effect_value(EffectKind::TEXT, EffectInstanceId::FIRST, 2);
+pub const COLOUR_OF_A_TEXT: PropertyId = PropertyId::effect_value(EffectKind::TEXT, EffectInstanceId::FIRST, 3);
+
+/// The effects of a text clip that says what `object` says: the one effect that it is made of (see [`crate::project::TextClip::content`]), the text effect, which is the first of the chain
+/// and has the words, the font, the size and the colour of `object` for its values. (Where `object` is on the picture is the clip's: see [`a_text_clip_that_says`].)
+pub fn the_effects_of_a_text_that_says(object: &TextObject) -> Effects {
+    let mut effects = Effects::none();
+    let content = effects.add(EffectKind::TEXT);
+    assert_eq!(
+        content,
+        EffectInstanceId::FIRST,
+        "a chain that is new has no effect yet"
+    );
+    for (property, value) in properties_of_the_text_effect(content)
+        .into_iter()
+        .zip(values_of_a_text_object(object))
+    {
+        assert!(effects.set_value(property, &value), "the text effect has this value");
+    }
+    effects
+}
+
+/// A text clip that shows for `frames` frames, and the effects it has, which say what `object` says: where `object` is on the picture is what the clip has for its place.
+pub fn a_text_clip_that_says(object: &TextObject, frames: u64) -> (Clip, Effects) {
+    let clip = TextClip::new(frames, EffectInstanceId::FIRST)
+        .expect("it lasts a frame at least")
+        .with_placement(object.placement());
+    (Clip::Text(clip), the_effects_of_a_text_that_says(object))
+}
+
+/// The same track, and every text on it that has no effect yet has the text effect, saying what a new text object says (a text that was made by the code of a test as a clip alone, with
+/// the content that a new text clip has, is made whole by this).
+pub fn with_the_text_effect_on_every_text(track: Track) -> Track {
+    let effects: Vec<Effects> = track
+        .entries()
+        .iter()
+        .map(|entry| match entry.clip() {
+            Clip::Text(_) if entry.effects().is_empty() => the_effects_of_a_text_that_says(&TextObject::default()),
+            _ => entry.effects().clone(),
+        })
+        .collect();
+    track.with_effects_on_its_clips(effects)
+}
 
 /// The descriptor of an effect that the program does not have, as a file would bring it: the key `key`, the version 1.0, a picture effect that
 /// changes each pixel by itself, and these values, `(id, what it begins as)`, each named by its id, with a label that is its id with a
@@ -207,10 +257,10 @@ pub fn project_with_a_crate_that_has_a_lot_of_racks() -> (Project, TrackId) {
         PropertyId::Position,
         PropertyId::Size,
         PropertyId::Rotation,
-        PropertyId::Text,
-        PropertyId::FontFamily,
-        PropertyId::FontSize,
-        PropertyId::Colour,
+        TEXT_OF_A_TEXT,
+        FONT_OF_A_TEXT,
+        SIZE_OF_A_TEXT,
+        COLOUR_OF_A_TEXT,
     ];
     assert_eq!(properties_of_a_text.len(), RACKS_IN_THE_CRATE);
     // (A crate lasts from its first keyframe to its last: the first rack makes it, from the first frame of the text to the last.)

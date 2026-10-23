@@ -11,7 +11,10 @@
 
 use std::fmt;
 
-use super::animation::{PropertyId, PropertyValue, placement_value, text_value, with_placement_value, with_text_value};
+use super::animation::{
+    PropertyId, PropertyValue, placement_value, properties_of_the_text_effect, text_object_of_values,
+    with_placement_value,
+};
 use super::racks::NewKeyframe;
 use super::tracks::{Clip, ClipEditError, ClipId, ClipPlacement, Gain, Placement, TextObject, TrackId};
 use super::{EditError, Project, TimelineFrameIndex, fitted_placement};
@@ -62,7 +65,7 @@ impl Project {
                         .unwrap_or_else(|| fitted_placement(shown_size, picture_size)),
                 )
             }
-            Clip::Text(text) => Some(text.object.placement()),
+            Clip::Text(text) => Some(text.placement()),
             Clip::Generator(generator) => Some(generator.placement()),
             Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => None,
         }
@@ -80,15 +83,27 @@ impl Project {
         )
     }
 
-    /// The text object of the text clip `clip` at `timeline_frame`: what it says, changed as its keyframes say. (A frame before
-    /// the clip is taken for its first, one after it for its last.) `None` for what is not a text clip.
-    pub fn text_object_at(&self, clip: ClipId, timeline_frame: TimelineFrameIndex) -> Option<TextObject> {
+    /// The text object that the text clip `clip` says when nothing about it is animated: the values of its text effect as they are when they have no keyframes, and where the clip is. (What it
+    /// is at a frame is [`Self::text_object_at`].) `None` for what is not a text clip, and for a text clip that has no text effect, which a project that is consistent does not have.
+    pub fn text_object_of(&self, clip: ClipId) -> Option<TextObject> {
         let placement = self.placement_of(clip)?;
         let text = placement.clip.as_text()?;
-        Some(
-            self.animation_of(AnimationTarget::Clip(clip))
-                .text_object_at(&text.object, the_frame_the_clip_is_at(&placement, timeline_frame)),
-        )
+        let values: Vec<PropertyValue> = properties_of_the_text_effect(text.content())
+            .into_iter()
+            .map(|property| placement.effects.value_of(property))
+            .collect::<Option<_>>()?;
+        Some(text_object_of_values(&values, text.placement()))
+    }
+
+    /// The text object of the text clip `clip` at `timeline_frame`: what it says and how it looks, which are the values of its text effect, and where it is, each as its keyframes say if it
+    /// has any. (A frame before the clip is taken for its first, one after it for its last.) `None` for what is not a text clip.
+    pub fn text_object_at(&self, clip: ClipId, timeline_frame: TimelineFrameIndex) -> Option<TextObject> {
+        let text = *self.placement_of(clip)?.clip.as_text()?;
+        let values: Vec<PropertyValue> = properties_of_the_text_effect(text.content())
+            .into_iter()
+            .map(|property| self.property_value_at(AnimationTarget::Clip(clip), property, timeline_frame))
+            .collect::<Option<_>>()?;
+        Some(text_object_of_values(&values, self.placement_at(clip, timeline_frame)?))
     }
 
     /// The value that `property` of the clip `placement` is has when it is not animated. `None` if the clip does not have the
@@ -106,9 +121,6 @@ impl Project {
             PropertyId::Muted => clip.as_media().map(|media| PropertyValue::Flag(media.is_muted())),
             PropertyId::Position | PropertyId::Size | PropertyId::Rotation => {
                 placement_value(&self.placement_on_the_picture(clip)?, property)
-            }
-            PropertyId::Text | PropertyId::FontFamily | PropertyId::FontSize | PropertyId::Colour => {
-                text_value(&clip.as_text()?.object, property)
             }
         }
     }
@@ -155,12 +167,8 @@ impl Project {
                 let current = self.placement_on_the_picture(&clip).ok_or_else(wrong)?;
                 self.set_clip_placement(clip_id, with_placement_value(current, property, value))
             }
-            (PropertyId::Text | PropertyId::FontFamily | PropertyId::FontSize | PropertyId::Colour, _) => {
-                let text = clip.as_text().ok_or_else(wrong)?;
-                self.set_text_object(clip_id, with_text_value(&text.object, property, value))
-            }
             // (The value was found above to be of the kind the property has, so these are not given another kind. Every property
-            // is named in this match, so that one that is added is not quietly given to the text object, which ignores it.)
+            // is named in this match, so that one that is added is not quietly given to something that ignores it.)
             (PropertyId::Gain | PropertyId::Muted, _) => Err(wrong().into()),
         }
     }

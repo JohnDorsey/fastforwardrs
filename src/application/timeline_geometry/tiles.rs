@@ -129,7 +129,7 @@ impl TimelineGeometry {
 mod tests {
     use super::super::test_support::{assert_close, clip, clip_id, geometry_at, media, track_of, two_clip_track};
     use super::*;
-    use crate::project::{MediaClip, SpeedFactor, TextClip, TextObject, TrackId};
+    use crate::project::{EffectInstanceId, MediaClip, SpeedFactor, TextClip, TrackId};
 
     /// The width of the tiles when a tile is as wide as a second of the video is on the screen, which
     /// is what they were before a tile could be of any width.
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn tiles_are_made_for_video_clips_only_and_stay_where_the_clips_are() {
         let geometry = geometry_at(30, 1, 100.0);
-        let text = Clip::Text(TextClip::new(TextObject::default(), 60).unwrap());
+        let text = Clip::Text(TextClip::new(60, EffectInstanceId::FIRST).unwrap());
         let sound = Clip::Audio(media(0, 90, 1));
         // A sound for 90 frames, then 30 empty frames, then a video clip of 60 frames, then a text of 60 frames.
         let track = Track::new(TrackId::new(0), "track 0").with_clips([(0, sound), (30, clip(0, 60, 1)), (0, text)]);

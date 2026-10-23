@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Projects with clips at places that are known, to try groups on. (Text clips are used because they last exactly as long as they are
-//! asked to, and need no file.)
+//! asked to, and need no file. **They are text clips that have no text effect**, which a text clip that the program made always has, as the first of its chain: what the tests of
+//! groups are about is the groups and the chains, and the chain of each of these clips is empty to begin with, as they were before a text was made of an effect. What a text clip is
+//! made of is tried by the tests of texts.)
 
 use crate::project::{
     ClipId, FrameRate, Group, GroupColour, GroupId, GroupKind, Member, Project, SourceMedia, SourceMediaIdentifier,
@@ -68,8 +70,18 @@ pub(crate) fn video_source(identifier: u32, frames: u64) -> SourceMedia {
 }
 
 /// A project with a track for each of `layout`, the first in front, that has a text clip for each pair on it: where it starts, and how
-/// many frames it lasts.
+/// many frames it lasts. (The text clips have no text effect: see the head of this file. [`lay_out_whole_texts`] makes them whole.)
 pub(crate) fn lay_out(layout: &[&[(u64, u64)]]) -> Laid {
+    lay_out_texts(layout, false)
+}
+
+/// [`lay_out`], with texts that are whole: each has the text effect that a text that the program makes has, as the first of its chain, saying what a new text says, so that it has what
+/// it is called by (its words), makes a picture, and is a project that can be saved.
+pub(crate) fn lay_out_whole_texts(layout: &[&[(u64, u64)]]) -> Laid {
+    lay_out_texts(layout, true)
+}
+
+fn lay_out_texts(layout: &[&[(u64, u64)]], whole: bool) -> Laid {
     let mut project = Project::empty();
     while project.tracks().len() < layout.len() {
         project.add_track_in_front();
@@ -79,14 +91,13 @@ pub(crate) fn lay_out(layout: &[&[(u64, u64)]]) -> Laid {
     for (track, placed) in tracks.iter().zip(layout) {
         let mut on_the_track = Vec::new();
         for &(first_frame, frames) in *placed {
-            let (clip, lasts) = project
-                .insert_text(
-                    *track,
-                    TimelineFrameIndex::new(first_frame),
-                    TextObject::default(),
-                    frames,
-                )
-                .expect("there is room for the clip");
+            let first_frame = TimelineFrameIndex::new(first_frame);
+            let (clip, lasts) = if whole {
+                project.insert_text(*track, first_frame, TextObject::default(), frames)
+            } else {
+                project.insert_a_text_clip_that_has_no_text_effect(*track, first_frame, frames)
+            }
+            .expect("there is room for the clip");
             assert_eq!(lasts, frames, "the clip lasts as long as it was asked to");
             on_the_track.push(clip);
         }

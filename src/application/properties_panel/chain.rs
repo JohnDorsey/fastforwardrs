@@ -69,6 +69,8 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Member, 
     let mut drawn: Vec<DrawnRow> = Vec::new();
     for row in &rows {
         let shown = match row {
+            // (What a text is made of, its text effect, is not a box of the chain: its rows are in the box of the text itself, where they always were. See `text_properties`.)
+            ChainRow::Effect(effect) if is_what_a_text_says(content, owner, effect) => continue,
             ChainRow::Effect(effect) => {
                 ui.add_space(SPACE_BETWEEN_ROWS);
                 show_an_effect(ui, content, owner, chain, effect, commands)
@@ -94,6 +96,15 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, owner: Member, 
         ui.add_space(SPACE_BETWEEN_ROWS);
         show_the_badge_of_the_group_it_is_in(ui, group, commands);
     }
+}
+
+/// Whether `effect` is the text effect that the text clip `owner` is made of, whose rows are those of the text and not a box of the chain.
+fn is_what_a_text_says(content: &PropertiesContent<'_>, owner: Member, effect: &Effect) -> bool {
+    content
+        .project
+        .the_clip_whose_content_is(owner, effect.instance())
+        .and_then(|clip| content.project.placement_of(clip))
+        .is_some_and(|placement| placement.clip.as_text().is_some())
 }
 
 /// The command that puts an effect of kind `kind` on `owner`: a clip, a track, or a group (whose effects are not animated).

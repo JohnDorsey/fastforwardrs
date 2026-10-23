@@ -30,7 +30,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`engine-phase-1-design.md`](engine-phase-1-design.md) to [`engine-phase-6-report.md`](engine-phase-6-report.md) | the picture engine, phase by phase (design and report of each; phase 6, the ISF host, has the designs [`engine-phase-6-design.md`](engine-phase-6-design.md), [`engine-phase-6-4-design.md`](engine-phase-6-4-design.md) and [`engine-phase-6-6-design.md`](engine-phase-6-6-design.md)); [`engine-comparison*`](engine-comparison) holds the pictures that compare old and new |
 | [`engine-phase-7-design.md`](engine-phase-7-design.md), [`engine-phase-7-report.md`](engine-phase-7-report.md) | the sound engine and LADSPA plugins |
 | [`engine-phase-7-clap-design.md`](engine-phase-7-clap-design.md), [`engine-phase-7-clap-report.md`](engine-phase-7-clap-report.md) | CLAP plugins |
-| [`engine-phase-9-design.md`](engine-phase-9-design.md) | phase 9, text objects become generators (the design; nothing built yet) |
+| [`engine-phase-9-design.md`](engine-phase-9-design.md), [`engine-phase-9-report.md`](engine-phase-9-report.md) | phase 9, text objects are made of an effect (the design, with what was built in its sections 6 to 8; and the report): the last phase of the plan |
 | [`groups-feature-spec.md`](groups-feature-spec.md) | tags, clip groups and track groups |
 | [`licence-plugin-clarification-draft.md`](licence-plugin-clarification-draft.md) | the options for the plugin clarification (`LICENSE-PLUGIN-CLARIFICATION` is the adopted one) |
 

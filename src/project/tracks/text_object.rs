@@ -11,6 +11,7 @@
 use thiserror::Error;
 
 use super::placement::{Angle, CanvasArea, Placement};
+use crate::project::EffectInstanceId;
 
 /// A colour with transparency, as the picture's pixels have them: straight (not premultiplied).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -153,21 +154,30 @@ impl Default for TextObject {
 #[error("a clip must last at least one frame")]
 pub struct EmptyTextClip;
 
-/// A text object on a track, and for how long it shows.
-#[derive(Clone, Debug, PartialEq)]
+/// A text object on a track: for how long it shows, which effect of its chain is what it is made of, and where on the picture it is.
+///
+/// **What it says and how it looks are the values of that effect** (`EffectKind::TEXT`, its *content*: the first effect of its chain, as a generator clip's is), and not of the clip: so
+/// they have keyframes and controls as the values of any effect do. A [`TextObject`] is what all of them are together at a frame, which is what the preview and the export draw; the
+/// project makes one from the values (`Project::text_object_at`) and changes the values to say what one says (`Project::set_text_object`). What the clip itself has is how long it shows
+/// and where it is (`Position`, `Size` and `Rotation`, which are properties of the clip).
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextClip {
-    pub object: TextObject,
     duration_in_frames: u64,
+    content: EffectInstanceId,
+    placement: Placement,
 }
 
 impl TextClip {
-    pub fn new(object: TextObject, duration_in_frames: u64) -> Result<Self, EmptyTextClip> {
+    /// A text clip that shows for `duration_in_frames` frames, whose content is the effect named `content` in the chain of the clip, and that is along the bottom of the picture, upright
+    /// (where a new text object is).
+    pub fn new(duration_in_frames: u64, content: EffectInstanceId) -> Result<Self, EmptyTextClip> {
         if duration_in_frames == 0 {
             return Err(EmptyTextClip);
         }
         Ok(Self {
-            object,
             duration_in_frames,
+            content,
+            placement: TextObject::default().placement(),
         })
     }
 
@@ -177,26 +187,44 @@ impl TextClip {
         self.duration_in_frames
     }
 
+    /// Which effect of the chain of the clip is what it is made of.
+    pub fn content(&self) -> EffectInstanceId {
+        self.content
+    }
+
+    /// Where the text is on the picture, and how far it is turned, before its keyframes change that.
+    pub fn placement(&self) -> Placement {
+        self.placement
+    }
+
+    #[must_use]
+    pub fn with_placement(&self, placement: Placement) -> Self {
+        Self { placement, ..*self }
+    }
+
     /// The same text for a different number of frames, or `None` if that is none at all.
     #[must_use]
     pub fn with_duration_in_frames(&self, duration_in_frames: u64) -> Option<Self> {
-        Self::new(self.object.clone(), duration_in_frames).ok()
+        (duration_in_frames > 0).then_some(Self {
+            duration_in_frames,
+            ..*self
+        })
     }
 
     /// Cuts the clip in two after its first `frames_in` frames, or `None` if that is not strictly
-    /// inside it. Both halves say and look the same.
+    /// inside it. Both halves have the same content (which is a copy of the effect in each half's chain) and are in the same place.
     pub fn split_after(&self, frames_in: u64) -> Option<(Self, Self)> {
         if frames_in == 0 || frames_in >= self.duration_in_frames {
             return None;
         }
         Some((
             Self {
-                object: self.object.clone(),
                 duration_in_frames: frames_in,
+                ..*self
             },
             Self {
-                object: self.object.clone(),
                 duration_in_frames: self.duration_in_frames - frames_in,
+                ..*self
             },
         ))
     }
@@ -283,27 +311,40 @@ mod tests {
 
     #[test]
     fn a_text_clip_lasts_at_least_one_frame_and_ignores_speed_so_its_duration_is_what_it_says() {
-        assert_eq!(TextClip::new(TextObject::default(), 0), Err(EmptyTextClip));
-        let clip = TextClip::new(TextObject::default(), 90).unwrap();
+        assert_eq!(TextClip::new(0, EffectInstanceId::FIRST), Err(EmptyTextClip));
+        let clip = TextClip::new(90, EffectInstanceId::FIRST).unwrap();
         assert_eq!(clip.duration_in_frames(), 90);
         assert_eq!(clip.with_duration_in_frames(10).unwrap().duration_in_frames(), 10);
         assert_eq!(clip.with_duration_in_frames(0), None);
     }
 
     #[test]
-    fn cutting_a_text_clip_makes_two_that_say_the_same_and_last_as_long_together() {
-        let clip = TextClip::new(
-            TextObject {
-                text: "Hello".to_owned(),
-                ..TextObject::default()
-            },
-            90,
-        )
-        .unwrap();
+    fn a_new_text_clip_is_made_of_the_effect_it_is_given_and_is_where_a_new_text_object_is() {
+        let clip = TextClip::new(90, EffectInstanceId::new(3)).unwrap();
+        assert_eq!(clip.content(), EffectInstanceId::new(3));
+        assert_eq!(clip.placement(), TextObject::default().placement());
+        let elsewhere = Placement::new(CanvasArea::new(0.5, 0.5, 0.1, 0.1), Angle::from_degrees(-45.0));
+        let moved = clip.with_placement(elsewhere);
+        assert_eq!(
+            (moved.placement(), moved.content(), moved.duration_in_frames()),
+            (elsewhere, EffectInstanceId::new(3), 90),
+            "only where it is changes"
+        );
+    }
+
+    #[test]
+    fn cutting_a_text_clip_makes_two_that_are_made_of_the_same_effect_and_last_as_long_together() {
+        let clip = TextClip::new(90, EffectInstanceId::new(2))
+            .unwrap()
+            .with_placement(Placement::new(
+                CanvasArea::new(0.2, 0.3, 0.4, 0.2),
+                Angle::from_degrees(30.0),
+            ));
         let (first, second) = clip.split_after(30).unwrap();
         assert_eq!((first.duration_in_frames(), second.duration_in_frames()), (30, 60));
-        assert_eq!(first.object, clip.object);
-        assert_eq!(second.object, clip.object);
+        for half in [first, second] {
+            assert_eq!((half.content(), half.placement()), (clip.content(), clip.placement()));
+        }
         for outside in [0, 90, 91] {
             assert_eq!(clip.split_after(outside), None, "after {outside} frames");
         }

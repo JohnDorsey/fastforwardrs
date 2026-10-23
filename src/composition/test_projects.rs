@@ -7,15 +7,16 @@
 use std::path::PathBuf;
 
 use crate::project::tracks::{
-    Angle, CanvasArea, Clip, ClipKind, ImageClip, MediaClip, Placement, TextClip, TextColour, TextObject, Track,
-    TrackId,
+    Angle, CanvasArea, Clip, ClipKind, ImageClip, MediaClip, Placement, TextColour, TextObject, Track, TrackId,
 };
 use crate::project::{
-    AnimationTarget, EffectKind, FrameRate, Project, PropertyId, PropertyValue, SourceAudioProperties,
+    AnimationTarget, EffectKind, Effects, FrameRate, Project, PropertyId, PropertyValue, SourceAudioProperties,
     SourceFrameIndex, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
     SourceVideoProperties, SpeedFactor, SpeedIndicatorLayout, TimelineFrameIndex, ValueKind,
 };
-use crate::test_support::DeterministicRandomNumbers;
+use crate::test_support::{
+    COLOUR_OF_A_TEXT, DeterministicRandomNumbers, a_text_clip_that_says, with_the_text_effect_on_every_text,
+};
 
 pub(super) const LONG_VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
 /// A video that is short and has no sound.
@@ -85,7 +86,11 @@ pub(super) fn project_of(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
     let tracks = tracks
         .into_iter()
         .enumerate()
-        .map(|(number, clips)| Track::new(TrackId::new(number as u32), format!("track {number}")).with_clips(clips))
+        .map(|(number, clips)| {
+            with_the_text_effect_on_every_text(
+                Track::new(TrackId::new(number as u32), format!("track {number}")).with_clips(clips),
+            )
+        })
         .collect();
     Project::from_parts(the_sources(), tracks, SpeedIndicatorLayout::DEFAULT).unwrap()
 }
@@ -198,7 +203,7 @@ pub(super) fn random_project_with_places_and_keyframes(random: &mut Deterministi
                     PropertyValue::Number(unit(random) * 360.0 - 180.0),
                 ),
                 _ => (
-                    PropertyId::Colour,
+                    COLOUR_OF_A_TEXT,
                     PropertyValue::Colour(TextColour::new(
                         random.next_below(256) as u8,
                         random.next_below(256) as u8,
@@ -303,6 +308,7 @@ fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool)
     let mut tracks = Vec::new();
     for number in 0..track_count {
         let mut clips = Vec::new();
+        let mut effects_of_the_clips = Vec::new();
         for _ in 0..random.next_below(6) {
             let gap = if random.next_below(3) == 0 {
                 random.next_below(40)
@@ -310,7 +316,7 @@ fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool)
                 0
             };
             let clip_speed = [1u32, 1, 2, 3, 5][random.next_below(5) as usize];
-            let clip = match random.next_below(10) {
+            let (clip, effects) = match random.next_below(10) {
                 0..=4 => {
                     let source = [LONG_VIDEO, SHORT_SILENT_VIDEO][random.next_below(2) as usize];
                     let file_length = if source == LONG_VIDEO {
@@ -321,26 +327,39 @@ fn random_project_of(random: &mut DeterministicRandomNumbers, with_places: bool)
                     let first = random.next_below(file_length);
                     // Up to half as long again as the file, so that some clips run out of pictures.
                     let end = first + 1 + random.next_below(file_length * 3 / 2);
-                    Clip::Video(media_clip(source, first, end, clip_speed))
+                    (Clip::Video(media_clip(source, first, end, clip_speed)), Effects::none())
                 }
                 5..=7 => {
                     let first = random.next_below(SOUND_FILE_FRAME_COUNT);
                     let end = first + 1 + random.next_below(SOUND_FILE_FRAME_COUNT * 3 / 2);
-                    Clip::Audio(media_clip(SOUND_FILE, first, end, clip_speed))
+                    (
+                        Clip::Audio(media_clip(SOUND_FILE, first, end, clip_speed)),
+                        Effects::none(),
+                    )
                 }
-                _ => Clip::Text(TextClip::new(text_object(random), 1 + random.next_below(80)).unwrap()),
+                _ => {
+                    let object = text_object(random);
+                    a_text_clip_that_says(&object, 1 + random.next_below(80))
+                }
             };
             let clip = if with_places {
                 placed_at_random(random, clip)
             } else {
                 clip
             };
+            // (A text that was made a picture has no text effect.)
+            effects_of_the_clips.push(if matches!(clip, Clip::Text(_)) {
+                effects
+            } else {
+                Effects::none()
+            });
             clips.push((gap, clip));
         }
         let speed = [1u32, 1, 2][random.next_below(3) as usize];
         let mut track = Track::new(TrackId::new(number as u32), format!("track {number}"))
             .with_speed(SpeedFactor::new(speed).unwrap())
-            .with_clips(clips);
+            .with_clips(clips)
+            .with_effects_on_its_clips(effects_of_the_clips);
         if random.next_below(6) == 0 {
             track = track.with_muted(true);
         }
@@ -389,12 +408,12 @@ fn placed_at_random(random: &mut DeterministicRandomNumbers, clip: Clip) -> Clip
             Clip::Image(picture.with_placement((random.next_below(2) == 0).then(|| random_place(random))))
         }
         Clip::Text(text) => {
-            let object = if random.next_below(2) == 0 {
-                text.object.with_placement(random_place(random))
+            let placement = if random.next_below(2) == 0 {
+                random_place(random)
             } else {
-                text.object.clone()
+                text.placement()
             };
-            Clip::Text(TextClip::new(object, text.duration_in_frames()).expect("it lasted before"))
+            Clip::Text(text.with_placement(placement))
         }
         other => other,
     }

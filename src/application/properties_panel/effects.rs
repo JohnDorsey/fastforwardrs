@@ -260,6 +260,24 @@ fn command_for(owner: Member, property: PropertyId, change: Change) -> Option<Co
     })
 }
 
+/// Whether the row of the value `property` of an effect of the kind `kind`, which has `shown` for its value, has the stopwatch and the buttons of keyframes. What changes evenly between
+/// two keyframes, a number, a pair and a colour, is animated by the stopwatch, and so are the words of a box of lines and a list of fonts (those of the text effect, which hold until the
+/// next keyframe: a text can say another thing later). A switch and a choice are not: they have no buttons of keyframes, and hold until they are changed.
+fn has_the_buttons_of_keyframes(kind: EffectKind, property: PropertyId, shown: &PropertyValue) -> bool {
+    match shown {
+        PropertyValue::Number(_) | PropertyValue::Pair(..) | PropertyValue::Colour(_) => true,
+        PropertyValue::Words(_) => {
+            let PropertyId::EffectValue { slot, .. } = property else {
+                return false;
+            };
+            kind.parameters().get(usize::from(slot)).is_some_and(|parameter| {
+                matches!(parameter.control, ParameterControl::Multiline | ParameterControl::Font)
+            })
+        }
+        PropertyValue::Flag(_) => false,
+    }
+}
+
 /// Shows the row of the control of the value of an effect of a clip or a track that `property` is, with the buttons of its keyframes, and
 /// adds a command if it is changed.
 pub(super) fn show_the_control_of(
@@ -276,12 +294,7 @@ pub(super) fn show_the_control_of(
     else {
         return;
     };
-    // (What changes evenly between two keyframes, a number, a pair and a colour, is animated by the stopwatch. A switch and a choice are not: they have no buttons of keyframes,
-    // and hold until they are changed.)
-    if !matches!(
-        shown,
-        PropertyValue::Number(_) | PropertyValue::Pair(..) | PropertyValue::Colour(_)
-    ) {
+    if !has_the_buttons_of_keyframes(kind, property, &shown) {
         if let Some(change) = labelled_row(ui, |ui| {
             control_for(ui, content.project, content.font_families, kind, property, &shown)
         }) && let Some(command) = command_for(member_of(target), property, change)

@@ -55,8 +55,9 @@ fn one_of_each() -> OneOfEach {
     let sound = project.import_source(audio_source(2, 20), frame(0)).unwrap();
     let picture = project.import_source(picture_source(3, 640, 480), frame(0)).unwrap();
     let text_track = project.add_track_in_front();
+    // (The text clip has no text effect: what is tried here is putting effects on, and "nothing has an effect" begins it.)
     let (text, lasts) = project
-        .insert_text(text_track, frame(0), TextObject::default(), 100)
+        .insert_a_text_clip_that_has_no_text_effect(text_track, frame(0), 100)
         .unwrap();
     assert_eq!(lasts, 100);
     let made = OneOfEach {

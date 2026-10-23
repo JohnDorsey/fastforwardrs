@@ -195,7 +195,14 @@ fn two_clips_at_once_are_two_runs_that_each_go_on_by_themselves() {
 #[test]
 fn a_picture_that_is_not_a_video_has_no_run_and_does_not_cut_the_video_under_it() {
     let mut a_text_over_the_video = video_layer(1, 2, 0, 0, 1);
-    a_text_over_the_video.content = LayerContent::Text(crate::project::TextObject::default());
+    a_text_over_the_video.content = LayerContent::Text(crate::composition::LayerEffect {
+        clock: Default::default(),
+        instance: crate::project::EffectInstanceId::FIRST,
+        kind: crate::project::EffectKind::TEXT,
+        values: crate::project::values_of_a_text_object(&crate::project::TextObject::default()).to_vec(),
+        animation: Default::default(),
+        tables: vec![None; 4],
+    });
     let plan = plan_of(vec![
         (0, 10, vec![video_layer(0, 1, 0, 10, 1)]),
         (10, 20, vec![video_layer(0, 1, 10, 20, 1), a_text_over_the_video]),

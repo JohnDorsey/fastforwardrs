@@ -20,8 +20,8 @@ use super::FastForwardApplication;
 use crate::application::commands::Command;
 use crate::application::history::EditKey;
 use crate::project::{
-    AnimationTarget, ClipId, Gain, PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, Placement, PropertyId,
-    PropertyValue, TextObject, TimelineFrameIndex, TrackId, placement_value, text_value,
+    AnimationTarget, ClipId, Gain, PROPERTIES_OF_A_PLACEMENT, Placement, PropertyId, PropertyValue, TextObject,
+    TimelineFrameIndex, TrackId, placement_value, properties_of_a_text_object, values_of_a_text_object,
 };
 
 impl FastForwardApplication {
@@ -76,9 +76,14 @@ impl FastForwardApplication {
             Command::SetClipPlacement { clip, .. } => {
                 is_animated(AnimationTarget::Clip(*clip), &PROPERTIES_OF_A_PLACEMENT)
             }
-            Command::SetTextObject { clip, .. } => {
-                is_animated(AnimationTarget::Clip(*clip), &PROPERTIES_OF_A_TEXT_OBJECT)
-            }
+            Command::SetTextObject { clip, .. } => self
+                .document
+                .project
+                .placement_of(*clip)
+                .and_then(|placement| placement.clip.content())
+                .is_some_and(|content| {
+                    is_animated(AnimationTarget::Clip(*clip), &properties_of_a_text_object(content))
+                }),
             Command::SetTrackGain { track, .. } => is_animated(AnimationTarget::Track(*track), &[PropertyId::Gain]),
             Command::SetTrackMuted { track, .. } => is_animated(AnimationTarget::Track(*track), &[PropertyId::Muted]),
             Command::SetEffectValue { target, property, .. } => is_animated(*target, &[*property]),
@@ -160,7 +165,17 @@ impl FastForwardApplication {
     /// Gives the text object `clip` the words, font, size, colour and place `object` says, at the playhead.
     pub(super) fn set_text_object_at_the_playhead(&mut self, clip: ClipId, object: TextObject, now: Instant) {
         let target = AnimationTarget::Clip(clip);
-        if !PROPERTIES_OF_A_TEXT_OBJECT
+        // (What a text says and how it looks are the values of its text effect, and where it is the clip's.)
+        let Some(content) = self
+            .document
+            .project
+            .placement_of(clip)
+            .and_then(|placement| placement.clip.content())
+        else {
+            return;
+        };
+        let properties = properties_of_a_text_object(content);
+        if !properties
             .into_iter()
             .any(|property| self.document.project.is_animated(target, property))
         {
@@ -168,8 +183,13 @@ impl FastForwardApplication {
             return;
         }
         let shown_at = self.frame_at_the_playhead(now);
-        for property in PROPERTIES_OF_A_TEXT_OBJECT {
-            let Some(wanted) = text_value(&object, property) else {
+        let values = values_of_a_text_object(&object);
+        for property in properties {
+            let wanted = match property {
+                PropertyId::EffectValue { slot, .. } => values.get(usize::from(slot)).cloned(),
+                other => placement_value(&object.placement(), other),
+            };
+            let Some(wanted) = wanted else {
                 continue;
             };
             if self

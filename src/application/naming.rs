@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use super::timeline_panel::SourceLook;
 use crate::project::{
     AnimationTarget, Clip, ClipId, ClipKind, Effect, EffectKind, Effects, Group, Member, Project, PropertyId, Rack,
-    SourceMediaIdentifier, format_timecode,
+    SourceMediaIdentifier, format_timecode, words_of_a_text_clip,
 };
 
 /// How many letters of the words of a text object are used to tell it from the others.
@@ -46,9 +46,9 @@ pub fn beginning_of(words: &str) -> String {
 
 /// What tells `clip` from the others of its kind: the name of its file, or the beginning of its words. (Nothing, for a clip
 /// that has neither.)
-pub fn detail_of_a_clip(clip: &Clip, source_looks: &SourceLooks<'_>) -> String {
+pub fn detail_of_a_clip(clip: &Clip, effects: &Effects, source_looks: &SourceLooks<'_>) -> String {
     match clip {
-        Clip::Text(text) => beginning_of(&text.object.text),
+        Clip::Text(text) => beginning_of(&words_of_a_text_clip(text, effects)),
         other => other
             .source()
             .and_then(|source| source_looks.get(&source))
@@ -115,7 +115,7 @@ pub fn what_a_target_is_called(
         AnimationTarget::Track(track) => Some(project.track(track)?.title().to_owned()),
         AnimationTarget::Clip(clip) => {
             let placement = project.placement_of(clip)?;
-            let detail = detail_of_a_clip(placement.clip, source_looks);
+            let detail = detail_of_a_clip(placement.clip, placement.effects, source_looks);
             Some(if detail.is_empty() {
                 kind_name(placement.clip.kind()).to_owned()
             } else {
@@ -130,7 +130,7 @@ pub fn what_a_target_is_called(
 /// for a clip that is not in the project.
 pub fn describe_a_clip(project: &Project, source_looks: &SourceLooks<'_>, clip: ClipId) -> Option<String> {
     let placement = project.placement_of(clip)?;
-    let detail = detail_of_a_clip(placement.clip, source_looks);
+    let detail = detail_of_a_clip(placement.clip, placement.effects, source_looks);
     let kind = kind_name(placement.clip.kind());
     let starts = format_timecode(placement.first_timeline_frame, project.frame_rate());
     Some(if detail.is_empty() {
@@ -188,8 +188,9 @@ mod tests {
     fn project_with_hue_shifts(effects_on_the_clip: usize) -> (Project, AnimationTarget) {
         let mut project = Project::empty();
         let track = project.tracks()[0].id();
+        // (A text clip that has no text effect: what is tried here is the names of effects, which begin at the first.)
         let (clip, _) = project
-            .insert_text(track, TimelineFrameIndex::new(0), TextObject::default(), 30)
+            .insert_a_text_clip_that_has_no_text_effect(track, TimelineFrameIndex::new(0), 30)
             .unwrap();
         for _ in 0..effects_on_the_clip {
             project
@@ -208,7 +209,7 @@ mod tests {
         let (project, target) = project_with_hue_shifts(0);
         let called = |property| what_a_property_of_is_called(&project, target, property);
         assert_eq!(called(PropertyId::Gain), "Gain");
-        assert_eq!(called(PropertyId::FontSize), "Font size");
+        assert_eq!(called(PropertyId::Position), "Position");
         assert_eq!(called(PropertyId::Rotation), "Rotation");
     }
 
@@ -263,7 +264,7 @@ mod tests {
         let (mut project, with_two) = project_with_hue_shifts(2);
         let track = project.tracks()[0].id();
         let (without_any, _) = project
-            .insert_text(track, TimelineFrameIndex::new(100), TextObject::default(), 30)
+            .insert_a_text_clip_that_has_no_text_effect(track, TimelineFrameIndex::new(100), 30)
             .unwrap();
         let without_any = AnimationTarget::Clip(without_any);
         let rack = Rack::new(RackId::new(track, 0), with_two, hue_of(1));

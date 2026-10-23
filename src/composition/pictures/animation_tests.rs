@@ -4,14 +4,13 @@
 //! Tests of what the picture plan makes of clips that have keyframes: each layer carries them, and says where it is
 //! (and what a text object says) at every frame it is seen at.
 
-use std::borrow::Cow;
-
 use super::tests::{frame, long_video, long_video_placed, over_the_whole_picture, plan, text};
 use super::*;
 use crate::composition::test_projects::{project_of, random_project_with_places_and_keyframes};
 use crate::project::tracks::Angle;
 use crate::project::{AnimationTarget, PropertyValue, TextColour, with_placement_value};
 use crate::test_support::{self, DeterministicRandomNumbers};
+use crate::test_support::{COLOUR_OF_A_TEXT, TEXT_OF_A_TEXT};
 
 /// Puts a keyframe at `timeline_frame` that makes `property` of `clip` have `value` there. (The property is animated
 /// from then on, if it was not.)
@@ -207,13 +206,18 @@ fn only_keyframes_for_where_a_layer_is_make_it_move_and_the_look_of_a_text_objec
     make_a_keyframe(
         &mut project,
         clip,
-        PropertyId::Colour,
+        COLOUR_OF_A_TEXT,
         10,
         PropertyValue::Colour(TextColour::new(255, 0, 0, 255)),
     );
     let plan = plan(&project);
     let layer = &plan.sections[0].layers[0];
-    assert!(!layer.animation.is_empty());
+    // (The colour is a value of the text effect, which the layer has as its content: the keyframes of it are the effect's, and not the layer's own.)
+    let LayerContent::Text(text_effect) = &layer.content else {
+        panic!("a text: {layer:?}")
+    };
+    assert!(text_effect.is_animated());
+    assert!(layer.animation.is_empty());
     assert!(!layer.is_moved_by_keyframes());
     assert_eq!(layer.placement_at(frame(30)), layer.placement);
 }
@@ -278,22 +282,22 @@ fn a_text_layer_is_the_text_object_as_its_keyframes_change_it_at_each_frame() {
     make_a_keyframe(
         &mut project,
         clip,
-        PropertyId::Colour,
+        COLOUR_OF_A_TEXT,
         10,
         PropertyValue::Colour(TextColour::new(0, 0, 0, 255)),
     );
-    make_a_keyframe(&mut project, clip, PropertyId::Colour, 30, PropertyValue::Colour(red));
+    make_a_keyframe(&mut project, clip, COLOUR_OF_A_TEXT, 30, PropertyValue::Colour(red));
     make_a_keyframe(
         &mut project,
         clip,
-        PropertyId::Text,
+        TEXT_OF_A_TEXT,
         10,
         PropertyValue::Words("Before".to_owned()),
     );
     make_a_keyframe(
         &mut project,
         clip,
-        PropertyId::Text,
+        TEXT_OF_A_TEXT,
         30,
         PropertyValue::Words("Later".to_owned()),
     );
@@ -319,13 +323,14 @@ fn a_text_layer_is_the_text_object_as_its_keyframes_change_it_at_each_frame() {
 }
 
 #[test]
-fn a_text_object_that_is_not_animated_is_lent_as_it_is_and_a_video_is_not_a_text_object() {
+fn a_text_object_that_is_not_animated_says_what_the_values_of_its_text_effect_say_and_a_video_is_not_a_text_object() {
     let project = project_of(vec![vec![(0, text(40))], vec![(0, long_video(0, 40, 1))]]);
     let plan = plan(&project);
     let layers = &plan.sections[0].layers;
     // Back to front: the video, then the text.
     assert!(layers[0].text_at(frame(5)).is_none());
-    assert!(matches!(layers[1].text_at(frame(5)), Some(Cow::Borrowed(_))));
+    // (It is made of the values of its text effect, so it is not lent from the plan as it once was: only what it says is checked.)
+    assert_eq!(layers[1].text_at(frame(5)).unwrap().into_owned(), TextObject::default());
 }
 
 #[test]
@@ -466,16 +471,20 @@ fn every_layer_is_where_and_what_the_project_says_at_every_frame_it_is_seen_at()
                 );
                 moved_layers_checked += usize::from(layer.is_moved_by_keyframes());
                 if let Some(object) = layer.text_at(frame(timeline_frame)) {
-                    animated_text_checked += usize::from(matches!(object, Cow::Owned(_)));
-                    let expected_object = crate::test_support::properties_of_every_kind()
+                    // (What a text says and how it looks are the values of its text effect, the content of the clip: each is what the project says it is at the frame, animated or not.)
+                    let properties =
+                        crate::project::properties_of_the_text_effect(placement.clip.as_text().unwrap().content());
+                    animated_text_checked +=
+                        usize::from(properties.iter().any(|property| project.is_animated(target, *property)));
+                    let values: Vec<_> = properties
                         .into_iter()
-                        .filter(|property| project.is_animated(target, *property))
-                        .fold(placement.clip.as_text().unwrap().object.clone(), |object, property| {
-                            let value = project
+                        .map(|property| {
+                            project
                                 .property_value_at(target, property, frame(timeline_frame))
-                                .unwrap();
-                            crate::project::with_text_value(&object, property, &value)
-                        });
+                                .unwrap()
+                        })
+                        .collect();
+                    let expected_object = crate::project::text_object_of_values(&values, expected_place);
                     assert_eq!(
                         *object, expected_object,
                         "seed {seed}, frame {timeline_frame}, text clip {}",

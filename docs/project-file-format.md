@@ -45,13 +45,13 @@ track's height, and the place and turn of a clip are left out when they have the
 something is on the picture is always **fractions of the picture's width and height** (and the turn is in
 degrees, clockwise), so it comes out in the same place whatever size the picture is shown or exported at. A clip, a
 track or a keyframe crate that has **racks of keyframes** has a `drawer`: a list with a rack for each property that has
-keyframes kept there. A rack has the `property` (`gain`, `muted`, `position`, `size`, `rotation`, `text`, `font`,
-`font size`, `colour`, or, for the value of an effect, its id: `degrees`), its `keyframes`, each a `frame` (counted from the clip's or the crate's first frame, or from the
+keyframes kept there. A rack has the `property` (`gain`, `muted`, `position`, `size`, `rotation`, or, for the value of an effect, its id:
+`degrees` for the hue shift; **what a text says, its font, its size and its colour are values of its text effect, `text`, `font`, `size` and `colour`**), its `keyframes`, each a `frame` (counted from the clip's or the crate's first frame, or from the
 start of the timeline for a track) and a `value`: a number, a pair of numbers (`[across, down]` or `[wide, tall]` as
 fractions of the picture), true or false, words, or a colour like `"#FFFFFFFF"`; and, when the keyframes are of
 something other than what has the drawer, a `target`: the `track` (its place in the list of tracks, counting from 0) and,
 for a clip, the `clip` (its place in the list of that track's clips, counting from 0). What the clip itself says (its
-gain, its place, its words) is what the property is while it has no keyframes, and is left as it was when it has some.
+gain, its place; the words of a text are its text effect's) is what the property is while it has no keyframes, and is left as it was when it has some.
 A drawer may have several racks of one property of one thing (they say it together, in the order they are in). A video,
 a picture, a text object, a clip of a sound file (its effects are those of sound plugins) or a track that has **effects** has `effects`: a list with an entry for each, in the order they are
 done in, which is its `effect` (the key of the type of effect: a namespace, a colon and an id, `builtin:hue_shift`), its `version` (the
@@ -94,7 +94,7 @@ is in a tag and has no badge of it) is refused with the group named.
 ```json
 {
   "file_format": "fastforwardrs-project",
-  "file_format_version": 13,
+  "file_format_version": 18,
   "sources": [
     {
       "kind": "video",
@@ -143,6 +143,30 @@ is in a tag and has no badge of it) is refused with the group named.
           "decimals": 1
         }
       ]
+    },
+    {
+      "key": "builtin:text",
+      "version": [1, 0],
+      "name": "text",
+      "description": "Words, in a font, of a size and a colour",
+      "category": "Generators",
+      "domain": "picture",
+      "params": [
+        { "id": "text", "name": "text", "label": "Text", "type": "words", "default": "", "control": "multiline" },
+        { "id": "font", "name": "font", "label": "Font", "type": "words", "default": "", "control": "font" },
+        {
+          "id": "size",
+          "name": "font size",
+          "label": "Size",
+          "type": "number",
+          "default": 0.06,
+          "range": [0.01, 0.5],
+          "unit": "pt",
+          "decimals": 1,
+          "control": "points_of_the_picture_height"
+        },
+        { "id": "colour", "name": "colour", "label": "Colour", "type": "colour", "default": "#FFFFFFFF" }
+      ]
     }
   ],
   "tracks": [
@@ -157,10 +181,7 @@ is in a tag and has no badge of it) is refused with the group named.
           "kind": "text",
           "gap_before_frames": 60,
           "duration_in_frames": 90,
-          "text": "Chapter one",
-          "font_family": "",
-          "font_size_fraction_of_frame_height": 0.06,
-          "colour": "#FFFFFFFF",
+          "content": 0,
           "area": {
             "left_fraction_of_frame_width": 0.1,
             "top_fraction_of_frame_height": 0.74,
@@ -171,6 +192,7 @@ is in a tag and has no badge of it) is refused with the group named.
           "drawer": [
             {
               "property": "colour",
+              "effect": 0,
               "keyframes": [
                 { "frame": 0, "value": "#FFFFFF00" },
                 { "frame": 15, "value": "#FFFFFFFF" }
@@ -186,15 +208,18 @@ is in a tag and has no badge of it) is refused with the group named.
             },
             {
               "property": "degrees",
-              "effect": 0,
+              "effect": 1,
               "keyframes": [
                 { "frame": 0, "value": 0.0 },
                 { "frame": 60, "value": 360.0 }
               ]
             }
           ],
-          "effects": [ { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 0 } ],
-          "badges": [ { "of": { "tag": 0 }, "effects_before": 1 } ]
+          "effects": [
+            { "effect": "builtin:text", "version": [1, 0], "instance": 0, "values": { "text": "Chapter one" } },
+            { "effect": "builtin:hue_shift", "version": [1, 0], "instance": 1 }
+          ],
+          "badges": [ { "of": { "tag": 0 }, "effects_before": 2 } ]
         },
         {
           "kind": "image",
@@ -279,9 +304,10 @@ is in a tag and has no badge of it) is refused with the group named.
 (The clips of the last track and its drawer are shown on one line each here to save room; the program writes one
 value to a line. A test loads this very example, so it cannot go out of date without the tests saying so. In it the
 text object lowers the loudness of the first video while it is shown, with a rack kept in its own drawer, a keyframe
-crate mutes the track the video is on from frame 420, and the track has a rack of its own for how loud it is. The text object has a hue shift that goes a whole turn round in its first 60 frames, with its keyframes in a rack in its drawer; the picture has one that is a quarter of a turn; and the track of the videos has two (named 0 and 1 in its list), of 15 degrees and of 40, which together turn the colours of both of them by 55. The text object and the first video are in a tag, which turns their colours another 30 degrees: in the chain of the text object the badge of the tag comes after its own hue shift, and in that of the video it comes after the badge of its track. The text object and the picture are in a clip group, and both tracks are in a track group.) A text object's
-font size is a fraction of the picture's height, which the window shows as points on a picture 1080 tall; an
-empty `font_family` is the program's default font. A video clip may have a `placement` like the picture's
+crate mutes the track the video is on from frame 420, and the track has a rack of its own for how loud it is. The text object is made of its first effect, the text effect (`content` names it), whose colour has the keyframes of the first rack in its drawer, and it has a hue shift (the effect named 1) that goes a whole turn round in its first 60 frames, with its keyframes in a rack in its drawer; the picture has one that is a quarter of a turn; and the track of the videos has two (named 0 and 1 in its list), of 15 degrees and of 40, which together turn the colours of both of them by 55. The text object and the first video are in a tag, which turns their colours another 30 degrees: in the chain of the text object the badge of the tag comes after its own hue shift, and in that of the video it comes after the badge of its track. The text object and the picture are in a clip group, and both tracks are in a track group.) A text's
+`size` is a fraction of the picture's height, which the window shows as points on a picture 1080 tall; an
+empty `font` is the program's default font. (A text clip has `content`, the `instance` of its text effect in its `effects`, and the area and turn of its place
+on the picture like a generator's; **a text that says nothing of its own is not a file**: what it says, its font, its size and its colour are the `values` of the effect, left out when they are what a new text has.) A video clip may have a `placement` like the picture's
 (without one it is fitted inside the picture), and the `area` of a placement is the rectangle **before** it is
 turned. It may reach out past the edges of the picture (a `left_fraction_of_frame_width` below 0 starts before the
 picture, and a left and a width that add up to more than 1 end after it), but its middle is always on the picture
@@ -291,7 +317,7 @@ the project, and is left out while the project follows its first video. A source
 (which is an archive then) has `included_as`, the name of its entry, besides the two paths it had when it was included, which
 are kept as they were (they are where it is put back); it is left out for a source that is not included. A video or a picture file that the user has said
 the colours of (see *Colours*) has `colour`: an object with the parts that were said and no others, `matrix` (`bt601`, `bt709` or `bt2020`), `range` (`limited` or `full`), `primaries` (`rec709`, `bt601_ntsc`, `bt601_pal`, `rec2020`, `display_p3`, `aces_cg`, `aces2065`) and `curve` (`srgb`, `gamma22`, `gamma24`, `gamma26`, `rec709` or `linear`); it is left out when nothing was said (and a sound has none). The project's own `settings` may also have `display_transform`, `working_colour_space` and `output_colour_space` (left out while the project follows the global ones). **Older files are still
-read**: version 11 files have no `colour` and no colour settings (the user said nothing, and the project follows the global colour settings: they load as they were); version 9 files have no groups and no badges (nothing in them is in a group), and what the program writes is always version 16 (version 15 added the clip of `"kind": "adjustment"`, with its `duration_in_frames` and, like any clip, its `gap_before_frames`, `drawer`, `effects` and `badges`: a clip with no picture of its own whose effects are done to everything behind it, in its own group if it is in one; a file of version 14 has none, and an older program refuses a 15 with the message about a newer file; version 16 added the clip of `"kind": "generator"` (`gap_before_frames`, `duration_in_frames`, `content`: the name, in its `effects`, of the effect that it makes its picture with, `area` and `rotation_degrees` (left out when upright), and like any clip its `drawer`, `effects` and `badges`; a file that names a `content` that the clip does not have is refused), and the `shader` of a snapshot of an effect in `plugins`: `{ "language": "isf", "source": "..." }`, the whole text of the file that runs the effect, so that the project carries it (a shader of another language, or one that says more than these two and its images, is kept as it was and not run; a file of version 15 has none); version 17 added the `images` of a shader that brings images with it (an ISF file's `IMPORTED`): a list of `{ "name": "...", "data": "<base 64>" }`, in the order that the header lists them, each the bytes of a PNG or a JPEG file of at most 4 MiB, at most 6 of them; a shader that brings none has no `images`, and a file of version 16 has none; version 14 added the `plugin_libraries` of a project, see *Plugins and who may run them*; a version 13 file has none; version 13 added to the effects: `category` and, for each value, `scale` and `control` (a number, a choice with its options, a switch, or a resource of a kind) in the snapshot of an effect, `enabled` in an effect, which is left out while it is on, the `resources` list, and a `resource_storage` setting; a version 12 file has none of them and is read as it was); version 10 files (and version 11 as it was while the effects were being given names) call an effect by the name that the program had for it, `hue shift`, have their values in a list, have no `plugins`, and have no `instance` in their effects and no `effect` in their racks (they have at most one effect of each kind: the effects are named in the order they are in, and a rack of the keyframes of the values of an effect is of the effect that has a value of that name);
+read**: version 11 files have no `colour` and no colour settings (the user said nothing, and the project follows the global colour settings: they load as they were); version 9 files have no groups and no badges (nothing in them is in a group), and what the program writes is always version 18 (version 18 made a text of an effect: a clip of `"kind": "text"` has a `content`, the name in its `effects` of its text effect, `builtin:text`, which makes its picture and has what it says (`text`), its `font`, its `size` and its `colour` for its values, **and has no `text`, `font_family`, `font_size_fraction_of_frame_height` or `colour` of its own**; a file of version 17 or earlier, which has those in the clip, is read as a clip whose text effect is the first of its chain, with the name that comes after the names its other effects have, so that they and the racks that name them stay what they were, and the badges that were before its first effect come after the text effect; the racks of keyframes of its `text`, `font`, `font size` and `colour` are those of the values of that effect; version 15 added the clip of `"kind": "adjustment"`, with its `duration_in_frames` and, like any clip, its `gap_before_frames`, `drawer`, `effects` and `badges`: a clip with no picture of its own whose effects are done to everything behind it, in its own group if it is in one; a file of version 14 has none, and an older program refuses a 15 with the message about a newer file; version 16 added the clip of `"kind": "generator"` (`gap_before_frames`, `duration_in_frames`, `content`: the name, in its `effects`, of the effect that it makes its picture with, `area` and `rotation_degrees` (left out when upright), and like any clip its `drawer`, `effects` and `badges`; a file that names a `content` that the clip does not have is refused), and the `shader` of a snapshot of an effect in `plugins`: `{ "language": "isf", "source": "..." }`, the whole text of the file that runs the effect, so that the project carries it (a shader of another language, or one that says more than these two and its images, is kept as it was and not run; a file of version 15 has none); version 17 added the `images` of a shader that brings images with it (an ISF file's `IMPORTED`): a list of `{ "name": "...", "data": "<base 64>" }`, in the order that the header lists them, each the bytes of a PNG or a JPEG file of at most 4 MiB, at most 6 of them; a shader that brings none has no `images`, and a file of version 16 has none; version 14 added the `plugin_libraries` of a project, see *Plugins and who may run them*; a version 13 file has none; version 13 added to the effects: `category` and, for each value, `scale` and `control` (a number, a choice with its options, a switch, or a resource of a kind) in the snapshot of an effect, `enabled` in an effect, which is left out while it is on, the `resources` list, and a `resource_storage` setting; a version 12 file has none of them and is read as it was); version 10 files (and version 11 as it was while the effects were being given names) call an effect by the name that the program had for it, `hue shift`, have their values in a list, have no `plugins`, and have no `instance` in their effects and no `effect` in their racks (they have at most one effect of each kind: the effects are named in the order they are in, and a rack of the keyframes of the values of an effect is of the effect that has a value of that name);
 version 8 files have no `included_as` (nothing in them is included); version 7
 files have no effects (nothing in them has one); version 6
 files have an `animation` object in a clip or a track where version 7 has a rack in its drawer (it is read as a rack of

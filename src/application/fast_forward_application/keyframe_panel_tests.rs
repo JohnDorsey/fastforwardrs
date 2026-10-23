@@ -20,6 +20,7 @@ use crate::project::{
     TimelineFrameIndex,
 };
 use crate::test_support::properties_of_every_kind;
+use crate::test_support::{COLOUR_OF_A_TEXT, FONT_OF_A_TEXT, SIZE_OF_A_TEXT, TEXT_OF_A_TEXT};
 
 fn frame(number: u64) -> TimelineFrameIndex {
     TimelineFrameIndex::new(number)
@@ -525,6 +526,14 @@ fn the_panel_has_the_buttons_of_just_the_properties_that_the_table_says_what_is_
             }
             select(&mut window, clip);
             for property in properties_of_every_kind() {
+                // (The first effect of the chain of a text is the text effect that it is made of: the hue shift that is put on it is the second.)
+                let property = if kind == crate::project::ClipKind::Text
+                    && property == crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT
+                {
+                    PropertyId::effect_value(EffectKind::HUE_SHIFT, crate::project::EffectInstanceId::new(1), 0)
+                } else {
+                    property
+                };
                 assert_eq!(
                     has_the_buttons_of(&window, property),
                     property.applies_to_a_clip_of_kind(kind) && has_what_the_property_is_of(&window, target, property),
@@ -569,10 +578,10 @@ fn a_text_object_has_the_buttons_for_what_it_says_how_it_looks_and_where_it_is()
     let mut window = Window::showing(project);
     select(&mut window, text);
     for property in [
-        PropertyId::Text,
-        PropertyId::FontFamily,
-        PropertyId::FontSize,
-        PropertyId::Colour,
+        TEXT_OF_A_TEXT,
+        FONT_OF_A_TEXT,
+        SIZE_OF_A_TEXT,
+        COLOUR_OF_A_TEXT,
         PropertyId::Position,
         PropertyId::Size,
         PropertyId::Rotation,
@@ -594,9 +603,9 @@ fn a_text_object_has_the_buttons_for_what_it_says_how_it_looks_and_where_it_is()
     );
 
     window.move_current_frame_to(60);
-    click_the_button(&mut window, &the_stopwatch_of(PropertyId::Colour, false));
+    click_the_button(&mut window, &the_stopwatch_of(COLOUR_OF_A_TEXT, false));
     assert_eq!(
-        keyframes_of(&window, text, PropertyId::Colour),
+        keyframes_of(&window, text, COLOUR_OF_A_TEXT),
         vec![40],
         "frame 60 is 40 frames into the text"
     );

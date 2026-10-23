@@ -11,6 +11,7 @@ use crate::project::{
     PropertyValue, SETTINGS, SourceImageProperties, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour,
     TimelineFrameIndex, TrackHeight,
 };
+use crate::test_support::COLOUR_OF_A_TEXT;
 
 fn video_properties() -> SourceVideoProperties {
     SourceVideoProperties {
@@ -73,7 +74,7 @@ fn the_json_has_the_documented_pretty_human_readable_shape() {
     let text = saved(&edited_project(link_to_missing_video()));
     let expected = r#"{
   "file_format": "fastforwardrs-project",
-  "file_format_version": 17,
+  "file_format_version": 18,
   "sources": [
     {
       "kind": "video",
@@ -806,6 +807,13 @@ pub(super) fn project_with_everything() -> Project {
     project
 }
 
+/// What the text that is the first clip of the front track of `project` says, when nothing about it is animated.
+fn the_caption_of(project: &Project) -> TextObject {
+    project
+        .text_object_of(project.tracks()[0].entries()[0].id())
+        .expect("the first clip of the front track is a text")
+}
+
 /// Where the second video clip of [`project_with_everything`] is on the picture.
 fn a_place_for_the_video() -> Placement {
     Placement::new(CanvasArea::new(0.125, 0.25, 0.5, 0.375), Angle::from_degrees(30.0))
@@ -838,15 +846,16 @@ fn tracks_sound_files_text_gaps_and_settings_all_survive_a_trip_through_text() {
         450,
         "the empty time before the sound is kept"
     );
-    let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
-    assert_eq!(caption.object.text, "Hello\nthere \"world\"");
-    assert_eq!(caption.object.font_family, "Arial");
-    assert_eq!(caption.object.colour, TextColour::new(255, 200, 0, 128));
-    assert_eq!(caption.duration_in_frames(), 90);
+    let caption_clip = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
+    let caption = the_caption_of(&loaded);
+    assert_eq!(caption.text, "Hello\nthere \"world\"");
+    assert_eq!(caption.font_family, "Arial");
+    assert_eq!(caption.colour, TextColour::new(255, 200, 0, 128));
+    assert_eq!(caption_clip.duration_in_frames(), 90);
     assert_eq!(loaded.tracks()[0].entries()[0].gap_before_frames(), 120);
-    assert_eq!(caption.object.area, CanvasArea::new(0.25, 0.5, 0.5, 0.125));
-    assert_eq!(caption.object.rotation, Angle::from_degrees(-12.5));
-    assert!((caption.object.font_size.points() - 54.0).abs() < 0.01);
+    assert_eq!(caption.area, CanvasArea::new(0.25, 0.5, 0.5, 0.125));
+    assert_eq!(caption.rotation, Angle::from_degrees(-12.5));
+    assert!((caption.font_size.points() - 54.0).abs() < 0.01);
     let video_clips: Vec<_> = loaded.tracks()[2]
         .entries()
         .iter()
@@ -945,8 +954,8 @@ fn files_written_before_clips_could_be_turned_or_placed_are_read_as_upright_and_
 
     let loaded = project_from_json_text(&document.to_string()).unwrap();
 
-    let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
-    assert_eq!(caption.object.rotation, Angle::ZERO);
+    let caption = the_caption_of(&loaded);
+    assert_eq!(caption.rotation, Angle::ZERO);
     assert!(
         loaded.tracks()[2]
             .entries()
@@ -960,8 +969,8 @@ fn files_written_before_clips_could_be_turned_or_placed_are_read_as_upright_and_
 fn an_angle_that_is_more_than_a_turn_is_kept_as_it_is_and_written_as_it_is() {
     let text = saved(&project_with_everything()).replace("\"rotation_degrees\": -12.5", "\"rotation_degrees\": 347.5");
     let loaded = project_from_json_text(&text).unwrap();
-    let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
-    assert_eq!(caption.object.rotation.degrees(), 347.5);
+    let caption = the_caption_of(&loaded);
+    assert_eq!(caption.rotation.degrees(), 347.5);
     assert!(saved(&loaded).contains("\"rotation_degrees\": 347.5"));
 }
 
@@ -991,22 +1000,29 @@ fn a_clips_volume_and_muting_and_the_empty_time_before_it_are_only_written_when_
 
 #[test]
 fn a_text_clip_is_written_with_its_words_font_size_colour_and_place() {
+    // (Rewritten on purpose in phase 9.4: the words, the font, the size and the colour are the values of the text effect, `text`, `font`, `size` and `colour`, and the clip names that
+    // effect with `content`; what it keeps of its own is how long it shows and where it is.)
     let text = saved(&project_with_everything());
     for expected in [
         "\"kind\": \"text\"",
+        "\"content\": 0",
+        "\"effect\": \"builtin:text\"",
         "\"text\": \"Hello\\nthere \\\"world\\\"\"",
-        "\"font_family\": \"Arial\"",
+        "\"font\": \"Arial\"",
         "\"colour\": \"#FFC80080\"",
+        "\"size\": 0.05",
         "\"duration_in_frames\": 90",
         "\"left_fraction_of_frame_width\": 0.25",
         "\"top_fraction_of_frame_height\": 0.5",
         "\"width_fraction_of_frame_width\": 0.5",
         "\"height_fraction_of_frame_height\": 0.125",
-        "\"font_size_fraction_of_frame_height\": 0.05",
         "\"kind\": \"audio\"",
         "\"duration_in_microseconds\": 12500000",
     ] {
         assert!(text.contains(expected), "{expected} is not in {text}");
+    }
+    for not_expected in ["\"font_family\"", "\"font_size_fraction_of_frame_height\""] {
+        assert!(!text.contains(not_expected), "{not_expected} is in {text}");
     }
 }
 
@@ -1146,23 +1162,20 @@ fn a_project_with_two_videos_is_saved_and_loaded() {
 #[test]
 fn values_of_a_text_object_that_are_out_of_range_are_corrected_not_rejected() {
     let text = saved(&project_with_everything())
-        .replace(
-            "\"font_size_fraction_of_frame_height\": 0.05",
-            "\"font_size_fraction_of_frame_height\": 90.0",
-        )
+        .replace("\"size\": 0.05", "\"size\": 90.0")
         .replace(
             "\"left_fraction_of_frame_width\": 0.25",
             "\"left_fraction_of_frame_width\": 7.0",
         )
         .replace("\"gain_decibels\": -7.5", "\"gain_decibels\": -700.0");
     let loaded = project_from_json_text(&text).unwrap();
-    let caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
+    let caption = the_caption_of(&loaded);
     assert_eq!(
-        caption.object.font_size.fraction_of_picture_height(),
+        caption.font_size.fraction_of_picture_height(),
         FontSize::LARGEST_FRACTION
     );
     assert_eq!(
-        caption.object.area.left(),
+        caption.area.left(),
         0.75,
         "moved back as far as it goes: its middle is at the edge of the picture"
     );
@@ -1196,9 +1209,9 @@ fn objects_that_reach_out_past_the_edges_of_the_picture_are_saved_and_loaded_as_
         "the left edge of the video is before the picture: {text}"
     );
     assert_same_content(&loaded, &project);
-    let loaded_caption = loaded.tracks()[0].entries()[0].clip().as_text().unwrap();
-    assert_eq!(loaded_caption.object.area, CanvasArea::new(0.75, 0.875, 0.5, 0.25));
-    assert!(loaded_caption.object.area.right() > 1.0 && loaded_caption.object.area.bottom() > 1.0);
+    let loaded_caption = the_caption_of(&loaded);
+    assert_eq!(loaded_caption.area, CanvasArea::new(0.75, 0.875, 0.5, 0.25));
+    assert!(loaded_caption.area.right() > 1.0 && loaded_caption.area.bottom() > 1.0);
     let loaded_video = loaded.tracks()[2].entries()[1].clip().as_media().unwrap();
     assert_eq!(
         loaded_video.placement().map(|place| place.area),
@@ -1215,16 +1228,22 @@ fn a_text_clip_that_lasts_no_time_or_has_a_bad_colour_is_rejected() {
         }
         other => panic!("unexpected error {other:?}"),
     }
+    // (The colour of a text is a value of its text effect now, so a colour that is not one is a value that is wrong, and not a field of the clip that is.)
     let bad_colour = saved(&project_with_everything()).replace("#FFC80080", "orange");
-    let reason = reason_for_unreadable_project(&bad_colour);
-    assert!(reason.contains("#RRGGBBAA"), "{reason}");
+    match project_from_json_text(&bad_colour).unwrap_err() {
+        ProjectFileError::InvalidProject { reason } => {
+            assert!(reason.contains("#RRGGBBAA"), "{reason}");
+            assert!(reason.contains("clip number 1 of track number 1"), "{reason}");
+        }
+        other => panic!("unexpected error {other:?}"),
+    }
 }
 
 #[test]
 fn a_misspelt_field_of_a_text_clip_is_reported() {
-    let text = saved(&project_with_everything()).replace("\"font_family\"", "\"font_famly\"");
+    let text = saved(&project_with_everything()).replace("\"content\"", "\"contnt\"");
     let reason = reason_for_unreadable_project(&text);
-    assert!(reason.contains("font_famly"), "{reason}");
+    assert!(reason.contains("contnt"), "{reason}");
 }
 
 #[test]
@@ -1260,8 +1279,8 @@ fn the_example_in_the_description_of_the_project_file_is_a_project_file_this_ver
     assert_eq!(project.sources().len(), 3, "a video, a sound and a picture");
     assert_eq!(project.tracks().len(), 2);
     assert_eq!(project.tracks()[0].height().points(), 80.0);
-    let caption = project.tracks()[0].entries()[0].clip().as_text().unwrap();
-    assert_eq!(caption.object.rotation, Angle::from_degrees(-12.5));
+    let caption = the_caption_of(&project);
+    assert_eq!(caption.rotation, Angle::from_degrees(-12.5));
     let picture = project.tracks()[0].entries()[1].clip().as_image().unwrap();
     assert_eq!(picture.source(), SourceMediaIdentifier::new(3));
     assert_eq!(picture.placement().unwrap().rotation, Angle::from_degrees(20.0));
@@ -1274,7 +1293,7 @@ fn the_example_in_the_description_of_the_project_file_is_a_project_file_this_ver
     // The keyframes the example shows: the caption fades in, the first video moves, and the caption, while it is shown, makes
     // the first video quieter (a rack of that, which is kept in the drawer of the caption).
     let caption_animation = project.tracks()[0].entries()[0].own_animation();
-    assert_eq!(caption_animation.keyframes_of(PropertyId::Colour).unwrap().len(), 2);
+    assert_eq!(caption_animation.keyframes_of(COLOUR_OF_A_TEXT).unwrap().len(), 2);
     let video = project.tracks()[1].entries()[0].id();
     let video_animation = project.tracks()[1].entries()[0].own_animation();
     assert_eq!(
@@ -1303,13 +1322,21 @@ fn the_example_in_the_description_of_the_project_file_is_a_project_file_this_ver
     let videos_track = AnimationTarget::Track(project.tracks()[1].id());
     let hue_at =
         |target: AnimationTarget, frame: u64| project.property_value_at(target, HUE, TimelineFrameIndex::new(frame));
+    // (The caption's hue shift is the second of its effects, the first being the text effect that it is made of.)
+    let hue_of_the_caption_at = |frame: u64| {
+        project.property_value_at(
+            caption,
+            PropertyId::effect_value(EffectKind::HUE_SHIFT, EffectInstanceId::new(1), 0),
+            TimelineFrameIndex::new(frame),
+        )
+    };
     assert_eq!(
-        hue_at(caption, 90),
+        hue_of_the_caption_at(90),
         Some(PropertyValue::Number(180.0)),
         "the caption starts at frame 60: half way is 30 frames in"
     );
     assert_eq!(
-        hue_at(caption, 120),
+        hue_of_the_caption_at(120),
         Some(PropertyValue::Number(360.0)),
         "a whole turn after 60 frames"
     );
@@ -1383,8 +1410,8 @@ fn the_example_in_the_description_of_the_project_file_is_a_project_file_this_ver
     };
     assert_eq!(
         describe(project.chain_rows_of(Member::Clip(caption_id))),
-        ["effect hue shift", "tag intro", "clip group titles"],
-        "the caption: its own hue shift, then the effects of the tag, and last those of the group it is in"
+        ["effect text", "effect hue shift", "tag intro", "clip group titles"],
+        "the caption: what it is made of, its own hue shift, then the effects of the tag, and last those of the group it is in"
     );
     assert_eq!(
         describe(project.chain_rows_of(Member::Clip(first_video))),

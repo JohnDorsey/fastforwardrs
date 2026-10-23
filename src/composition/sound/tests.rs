@@ -5,7 +5,8 @@ use super::*;
 use crate::composition::test_projects::{
     LONG_VIDEO, SHORT_SILENT_VIDEO, SOUND_FILE, media_clip, project_of, random_project,
 };
-use crate::project::tracks::{Clip, ClipId, Gain, TextClip, TextObject};
+use crate::project::EffectInstanceId;
+use crate::project::tracks::{Clip, ClipId, Gain, TextClip};
 use crate::test_support::DeterministicRandomNumbers;
 
 fn frame(number: u64) -> TimelineFrameIndex {
@@ -29,7 +30,7 @@ fn sound_file(first: u64, end: u64, factor: u32) -> Clip {
 }
 
 fn text(duration: u64) -> Clip {
-    Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
+    Clip::Text(TextClip::new(duration, EffectInstanceId::FIRST).unwrap())
 }
 
 fn plan(project: &Project) -> SoundPlan {

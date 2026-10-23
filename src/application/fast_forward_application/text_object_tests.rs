@@ -34,7 +34,12 @@ fn text_clip(window: &Window, position: usize, index: usize) -> (ClipId, TextObj
     let location = window.clip(position, index);
     let placement = window.application().project().placement_of(location).unwrap();
     let text = placement.clip.as_text().expect("a text clip");
-    (location, text.object.clone(), text.duration_in_frames())
+    let object = window
+        .application()
+        .project()
+        .text_object_of(location)
+        .expect("a text clip has a text object");
+    (location, object, text.duration_in_frames())
 }
 
 /// A window with a 90 frame video and, beyond its end, a text object made from the menu.
@@ -195,6 +200,47 @@ fn the_panel_has_the_words_the_font_the_size_the_colour_and_how_long_the_text_is
     assert!(
         window.harness.query_by_value("Default font").is_some(),
         "the font that is chosen"
+    );
+}
+
+/// (A planted mistake that swapped the rows of the font and the size was not noticed by any test, so this one says what order a person sees them in. They are the rows that any effect's values have since
+/// phase 9, drawn in the box of the text and not in a box of the chain, so that they come where they always did.)
+#[test]
+fn the_rows_of_a_text_are_in_the_order_the_words_the_font_the_size_the_colour_and_then_how_long_it_is_shown() {
+    let mut window = window_with_a_text_object();
+    window.application_mut().environment.font_families = Some(vec!["Arial".to_owned()]);
+    window.settle();
+    let heights: Vec<f32> = ["Text", "Font", "Size", "Colour", "Shown for"]
+        .into_iter()
+        .map(|label| window.rectangle_of(label).top())
+        .collect();
+    assert!(
+        heights.windows(2).all(|pair| pair[0] < pair[1]),
+        "from the top to the bottom: the words, the font, the size, the colour, how long: {heights:?}"
+    );
+}
+
+/// (Another planted mistake that no test noticed: a text clip on the timeline that shows nothing of what it says.)
+#[test]
+fn the_clip_of_a_text_on_the_timeline_says_the_first_line_of_what_the_text_says() {
+    let mut window = window_with_a_text_object();
+    window.replace_text_in_the_field_showing(
+        "Text",
+        "Chapter one
+and a second line",
+    );
+    let written: Vec<String> = window
+        .shapes_drawn()
+        .into_iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    // (The box of lines in the panel writes all of the words in one piece, so a piece that is just the first line is what the clip says.)
+    assert!(
+        written.iter().any(|words| words == "Chapter one"),
+        "the first line of what it says is written on the clip: {written:?}"
     );
 }
 
@@ -500,9 +546,10 @@ fn a_text_object_made_and_saved_comes_back_as_it_was() {
 
     let loaded = crate::project_file::read_project_file(&path).unwrap();
     let track: &Track = &loaded.tracks()[0];
-    let Clip::Text(text) = track.placement_at_index(1).unwrap().clip else {
+    let placement = track.placement_at_index(1).unwrap();
+    let Clip::Text(text) = placement.clip else {
         panic!("a text clip")
     };
-    assert_eq!(text.object.text, "Chapter one");
+    assert_eq!(loaded.text_object_of(placement.id).unwrap().text, "Chapter one");
     assert_eq!(text.duration_in_frames(), 90);
 }

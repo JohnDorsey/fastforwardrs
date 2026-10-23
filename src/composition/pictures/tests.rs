@@ -41,7 +41,7 @@ pub(super) fn over_the_whole_picture() -> Placement {
 }
 
 pub(super) fn text(duration: u64) -> Clip {
-    Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
+    Clip::Text(TextClip::new(duration, EffectInstanceId::FIRST).unwrap())
 }
 
 pub(super) fn plan(project: &Project) -> PicturePlan {
@@ -329,11 +329,23 @@ fn a_text_layer_is_where_its_text_object_is_and_turned_as_it_is() {
         CanvasArea::new(0.2, 0.3, 0.4, 0.2),
         Angle::from_degrees(-40.0),
     ));
-    let project = project_of(vec![vec![(0, Clip::Text(TextClip::new(object.clone(), 20).unwrap()))]]);
+    let project = project_of(vec![vec![(
+        0,
+        Clip::Text(
+            TextClip::new(20, EffectInstanceId::FIRST)
+                .unwrap()
+                .with_placement(object.placement()),
+        ),
+    )]]);
     let plan = plan(&project);
     let layer = &plan.sections[0].layers[0];
     assert_eq!(layer.placement, object.placement());
-    assert_eq!(layer.content, LayerContent::Text(object));
+    assert!(matches!(layer.content, LayerContent::Text(_)));
+    assert_eq!(
+        layer.text_at(frame(0)).unwrap().into_owned(),
+        object,
+        "it says what a new text says, there"
+    );
 }
 
 #[test]
@@ -393,7 +405,14 @@ fn a_video_that_is_smaller_than_the_picture_does_not_hide_the_text_behind_it() {
 fn text_never_hides_what_is_behind_it_even_if_its_area_is_the_whole_picture() {
     let covering_text = TextObject::default().with_placement(over_the_whole_picture());
     let project = project_of(vec![
-        vec![(0, Clip::Text(TextClip::new(covering_text, 60).unwrap()))],
+        vec![(
+            0,
+            Clip::Text(
+                TextClip::new(60, EffectInstanceId::FIRST)
+                    .unwrap()
+                    .with_placement(covering_text.placement()),
+            ),
+        )],
         vec![(0, long_video(0, 60, 1))],
     ]);
     assert_eq!(
@@ -704,7 +723,7 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<
             Clip::Text(text) => front_to_back.push((
                 location,
                 None,
-                plain_place(project, location, text.object.placement(), timeline_frame),
+                plain_place(project, location, text.placement(), timeline_frame),
             )),
             // (What a generator makes is not known to the plan, so it hides nothing.)
             Clip::Generator(generator) => front_to_back.push((

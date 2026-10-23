@@ -20,8 +20,8 @@ mod property;
 use std::collections::BTreeMap;
 
 pub use apply::{
-    PROPERTIES_OF_A_PLACEMENT, PROPERTIES_OF_A_TEXT_OBJECT, placement_value, text_value, with_placement_value,
-    with_text_value,
+    PROPERTIES_OF_A_PLACEMENT, placement_value, properties_of_a_text_object, properties_of_the_text_effect,
+    text_object_of_values, values_of_a_text_object, with_placement_value, words_of_a_text_clip,
 };
 pub use keyframes::{Keyframe, Keyframes};
 pub use property::{PropertyId, PropertyValue, ValueKind};

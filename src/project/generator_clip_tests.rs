@@ -7,6 +7,7 @@
 
 use super::tests::{frame, frame_rate};
 use super::*;
+use crate::test_support::{COLOUR_OF_A_TEXT, FONT_OF_A_TEXT, SIZE_OF_A_TEXT, TEXT_OF_A_TEXT};
 use crate::test_support::{make_a_keyframe, put_a_hue_shift_on};
 
 const SOLID: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"colour\", \"TYPE\": \"color\", \"DEFAULT\": [0.2, 0.4, 0.9, 1.0] } ] }*/\nvoid main() { gl_FragColor = colour; }\n";
@@ -138,10 +139,10 @@ fn a_generator_clip_is_put_somewhere_on_the_picture_like_a_text_object_and_its_p
     }
     // It has no words, no letters, no colour and no loudness: those are for other clips.
     for property in [
-        PropertyId::Text,
-        PropertyId::FontFamily,
-        PropertyId::FontSize,
-        PropertyId::Colour,
+        TEXT_OF_A_TEXT,
+        FONT_OF_A_TEXT,
+        SIZE_OF_A_TEXT,
+        COLOUR_OF_A_TEXT,
         PropertyId::Gain,
         PropertyId::Muted,
     ] {

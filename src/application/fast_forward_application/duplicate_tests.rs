@@ -88,8 +88,7 @@ fn text_of(window: &Window, clip: ClipId) -> TextObject {
     window
         .application()
         .project()
-        .placement_of(clip)
-        .and_then(|placement| placement.clip.as_text().map(|text| text.object.clone()))
+        .text_object_of(clip)
         .expect("a text clip")
 }
 

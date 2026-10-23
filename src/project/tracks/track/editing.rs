@@ -18,7 +18,10 @@ use crate::project::tracks::ids::{ClipId, RackId};
 use crate::project::tracks::placement::Placement;
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
-use crate::project::{AnimationTarget, EffectKind, Effects, PropertyId, PropertyValue};
+use crate::project::{
+    AnimationTarget, EffectKind, Effects, PropertyId, PropertyValue, properties_of_the_text_effect,
+    values_of_a_text_object,
+};
 use crate::project::{SpeedFactor, TimelineFrameIndex};
 
 /// What a cut puts at the edges of the two parts, in each of the racks of the cut clip's own keyframes: the value that the
@@ -305,14 +308,26 @@ impl Track {
         Ok(())
     }
 
-    /// Changes what the text clip `clip` says and how it looks. (Its length is not touched: see
-    /// [`Self::set_clip_duration`].)
+    /// Changes what the text clip `clip` says and how it looks, **which are the values of its text effect**, and where it is, which is the clip's. (Its length is not touched: see
+    /// [`Self::set_clip_duration`].) The values are what they are when they are not animated; a value that has keyframes is changed by the keyframes' own functions.
     pub fn set_text_object(&mut self, clip: ClipId, object: TextObject) -> Result<(), ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
-        let Clip::Text(text) = &mut self.entries[index].clip else {
+        let Clip::Text(text) = &self.entries[index].clip else {
             return Err(ClipEditError::NotATextClip { clip });
         };
-        text.object = object;
+        let content = text.content();
+        let placed = text.with_placement(object.placement());
+        let values = values_of_a_text_object(&object);
+        let effects = &mut self.entries[index].effects;
+        let properties = properties_of_the_text_effect(content);
+        // (A text clip whose content is not there, which a project that is consistent does not have, is not changed at all.)
+        if !properties.iter().all(|property| effects.has_the_value(*property)) {
+            return Err(ClipEditError::NotATextClip { clip });
+        }
+        for (property, value) in properties.into_iter().zip(&values) {
+            effects.set_value(property, value);
+        }
+        self.entries[index].clip = Clip::Text(placed);
         Ok(())
     }
 
@@ -492,8 +507,12 @@ impl Track {
         wanted_frames: u64,
     ) -> Option<(ClipId, u64)> {
         let duration = self.longest_new_text_clip_at(timeline_frame, wanted_frames)?;
-        let clip = Clip::Text(TextClip::new(object, duration).ok()?);
+        let clip = Clip::Text(TextClip::new(duration, EffectInstanceId::FIRST).ok()?);
         let id = self.insert_clip_at(timeline_frame, clip).ok()?;
+        // (Its content, what it says and how it looks, is the text effect, the first of its chain, as a generator clip's is its first effect.)
+        let made = self.add_effect_to_the_clip(id, EffectKind::TEXT).ok()?;
+        debug_assert_eq!(made, EffectInstanceId::FIRST, "a clip that is new has no effect yet");
+        self.set_text_object(id, object).ok()?;
         Some((id, duration))
     }
 }

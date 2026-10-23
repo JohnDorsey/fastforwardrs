@@ -73,7 +73,7 @@ impl TimelineGeometry {
 mod tests {
     use super::super::test_support::{assert_close, geometry_at, media};
     use super::*;
-    use crate::project::{Clip, SpeedFactor, TextClip, TextObject, Track, TrackId};
+    use crate::project::{Clip, EffectInstanceId, SpeedFactor, TextClip, Track, TrackId};
 
     // --- waveform columns ---
 
@@ -212,7 +212,7 @@ mod tests {
     fn a_text_clip_has_no_waveform() {
         let geometry = geometry_at(30, 1, 100.0);
         let track = Track::new(TrackId::new(0), "track 0")
-            .with_clips([(0, Clip::Text(TextClip::new(TextObject::default(), 60).unwrap()))]);
+            .with_clips([(0, Clip::Text(TextClip::new(60, EffectInstanceId::FIRST).unwrap()))]);
         let placement = track.placement_at_index(0).unwrap();
         assert!(
             geometry

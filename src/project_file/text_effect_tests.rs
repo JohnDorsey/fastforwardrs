@@ -9,16 +9,15 @@ use super::tests::{assert_same_content, saved};
 use super::*;
 use crate::project::{AnimationTarget, EffectKind, ParameterControl, TextObject, TimelineFrameIndex};
 
-/// A project with a text on its track that has the text effect on it too, which only a test does (nothing offers it; a text is made of it from 9.2).
+/// A project with a text on its track. (A text is made of the text effect since phase 9.2: it is the first effect of its chain. Before that this made a text that had the effect on it too, which
+/// only a test could do.)
 fn a_text_that_has_the_text_effect() -> (Project, AnimationTarget) {
     let mut project = Project::empty();
     let track = project.tracks()[0].id();
     let (clip, _) = project
         .insert_text(track, TimelineFrameIndex::new(0), TextObject::default(), 60)
         .unwrap();
-    let target = AnimationTarget::Clip(clip);
-    project.add_effect(target, EffectKind::TEXT).unwrap();
-    (project, target)
+    (project, AnimationTarget::Clip(clip))
 }
 
 #[test]
@@ -81,16 +80,34 @@ fn a_file_that_gives_the_text_effect_to_something_that_is_not_a_text_is_refused(
 
 #[test]
 fn a_snapshot_of_another_effect_that_has_these_controls_is_read_with_them_and_written_as_it_was() {
-    let (project, _) = a_text_that_has_the_text_effect();
-    let text = saved(&project).replace("builtin:text", "isf:like_a_text");
+    // (The text clip has the text effect as what it is made of, and a second one, which only a test puts on a text: that one is the one that has the key of another effect.)
+    let (mut project, target) = a_text_that_has_the_text_effect();
+    project.add_effect(target, EffectKind::TEXT).unwrap();
+    let text = saved(&project);
+    let snapshot_start = text
+        .find("    {\n      \"key\": \"builtin:text\"")
+        .expect("the snapshot of the text effect");
+    let snapshot_end = snapshot_start + text[snapshot_start..].find("\n    }").unwrap() + "\n    }".len();
+    let snapshot = &text[snapshot_start..snapshot_end];
+    let mut text = text.replacen(
+        snapshot,
+        &format!("{snapshot},\n{}", snapshot.replace("builtin:text", "isf:like_a_text")),
+        1,
+    );
+    let effect_says = "\"effect\": \"builtin:text\"";
+    let first = text
+        .find(effect_says)
+        .expect("the text effect that the text is made of");
+    let second = first + 1 + text[first + 1..].find(effect_says).expect("the second text effect");
+    text.replace_range(second..second + effect_says.len(), "\"effect\": \"isf:like_a_text\"");
     let loaded = project_from_json_text(&text).unwrap();
     let clip = loaded.tracks()[0].entries()[0].id();
     let kind = loaded
         .effects_of(AnimationTarget::Clip(clip))
         .unwrap()
         .iter()
-        .next()
-        .expect("the effect is there")
+        .nth(1)
+        .expect("the second effect is there")
         .kind();
     assert_ne!(
         kind,

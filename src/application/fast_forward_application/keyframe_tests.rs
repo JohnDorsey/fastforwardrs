@@ -13,6 +13,7 @@ use crate::project::{
     Angle, AnimationTarget, CanvasArea, ClipId, Gain, Placement, Project, PropertyId, PropertyValue, TextColour,
     TextObject, TimelineFrameIndex,
 };
+use crate::test_support::{COLOUR_OF_A_TEXT, TEXT_OF_A_TEXT};
 
 fn frame(number: u64) -> TimelineFrameIndex {
     TimelineFrameIndex::new(number)
@@ -98,16 +99,7 @@ fn placement_the_clip_says(window: &Window, clip: ClipId) -> Placement {
 }
 
 fn the_object_the_text_clip_says(window: &Window, clip: ClipId) -> TextObject {
-    window
-        .application()
-        .project()
-        .placement_of(clip)
-        .unwrap()
-        .clip
-        .as_text()
-        .unwrap()
-        .object
-        .clone()
+    window.application().project().text_object_of(clip).unwrap()
 }
 
 // --- the commands ---
@@ -147,7 +139,7 @@ fn a_keyframe_that_cannot_be_made_is_not_an_edit() {
     let (mut window, clip) = window_with_a_video();
     let target = AnimationTarget::Clip(clip);
     // Words are not a property of a video, and frame 5000 is not in a clip that is 300 frames long.
-    add_a_keyframe(&mut window, target, PropertyId::Text, 10);
+    add_a_keyframe(&mut window, target, TEXT_OF_A_TEXT, 10);
     add_a_keyframe(&mut window, target, PropertyId::Gain, 5000);
     assert!(!window.application().has_unsaved_changes());
     assert!(!window.application().can_undo());
@@ -641,7 +633,7 @@ fn changing_a_text_object_that_has_its_colour_animated_changes_the_keyframe_of_t
  {
     let (mut window, clip) = window_with_a_video_and_a_text_object();
     let target = AnimationTarget::Clip(clip);
-    add_a_keyframe(&mut window, target, PropertyId::Colour, 20);
+    add_a_keyframe(&mut window, target, COLOUR_OF_A_TEXT, 20);
     window.move_current_frame_to(60);
     let red = TextColour::new(255, 0, 0, 255);
     let changed = TextObject {
@@ -653,18 +645,18 @@ fn changing_a_text_object_that_has_its_colour_animated_changes_the_keyframe_of_t
     window.do_this(Command::SetTextObject { clip, object: changed });
 
     // The clip begins at frame 20, so frame 60 is 40 frames in.
-    assert_eq!(keyframes_of(&window, clip, PropertyId::Colour), vec![0, 40]);
+    assert_eq!(keyframes_of(&window, clip, COLOUR_OF_A_TEXT), vec![0, 40]);
     assert_eq!(
-        value_at(&window, target, PropertyId::Colour, 60),
+        value_at(&window, target, COLOUR_OF_A_TEXT, 60),
         Some(PropertyValue::Colour(red))
     );
     assert_eq!(
-        value_at(&window, target, PropertyId::Colour, 20),
+        value_at(&window, target, COLOUR_OF_A_TEXT, 20),
         Some(PropertyValue::Colour(TextColour::WHITE)),
         "the colour at the other keyframe is as it was"
     );
     assert_eq!(
-        keyframes_of(&window, clip, PropertyId::Text),
+        keyframes_of(&window, clip, TEXT_OF_A_TEXT),
         Vec::<u64>::new(),
         "the words are not animated"
     );

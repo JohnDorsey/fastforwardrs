@@ -10,8 +10,8 @@ use crate::application::commands::Command;
 use crate::application::start_time_hold::{DECENT_DISTANCE_IN_POINTS, HELD_WITHIN_POINTS};
 use crate::application::theme;
 use crate::project::{
-    Clip, MediaClip, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TextClip, TextObject,
-    TimelineFrameIndex, Track, TrackId,
+    Clip, MediaClip, Project, SourceFrameIndex, SpeedFactor, SpeedIndicatorLayout, TextObject, TimelineFrameIndex,
+    Track, TrackId,
 };
 
 /// A video clip of `frames` frames, from the video the test windows have.
@@ -474,10 +474,10 @@ fn a_text_object_is_dragged_like_any_clip() {
 
     assert_eq!(starts_on_track(&window, 0), vec![0, 125]);
     let text = window.application().project().tracks()[0].placements().nth(1).unwrap();
-    assert!(
-        text.clip
-            .as_text()
-            .is_some_and(|text: &TextClip| text.object == TextObject::default())
+    assert!(text.clip.as_text().is_some());
+    assert_eq!(
+        window.application().project().text_object_of(text.id),
+        Some(TextObject::default())
     );
 }
 

@@ -1,20 +1,21 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The properties of a text object: what it says, its font, the size and colour of its letters, how long
-//! it is shown for, and where it is on the picture (see `placement_controls`; it can be moved and resized on the preview too, by
-//! dragging it and its corners). What is shown of what it says and how it looks, when there are keyframes for them, is what
-//! they are at the playhead.
+//! The properties of a text object: what it says, its font, the size and colour of its letters, how long it is shown for, and where it is on the picture (see `placement_controls`; it can be
+//! moved and resized on the preview too, by dragging it and its corners). What is shown of what it says and how it looks, when there are keyframes for them, is what they are at the playhead.
+//!
+//! **What it says, its font, and the size and colour of its letters are the values of its text effect**, the content of the clip, and their rows are the rows that any effect's values have
+//! (see `effects`, which draws them with the controls that the text effect says its values have, and keyframes of their own): they are shown here, in the box of the text, where they
+//! always were, and not in a box of the chain of the clip (see `chain`, which leaves that one out).
 
-use egui::{ComboBox, DragValue, TextEdit, Ui};
+use egui::Ui;
 
-use super::animatable::{self, Animatable};
-use super::effects::{DEFAULT_FONT_LABEL, LINES_OF_WORDS_SHOWN};
+use super::effects::show_the_control_of;
 use super::{PropertiesContent, kind_box, placement_controls};
 use crate::application::commands::Command;
 use crate::application::duration_control::shown_for;
 use crate::application::naming::kind_name;
-use crate::project::{ClipId, ClipKind, FontSize, PropertyId, TextClip, TextColour};
+use crate::project::{AnimationTarget, ClipId, ClipKind, EffectKind, TextClip, properties_of_the_text_effect};
 
 /// What the row of how big a text object's box is is called (its letters have a size of their own).
 const BOX_SIZE_LABEL: &str = "Box size";
@@ -28,116 +29,16 @@ pub(super) fn show(
     commands: &mut Vec<Command>,
 ) {
     kind_box::show(ui, kind_name(ClipKind::Text), |ui| {
-        let at_the_playhead = content
-            .project
-            .text_object_at(clip, content.current_frame)
-            .unwrap_or_else(|| text.object.clone());
-        let mut object = at_the_playhead.clone();
-
-        let text_label = ui.label("Text");
-        animatable::row(
-            ui,
-            content,
-            Animatable::of_a_clip(clip, PropertyId::Text),
-            commands,
-            |ui, _| {
-                ui.add(
-                    TextEdit::multiline(&mut object.text)
-                        .desired_rows(LINES_OF_WORDS_SHOWN)
-                        .desired_width(f32::INFINITY),
-                )
-                .labelled_by(text_label.id);
-            },
-        );
+        let [text_property, font_property, size_property, colour_property] =
+            properties_of_the_text_effect(text.content());
+        let target = AnimationTarget::Clip(clip);
+        show_the_control_of(ui, content, target, EffectKind::TEXT, text_property, commands);
         ui.add_space(6.0);
-
-        animatable::row(
-            ui,
-            content,
-            Animatable::of_a_clip(clip, PropertyId::FontFamily),
-            commands,
-            |ui, _| {
-                ui.label("Font");
-                match content.font_families {
-                    Some(families) => {
-                        let shown = if object.font_family.is_empty() {
-                            DEFAULT_FONT_LABEL
-                        } else {
-                            &object.font_family
-                        };
-                        ComboBox::from_id_salt("text object font")
-                            .selected_text(shown)
-                            .width((ui.available_width() - 4.0).max(60.0))
-                            .height(320.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut object.font_family, String::new(), DEFAULT_FONT_LABEL);
-                                for family in families {
-                                    ui.selectable_value(&mut object.font_family, family.clone(), family);
-                                }
-                            });
-                    }
-                    None => {
-                        ui.weak("Looking for the fonts...");
-                    }
-                }
-            },
-        );
-
-        animatable::row(
-            ui,
-            content,
-            Animatable::of_a_clip(clip, PropertyId::FontSize),
-            commands,
-            |ui, _| {
-                let label = ui.label("Size");
-                let mut points = object.font_size.points();
-                let smallest = FontSize::SMALLEST_FRACTION * FontSize::REFERENCE_PICTURE_HEIGHT;
-                let largest = FontSize::LARGEST_FRACTION * FontSize::REFERENCE_PICTURE_HEIGHT;
-                if ui
-                    .add(
-                        DragValue::new(&mut points)
-                            .range(smallest..=largest)
-                            .speed(0.5)
-                            .max_decimals(1)
-                            .suffix(" pt"),
-                    )
-                    .labelled_by(label.id)
-                    .changed()
-                {
-                    object.font_size = FontSize::from_points(points);
-                }
-            },
-        );
-
-        animatable::row(
-            ui,
-            content,
-            Animatable::of_a_clip(clip, PropertyId::Colour),
-            commands,
-            |ui, _| {
-                let label = ui.label("Colour");
-                let mut rgba = [
-                    object.colour.red,
-                    object.colour.green,
-                    object.colour.blue,
-                    object.colour.alpha,
-                ];
-                if ui
-                    .color_edit_button_srgba_unmultiplied(&mut rgba)
-                    .labelled_by(label.id)
-                    .changed()
-                {
-                    object.colour = TextColour::new(rgba[0], rgba[1], rgba[2], rgba[3]);
-                }
-            },
-        );
-
+        for property in [font_property, size_property, colour_property] {
+            show_the_control_of(ui, content, target, EffectKind::TEXT, property, commands);
+        }
         if let Some(frames) = shown_for(ui, content.project.frame_rate(), text.duration_in_frames()) {
             commands.push(Command::SetClipDuration { clip, frames });
-        }
-
-        if object != at_the_playhead {
-            commands.push(Command::SetTextObject { clip, object });
         }
         placement_controls::show(ui, content, clip, BOX_SIZE_LABEL, commands);
     });

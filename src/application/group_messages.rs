@@ -130,7 +130,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::project::groups::test_projects::lay_out;
+    use crate::project::groups::test_projects::{lay_out, lay_out_whole_texts};
     use crate::project::{GroupKind, TrackId};
 
     fn the_looks() -> SourceLooks<'static> {
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn a_clip_that_would_be_inside_a_clip_group_is_named_as_the_lists_name_it_with_the_group_if_there_is_one() {
         // (The middle clip starts a little later than the others, so that it is the one that the message names, and not one of the members.)
-        let mut laid = lay_out(&[&[(0, 10)], &[(3, 4)], &[(0, 10)]]);
+        let mut laid = lay_out_whole_texts(&[&[(0, 10)], &[(3, 4)], &[(0, 10)]]);
         let error = laid
             .project
             .create_group(GroupKind::ClipGroup, &[laid.clip_member(0, 0), laid.clip_member(2, 0)])

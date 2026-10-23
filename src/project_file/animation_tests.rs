@@ -11,6 +11,7 @@ use super::*;
 use crate::project::{AnimationTarget, PropertyId, TextColour};
 use crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE;
 use crate::test_support::make_a_keyframe;
+use crate::test_support::{COLOUR_OF_A_TEXT, FONT_OF_A_TEXT, SIZE_OF_A_TEXT, TEXT_OF_A_TEXT};
 
 /// The project that has everything, with keyframes on a video, a sound, a text object and two tracks.
 fn project_with_keyframes() -> Project {
@@ -97,35 +98,35 @@ fn project_with_keyframes() -> Project {
     make_a_keyframe(
         &mut project,
         clip(text),
-        PropertyId::Colour,
+        COLOUR_OF_A_TEXT,
         120,
         PropertyValue::Colour(TextColour::new(255, 0, 0, 255)),
     );
     make_a_keyframe(
         &mut project,
         clip(text),
-        PropertyId::Colour,
+        COLOUR_OF_A_TEXT,
         170,
         PropertyValue::Colour(TextColour::new(0, 0, 255, 128)),
     );
     make_a_keyframe(
         &mut project,
         clip(text),
-        PropertyId::Text,
+        TEXT_OF_A_TEXT,
         120,
         PropertyValue::Words("One \"two\"\nthree".to_owned()),
     );
     make_a_keyframe(
         &mut project,
         clip(text),
-        PropertyId::FontFamily,
+        FONT_OF_A_TEXT,
         125,
         PropertyValue::Words("Arial".to_owned()),
     );
     make_a_keyframe(
         &mut project,
         clip(text),
-        PropertyId::FontSize,
+        SIZE_OF_A_TEXT,
         125,
         PropertyValue::Number(0.1),
     );
@@ -482,6 +483,8 @@ fn a_file_of_the_version_before_keyframes_loads_as_a_project_with_nothing_animat
 /// the file of `project` (which has racks of the keyframes of what has the drawer they are in, and no others).
 fn written_the_way_version_6_did(project: &Project) -> String {
     let mut file: serde_json::Value = serde_json::from_str(&saved(project)).unwrap();
+    // (A text says what it says in its clip, and its keyframes are of the properties of the clip, as they were before version 18.)
+    super::old_text_files_tests::as_a_file_of_a_version_before_18(&mut file);
     let to_animation = |holder: &mut serde_json::Value| {
         let Some(drawer) = holder.as_object_mut().and_then(|holder| holder.remove("drawer")) else {
             return;
@@ -525,9 +528,12 @@ fn a_file_of_version_6_has_the_keyframes_in_an_animation_object_which_is_read_as
 
     // (The racks of a clip are in the order of the table of properties when they come from an animation object, which is the
     // order they were made in or not: what is the same is what each drawer has.)
+    // (The texts of `project` are made of a text effect that is named as it is when a file of a version before 18 is read: see `old_text_files_tests`.)
     assert_eq!(
         with_the_racks_in_order(&saved(&loaded)),
-        with_the_racks_in_order(&saved(&project))
+        with_the_racks_in_order(&saved(
+            &super::old_text_files_tests::as_read_from_the_file_of_a_version_before_18(&project)
+        ))
     );
     assert!(
         saved(&loaded).contains(&current_version_line()),
@@ -590,9 +596,11 @@ fn keyframes_of_something_that_cannot_be_animated_are_refused_by_name() {
 
 #[test]
 fn keyframes_of_something_the_clip_or_the_track_does_not_have_are_refused() {
-    // A video has no words.
+    // A video has no words. (Words are a value of a text effect, which a video does not have: a rack says which effect it is of.)
     let text = saved_with(|file| {
-        rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "rotation")["property"] = serde_json::json!("text");
+        let rack = rack_of_mut(&mut file["tracks"][2]["clips"][0]["drawer"], "rotation");
+        rack["property"] = serde_json::json!("text");
+        rack["effect"] = serde_json::json!(0);
     });
     let reason = reason_for_invalid_project(&text);
     assert!(reason.contains("\"text\" cannot be animated"), "{reason}");

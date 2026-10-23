@@ -9,20 +9,77 @@
 
 use super::{Animation, PropertyId, PropertyValue};
 use crate::project::tracks::{Angle, CanvasArea, FontSize, Gain, Placement, TextObject};
+use crate::project::{EffectInstanceId, EffectKind};
 
 /// The properties of where something is on the picture: those that [`placement_value`] has a value for.
 pub const PROPERTIES_OF_A_PLACEMENT: [PropertyId; 3] = [PropertyId::Position, PropertyId::Size, PropertyId::Rotation];
 
-/// The properties of a text object, which include where it is on the picture: those that [`text_value`] has a value for.
-pub const PROPERTIES_OF_A_TEXT_OBJECT: [PropertyId; 7] = [
-    PropertyId::Text,
-    PropertyId::FontFamily,
-    PropertyId::FontSize,
-    PropertyId::Colour,
-    PropertyId::Position,
-    PropertyId::Size,
-    PropertyId::Rotation,
-];
+/// The properties of a text object that are the values of the text effect that makes it, which is named `content` in the chain of the text clip: its words, its font, its size and its
+/// colour, in the order that [`values_of_a_text_object`] has them. (Where it is on the picture is the placement's: [`PROPERTIES_OF_A_PLACEMENT`].)
+pub const fn properties_of_the_text_effect(content: EffectInstanceId) -> [PropertyId; 4] {
+    [
+        PropertyId::effect_value(EffectKind::TEXT, content, 0),
+        PropertyId::effect_value(EffectKind::TEXT, content, 1),
+        PropertyId::effect_value(EffectKind::TEXT, content, 2),
+        PropertyId::effect_value(EffectKind::TEXT, content, 3),
+    ]
+}
+
+/// The properties of a text object, which include where it is on the picture: those of the text effect that is named `content`, and the three of a placement.
+pub const fn properties_of_a_text_object(content: EffectInstanceId) -> [PropertyId; 7] {
+    let text = properties_of_the_text_effect(content);
+    [
+        text[0],
+        text[1],
+        text[2],
+        text[3],
+        PropertyId::Position,
+        PropertyId::Size,
+        PropertyId::Rotation,
+    ]
+}
+
+/// The words that the text clip `text` says when its effects are `effects`, as they are when they are not animated: the first value of its text effect (nothing if the clip has none).
+pub fn words_of_a_text_clip(text: &crate::project::tracks::TextClip, effects: &crate::project::Effects) -> String {
+    match effects.value_of(properties_of_the_text_effect(text.content())[0]) {
+        Some(PropertyValue::Words(words)) => words,
+        _ => String::new(),
+    }
+}
+
+/// The values that the text effect has when it says what `object` says: its words, its font, its size (a fraction of the height of the picture) and its colour, in the order the effect has them.
+/// (Where the object is on the picture is not a value of the effect: it is the clip's.)
+pub fn values_of_a_text_object(object: &TextObject) -> [PropertyValue; 4] {
+    [
+        PropertyValue::Words(object.text.clone()),
+        PropertyValue::Words(object.font_family.clone()),
+        PropertyValue::Number(object.font_size.fraction_of_picture_height()),
+        PropertyValue::Colour(object.colour),
+    ]
+}
+
+/// The text object that has the values `values` of the text effect (its words, its font, its size and its colour, in that order) and is where `placement` says. A value that is missing, or is not the
+/// kind it should be, is what a new text object has; a size is brought inside what a text can be, as always.
+pub fn text_object_of_values(values: &[PropertyValue], placement: Placement) -> TextObject {
+    let new = TextObject::default();
+    let words = |slot: usize, otherwise: &str| match values.get(slot) {
+        Some(PropertyValue::Words(words)) => words.clone(),
+        _ => otherwise.to_owned(),
+    };
+    TextObject {
+        text: words(0, &new.text),
+        font_family: words(1, &new.font_family),
+        font_size: match values.get(2) {
+            Some(PropertyValue::Number(fraction)) => FontSize::from_fraction_of_picture_height(*fraction),
+            _ => new.font_size,
+        },
+        colour: match values.get(3) {
+            Some(PropertyValue::Colour(colour)) => *colour,
+            _ => new.colour,
+        },
+        ..new.with_placement(placement)
+    }
+}
 
 /// The value of the placement-related `property` of `placement`: where its middle is (as fractions of the picture), how
 /// big its area is, or the degrees it is turned. `None` for any other property.
@@ -70,48 +127,6 @@ pub fn with_placement_value(placement: Placement, property: PropertyId, value: &
     }
 }
 
-/// The value of the text-related `property` of `object`. `None` for any other property.
-pub fn text_value(object: &TextObject, property: PropertyId) -> Option<PropertyValue> {
-    match property {
-        PropertyId::Text => Some(PropertyValue::Words(object.text.clone())),
-        PropertyId::FontFamily => Some(PropertyValue::Words(object.font_family.clone())),
-        PropertyId::FontSize => Some(PropertyValue::Number(object.font_size.fraction_of_picture_height())),
-        PropertyId::Colour => Some(PropertyValue::Colour(object.colour)),
-        PropertyId::Position | PropertyId::Size | PropertyId::Rotation => {
-            placement_value(&object.placement(), property)
-        }
-        PropertyId::Gain | PropertyId::Muted | PropertyId::EffectValue { .. } => None,
-    }
-}
-
-/// The text object `object` made different as `value` says for `property`. (The properties of where it is on the picture
-/// are those of its placement.) Anything else, and a value of the wrong kind, leaves it alone.
-#[must_use]
-pub fn with_text_value(object: &TextObject, property: PropertyId, value: &PropertyValue) -> TextObject {
-    match (property, value) {
-        (PropertyId::Text, PropertyValue::Words(text)) => TextObject {
-            text: text.clone(),
-            ..object.clone()
-        },
-        (PropertyId::FontFamily, PropertyValue::Words(family)) => TextObject {
-            font_family: family.clone(),
-            ..object.clone()
-        },
-        (PropertyId::FontSize, PropertyValue::Number(fraction)) => TextObject {
-            font_size: FontSize::from_fraction_of_picture_height(*fraction),
-            ..object.clone()
-        },
-        (PropertyId::Colour, PropertyValue::Colour(colour)) => TextObject {
-            colour: *colour,
-            ..object.clone()
-        },
-        (PropertyId::Position | PropertyId::Size | PropertyId::Rotation, _) => {
-            object.with_placement(with_placement_value(object.placement(), property, value))
-        }
-        _ => object.clone(),
-    }
-}
-
 impl Animation {
     /// `placement` as it is at `frame` of what the animation belongs to: where its middle is, how big it is and how far it
     /// is turned, each as the animation says if it is animated, and as `placement` says if it is not.
@@ -122,21 +137,6 @@ impl Animation {
             .fold(placement, |placement, property| match self.value_at(property, frame) {
                 Some(value) => with_placement_value(placement, property, &value),
                 None => placement,
-            })
-    }
-
-    /// `object` as it is at `frame` of what the animation belongs to: every one of its properties as the animation says if
-    /// it is animated, and as `object` says if it is not.
-    #[must_use]
-    pub fn text_object_at(&self, object: &TextObject, frame: u64) -> TextObject {
-        PROPERTIES_OF_A_TEXT_OBJECT
-            .into_iter()
-            .filter(|property| self.is_animated(*property))
-            .fold(object.clone(), |object, property| {
-                match self.value_at(property, frame) {
-                    Some(value) => with_text_value(&object, property, &value),
-                    None => object,
-                }
             })
     }
 
@@ -186,40 +186,54 @@ mod tests {
             Some(PropertyValue::Number(25.0))
         );
         assert_eq!(placement_value(&placement, PropertyId::Gain), None);
-        assert_eq!(placement_value(&placement, PropertyId::Text), None);
+        assert_eq!(placement_value(&placement, crate::test_support::TEXT_OF_A_TEXT), None);
     }
 
-    /// What keeps the two lists of properties honest: each is exactly the properties that its `..._value` has a value for. A
-    /// property that is added to a placement or a text object and not put in its list (or put in a list and given no value) is
-    /// found here, and not as a control that changes nothing while the property is animated.
+    /// What keeps the list of the properties of a placement honest: it is exactly the properties that `placement_value` has a value for. A property that is added to a placement and not put in the
+    /// list (or put in the list and given no value) is found here, and not as a control that changes nothing while the property is animated. (Rewritten on purpose in phase 9: what a text says and how
+    /// it looks are the values of its text effect, so the properties of a text object are those of that effect and the three of its placement, and the list of them is made for the effect's name in its
+    /// chain.)
     #[test]
-    fn the_lists_of_the_properties_of_a_placement_and_of_a_text_object_are_those_that_have_a_value_in_one() {
+    fn the_list_of_the_properties_of_a_placement_is_those_that_have_a_value_in_one_and_those_of_a_text_object_are_those_of_its_text_effect_and_its_placement()
+     {
         let placement = somewhere();
-        let object = TextObject::default();
         for property in crate::test_support::properties_of_every_kind() {
             assert_eq!(
                 placement_value(&placement, property).is_some(),
                 PROPERTIES_OF_A_PLACEMENT.contains(&property),
                 "{property:?} and a placement"
             );
-            assert_eq!(
-                text_value(&object, property).is_some(),
-                PROPERTIES_OF_A_TEXT_OBJECT.contains(&property),
-                "{property:?} and a text object"
-            );
         }
+        let content = EffectInstanceId::new(3);
+        let of_the_effect = properties_of_the_text_effect(content);
+        assert_eq!(
+            of_the_effect.len(),
+            EffectKind::TEXT.parameters().len(),
+            "one for each value that the text effect has"
+        );
+        let object = TextObject::default();
+        let values = values_of_a_text_object(&object);
+        for (slot, property) in of_the_effect.into_iter().enumerate() {
+            assert_eq!(
+                property,
+                PropertyId::effect_value(EffectKind::TEXT, content, u8::try_from(slot).unwrap())
+            );
+            assert_eq!(property.kind(), values[slot].kind(), "slot {slot}");
+        }
+        let of_the_object = properties_of_a_text_object(content);
+        assert_eq!(of_the_object[..4], of_the_effect);
+        assert_eq!(of_the_object[4..], PROPERTIES_OF_A_PLACEMENT);
     }
 
-    /// What the window changes is a loudness or a mute switch, a place on the picture, a text object or a value of an effect, and a
+    /// What the window changes is a loudness or a mute switch, a place on the picture, or a value of an effect (which a text object's words, font, size and colour are), and a
     /// change of one of them while it is animated is made a keyframe by the one thing that knows how. A property that is none of the
     /// four would be changed by nothing.
     #[test]
-    fn every_property_is_a_loudness_or_a_mute_switch_or_one_of_a_placement_or_of_a_text_object_or_of_an_effect() {
+    fn every_property_is_a_loudness_or_a_mute_switch_or_one_of_a_placement_or_of_an_effect() {
         for property in crate::test_support::properties_of_every_kind() {
             assert!(
                 property.is_heard()
                     || PROPERTIES_OF_A_PLACEMENT.contains(&property)
-                    || PROPERTIES_OF_A_TEXT_OBJECT.contains(&property)
                     || property.is_a_value_of_an_effect(),
                 "{property:?} is not changed by anything the window does"
             );
@@ -290,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn a_text_object_has_its_words_font_size_colour_and_place_as_properties() {
+    fn a_text_object_has_its_words_font_size_and_colour_as_the_values_of_a_text_effect() {
         let object = TextObject {
             text: "Hello".to_owned(),
             font_family: "Arial".to_owned(),
@@ -299,30 +313,23 @@ mod tests {
             ..TextObject::default()
         };
         assert_eq!(
-            text_value(&object, PropertyId::Text),
-            Some(PropertyValue::Words("Hello".to_owned()))
+            values_of_a_text_object(&object),
+            [
+                PropertyValue::Words("Hello".to_owned()),
+                PropertyValue::Words("Arial".to_owned()),
+                PropertyValue::Number(0.1),
+                PropertyValue::Colour(TextColour::new(1, 2, 3, 4)),
+            ]
         );
         assert_eq!(
-            text_value(&object, PropertyId::FontFamily),
-            Some(PropertyValue::Words("Arial".to_owned()))
+            EffectKind::TEXT.default_values()[1..],
+            values_of_a_text_object(&TextObject::default())[1..],
+            "the effect begins as a new text object, but for the words"
         );
-        assert_eq!(
-            text_value(&object, PropertyId::FontSize),
-            Some(PropertyValue::Number(0.1))
-        );
-        assert_eq!(
-            text_value(&object, PropertyId::Colour),
-            Some(PropertyValue::Colour(TextColour::new(1, 2, 3, 4)))
-        );
-        assert_eq!(
-            text_value(&object, PropertyId::Rotation),
-            Some(PropertyValue::Number(object.rotation.degrees()))
-        );
-        assert_eq!(text_value(&object, PropertyId::Gain), None);
     }
 
     #[test]
-    fn a_text_object_made_to_have_the_values_it_has_is_the_same_object() {
+    fn a_text_object_made_of_the_values_it_has_and_the_place_it_is_at_is_the_same_object() {
         let object = TextObject {
             text: "Hello".to_owned(),
             font_family: "Arial".to_owned(),
@@ -330,23 +337,73 @@ mod tests {
             rotation: Angle::from_degrees(12.0),
             ..TextObject::default()
         };
-        for property in crate::test_support::properties_of_every_kind() {
-            let Some(value) = text_value(&object, property) else {
-                continue;
-            };
-            let again = with_text_value(&object, property, &value);
-            assert_eq!(again.text, object.text);
-            assert_eq!(again.font_family, object.font_family);
-            assert_eq!(again.colour, object.colour);
-            assert!(close(
-                again.font_size.fraction_of_picture_height(),
-                object.font_size.fraction_of_picture_height()
-            ));
-            assert!(
-                close(again.rotation.degrees(), object.rotation.degrees()),
-                "{property:?}"
-            );
-        }
+        assert_eq!(
+            text_object_of_values(&values_of_a_text_object(&object), object.placement()),
+            object
+        );
+    }
+
+    #[test]
+    fn a_value_that_is_missing_or_of_another_kind_is_what_a_new_text_object_has_and_a_size_is_brought_inside_what_a_text_can_be()
+     {
+        let new = TextObject::default();
+        let elsewhere = somewhere();
+        let made = text_object_of_values(&[], elsewhere);
+        assert_eq!(
+            made,
+            new.with_placement(elsewhere),
+            "nothing given: a new text object, where it is said to be"
+        );
+        let wrong = text_object_of_values(
+            &[
+                PropertyValue::Number(1.0),
+                PropertyValue::Flag(true),
+                PropertyValue::Words("not a size".to_owned()),
+                PropertyValue::Pair(1.0, 2.0),
+            ],
+            elsewhere,
+        );
+        assert_eq!(
+            wrong,
+            new.with_placement(elsewhere),
+            "every value of another kind: a new text object"
+        );
+        let too_big = text_object_of_values(
+            &[
+                PropertyValue::Words("a".to_owned()),
+                PropertyValue::Words(String::new()),
+                PropertyValue::Number(9.0),
+            ],
+            elsewhere,
+        );
+        assert_eq!(
+            too_big.font_size,
+            FontSize::from_fraction_of_picture_height(FontSize::LARGEST_FRACTION)
+        );
+        assert_eq!(too_big.text, "a", "and what is right is kept");
+    }
+
+    #[test]
+    fn the_words_of_a_text_clip_are_the_first_value_of_its_text_effect_and_nothing_if_it_has_none() {
+        let text = crate::project::tracks::TextClip::new(30, EffectInstanceId::FIRST).unwrap();
+        assert_eq!(
+            words_of_a_text_clip(&text, &crate::project::Effects::none()),
+            "",
+            "no text effect: no words"
+        );
+        let mut effects = crate::project::Effects::none();
+        effects.add(EffectKind::TEXT);
+        effects.set_value(
+            properties_of_the_text_effect(EffectInstanceId::FIRST)[0],
+            &PropertyValue::Words("Hello".to_owned()),
+        );
+        assert_eq!(words_of_a_text_clip(&text, &effects), "Hello");
+        let elsewhere = crate::project::tracks::TextClip::new(30, EffectInstanceId::new(7)).unwrap();
+        assert_eq!(
+            words_of_a_text_clip(&elsewhere, &effects),
+            "",
+            "the effect of another name is not its content"
+        );
     }
 
     #[test]
@@ -370,25 +427,6 @@ mod tests {
 
         let nothing = Animation::default();
         assert_eq!(nothing.placement_at(placement, 5), placement);
-    }
-
-    #[test]
-    fn the_text_of_a_text_object_animated_changes_at_its_keyframes_and_what_is_not_animated_stays() {
-        let mut animation = Animation::default();
-        animation.set_keyframe(PropertyId::Text, 0, PropertyValue::Words("One".to_owned()));
-        animation.set_keyframe(PropertyId::Text, 20, PropertyValue::Words("Two".to_owned()));
-        animation.set_keyframe(PropertyId::FontSize, 0, PropertyValue::Number(0.1));
-        animation.set_keyframe(PropertyId::FontSize, 20, PropertyValue::Number(0.3));
-        let object = TextObject {
-            colour: TextColour::new(9, 9, 9, 255),
-            ..TextObject::default()
-        };
-
-        let at_10 = animation.text_object_at(&object, 10);
-        assert_eq!(at_10.text, "One");
-        assert!(close(at_10.font_size.fraction_of_picture_height(), 0.2));
-        assert_eq!(at_10.colour, TextColour::new(9, 9, 9, 255));
-        assert_eq!(animation.text_object_at(&object, 20).text, "Two");
     }
 
     #[test]

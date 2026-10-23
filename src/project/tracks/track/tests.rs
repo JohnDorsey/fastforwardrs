@@ -8,7 +8,10 @@ use crate::project::tracks::media_clip::MediaClip;
 use crate::project::tracks::placement::{Angle, CanvasArea, Placement};
 use crate::project::tracks::text_object::{TextClip, TextObject};
 use crate::project::tracks::track_height::TrackHeight;
-use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier};
+use crate::project::{
+    EffectInstanceId, FrameRate, SourceFrameIndex, SourceMediaIdentifier, properties_of_the_text_effect,
+    text_object_of_values,
+};
 use crate::test_support::DeterministicRandomNumbers;
 
 const SOURCE: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
@@ -41,7 +44,7 @@ pub(super) fn sound(first: u64, end: u64, factor: u32) -> Clip {
 }
 
 pub(super) fn text(duration: u64) -> Clip {
-    Clip::Text(TextClip::new(TextObject::default(), duration).unwrap())
+    Clip::Text(TextClip::new(duration, EffectInstanceId::FIRST).unwrap())
 }
 
 /// A picture that is shown for `duration` frames.
@@ -58,8 +61,25 @@ pub(super) fn clip_id(number: u32) -> ClipId {
 }
 
 /// A track with these clips, each with the number of empty frames before it.
+/// A track of `clips`. (A text clip on it has no text effect, which a text that the program made always has as the first of its chain: see [`texts_of_the_track`].)
 pub(super) fn track_of(clips: Vec<(u64, Clip)>) -> Track {
     Track::new(THE_TRACK, "track 0").with_clips(clips)
+}
+
+/// The track `track` in which every text clip that has no effect has a text effect, saying what a new text says.
+fn texts_of_the_track(track: Track) -> Track {
+    crate::test_support::with_the_text_effect_on_every_text(track)
+}
+
+/// What the text clip that is the clip number `index` of `track` says when nothing about it is animated: the values of its text effect, and where the clip is.
+fn the_text_object_of(track: &Track, index: usize) -> TextObject {
+    let entry = &track.entries()[index];
+    let text = entry.clip().as_text().expect("a text clip");
+    let values: Vec<_> = properties_of_the_text_effect(text.content())
+        .into_iter()
+        .map(|property| entry.effects().value_of(property).expect("the text effect is there"))
+        .collect();
+    text_object_of_values(&values, text.placement())
 }
 
 /// Where each clip starts and ends, in order.
@@ -656,7 +676,7 @@ fn a_clip_put_on_the_track_is_given_a_name_no_other_clip_has_ever_had() {
 
 #[test]
 fn changing_what_a_text_clip_says_changes_nothing_about_where_it_is() {
-    let mut track = track_of(vec![(10, text(30))]);
+    let mut track = texts_of_the_track(track_of(vec![(10, text(30))]));
     let id = ids(&track)[0];
     let object = TextObject {
         text: "Hello".to_owned(),
@@ -664,7 +684,7 @@ fn changing_what_a_text_clip_says_changes_nothing_about_where_it_is() {
         ..TextObject::default()
     };
     track.set_text_object(id, object.clone()).unwrap();
-    assert_eq!(track.entries()[0].clip().as_text().unwrap().object, object);
+    assert_eq!(the_text_object_of(&track, 0), object);
     assert_eq!(spans(&track), vec![(10, 40)]);
     let mut track_with_video = track_of(vec![(0, video(0, 10, 1))]);
     let video_id = ids(&track_with_video)[0];
@@ -680,7 +700,11 @@ fn somewhere() -> Placement {
 
 #[test]
 fn a_text_clip_or_a_video_clip_can_be_put_somewhere_on_the_picture_and_nothing_moves_on_the_track() {
-    let mut track = track_of(vec![(10, text(30)), (0, video(0, 100, 1)), (7, video(0, 20, 2))]);
+    let mut track = texts_of_the_track(track_of(vec![
+        (10, text(30)),
+        (0, video(0, 100, 1)),
+        (7, video(0, 20, 2)),
+    ]));
     let [text_id, video_id, _untouched_video] = ids(&track)[..] else {
         panic!("three clips")
     };
@@ -698,7 +722,7 @@ fn a_text_clip_or_a_video_clip_can_be_put_somewhere_on_the_picture_and_nothing_m
     );
     assert_eq!(spans(&track), spans_before);
     assert_eq!(
-        track.entries()[0].clip().as_text().unwrap().object.text,
+        the_text_object_of(&track, 0).text,
         TextObject::default().text,
         "what the text says is as it was"
     );

@@ -12,7 +12,7 @@ use super::clip_drag_tests::project_of_tracks;
 use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::dialogs::Dialog;
-use crate::project::groups::test_projects::lay_out;
+use crate::project::groups::test_projects::{lay_out, lay_out_whole_texts};
 use crate::project::{
     AnimationTarget, ClipMove, FrameRate, GroupKind, Member, PropertyId, RackDestination, SpeedFactor,
     TimelineFrameIndex,
@@ -243,7 +243,7 @@ fn a_frame_rate_that_would_put_a_clip_a_frame_inside_the_rectangle_of_a_clip_gro
 #[test]
 fn an_edge_that_is_asked_to_go_where_it_would_cut_across_a_clip_is_refused_and_the_clip_is_named() {
     // The clip group has the clips at 20 to 50 and 65 to 95; the third, at 110 to 140, is cut across by an edge at 120.
-    let laid = lay_out(&[&[(20, 30), (65, 30), (110, 30)]]);
+    let laid = lay_out_whole_texts(&[&[(20, 30), (65, 30), (110, 30)]]);
     let (a, b) = (laid.clip(0, 0), laid.clip(0, 1));
     let mut project = laid.project;
     let group = project

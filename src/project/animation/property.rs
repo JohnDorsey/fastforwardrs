@@ -28,14 +28,6 @@ pub enum PropertyId {
     Size,
     /// How far a video, a picture, a text object or a generator clip is turned, in degrees.
     Rotation,
-    /// What a text object says.
-    Text,
-    /// The font of a text object.
-    FontFamily,
-    /// How big the letters of a text object are.
-    FontSize,
-    /// The colour of the letters of a text object.
-    Colour,
     /// The value in place `slot` of the effect of kind `effect` that is named `instance` in the chain of effects of a clip or a track (and a
     /// property only of what has that effect). The kind of effect is here so that what the property is, what kind of value it has and what
     /// it is called can be said without looking in the chain.
@@ -64,17 +56,7 @@ pub enum ValueKind {
 impl PropertyId {
     /// Every property that a clip or a track has of its own, in the order they are kept and shown in. (The values of effects, which are
     /// the others, are as many as the effects there are: see [`Effect::properties`](crate::project::Effect::properties).)
-    pub const OWN: [PropertyId; 9] = [
-        Self::Gain,
-        Self::Muted,
-        Self::Position,
-        Self::Size,
-        Self::Rotation,
-        Self::Text,
-        Self::FontFamily,
-        Self::FontSize,
-        Self::Colour,
-    ];
+    pub const OWN: [PropertyId; 5] = [Self::Gain, Self::Muted, Self::Position, Self::Size, Self::Rotation];
 
     /// The property that is the value in place `slot` of the effect `instance`, which is of the kind `effect`.
     pub const fn effect_value(effect: EffectKind, instance: EffectInstanceId, slot: u8) -> Self {
@@ -86,11 +68,9 @@ impl PropertyId {
     pub fn kind(self) -> ValueKind {
         match self {
             Self::EffectValue { effect, slot, .. } => effect.value_kind(usize::from(slot)).unwrap_or(ValueKind::Number),
-            Self::Gain | Self::Rotation | Self::FontSize => ValueKind::Number,
+            Self::Gain | Self::Rotation => ValueKind::Number,
             Self::Position | Self::Size => ValueKind::Pair,
-            Self::Colour => ValueKind::Colour,
             Self::Muted => ValueKind::Flag,
-            Self::Text | Self::FontFamily => ValueKind::Words,
         }
     }
 
@@ -107,10 +87,6 @@ impl PropertyId {
             Self::Position => "position",
             Self::Size => "size",
             Self::Rotation => "rotation",
-            Self::Text => "text",
-            Self::FontFamily => "font",
-            Self::FontSize => "font size",
-            Self::Colour => "colour",
         }
     }
 
@@ -166,8 +142,7 @@ impl PropertyId {
     }
 
     /// Whether a clip of this kind has this property: a video or a sound has its loudness and its mute switch, a
-    /// video, a picture, a text object and a generator clip are somewhere on the picture, and a text object has words with a font, a size
-    /// and a colour.
+    /// video, a picture, a text object and a generator clip are somewhere on the picture. (What a text object says and how it looks are the values of its text effect.)
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self {
             Self::Gain | Self::Muted => matches!(kind, ClipKind::Video | ClipKind::Audio),
@@ -177,7 +152,6 @@ impl PropertyId {
                     ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Generator
                 )
             }
-            Self::Text | Self::FontFamily | Self::FontSize | Self::Colour => kind == ClipKind::Text,
             // (A value of an effect is a property of a clip that can have the kind of effect: whether it has this one is for `is_had_by_a_clip`.)
             Self::EffectValue { effect, .. } => effect.applies_to_a_clip_of_kind(kind),
         }
@@ -274,7 +248,10 @@ impl PropertyValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE, properties_of_every_kind};
+    use crate::test_support::{
+        COLOUR_OF_A_TEXT, FONT_OF_A_TEXT, HUE_SHIFT_AS_THE_FIRST_EFFECT as HUE, SIZE_OF_A_TEXT, TEXT_OF_A_TEXT,
+        properties_of_every_kind,
+    };
 
     #[test]
     fn every_property_has_a_name_that_only_it_has_and_that_it_is_found_by_if_it_is_one_of_a_clip_or_a_track_itself() {
@@ -307,10 +284,9 @@ mod tests {
         assert_eq!(of(ClipKind::Video), vec![Gain, Muted, Position, Size, Rotation, HUE]);
         assert_eq!(of(ClipKind::Audio), vec![Gain, Muted]);
         assert_eq!(of(ClipKind::Image), vec![Position, Size, Rotation, HUE]);
-        assert_eq!(
-            of(ClipKind::Text),
-            vec![Position, Size, Rotation, Text, FontFamily, FontSize, Colour, HUE]
-        );
+        // (Rewritten on purpose in phase 9: what a text says and how it looks are the values of its text effect, and are not properties of the clip, so they are not in this list;
+        // a text that has the text effect has them as the values of an effect.)
+        assert_eq!(of(ClipKind::Text), vec![Position, Size, Rotation, HUE]);
         assert_eq!(of(ClipKind::Crate), Vec::<PropertyId>::new());
         let of_a_track: Vec<PropertyId> = properties_of_every_kind()
             .into_iter()
@@ -433,16 +409,11 @@ mod tests {
         assert_eq!(PropertyValue::Pair(0.0, 0.0).kind(), PropertyId::Position.kind());
         assert_eq!(PropertyValue::Pair(0.0, 0.0).kind(), PropertyId::Size.kind());
         assert_eq!(PropertyValue::Number(0.0).kind(), PropertyId::Rotation.kind());
-        assert_eq!(PropertyValue::Number(0.0).kind(), PropertyId::FontSize.kind());
+        // (The words, the font, the size and the colour of a text are values of its text effect since phase 9, and have the kinds that they had as properties of the clip.)
+        assert_eq!(PropertyValue::Number(0.0).kind(), SIZE_OF_A_TEXT.kind());
         assert_eq!(PropertyValue::Flag(true).kind(), PropertyId::Muted.kind());
-        assert_eq!(PropertyValue::Words(String::new()).kind(), PropertyId::Text.kind());
-        assert_eq!(
-            PropertyValue::Words(String::new()).kind(),
-            PropertyId::FontFamily.kind()
-        );
-        assert_eq!(
-            PropertyValue::Colour(TextColour::WHITE).kind(),
-            PropertyId::Colour.kind()
-        );
+        assert_eq!(PropertyValue::Words(String::new()).kind(), TEXT_OF_A_TEXT.kind());
+        assert_eq!(PropertyValue::Words(String::new()).kind(), FONT_OF_A_TEXT.kind());
+        assert_eq!(PropertyValue::Colour(TextColour::WHITE).kind(), COLOUR_OF_A_TEXT.kind());
     }
 }

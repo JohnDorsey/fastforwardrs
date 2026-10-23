@@ -16,8 +16,8 @@ use super::document::{AnimationDocument, KeyframeDocument, MemberDocument, RackD
 use super::legacy_effects;
 use super::value_from_document;
 use crate::project::{
-    AnimationTarget, ClipId, ClipKind, Drawer, EffectInstanceId, Effects, GroupId, Member, PropertyId, Rack, RackId,
-    Track, TrackId,
+    AnimationTarget, ClipId, ClipKind, Drawer, EffectInstanceId, EffectKind, Effects, GroupId, Member, PropertyId,
+    Rack, RackId, Track, TrackId,
 };
 
 /// What is known of what a file has, which is what the racks it has can be checked against.
@@ -27,6 +27,9 @@ pub(super) struct FileContents {
     /// The effects of each clip of each track, in the same order, and those of each track.
     pub effects_of_the_clips: Vec<Vec<Effects>>,
     pub effects_of_the_tracks: Vec<Effects>,
+    /// The effect that each clip of each track is made of, if it is made of one (a generator clip, and a text clip, whether it was read as such or made one of by the migration of a file
+    /// of format 17 or earlier).
+    pub contents_of_the_clips: Vec<Vec<Option<EffectInstanceId>>>,
 }
 
 impl FileContents {
@@ -74,11 +77,13 @@ impl FileContents {
     ) -> Option<PropertyId> {
         let effects = self.effects_of(target);
         match effect {
-            None => PropertyId::from_name(name).or_else(|| {
-                effects
-                    .iter()
-                    .find_map(|effect| legacy_effects::the_value_of_the_effect_called(effect, name))
-            }),
+            None => PropertyId::from_name(name)
+                .or_else(|| self.value_of_the_text_that_a_file_of_an_earlier_version_calls(name, target))
+                .or_else(|| {
+                    effects
+                        .iter()
+                        .find_map(|effect| legacy_effects::the_value_of_the_effect_called(effect, name))
+                }),
             Some(instance) => {
                 let effect = effects.instance(instance)?;
                 effect
@@ -86,6 +91,31 @@ impl FileContents {
                     .or_else(|| legacy_effects::the_value_of_the_effect_called(effect, name))
             }
         }
+    }
+
+    /// The value of the text effect of `target`, if it is a text clip, that a file of format 17 or earlier calls `name` (what a text says, its font, its size and its colour were properties
+    /// of the clip itself then, `"text"`, `"font"`, `"font size"` and `"colour"`; they are the values of its text effect since, and a rack of them says which effect).
+    fn value_of_the_text_that_a_file_of_an_earlier_version_calls(
+        &self,
+        name: &str,
+        target: AnimationTarget,
+    ) -> Option<PropertyId> {
+        let AnimationTarget::Clip(clip) = target else {
+            return None;
+        };
+        let (track, number) = (clip.origin().value() as usize, clip.number() as usize);
+        if self.kinds_of_the_clips[track][number] != ClipKind::Text {
+            return None;
+        }
+        let content = self.contents_of_the_clips[track][number]?;
+        let slot = match name {
+            "text" => 0,
+            "font" => 1,
+            "font size" => 2,
+            "colour" => 3,
+            _ => return None,
+        };
+        Some(PropertyId::effect_value(EffectKind::TEXT, content, slot))
     }
 
     /// Whether `target` (which the file has) has `property`: a value of an effect only if it has the effect.
