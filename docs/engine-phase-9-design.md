@@ -1,0 +1,64 @@
+<!--
+SPDX-FileCopyrightText: 2026 John Dorsey
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+# Phase 9: text objects become generators (design)
+
+Written 2026-10-22, from the plan's phase 9 ([`plugin-system-plan-of-action.md`](plugin-system-plan-of-action.md)), EF-06, SC-05, ID-05 and Q-17 of [the features list](plugin-system-features.md), the generator clip of phase 6.5 ([`engine-phase-6-design.md`](engine-phase-6-design.md)),
+and the code as it is. Tags: **[V]** verified in the code or by running something; **[D]** decided by the maintainer; **[P]** my proposal, which stands unless it is objected to; **[B]** my belief.
+
+**Effort I suggest: high** (the plan says M-L). **Riskiest piece: 9.2 to 9.4 together** (section 4): the model, the picture and the file change under each other and cannot be shipped one at a time.
+
+## 0. What was asked [D]
+
+* The plan (2026-10-15): *Text becomes a generator effect with the parameters it has today (text, font, size, colour), drawn on the CPU and uploaded (a second kind of host, "CPU image producer"). One migration from format 11. Done last because it changes a lot for no new capability and benefits from a settled model. Gate: every text test passes unmodified except the file-format ones; old projects look the same.*
+* Q-17 (2026-10-15, default accepted): *later, once the plugin model has settled.* The maintainer said on 2026-10-22, when they could not do experiments at home: **"continue to phase 9"**. The model has settled (phases 4 to 6 are built).
+* (The plan says "format 12" and "from format 11": the file format is **17** now, so the migration is to **18**.)
+
+## 1. What there is [V, read 2026-10-22]
+
+* **A text object** is `Clip::Text(TextClip { object: TextObject { text, font_family, font_size (a fraction of the picture's height; shown as points on 1080), colour: TextColour (straight RGBA, 8 bits), area, rotation }, duration_in_frames })`, kind `ClipKind::Text`. `Clip::Text`, `ClipKind::Text` and `as_text()` are named in **39 places of the program** (the largest groups: `project/tracks/clip.rs` 7, `project/animation/property.rs` 4, `project/animating.rs` 4, `project/tracks/track/editing.rs` 3, `project_file/mod.rs` 3), and the text types in about **70 files that have tests** (about 100 mentions in tests: the model, the keyframe tests, the preview, the export, the file format).
+* **What a text says and how it looks can be animated**: the clip's own properties `PropertyId::{Text, FontFamily, FontSize, Colour}` (kinds *words*, *words*, *number*, *colour*), with keyframes, racks and the stopwatch buttons like any property; `Project::text_object_at(clip, frame)` is the object at a frame; where it is (`Position`, `Size`, `Rotation`) is the placement that the generator clip has too.
+* **A generator clip** (6.5) is `Clip::Generator(GeneratorClip { duration_in_frames, content: EffectInstanceId, placement })`, **and its content is the first effect of its chain**: an effect that takes no picture, whose values are properties like any effect's (keyframes, controls, a place in the file with no more code). The content cannot be taken off, switched off, copied or moved (`Project::the_clip_whose_content_is`); `Track::insert_generator_clip_at(frame, kind, frames)` makes the clip and puts the content on it.
+* **The values of an effect are `PropertyValue`s**: *number*, *pair*, *colour* (the same `TextColour`), *flag*, *words*; a descriptor says the control (`ParameterControl::{Automatic, Slider, Integer, Toggle, Choice, Resource}`); *words* with `Automatic` are a text field. The built-in effects are statics (`project/effects/built_in.rs`), their descriptors never change without a new version, and a project file keeps a snapshot of the descriptor of each effect it uses.
+* **A text is already a CPU image producer, and the engine does not know it**: the preview and the export describe a text layer as `PreviewLayerContent::Text(object)`; `frame_scene/describe.rs` makes its picture with `TextPictures::text_picture` (the text renderer, on the CPU, once the fonts are loaded: `HowToMakeIt::Text`), and it goes to the engine as **a picture** under an id made of the text's look (`KindOfPicture::Text`). So "the second kind of host" is a name for something that exists: nothing in the engine changes for text, and no shader runs for it.
+* The file has `Text { text, font_family, font_size_fraction_of_frame_height, colour, area, rotation_degrees, animation, drawer, effects, badges }` and `Generator { content, area, rotation_degrees, drawer, effects, badges }` as entries of a track (`project_file/document.rs`); keyframes are by property name (`"text"`, `"font"`, `"font size"`, `"colour"` for the clip's own; an effect's by the id of its instance and of the value).
+
+## 2. What I propose [P]
+
+| | | why |
+|---|---|---|
+| **T1** | **A text clip is a clip whose content is the effect `builtin:text`**, as a generator clip's is: `TextClip { duration_in_frames, content: EffectInstanceId, placement }` with the content the first effect of its chain, **and the kind stays `ClipKind::Text`**. The two clip kinds are not merged now. | The plan says the text becomes a generator *effect*; this does that (the text is the *content*, an effect with values, keyframes and a descriptor) and keeps the 39 places, the timeline's names and tiles, the selection, and the dispatch of the properties panel as they are. Merging `TextClip` into `GeneratorClip` (a tag in it, and no `Clip::Text`) is the cleaner end, touches the same places and about a hundred tests, and can be done afterwards as a mechanical step: **I do not do it unless you ask**. |
+| **T2** | **`builtin:text`**, version 1.0, domain *picture*, category *Generators*, no shader. Its values, in this order: `text` (*words*, the control *Multiline*, default `Text`), `font` (*words*, the control *Font*, default empty = the program's font), `size` (*number*, **a fraction of the picture's height**, the control *Points of the picture's height*, default 0.06), `colour` (*colour*, default white). | The values are what a text object has today, and the **fraction stays the stored value** so that a project that is migrated makes the very same pixels: points would be the fraction times 1080 in `f32` and back, which is not always the same number, and the size in pixels that the text renderer is given would differ in its last bits. |
+| **T3** | **Q-17 / ID-05 answered: a font is a *words* value with a control** (`ParameterControl::Font`), not a new kind of value. The controls added are `Multiline`, `Font` and `PointsOfThePictureHeight`. A font that the computer does not have is kept as it is, and the program's font is used, as now. | Nothing in the animation (a words value holds until the next keyframe), the file (a string) or the keyframe code changes: only the panel's row. |
+| **T4** | **Where the text is stays the clip's**: `Position`, `Size`, `Rotation` (the area and the turning) are the clip's own properties, as for a generator and a picture. | They are properties of the clip and not of an effect, and the box on the preview moves them. |
+| **T5** | **`TextObject` stays** as the value that the panel, the commands (`NewTextObject`, `SetTextObject`), `Project::insert_text` and `text_object_at` speak in: it is **read from and written to the values of the content** (and a keyframe where the value is animated, as `SetTextObject` does today for the properties that have keyframes). `PropertyId::{Text, FontFamily, FontSize, Colour}` go; the same four are `EffectValue` properties of the content (and the rows of racks and the lists of keyframes follow, since they are by property). | What a person or a test does with a text through these does not change. |
+| **T6** | **The describer reads the values of the content at the frame** (the content's values with its keyframes applied, which is what `text_at` does for the clip's own today) and makes `LayerContent::Text(object)` of them; the rest of the chain is done to the picture, as to a picture of a video. **The engine is not touched.** | The picture of a text is made by the code that makes it now. |
+| **T7** | **The migration, format 18** (`project_file`): a text entry of a file of format 17 or less is read as it is (its fields stay readable: `legacy_text`) and becomes a text clip whose chain has `builtin:text` first (with a snapshot of its descriptor), **with the object's four values, and the keyframes and the racks of the four properties moved to the values of that instance**; the other effects of the clip are after it, as they were, with the names they had. Saved, it is the new entry (`content`, `area`, `rotation_degrees`, `effects`, `drawer`, `badges`), as a generator is. A file of format 18 that a program of format 17 opens is refused as always (`file_format_version` too new). | One migration, as the plan says. |
+| **T8** | **The properties panel keeps its rows** (text, font, size, colour, how long) and binds them to the values of the content (`Animatable::of_an_effect`) instead of the clip's own properties. The content shows in the chain as a generator's does and cannot be taken off, switched off, copied or moved (the rule of `the_clip_whose_content_is` covers it). | **Nothing a person sees changes** (UI rule: no new always-visible interface). |
+| **T9** | **The gate, made stricter and made honest.** *Old projects look the same*: **before any change**, fixtures are saved by the program as it is (a text, a text with keyframes of each of the four, one with racks, one with effects, one in a group, one over a video), and the pictures that the engine makes of them at several frames are kept as hashes in the tests (9.0); after the migration they must be the same, pixel for pixel. *Every text test passes unmodified*: **this holds for every test that works through the API (T5) and the pictures**; it **cannot** for a test that builds a `TextClip` itself or reads `text.object` or names `PropertyId::Text` (the model's shape changes under it). Those are **changed mechanically (the same assertions, the new way of building)**, and **listed in the report**, as the tests that were rewritten on purpose are in phase 6's. | The plan's gate was written before the shape of the code was known. |
+
+## 3. What this does not do
+
+* A text that is a *shader* (a different way of drawing text) is not built; nor are outlines, shadows, boxes behind the text, or more than one style in a text. They are new capabilities (the plan: "for no new capability").
+* The two clip kinds are not merged (T1).
+* The text of one clip is not made available to another clip.
+
+## 4. Pieces and their order [P]
+
+| | piece | ends with |
+|---|---|---|
+| **9.0** | **Lock what a text is now**: the fixtures and the pictures of T9 (the program as it is, nothing changed); a test that says which tests name the types that change (a list, so that the changed tests are known). | green; **committed alone** |
+| **9.1** | **The descriptor and the controls**: `builtin:text` (T2), `ParameterControl::{Multiline, Font, PointsOfThePictureHeight}` and their rows in the effect panels; the descriptor test that holds version 1.0. Nothing uses the effect yet. | green; committed alone |
+| **9.2 to 9.4** | **The model, the picture and the file together** (they cannot be shipped one at a time): `TextClip` with a content (T1, T5); the track's `insert_text_at`, `set_text_object`; `text_object_at` and the keyframes and racks as values of the content (the own properties go); the layer from the values (T6); the migration and the new entry (T7). | green: **all of 9.0's pictures the same**, the file tests of format 18 |
+| **9.5** | **The panel and the lists** (T8): the rows bound to the content, the keyframe lists and racks, the clip's menu, the timeline's names. | green; the panel's tests unmodified |
+| **9.6** | **The end**: dead code out (`legacy` text fields are kept for reading), the documents (`project-file-format.md`, `using-the-editor-in-detail.md`, `effects-and-shaders-in-detail.md`, the features list), a planted-mistakes campaign over the new code, the report. | the report |
+
+**The riskiest is 9.2 to 9.4**: about 40 places and about 100 mentions in tests change shape in one step. If it turns out to be bigger than the plan's M-L I will stop at 9.1 (which changes nothing), say so, and ask.
+
+## 5. What I will not know until it is built [B]
+
+* How many tests name the types that change (the list of 9.0 says it before 9.2).
+* Whether the racks of the four properties move cleanly (a rack is by property: it is the part of the format that I understand least; 9.0 has a fixture with one).
+* Whether `Project::the_clip_whose_content_is` is the one rule for both clip kinds, or the text needs its own (it has `Clip::as_generator()` to read the content, and a text clip would be another variant).
