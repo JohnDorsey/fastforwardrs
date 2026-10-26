@@ -7,7 +7,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use lv2_host::{PluginDescription, PortDescription, PortDirection, PortKind, ScalePoint, ScannedPlugin};
+use lv2_host::{PluginDescription, PortDescription, PortDirection, PortKind, ScalePoint, ScannedPlugin, UiDescription};
 
 use super::effects::{effect_of_an_lv2_plugin, key_of_an_lv2_plugin, plugins_found_in};
 use super::folders::{folders_looked_in_with, is_an_lv2_bundle, lv2_bundles_in};
@@ -104,6 +104,59 @@ fn the_audio_ports_decide_whether_a_plugin_can_be_an_effect_and_the_reason_is_sa
     assert!(layout(1, 0).unwrap_err().contains("no audio output"));
     let error = layout(3, 3).unwrap_err();
     assert!(error.contains("3 audio inputs and 3 audio outputs"), "{error}");
+}
+
+/// An interface of the class that `class` is in the namespace of the extension, with a binary, that requires these features.
+fn an_interface(class: &str, required: &[&str]) -> UiDescription {
+    UiDescription {
+        uri: format!("http://example.org/plugins/amp#{class}"),
+        kinds: vec![format!("http://lv2plug.in/ns/extensions/ui#{class}")],
+        binary: Some(PathBuf::from("/lv2/amp.lv2/amp_ui.so")),
+        required_features: required
+            .iter()
+            .map(|feature| format!("http://lv2plug.in/ns/extensions/ui#{feature}"))
+            .collect(),
+        optional_features: Vec::new(),
+        extension_data: Vec::new(),
+    }
+}
+
+/// The class of the interface that a window of this system is (said here by the system that the tests are built for, and not by the program that is tried).
+fn the_class_of_this_system() -> &'static str {
+    if cfg!(windows) {
+        "WindowsUI"
+    } else if cfg!(target_os = "macos") {
+        "CocoaUI"
+    } else {
+        "X11UI"
+    }
+}
+
+#[test]
+fn a_plugin_has_a_window_when_it_has_an_interface_of_this_system_that_asks_for_nothing_that_is_not_given() {
+    let mut plugin = a_plugin_with(Vec::new());
+    assert!(!effect_of(&plugin).unwrap().has_a_window, "it has no interface");
+
+    plugin.description.user_interfaces = vec![an_interface("Gtk3UI", &[]), an_interface("Qt5UI", &["parent"])];
+    assert!(
+        !effect_of(&plugin).unwrap().has_a_window,
+        "none of them is of this system"
+    );
+
+    plugin.description.user_interfaces = vec![an_interface(the_class_of_this_system(), &["parent", "somethingElse"])];
+    assert!(
+        !effect_of(&plugin).unwrap().has_a_window,
+        "it requires a feature that this program does not give"
+    );
+
+    plugin.description.user_interfaces = vec![an_interface(the_class_of_this_system(), &["parent", "resize"])];
+    assert!(effect_of(&plugin).unwrap().has_a_window);
+
+    plugin.description.user_interfaces = vec![
+        an_interface("Gtk3UI", &[]),
+        an_interface(the_class_of_this_system(), &["idleInterface", "touch", "portMap"]),
+    ];
+    assert!(effect_of(&plugin).unwrap().has_a_window, "one of them is enough");
 }
 
 #[test]

@@ -2099,9 +2099,11 @@ dependencies = [
  "lv2-test-plugins",
  "oxrdf",
  "oxttl",
+ "raw-window-handle",
  "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

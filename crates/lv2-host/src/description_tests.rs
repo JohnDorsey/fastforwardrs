@@ -135,7 +135,10 @@ const AMP: &str = r#"
 
 <urn:test:amp#ui>
     a ui:WindowsUI ;
-    ui:binary <amp_ui.dll> .
+    ui:binary <amp_ui.dll> ;
+    lv2:requiredFeature ui:parent , ui:parent ;
+    lv2:optionalFeature ui:resize , ui:touch ;
+    lv2:extensionData ui:resize , ui:idleInterface .
 "#;
 
 fn the_amp() -> PluginDescription {
@@ -199,6 +202,118 @@ fn a_plugin_is_described_as_its_bundle_says_with_the_name_in_the_language_that_i
     assert_eq!(
         plugin.user_interfaces[0].binary,
         Some(Path::new("bundle").join("amp_ui.dll"))
+    );
+    assert_eq!(
+        plugin.user_interfaces[0].required_features,
+        vec!["http://lv2plug.in/ns/extensions/ui#parent".to_owned()],
+        "once, though it was said twice"
+    );
+    assert_eq!(
+        plugin.user_interfaces[0].optional_features,
+        vec![
+            "http://lv2plug.in/ns/extensions/ui#resize".to_owned(),
+            "http://lv2plug.in/ns/extensions/ui#touch".to_owned()
+        ]
+    );
+    assert_eq!(
+        plugin.user_interfaces[0].extension_data,
+        vec![
+            "http://lv2plug.in/ns/extensions/ui#idleInterface".to_owned(),
+            "http://lv2plug.in/ns/extensions/ui#resize".to_owned()
+        ]
+    );
+}
+
+const UI: &str = "http://lv2plug.in/ns/extensions/ui#";
+
+fn a_ui(uri: &str, class: &str, required: &[&str]) -> UiDescription {
+    UiDescription {
+        uri: uri.to_owned(),
+        kinds: vec![format!("{UI}{class}")],
+        binary: Some(Path::new("bundle").join("ui.dll")),
+        required_features: required.iter().map(|feature| (*feature).to_owned()).collect(),
+        optional_features: Vec::new(),
+        extension_data: Vec::new(),
+    }
+}
+
+#[test]
+fn a_window_is_the_interface_of_the_class_of_the_system_with_a_binary_and_with_nothing_required_that_is_not_given() {
+    let mut plugin = the_amp();
+    let parent = format!("{UI}parent");
+    plugin.user_interfaces = vec![
+        a_ui("urn:ui:gtk", "Gtk3UI", &[]),
+        a_ui("urn:ui:needs_more", "WindowsUI", &[&parent, "urn:something:else"]),
+        a_ui("urn:ui:good_x11", "X11UI", &[&parent]),
+        a_ui("urn:ui:good_windows", "WindowsUI", &[&parent]),
+    ];
+    let mut without_a_binary = a_ui("urn:ui:no_binary", "CocoaUI", &[]);
+    without_a_binary.binary = None;
+    plugin.user_interfaces.push(without_a_binary);
+    plugin.user_interfaces.push(a_ui("urn:ui:good_cocoa", "CocoaUI", &[]));
+
+    assert_eq!(
+        window_of(&plugin, "win32").map(|ui| ui.uri.as_str()),
+        Some("urn:ui:good_windows")
+    );
+    assert_eq!(
+        window_of(&plugin, "x11").map(|ui| ui.uri.as_str()),
+        Some("urn:ui:good_x11")
+    );
+    assert_eq!(
+        window_of(&plugin, "cocoa").map(|ui| ui.uri.as_str()),
+        Some("urn:ui:good_cocoa"),
+        "the one with no binary is passed over"
+    );
+    assert_eq!(
+        window_of(&plugin, "wayland"),
+        None,
+        "a kind of window that is not known"
+    );
+    plugin.user_interfaces.retain(|ui| ui.uri != "urn:ui:good_windows");
+    assert_eq!(
+        window_of(&plugin, "win32"),
+        None,
+        "what is left of this class needs a feature that is not given"
+    );
+}
+
+#[test]
+fn the_class_of_an_interface_that_a_window_of_each_system_is() {
+    assert_eq!(
+        ui_class_of_a_window("win32"),
+        Some("http://lv2plug.in/ns/extensions/ui#WindowsUI")
+    );
+    assert_eq!(
+        ui_class_of_a_window("x11"),
+        Some("http://lv2plug.in/ns/extensions/ui#X11UI")
+    );
+    assert_eq!(
+        ui_class_of_a_window("cocoa"),
+        Some("http://lv2plug.in/ns/extensions/ui#CocoaUI")
+    );
+    assert_eq!(ui_class_of_a_window("gtk"), None);
+}
+
+#[test]
+fn the_interfaces_of_a_plugin_are_in_the_order_of_their_uris() {
+    let amp = AMP.replace(
+        "ui:ui <urn:test:amp#ui> ;",
+        "ui:ui <urn:test:amp#zui> , <urn:test:amp#ui> ;",
+    ) + "
+<urn:test:amp#zui> a ui:X11UI ; ui:binary <z.so> .
+";
+    let folder = bundle_with(&[("manifest.ttl", MANIFEST), ("amp.ttl", &amp)]);
+    let described = describe_bundle(folder.path()).unwrap();
+    let uris: Vec<&str> = described.plugins[0]
+        .user_interfaces
+        .iter()
+        .map(|ui| ui.uri.as_str())
+        .collect();
+    assert_eq!(
+        uris,
+        vec!["urn:test:amp#ui", "urn:test:amp#zui"],
+        "though the other is said first"
     );
 }
 

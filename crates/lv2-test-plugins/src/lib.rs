@@ -19,8 +19,12 @@
 
 #![allow(unsafe_code)]
 
+mod ui;
+
 use std::ffi::{CStr, c_char, c_void};
 use std::path::{Path, PathBuf};
+
+pub use ui::{FAILS_UI, GAIN_UI, QUIET_UI, UI_CLOSE_VALUE, UI_EDIT_VALUE, UI_REAL_WINDOW_SIZE, UI_SIZE};
 
 pub const GAIN: &str = "urn:fastforwardrs:test:gain";
 pub const CONTROLS: &str = "urn:fastforwardrs:test:controls";
@@ -925,6 +929,7 @@ const PREFIXES: &str = r#"@prefix atom: <http://lv2plug.in/ns/ext/atom#> .
 @prefix opts: <http://lv2plug.in/ns/ext/options#> .
 @prefix bufsz: <http://lv2plug.in/ns/ext/buf-size#> .
 @prefix log:  <http://lv2plug.in/ns/ext/log#> .
+@prefix ui:   <http://lv2plug.in/ns/extensions/ui#> .
 "#;
 
 fn audio_pair() -> &'static str {
@@ -1089,8 +1094,27 @@ pub fn bundle_files(library_file_name: &str) -> Vec<(String, String)> {
     let uris = [GAIN, CONTROLS, LATENCY, ATOMS, OPTIONS, WORKER, NEEDS_LOG, STATE, FAILS];
     let mut manifest = String::from(PREFIXES);
     for ((file, _), uri) in plugins.iter().zip(uris) {
+        // (The gain plugin has a window, and so has the one that fails: whose window does not come. A window is of the class of the system that this was built for.)
+        let window = match uri {
+            GAIN => format!("    ui:ui <{GAIN_UI}> ;\n"),
+            FAILS => format!("    ui:ui <{FAILS_UI}> ;\n"),
+            LATENCY => format!("    ui:ui <{QUIET_UI}> ;\n"),
+            _ => String::new(),
+        };
         manifest.push_str(&format!(
-            "\n<{uri}>\n    a lv2:Plugin ;\n    lv2:binary <{library_file_name}> ;\n    rdfs:seeAlso <{file}> .\n"
+            "\n<{uri}>\n    a lv2:Plugin ;\n{window}    lv2:binary <{library_file_name}> ;\n    rdfs:seeAlso <{file}> .\n"
+        ));
+    }
+    let class = if cfg!(windows) {
+        "ui:WindowsUI"
+    } else if cfg!(target_os = "macos") {
+        "ui:CocoaUI"
+    } else {
+        "ui:X11UI"
+    };
+    for window in [GAIN_UI, QUIET_UI, FAILS_UI] {
+        manifest.push_str(&format!(
+            "\n<{window}>\n    a {class} ;\n    ui:binary <{library_file_name}> ;\n    lv2:requiredFeature ui:parent ;\n    lv2:optionalFeature ui:resize , ui:touch , ui:portMap ;\n    lv2:extensionData ui:idleInterface , ui:resize .\n"
         ));
     }
     let mut files = vec![("manifest.ttl".to_owned(), manifest)];

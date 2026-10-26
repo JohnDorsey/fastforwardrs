@@ -17,6 +17,7 @@ use egui::Context;
 
 use super::FastForwardApplication;
 use crate::application::commands::Command;
+use crate::plugin_editor::program::PluginKind;
 use crate::plugin_editor::protocol::ParameterEdit;
 use crate::plugin_editor::sessions::{EditorWindows, WhatToOpen, WindowEvent, WindowKey};
 use crate::plugin_editor::values::{number_for_a_plugin, value_for_a_plugin_number};
@@ -235,8 +236,10 @@ impl FastForwardApplication {
         if !plugin.has_a_window {
             return Err("the plugin has no window".to_owned());
         }
-        let PluginAddress::Clap { id } = &plugin.address else {
-            return Err("only a CLAP plugin has a window".to_owned());
+        let (kind_of_plugin, id) = match &plugin.address {
+            PluginAddress::Clap { id } => (PluginKind::Clap, id),
+            PluginAddress::Lv2 { uri } => (PluginKind::Lv2, uri),
+            _ => return Err("only a CLAP plugin or an LV2 plugin has a window".to_owned()),
         };
         // (A library is loaded only from a folder that has been said yes to: a window loads it too.)
         let folder = folder_of(&plugin.library);
@@ -262,6 +265,7 @@ impl FastForwardApplication {
         let what = WhatToOpen {
             library: plugin.library.clone(),
             plugin_id: id.clone(),
+            kind: kind_of_plugin,
             title,
             values,
             state: state.as_deref().map(crate::base64::encode),

@@ -9,6 +9,8 @@
 //! * [`description`] reads what a bundle says about its plugins (its Turtle), as safe values that can be sent between programs; **it loads nothing**.
 //! * [`Library`] is a library that is loaded; [`Instance`] is a plugin that has been made from it, and can be given values and sound, and its state saved and restored.
 //!
+//! * [`UiWindow`] is the window of a plugin (its user interface), made inside a window of the program that shows it; [`window_of`] says which interface of a plugin can be shown.
+//!
 //! * [`scan_bundle`] reads a bundle, loads its binary, and makes and runs each of its plugins once on silence, saying what it is doing as it goes: **it is meant to be run in a
 //!   program of its own** (`fastforwardrs-plugin-scan`), so that a library that crashes or never returns costs that program and not the editor.
 //!
@@ -24,19 +26,23 @@ mod instance;
 mod library;
 mod scan;
 mod state;
+mod ui;
 mod worker;
 
 pub use description::{
     AtomPortDescription, BundleDescription, DescribeError, PluginDescription, PortDescription, PortDirection, PortKind,
-    ScalePoint, UiDescription, bundles_in, describe_bundle, usual_folders,
+    ScalePoint, UiDescription, bundles_in, describe_bundle, ui_class_of_a_window, usual_folders, window_of,
 };
 
 pub use instance::{Instance, InstantiateError, RunError};
 pub use library::{Library, OpenError};
 pub use scan::{BundleScan, PROBE_BLOCK_FRAMES, PROBE_SAMPLE_RATE, ScannedPlugin, scan_bundle};
 pub use state::StateError;
+pub use ui::{DEFAULT_WINDOW_SIZE, UiError, UiEvent, UiWindow};
 
 #[cfg(test)]
 mod description_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ui_tests;

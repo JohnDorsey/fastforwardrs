@@ -253,7 +253,17 @@ fn an_effect_is_offered_under_the_name_the_author_and_the_key_that_the_bundle_gi
         (1, 0),
         "the minor and the micro version of the plugin"
     );
-    assert!(!gain.has_a_window);
+    // (Phase 11.5: the gain plugin of the test bundle has a window of this system's class, and the other plugins have none, except the quiet one that the latency plugin has.)
+    assert!(
+        gain.has_a_window,
+        "its bundle names an interface of this system's class"
+    );
+    let controls = found
+        .effects
+        .iter()
+        .find(|effect| effect.descriptor.key == key_of_an_lv2_plugin(lv2_test_plugins::CONTROLS))
+        .unwrap();
+    assert!(!controls.has_a_window, "it names none");
     // The library of the effect is the bundle's folder (what is trusted is the folder that the bundles are in).
     assert_eq!(gain.library.file_name().unwrap(), "test.lv2");
 }

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The inside of the editor-window program (`fastforwardrs-plugin-editor`, which is only this, called from `main`): **it loads the plugin library it is given**, makes an
-//! [`clap_host::Editor`] of a plugin, and shows the plugin's window; what a person does in the window it says on its standard output, and what the editor says (the values the
+//! The inside of the editor-window program (`fastforwardrs-plugin-editor`, which is only this, called from `main`): **it loads the plugin library it is given**, makes the window of a
+//! plugin (a CLAP plugin's [`clap_host::Editor`] or an LV2 plugin's user interface: see [`super::backends`]), and shows it; what a person does in the window it says on its standard output, and what the editor says (the values the
 //! project has, the plugin's state) it reads on its standard input (see [`super::protocol`]). It is a program of its own so that a plugin whose window crashes does not take the
 //! editor and the project with it, and so that the plugin's window has the main thread of a program that has a message loop, on every system (P1 of the design).
 //!
@@ -23,15 +23,19 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
+use super::backends::{ClapWindow, Lv2Window, PluginWindow};
 use super::protocol::{FromProgram, ToProgram, line_of, message_in};
+use super::the_kind_of_window;
 use crate::base64;
 
 /// What the program says when it is used wrongly.
 pub const USAGE: &str =
-    "Usage: fastforwardrs-plugin-editor --library <file> --id <plugin id> [--title <words>] [--headless]
+    "Usage: fastforwardrs-plugin-editor --library <file or folder> --id <plugin id> [--kind clap|lv2] [--title <words>] [--headless]
 
-Shows the window of a CLAP plugin. It is started by the editor, which talks to it in lines on its
-standard input and output (see plugin_editor::protocol); it ends when the window is closed.
+Shows the window of a plugin: a CLAP plugin (the library is its file and the id is its id, the
+default) or an LV2 plugin (the library is its bundle's folder and the id is its URI). It is started
+by the editor, which talks to it in lines on its standard input and output (see
+plugin_editor::protocol); it ends when the window is closed.
 ";
 
 /// How long the program waits for the editor's first message (`Begin`) before it gives up. (The editor says it at once.)
@@ -49,18 +53,38 @@ fn the_size_to_follow(told: Option<(u32, u32)>, said: Option<(u32, u32)>) -> Opt
 /// How often the program asks the plugin how big its window is, to follow it when it changes it by itself (see `follow_the_size_the_plugin_says`).
 const HOW_OFTEN_TO_ASK_THE_SIZE: Duration = Duration::from_millis(100);
 
+/// Which kind of plugin the window is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginKind {
+    Clap,
+    Lv2,
+}
+
+impl PluginKind {
+    /// The word that tells the program (`--kind`).
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Clap => "clap",
+            Self::Lv2 => "lv2",
+        }
+    }
+}
+
 /// What the program was started with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Arguments {
+    /// A CLAP plugin's library file, or an LV2 plugin's bundle folder.
     pub library: PathBuf,
+    /// A CLAP plugin's id, or an LV2 plugin's URI.
     pub id: String,
+    pub kind: PluginKind,
     pub title: String,
     pub headless: bool,
 }
 
 /// Reads what the program was started with (not its name).
 pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Arguments, String> {
-    let (mut library, mut id, mut title, mut headless) = (None, None, None, false);
+    let (mut library, mut id, mut title, mut headless, mut kind) = (None, None, None, false, PluginKind::Clap);
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let mut value = |name: &str| arguments.next().ok_or_else(|| format!("{name} needs a value after it"));
@@ -68,6 +92,13 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             "--library" => library = Some(PathBuf::from(value("--library")?)),
             "--id" => id = Some(value("--id")?.to_string_lossy().into_owned()),
             "--title" => title = Some(value("--title")?.to_string_lossy().into_owned()),
+            "--kind" => {
+                kind = match value("--kind")?.to_string_lossy().as_ref() {
+                    "clap" => PluginKind::Clap,
+                    "lv2" => PluginKind::Lv2,
+                    other => return Err(format!("{other:?} is not a kind of plugin (clap or lv2)")),
+                }
+            }
             "--headless" => headless = true,
             other => return Err(format!("{other:?} is not something this program is told")),
         }
@@ -77,19 +108,9 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
         library: library.ok_or("--library is needed")?,
         title: title.unwrap_or_else(|| id.clone()),
         id,
+        kind,
         headless,
     })
-}
-
-/// The kind of window of this system that a plugin is asked for.
-fn the_kind_of_window() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "win32"
-    } else if cfg!(target_os = "macos") {
-        "cocoa"
-    } else {
-        "x11"
-    }
 }
 
 /// What comes in: a message from the editor, or the end of the lines (the editor is gone).
@@ -113,7 +134,7 @@ fn read_lines(input: impl BufRead + Send + 'static, send: impl Fn(Wake) + Send +
 
 /// The plugin, and what is said about it.
 struct Session {
-    editor: Editor,
+    editor: Box<dyn PluginWindow>,
     out: Box<dyn Write>,
     /// Whether the plugin said that its state is not what was last said (`StateChanged`), and the editor has not asked for it since: the state is said when the program ends, so that what a
     /// person did in the window last is not lost to the project.
@@ -210,13 +231,20 @@ impl Session {
     }
 }
 
-/// Makes the editor of the plugin, or says why not and ends.
-fn the_editor_or_end(arguments: &Arguments, out: &mut dyn Write) -> Editor {
+/// Makes the window of the plugin, or says why not and ends.
+fn the_editor_or_end(arguments: &Arguments, out: &mut dyn Write) -> Box<dyn PluginWindow> {
     let fail = |out: &mut dyn Write, reason: String| -> ! {
         let _ = write!(out, "\n{}\n", line_of(&FromProgram::Failed { reason }));
         let _ = out.flush();
         std::process::exit(1)
     };
+    if arguments.kind == PluginKind::Lv2 {
+        // (Nothing is loaded until the window is made: the bundle's Turtle says which interface there is.)
+        return match Lv2Window::new(&arguments.library, &arguments.id) {
+            Ok(window) => Box::new(window),
+            Err(error) => fail(out, error),
+        };
+    }
     let library = match Library::open(&arguments.library) {
         Ok(library) => library,
         Err(error) => fail(out, format!("the library could not be loaded: {error}")),
@@ -230,7 +258,7 @@ fn the_editor_or_end(arguments: &Arguments, out: &mut dyn Write) -> Editor {
     }
     // (The library stays loaded for as long as the program does.)
     std::mem::forget(library);
-    editor
+    Box::new(ClapWindow::new(editor))
 }
 
 /// Runs the program: **this is `main`** of `fastforwardrs-plugin-editor`, which does not return (it ends with the window).
@@ -263,12 +291,12 @@ fn run_without_a_window(mut session: Session, input: impl BufRead + Send + 'stat
     };
     session.begin(&values, state.as_deref());
     let api = the_kind_of_window();
-    let size = match session.editor.make_the_window(api, true, 1.0) {
+    let size = match session.editor.make_the_window(api, true, 1.0, None) {
         Ok(size) => size,
-        Err(error) => session.fail(error.to_string()),
+        Err(error) => session.fail(error),
     };
     if let Err(error) = session.editor.show() {
-        session.fail(error.to_string());
+        session.fail(error);
     }
     session.say(&FromProgram::Ready {
         width: size.width,
@@ -359,7 +387,10 @@ impl WindowedProgram {
             ) {
                 Ok(window) => {
                     let window = Arc::new(window);
-                    match session.editor.make_the_window(api, false, window.scale_factor()) {
+                    match session
+                        .editor
+                        .make_the_window(api, false, window.scale_factor(), Some(Arc::clone(&window)))
+                    {
                         Ok(size) => {
                             self.can_resize = size.can_resize;
                             window.set_resizable(size.can_resize);
@@ -409,7 +440,7 @@ impl WindowedProgram {
             };
             session.fail(why);
         }
-        match session.editor.make_the_window(api, true, 1.0) {
+        match session.editor.make_the_window(api, true, 1.0, None) {
             Ok(size) => {
                 session.editor.suggest_a_title(&title);
                 if let Err(error) = session.editor.show() {
@@ -589,6 +620,7 @@ mod tests {
             Ok(Arguments {
                 library: PathBuf::from("a.clap"),
                 id: "x.y".to_owned(),
+                kind: PluginKind::Clap,
                 title: "Hello there".to_owned(),
                 headless: true,
             })
@@ -596,6 +628,27 @@ mod tests {
         let plain = arguments_of(&["--id", "x.y", "--library", "a.clap"]).unwrap();
         assert_eq!(plain.title, "x.y", "the title is the id when none is given");
         assert!(!plain.headless);
+    }
+
+    #[test]
+    fn the_kind_of_plugin_is_clap_unless_it_is_said_and_only_clap_and_lv2_are_kinds() {
+        let lv2 = arguments_of(&["--library", "a.lv2", "--id", "urn:x", "--kind", "lv2"]).unwrap();
+        assert_eq!(lv2.kind, PluginKind::Lv2);
+        let clap = arguments_of(&["--library", "a.clap", "--id", "x", "--kind", "clap"]).unwrap();
+        assert_eq!(clap.kind, PluginKind::Clap);
+        let said_nothing = arguments_of(&["--library", "a.clap", "--id", "x"]).unwrap();
+        assert_eq!(said_nothing.kind, PluginKind::Clap);
+        assert!(
+            arguments_of(&["--library", "a", "--id", "x", "--kind", "vst3"])
+                .unwrap_err()
+                .contains("vst3")
+        );
+        assert!(
+            arguments_of(&["--library", "a", "--id", "x", "--kind"])
+                .unwrap_err()
+                .contains("needs a value")
+        );
+        assert_eq!((PluginKind::Clap.word(), PluginKind::Lv2.word()), ("clap", "lv2"));
     }
 
     #[test]

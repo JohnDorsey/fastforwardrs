@@ -848,8 +848,8 @@ fn the_answer_of_a_clap_scan_is_read_back_as_it_was_written_and_the_other_words_
     }
     // The words of the LADSPA answers are what they were (the cache and the scan program of another version are told apart by the number, not by the words).
     assert!(answer_line(&ScanAnswer::CouldNotBeLoaded("x".to_owned())).contains("CouldNotBeLoaded"));
-    // (3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4, in phase 10: it says whether a CLAP plugin has a window. 5, in phase 11: it reads LV2 bundles too. It is raised when the scan finds something it did not.)
-    assert_eq!(super::protocol::SCAN_FORMAT, 5);
+    // (3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4, in phase 10: it says whether a CLAP plugin has a window. 5, in phase 11: it reads LV2 bundles too. 6, in 11.5: it says what an LV2 plugin's interface needs. It is raised when the scan finds something it did not.)
+    assert_eq!(super::protocol::SCAN_FORMAT, 6);
 }
 
 #[test]

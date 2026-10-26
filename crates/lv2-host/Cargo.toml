@@ -15,8 +15,14 @@ libloading = "0.8.9"
 oxttl = "0.2.5"
 # (The terms that it gives: the same version, because `oxttl` pins it.)
 oxrdf = "0.3.5"
+# The windows that a plugin's window is put in are given as anything that has a window handle (what `winit` windows are).
+raw-window-handle = "0.6"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+
+[target.'cfg(windows)'.dependencies]
+# (How big the window is that a user interface made: the client area, which `ui.h` has no call for.)
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 lv2-test-plugins = { path = "../lv2-test-plugins", version = "0.1.0" }

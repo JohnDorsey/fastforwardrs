@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use clap_test_plugins::{EDITOR, EDITOR_EDIT_VALUE, GAIN};
+use fastforwardrs::plugin_editor::program::PluginKind;
 use fastforwardrs::plugin_editor::protocol::ParameterEdit;
 use fastforwardrs::plugin_editor::sessions::{EditorWindows, WhatToOpen, WindowEvent, WindowKey};
 use fastforwardrs::project::{AnimationTarget, ClipId, EffectInstanceId, TrackId};
@@ -24,6 +25,7 @@ fn what_to_open(id: &str, values: &[(u32, f64)], state: Option<&str>) -> WhatToO
     WhatToOpen {
         library: clap_test_plugins::library_file_for_tests(),
         plugin_id: id.to_owned(),
+        kind: PluginKind::Clap,
         title: "a window".to_owned(),
         values: values.to_vec(),
         state: state.map(str::to_owned),

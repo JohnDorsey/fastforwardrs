@@ -117,6 +117,36 @@ pub struct UiDescription {
     /// The classes it says it is (`ui:WindowsUI`, `ui:X11UI`...), as URIs.
     pub kinds: Vec<String>,
     pub binary: Option<PathBuf>,
+    /// What it cannot work without that the host gives it (`ui:parent`...), as URIs.
+    pub required_features: Vec<String>,
+    /// What it uses if the host gives it.
+    pub optional_features: Vec<String>,
+    /// The URIs of what its `extension_data` function answers for (`ui:idleInterface`, `ui:resize`...).
+    pub extension_data: Vec<String>,
+}
+
+/// The class of user interface that a window of the kind `api` (as the plugin hosts of this program say it: `win32`, `x11` or `cocoa`) is, as a URI.
+pub fn ui_class_of_a_window(api: &str) -> Option<&'static str> {
+    match api {
+        "win32" => Some("http://lv2plug.in/ns/extensions/ui#WindowsUI"),
+        "x11" => Some("http://lv2plug.in/ns/extensions/ui#X11UI"),
+        "cocoa" => Some("http://lv2plug.in/ns/extensions/ui#CocoaUI"),
+        _ => None,
+    }
+}
+
+/// The user interface of `plugin` that this program can show in a window of the kind `api`, if it has one: of that system's class, with a binary that is in the bundle, and needing
+/// nothing that this host does not give a user interface. (The first, in the order of their URIs, when there are more.)
+pub fn window_of<'plugin>(plugin: &'plugin PluginDescription, api: &str) -> Option<&'plugin UiDescription> {
+    let class = ui_class_of_a_window(api)?;
+    plugin.user_interfaces.iter().find(|interface| {
+        interface.kinds.iter().any(|kind| kind == class)
+            && interface.binary.is_some()
+            && interface
+                .required_features
+                .iter()
+                .all(|feature| crate::abi::SUPPORTED_UI_FEATURES.contains(&feature.as_str()))
+    })
 }
 
 /// What a bundle says of one of its plugins.
@@ -446,6 +476,13 @@ fn describe_plugin(graph: &Graph, uri: &str, node: &Node, bundle: &Path) -> Resu
     let mut user_interfaces = Vec::new();
     for interface in graph.nodes(node, &format!("{UI}ui")) {
         let Node::Iri(interface_uri) = &interface else { continue };
+        let mut required_features = graph.iris(&interface, &format!("{LV2}requiredFeature"));
+        let mut optional_features = graph.iris(&interface, &format!("{LV2}optionalFeature"));
+        let mut extension_data = graph.iris(&interface, &format!("{LV2}extensionData"));
+        for list in [&mut required_features, &mut optional_features, &mut extension_data] {
+            list.sort();
+            list.dedup();
+        }
         user_interfaces.push(UiDescription {
             uri: interface_uri.clone(),
             kinds: graph.types(&interface),
@@ -455,8 +492,12 @@ fn describe_plugin(graph: &Graph, uri: &str, node: &Node, bundle: &Path) -> Resu
                 .chain(graph.iris(&interface, &format!("{LV2}binary")))
                 .find_map(|iri| file_of_the_bundle(&iri))
                 .map(|file| bundle.join(file)),
+            required_features,
+            optional_features,
+            extension_data,
         });
     }
+    user_interfaces.sort_by(|a: &UiDescription, b: &UiDescription| a.uri.cmp(&b.uri));
 
     let mut required_features = graph.iris(node, &format!("{LV2}requiredFeature"));
     let mut optional_features = graph.iris(node, &format!("{LV2}optionalFeature"));

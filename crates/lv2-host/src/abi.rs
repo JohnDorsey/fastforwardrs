@@ -181,3 +181,24 @@ pub(crate) const SUPPORTED_FEATURES: [&str; 9] = [
     IS_LIVE,
     IN_PLACE_BROKEN,
 ];
+
+// The URIs of the user interfaces (the extension `ui`), and what the host gives them.
+pub(crate) const UI_PARENT: &str = "http://lv2plug.in/ns/extensions/ui#parent";
+pub(crate) const UI_RESIZE: &str = "http://lv2plug.in/ns/extensions/ui#resize";
+pub(crate) const UI_IDLE_INTERFACE: &str = "http://lv2plug.in/ns/extensions/ui#idleInterface";
+pub(crate) const UI_TOUCH: &str = "http://lv2plug.in/ns/extensions/ui#touch";
+pub(crate) const UI_PORT_MAP: &str = "http://lv2plug.in/ns/extensions/ui#portMap";
+pub(crate) const UI_SCALE_FACTOR: &str = "http://lv2plug.in/ns/extensions/ui#scaleFactor";
+
+/// The features that this host can give a user interface that says it needs them. A user interface that requires another is not shown. (`ui:noUserResize` and `ui:fixedSize` are
+/// things that a UI says of itself; the host that gives a UI no way to be resized does not break them.)
+pub(crate) const SUPPORTED_UI_FEATURES: [&str; 8] = [
+    UI_PARENT,
+    UI_RESIZE,
+    UI_IDLE_INTERFACE,
+    UI_TOUCH,
+    UI_PORT_MAP,
+    URID_MAP,
+    URID_UNMAP,
+    OPTIONS,
+];

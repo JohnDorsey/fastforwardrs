@@ -690,7 +690,8 @@ pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) 
         value_handles,
         // (LV2 does not say how long a plugin goes on after its input stops: half a second, as for a CLAP plugin that says nothing.)
         pre_roll_samples: SAMPLE_RATE as usize / 2,
-        has_a_window: false,
+        // (An interface of this system's kind that this program can show.)
+        has_a_window: lv2_host::window_of(description, crate::plugin_editor::the_kind_of_window()).is_some(),
         start_warning: None,
     })
 }

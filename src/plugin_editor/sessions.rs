@@ -15,6 +15,7 @@ use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
+use super::program::PluginKind;
 use super::protocol::{FromProgram, ParameterEdit, ToProgram, line_of, message_in};
 use crate::media::background_command;
 use crate::plugin_scan::protocol::{BUILD_ID, BUILD_ID_REQUEST};
@@ -48,8 +49,11 @@ pub struct WindowKey {
 /// What a window is opened for.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WhatToOpen {
+    /// A CLAP plugin's library file, or an LV2 plugin's bundle folder.
     pub library: PathBuf,
+    /// A CLAP plugin's id, or an LV2 plugin's URI.
     pub plugin_id: String,
+    pub kind: PluginKind,
     pub title: String,
     /// The values that the project says (`(id of the parameter, value)`).
     pub values: Vec<(u32, f64)>,
@@ -164,7 +168,14 @@ impl EditorWindows {
             .envs(what.environment.iter().map(|(name, value)| (name, value)))
             .arg("--library")
             .arg(&what.library)
-            .args(["--id", &what.plugin_id, "--title", &what.title])
+            .args([
+                "--id",
+                &what.plugin_id,
+                "--kind",
+                what.kind.word(),
+                "--title",
+                &what.title,
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
