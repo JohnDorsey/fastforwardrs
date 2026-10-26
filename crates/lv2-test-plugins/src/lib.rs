@@ -284,6 +284,9 @@ struct Latency {
     ports: Ports,
     says: *mut f32,
     memory: Vec<f32>,
+    /// How many times it has been activated, said on port 3 at each block.
+    activations: u32,
+    says_activations: *mut f32,
 }
 
 impl Latency {
@@ -292,13 +295,19 @@ impl Latency {
 
 impl Plugin for Latency {
     fn connect(&mut self, port: u32, data: *mut c_void) {
-        if !self.connect_audio(port, data) && port == 2 {
-            self.says = data.cast();
+        if self.connect_audio(port, data) {
+            return;
+        }
+        match port {
+            2 => self.says = data.cast(),
+            3 => self.says_activations = data.cast(),
+            _ => {}
         }
     }
 
     fn run(&mut self, frames: usize) {
         write_control(self.says, LATENCY_FRAMES as f32);
+        write_control(self.says_activations, self.activations as f32);
         let input: Vec<f32> = self.ports.input(frames).to_vec();
         let out = self.ports.output(frames);
         for (place, sample) in input.into_iter().enumerate() {
@@ -309,6 +318,7 @@ impl Plugin for Latency {
 
     fn activate(&mut self) {
         self.memory = vec![0.0; LATENCY_FRAMES];
+        self.activations += 1;
     }
 }
 
@@ -505,6 +515,8 @@ fn make(kind: usize, given: &Given<'_>) -> Option<Box<dyn Plugin>> {
             ports: Ports::new(),
             says: std::ptr::null_mut(),
             memory: vec![0.0; LATENCY_FRAMES],
+            activations: 0,
+            says_activations: std::ptr::null_mut(),
         }),
         KIND_ATOMS => Box::new(Atoms {
             ports: Ports::new(),
@@ -986,6 +998,9 @@ pub fn bundle_files(library_file_name: &str) -> Vec<(String, String)> {
             r#"    [
         a lv2:OutputPort , lv2:ControlPort ;
         lv2:index 2 ; lv2:symbol "latency" ; lv2:name "Latency" ; lv2:designation lv2:latency ; lv2:portProperty lv2:integer ;
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 3 ; lv2:symbol "activations" ; lv2:name "Activations" ;
     ]"#,
         ),
         description_of(

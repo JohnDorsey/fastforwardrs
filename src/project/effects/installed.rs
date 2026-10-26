@@ -28,6 +28,8 @@ pub enum PluginAddress {
     },
     /// A CLAP plugin is the one with an id (a reverse-domain string that is unique in the world) in the factory of its library.
     Clap { id: String },
+    /// An LV2 plugin is the one with a URI, in a bundle (the library of the plugin is the bundle's folder; its binary is what the bundle's Turtle says).
+    Lv2 { uri: String },
 }
 
 impl PluginAddress {
@@ -35,7 +37,7 @@ impl PluginAddress {
     pub fn ladspa_index(&self) -> Option<usize> {
         match self {
             Self::Ladspa { index, .. } => Some(*index),
-            Self::Clap { .. } => None,
+            Self::Clap { .. } | Self::Lv2 { .. } => None,
         }
     }
 }

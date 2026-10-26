@@ -13,7 +13,9 @@ use thiserror::Error;
 use super::cache::{CachedOutcome, FileFingerprint, ScanCache};
 use super::child::{SCAN_TIME_LIMIT, build_id_of_a_program, scan_in_a_program};
 use super::failure::ScanFailure;
-use super::folders::{clap_libraries_in, dependency_search_folders, libraries_in, library_search_variable};
+use super::folders::{
+    clap_libraries_in, dependency_search_folders, libraries_in, library_search_variable, lv2_bundles_in,
+};
 use super::protocol::BUILD_ID;
 use ladspa_host::LibraryScan;
 
@@ -23,6 +25,8 @@ pub enum LibraryOutcome {
     Scanned(LibraryScan),
     /// A CLAP library was scanned.
     ScannedClap(clap_host::scan::LibraryScan),
+    /// An LV2 bundle was scanned.
+    ScannedLv2(lv2_host::BundleScan),
     Failed(ScanFailure),
 }
 
@@ -31,6 +35,7 @@ impl From<LibraryOutcome> for CachedOutcome {
         match outcome {
             LibraryOutcome::Scanned(scan) => Self::Scanned(scan),
             LibraryOutcome::ScannedClap(scan) => Self::ScannedClap(scan),
+            LibraryOutcome::ScannedLv2(scan) => Self::ScannedLv2(scan),
             LibraryOutcome::Failed(failure) => Self::Failed(failure),
         }
     }
@@ -41,6 +46,7 @@ impl From<CachedOutcome> for LibraryOutcome {
         match outcome {
             CachedOutcome::Scanned(scan) => Self::Scanned(scan),
             CachedOutcome::ScannedClap(scan) => Self::ScannedClap(scan),
+            CachedOutcome::ScannedLv2(scan) => Self::ScannedLv2(scan),
             CachedOutcome::Failed(failure) => Self::Failed(failure),
         }
     }
@@ -251,9 +257,10 @@ impl PluginScanner {
         let mut scan = FolderScan::default();
         let mut found = Vec::new();
         for folder in folders {
-            // (The LADSPA libraries of the folder, and then the CLAP ones in it and below it.)
+            // (The LADSPA libraries of the folder, and then the CLAP ones in it and below it, and then the LV2 bundles in it.)
             let libraries = match libraries_in(folder).and_then(|mut found| {
                 found.extend(clap_libraries_in(folder)?);
+                found.extend(lv2_bundles_in(folder)?);
                 Ok(found)
             }) {
                 Ok(libraries) => libraries,

@@ -403,6 +403,14 @@ fn show_libraries(ui: &mut Ui, view: &PluginManagerView<'_>) {
                     }
                 }
             }
+            LibraryOutcome::ScannedLv2(scan) => {
+                let count = scan.plugins.len();
+                ui.label(format!(
+                    "{name}: {count} plugin{} (LV2)",
+                    if count == 1 { "" } else { "s" }
+                ))
+                .on_hover_text(library.path.display().to_string());
+            }
             LibraryOutcome::Failed(failure) => {
                 ui.colored_label(ui.visuals().warn_fg_color, format!("{name}: {failure}"))
                     .on_hover_text(library.path.display().to_string());

@@ -8,13 +8,13 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use super::folders::is_a_clap_file;
+use super::folders::{is_a_clap_file, is_an_lv2_bundle};
 use super::protocol::{ScanAnswer, answer_line, step_line};
 
 /// What the program says when it is used wrongly.
-pub const USAGE: &str = "Usage: fastforwardrs-plugin-scan <library file>
+pub const USAGE: &str = "Usage: fastforwardrs-plugin-scan <library file or LV2 bundle folder>
 
-Loads a LADSPA library (or a CLAP one, if the file ends in .clap), reads what its plugins say,
+Loads a LADSPA library (or a CLAP one, if the file ends in .clap; or reads an LV2 bundle, if it is a folder with a manifest.ttl, and loads its library), reads what its plugins say,
 makes each plugin and runs it once on silence, and writes what it found on its standard
 output (lines that begin with \"ffrs-scan-step: \" say what it is about to do, and the line
 that begins with \"ffrs-scan-result: \" is the answer). It exists so that a library that
@@ -47,7 +47,12 @@ pub fn run(library: &Path, out: &mut impl Write) -> io::Result<()> {
             broken_pipe.get_or_insert(error);
         }
     };
-    let answer = if is_a_clap_file(library) {
+    let answer = if is_an_lv2_bundle(library) {
+        match lv2_host::scan_bundle(library, &mut step) {
+            Ok(scan) => ScanAnswer::ScannedLv2(scan),
+            Err(error) => ScanAnswer::NotAnLv2Bundle(error.to_string()),
+        }
+    } else if is_a_clap_file(library) {
         let result = match start_check_time_from(std::env::var(START_CHECK_SECONDS_VARIABLE).ok().as_deref()) {
             Some(longest) => clap_host::scan::scan_library_checking_starts_for(library, longest, &mut step),
             None => clap_host::scan::scan_library(library, &mut step),

@@ -236,15 +236,26 @@ fn an_audio_input_that_is_not_given_is_silence_and_an_output_that_is_not_given_i
 fn a_plugin_that_delays_the_sound_says_how_much_on_its_latency_port_and_it_is_what_the_host_reads() {
     let bundle = the_bundle();
     let mut latency = bundle.make(LATENCY);
-    assert_eq!(latency.latency(), 0, "nothing is known before a block");
+    assert_eq!(
+        latency.latency() as usize,
+        LATENCY_FRAMES,
+        "known as soon as the plugin is made, before it is run on any sound: a plugin says it when it runs, so it is run once on silence"
+    );
     let input = ramp(200);
 
     let out = run_mono(&mut latency, &input);
 
     assert_eq!(latency.latency() as usize, LATENCY_FRAMES);
     // (The plugin forgets what it has heard when it is activated: blocks that follow one another are one stream, and it is not activated again at each of them.)
+    let activations = bundle.port(LATENCY, "activations");
+    assert_eq!(
+        latency.control(activations),
+        Some(2.0),
+        "activated when it was made and again after the one block that was run to learn its latency (so that what it heard is forgotten)"
+    );
     let more = ramp(100);
     let next = run_mono(&mut latency, &more);
+    assert_eq!(latency.control(activations), Some(2.0), "and not at each block");
     assert_eq!(
         next[..LATENCY_FRAMES],
         input[200 - LATENCY_FRAMES..],
@@ -552,4 +563,94 @@ fn a_state_that_has_nothing_the_plugin_asks_for_is_taken_and_the_plugin_goes_on_
     assert_eq!(state.restore_state(&encode(&[])), Ok(()));
 
     assert_eq!(run_mono(&mut state, &input), input);
+}
+
+// --- the scan ---
+
+#[test]
+fn the_scan_of_the_test_bundle_says_which_plugins_work_and_why_the_others_do_not_and_what_it_was_doing() {
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = lv2_test_plugins::write_bundle(folder.path());
+    let mut steps = Vec::new();
+
+    let scan = crate::scan_bundle(&bundle, &mut |step| steps.push(step.to_owned())).expect("the bundle is scanned");
+
+    assert_eq!(scan.problems, Vec::<String>::new());
+    assert_eq!(scan.plugins.len(), 9);
+    let of = |uri: &str| {
+        scan.plugins
+            .iter()
+            .find(|plugin| plugin.description.uri == uri)
+            .unwrap()
+    };
+    for working in [GAIN, CONTROLS, LATENCY, ATOMS, OPTIONS, WORKER, STATE] {
+        assert_eq!(of(working).problem, None, "{working}");
+    }
+    assert!(
+        of(NEEDS_LOG)
+            .problem
+            .as_deref()
+            .is_some_and(|problem| problem.contains("log#log")),
+        "{:?}",
+        of(NEEDS_LOG).problem
+    );
+    assert!(
+        of(FAILS)
+            .problem
+            .as_deref()
+            .is_some_and(|problem| problem.contains("gave nothing")),
+        "{:?}",
+        of(FAILS).problem
+    );
+    assert_eq!(of(LATENCY).latency as usize, LATENCY_FRAMES);
+    assert_eq!(of(GAIN).latency, 0);
+    assert!(of(STATE).has_state && !of(GAIN).has_state);
+
+    // The steps come before what they say is done, and the binary is loaded once for all nine.
+    assert!(steps[0].starts_with("reading the Turtle"), "{steps:?}");
+    assert_eq!(
+        steps.iter().filter(|step| step.starts_with("loading ")).count(),
+        1,
+        "{steps:?}"
+    );
+    let making = steps.iter().position(|step| step == &format!("making {GAIN}")).unwrap();
+    assert_eq!(steps[making + 1], format!("running {GAIN} on silence"));
+}
+
+#[test]
+fn a_bundle_whose_binary_is_not_there_has_every_plugin_with_the_reason_and_a_manifest_that_is_not_there_is_an_error() {
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = lv2_test_plugins::write_bundle(folder.path());
+    for entry in std::fs::read_dir(&bundle).unwrap().map(Result::unwrap) {
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|extension| !extension.eq_ignore_ascii_case("ttl"))
+        {
+            std::fs::remove_file(entry.path()).unwrap();
+        }
+    }
+
+    let scan = crate::scan_bundle(&bundle, &mut |_| {}).unwrap();
+
+    assert_eq!(scan.plugins.len(), 9);
+    assert!(
+        scan.plugins.iter().all(|plugin| plugin
+            .problem
+            .as_deref()
+            .is_some_and(|problem| problem.contains("could not be loaded"))),
+        "{:?}",
+        scan.plugins.iter().map(|plugin| &plugin.problem).collect::<Vec<_>>()
+    );
+    assert!(crate::scan_bundle(&folder.path().join("nothing.lv2"), &mut |_| {}).is_err());
+}
+
+#[test]
+fn a_sound_that_has_a_sample_that_is_not_a_number_or_is_infinite_is_not_made_of_numbers() {
+    use crate::scan::is_made_of_numbers;
+
+    assert!(is_made_of_numbers(&[vec![0.0, 1.5, -2.0], vec![]]));
+    assert!(!is_made_of_numbers(&[vec![0.0, f32::NAN]]));
+    assert!(!is_made_of_numbers(&[vec![0.0], vec![f32::INFINITY]]));
+    assert!(!is_made_of_numbers(&[vec![f32::NEG_INFINITY]]));
 }

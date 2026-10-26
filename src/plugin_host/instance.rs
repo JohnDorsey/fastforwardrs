@@ -51,6 +51,40 @@ pub struct BetweenBlocks {
     pub note: Option<String>,
 }
 
+/// How many frames an LV2 plugin is made for at most, and so how many it is given in one call: a block of the sound engine; a longer stretch is given in pieces.
+pub const MOST_FRAMES_OF_AN_LV2_PLUGIN: usize = crate::sound_engine::BLOCK_SAMPLES;
+
+/// A copy of an LV2 plugin.
+pub struct Lv2Copy(pub lv2_host::Instance);
+
+impl PluginInstance for Lv2Copy {
+    fn set_value(&mut self, handle: u32, value: f32, _at_sample: usize) {
+        // (The control ports of LV2 are read at each block, so the effect runs the plugin in pieces and sets the values between them, as for LADSPA. A port that is not a control
+        // input is refused, and the plugin keeps the value it had.)
+        let _ = self.0.set_control(handle, value);
+    }
+
+    fn takes_values_at_samples(&self) -> bool {
+        false
+    }
+
+    fn most_samples_at_once(&self) -> Option<usize> {
+        Some(MOST_FRAMES_OF_AN_LV2_PLUGIN)
+    }
+
+    fn run(&mut self, inputs: &mut [&mut [f32]], outputs: &mut [&mut [f32]], frames: usize) -> Result<(), String> {
+        self.0.run(inputs, outputs, frames).map_err(|error| error.to_string())
+    }
+
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+
+    fn latency(&self) -> usize {
+        self.0.latency() as usize
+    }
+}
+
 /// A copy of a LADSPA plugin.
 pub struct LadspaCopy(pub ladspa_host::Instance);
 

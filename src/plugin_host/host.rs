@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use ladspa_host::Library;
 
 use super::effect::{Layout, PluginEffect, ProblemBoard};
-use super::instance::{ClapCopy, ClapMaker, LadspaCopy, Lives, PluginInstance};
+use super::instance::{ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, PluginInstance};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::plugin_scan::{Breadcrumb, dependency_search_folders};
@@ -84,6 +84,10 @@ pub struct PluginHost {
     trust: Mutex<Trust>,
     libraries: Mutex<HashMap<PathBuf, Result<Library, String>>>,
     clap_libraries: Mutex<HashMap<PathBuf, Result<clap_host::Library, String>>>,
+    /// The LV2 libraries (the binaries of bundles), by the path of the file.
+    lv2_libraries: Mutex<HashMap<PathBuf, Result<lv2_host::Library, String>>>,
+    /// What the bundles said when they were last read (by the folder of the bundle): read again when the plugins are scanned again (see [`Self::forget_what_the_bundles_said`]).
+    lv2_bundles: Mutex<HashMap<PathBuf, Result<std::sync::Arc<lv2_host::BundleDescription>, String>>>,
     /// The thread that does what CLAP asks to be done on the main thread, started when the first CLAP plugin is wanted.
     clap_worker: Mutex<Option<std::sync::Arc<clap_host::MainThread>>>,
     search: Mutex<Search>,
@@ -118,6 +122,8 @@ impl PluginHost {
             trust: Mutex::new(Trust::default()),
             libraries: Mutex::new(HashMap::new()),
             clap_libraries: Mutex::new(HashMap::new()),
+            lv2_libraries: Mutex::new(HashMap::new()),
+            lv2_bundles: Mutex::new(HashMap::new()),
             clap_worker: Mutex::new(None),
             search: Mutex::new(Search::default()),
             breadcrumb: Mutex::new(None),
@@ -349,6 +355,16 @@ impl PluginHost {
                 .filter(|(_, library)| library.is_ok())
                 .map(|(path, _)| path.clone()),
         );
+        let lv2_libraries = self
+            .lv2_libraries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        paths.extend(
+            lv2_libraries
+                .iter()
+                .filter(|(_, library)| library.is_ok())
+                .map(|(path, _)| path.clone()),
+        );
         paths.sort();
         paths
     }
@@ -405,6 +421,45 @@ impl PluginHost {
         let loaded = clap_host::Library::open(path).map_err(|error| error.to_string());
         libraries.insert(path.to_owned(), loaded.clone());
         loaded
+    }
+
+    /// The LV2 library at `path` (the binary of a bundle), loaded (once: it stays loaded), or why it could not be.
+    fn lv2_library(&self, path: &Path) -> Result<lv2_host::Library, String> {
+        let mut libraries = self
+            .lv2_libraries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(known) = libraries.get(path) {
+            return known.clone();
+        }
+        self.before_loading(path);
+        let loaded = lv2_host::Library::open(path).map_err(|error| error.to_string());
+        libraries.insert(path.to_owned(), loaded.clone());
+        loaded
+    }
+
+    /// What the bundle in `folder` says (its Turtle is read once, and kept until [`Self::forget_what_the_bundles_said`]), or why it cannot be read.
+    fn lv2_bundle(&self, folder: &Path) -> Result<std::sync::Arc<lv2_host::BundleDescription>, String> {
+        let mut bundles = self
+            .lv2_bundles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(known) = bundles.get(folder) {
+            return known.clone();
+        }
+        let described = lv2_host::describe_bundle(folder)
+            .map(std::sync::Arc::new)
+            .map_err(|error| error.to_string());
+        bundles.insert(folder.to_owned(), described.clone());
+        described
+    }
+
+    /// Forgets what the bundles said: they are read again the next time a plugin of one is wanted. (For when the plugins have been scanned again: a bundle may have changed.)
+    pub fn forget_what_the_bundles_said(&self) {
+        self.lv2_bundles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 
     /// Before a library of either kind is loaded: where the libraries it needs are looked for, and the breadcrumb.
@@ -507,6 +562,58 @@ impl PluginHost {
 }
 
 impl PluginHost {
+    /// As many copies of the LV2 plugin `description` of `library` as the layout needs, each made at the rate of the sound engine and given its state if the project has one, or why
+    /// not (said in the notes).
+    fn the_lv2_instances_of(
+        &self,
+        plugin: &'static InstalledPlugin,
+        description: &lv2_host::PluginDescription,
+        layout: Layout,
+        library: &lv2_host::Library,
+        state: Option<&std::sync::Arc<[u8]>>,
+        voice: &Voice<'_>,
+    ) -> Option<Vec<Box<dyn PluginInstance>>> {
+        if !this_lv2_plugin_is_the_one_that_was_scanned(description, plugin) {
+            voice.problem(format!(
+                "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the bundle {} has changed): scan again.",
+                plugin.descriptor.name,
+                plugin.library.display()
+            ));
+            return None;
+        }
+        let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
+        for _ in 0..layout.instances() {
+            match lv2_host::Instance::new(
+                library,
+                description,
+                f64::from(SAMPLE_RATE),
+                super::instance::MOST_FRAMES_OF_AN_LV2_PLUGIN as u32,
+            ) {
+                Ok(mut instance) => {
+                    // The state before the values: what the project says the values are is what they are, whatever the state says.
+                    if let Some(bytes) = state
+                        && instance.has_state()
+                        && let Err(error) = instance.restore_state(bytes)
+                    {
+                        voice.problem(format!(
+                            "The sound plugin \u{ab}{}\u{bb} did not take the state that the project has for it ({error}): it goes on with its values.",
+                            plugin.descriptor.name
+                        ));
+                    }
+                    instances.push(Box::new(Lv2Copy(instance)));
+                }
+                Err(error) => {
+                    voice.problem(format!(
+                        "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
+                        plugin.descriptor.name
+                    ));
+                    return None;
+                }
+            }
+        }
+        Some(instances)
+    }
+
     /// As many copies of the CLAP plugin `id` of `library` as the layout needs, each activated at the rate of the sound engine, or why not (said in the notes).
     fn the_clap_instances_of(
         &self,
@@ -638,6 +745,28 @@ fn say(notes: &Notes, line: String) {
     }
 }
 
+/// Whether what the bundle says now of the LV2 plugin is the plugin that was scanned: the same audio ports and the same control inputs for the values.
+fn this_lv2_plugin_is_the_one_that_was_scanned(
+    description: &lv2_host::PluginDescription,
+    plugin: &InstalledPlugin,
+) -> bool {
+    use lv2_host::{PortDirection, PortKind};
+    let count = |direction: PortDirection| {
+        description
+            .ports
+            .iter()
+            .filter(|port| port.kind == PortKind::Audio && port.direction == direction)
+            .count()
+    };
+    (count(PortDirection::Input), count(PortDirection::Output)) == (plugin.audio_inputs, plugin.audio_outputs)
+        && plugin.value_handles.iter().all(|&index| {
+            description
+                .ports
+                .get(index as usize)
+                .is_some_and(|port| port.direction == PortDirection::Input && port.kind == PortKind::Control)
+        })
+}
+
 /// Whether what the library gave for the plugin is the plugin that was scanned: the same label and ports of the same kinds, so that no value is given to a port that is
 /// not the one it was made for.
 fn this_is_the_plugin_that_was_scanned(instance: &ladspa_host::Instance, plugin: &InstalledPlugin) -> bool {
@@ -711,6 +840,21 @@ impl PluginRunner for PluginHost {
                     .inspect_err(|error| could_not_be_loaded(error.clone()))
                     .ok()?;
                 self.the_instances_of(plugin, layout, &library, &voice)?
+            }
+            PluginAddress::Lv2 { uri } => {
+                let bundle = self
+                    .lv2_bundle(&plugin.library)
+                    .inspect_err(|error| could_not_be_loaded(error.clone()))
+                    .ok()?;
+                let Some(description) = bundle.plugins.iter().find(|candidate| candidate.uri == *uri) else {
+                    could_not_be_loaded(format!("the bundle does not describe a plugin called {uri} any more"));
+                    return None;
+                };
+                let library = self
+                    .lv2_library(&description.binary)
+                    .inspect_err(|error| could_not_be_loaded(error.clone()))
+                    .ok()?;
+                self.the_lv2_instances_of(plugin, description, layout, &library, effect.state.as_ref(), &voice)?
             }
             PluginAddress::Clap { id } => {
                 let library = self

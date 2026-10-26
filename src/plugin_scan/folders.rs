@@ -100,6 +100,12 @@ pub fn folders_looked_in_with(
         environment("COMMONPROGRAMFILES").map(PathBuf::from).as_deref(),
         environment("LOCALAPPDATA").map(PathBuf::from).as_deref(),
     ));
+    usual.extend(lv2_host::usual_folders(
+        environment("LV2_PATH").as_deref(),
+        home,
+        environment("APPDATA").map(PathBuf::from).as_deref(),
+        environment("COMMONPROGRAMFILES").map(PathBuf::from).as_deref(),
+    ));
     let mut folders = folders_to_scan(&[], environment("LADSPA_PATH").as_deref(), &usual);
     // (The bundled plugins come last: a plugin that a person installed wins over the one that came with the program.)
     for folder in bundled {
@@ -108,6 +114,20 @@ pub fn folders_looked_in_with(
         }
     }
     folders
+}
+
+/// Whether `path` is an LV2 bundle: a folder with a `manifest.ttl` in it.
+pub fn is_an_lv2_bundle(path: &Path) -> bool {
+    path.is_dir() && path.join("manifest.ttl").is_file()
+}
+
+/// The LV2 bundles in `folder`: the folders in it that have a `manifest.ttl`, in the order of their names. (A folder that is not there has none.)
+pub fn lv2_bundles_in(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    match fs::read_dir(folder) {
+        Ok(_) => Ok(lv2_host::bundles_in(folder)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Whether `path` is named like a CLAP library: it ends in `.clap` (whatever case). On Windows and Linux a CLAP library is a file with that ending; on macOS it is a bundle, a

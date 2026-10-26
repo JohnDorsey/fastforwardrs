@@ -33,6 +33,10 @@ impl FileFingerprint {
     /// What the file at `path` is like now. **For a bundle (a CLAP library on macOS is a folder) it is the file inside that is looked at**: the time of a folder does not change
     /// when a file deep in it does.
     pub fn of(path: &Path) -> io::Result<Self> {
+        // (An LV2 bundle is a folder of many files, and any may change: its size is theirs together and its time the latest of theirs.)
+        if path.join("manifest.ttl").is_file() {
+            return folder_fingerprint(path);
+        }
         let metadata = fs::metadata(bundle_executable(path).as_deref().unwrap_or(path))?;
         let since_epoch = metadata
             .modified()
@@ -45,6 +49,55 @@ impl FileFingerprint {
             modified_nanoseconds: since_epoch.subsec_nanos(),
         })
     }
+}
+
+/// How many files of a folder are looked at to tell whether it has changed, and how many folders down: what is past is not looked at (a bundle that has more is a bundle of data).
+const MOST_FILES_OF_A_BUNDLE_LOOKED_AT: usize = 5000;
+const MOST_FOLDERS_DOWN_IN_A_BUNDLE: usize = 4;
+
+/// What a folder is like: the sizes of its files added up, and the time of the latest change of any (and of the folders), down to a few folders and a few thousand files.
+fn folder_fingerprint(folder: &Path) -> io::Result<FileFingerprint> {
+    fn walk(
+        folder: &Path,
+        down: usize,
+        looked_at: &mut usize,
+        size: &mut u64,
+        latest: &mut std::time::SystemTime,
+    ) -> io::Result<()> {
+        for entry in fs::read_dir(folder)? {
+            let Ok(entry) = entry else { continue };
+            let Ok(metadata) = entry.metadata() else { continue };
+            *looked_at += 1;
+            if *looked_at > MOST_FILES_OF_A_BUNDLE_LOOKED_AT {
+                return Ok(());
+            }
+            if let Ok(modified) = metadata.modified() {
+                *latest = (*latest).max(modified);
+            }
+            if metadata.is_dir() {
+                if down > 0 {
+                    let _ = walk(&entry.path(), down - 1, looked_at, size, latest);
+                }
+            } else {
+                *size += metadata.len();
+            }
+        }
+        Ok(())
+    }
+    let (mut size, mut latest, mut looked_at) = (0_u64, UNIX_EPOCH, 0_usize);
+    walk(
+        folder,
+        MOST_FOLDERS_DOWN_IN_A_BUNDLE,
+        &mut looked_at,
+        &mut size,
+        &mut latest,
+    )?;
+    let since_epoch = latest.duration_since(UNIX_EPOCH).unwrap_or_default();
+    Ok(FileFingerprint {
+        size,
+        modified_seconds: since_epoch.as_secs(),
+        modified_nanoseconds: since_epoch.subsec_nanos(),
+    })
 }
 
 /// The file that is the library inside the bundle `path` (`Name.clap/Contents/MacOS/<the one file there>`), if `path` is a folder that has one.
@@ -65,6 +118,8 @@ pub enum CachedOutcome {
     Scanned(LibraryScan),
     /// A CLAP library that was scanned.
     ScannedClap(clap_host::scan::LibraryScan),
+    /// An LV2 bundle that was scanned.
+    ScannedLv2(lv2_host::BundleScan),
     Failed(ScanFailure),
 }
 

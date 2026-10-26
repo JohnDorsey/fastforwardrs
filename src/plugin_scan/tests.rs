@@ -848,8 +848,8 @@ fn the_answer_of_a_clap_scan_is_read_back_as_it_was_written_and_the_other_words_
     }
     // The words of the LADSPA answers are what they were (the cache and the scan program of another version are told apart by the number, not by the words).
     assert!(answer_line(&ScanAnswer::CouldNotBeLoaded("x".to_owned())).contains("CouldNotBeLoaded"));
-    // (3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4, in phase 10: it says whether a CLAP plugin has a window. It is raised when the scan finds something it did not.)
-    assert_eq!(super::protocol::SCAN_FORMAT, 4);
+    // (3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4, in phase 10: it says whether a CLAP plugin has a window. 5, in phase 11: it reads LV2 bundles too. It is raised when the scan finds something it did not.)
+    assert_eq!(super::protocol::SCAN_FORMAT, 5);
 }
 
 #[test]
@@ -1080,13 +1080,48 @@ fn a_bundle_is_fingerprinted_by_the_file_inside_it_and_a_folder_with_no_such_fil
 }
 
 #[test]
-fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_clap_path_and_its_usual_places() {
+fn the_fingerprint_of_an_lv2_bundle_is_of_all_that_is_in_it_the_sizes_added_and_the_latest_time_of_change() {
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = folder.path().join("b.lv2");
+    fs::create_dir_all(bundle.join("data")).unwrap();
+    fs::write(bundle.join("manifest.ttl"), b"a").unwrap();
+    fs::write(bundle.join("data").join("inner.bin"), b"123").unwrap();
+    let first = FileFingerprint::of(&bundle).unwrap();
+    assert_eq!(first.size, 4, "the sizes of the files, those in the folders in it too");
+
+    // A file that is longer: the size is.
+    fs::write(bundle.join("data").join("inner.bin"), b"12345").unwrap();
+    assert_eq!(FileFingerprint::of(&bundle).unwrap().size, 6);
+
+    // A file that is the same length and was changed later: the time is (the folder itself has not changed: only a file in a folder in it).
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(7200);
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .open(bundle.join("data").join("inner.bin"))
+        .unwrap();
+    file.set_modified(later).unwrap();
+    drop(file);
+    let changed = FileFingerprint::of(&bundle).unwrap();
+    let wanted = later.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert!(
+        changed.modified_seconds >= wanted,
+        "{} and {wanted}",
+        changed.modified_seconds
+    );
+    assert_eq!(changed.size, 6);
+    assert_ne!(changed, first);
+}
+
+#[test]
+fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_clap_path_and_its_usual_places_then_lv2_path_and_its_usual_places()
+ {
     let environment = |name: &str| -> Option<std::ffi::OsString> {
         match name {
             "LADSPA_PATH" => Some("/ladspa/from/variable".into()),
             "CLAP_PATH" => Some("/clap/from/variable".into()),
             "COMMONPROGRAMFILES" => Some("/common".into()),
             "LOCALAPPDATA" => Some("/local".into()),
+            "LV2_PATH" => Some("/lv2/from/variable".into()),
             _ => None,
         }
     };
@@ -1102,11 +1137,15 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
         Some(Path::new("/common")),
         Some(Path::new("/local")),
     ));
+    // (A variable that says where LV2 bundles are is the only place for them: the usual ones are for when it is not set.)
+    expected.push(PathBuf::from("/lv2/from/variable"));
     assert_eq!(folders, expected);
     assert!(folders.contains(&PathBuf::from("/clap/from/variable")));
     assert_eq!(
         folders_looked_in_with(&|_| None, None, &[]).len(),
-        clap_folders(None, None, None, None).len() + usual_folders(None).len()
+        clap_folders(None, None, None, None).len()
+            + usual_folders(None).len()
+            + lv2_host::usual_folders(None, None, None, None).len()
     );
 }
 

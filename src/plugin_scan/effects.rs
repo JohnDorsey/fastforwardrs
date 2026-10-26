@@ -67,6 +67,25 @@ pub fn plugins_found_in(reports: &[LibraryReport]) -> PluginsFound {
                     );
                 }
             }
+            LibraryOutcome::ScannedLv2(scan) => {
+                for plugin in &scan.plugins {
+                    found.add(
+                        &report.path,
+                        &plugin.description.uri,
+                        &plugin.description.name,
+                        effect_of_an_lv2_plugin(&report.path, plugin),
+                    );
+                }
+                // (What could not be understood of the bundle is said too, as a plugin that is not used.)
+                for problem in &scan.problems {
+                    found.not_used.push(NotUsed {
+                        library: report.path.clone(),
+                        label: String::new(),
+                        name: String::new(),
+                        reason: problem.clone(),
+                    });
+                }
+            }
             LibraryOutcome::Failed(_) => {}
         }
     }
@@ -458,5 +477,220 @@ pub fn effect_of_a_clap_plugin(
         pre_roll_samples: pre_roll_of_a_clap_plugin(plugin.tail),
         has_a_window: plugin.has_gui,
         start_warning: plugin.start.warning(),
+    })
+}
+
+// --- LV2 plugins (piece 11.2; `docs/engine-phase-11-lv2-design.md`) ---
+
+/// The key of the LV2 plugin whose URI is `uri`: `lv2:` and the URI, with its colons made underscores (as for the others, a key has the one colon, after its namespace). The same
+/// plugin in two folders is one effect.
+pub fn key_of_an_lv2_plugin(uri: &str) -> String {
+    format!("lv2:{}", uri.replace(':', "_"))
+}
+
+/// A number as the text that names an option of a choice: the shortest text that reads back as it was (a whole number has no point: `1`, and not `1.0`).
+fn text_of_a_choice_value(value: f64) -> String {
+    format!("{value}")
+}
+
+/// What a control port that designates something that the host decides (it is the host's to say whether the plugin is running free of the clock) is not a value of the effect.
+fn is_decided_by_the_host(port: &lv2_host::PortDescription) -> bool {
+    port.designations.iter().any(|designation| {
+        designation == "http://lv2plug.in/ns/lv2core#freeWheeling"
+            || designation.starts_with("http://lv2plug.in/ns/ext/time#")
+    })
+}
+
+/// The value that a control input of an LV2 plugin is: its kind from what the port says (a switch, a whole number, a choice among its scale points, a logarithmic slider), its range
+/// and default (a range that is a fraction of the sample rate is made into the value at the rate of the sound engine).
+fn value_of_an_lv2_port(port: &lv2_host::PortDescription) -> ParameterDescriptor {
+    let rate = if port.sample_rate_relative {
+        f64::from(SAMPLE_RATE)
+    } else {
+        1.0
+    };
+    let (least, most) = (
+        port.minimum.map(|number| number * rate),
+        port.maximum.map(|number| number * rate),
+    );
+    let mut default = port.default.or(port.minimum).unwrap_or(0.0) * rate;
+    if let (Some(least), Some(most)) = (least, most)
+        && least <= most
+    {
+        default = default.clamp(least, most);
+    }
+    let name = if port.name.trim().is_empty() {
+        port.symbol.clone()
+    } else {
+        port.name.trim().to_owned()
+    };
+    let (control, default, range, scale) = if port.toggled {
+        (
+            ParameterControl::Toggle,
+            PropertyValue::Flag(default >= 0.5),
+            None,
+            ValueScale::Linear,
+        )
+    } else if port.enumeration && !port.scale_points.is_empty() {
+        let options: Vec<ChoiceOption> = port
+            .scale_points
+            .iter()
+            .take(MOST_OPTIONS_OF_AN_ENUM)
+            .map(|point| ChoiceOption {
+                id: Cow::Owned(text_of_a_choice_value(point.value)),
+                label: Cow::Owned(if point.label.trim().is_empty() {
+                    text_of_a_choice_value(point.value)
+                } else {
+                    point.label.trim().to_owned()
+                }),
+            })
+            .collect();
+        // (The option that is nearest to the default.)
+        let nearest = port
+            .scale_points
+            .iter()
+            .take(options.len())
+            .enumerate()
+            .min_by(|(_, a), (_, b)| (a.value - default).abs().total_cmp(&(b.value - default).abs()))
+            .map_or(0, |(place, _)| place);
+        let default = options[nearest].id.to_string();
+        (
+            ParameterControl::Choice(Cow::Owned(options)),
+            PropertyValue::Words(default),
+            None,
+            ValueScale::Linear,
+        )
+    } else {
+        let range = match (least, most) {
+            (Some(least), Some(most)) if least.is_finite() && most.is_finite() && least <= most => {
+                Some((least as f32, most as f32))
+            }
+            _ => None,
+        };
+        let scale = match range {
+            Some((least, _)) if port.logarithmic && least > 0.0 => ValueScale::Logarithmic,
+            _ => ValueScale::Linear,
+        };
+        if port.integer {
+            (
+                ParameterControl::Integer,
+                PropertyValue::Number(default.round() as f32),
+                range,
+                ValueScale::Linear,
+            )
+        } else {
+            (
+                ParameterControl::Automatic,
+                PropertyValue::Number(default as f32),
+                range,
+                scale,
+            )
+        }
+    };
+    ParameterDescriptor {
+        id: Cow::Owned(port.symbol.clone()),
+        name: Cow::Owned(name.to_lowercase()),
+        label: Cow::Owned(name),
+        default,
+        range,
+        unit: Cow::Owned(port.unit.clone().unwrap_or_default()),
+        decimals: None,
+        unknown_fields: UnknownFields::none(),
+        scale,
+        control,
+    }
+}
+
+/// The type of effect that the LV2 plugin `plugin` of the bundle `bundle` is, or why it is not one. **The library of the effect is the folder of the bundle**, so that what is
+/// trusted is the folder that bundles are in (the folder that a person says yes to), as it is for the files of the other kinds.
+pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) -> Result<InstalledPlugin, String> {
+    if let Some(problem) = &plugin.problem {
+        return Err(format!("it could not be made or run: {problem}"));
+    }
+    let description = &plugin.description;
+    let count = |direction: lv2_host::PortDirection| {
+        description
+            .ports
+            .iter()
+            .filter(|port| port.kind == lv2_host::PortKind::Audio && port.direction == direction)
+            .count()
+    };
+    let (inputs, outputs) = (
+        count(lv2_host::PortDirection::Input),
+        count(lv2_host::PortDirection::Output),
+    );
+    match (inputs, outputs) {
+        (0, _) => {
+            return Err(
+                "it has no audio input: it makes sound and does not change any (a generator or an instrument is not used yet)"
+                    .to_owned(),
+            );
+        }
+        (_, 0) => return Err("it has no audio output".to_owned()),
+        (1, 1) | (2, 2) | (1, 2) | (2, 1) => {}
+        (inputs, outputs) => {
+            return Err(format!(
+                "it has {inputs} audio inputs and {outputs} audio outputs, which no effect uses yet"
+            ));
+        }
+    }
+    let mut parameters = Vec::new();
+    let mut value_handles = Vec::new();
+    for port in &description.ports {
+        if port.kind != lv2_host::PortKind::Control
+            || port.direction != lv2_host::PortDirection::Input
+            || is_decided_by_the_host(port)
+        {
+            continue;
+        }
+        if parameters.len() == MOST_VALUES_OF_AN_EFFECT {
+            // (The first ones are kept, as for a CLAP plugin.)
+            break;
+        }
+        parameters.push(value_of_an_lv2_port(port));
+        value_handles.push(port.index);
+    }
+    let about = format!(
+        "{}, in {}",
+        description.uri,
+        bundle
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default()
+    );
+    let descriptor = EffectDescriptor {
+        shader: None,
+        key: Cow::Owned(key_of_an_lv2_plugin(&description.uri)),
+        version: (description.minor_version, description.micro_version),
+        name: Cow::Owned(description.name.trim().to_lowercase()),
+        description: Cow::Owned(about),
+        category: Cow::Owned(if !description.author.trim().is_empty() {
+            description.author.trim().to_owned()
+        } else if let Some(category) = description.categories.first() {
+            category.clone()
+        } else {
+            "Plugins".to_owned()
+        }),
+        domain: EffectDomain::Sound,
+        changes_each_pixel_by_itself: false,
+        parameters: Cow::Owned(parameters),
+        unknown_fields: UnknownFields::none(),
+    };
+    if let Some(problem) = descriptor.problem() {
+        return Err(format!("what it says of itself cannot be used: {problem}"));
+    }
+    Ok(InstalledPlugin {
+        descriptor,
+        library: bundle.to_owned(),
+        address: PluginAddress::Lv2 {
+            uri: description.uri.clone(),
+        },
+        audio_inputs: inputs,
+        audio_outputs: outputs,
+        value_handles,
+        // (LV2 does not say how long a plugin goes on after its input stops: half a second, as for a CLAP plugin that says nothing.)
+        pre_roll_samples: SAMPLE_RATE as usize / 2,
+        has_a_window: false,
+        start_warning: None,
     })
 }

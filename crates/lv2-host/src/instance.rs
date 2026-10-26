@@ -21,6 +21,9 @@ use crate::features::{FeatureSet, UridTable};
 use crate::library::{Library, Loaded};
 use crate::worker::{Worker, WorkerShared};
 
+/// How many frames of silence are run to learn a plugin's latency when it is made.
+const LATENCY_PROBE_FRAMES: usize = 64;
+
 /// How many bytes an atom port's buffer has. (A plugin that says it needs more, with `rsz:minimumSize`, is given that.)
 pub(crate) const ATOM_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -228,7 +231,20 @@ impl Instance {
         };
         instance.connect_everything_that_is_the_hosts();
         instance.activate();
+        instance.learn_the_latency();
         Ok(instance)
+    }
+
+    /// A plugin writes its latency on its port when it **runs**, so that the host that has to make it up (the sound is given from earlier by that much) does not know it until a block has
+    /// been run: one short block of silence is run, and the plugin is stopped and started again, so that what it heard is forgotten.
+    fn learn_the_latency(&mut self) {
+        if self.latency_port.is_none() {
+            return;
+        }
+        let frames = self.most_frames.min(LATENCY_PROBE_FRAMES);
+        if self.run(&mut [], &mut [], frames).is_ok() {
+            self.reset();
+        }
     }
 
     pub fn description(&self) -> &PluginDescription {

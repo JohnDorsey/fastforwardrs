@@ -2401,3 +2401,181 @@ fn an_embedded_plugin_that_is_not_what_the_project_recorded_is_not_written_out_o
     );
     assert!(!host.forget_the_embedded_plugins());
 }
+
+/// A plugin that makes the sound it is given and writes down how many frames each run was of; it takes at most 100 at once and is not told values at samples.
+struct SlowToTakeALongBlock {
+    runs: Arc<Mutex<Vec<usize>>>,
+}
+
+impl super::PluginInstance for SlowToTakeALongBlock {
+    fn set_value(&mut self, _handle: u32, _value: f32, _at_sample: usize) {}
+
+    fn takes_values_at_samples(&self) -> bool {
+        false
+    }
+
+    fn most_samples_at_once(&self) -> Option<usize> {
+        Some(100)
+    }
+
+    fn run(&mut self, inputs: &mut [&mut [f32]], outputs: &mut [&mut [f32]], frames: usize) -> Result<(), String> {
+        self.runs.lock().unwrap().push(frames);
+        for (out, input) in outputs.iter_mut().zip(inputs.iter()) {
+            out[..frames].copy_from_slice(&input[..frames]);
+        }
+        Ok(())
+    }
+
+    fn reset(&mut self) {}
+
+    fn latency(&self) -> usize {
+        0
+    }
+}
+
+#[test]
+fn a_plugin_that_takes_so_many_frames_at_most_is_given_no_more_in_a_run_even_when_it_is_not_told_values_at_samples_and_the_sound_is_whole()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_kind_of("ffrs_test_gain");
+    let plugin = kind.installed_plugin().unwrap();
+    let runs = Arc::new(Mutex::new(Vec::new()));
+    let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs).unwrap();
+    let instances: Vec<Box<dyn super::PluginInstance>> = (0..layout.instances())
+        .map(|_| {
+            Box::new(SlowToTakeALongBlock {
+                runs: Arc::clone(&runs),
+            }) as Box<dyn super::PluginInstance>
+        })
+        .collect();
+    let mut effect = PluginEffect::new(
+        instances,
+        plugin,
+        the_effect(kind, &[1.0]),
+        thirty(),
+        0,
+        false,
+        Notes::default(),
+    )
+    .unwrap();
+    let (mut left, mut right) = (vec![0.25_f32; 512], vec![-0.25_f32; 512]);
+
+    effect.process(&mut left, &mut right);
+
+    let runs = runs.lock().unwrap().clone();
+    assert!(runs.iter().all(|frames| *frames <= 100), "{runs:?}");
+    let per_instance: usize = runs.iter().sum::<usize>() / layout.instances();
+    assert_eq!(per_instance, 512, "every frame of the block was made: {runs:?}");
+    assert!(
+        left.iter().all(|sample| *sample == 0.25) && right.iter().all(|sample| *sample == -0.25),
+        "and it is the sound that went in"
+    );
+}
+
+#[test]
+fn what_a_bundle_says_is_read_once_by_the_host_and_again_when_it_is_told_to_forget() {
+    use crate::plugin_scan::{effect_of_an_lv2_plugin, key_of_an_lv2_plugin};
+    let _alone = the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = lv2_test_plugins::write_bundle(folder.path());
+    let scan = lv2_host::scan_bundle(&bundle, &mut |_| {}).unwrap();
+    set_installed_plugins(
+        scan.plugins
+            .iter()
+            .filter_map(|plugin| effect_of_an_lv2_plugin(&bundle, plugin).ok())
+            .collect(),
+    );
+    let key = key_of_an_lv2_plugin(lv2_test_plugins::GAIN);
+    let kind = EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key() == key)
+        .unwrap();
+    let host = PluginHost::new();
+    host.allow_everything();
+    let effect = the_effect(kind, &[0.5]);
+    let notes = Notes::default();
+    let clip = a_clip_at(0, vec![effect.clone()]);
+    let make = || host.processor_for(&effect, &clip, thirty(), &notes, false);
+    assert!(make().is_some(), "the plugin is made");
+
+    // The bundle is changed on disk: its gain plugin has no port for the gain any more.
+    let ttl = bundle.join("gain.ttl");
+    let text = std::fs::read_to_string(&ttl).unwrap();
+    let without_the_control = text
+        .replace(
+            "lv2:index 2 ; lv2:symbol \"gain\"",
+            "lv2:index 2 ; lv2:symbol \"gain\" ; lv2:portProperty lv2:connectionOptional",
+        )
+        .replace(
+            "a lv2:InputPort , lv2:ControlPort",
+            "a lv2:OutputPort , lv2:ControlPort",
+        );
+    assert_ne!(text, without_the_control);
+    std::fs::write(&ttl, without_the_control).unwrap();
+
+    assert!(
+        make().is_some(),
+        "what the host read before is kept: the plugin is made as it was scanned"
+    );
+    host.forget_what_the_bundles_said();
+    assert!(
+        make().is_none(),
+        "read again, the bundle is not what it was when it was scanned"
+    );
+    assert!(
+        notes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|note| note.contains("not what it was when the plugins were scanned")),
+        "{:?}",
+        notes.lock().unwrap()
+    );
+}
+
+#[test]
+fn an_lv2_plugin_whose_audio_ports_are_not_what_they_were_when_it_was_scanned_is_not_run() {
+    use crate::plugin_scan::{effect_of_an_lv2_plugin, key_of_an_lv2_plugin};
+    let _alone = the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = lv2_test_plugins::write_bundle(folder.path());
+    let scan = lv2_host::scan_bundle(&bundle, &mut |_| {}).unwrap();
+    set_installed_plugins(
+        scan.plugins
+            .iter()
+            .filter_map(|plugin| effect_of_an_lv2_plugin(&bundle, plugin).ok())
+            .collect(),
+    );
+    let key = key_of_an_lv2_plugin(lv2_test_plugins::GAIN);
+    let kind = EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key() == key)
+        .unwrap();
+    // The gain plugin of the bundle has another audio output now (and the numbers of its ports are as they were).
+    let ttl = bundle.join("gain.ttl");
+    let text = std::fs::read_to_string(&ttl).unwrap();
+    let with_another_output = text.replace(
+        "lv2:port [",
+        "lv2:port [ a lv2:OutputPort , lv2:AudioPort ; lv2:index 3 ; lv2:symbol \"extra\" ; lv2:name \"Extra\" ] , [",
+    );
+    assert_ne!(text, with_another_output);
+    std::fs::write(&ttl, with_another_output).unwrap();
+    let host = PluginHost::new();
+    host.allow_everything();
+    let effect = the_effect(kind, &[0.5]);
+    let notes = Notes::default();
+    let clip = a_clip_at(0, vec![effect.clone()]);
+
+    let processor = host.processor_for(&effect, &clip, thirty(), &notes, false);
+
+    assert!(processor.is_none(), "not what it was: not run");
+    assert!(
+        notes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|note| note.contains("not what it was when the plugins were scanned")),
+        "{:?}",
+        notes.lock().unwrap()
+    );
+}

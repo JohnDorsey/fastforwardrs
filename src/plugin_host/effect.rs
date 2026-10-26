@@ -409,6 +409,8 @@ impl BlockProcessor for PluginEffect {
             } else {
                 total
             };
+            // (A plugin that was made for blocks of at most so many frames, as an LV2 plugin is, is not given a longer one, whether or not its values change in the middle of it.)
+            let step = step.min(self.instances[0].most_samples_at_once().unwrap_or(usize::MAX).max(1));
             let mut at = 0;
             while at < total && !self.left_out {
                 let end = (at + step).min(total);

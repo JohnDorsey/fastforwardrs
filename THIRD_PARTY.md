@@ -12,10 +12,10 @@ source of the ffmpeg that is shipped with a release is to be offered with it (`d
 
 | Licence | Libraries |
 |---|---|
-| [MIT License](#MIT) | 349 |
+| [MIT License](#MIT) | 357 |
 | [Unicode License v3](#Unicode-3.0) | 19 |
 | [Apache License 2.0](#Apache-2.0) | 18 |
-| [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 4 |
+| [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 5 |
 | [BSD 3-Clause "New" or "Revised" License](#BSD-3-Clause) | 3 |
 | [Boost Software License 1.0](#BSL-1.0) | 2 |
 | [zlib License](#Zlib) | 2 |
@@ -2226,6 +2226,7 @@ Public License instead of this License.  But first, please read
 Used by:
 - clap-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 - ladspa-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
+- lv2-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 
 ```text
 GNU GENERAL PUBLIC LICENSE
@@ -3399,6 +3400,34 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
+- oxilangtag 0.1.6 (https://github.com/oxigraph/oxilangtag)
+
+```text
+Copyright (c) 2015-2021 Pyfisch Tpt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+```
+
+## MIT License <a id="MIT"></a>
+
+Used by:
 - ash 0.38.0+1.3.281 (https://github.com/ash-rs/ash)
 
 ```text
@@ -3971,6 +4000,40 @@ THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
+- oxiri 0.2.11 (https://github.com/oxigraph/oxiri)
+
+```text
+Copyright (c) 2018 Oxigraph developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+## MIT License <a id="MIT"></a>
+
+Used by:
 - fearless_simd 0.4.1 (https://github.com/linebender/fearless_simd)
 - kurbo 0.13.1 (https://github.com/linebender/kurbo)
 - peniko 0.6.1 (https://github.com/linebender/peniko)
@@ -4439,6 +4502,40 @@ Used by:
 
 ```text
 Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+## MIT License <a id="MIT"></a>
+
+Used by:
+- ppv-lite86 0.2.21 (https://github.com/cryptocorrosion/cryptocorrosion)
+
+```text
+Copyright (c) 2019 The CryptoCorrosion Contributors
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -5385,6 +5482,43 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## MIT License <a id="MIT"></a>
 
 Used by:
+- rand 0.9.5 (https://github.com/rust-random/rand)
+- rand_chacha 0.9.0 (https://github.com/rust-random/rand)
+- rand_core 0.9.5 (https://github.com/rust-random/rand)
+
+```text
+Copyright 2018 Developers of the Rand project
+Copyright (c) 2014 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+## MIT License <a id="MIT"></a>
+
+Used by:
 - nohash-hasher 0.2.0 (https://github.com/paritytech/nohash-hasher)
 
 ```text
@@ -6211,6 +6345,8 @@ Used by:
 - objc2-quartz-core 0.3.2 (https://github.com/madsmtm/objc2)
 - objc2 0.5.3 (https://github.com/madsmtm/objc2)
 - objc2 0.6.5 (https://github.com/madsmtm/objc2)
+- oxrdf 0.3.5 (https://github.com/oxigraph/oxigraph/tree/main/lib/oxrdf)
+- oxttl 0.2.5 (https://github.com/oxigraph/oxigraph/tree/master/lib/oxttl)
 - profiling 1.0.18 (https://github.com/aclysma/profiling)
 - type-map 0.5.1 (https://github.com/kardeiz/type-map)
 - windows-collections 0.3.2 (https://github.com/microsoft/windows-rs)

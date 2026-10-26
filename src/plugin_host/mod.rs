@@ -20,8 +20,8 @@ pub use effect::{
 };
 pub use host::{PluginHost, Wanted};
 pub use instance::{
-    BetweenBlocks, ClapCopy, ClapMaker, LadspaCopy, LiveGuard, Lives, MOST_FRAMES_OF_A_CLAP_PLUGIN, PluginInstance,
-    places_to_look_in,
+    BetweenBlocks, ClapCopy, ClapMaker, LadspaCopy, LiveGuard, Lives, Lv2Copy, MOST_FRAMES_OF_A_CLAP_PLUGIN,
+    PluginInstance, places_to_look_in,
 };
 pub use needs::folders_the_sound_of_a_project_needs;
 

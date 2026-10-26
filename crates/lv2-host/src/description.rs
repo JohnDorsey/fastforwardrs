@@ -597,8 +597,14 @@ fn short_name_of_a_unit(unit: &str) -> Option<String> {
 
 // ---- finding bundles ----
 
-/// The folders that LV2 bundles are looked for in, when nobody says: `LV2_PATH` if it is set, and otherwise the usual ones of the system. (A person adds more in the plugin manager.)
-pub fn usual_folders(lv2_path: Option<&std::ffi::OsStr>, home: Option<&Path>) -> Vec<PathBuf> {
+/// The folders that LV2 bundles are looked for in, when nobody says: `LV2_PATH` if it is set, and otherwise the usual ones of the system. (A person adds more in the plugin manager.
+/// The places that a system gives are passed in, so that this does not look at the environment: `app_data` and `common_program_files` are `%APPDATA%` and `%COMMONPROGRAMFILES%`.)
+pub fn usual_folders(
+    lv2_path: Option<&std::ffi::OsStr>,
+    home: Option<&Path>,
+    app_data: Option<&Path>,
+    common_program_files: Option<&Path>,
+) -> Vec<PathBuf> {
     if let Some(path) = lv2_path.filter(|path| !path.is_empty()) {
         return std::env::split_paths(path)
             .filter(|folder| !folder.as_os_str().is_empty())
@@ -606,10 +612,8 @@ pub fn usual_folders(lv2_path: Option<&std::ffi::OsStr>, home: Option<&Path>) ->
     }
     let mut folders = Vec::new();
     if cfg!(windows) {
-        for variable in ["APPDATA", "COMMONPROGRAMFILES"] {
-            if let Some(base) = std::env::var_os(variable) {
-                folders.push(PathBuf::from(base).join("LV2"));
-            }
+        for base in [app_data, common_program_files].into_iter().flatten() {
+            folders.push(base.join("LV2"));
         }
     } else if cfg!(target_os = "macos") {
         if let Some(home) = home {

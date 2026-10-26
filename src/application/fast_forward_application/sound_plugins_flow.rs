@@ -18,12 +18,12 @@ use crate::application::plugin_manager_bundles::{BundleKind, BundlesView};
 use crate::application::plugin_manager_window::{PluginManagerCommand, PluginManagerView};
 use crate::plugin_host::PluginHost;
 use crate::plugin_scan::ScanFailure;
-use crate::plugin_scan::is_a_clap_file;
 use crate::plugin_scan::{
     Breadcrumb, LibraryOutcome, LibraryReport, NotUsed, PluginScanner, PluginSearchSettings, ScanCache,
     bundled_plugins_folder, folders_looked_in_by_default, plugins_found_in, recover, scan_a_library_alone,
     scanner_program_beside_this_program,
 };
+use crate::plugin_scan::{is_a_clap_file, is_an_lv2_bundle};
 use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
 use crate::project::{EffectKind, set_installed_plugins, set_installed_shaders};
 use crate::shader_files::{
@@ -163,7 +163,7 @@ impl PluginSearch {
         }
         let key = kind.key();
         let (namespace, rest) = key.split_once(':')?;
-        if namespace != "ladspa" && namespace != "clap" {
+        if namespace != "ladspa" && namespace != "clap" && namespace != "lv2" {
             return None;
         }
         Some(self.why_a_plugin_is_not_installed(namespace, rest))
@@ -207,7 +207,11 @@ impl PluginSearch {
             _ => (None, rest),
         };
         let in_the_library = |path: &Path| library_stem.is_none_or(|stem| stem_of(path) == stem);
-        let own_kind = |path: &Path| is_a_clap_file(path) == (namespace == "clap");
+        let own_kind = |path: &Path| match namespace {
+            "lv2" => is_an_lv2_bundle(path),
+            "clap" => is_a_clap_file(path),
+            _ => !is_a_clap_file(path) && !is_an_lv2_bundle(path),
+        };
         // The plugin was found, and cannot be an effect.
         if let Some(not_used) = self.result.not_used.iter().find(|not_used| {
             not_used.label.replace(':', "_") == label
@@ -503,6 +507,8 @@ impl FastForwardApplication {
         let found = plugins_found_in(&reports);
         search.result.not_used = found.not_used;
         search.result.effect_count = found.effects.len();
+        // (What the host read of the bundles before is what they said then: a bundle may have changed, and the scan that has just ended is what says.)
+        self.environment.plugin_host.forget_what_the_bundles_said();
         set_installed_plugins(found.effects);
         // (Effects of plugins that were not installed before are now: their folders are asked about, and the sound is made with them if the answer is yes.)
         self.ask_about_the_folders_the_sound_needs();

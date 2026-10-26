@@ -38,6 +38,7 @@ fn scanned(outcome: LibraryOutcome) -> LibraryScan {
         LibraryOutcome::Scanned(scan) => scan,
         LibraryOutcome::Failed(failure) => panic!("the library failed: {failure}"),
         LibraryOutcome::ScannedClap(scan) => panic!("the library was scanned as a CLAP one: {scan:?}"),
+        LibraryOutcome::ScannedLv2(scan) => panic!("the library was scanned as an LV2 bundle: {scan:?}"),
     }
 }
 
@@ -46,6 +47,7 @@ fn failure(outcome: LibraryOutcome) -> ScanFailure {
         LibraryOutcome::Failed(failure) => failure,
         LibraryOutcome::Scanned(scan) => panic!("the library did not fail: {scan:?}"),
         LibraryOutcome::ScannedClap(scan) => panic!("the library did not fail: {scan:?}"),
+        LibraryOutcome::ScannedLv2(scan) => panic!("the library did not fail: {scan:?}"),
     }
 }
 
@@ -531,6 +533,7 @@ fn a_look_at_the_plugins_that_are_installed_in_a_folder() {
             LibraryOutcome::ScannedClap(library) => {
                 println!("{name}: a CLAP library, {} plugins", library.plugins.len())
             }
+            LibraryOutcome::ScannedLv2(bundle) => println!("{name}: an LV2 bundle, {} plugins", bundle.plugins.len()),
             LibraryOutcome::Failed(failure) => println!("{name}: FAILED: {failure}"),
         }
     }

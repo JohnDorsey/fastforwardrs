@@ -9,6 +9,9 @@
 //! * [`description`] reads what a bundle says about its plugins (its Turtle), as safe values that can be sent between programs; **it loads nothing**.
 //! * [`Library`] is a library that is loaded; [`Instance`] is a plugin that has been made from it, and can be given values and sound, and its state saved and restored.
 //!
+//! * [`scan_bundle`] reads a bundle, loads its binary, and makes and runs each of its plugins once on silence, saying what it is doing as it goes: **it is meant to be run in a
+//!   program of its own** (`fastforwardrs-plugin-scan`), so that a library that crashes or never returns costs that program and not the editor.
+//!
 //! Nothing in this crate decides whether a library may be loaded. That is the editor's `plugin_trust` module.
 
 #![deny(unsafe_code)]
@@ -19,6 +22,7 @@ pub mod description;
 mod features;
 mod instance;
 mod library;
+mod scan;
 mod state;
 mod worker;
 
@@ -29,6 +33,7 @@ pub use description::{
 
 pub use instance::{Instance, InstantiateError, RunError};
 pub use library::{Library, OpenError};
+pub use scan::{BundleScan, PROBE_BLOCK_FRAMES, PROBE_SAMPLE_RATE, ScannedPlugin, scan_bundle};
 pub use state::StateError;
 
 #[cfg(test)]

@@ -446,11 +446,16 @@ fn the_folders_that_bundles_are_looked_for_in_are_those_of_lv2_path_when_it_is_s
         if cfg!(windows) { "C:\\" } else { "/" }
     ));
 
-    let given = usual_folders(Some(&path), None);
+    let given = usual_folders(Some(&path), None, None, None);
     assert_eq!(given.len(), 2);
     assert!(given[0].ends_with("a") && given[1].ends_with("b"));
 
-    let usual = usual_folders(None, Some(Path::new("/home/someone")));
+    let usual = usual_folders(
+        None,
+        Some(Path::new("/home/someone")),
+        Some(Path::new("C:\\Users\\someone\\AppData\\Roaming")),
+        Some(Path::new("C:\\Program Files\\Common Files")),
+    );
     assert!(!usual.is_empty());
     assert!(
         usual
@@ -459,8 +464,8 @@ fn the_folders_that_bundles_are_looked_for_in_are_those_of_lv2_path_when_it_is_s
         "{usual:?}"
     );
     assert_eq!(
-        usual_folders(Some(std::ffi::OsStr::new("")), Some(Path::new("/h"))),
-        usual_folders(None, Some(Path::new("/h"))),
+        usual_folders(Some(std::ffi::OsStr::new("")), Some(Path::new("/h")), None, None),
+        usual_folders(None, Some(Path::new("/h")), None, None),
         "an empty LV2_PATH is not set"
     );
 }

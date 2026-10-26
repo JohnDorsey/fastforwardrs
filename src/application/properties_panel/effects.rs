@@ -166,14 +166,14 @@ pub(super) fn effects_that_match(kinds: &[EffectKind], typed: &str) -> Vec<Effec
 }
 
 /// The sources that effects come from, in the order the menu of effects lists them in; a source that is not here comes after them, in the order its first effect is offered in.
-const SOURCES_IN_ORDER: [&str; 4] = ["Built-in", "ISF", "LADSPA", "CLAP"];
+const SOURCES_IN_ORDER: [&str; 5] = ["Built-in", "ISF", "LADSPA", "CLAP", "LV2"];
 
 /// What the menu of effects calls the place the effect `kind` comes from: the part of its key before the colon (`builtin:hue_shift`, `ladspa:caps:Eq`), said as a person says it.
 pub(super) fn source_of(kind: EffectKind) -> String {
     let namespace = kind.key().split(':').next().unwrap_or_default();
     match namespace {
         "builtin" => "Built-in".to_owned(),
-        "isf" | "ladspa" | "clap" => namespace.to_uppercase(),
+        "isf" | "ladspa" | "clap" | "lv2" => namespace.to_uppercase(),
         other => other.to_uppercase(),
     }
 }

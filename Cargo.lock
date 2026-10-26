@@ -1296,6 +1296,8 @@ dependencies = [
  "image",
  "ladspa-host",
  "ladspa-test-plugins",
+ "lv2-host",
+ "lv2-test-plugins",
  "naga",
  "pathdiff",
  "pollster 0.4.0",
