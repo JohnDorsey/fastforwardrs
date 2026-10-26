@@ -31,6 +31,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`engine-phase-7-design.md`](engine-phase-7-design.md), [`engine-phase-7-report.md`](engine-phase-7-report.md) | the sound engine and LADSPA plugins |
 | [`engine-phase-7-clap-design.md`](engine-phase-7-clap-design.md), [`engine-phase-7-clap-report.md`](engine-phase-7-clap-report.md) | CLAP plugins |
 | [`engine-phase-9-design.md`](engine-phase-9-design.md), [`engine-phase-9-report.md`](engine-phase-9-report.md) | phase 9, text objects are made of an effect (the design, with what was built in its sections 6 to 8; and the report): the last phase of the plan |
+| [`engine-phase-10-editors-design.md`](engine-phase-10-editors-design.md), [`engine-phase-10-report.md`](engine-phase-10-report.md) | phase 10, the windows of plugins (CLAP; a program of its own for each window, the state of a plugin kept in the project, file format 19): the design, with what was built in its section 6; and the report |
 | [`groups-feature-spec.md`](groups-feature-spec.md) | tags, clip groups and track groups |
 | [`licence-plugin-clarification-draft.md`](licence-plugin-clarification-draft.md) | the options for the plugin clarification (`LICENSE-PLUGIN-CLARIFICATION` is the adopted one) |
 
