@@ -307,3 +307,43 @@ fn what_is_heard_of_the_effects_changes_when_another_plugin_of_the_same_library_
     assert_ne!(heard_first, heard_clap);
     assert_ne!(heard_moved, heard_clap);
 }
+
+#[test]
+fn the_state_that_a_plugin_saved_is_in_the_plan_and_what_is_heard_changes_when_it_does() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut project = project_with_a_video_and_a_sound();
+    let target = AnimationTarget::Clip(clip_id(&project, 0));
+    let kind = kind_of(&plugin("clap:a:first"));
+    let instance = put_an_effect_on(
+        &mut project,
+        target,
+        kind,
+        &[PropertyValue::Number(2.0), PropertyValue::Number(0.25)],
+    );
+    assert_eq!(clips_of(&plan(&project))[0].effects[0].state, None);
+    let heard_without = hash_of_the_sound_effects(&project);
+
+    project
+        .set_effect_state(target.into(), instance, Some(std::sync::Arc::from(b"one".as_slice())))
+        .unwrap();
+    let heard_one = hash_of_the_sound_effects(&project);
+    project
+        .set_effect_state(target.into(), instance, Some(std::sync::Arc::from(b"two".as_slice())))
+        .unwrap();
+    let heard_two = hash_of_the_sound_effects(&project);
+
+    assert_eq!(
+        clips_of(&plan(&project))[0].effects[0].state.as_deref(),
+        Some(b"two".as_slice())
+    );
+    assert_ne!(heard_without, heard_one, "a state where there was none");
+    assert_ne!(heard_one, heard_two, "another state");
+    project
+        .set_effect_state(target.into(), instance, Some(std::sync::Arc::from(b"one".as_slice())))
+        .unwrap();
+    assert_eq!(
+        hash_of_the_sound_effects(&project),
+        heard_one,
+        "the same bytes are heard the same"
+    );
+}

@@ -58,6 +58,9 @@ struct Step {
     /// What the edits of the step are about, while more may still be joined to it.
     key: Option<EditKey>,
     last_edited_at: Instant,
+    /// Whether an edit that rides on the one before it (see [`History::record_rider`]) may be joined to the step: not one that was made by an undo or a redo, nor one that has been undone
+    /// since it was made.
+    open_to_riders: bool,
 }
 
 /// What undoing or redoing gives back.
@@ -198,11 +201,34 @@ impl History {
             state_before: self.current,
             key,
             last_edited_at: now,
+            open_to_riders: true,
         });
         self.current = state_after;
         if self.undo.len() > MOST_STEPS_KEPT {
             self.undo.remove(0);
         }
+    }
+
+    /// Records an edit that **rides** on the edit before it (what a plugin's window says of its state, which comes a moment after the value that the hand changed): if the latest step is
+    /// open to it and was last edited less than [`MERGE_WINDOW`] ago (or the mouse button, or a hand in a window, is down), it becomes part of that step, whatever the step is about;
+    /// if not, it is a step of its own. (Arguments as for [`Self::record_change`].)
+    pub fn record_rider(
+        &mut self,
+        project_before: Project,
+        selection_before: Vec<SelectionItem>,
+        now: Instant,
+        pointer_is_down: bool,
+    ) {
+        if let Some(latest) = self.undo.last_mut()
+            && latest.open_to_riders
+            && (pointer_is_down || now.saturating_duration_since(latest.last_edited_at) < self.merge_window)
+        {
+            self.redo.clear();
+            latest.last_edited_at = now;
+            self.current = self.new_state();
+            return;
+        }
+        self.record_change(project_before, selection_before, None, now, pointer_is_down);
     }
 
     /// Takes back the latest step. `project_now` and `selection_now` are what there is now, which a
@@ -215,6 +241,7 @@ impl History {
             state_before: self.current,
             key: None,
             last_edited_at: Instant::now(),
+            open_to_riders: false,
         });
         self.current = step.state_before;
         self.stop_joining_edits_to_the_latest_step();
@@ -233,6 +260,7 @@ impl History {
             state_before: self.current,
             key: None,
             last_edited_at: Instant::now(),
+            open_to_riders: false,
         });
         self.current = step.state_before;
         Some(Restored {
@@ -245,6 +273,7 @@ impl History {
     fn stop_joining_edits_to_the_latest_step(&mut self) {
         if let Some(latest) = self.undo.last_mut() {
             latest.key = None;
+            latest.open_to_riders = false;
         }
     }
 }
@@ -352,6 +381,65 @@ mod tests {
         assert!(history.can_redo());
         record(&mut history, 1, None, now, false);
         assert!(!history.can_redo());
+    }
+
+    // --- an edit that rides on the one before it ---
+
+    fn ride(history: &mut History, before: usize, now: Instant, pointer_is_down: bool) {
+        history.record_rider(project_of(before), Vec::new(), now, pointer_is_down);
+    }
+
+    #[test]
+    fn an_edit_that_rides_joins_the_step_before_it_whatever_that_is_about_when_it_comes_soon_or_a_hand_is_down() {
+        let mut history = History::new();
+        let start = Instant::now();
+        record(&mut history, 1, key("a value"), start, false);
+        ride(&mut history, 2, start + Duration::from_millis(300), false);
+        // (A hand is on a window: it may be long since the last edit, and the state still belongs to the gesture.)
+        ride(&mut history, 3, start + Duration::from_secs(9), true);
+
+        let undone = history.undo(&project_of(4), Vec::new()).unwrap();
+        assert_eq!(track_count(&undone.project), 1, "the project from before the value");
+        assert!(!history.can_undo(), "one step");
+    }
+
+    #[test]
+    fn an_edit_that_rides_is_a_step_of_its_own_when_the_step_before_it_is_old_or_there_is_none() {
+        let mut history = History::new();
+        let start = Instant::now();
+        ride(&mut history, 1, start, false);
+        assert!(history.can_undo(), "with nothing to ride on it is a step");
+
+        record(&mut history, 2, key("a value"), start + Duration::from_secs(1), false);
+        // (More than the merge window after the last edit, and no hand down.)
+        ride(&mut history, 3, start + Duration::from_secs(5), false);
+
+        let latest = history.undo(&project_of(4), Vec::new()).unwrap();
+        assert_eq!(track_count(&latest.project), 3, "the rider is a step of its own");
+        let middle = history.undo(&latest.project, Vec::new()).unwrap();
+        assert_eq!(track_count(&middle.project), 2);
+        let first = history.undo(&middle.project, Vec::new()).unwrap();
+        assert_eq!(track_count(&first.project), 1);
+        assert!(!history.can_undo());
+    }
+
+    #[test]
+    fn an_edit_that_rides_does_not_join_a_step_that_was_undone_or_redone_and_what_was_undone_cannot_be_redone_after_it()
+    {
+        let mut history = History::new();
+        let start = Instant::now();
+        record(&mut history, 1, None, start, false);
+        record(&mut history, 2, None, start, false);
+        let undone = history.undo(&project_of(3), Vec::new()).unwrap();
+        assert!(history.can_redo());
+
+        // (The step that is now the latest was undone to and not made: a rider that comes at once is not part of it.)
+        ride(&mut history, track_count(&undone.project), start, false);
+
+        assert!(!history.can_redo(), "an edit after an undo ends the redo");
+        let latest = history.undo(&project_of(3), Vec::new()).unwrap();
+        assert_eq!(track_count(&latest.project), 2, "the rider is a step of its own");
+        assert!(history.can_undo(), "and the step before it is still there");
     }
 
     // --- one step for one gesture ---

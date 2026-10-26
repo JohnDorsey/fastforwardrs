@@ -386,3 +386,157 @@ fn a_folder_that_was_said_no_to_is_not_opened_and_the_box_says_so() {
 
     assert!(window.harness.query_by_label_contains("was said no to").is_some());
 }
+
+// --- the state of the plugin, kept in the project (phase 10, piece 10.4) ---
+
+/// The state that the effect of `a_clap_plugin` on the clip keeps, if it keeps one.
+fn the_state_kept(window: &Window, clip: ClipId) -> Option<Vec<u8>> {
+    window
+        .application()
+        .project()
+        .effects_of(AnimationTarget::Clip(clip))
+        .and_then(|chain| chain.instance(EffectInstanceId::FIRST))
+        .and_then(|effect| effect.state().map(|state| state.to_vec()))
+}
+
+fn the_window_says_this_state(text: &[u8]) -> WindowEvent {
+    WindowEvent::State(crate::base64::encode(text))
+}
+
+#[test]
+fn a_state_that_a_window_says_is_kept_by_the_effect_and_is_one_step_with_the_edit_that_made_the_plugin_say_so() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = a_clap_plugin("with_a_state", true);
+    let (mut window, clip) = window_with_the_plugin_on_the_clip(kind);
+    assert_eq!(the_state_kept(&window, clip), None);
+
+    the_window_says(
+        &mut window,
+        clip,
+        &[
+            (
+                Duration::from_secs(5),
+                WindowEvent::Edit(ParameterEdit::Value { id: 0, value: 2.5 }),
+            ),
+            (Duration::from_millis(5_300), WindowEvent::StateChanged),
+            (
+                Duration::from_millis(5_300),
+                the_window_says_this_state(b"what the plugin saved"),
+            ),
+        ],
+    );
+    assert_eq!(the_state_kept(&window, clip), Some(b"what the plugin saved".to_vec()));
+    assert_eq!(the_amount(&window, clip, kind), Some(PropertyValue::Number(2.5)));
+
+    window.do_this(Command::Undo);
+    assert_eq!(
+        the_amount(&window, clip, kind),
+        Some(PropertyValue::Number(1.0)),
+        "the value is back"
+    );
+    assert_eq!(
+        the_state_kept(&window, clip),
+        None,
+        "and the state with it: they were one step"
+    );
+    window.do_this(Command::Redo);
+    assert_eq!(the_state_kept(&window, clip), Some(b"what the plugin saved".to_vec()));
+}
+
+#[test]
+fn a_state_that_nothing_made_the_plugin_say_is_a_step_of_its_own_and_a_state_that_the_effect_has_is_no_edit() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = a_clap_plugin("alone_with_a_state", true);
+    let (mut window, clip) = window_with_the_plugin_on_the_clip(kind);
+
+    the_window_says(
+        &mut window,
+        clip,
+        &[
+            (Duration::from_secs(5), WindowEvent::StateChanged),
+            (Duration::from_secs(5), the_window_says_this_state(b"a preset")),
+            // (The same again, as a plugin says what it saved when its state changed: nothing is changed, and nothing is a step.)
+            (Duration::from_secs(10), WindowEvent::StateChanged),
+            (Duration::from_secs(10), the_window_says_this_state(b"a preset")),
+        ],
+    );
+    assert_eq!(the_state_kept(&window, clip), Some(b"a preset".to_vec()));
+
+    window.do_this(Command::Undo);
+    assert_eq!(
+        the_state_kept(&window, clip),
+        None,
+        "one step took the state: the second time it was said was no step"
+    );
+    assert!(
+        window
+            .application()
+            .project()
+            .effects_of(AnimationTarget::Clip(clip))
+            .is_some_and(|chain| chain.instance(EffectInstanceId::FIRST).is_some()),
+        "the effect is still there: only the state was undone"
+    );
+}
+
+#[test]
+fn a_state_that_is_too_big_for_a_project_is_not_kept_and_the_effect_goes_on_as_it_was() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = a_clap_plugin("with_too_big_a_state", true);
+    let (mut window, clip) = window_with_the_plugin_on_the_clip(kind);
+    the_window_says(
+        &mut window,
+        clip,
+        &[
+            (Duration::ZERO, WindowEvent::StateChanged),
+            (Duration::ZERO, the_window_says_this_state(b"small")),
+        ],
+    );
+
+    let too_big = vec![0_u8; crate::project::MOST_BYTES_OF_A_PLUGIN_STATE + 1];
+    the_window_says(
+        &mut window,
+        clip,
+        &[
+            (Duration::from_secs(5), WindowEvent::StateChanged),
+            (Duration::from_secs(5), the_window_says_this_state(&too_big)),
+        ],
+    );
+
+    assert_eq!(
+        the_state_kept(&window, clip),
+        Some(b"small".to_vec()),
+        "what the effect had is kept"
+    );
+}
+
+#[test]
+fn a_state_that_nothing_said_had_changed_is_not_kept_and_so_leaves_what_can_be_redone_alone() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = a_clap_plugin("asked_not_changed", true);
+    let (mut window, clip) = window_with_the_plugin_on_the_clip(kind);
+    the_window_says(
+        &mut window,
+        clip,
+        &[(
+            Duration::from_secs(5),
+            WindowEvent::Edit(ParameterEdit::Value { id: 0, value: 2.5 }),
+        )],
+    );
+    window.do_this(Command::Undo);
+    assert_eq!(the_amount(&window, clip, kind), Some(PropertyValue::Number(1.0)));
+
+    // (The window answers an asking of the program, or a value that the project told it: the plugin did not say that its state changed.)
+    the_window_says(
+        &mut window,
+        clip,
+        &[(Duration::from_secs(8), the_window_says_this_state(b"an answer"))],
+    );
+
+    assert_eq!(the_state_kept(&window, clip), None, "no person did that");
+    window.do_this(Command::Redo);
+    assert_eq!(
+        the_amount(&window, clip, kind),
+        Some(PropertyValue::Number(2.5)),
+        "the redo is still there"
+    );
+}

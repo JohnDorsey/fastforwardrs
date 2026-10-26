@@ -228,7 +228,29 @@ fn closing_ends_the_program_after_it_says_that_the_window_is_closed() {
 
     program.tell(&ToProgram::Close);
 
+    // (The plugin said that its state changed, and the editor did not ask for it: it is said before the end, so that what a person did last is not lost.)
+    assert!(
+        matches!(program.next(), FromProgram::State { .. }),
+        "the state that changed is said before the end"
+    );
     assert_eq!(program.next(), FromProgram::Closed);
+    assert_eq!(program.exit_code(), Some(0));
+}
+
+#[test]
+fn closing_after_the_state_was_asked_for_says_only_that_the_window_is_closed() {
+    let mut program = Running::of_the_test_plugin(EDITOR);
+    program.begin(&[], None);
+    let _ = program.said_until(|message| matches!(message, FromProgram::StateChanged));
+    let _ = program.the_state();
+
+    program.tell(&ToProgram::Close);
+
+    assert_eq!(
+        program.next(),
+        FromProgram::Closed,
+        "it was asked for, and has not changed since"
+    );
     assert_eq!(program.exit_code(), Some(0));
 }
 
@@ -240,6 +262,10 @@ fn when_the_editor_goes_away_the_window_does_too() {
 
     drop(program.stdin.take());
 
+    assert!(
+        matches!(program.next(), FromProgram::State { .. }),
+        "the state that changed is said first"
+    );
     assert_eq!(program.next(), FromProgram::Closed);
     assert_eq!(program.exit_code(), Some(0));
 }
@@ -344,6 +370,10 @@ fn the_window_is_destroyed_before_the_program_ends_and_what_a_plugin_prints_is_n
     let _ = program.said_until(|message| matches!(message, FromProgram::ParametersChanged));
 
     program.tell(&ToProgram::Close);
+    assert!(
+        matches!(program.next(), FromProgram::State { .. }),
+        "the state that changed is said first"
+    );
     assert_eq!(program.next(), FromProgram::Closed);
     assert_eq!(program.exit_code(), Some(0));
 

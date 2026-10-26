@@ -235,8 +235,8 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    // (Rewritten on purpose in phase 9.4: 18, the version that has a text made of an effect; it was 17 for the images of a shader, 16 for the shader of an effect, 15 for the adjustment clip, 14 for the plugin libraries, and 13 for the shown-ness of the effects.)
-    assert_eq!(FILE_FORMAT_VERSION, 18);
+    // (Rewritten on purpose in phase 10.4: 19, the version that has the state of an effect's plugin; it was 18 for a text made of an effect (phase 9.4), 17 for the images of a shader, 16 for the shader of an effect, 15 for the adjustment clip, 14 for the plugin libraries, and 13 for the shown-ness of the effects.)
+    assert_eq!(FILE_FORMAT_VERSION, 19);
 }
 
 // --- the trip through the file ---

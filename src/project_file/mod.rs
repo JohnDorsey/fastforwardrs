@@ -122,7 +122,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// font, its size and its colour are the values `text`, `font`, `size` and `colour` of its effect `builtin:text`, which is the first of its chain and which the clip names in `content`
 /// (an earlier file has the four in the clip itself, and keyframes of them, in racks or in the `animation` of a file of version 6 or earlier, that call them `"text"`, `"font"`, `"font size"`
 /// and `"colour"`: it is read as a text whose chain has that effect first, with those values and those keyframes, and the badges of its chain after it).
-pub const FILE_FORMAT_VERSION: u32 = 18;
+///
+/// **Version 19 added the `state` of an effect** (phase 10): what the plugin of the effect saved of what is not one of its values, which its window made it say, in base 64 (left out when
+/// it saved none). A file of version 18 has none.
+pub const FILE_FORMAT_VERSION: u32 = 19;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1395,6 +1398,8 @@ mod colour_tests;
 mod effects_tests;
 #[cfg(test)]
 mod format_13_tests;
+#[cfg(test)]
+mod format_19_tests;
 #[cfg(test)]
 mod generator_clip_tests;
 #[cfg(test)]

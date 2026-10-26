@@ -33,6 +33,8 @@ pub enum InstanceError {
     BadId,
     #[error("the main thread of the plugins has ended")]
     MainThreadEnded,
+    #[error("the plugin could not take the state it was given: {0}")]
+    StateNotLoaded(String),
 }
 
 /// Why a block could not be run.
@@ -210,6 +212,28 @@ impl Instance {
     /// Whether the plugin has a window of its own to show (`clap.gui`).
     pub fn has_a_window(&self) -> bool {
         self.gathered.has_gui
+    }
+
+    /// Gives the plugin a state that it saved (`clap.state`), on the main thread, while it is active: what a project keeps for an effect, which the plugin's window made it say. Give
+    /// it **before the values** of the parameters, which are what the project says they are whatever the state says.
+    pub fn load_the_state(&mut self, state: &[u8]) -> Result<(), InstanceError> {
+        let key = self.key;
+        let bytes = state.to_vec();
+        self.worker
+            .call(move |instances| -> Result<(), InstanceError> {
+                let instance = instances
+                    .map
+                    .get_mut(&key)
+                    .ok_or_else(|| InstanceError::StateNotLoaded("the plugin is gone".to_owned()))?;
+                let handle = instance.plugin_handle();
+                let extension = handle
+                    .get_extension::<PluginState>()
+                    .ok_or_else(|| InstanceError::StateNotLoaded("it has no state".to_owned()))?;
+                extension
+                    .load(&handle, &mut &*bytes)
+                    .map_err(|error| InstanceError::StateNotLoaded(error.to_string()))
+            })
+            .ok_or(InstanceError::MainThreadEnded)?
     }
 
     /// How long the plugin goes on making sound after its input stops, in samples, if it says (`u32::MAX` is for ever).

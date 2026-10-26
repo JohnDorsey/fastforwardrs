@@ -621,6 +621,12 @@ impl<const KIND: u8> PluginStateImpl for Main<'_, KIND> {
             self.shared.window.ask.store(ask, Ordering::SeqCst);
             self.host.request_callback();
         }
+        // (Many plugins say that their state changed when they are given one: so does this one, and a host that took that for a person's edit would make an edit that nobody made.)
+        if KIND == KIND_EDITOR
+            && let Some(state) = self.host.get_extension::<HostState>()
+        {
+            state.mark_dirty(&self.host);
+        }
         Ok(())
     }
 }
@@ -835,7 +841,10 @@ impl<const KIND: u8> Processor<'_, KIND> {
     /// Makes the samples `from` up to `to` of every channel.
     fn process_stretch(&mut self, audio: &mut Audio, from: usize, to: usize) -> Result<(), PluginError> {
         let multiplier = match KIND {
-            KIND_GAIN | KIND_CALLBACKS | KIND_EDITOR => self.values[0] as f32,
+            // (The editor plugin's sound depends on its state too: each edit that a state says the window made is half a gain more. A plugin that is made from a state it was given, and one
+            // that is not, are heard to be different.)
+            KIND_EDITOR => self.values[0] as f32 * (1.0 + 0.5 * self.shared.window.edits.load(Ordering::SeqCst) as f32),
+            KIND_GAIN | KIND_CALLBACKS => self.values[0] as f32,
             KIND_MONO_HALF => 0.5,
             KIND_CHOICE => ((self.values[0] as i64 + 1) * (self.values[1] as i64 + 1)) as f32,
             KIND_THREADS if !self.threads_were_right => -1.0,

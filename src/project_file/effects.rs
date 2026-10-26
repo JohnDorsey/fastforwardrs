@@ -24,8 +24,9 @@ use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
     ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
-    MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, ParameterControl,
-    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueKind, ValueScale,
+    MOST_BYTES_OF_A_PLUGIN_STATE, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
+    MOST_IMAGES_A_SHADER_BRINGS, ParameterControl, ParameterDescriptor, Project, ShaderImage, ShaderLanguage,
+    ShaderSource, UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -150,6 +151,10 @@ pub(super) struct EffectDocument {
     /// Whether the effect is done: `false` for one that is switched off (bypassed). Left out when it is on, and in the files of versions before 13.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub enabled: bool,
+    /// What the plugin of the effect saved of what is not one of its values (its state), in base 64, which only the plugin can read. Left out when it saved none, and in the files of
+    /// versions before 19.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
     /// What this version of the program does not know of the effect, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
@@ -423,11 +428,25 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
             }
         }
     }
+    let state = document
+        .state
+        .map(|text| {
+            let bytes = crate::base64::decode(&text).map_err(|reason| format!("the state of the {kind} effect: {reason}"))?;
+            if bytes.len() > MOST_BYTES_OF_A_PLUGIN_STATE {
+                return Err(format!(
+                    "the state of the {kind} effect is of {} bytes, and a project keeps at most {MOST_BYTES_OF_A_PLUGIN_STATE}",
+                    bytes.len()
+                ));
+            }
+            Ok(std::sync::Arc::<[u8]>::from(bytes))
+        })
+        .transpose()?;
     Effect::with_values(kind, values)
         .map(|effect| {
             effect
                 .with_unknown_fields(UnknownFields::new(document.unknown))
                 .with_enabled(document.enabled)
+                .with_state(state)
         })
         .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
 }
@@ -504,6 +523,7 @@ pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
                 instance: Some(effect.instance().number()),
                 values: ValuesDocument::ById(values),
                 enabled: effect.is_enabled(),
+                state: effect.state().map(|bytes| crate::base64::encode(bytes)),
                 unknown: effect.unknown_fields().fields().clone(),
             }
         })

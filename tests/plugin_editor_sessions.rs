@@ -65,6 +65,23 @@ fn the_state(windows: &mut EditorWindows) -> String {
 // (The editor's own base 64 is private: this is the little of it that the tests need.)
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+fn base64_of(text: &str) -> String {
+    let mut encoded = String::new();
+    for chunk in text.as_bytes().chunks(3) {
+        let group = chunk.iter().enumerate().fold(0_u32, |group, (place, byte)| {
+            group | (u32::from(*byte) << (16 - 8 * place))
+        });
+        for place in 0..4 {
+            if place <= chunk.len() {
+                encoded.push(ALPHABET[((group >> (18 - 6 * place)) & 63) as usize] as char);
+            } else {
+                encoded.push('=');
+            }
+        }
+    }
+    encoded
+}
+
 fn decode(text: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     let (mut group, mut bits) = (0_u32, 0);
@@ -197,6 +214,70 @@ fn closing_ends_the_window_and_it_is_not_open_any_more() {
 }
 
 #[test]
+fn a_window_that_ends_after_its_plugin_said_that_its_state_changed_says_the_state_before_it_ends() {
+    let mut windows = windows();
+    windows.open(the_key(), &what_to_open(EDITOR, &[], None)).unwrap();
+    // (The test plugin says that its state changed when it is shown, and the editor does not ask for it.)
+    let _ = polled_until(&mut windows, |events| events.contains(&WindowEvent::StateChanged));
+
+    windows.close(the_key());
+    let events = polled_until(&mut windows, |events| events.contains(&WindowEvent::Closed));
+
+    let states: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| matches!(event, WindowEvent::State(_)))
+        .map(|(place, _)| place)
+        .collect();
+    assert_eq!(states.len(), 1, "the state, said once: {events:?}");
+    let closed = events.iter().position(|event| *event == WindowEvent::Closed).unwrap();
+    assert!(states[0] < closed, "before the end: {events:?}");
+    let Some(WindowEvent::State(state)) = events.get(states[0]) else {
+        unreachable!()
+    };
+    assert!(
+        String::from_utf8(decode(state)).unwrap().contains("edits=1 "),
+        "what the plugin keeps"
+    );
+}
+
+#[test]
+fn a_plugin_that_says_that_its_state_changed_because_it_was_given_one_is_not_heard_to_say_so() {
+    let mut windows = windows();
+    windows.open(the_key(), &what_to_open(EDITOR, &[], None)).unwrap();
+    // (The test plugin says so when it is shown, and again when it is given a state, as many plugins do.)
+    let _ = polled_until(&mut windows, |events| events.contains(&WindowEvent::StateChanged));
+
+    windows.give_the_state(the_key(), &base64_of("edits=5"));
+    windows.ask_for_the_state(the_key());
+    let events = polled_until(&mut windows, |events| {
+        events.iter().any(|event| matches!(event, WindowEvent::State(_)))
+    });
+
+    assert!(
+        !events.contains(&WindowEvent::StateChanged),
+        "nobody changed it by hand: {events:?}"
+    );
+    assert!(the_state(&mut windows).contains("edits=5 "), "and the state was taken");
+}
+
+#[test]
+fn a_window_that_ends_after_its_state_was_asked_for_does_not_say_it_again() {
+    let mut windows = windows();
+    windows.open(the_key(), &what_to_open(EDITOR, &[], None)).unwrap();
+    let _ = polled_until(&mut windows, |events| events.contains(&WindowEvent::StateChanged));
+    let _ = the_state(&mut windows);
+
+    windows.close(the_key());
+    let events = polled_until(&mut windows, |events| events.contains(&WindowEvent::Closed));
+
+    assert!(
+        !events.iter().any(|event| matches!(event, WindowEvent::State(_))),
+        "it was asked for, and has not changed since: {events:?}"
+    );
+}
+
+#[test]
 fn a_state_is_given_to_the_window_and_asked_of_it() {
     let mut windows = windows();
     windows.open(the_key(), &what_to_open(EDITOR, &[], None)).unwrap();
@@ -259,7 +340,7 @@ fn a_program_that_is_not_the_editors_is_refused() {
     let not_ours = if cfg!(windows) {
         "C:/Windows/System32/whoami.exe"
     } else {
-        "/bin/true"
+        "/usr/bin/true"
     };
     let mut windows = EditorWindows::with_program(PathBuf::from(not_ours));
 

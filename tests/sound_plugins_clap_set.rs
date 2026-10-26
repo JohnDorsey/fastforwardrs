@@ -163,6 +163,7 @@ fn one_clap_plugin_of_a_library_on_a_clip_for_the_driver() {
         return;
     };
     let effect = LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,

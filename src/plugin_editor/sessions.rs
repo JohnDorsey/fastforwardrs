@@ -268,10 +268,11 @@ impl EditorWindows {
         events
     }
 
-    /// Tells the window `key` what these parameters are now: only those that are not what the window has (what it was last told, or what its own edit made them).
-    pub fn tell_the_values(&mut self, key: WindowKey, values: &[(u32, f64)]) {
+    /// Tells the window `key` what these parameters are now: only those that are not what the window has (what it was last told, or what its own edit made them). Says whether any was
+    /// told.
+    pub fn tell_the_values(&mut self, key: WindowKey, values: &[(u32, f64)]) -> bool {
         let Some(running) = self.running.get_mut(&key) else {
-            return;
+            return false;
         };
         let changed: Vec<(u32, f64)> = values
             .iter()
@@ -279,10 +280,11 @@ impl EditorWindows {
             .filter(|(id, value)| running.known.get(id).map(|known| *known as f32) != Some(*value as f32))
             .collect();
         if changed.is_empty() {
-            return;
+            return false;
         }
         running.known.extend(changed.iter().copied());
         running.tell(&ToProgram::Values { values: changed });
+        true
     }
 
     /// Asks the window for the plugin's state (the answer is [`WindowEvent::State`]).

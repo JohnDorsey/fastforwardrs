@@ -223,7 +223,8 @@ fn what_the_plugin_asks_when_a_state_says(ask: &str) -> Vec<EditorEvent> {
     editor
         .poll()
         .into_iter()
-        .filter(|event| !matches!(event, EditorEvent::ParametersChanged))
+        // (The test plugin says that its state changed when it is given one, as many plugins do: that is not what is asked about here.)
+        .filter(|event| !matches!(event, EditorEvent::ParametersChanged | EditorEvent::StateChanged))
         .collect()
 }
 

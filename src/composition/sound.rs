@@ -161,7 +161,7 @@ pub fn plan_sound(
 
 /// Feeds everything that is heard of the sound effects of the clips of `project` into `hasher`, so that a number made from it is different whenever it is: for each clip that
 /// has sound effects, which they are (the kind and version, which plugin of which library stands in for it now, if one does, so that a plugin that is found by the scan is a
-/// change), their values and the keyframes of them. A project with no sound effects feeds nothing.
+/// change), their values, the keyframes of them and the state that their plugin saved. A project with no sound effects feeds nothing.
 pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     let applied = project.effects_applied_to_every_clip();
@@ -192,6 +192,8 @@ pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::has
                     value.hash_into(hasher);
                 }
                 layer.animation.hash_properties_into(hasher, |_| true);
+                // (What its plugin saved is heard too: a window changed it. A number that was made when it was saved: the bytes are not read at every frame.)
+                effect.effect.state_fingerprint().hash(hasher);
             }
         }
     }

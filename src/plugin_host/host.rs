@@ -514,6 +514,7 @@ impl PluginHost {
         id: &str,
         layout: Layout,
         library: &clap_host::Library,
+        state: Option<&std::sync::Arc<[u8]>>,
         voice: &Voice<'_>,
     ) -> Option<Vec<Box<dyn PluginInstance>>> {
         let worker = self.the_clap_worker();
@@ -537,9 +538,16 @@ impl PluginHost {
                 worker: std::sync::Arc::clone(&worker),
                 library: library.clone(),
                 id: id.to_owned(),
+                state: state.cloned(),
             };
-            match maker.make() {
-                Ok(instance) => {
+            match maker.make_and_say_if_the_state_was_not_taken() {
+                Ok((instance, state_not_taken)) => {
+                    if let Some(why) = state_not_taken {
+                        voice.problem(format!(
+                            "The sound plugin \u{ab}{}\u{bb} did not take the state that the project has for it ({why}): it goes on with its values.",
+                            plugin.descriptor.name
+                        ));
+                    }
                     if !this_clap_plugin_is_the_one_that_was_scanned(&instance, plugin) {
                         voice.problem(
                             format!(
@@ -709,7 +717,7 @@ impl PluginRunner for PluginHost {
                     .clap_library(&plugin.library)
                     .inspect_err(|error| could_not_be_loaded(error.clone()))
                     .ok()?;
-                self.the_clap_instances_of(plugin, id, layout, &library, &voice)?
+                self.the_clap_instances_of(plugin, id, layout, &library, effect.state.as_ref(), &voice)?
             }
         };
         PluginEffect::new(

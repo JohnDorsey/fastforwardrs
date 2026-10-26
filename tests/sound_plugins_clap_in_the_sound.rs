@@ -68,6 +68,7 @@ fn the_kind_of(id: &str) -> EffectKind {
 
 fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
     LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
@@ -229,6 +230,58 @@ fn the_export_and_the_preview_make_the_same_sound_with_a_clap_plugin_and_it_is_t
 }
 
 #[test]
+fn the_state_that_the_project_keeps_for_a_clap_plugin_is_given_to_it_in_the_export_and_in_the_preview_and_one_that_it_cannot_take_is_said()
+ {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let (plain, _) = by_the_export(&toolchain, &specification_of_a_second_with(Vec::new()), &sources, None);
+    let editor = the_kind_of(clap_test_plugins::EDITOR);
+
+    // (The test plugin hears an edit that its state says was made as half a gain more: a gain of 0.5 and one edit is 0.5 * 1.5.)
+    let mut with_a_state = a_gain(editor, 0.5);
+    with_a_state.state = Some(Arc::from(b"edits=1".as_slice()));
+    let specification = specification_of_a_second_with(vec![with_a_state]);
+    let (exported, export_notes) = by_the_export(
+        &toolchain,
+        &specification,
+        &sources,
+        Some(a_host_that_runs_everything()),
+    );
+    let (previewed, preview_notes) = by_the_preview(
+        &toolchain,
+        &specification,
+        &sources,
+        Some(a_host_that_runs_everything()),
+    );
+    let expected: Vec<f32> = plain.iter().map(|sample| sample * 0.75).collect();
+    assert_eq!(exported, expected, "the export: the state was given before the value");
+    assert_eq!(previewed, exported, "the preview too");
+    assert_eq!((export_notes, preview_notes), (Vec::new(), Vec::new()));
+
+    let without = specification_of_a_second_with(vec![a_gain(editor, 0.5)]);
+    let (exported, _) = by_the_export(&toolchain, &without, &sources, Some(a_host_that_runs_everything()));
+    let half: Vec<f32> = plain.iter().map(|sample| sample * 0.5).collect();
+    assert_eq!(exported, half, "with no state, the sound is of the value alone");
+
+    // A plugin that has no state cannot take one: the sound is of its value, and it is said.
+    let mut cannot_take = a_gain(the_kind_of(clap_test_plugins::GAIN), 0.5);
+    cannot_take.state = Some(Arc::from(b"edits=1".as_slice()));
+    let (exported, notes) = by_the_export(
+        &toolchain,
+        &specification_of_a_second_with(vec![cannot_take]),
+        &sources,
+        Some(a_host_that_runs_everything()),
+    );
+    assert_eq!(exported, half);
+    assert!(
+        notes.iter().any(|note| note.contains("did not take the state")),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn a_clap_value_that_has_keyframes_is_what_the_keyframes_say_in_the_export_and_in_the_preview() {
     let toolchain = toolchain_or_skip!();
     let _alone = the_installed_plugins_to_myself();
@@ -276,6 +329,7 @@ fn a_clap_plugin_that_delays_the_sound_is_made_up_for_in_the_export_and_in_the_p
     let folder = scratch_directory();
     let sources = the_sources(folder.path());
     let delaying = LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind: the_kind_of(clap_test_plugins::LATENCY),
@@ -365,6 +419,7 @@ fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_
         plugin.pre_roll_samples = pre_roll_samples;
         set_installed_plugins(vec![plugin]);
         LayerEffect {
+            state: None,
             clock: Default::default(),
             instance: EffectInstanceId::FIRST,
             kind: EffectKind::installed_plugin_kinds()[0],

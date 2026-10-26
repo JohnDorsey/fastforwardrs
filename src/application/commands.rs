@@ -252,6 +252,13 @@ pub enum Command {
         instance: EffectInstanceId,
         enabled: bool,
     },
+    /// A plugin saved its state (phase 10): the effect that is named `instance` in the chain of `owner` keeps it (`None` takes it away). It is not an edit of its own as far as undo goes: it
+    /// is **joined to the step of the edit in the window that made the plugin say so** (see [`Command::is_a_rider`]).
+    SetPluginState {
+        owner: Member,
+        instance: EffectInstanceId,
+        state: Option<std::sync::Arc<[u8]>>,
+    },
     /// Put a copy of an effect of a clip, a track or a group right after it (from the menu of its box): the one that is named `instance` in its chain, with its values (and not
     /// its keyframes).
     DuplicateEffect {
@@ -483,6 +490,7 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::SetPluginState { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }
             | Self::UseAShader { .. }
@@ -619,6 +627,7 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::SetPluginState { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }
             | Self::UseAShader { .. }
@@ -655,6 +664,12 @@ impl Command {
     /// if it would (see [`Self::name_in_a_question_about_losing_keyframes`]).
     pub fn may_lose_keyframes(&self) -> bool {
         self.name_in_a_question_about_losing_keyframes().is_some()
+    }
+
+    /// Whether this command is an edit that **rides** on another: it is part of the step before it if that step was made a moment ago (or a hand is on a window), and a step of its own if not
+    /// (see [`crate::application::history::History::record_rider`]). What a plugin's window says of its state is one: the state is made by the same hand as the value that was changed.
+    pub fn is_a_rider(&self) -> bool {
+        matches!(self, Self::SetPluginState { .. })
     }
 
     /// What this command is about, if it is the kind of edit that a gesture makes over and over (a

@@ -41,6 +41,7 @@ fn the_kind_of(label: &str) -> EffectKind {
 
 fn the_effect(kind: EffectKind, values: &[f32]) -> LayerEffect {
     LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
@@ -1324,6 +1325,7 @@ fn the_clap_kind_of(id: &str) -> EffectKind {
 
 fn the_clap_effect(id: &str, values: Vec<PropertyValue>) -> LayerEffect {
     LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind: the_clap_kind_of(id),
@@ -1554,6 +1556,7 @@ fn a_clap_plugin_that_says_process_failed_is_left_out_and_said_and_the_sound_is_
     set_installed_plugins(vec![plugin]);
     let kind = EffectKind::installed_plugin_kinds()[0];
     let effect = LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,
@@ -1674,6 +1677,7 @@ fn a_clap_copy_that_asks_to_be_made_again_is_made_again_when_the_blocks_are_betw
         worker: Arc::clone(&worker),
         library: library.clone(),
         id: clap_test_plugins::CALLBACKS.to_owned(),
+        state: None,
     };
     let lives = Arc::new(Mutex::new(super::Lives::default()));
     let mut copy = ClapCopy::new(
@@ -1807,6 +1811,7 @@ fn a_plugin_that_is_left_out_while_it_runs_says_why_on_the_board() {
     let key = plugin.descriptor.key.to_string();
     set_installed_plugins(vec![plugin]);
     let effect = LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind: EffectKind::installed_plugin_kinds()[0],
@@ -2127,6 +2132,7 @@ fn a_plugin_whose_start_is_unreliable_says_so_once_in_the_sound_it_is_run_in_and
     set_installed_plugins(vec![plugin]);
     let kind = EffectKind::installed_plugin_kinds()[0];
     let effect = || LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,

@@ -54,6 +54,12 @@ impl FastForwardApplication {
         // (A hand that is holding a parameter in the window of a plugin is a pointer that is down, as far as one gesture being one step goes.)
         let pointer_is_down = pointer_is_down || self.interface.plugin_editors.a_gesture_is_open();
         let gesture_key = gesture_key_of_the_edits_among(&commands);
+        // (What a plugin's window says of its state rides on the step of the edit that made it say so, and is not a step of its own unless there is none to ride on.)
+        let all_the_edits_ride = may_edit
+            && commands
+                .iter()
+                .filter(|command| command.may_change_the_project())
+                .all(Command::is_a_rider);
         // An edit that makes or changes a keyframe is about the frame it is at as well: what is done at another frame is
         // another edit, not more of this gesture, however soon after it.
         let frame_of_the_keyframes = commands
@@ -82,9 +88,19 @@ impl FastForwardApplication {
             && self.document.history.generation() == generation
             && self.document.project != project_before
         {
-            self.document
-                .history
-                .record_change(project_before, selection_before, gesture_key, now, pointer_is_down);
+            if all_the_edits_ride {
+                self.document
+                    .history
+                    .record_rider(project_before, selection_before, now, pointer_is_down);
+            } else {
+                self.document.history.record_change(
+                    project_before,
+                    selection_before,
+                    gesture_key,
+                    now,
+                    pointer_is_down,
+                );
+            }
             self.note_the_project_was_edited(now);
         }
     }
@@ -238,6 +254,11 @@ impl FastForwardApplication {
                 enabled,
             } => {
                 let _ = self.document.project.set_effect_enabled(owner, instance, enabled);
+            }
+            Command::SetPluginState { owner, instance, state } => {
+                if let Err(error) = self.document.project.set_effect_state(owner, instance, state) {
+                    self.say_why_an_effect_was_refused("The state of the plugin cannot be kept", &error);
+                }
             }
             Command::DuplicateEffect { owner, instance } => {
                 if let Err(error) = self.document.project.duplicate_effect(owner, instance) {

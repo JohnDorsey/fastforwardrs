@@ -67,6 +67,7 @@ fn the_kind_of(label: &str) -> EffectKind {
 
 fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
     LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: EffectInstanceId::FIRST,
         kind,

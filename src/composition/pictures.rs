@@ -109,6 +109,9 @@ pub struct LayerEffect {
     /// The table that each of its values is, one for each value, `Some` for a value that names a resource of the project that is a table the program can read (the
     /// resources are not in the layer, so what they are is worked out when the plan is made).
     pub tables: Vec<Option<Arc<CubeTable>>>,
+    /// What its plugin saved of what is not one of its values, if the project has it (see [`crate::project::Effect::state`]): a plugin that is made for the sound is given it before
+    /// its values.
+    pub state: Option<Arc<[u8]>>,
 }
 
 impl LayerEffect {
@@ -545,6 +548,7 @@ pub(crate) fn layer_effect_of(
         instance: applied.effect.instance(),
         kind,
         values: applied.effect.values().to_vec(),
+        state: applied.effect.state().cloned(),
         animation,
         tables: kind
             .parameters()

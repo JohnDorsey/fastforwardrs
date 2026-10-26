@@ -561,6 +561,7 @@ fn clip_with_plugins_that_ask_for(first: u64, end: u64, factor: u32, pre_rolls: 
     with_effects.effects = crate::project::EffectKind::installed_plugin_kinds()
         .into_iter()
         .map(|kind| crate::composition::LayerEffect {
+            state: None,
             clock: Default::default(),
             instance: EffectInstanceId::FIRST,
             kind,

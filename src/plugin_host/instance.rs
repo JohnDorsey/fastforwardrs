@@ -86,18 +86,35 @@ pub struct ClapMaker {
     pub worker: Arc<clap_host::MainThread>,
     pub library: clap_host::Library,
     pub id: String,
+    /// What the plugin saved of what is not one of its values, if the project has it: each copy is given it as soon as it is made, before it is given any value.
+    pub state: Option<Arc<[u8]>>,
 }
 
 impl ClapMaker {
-    /// A copy of the plugin, activated at the rate of the sound engine.
-    pub fn make(&self) -> Result<clap_host::Instance, clap_host::InstanceError> {
-        clap_host::Instance::new(
+    /// A copy of the plugin, activated at the rate of the sound engine, and given its state if there is one. A state that the plugin cannot take is not a reason to go without it: the
+    /// copy is made and the second thing that comes is what is said of it.
+    pub fn make_and_say_if_the_state_was_not_taken(
+        &self,
+    ) -> Result<(clap_host::Instance, Option<String>), clap_host::InstanceError> {
+        let mut instance = clap_host::Instance::new(
             &self.worker,
             &self.library,
             &self.id,
             f64::from(SAMPLE_RATE),
             MOST_FRAMES_OF_A_CLAP_PLUGIN as u32,
-        )
+        )?;
+        let not_taken = self
+            .state
+            .as_ref()
+            .and_then(|state| instance.load_the_state(state).err())
+            .map(|error| error.to_string());
+        Ok((instance, not_taken))
+    }
+
+    /// The same, when what is said of a state that was not taken is of no use (a copy that is made again).
+    pub fn make(&self) -> Result<clap_host::Instance, clap_host::InstanceError> {
+        self.make_and_say_if_the_state_was_not_taken()
+            .map(|(instance, _)| instance)
     }
 }
 

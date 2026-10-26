@@ -90,6 +90,7 @@ fn the_standing_in_the_host(window: &Window, plugin: &InstalledPlugin) -> Folder
 /// What the sound does when it comes to a clip that has `kind` on it: asks the host for the effect, as the graph does.
 fn the_sound_comes_to(window: &Window, kind: EffectKind, notes: &Notes) {
     let effect = LayerEffect {
+        state: None,
         clock: Default::default(),
         instance: crate::project::EffectInstanceId::FIRST,
         kind,

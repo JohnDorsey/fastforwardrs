@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use clap_test_plugins::{
-    CALLBACKS, CHOICE, FAILS_TO_ACTIVATE, FAILS_TO_PROCESS, GAIN, INSTRUMENT, LATENCY, LATENCY_CHANGES,
+    CALLBACKS, CHOICE, EDITOR, FAILS_TO_ACTIVATE, FAILS_TO_PROCESS, GAIN, INSTRUMENT, LATENCY, LATENCY_CHANGES,
     LATENCY_SAMPLES, MONO_HALF, PANICS, RATE, SIDE_CHAIN, SWAP, TAIL, TAIL_FOREVER, TAIL_SAMPLES, THREADS,
 };
 
@@ -294,6 +294,24 @@ fn a_plugin_with_a_tail_rings_after_its_input_stops_and_says_how_long() {
 
     assert_eq!((left[0], left[100], left[200], left[300]), (1.0, 0.5, 0.25, 0.125));
     assert_eq!(left[50], 0.0);
+}
+
+#[test]
+fn a_state_that_is_given_to_an_active_plugin_changes_what_it_makes_and_a_plugin_without_a_state_says_so() {
+    let ones = vec![1.0_f32; 32];
+    let mut plain = made(EDITOR);
+    let (without, _) = run_stereo(&mut plain, &ones, &ones, &[]);
+    assert_eq!(without, ones, "a gain of one, and a state that says no edits");
+
+    // (The test plugin hears two edits in a state as a gain of twice: 1 + 0.5 * 2.)
+    let mut given = made(EDITOR);
+    given.load_the_state(b"edits=2").expect("the state is taken");
+    let (with, _) = run_stereo(&mut given, &ones, &ones, &[]);
+    assert_eq!(with, vec![2.0_f32; 32]);
+
+    let mut stateless = made(GAIN);
+    let error = stateless.load_the_state(b"edits=2").unwrap_err();
+    assert!(error.to_string().contains("no state"), "{error}");
 }
 
 #[test]

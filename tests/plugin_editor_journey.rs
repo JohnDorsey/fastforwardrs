@@ -255,6 +255,8 @@ fn the_button_closes_the_window_and_taking_the_effect_off_closes_it_too() {
             .application()
             .is_a_plugin_window_open(target, EffectInstanceId::FIRST)
     });
+    // (The box says "Open editor" again only after it is drawn again: a slow machine is not drawn again by the time the window is gone.)
+    journey.settle();
 
     // It can be opened again; and when the effect is deleted the window goes with it.
     open(&mut journey);
@@ -364,4 +366,99 @@ fn the_window_is_opened_with_the_values_that_the_project_has_and_closes_when_ano
             .application()
             .is_a_plugin_window_open(target, EffectInstanceId::FIRST)
     });
+}
+
+/// What the effect keeps of the plugin's state, as text (the test plugin's state is text).
+fn the_state_the_project_keeps(journey: &Journey, target: AnimationTarget) -> Option<String> {
+    journey
+        .application()
+        .project()
+        .effects_of(target)
+        .and_then(|chain| chain.instance(EffectInstanceId::FIRST))
+        .and_then(|effect| effect.state().map(|state| String::from_utf8_lossy(state).into_owned()))
+}
+
+#[test]
+fn the_state_that_the_plugin_says_is_kept_in_the_project_with_the_edit_and_a_window_that_is_opened_again_is_given_it() {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let scratch = scratch_directory();
+    let (mut journey, target, kind) = journey_with_the_editor_plugin_on_the_clip(&toolchain, scratch.path(), true);
+    assert_eq!(the_state_the_project_keeps(&journey, target), None);
+
+    journey
+        .harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Open editor")
+        .click();
+    journey.settle();
+
+    // The window makes its edit when it is shown, and says that its state changed: the project keeps the state it saves (the test plugin's says how many edits the window made).
+    draw_until(&mut journey, "the state of the plugin in the project", |journey| {
+        the_state_the_project_keeps(journey, target).is_some_and(|state| state.contains("edits=1 "))
+    });
+    assert_eq!(
+        the_gain(&journey, target, kind),
+        Some(PropertyValue::Number(EDITOR_EDIT_VALUE as f32))
+    );
+
+    // The edit and the state are one step: one undo takes both, one redo gives both.
+    journey.press_key_with(Modifiers::COMMAND, Key::Z);
+    journey.settle();
+    assert_eq!(the_gain(&journey, target, kind), Some(PropertyValue::Number(1.0)));
+    assert_eq!(
+        the_state_the_project_keeps(&journey, target),
+        None,
+        "the state went with the value"
+    );
+    journey.press_key_with(Modifiers::COMMAND, Key::Y);
+    journey.settle();
+    assert!(
+        the_state_the_project_keeps(&journey, target).is_some_and(|state| state.contains("edits=1 ")),
+        "and came back with it"
+    );
+
+    // Close the window and open it again: it begins from the state that the project keeps (it makes its edit again, which is the second, so the state says two).
+    journey
+        .harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Close editor")
+        .click();
+    draw_until(&mut journey, "the window to be closed", |journey| {
+        !journey
+            .application()
+            .is_a_plugin_window_open(target, EffectInstanceId::FIRST)
+    });
+    journey.settle();
+    journey
+        .harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Open editor")
+        .click();
+    journey.settle();
+    draw_until(&mut journey, "the second window to say its state", |journey| {
+        the_state_the_project_keeps(journey, target).is_some_and(|state| state.contains("edits=2 "))
+    });
+
+    // An undo brings back the state the project had before: the window that is open is given it (the plugin makes the state it was given its own: one edit, and no more).
+    journey.press_key_with(Modifiers::COMMAND, Key::Z);
+    journey.settle();
+    assert!(
+        the_state_the_project_keeps(&journey, target).is_some_and(|state| state.contains("edits=1 ")),
+        "the state before"
+    );
+    journey.keep_drawing_for(Duration::from_millis(300));
+    let in_the_window = the_state_of_the_window(&mut journey, target);
+    assert!(
+        in_the_window.contains("edits=1 "),
+        "the window was given it: {in_the_window}"
+    );
+    // (What the window said when it was asked for its state was not a person's edit: the project goes on as the undo left it, and what was undone can be redone.)
+    assert!(
+        the_state_the_project_keeps(&journey, target).is_some_and(|state| state.contains("edits=1 ")),
+        "the answer to an asking is not kept"
+    );
+    journey.press_key_with(Modifiers::COMMAND, Key::Y);
+    journey.settle();
+    assert!(
+        the_state_the_project_keeps(&journey, target).is_some_and(|state| state.contains("edits=2 ")),
+        "the redo is there"
+    );
 }

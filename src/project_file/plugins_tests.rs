@@ -170,7 +170,7 @@ fn the_file_with_effects_of_a_type_the_program_does_not_have(key: &str) -> Strin
         file["tracks"][2]["clips"][0]["effects"] = json!([
             {"effect": key, "version": [2, 3], "instance": 0,
              "values": {"amount": 0.75, "tint": "#102030FF", "caption": "bye", "point": [0.0, 1.0], "on": false},
-             "state": {"seed": 4}},
+             "settings": {"seed": 4}},
             {"effect": "builtin:hue_shift", "version": [1, 1], "instance": 1}
         ]);
         file["tracks"][2]["clips"][0]["drawer"] = json!([
@@ -207,7 +207,7 @@ fn an_effect_of_a_type_the_program_does_not_have_is_kept_with_its_values_and_key
         "each value is what the file says, of the kind that the snapshot says, in the place the snapshot has it"
     );
     assert_eq!(
-        foreign.unknown_fields().fields().get("state"),
+        foreign.unknown_fields().fields().get("settings"),
         Some(&json!({"seed": 4})),
         "what the file says of the effect that the program does not know is kept"
     );
@@ -294,7 +294,7 @@ fn what_is_kept_of_an_effect_the_program_does_not_have_is_kept_by_an_edit_of_the
             .unwrap()
             .unknown_fields()
             .fields()
-            .get("state"),
+            .get("settings"),
         Some(&json!({"seed": 4}))
     );
 }

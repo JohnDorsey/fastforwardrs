@@ -176,6 +176,7 @@ fn a_shader_that_is_not_installed_is_no_operation_even_when_it_is_in_the_effects
     // (The plan leaves such an effect out of a layer, so this is the check that holds if one gets there: a layer of effects that are given by hand.)
     let cannot_be_run = kind_of("mask.fs", A_SHADER_THAT_CANNOT_BE_RUN);
     let effect = LayerEffect {
+        state: None,
         clock: EffectClock::default(),
         instance: crate::project::EffectInstanceId::FIRST,
         kind: cannot_be_run,

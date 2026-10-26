@@ -23,6 +23,8 @@
 //! [`EffectKind::is_installed`]). (So far the one effect that the program has is the hue shift, which changes colours; sound, and what is
 //! seen of other pictures, come with the effects that need them.)
 
+use std::sync::Arc;
+
 use super::animation::{PropertyId, PropertyValue};
 use super::groups::GroupId;
 
@@ -82,7 +84,24 @@ pub struct Effect {
     /// Whether the effect is done. An effect that is **switched off** (bypassed) stays in its chain with its values and keyframes and is not applied, not exported and not
     /// missed if it is one that the program does not have. It is on when it is put on.
     enabled: bool,
+    /// What a plugin keeps that is not one of its values, saved by the plugin itself (its `clap.state`), if its window made it say so (phase 10). It is bytes that only the plugin
+    /// can read; the program keeps them as they are and gives them back to the plugin, in the sound and in the window.
+    state: Option<Arc<[u8]>>,
+    /// A number made from the bytes of the state (see [`fingerprint_of_a_state`]), so that what is heard can be told to have changed without reading them again.
+    state_fingerprint: u64,
 }
+
+/// A number that is different whenever the bytes are (to all intents and purposes): it is worked out once, when an effect is given a state, and not at every frame that the sound asks
+/// whether anything is different.
+fn fingerprint_of_a_state(state: Option<&Arc<[u8]>>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    state.map(|bytes| &bytes[..]).hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The most bytes of a plugin's state that a project keeps for one effect: a state that is bigger is not kept (the plugin's values are, as they always were), and the window says so.
+pub const MOST_BYTES_OF_A_PLUGIN_STATE: usize = 16 * 1024 * 1024;
 
 impl Effect {
     /// The effect of this kind as it is when it is put on. (It is named [`EffectInstanceId::FIRST`] until a chain gives it the name it has
@@ -94,6 +113,8 @@ impl Effect {
             values: kind.default_values(),
             unknown_fields: UnknownFields::none(),
             enabled: true,
+            state: None,
+            state_fingerprint: fingerprint_of_a_state(None),
         }
     }
 
@@ -110,6 +131,8 @@ impl Effect {
             values,
             unknown_fields: UnknownFields::none(),
             enabled: true,
+            state: None,
+            state_fingerprint: fingerprint_of_a_state(None),
         })
     }
 
@@ -123,6 +146,24 @@ impl Effect {
     /// Whether the effect is switched on (see [`Self::with_enabled`]).
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// The same effect, with the state that its plugin saved (see [`Self::state`]).
+    #[must_use]
+    pub fn with_state(mut self, state: Option<Arc<[u8]>>) -> Self {
+        self.state_fingerprint = fingerprint_of_a_state(state.as_ref());
+        self.state = state;
+        self
+    }
+
+    /// A number made from the bytes of the state: different when they are (see [`Self::state`]), and the same for an effect that has none.
+    pub fn state_fingerprint(&self) -> u64 {
+        self.state_fingerprint
+    }
+
+    /// What its plugin saved of what is not one of its values, if it did (phase 10); only a plugin has any.
+    pub fn state(&self) -> Option<&Arc<[u8]>> {
+        self.state.as_ref()
     }
 
     /// The same effect, named `instance`.
@@ -204,6 +245,8 @@ impl Effect {
                 values,
                 unknown_fields: self.unknown_fields.clone(),
                 enabled: self.enabled,
+                state: self.state.clone(),
+                state_fingerprint: self.state_fingerprint,
             }
         })
     }
@@ -437,6 +480,20 @@ impl Effects {
                 && effect.instance() == instance
             {
                 effect.enabled = enabled;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Gives the effect that is named `instance` the state its plugin saved (or takes it away: `None`). `false` if there is no such effect.
+    pub fn set_state(&mut self, instance: EffectInstanceId, state: Option<Arc<[u8]>>) -> bool {
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link
+                && effect.instance() == instance
+            {
+                effect.state_fingerprint = fingerprint_of_a_state(state.as_ref());
+                effect.state = state;
                 return true;
             }
         }

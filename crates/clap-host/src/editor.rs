@@ -486,6 +486,12 @@ impl Editor {
         Ok(bytes)
     }
 
+    /// Forgets that the plugin said that its state changed, if it did and [`Self::poll`] has not told: **for a plugin that says so while it is given a state** (many do), which is a change
+    /// that nobody made.
+    pub fn forget_that_the_state_changed(&mut self) {
+        self.requests.state_dirty.store(false, Ordering::SeqCst);
+    }
+
     /// Gives the plugin a state that it saved.
     pub fn load_the_state(&mut self, bytes: &[u8]) -> Result<(), EditorError> {
         let handle = self.instance.plugin_handle();

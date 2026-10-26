@@ -115,6 +115,9 @@ fn read_lines(input: impl BufRead + Send + 'static, send: impl Fn(Wake) + Send +
 struct Session {
     editor: Editor,
     out: Box<dyn Write>,
+    /// Whether the plugin said that its state is not what was last said (`StateChanged`), and the editor has not asked for it since: the state is said when the program ends, so that what a
+    /// person did in the window last is not lost to the project.
+    state_is_not_what_was_said: bool,
 }
 
 impl Session {
@@ -131,6 +134,13 @@ impl Session {
 
     /// Ends the program: the window is destroyed first, and the library is not unloaded (some crash when they are).
     fn end(mut self) -> ! {
+        if self.state_is_not_what_was_said
+            && let Ok(bytes) = self.editor.save_the_state()
+        {
+            self.say(&FromProgram::State {
+                state: base64::encode(&bytes),
+            });
+        }
         self.editor.destroy_the_window();
         self.say(&FromProgram::Closed);
         // (Dropping the editor would be the plugin's `destroy`; the process ends here and now.)
@@ -151,6 +161,8 @@ impl Session {
             Ok(bytes) => {
                 // (A plugin that cannot take a state it was given is not a reason to close the window: the values are what the sound has.)
                 let _ = self.editor.load_the_state(&bytes);
+                // (A plugin that says that its state changed because it was given one has not changed by a person's hand: the editor would take it for an edit that nobody made.)
+                self.editor.forget_that_the_state_changed();
             }
             Err(_) => { /* a state that is not base 64 is not given to the plugin */ }
         }
@@ -165,9 +177,12 @@ impl Session {
             }
             ToProgram::LoadState { state } => self.load_the_state(&state),
             ToProgram::SaveState => match self.editor.save_the_state() {
-                Ok(bytes) => self.say(&FromProgram::State {
-                    state: base64::encode(&bytes),
-                }),
+                Ok(bytes) => {
+                    self.state_is_not_what_was_said = false;
+                    self.say(&FromProgram::State {
+                        state: base64::encode(&bytes),
+                    });
+                }
                 Err(error) => self.say(&FromProgram::Failed {
                     reason: error.to_string(),
                 }),
@@ -183,7 +198,10 @@ impl Session {
         for event in self.editor.poll() {
             match event {
                 EditorEvent::Edit(edit) => self.say(&FromProgram::Edit { edit }),
-                EditorEvent::StateChanged => self.say(&FromProgram::StateChanged),
+                EditorEvent::StateChanged => {
+                    self.state_is_not_what_was_said = true;
+                    self.say(&FromProgram::StateChanged);
+                }
                 EditorEvent::ParametersChanged => self.say(&FromProgram::ParametersChanged),
                 other => for_the_window.push(other),
             }
@@ -221,7 +239,11 @@ pub fn run(arguments: Arguments, input: impl BufRead + Send + 'static, out: Box<
     ladspa_host::prepare_to_crash_quietly();
     let mut out = out;
     let editor = the_editor_or_end(&arguments, &mut *out);
-    let session = Session { editor, out };
+    let session = Session {
+        editor,
+        out,
+        state_is_not_what_was_said: false,
+    };
     if arguments.headless {
         run_without_a_window(session, input)
     } else {
