@@ -246,6 +246,10 @@ struct WindowLog {
     edit_waits: AtomicBool,
     /// How many times the host has done the call on the main thread that the plugin asked for.
     callbacks: AtomicU32,
+    /// What the gain was at the moment the window was shown (the bits of an `f64`): what the host told the plugin before it showed it.
+    gain_when_shown: AtomicU64,
+    /// Whether the window cannot be made (a state said `ask=fail_create`).
+    fail_create: AtomicBool,
     /// What the plugin is to ask of the host in its next call on the main thread, when a state said so (`ask=resize`, `show`, `hide`, `close`, `destroyed`): see [`ASK_RESIZE`].
     ask: AtomicU32,
 }
@@ -276,7 +280,7 @@ impl Shared {
     fn state_text(&self) -> String {
         let window = &self.window;
         format!(
-            "created={} shown={} hidden={} destroyed={} floating={} embedded={} scale={} size={}x{} edits={} callbacks={}",
+            "created={} shown={} hidden={} destroyed={} floating={} embedded={} scale={} size={}x{} edits={} callbacks={} gain={} gain_when_shown={}",
             window.created.load(Ordering::SeqCst),
             window.shown.load(Ordering::SeqCst),
             window.hidden.load(Ordering::SeqCst),
@@ -288,6 +292,8 @@ impl Shared {
             window.height.load(Ordering::SeqCst),
             window.edits.load(Ordering::SeqCst),
             window.callbacks.load(Ordering::SeqCst),
+            self.get(0),
+            f64::from_bits(window.gain_when_shown.load(Ordering::SeqCst)),
         )
     }
 
@@ -490,12 +496,18 @@ impl<const KIND: u8> PluginGuiImpl for Main<'_, KIND> {
 
     fn create(&self, configuration: GuiConfiguration) -> Result<(), PluginError> {
         let window = &self.shared.window;
+        if window.fail_create.load(Ordering::SeqCst) {
+            return Err(PluginError::Message("this plugin cannot make its window"));
+        }
         window.created.fetch_add(1, Ordering::SeqCst);
         window.floating.store(configuration.is_floating, Ordering::SeqCst);
         Ok(())
     }
 
     fn destroy(&self) {
+        // (A plugin may print: the program that shows its window says its own lines in a way that this does not spoil. A test reads this to see that the window was destroyed
+        // before the program ended, which nothing else shows.)
+        println!("clap-test-editor: the window was destroyed");
         self.shared.window.destroyed.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -541,6 +553,10 @@ impl<const KIND: u8> PluginGuiImpl for Main<'_, KIND> {
 
     fn show(&self) -> Result<(), PluginError> {
         self.shared.window.shown.fetch_add(1, Ordering::SeqCst);
+        self.shared
+            .window
+            .gain_when_shown
+            .store(self.shared.get(0).to_bits(), Ordering::SeqCst);
         // A person's hand is on the window: it has an edit to give the host, and its state is not what the host saved.
         self.shared.window.edit_waits.store(true, Ordering::SeqCst);
         if let Some(params) = self.host.get_extension::<HostParams>() {
@@ -580,6 +596,9 @@ impl<const KIND: u8> PluginStateImpl for Main<'_, KIND> {
             .and_then(|edits| edits.parse::<u32>().ok())
         {
             self.shared.window.edits.store(edits, Ordering::SeqCst);
+        }
+        if text.split_whitespace().any(|word| word == "ask=fail_create") {
+            self.shared.window.fail_create.store(true, Ordering::SeqCst);
         }
         // (A state that asks something of the host, in its next call on the main thread: for the tests of what the host does with the plugin's requests.)
         let ask = match text.split_whitespace().find_map(|word| word.strip_prefix("ask=")) {

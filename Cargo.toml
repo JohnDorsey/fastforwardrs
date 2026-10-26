@@ -47,6 +47,8 @@ sha2 = "0.11.1"
 ladspa-host = { path = "crates/ladspa-host", version = "0.1.0" }
 # Loads CLAP plugins (over the `clack` crates; it has the one `unsafe` call that loads a file). Like `ladspa-host`, it is used by the program that scans plugin libraries.
 clap-host = { path = "crates/clap-host", version = "0.1.0" }
+# The window of the program that shows a plugin's window (`fastforwardrs-plugin-editor`): the same version as eframe's.
+winit = "0.30.13"
 
 [dev-dependencies]
 # A plugin library written for the tests (see docs/engine-phase-7-design.md, G2); `cargo` builds its library beside the tests.

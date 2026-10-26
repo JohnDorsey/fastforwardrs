@@ -561,8 +561,8 @@ fn the_only_unsafe_code_of_this_crate_is_the_loading_of_the_library_and_it_says_
         }
     }
     // (The lint lines `#![...]` of `lib.rs` are not code. `#[allow(unsafe_code)]` and the `unsafe { ... }` block it allows: both in `library.rs`; and, since phase 10, the three of
-    // `Editor::put_the_window_in` in `editor.rs` (the `allow`, the `unsafe fn` that says what its caller must keep true, and the block that calls the plugin); nowhere else.)
-    assert_eq!(found.len(), 5, "{found:?}");
+    // `Editor::put_the_window_in` in `editor.rs` (the `allow`, the `unsafe fn` that says what its caller must keep true, and the block that calls the plugin) and the two of `put_the_window_in_a_window`, which keeps the window it is given (the `allow` and the block); nowhere else.)
+    assert_eq!(found.len(), 7, "{found:?}");
     assert_eq!(
         found.iter().filter(|place| place.starts_with("library.rs:")).count(),
         2,
@@ -570,7 +570,7 @@ fn the_only_unsafe_code_of_this_crate_is_the_loading_of_the_library_and_it_says_
     );
     assert_eq!(
         found.iter().filter(|place| place.starts_with("editor.rs:")).count(),
-        3,
+        5,
         "{found:?}"
     );
     for file in ["library.rs", "editor.rs"] {

@@ -648,6 +648,7 @@ dependencies = [
  "clack-host",
  "clack-plugin",
  "clap-sys",
+ "raw-window-handle",
 ]
 
 [[package]]
@@ -679,6 +680,7 @@ dependencies = [
  "clack-extensions",
  "clack-host",
  "clap-test-plugins",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tempfile",
@@ -1304,6 +1306,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "wgpu",
+ "winit",
  "zip",
 ]
 

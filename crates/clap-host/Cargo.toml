@@ -10,7 +10,9 @@ publish = false
 
 [dependencies]
 clack-host = "0.2.0"
-clack-extensions = { version = "0.2.0", features = ["clack-host", "audio-ports", "params", "latency", "tail", "state", "note-ports", "thread-check", "gui"] }
+clack-extensions = { version = "0.2.0", features = ["clack-host", "audio-ports", "params", "latency", "tail", "state", "note-ports", "thread-check", "gui", "raw-window-handle_06"] }
+# The windows that a plugin's window is put in are given as anything that has a window handle (what `winit` windows are).
+raw-window-handle = "0.6"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 

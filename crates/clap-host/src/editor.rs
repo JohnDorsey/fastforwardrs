@@ -201,6 +201,8 @@ pub struct Editor {
     requests: Arc<Requests>,
     gathered: Gathered,
     window_exists: bool,
+    /// The window that the plugin's window is in, kept so that it is there as long as the plugin's window is (**the last field: it is dropped after the plugin**).
+    parent: Option<Arc<dyn std::any::Any>>,
 }
 
 impl Editor {
@@ -229,12 +231,13 @@ impl Editor {
             &host_info,
         )
         .map_err(|error| EditorError::CouldNotBeMade(error.to_string()))?;
-        let gathered = gather(&mut instance);
+        let gathered = gather(&mut instance, false);
         Ok(Self {
             instance,
             requests,
             gathered,
             window_exists: false,
+            parent: None,
         })
     }
 
@@ -323,6 +326,22 @@ impl Editor {
         unsafe { gui.set_parent(&handle, parent) }.map_err(|_| EditorError::CouldNotEmbed)
     }
 
+    /// Puts the plugin's window inside `window`, which the editor **keeps** until the plugin's window is destroyed (so it is valid for as long as the plugin uses it): the safe way to
+    /// embed a window, for a program that makes its windows with a library of windows.
+    pub fn put_the_window_in_a_window<W: raw_window_handle::HasWindowHandle + 'static>(
+        &mut self,
+        window: Arc<W>,
+    ) -> Result<(), EditorError> {
+        let parent = Window::from_window(&*window).ok_or(EditorError::CouldNotEmbed)?;
+        #[allow(unsafe_code)]
+        // SAFETY: the window is kept in `self.parent`, which is dropped after the plugin and its window are.
+        unsafe {
+            self.put_the_window_in(parent)?;
+        }
+        self.parent = Some(window);
+        Ok(())
+    }
+
     /// Gives a floating window a title to use, if it likes.
     pub fn suggest_a_title(&mut self, title: &str) {
         let Ok(title) = CString::new(title) else {
@@ -355,6 +374,21 @@ impl Editor {
         let gui = handle.get_extension::<PluginGui>()?;
         gui.adjust_size(&handle, GuiSize { width, height })
             .map(|size| (size.width, size.height))
+    }
+
+    /// How big the plugin says its window is now. (It can be other than it said when the window was made: a plugin that applies a zoom of its own does it when it is given its parent.)
+    pub fn size_of_the_window(&mut self) -> Option<(u32, u32)> {
+        let handle = self.instance.plugin_handle();
+        let gui = handle.get_extension::<PluginGui>()?;
+        gui.get_size(&handle).map(|size| (size.width, size.height))
+    }
+
+    /// Tells the plugin that the screen's scale is this now (a window that was moved to another screen).
+    pub fn set_the_scale(&mut self, scale: f64) {
+        let handle = self.instance.plugin_handle();
+        if let Some(gui) = handle.get_extension::<PluginGui>() {
+            let _ = gui.set_scale(&handle, scale);
+        }
     }
 
     /// Tells the plugin that its window is this big now. Whether it took it.

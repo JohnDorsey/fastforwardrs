@@ -146,7 +146,7 @@ impl Instance {
                                 },
                             )
                             .map_err(|error| InstanceError::CouldNotBeActivated(error.to_string()))?;
-                        let gathered = gather(&mut instance);
+                        let gathered = gather(&mut instance, true);
                         let key = instances.next;
                         instances.next += 1;
                         instances.map.insert(key, instance);
@@ -433,7 +433,7 @@ impl Drop for Instance {
 }
 
 /// Asks an instance that is active what it has: ports, parameters, latency, state. (On the main thread.)
-pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>) -> Gathered {
+pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>, active: bool) -> Gathered {
     let mut gathered = Gathered {
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -496,7 +496,8 @@ pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>) -> Gathe
             }
         }
     }
-    if let Some(latency) = handle.get_extension::<PluginLatency>() {
+    // (A plugin that is not active is not asked its latency: it cannot know it before it knows the sample rate, and some say so.)
+    if active && let Some(latency) = handle.get_extension::<PluginLatency>() {
         gathered.latency = latency.get(&handle);
     }
     gathered.has_state = handle.get_extension::<PluginState>().is_some();

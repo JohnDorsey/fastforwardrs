@@ -48,6 +48,7 @@ pub mod lead_up;
 pub mod media;
 pub mod playback;
 pub mod plugin_bundles;
+pub mod plugin_editor;
 pub mod plugin_host;
 pub mod plugin_scan;
 pub mod plugin_trust;
