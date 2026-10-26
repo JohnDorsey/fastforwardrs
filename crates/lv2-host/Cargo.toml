@@ -1,0 +1,23 @@
+[package]
+name = "lv2-host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/JohnDorsey/fastforwardrs"
+description = "Finds, describes and runs LV2 sound plugins, with a host of its own (no lilv): the third part of fastforwardrs that has unsafe code in it"
+publish = false
+
+[dependencies]
+# (Already in the tree: it is what loads the other plugin kinds' libraries.)
+libloading = "0.8.9"
+# The Turtle of the bundles' descriptions (pure Rust; MIT or Apache-2.0).
+oxttl = "0.2.5"
+# (The terms that it gives: the same version, because `oxttl` pins it.)
+oxrdf = "0.3.5"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+lv2-test-plugins = { path = "../lv2-test-plugins", version = "0.1.0" }
+tempfile = "3.27.0"

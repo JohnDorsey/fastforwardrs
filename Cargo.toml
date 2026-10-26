@@ -11,7 +11,7 @@ default-run = "fastforwardrs"
 # The editor is a package of a workspace with two small crates beside it. `ladspa-host` is the only place with `unsafe` code in it (the editor itself keeps
 # `#![forbid(unsafe_code)]`): it loads LADSPA plugins. `ladspa-test-plugins` is a plugin written for the tests. See docs/engine-phase-7-design.md, G1 and G2.
 [workspace]
-members = [".", "crates/ladspa-host", "crates/ladspa-test-plugins", "crates/clap-host", "crates/clap-test-plugins"]
+members = [".", "crates/ladspa-host", "crates/ladspa-test-plugins", "crates/clap-host", "crates/clap-test-plugins", "crates/lv2-host", "crates/lv2-test-plugins"]
 
 [dependencies]
 ab_glyph = "0.2.32"
