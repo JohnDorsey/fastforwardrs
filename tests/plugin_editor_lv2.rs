@@ -16,7 +16,9 @@ use fastforwardrs::plugin_editor::program::PluginKind;
 use fastforwardrs::plugin_editor::protocol::{FromProgram, ParameterEdit, ToProgram, line_of, message_in};
 use fastforwardrs::plugin_editor::sessions::{EditorWindows, WhatToOpen, WindowEvent, WindowKey};
 use fastforwardrs::project::{AnimationTarget, ClipId, EffectInstanceId, TrackId};
-use lv2_test_plugins::{CONTROLS, FAILS, GAIN, UI_CLOSE_VALUE, UI_EDIT_VALUE, UI_REAL_WINDOW_SIZE, UI_SIZE};
+#[cfg(windows)]
+use lv2_test_plugins::UI_REAL_WINDOW_SIZE;
+use lv2_test_plugins::{CONTROLS, FAILS, GAIN, UI_CLOSE_VALUE, UI_EDIT_VALUE, UI_SIZE};
 use tempfile::TempDir;
 
 const PROGRAM: &str = env!("CARGO_BIN_EXE_fastforwardrs-plugin-editor");
