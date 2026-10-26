@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 clack-host = "0.2.0"
-clack-extensions = { version = "0.2.0", features = ["clack-host", "audio-ports", "params", "latency", "tail", "state", "note-ports", "thread-check"] }
+clack-extensions = { version = "0.2.0", features = ["clack-host", "audio-ports", "params", "latency", "tail", "state", "note-ports", "thread-check", "gui"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 

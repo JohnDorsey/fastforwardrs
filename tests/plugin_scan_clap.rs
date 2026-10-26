@@ -17,7 +17,7 @@ use fastforwardrs::plugin_scan::{
 const SCANNER: &str = env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan");
 const MISBEHAVE: &str = "FFRS_TEST_PLUGIN";
 /// How many plugins the test library has.
-const PLUGINS: usize = 18;
+const PLUGINS: usize = 19;
 
 /// A copy of the good test library, named as a CLAP library is, in a folder of its own.
 fn good_library_in(folder: &Path) -> PathBuf {
@@ -370,7 +370,7 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
         .iter()
         .map(|effect| effect.descriptor.key.as_ref())
         .collect();
-    assert_eq!(keys.len(), 14, "{keys:?}");
+    assert_eq!(keys.len(), 15, "{keys:?}");
     assert!(keys.iter().all(|key| key.starts_with("clap:org.fastforwardrs.test.")));
     assert!(found.effects.iter().all(|effect| effect.library == library));
     let reason_of = |id: &str| {

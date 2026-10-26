@@ -57,7 +57,7 @@ fn the_library_says_what_plugins_it_has_and_what_each_says_of_itself() {
     assert_eq!(described.problems, Vec::<String>::new());
     let ids: Vec<&str> = described.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
     assert!(ids.contains(&THREADS));
-    assert_eq!(ids.len(), 18, "{ids:?}");
+    assert_eq!(ids.len(), 19, "{ids:?}");
     assert!(ids.contains(&GAIN) && ids.contains(&INSTRUMENT));
     let gain = described.plugins.iter().find(|plugin| plugin.id == GAIN).unwrap();
     assert_eq!((gain.name.as_str(), gain.vendor.as_str()), ("Gain", "fastforwardrs"));
@@ -542,7 +542,10 @@ fn the_only_unsafe_code_of_this_crate_is_the_loading_of_the_library_and_it_says_
     let mut found = Vec::new();
     for entry in std::fs::read_dir(&source).unwrap() {
         let path = entry.unwrap().path();
-        if path.file_name().is_some_and(|name| name == "tests.rs") {
+        if path
+            .file_name()
+            .is_some_and(|name| name == "tests.rs" || name == "editor_tests.rs")
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();
@@ -557,14 +560,26 @@ fn the_only_unsafe_code_of_this_crate_is_the_loading_of_the_library_and_it_says_
             }
         }
     }
-    // (The lint lines `#![...]` of `lib.rs` are not code. `#[allow(unsafe_code)]` and the `unsafe { ... }` block it allows: both in `library.rs`, and nowhere else.)
-    assert_eq!(found.len(), 2, "{found:?}");
-    assert!(found.iter().all(|place| place.starts_with("library.rs:")), "{found:?}");
-    let library = std::fs::read_to_string(source.join("library.rs")).unwrap();
-    assert!(
-        library.contains("// SAFETY:"),
-        "the unsafe block has to say why it is fine"
+    // (The lint lines `#![...]` of `lib.rs` are not code. `#[allow(unsafe_code)]` and the `unsafe { ... }` block it allows: both in `library.rs`; and, since phase 10, the three of
+    // `Editor::put_the_window_in` in `editor.rs` (the `allow`, the `unsafe fn` that says what its caller must keep true, and the block that calls the plugin); nowhere else.)
+    assert_eq!(found.len(), 5, "{found:?}");
+    assert_eq!(
+        found.iter().filter(|place| place.starts_with("library.rs:")).count(),
+        2,
+        "{found:?}"
     );
+    assert_eq!(
+        found.iter().filter(|place| place.starts_with("editor.rs:")).count(),
+        3,
+        "{found:?}"
+    );
+    for file in ["library.rs", "editor.rs"] {
+        let text = std::fs::read_to_string(source.join(file)).unwrap();
+        assert!(
+            text.contains("// SAFETY:"),
+            "the unsafe block of {file} has to say why it is fine"
+        );
+    }
 }
 
 // --- the check of a plugin's start ---

@@ -13,6 +13,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![deny(unsafe_code)]
 
+pub mod editor;
 mod host;
 mod instance;
 mod library;
@@ -20,9 +21,12 @@ mod main_thread;
 pub mod scan;
 pub mod start_check;
 
+pub use editor::{Editor, EditorError, EditorEvent, ParameterEdit, WindowSize};
 pub use instance::{Instance, InstanceError, ParameterChange, ProcessOutcome, RunError};
 pub use library::{Library, LibraryDescription, OpenError, PluginDescription};
 pub use main_thread::MainThread;
 
+#[cfg(test)]
+mod editor_tests;
 #[cfg(test)]
 mod tests;

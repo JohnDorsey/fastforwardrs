@@ -17,28 +17,33 @@
 //! | `org.fastforwardrs.test.threads` | stereo; **checks the thread it is called on** (the host's `thread-check`) and gives the sound as it is if every call was on the right thread, and with the sign changed if one was not |
 //!
 //! | `…fails_to_activate`, `…fails_to_process`, `…panics` | stereo; misbehave on purpose: `activate` says no, `process` says it failed, `process` panics |
+//! | `org.fastforwardrs.test.editor` | stereo, one parameter (`Gain`, 0 to 4, id 1) **and a window** (`clap.gui`, floating or embedded, which it only pretends to have: nothing is drawn) **and a state** (`clap.state`): the state is text that says what the host did to the window (`created=1 shown=1 ... edits=2`), so a test can see it. When it is shown it **makes an edit, as a person's hand in a window would**: it asks the host for a flush, and in the flush it says `begin`, `Gain = 0.75`, `end` of a gesture, and tells the host that its state changed |
 //!
 //! It does nothing but arithmetic.
 
 use std::ffi::CStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use clack_extensions::audio_ports::{
     AudioPortFlags, AudioPortInfo, AudioPortInfoWriter, AudioPortType, PluginAudioPorts, PluginAudioPortsImpl,
 };
+use clack_extensions::gui::{GuiConfiguration, GuiSize, HostGui, PluginGui, PluginGuiImpl, Window};
 use clack_extensions::latency::{HostLatency, PluginLatency, PluginLatencyImpl};
 use clack_extensions::params::{HostParams, ParamRescanFlags};
 use clack_extensions::params::{
     ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter, PluginAudioProcessorParams, PluginMainThreadParams,
     PluginParams,
 };
+use clack_extensions::state::{HostState, PluginState, PluginStateImpl};
 use clack_extensions::tail::{PluginTail, PluginTailImpl, TailLength};
 use clack_extensions::thread_check::HostThreadCheck;
 use clack_plugin::clack_export_entry;
 use clack_plugin::entry::prelude::*;
+use clack_plugin::events::event_types::{ParamGestureBeginEvent, ParamGestureEndEvent, ParamValueEvent};
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::factory::plugin::PluginFactoryWrapper;
 use clack_plugin::prelude::*;
+use clack_plugin::stream::{InputStream, OutputStream};
 
 /// The ids of the plugins.
 pub const GAIN: &str = "org.fastforwardrs.test.gain";
@@ -70,6 +75,12 @@ pub const SINGLE_INSTANCE: &str = "org.fastforwardrs.test.single_instance";
 /// the sound times a gain that is made from the sum. In memory that is cleared the gain is 1; in memory that holds other bytes it is not. (Found with a reverb that roared, warbled and went
 /// silent at random; the check of a plugin's start is tested with this.)
 pub const READS_GARBAGE: &str = "org.fastforwardrs.test.reads_garbage";
+/// A plugin with a window and a state (see the head of this file).
+pub const EDITOR: &str = "org.fastforwardrs.test.editor";
+/// What the window of the editor plugin says its size is, until it is given another.
+pub const EDITOR_SIZE: (u32, u32) = (400, 300);
+/// What the gain becomes when the window of the editor plugin makes its edit.
+pub const EDITOR_EDIT_VALUE: f64 = 0.75;
 
 /// What the library is asked to do wrong, if anything: the value of the environment variable `FFRS_TEST_PLUGIN`, read once, when the library is first asked. It is for the
 /// tests of the scan, which run the scan program (a process of its own) with the variable set; **in a test program the variable is never set**.
@@ -126,12 +137,13 @@ const KIND_RATE: u8 = 14;
 const KIND_LATENCY_CHANGES: u8 = 15;
 const KIND_SINGLE_INSTANCE: u8 = 16;
 const KIND_READS_GARBAGE: u8 = 17;
+const KIND_EDITOR: u8 = 18;
 
 /// How many `single_instance` plugins are alive.
 static SINGLE_INSTANCES_ALIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The ids of the plugins, in the order of the kinds.
-const IDS: [&str; 18] = [
+const IDS: [&str; 19] = [
     GAIN,
     SWAP,
     MONO_HALF,
@@ -150,8 +162,9 @@ const IDS: [&str; 18] = [
     LATENCY_CHANGES,
     SINGLE_INSTANCE,
     READS_GARBAGE,
+    EDITOR,
 ];
-const NAMES: [&str; 18] = [
+const NAMES: [&str; 19] = [
     "Gain",
     "Swap",
     "Mono half",
@@ -170,6 +183,7 @@ const NAMES: [&str; 18] = [
     "Latency changes",
     "Single instance",
     "Reads garbage",
+    "Editor",
 ];
 
 /// What the parameters of a plugin are, as `(id, name, minimum, maximum, default, flags)`.
@@ -197,7 +211,7 @@ fn parameters_of(kind: u8) -> &'static [(u32, &'static str, f64, f64, f64, Param
         ),
     ];
     match kind {
-        KIND_GAIN | KIND_CALLBACKS => &GAIN_PARAMETER,
+        KIND_GAIN | KIND_CALLBACKS | KIND_EDITOR => &GAIN_PARAMETER,
         KIND_CHOICE => &CHOICE_PARAMETERS,
         _ => &[],
     }
@@ -210,15 +224,71 @@ const MODE_TEXTS: [&str; 3] = ["off", "double", "triple"];
 pub struct Shared {
     /// The values of the parameters (as the bits of an `f64`), by the order of `parameters_of`.
     values: [AtomicU64; 2],
+    /// What has been done to the window (`editor` only; see [`Shared::state_text`]).
+    window: WindowLog,
 }
+
+/// What the host has done to the window of the editor plugin.
+#[derive(Default)]
+struct WindowLog {
+    created: AtomicU32,
+    shown: AtomicU32,
+    hidden: AtomicU32,
+    destroyed: AtomicU32,
+    floating: AtomicBool,
+    embedded: AtomicBool,
+    scale: AtomicU64,
+    width: AtomicU32,
+    height: AtomicU32,
+    /// How many edits the window has made (it makes one each time it is shown), which is what the state keeps.
+    edits: AtomicU32,
+    /// Whether the window has an edit to give to the host in the next flush.
+    edit_waits: AtomicBool,
+    /// How many times the host has done the call on the main thread that the plugin asked for.
+    callbacks: AtomicU32,
+    /// What the plugin is to ask of the host in its next call on the main thread, when a state said so (`ask=resize`, `show`, `hide`, `close`, `destroyed`): see [`ASK_RESIZE`].
+    ask: AtomicU32,
+}
+
+const ASK_RESIZE: u32 = 1;
+const ASK_SHOW: u32 = 2;
+const ASK_HIDE: u32 = 3;
+const ASK_CLOSE: u32 = 4;
+const ASK_DESTROYED: u32 = 5;
+/// The size that the window asks for when a state says `ask=resize`.
+pub const EDITOR_ASKED_SIZE: (u32, u32) = (410, 310);
 
 impl Shared {
     fn new(kind: u8) -> Self {
         let defaults = parameters_of(kind);
         let value = |number: usize| AtomicU64::new(defaults.get(number).map_or(0.0, |parameter| parameter.4).to_bits());
+        let window = WindowLog::default();
+        window.width.store(EDITOR_SIZE.0, Ordering::SeqCst);
+        window.height.store(EDITOR_SIZE.1, Ordering::SeqCst);
+        window.scale.store(1.0_f64.to_bits(), Ordering::SeqCst);
         Self {
             values: [value(0), value(1)],
+            window,
         }
+    }
+
+    /// The state of the editor plugin, as text: what was done to its window, and how many edits the window made.
+    fn state_text(&self) -> String {
+        let window = &self.window;
+        format!(
+            "created={} shown={} hidden={} destroyed={} floating={} embedded={} scale={} size={}x{} edits={} callbacks={}",
+            window.created.load(Ordering::SeqCst),
+            window.shown.load(Ordering::SeqCst),
+            window.hidden.load(Ordering::SeqCst),
+            window.destroyed.load(Ordering::SeqCst),
+            u8::from(window.floating.load(Ordering::SeqCst)),
+            u8::from(window.embedded.load(Ordering::SeqCst)),
+            f64::from_bits(window.scale.load(Ordering::SeqCst)),
+            window.width.load(Ordering::SeqCst),
+            window.height.load(Ordering::SeqCst),
+            window.edits.load(Ordering::SeqCst),
+            window.callbacks.load(Ordering::SeqCst),
+        )
     }
 
     fn get(&self, number: usize) -> f64 {
@@ -248,6 +318,9 @@ impl<const KIND: u8> Plugin for TestPlugin<KIND> {
         if !parameters_of(KIND).is_empty() {
             builder.register::<PluginParams>();
         }
+        if KIND == KIND_EDITOR {
+            builder.register::<PluginGui>().register::<PluginState>();
+        }
         if KIND == KIND_LATENCY || KIND == KIND_LATENCY_CHANGES {
             builder.register::<PluginLatency>();
         }
@@ -261,6 +334,30 @@ impl PluginShared<'_> for Shared {}
 
 impl<'a, const KIND: u8> PluginMainThread<'a, Shared> for Main<'a, KIND> {
     fn on_main_thread(&self) {
+        if KIND == KIND_EDITOR {
+            // (The call that the window asked for when it was shown or given a state: it says that its parameters are not what they were, and does what a state asked it to.)
+            self.shared.window.callbacks.fetch_add(1, Ordering::SeqCst);
+            if let Some(params) = self.host.get_extension::<HostParams>() {
+                params.rescan(&self.host, ParamRescanFlags::INFO);
+            }
+            if let Some(gui) = self.host.get_extension::<HostGui>() {
+                let handle: &HostSharedHandle = &self.host;
+                match self.shared.window.ask.swap(0, Ordering::SeqCst) {
+                    ASK_RESIZE => {
+                        let _ = gui.request_resize(handle, EDITOR_ASKED_SIZE.0, EDITOR_ASKED_SIZE.1);
+                    }
+                    ASK_SHOW => {
+                        let _ = gui.request_show(handle);
+                    }
+                    ASK_HIDE => {
+                        let _ = gui.request_hide(handle);
+                    }
+                    ASK_CLOSE => gui.closed(handle, false),
+                    ASK_DESTROYED => gui.closed(handle, true),
+                    _ => {}
+                }
+            }
+        }
         // (The call that the plugin asked for: it says that its parameters are not what they were.)
         if KIND == KIND_CALLBACKS
             && let Some(params) = self.host.get_extension::<HostParams>()
@@ -357,7 +454,148 @@ impl<const KIND: u8> PluginMainThreadParams for Main<'_, KIND> {
         text.to_str().ok()?.trim().parse().ok()
     }
 
-    fn flush(&self, _input: &InputEvents, _output: &mut OutputEvents) {}
+    fn flush(&self, input: &InputEvents, output: &mut OutputEvents) {
+        // (What the host says the parameters are, outside of `process`.)
+        for event in input {
+            if let Some(CoreEventSpace::ParamValue(change)) = event.as_core_event()
+                && let Some(id) = change.param_id()
+                && let Some(number) = parameters_of(KIND).iter().position(|parameter| parameter.0 == id.get())
+            {
+                self.shared.set(number, change.value());
+            }
+        }
+        // (The edit that the window makes, as a person's hand would: a gesture with a value in it.)
+        if KIND == KIND_EDITOR && self.shared.window.edit_waits.swap(false, Ordering::SeqCst) {
+            let id = ClapId::new(1);
+            self.shared.set(0, EDITOR_EDIT_VALUE);
+            self.shared.window.edits.fetch_add(1, Ordering::SeqCst);
+            let _ = output.try_push(ParamGestureBeginEvent::new(0, id));
+            let _ = output.try_push(ParamValueEvent::new(0, id, Pckn::match_all(), EDITOR_EDIT_VALUE));
+            let _ = output.try_push(ParamGestureEndEvent::new(0, id));
+        }
+    }
+}
+
+impl<const KIND: u8> PluginGuiImpl for Main<'_, KIND> {
+    fn is_api_supported(&self, configuration: GuiConfiguration) -> bool {
+        // (Every kind of window, floating or embedded, but `cocoa`, which it only makes floating: so that a host that asks the wrong way round is heard.)
+        KIND == KIND_EDITOR
+            && ["win32", "x11", "cocoa", "wayland"].contains(&configuration.api_type.0.to_str().unwrap_or(""))
+            && (configuration.is_floating || configuration.api_type.0 != c"cocoa")
+    }
+
+    fn get_preferred_api(&self) -> Option<GuiConfiguration<'_>> {
+        None
+    }
+
+    fn create(&self, configuration: GuiConfiguration) -> Result<(), PluginError> {
+        let window = &self.shared.window;
+        window.created.fetch_add(1, Ordering::SeqCst);
+        window.floating.store(configuration.is_floating, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn destroy(&self) {
+        self.shared.window.destroyed.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn set_scale(&self, scale: f64) -> Result<(), PluginError> {
+        self.shared.window.scale.store(scale.to_bits(), Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn get_size(&self) -> Option<GuiSize> {
+        let window = &self.shared.window;
+        Some(GuiSize {
+            width: window.width.load(Ordering::SeqCst),
+            height: window.height.load(Ordering::SeqCst),
+        })
+    }
+
+    fn can_resize(&self) -> bool {
+        true
+    }
+
+    fn adjust_size(&self, size: GuiSize) -> Option<GuiSize> {
+        // (Whole tens: so that a test sees that the host asked.)
+        Some(GuiSize {
+            width: size.width / 10 * 10,
+            height: size.height / 10 * 10,
+        })
+    }
+
+    fn set_size(&self, size: GuiSize) -> Result<(), PluginError> {
+        self.shared.window.width.store(size.width, Ordering::SeqCst);
+        self.shared.window.height.store(size.height, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn set_parent(&self, _window: Window) -> Result<(), PluginError> {
+        self.shared.window.embedded.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn set_transient(&self, _window: Window) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn show(&self) -> Result<(), PluginError> {
+        self.shared.window.shown.fetch_add(1, Ordering::SeqCst);
+        // A person's hand is on the window: it has an edit to give the host, and its state is not what the host saved.
+        self.shared.window.edit_waits.store(true, Ordering::SeqCst);
+        if let Some(params) = self.host.get_extension::<HostParams>() {
+            params.request_flush(&self.host);
+        }
+        if let Some(state) = self.host.get_extension::<HostState>() {
+            state.mark_dirty(&self.host);
+        }
+        self.host.request_callback();
+        Ok(())
+    }
+
+    fn hide(&self) -> Result<(), PluginError> {
+        self.shared.window.hidden.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+impl<const KIND: u8> PluginStateImpl for Main<'_, KIND> {
+    fn save(&self, output: &mut OutputStream) -> Result<(), PluginError> {
+        use std::io::Write;
+        output
+            .write_all(self.shared.state_text().as_bytes())
+            .map_err(|_| PluginError::Message("the state could not be written"))
+    }
+
+    fn load(&self, input: &mut InputStream) -> Result<(), PluginError> {
+        use std::io::Read;
+        let mut text = String::new();
+        input
+            .read_to_string(&mut text)
+            .map_err(|_| PluginError::Message("the state could not be read"))?;
+        // (Only the edits are what a state gives back; the rest says what was done to a window, which a state does not undo.)
+        if let Some(edits) = text
+            .split_whitespace()
+            .find_map(|word| word.strip_prefix("edits="))
+            .and_then(|edits| edits.parse::<u32>().ok())
+        {
+            self.shared.window.edits.store(edits, Ordering::SeqCst);
+        }
+        // (A state that asks something of the host, in its next call on the main thread: for the tests of what the host does with the plugin's requests.)
+        let ask = match text.split_whitespace().find_map(|word| word.strip_prefix("ask=")) {
+            Some("resize") => ASK_RESIZE,
+            Some("show") => ASK_SHOW,
+            Some("hide") => ASK_HIDE,
+            Some("close") => ASK_CLOSE,
+            Some("destroyed") => ASK_DESTROYED,
+            _ => 0,
+        };
+        if ask != 0 {
+            self.shared.window.ask.store(ask, Ordering::SeqCst);
+            self.host.request_callback();
+        }
+        Ok(())
+    }
 }
 
 impl<const KIND: u8> PluginLatencyImpl for Main<'_, KIND> {
@@ -570,7 +808,7 @@ impl<const KIND: u8> Processor<'_, KIND> {
     /// Makes the samples `from` up to `to` of every channel.
     fn process_stretch(&mut self, audio: &mut Audio, from: usize, to: usize) -> Result<(), PluginError> {
         let multiplier = match KIND {
-            KIND_GAIN | KIND_CALLBACKS => self.values[0] as f32,
+            KIND_GAIN | KIND_CALLBACKS | KIND_EDITOR => self.values[0] as f32,
             KIND_MONO_HALF => 0.5,
             KIND_CHOICE => ((self.values[0] as i64 + 1) * (self.values[1] as i64 + 1)) as f32,
             KIND_THREADS if !self.threads_were_right => -1.0,
@@ -706,6 +944,7 @@ impl PluginFactoryImpl for Factory {
             KIND_LATENCY_CHANGES => made!(KIND_LATENCY_CHANGES),
             KIND_SINGLE_INSTANCE => made!(KIND_SINGLE_INSTANCE),
             KIND_READS_GARBAGE => made!(KIND_READS_GARBAGE),
+            KIND_EDITOR => made!(KIND_EDITOR),
             KIND_TAIL => made!(KIND_TAIL),
             KIND_CHOICE => made!(KIND_CHOICE),
             KIND_INSTRUMENT => made!(KIND_INSTRUMENT),

@@ -433,7 +433,7 @@ impl Drop for Instance {
 }
 
 /// Asks an instance that is active what it has: ports, parameters, latency, state. (On the main thread.)
-fn gather(instance: &mut PluginInstance<Host>) -> Gathered {
+pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>) -> Gathered {
     let mut gathered = Gathered {
         inputs: Vec::new(),
         outputs: Vec::new(),
