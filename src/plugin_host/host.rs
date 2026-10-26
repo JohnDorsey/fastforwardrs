@@ -430,6 +430,25 @@ impl PluginHost {
             .clone()
     }
 
+    /// The environment variables that a **program of its own** that loads the library `library` (the scan program, the program that shows a plugin's window) is started with, so that
+    /// it looks for the libraries that the plugin library needs where this host does: the folders a person said, and the parents of the library's folder if the setting says so,
+    /// before what the variable has already. (Empty when there are none.)
+    pub fn environment_for_a_program_that_loads(&self, library: &Path) -> Vec<(String, String)> {
+        let search = self.search.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let folders = dependency_search_folders(library, &search.dependency_folders, search.parent_folders);
+        if folders.is_empty() {
+            return Vec::new();
+        }
+        let variable = crate::plugin_scan::library_search_variable();
+        let existing = std::env::var_os(variable).map(|value| std::env::split_paths(&value).collect::<Vec<_>>());
+        let all = folders.into_iter().chain(existing.into_iter().flatten());
+        std::env::join_paths(all)
+            .ok()
+            .and_then(|value| value.into_string().ok())
+            .map(|value| vec![(variable.to_owned(), value)])
+            .unwrap_or_default()
+    }
+
     /// Before a library is loaded: where the libraries that it needs are looked for, where that can be done after the program has started (on Windows: before the others of the
     /// search path). On the other systems the loader reads its search path when the program starts, and a plugin that needs a library that is not beside it has to be
     /// loaded by a program that was started with the folder in `LD_LIBRARY_PATH` (the scan has the folders: it is started with them).

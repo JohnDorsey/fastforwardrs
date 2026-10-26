@@ -115,6 +115,13 @@ impl History {
         self.merge_window = Duration::MAX;
     }
 
+    /// Undoes [`Self::merge_edits_whenever_they_are_made`]: edits are one step only when they come within [`MERGE_WINDOW`] of each other (or a pointer is down), so that a test of the
+    /// window can give the times itself.
+    #[cfg(test)]
+    pub fn merge_edits_by_time_again(&mut self) {
+        self.merge_window = MERGE_WINDOW;
+    }
+
     /// Forgets everything (a different project was made or loaded), and counts the project as saved.
     pub fn reset(&mut self) {
         self.undo.clear();

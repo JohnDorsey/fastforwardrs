@@ -411,4 +411,12 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
     );
     assert_eq!(effect(CHOICE).value_handles, [1, 2]);
     assert_eq!(effect(CHOICE).descriptor.parameters.len(), 2);
+    // (Phase 10: the scan says which plugins have a window of their own.)
+    assert!(
+        effect(clap_test_plugins::EDITOR).has_a_window,
+        "the one that has a window"
+    );
+    for id in [GAIN, CHOICE, clap_test_plugins::SWAP, clap_test_plugins::MONO_HALF] {
+        assert!(!effect(id).has_a_window, "{id} has none");
+    }
 }

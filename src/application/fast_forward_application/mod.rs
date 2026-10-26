@@ -108,6 +108,9 @@ mod picture_tests;
 #[cfg(test)]
 mod playing_edit_tests;
 mod plugin_bundles_flow;
+#[cfg(test)]
+mod plugin_editor_box_tests;
+mod plugin_editor_flow;
 mod plugin_flow;
 #[cfg(test)]
 mod plugin_manager_bundles_tests;

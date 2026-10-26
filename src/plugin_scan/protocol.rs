@@ -40,8 +40,8 @@ pub fn build_id_in(output: &str) -> Option<String> {
 }
 
 /// What is in the cache of scans as well as on the wire. **Raise it when the scan finds something it did not (or means something else by what it finds)**, so that the answers
-/// that were kept are not believed any more. (2: the scan reads CLAP libraries too. 3: the scan checks whether a CLAP plugin's start depends on memory it did not write.)
-pub const SCAN_FORMAT: u32 = 3;
+/// that were kept are not believed any more. (2: the scan reads CLAP libraries too. 3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4: the scan says whether a CLAP plugin has a window.)
+pub const SCAN_FORMAT: u32 = 4;
 
 /// The answer of the scan program.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

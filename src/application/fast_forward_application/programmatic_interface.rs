@@ -16,9 +16,59 @@ use crate::application::selection::SelectionItem;
 use crate::engine::AdapterChoice;
 use crate::media::MediaLocation;
 use crate::playback::{AudioSinkOpener, EffectSpeakersOpener, SuppliedPicture};
-use crate::project::{ClipId, Project, Settings, SourceMediaIdentifier, TimelineFrameIndex};
+use crate::project::{
+    AnimationTarget, ClipId, EffectInstanceId, Project, PropertyId, PropertyValue, Settings, SourceMediaIdentifier,
+    TimelineFrameIndex,
+};
 
 impl FastForwardApplication {
+    /// Gives the value `property` of the effect of the clip or the track `target` the value `value`, as the control of it in the panel does (at the playhead if it has keyframes): one
+    /// edit of the history.
+    pub fn set_the_value_of_an_effect(&mut self, target: AnimationTarget, property: PropertyId, value: PropertyValue) {
+        let command = crate::application::commands::Command::SetEffectValue {
+            target,
+            property,
+            value,
+        };
+        self.carry_out_all(vec![command], Instant::now(), &egui::Context::default());
+    }
+
+    /// Whether the window of the plugin effect `instance` of `target` is open (phase 10).
+    pub fn is_a_plugin_window_open(&self, target: AnimationTarget, instance: EffectInstanceId) -> bool {
+        self.interface.plugin_editors.is_open(target, instance)
+    }
+
+    /// Why the window of that plugin effect could not be opened or ended, if it could not.
+    pub fn problem_with_a_plugin_window(&self, target: AnimationTarget, instance: EffectInstanceId) -> Option<String> {
+        self.interface
+            .plugin_editors
+            .problem_with(target, instance)
+            .map(str::to_owned)
+    }
+
+    /// Asks the window of that plugin effect for the plugin's state (the answer comes in a frame or two: see [`Self::the_state_a_plugin_window_last_said`]).
+    pub fn ask_a_plugin_window_for_its_state(&mut self, target: AnimationTarget, instance: EffectInstanceId) {
+        self.interface.plugin_editors.ask_for_the_state(target, instance);
+    }
+
+    /// The state of the plugin (base 64) that its window last said, if it said one.
+    pub fn the_state_a_plugin_window_last_said(
+        &self,
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+    ) -> Option<String> {
+        self.interface
+            .plugin_editors
+            .state_of(target, instance)
+            .map(str::to_owned)
+    }
+
+    /// Makes the windows that are opened from now on have no window at all, and use this program to show them (**for the tests**, which have no screen; a window is for the program that
+    /// `cargo` built beside the test).
+    pub fn show_plugin_windows_with_this_program(&mut self, program: PathBuf, headless: bool) {
+        self.interface.plugin_editors.use_this_program(program, headless);
+    }
+
     /// Puts the video or sound file at `path` on the timeline at the current frame, as choosing it
     /// after "Link and import" does.
     ///

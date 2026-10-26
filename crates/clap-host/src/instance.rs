@@ -73,6 +73,7 @@ pub(crate) struct Gathered {
     pub(crate) parameters: Vec<Parameter>,
     pub(crate) latency: u32,
     pub(crate) has_state: bool,
+    pub(crate) has_gui: bool,
     pub(crate) has_tail: bool,
 }
 
@@ -204,6 +205,11 @@ impl Instance {
     /// Whether the plugin has a state to be saved (it keeps something that is not a parameter).
     pub fn has_state(&self) -> bool {
         self.gathered.has_state
+    }
+
+    /// Whether the plugin has a window of its own to show (`clap.gui`).
+    pub fn has_a_window(&self) -> bool {
+        self.gathered.has_gui
     }
 
     /// How long the plugin goes on making sound after its input stops, in samples, if it says (`u32::MAX` is for ever).
@@ -440,6 +446,7 @@ pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>, active: 
         parameters: Vec::new(),
         latency: 0,
         has_state: false,
+        has_gui: false,
         has_tail: false,
     };
     let handle = instance.plugin_handle();
@@ -501,6 +508,7 @@ pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>, active: 
         gathered.latency = latency.get(&handle);
     }
     gathered.has_state = handle.get_extension::<PluginState>().is_some();
+    gathered.has_gui = handle.get_extension::<clack_extensions::gui::PluginGui>().is_some();
     gathered.has_tail = handle.get_extension::<PluginTail>().is_some();
     gathered
 }

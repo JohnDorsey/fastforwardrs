@@ -295,6 +295,17 @@ pub enum Command {
         value: PropertyValue,
     },
 
+    /// Open the window of the plugin effect `instance` of the clip or the track `target` (phase 10), if it has one. What cannot be done is said in the box of the effect.
+    OpenPluginEditor {
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+    },
+    /// Close that window.
+    ClosePluginEditor {
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+    },
+
     // Groups.
     /// Make a group of kind `kind` of `members` (from the menu of a selection of clips, or of tracks), and select it and nothing else.
     /// A group that cannot be made (see [`crate::project::Project::create_group`]) is not, and the user is told why.
@@ -513,6 +524,8 @@ impl Command {
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
             | Self::PluginManager(_)
+            | Self::OpenPluginEditor { .. }
+            | Self::ClosePluginEditor { .. }
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
             | Self::SetGenerateLeadUpOnSeek(_)
@@ -563,6 +576,8 @@ impl Command {
             | Self::ShowProjectSettings
             | Self::ShowGlobalSettings
             | Self::PluginManager(_)
+            | Self::OpenPluginEditor { .. }
+            | Self::ClosePluginEditor { .. }
             | Self::SetProjectSettings(_)
             | Self::SetGlobalSettings(_)
             | Self::SetGenerateLeadUpOnSeek(_)

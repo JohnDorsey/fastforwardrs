@@ -92,6 +92,9 @@ pub struct ScannedPlugin {
     /// `Some` if the plugin says how long its tail is.
     pub tail: Option<u32>,
     pub has_state: bool,
+    /// Whether the plugin has a window of its own to show (`clap.gui`). A scan from before this was known says `false`.
+    #[serde(default)]
+    pub has_gui: bool,
     /// Whether the plugin's sound at its start depends on memory it did not write (see [`crate::start_check`]). A scan from before the check has [`StartCheck::NotChecked`].
     #[serde(default)]
     pub start: StartCheck,
@@ -155,6 +158,7 @@ fn probe(
         latency: 0,
         tail: None,
         has_state: false,
+        has_gui: false,
         start: StartCheck::NotChecked,
         problem: None,
     };
@@ -176,6 +180,7 @@ fn probe(
     scanned.parameters = instance.parameters().to_vec();
     scanned.latency = instance.latency();
     scanned.has_state = instance.has_state();
+    scanned.has_gui = instance.has_a_window();
     step(&format!(
         "running the plugin {} on {PROBE_BLOCK_FRAMES} frames of silence",
         scanned.description.id

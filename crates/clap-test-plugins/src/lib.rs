@@ -250,6 +250,8 @@ struct WindowLog {
     gain_when_shown: AtomicU64,
     /// Whether the window cannot be made (a state said `ask=fail_create`).
     fail_create: AtomicBool,
+    /// How many values the host has told the plugin in a flush.
+    told: AtomicU32,
     /// What the plugin is to ask of the host in its next call on the main thread, when a state said so (`ask=resize`, `show`, `hide`, `close`, `destroyed`): see [`ASK_RESIZE`].
     ask: AtomicU32,
 }
@@ -259,6 +261,8 @@ const ASK_SHOW: u32 = 2;
 const ASK_HIDE: u32 = 3;
 const ASK_CLOSE: u32 = 4;
 const ASK_DESTROYED: u32 = 5;
+/// The plugin crashes the program that it is in.
+const ASK_CRASH: u32 = 6;
 /// The size that the window asks for when a state says `ask=resize`.
 pub const EDITOR_ASKED_SIZE: (u32, u32) = (410, 310);
 
@@ -280,7 +284,7 @@ impl Shared {
     fn state_text(&self) -> String {
         let window = &self.window;
         format!(
-            "created={} shown={} hidden={} destroyed={} floating={} embedded={} scale={} size={}x{} edits={} callbacks={} gain={} gain_when_shown={}",
+            "created={} shown={} hidden={} destroyed={} floating={} embedded={} scale={} size={}x{} edits={} callbacks={} gain={} gain_when_shown={} told={}",
             window.created.load(Ordering::SeqCst),
             window.shown.load(Ordering::SeqCst),
             window.hidden.load(Ordering::SeqCst),
@@ -294,6 +298,7 @@ impl Shared {
             window.callbacks.load(Ordering::SeqCst),
             self.get(0),
             f64::from_bits(window.gain_when_shown.load(Ordering::SeqCst)),
+            window.told.load(Ordering::SeqCst),
         )
     }
 
@@ -360,6 +365,7 @@ impl<'a, const KIND: u8> PluginMainThread<'a, Shared> for Main<'a, KIND> {
                     }
                     ASK_CLOSE => gui.closed(handle, false),
                     ASK_DESTROYED => gui.closed(handle, true),
+                    ASK_CRASH => std::process::abort(),
                     _ => {}
                 }
             }
@@ -468,6 +474,7 @@ impl<const KIND: u8> PluginMainThreadParams for Main<'_, KIND> {
                 && let Some(number) = parameters_of(KIND).iter().position(|parameter| parameter.0 == id.get())
             {
                 self.shared.set(number, change.value());
+                self.shared.window.told.fetch_add(1, Ordering::SeqCst);
             }
         }
         // (The edit that the window makes, as a person's hand would: a gesture with a value in it.)
@@ -607,6 +614,7 @@ impl<const KIND: u8> PluginStateImpl for Main<'_, KIND> {
             Some("hide") => ASK_HIDE,
             Some("close") => ASK_CLOSE,
             Some("destroyed") => ASK_DESTROYED,
+            Some("crash") => ASK_CRASH,
             _ => 0,
         };
         if ask != 0 {

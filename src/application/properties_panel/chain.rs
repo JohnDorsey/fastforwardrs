@@ -17,11 +17,12 @@ use egui::{CornerRadius, Key, Popup, Rect, Response, RichText, ScrollArea, Strok
 use super::PropertiesContent;
 use super::badge::{self, BadgeLook};
 use super::effects::{
-    ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, DELETE_EFFECT_LABEL, DEPENDS_ON_EARLIER_FRAMES_NOTE,
-    DUPLICATE_EFFECT_LABEL, NO_EFFECT_FOUND_NOTE, NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, SEARCH_EFFECTS_HINT,
-    SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE, TRANSITION_NOTE, VALUES_ARE_KEPT_NOTE,
-    WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source,
-    items_for_where_the_tables_are_kept, show_the_control_of, show_the_control_of_a_group_effect,
+    ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, CLOSE_EDITOR_LABEL, DELETE_EFFECT_LABEL,
+    DEPENDS_ON_EARLIER_FRAMES_NOTE, DUPLICATE_EFFECT_LABEL, EDITOR_PROBLEM_NOTE, NO_EFFECT_FOUND_NOTE,
+    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, OPEN_EDITOR_LABEL, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL,
+    SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE, TRANSITION_NOTE, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE,
+    effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept,
+    show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -150,7 +151,23 @@ fn show_an_effect(
     let mut to_be_deleted = false;
     let mut to_be_switched = false;
     let mut to_be_duplicated = false;
+    // (A cell: the menu and the box both can say it.)
+    let to_toggle_the_editor = std::cell::Cell::new(false);
     let mut from_the_menu = Vec::new();
+    // (A plugin that has a window of its own: the box has a button for it, and so does the menu. Only a clip or a track has the window: it is for the effect that makes the sound.)
+    let editor_of = match owner {
+        Member::Clip(clip) => Some(AnimationTarget::Clip(clip)),
+        Member::Track(track) => Some(AnimationTarget::Track(track)),
+        Member::Group(_) => None,
+    }
+    .filter(|_| kind.installed_plugin().is_some_and(|plugin| plugin.has_a_window))
+    .map(|target| {
+        (
+            target,
+            (content.plugin_window_is_open)(target, effect.instance()),
+            (content.plugin_window_problem)(target, effect.instance()),
+        )
+    });
     let title = chain.map_or_else(
         || what_an_effect_is_called(kind),
         |chain| what_an_effect_in_a_chain_is_called(chain, effect),
@@ -172,6 +189,18 @@ fn show_an_effect(
             if is_what_a_generator_makes {
                 ui.weak(WHAT_A_GENERATOR_MAKES_NOTE);
                 return;
+            }
+            if let Some((_, is_open, _)) = &editor_of
+                && ui
+                    .button(if *is_open {
+                        CLOSE_EDITOR_LABEL
+                    } else {
+                        OPEN_EDITOR_LABEL
+                    })
+                    .clicked()
+            {
+                to_toggle_the_editor.set(true);
+                ui.close();
             }
             if ui.button(label).clicked() {
                 to_be_switched = true;
@@ -211,6 +240,23 @@ fn show_an_effect(
             if !effect.is_enabled() {
                 ui.label(RichText::new(SWITCHED_OFF_NOTE).weak());
             }
+            if let Some((_, is_open, problem)) = &editor_of {
+                if ui
+                    .button(if *is_open {
+                        CLOSE_EDITOR_LABEL
+                    } else {
+                        OPEN_EDITOR_LABEL
+                    })
+                    .clicked()
+                {
+                    to_toggle_the_editor.set(true);
+                }
+                if let Some(problem) = problem {
+                    ui.label(
+                        RichText::new(format!("{EDITOR_PROBLEM_NOTE} {problem}")).color(ui.visuals().warn_fg_color),
+                    );
+                }
+            }
             for property in effect.properties() {
                 match owner {
                     Member::Clip(clip) => {
@@ -228,6 +274,16 @@ fn show_an_effect(
     );
     if to_be_deleted {
         commands.push(command_that_takes_off(owner, effect.instance()));
+    }
+    if to_toggle_the_editor.get()
+        && let Some((target, is_open, _)) = editor_of
+    {
+        let instance = effect.instance();
+        commands.push(if is_open {
+            Command::ClosePluginEditor { target, instance }
+        } else {
+            Command::OpenPluginEditor { target, instance }
+        });
     }
     commands.extend(from_the_menu);
     if to_be_duplicated {

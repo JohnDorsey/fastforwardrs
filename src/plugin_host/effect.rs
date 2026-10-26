@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use super::instance::{PluginInstance, places_to_look_in};
 use crate::composition::LayerEffect;
-use crate::project::{FrameRate, InstalledPlugin, PropertyValue};
+use crate::project::{FrameRate, InstalledPlugin};
 use crate::sound_engine::{BlockProcessor, Notes, SAMPLE_RATE};
 
 /// How many samples apart the values of an effect that is animated are looked at (32 is 0.67 milliseconds at 48000 a second).
@@ -222,13 +222,8 @@ impl PluginEffect {
             .iter()
             .enumerate()
             .map(|(slot, value)| {
-                let number = match value {
-                    PropertyValue::Number(number) => *number,
-                    PropertyValue::Flag(on) => f32::from(u8::from(*on)),
-                    // (The id of an option of a choice is the number the plugin gives it.)
-                    PropertyValue::Words(words) => words.trim().parse::<f32>().unwrap_or(0.0),
-                    PropertyValue::Pair(..) | PropertyValue::Colour(_) => 0.0,
-                };
+                // (The id of an option of a choice is the number the plugin gives it: see `plugin_editor::values`, which the window that edits the values uses too.)
+                let number = crate::plugin_editor::values::number_for_a_plugin(value);
                 // (A value that is typed past the range is kept to it when the plugin is run.)
                 match self
                     .plugin

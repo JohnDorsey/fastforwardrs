@@ -34,6 +34,13 @@ pub(super) const LOOKING_FOR_THE_FONTS_NOTE: &str = "Looking for the fonts...";
 /// What the plus button that puts an effect on is called, which it says when the pointer rests on it, and to screen readers.
 pub const ADD_EFFECT_LABEL: &str = "Add an effect";
 
+/// What the button of the box of a plugin that has a window, and the item of its menu, say: open the window, and (while it is open) close it.
+pub const OPEN_EDITOR_LABEL: &str = "Open editor";
+pub const CLOSE_EDITOR_LABEL: &str = "Close editor";
+
+/// What the box of a plugin says when its window could not be opened or ended: followed by why.
+pub const EDITOR_PROBLEM_NOTE: &str = "The plugin's window:";
+
 /// What the item of the menu of a box of an effect that deletes the effect is called.
 pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
 

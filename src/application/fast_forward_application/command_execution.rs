@@ -51,6 +51,8 @@ impl FastForwardApplication {
         let may_edit = commands.iter().any(Command::may_change_the_project);
         let (pointer_is_down, press_began_at) =
             context.input(|input| (input.pointer.any_down(), input.pointer.press_start_time()));
+        // (A hand that is holding a parameter in the window of a plugin is a pointer that is down, as far as one gesture being one step goes.)
+        let pointer_is_down = pointer_is_down || self.interface.plugin_editors.a_gesture_is_open();
         let gesture_key = gesture_key_of_the_edits_among(&commands);
         // An edit that makes or changes a keyframe is about the frame it is at as well: what is done at another frame is
         // another edit, not more of this gesture, however soon after it.
@@ -108,6 +110,8 @@ impl FastForwardApplication {
             Command::ShowProjectSettings => self.interface.settings_windows_open.project = true,
             Command::ShowGlobalSettings => self.interface.settings_windows_open.global = true,
             Command::PluginManager(command) => self.do_what_the_plugin_manager_asked(command),
+            Command::OpenPluginEditor { target, instance } => self.open_a_plugin_editor(target, instance),
+            Command::ClosePluginEditor { target, instance } => self.close_a_plugin_editor(target, instance),
             Command::SetProjectSettings(settings) => self.set_project_settings(settings),
             Command::SetProjectFrameRate(frame_rate) => self.set_project_frame_rate(frame_rate, now),
             Command::SetGlobalSettings(settings) => self.set_global_settings(settings),

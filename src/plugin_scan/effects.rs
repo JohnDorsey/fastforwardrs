@@ -234,6 +234,7 @@ pub fn effect_of_a_plugin(library: &Path, plugin: &ScannedPlugin) -> Result<Inst
         audio_outputs: outputs,
         value_handles: value_ports,
         pre_roll_samples: 0,
+        has_a_window: false,
         start_warning: None,
     })
 }
@@ -455,6 +456,7 @@ pub fn effect_of_a_clap_plugin(
         audio_outputs: outputs,
         value_handles,
         pre_roll_samples: pre_roll_of_a_clap_plugin(plugin.tail),
+        has_a_window: plugin.has_gui,
         start_warning: plugin.start.warning(),
     })
 }

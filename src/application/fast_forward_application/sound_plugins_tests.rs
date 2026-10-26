@@ -917,6 +917,7 @@ fn the_window_tells_of_a_clap_plugin_whose_start_depends_on_memory_it_did_not_wr
         latency: 0,
         tail: None,
         has_state: false,
+        has_gui: false,
         start,
         problem: None,
     };

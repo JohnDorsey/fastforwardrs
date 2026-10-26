@@ -834,6 +834,7 @@ fn a_clap_plugin_with_a_value_of_each_kind(parameter_ids: [u32; 4]) -> crate::pr
         latency: 0,
         tail: Some(48_000),
         has_state: false,
+        has_gui: false,
         start: clap_host::start_check::StartCheck::NotChecked,
         problem: None,
     };

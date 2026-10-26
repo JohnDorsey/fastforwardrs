@@ -672,6 +672,7 @@ fn a_clap_plugin(id: &str, parameters: Vec<Parameter>) -> ScannedClapPlugin {
         latency: 0,
         tail: None,
         has_state: false,
+        has_gui: false,
         start: clap_host::start_check::StartCheck::NotChecked,
         problem: None,
     }

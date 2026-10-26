@@ -77,6 +77,11 @@ pub struct PropertiesContent<'a> {
     /// Why an effect does nothing, for an effect that is a sound plugin that is not run (not installed, a folder that is not trusted, a plugin that went wrong...); the panel says
     /// it where the effect is.
     pub why_an_effect_does_nothing: &'a dyn Fn(crate::project::EffectKind) -> Option<String>,
+    /// Whether the window of the plugin effect `instance` of the clip or the track `target` is open (phase 10).
+    pub plugin_window_is_open: &'a dyn Fn(crate::project::AnimationTarget, crate::project::EffectInstanceId) -> bool,
+    /// Why the window of that effect could not be opened or ended, if it did not.
+    pub plugin_window_problem:
+        &'a dyn Fn(crate::project::AnimationTarget, crate::project::EffectInstanceId) -> Option<String>,
 }
 
 /// Shows the panel's contents, and adds a command for each change made in it.

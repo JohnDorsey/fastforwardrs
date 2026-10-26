@@ -107,6 +107,15 @@ impl FastForwardApplication {
                                 .why_a_plugin_effect_does_nothing(kind, &self.environment.plugin_host)
                                 .or_else(|| crate::isf::why_not_usable(kind.descriptor()))
                         },
+                        plugin_window_is_open: &|target, instance| {
+                            self.interface.plugin_editors.is_open(target, instance)
+                        },
+                        plugin_window_problem: &|target, instance| {
+                            self.interface
+                                .plugin_editors
+                                .problem_with(target, instance)
+                                .map(str::to_owned)
+                        },
                     },
                     commands,
                 );
@@ -163,6 +172,8 @@ impl FastForwardApplication {
         self.interface.preview_panel_in_the_last_frame = Some(preview.response.rect);
         // (The preview says what it wants of the project after it has been drawn; the project is here.)
         self.start_the_lead_up_that_the_preview_wants(frame_state.current_frame);
+        // (The windows of plugins: what they did is done, and what the project says is told to them.)
+        self.look_after_the_plugin_editors(Instant::now(), frame_state.current_frame, ui.ctx());
     }
 
     /// Looks for the names of the fonts the computer has once a text object is selected, which it

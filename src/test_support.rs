@@ -483,6 +483,7 @@ pub fn an_installed_sound_plugin(
         audio_outputs: 1,
         value_handles: (0..values.len() as u32).collect(),
         pre_roll_samples: 0,
+        has_a_window: false,
         start_warning: None,
     }
 }

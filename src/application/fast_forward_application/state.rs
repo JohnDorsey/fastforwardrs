@@ -174,6 +174,8 @@ pub(super) struct Interface {
     /// Where the preview panel was in the last frame, for the keys that mean something else when the pointer is over it.
     pub(super) preview_panel_in_the_last_frame: Option<egui::Rect>,
     pub(super) settings_windows_open: SettingsWindowsOpen,
+    /// The windows of plugins that are open (phase 10: see `plugin_editor_flow`).
+    pub(super) plugin_editors: super::plugin_editor_flow::PluginEditors,
     /// Whether the plugin manager is open.
     pub(super) plugin_manager_open: bool,
     /// Which tab of that window is showing.
@@ -213,6 +215,7 @@ impl Interface {
             preview_view: PreviewView::default(),
             preview_panel_in_the_last_frame: None,
             settings_windows_open: SettingsWindowsOpen::default(),
+            plugin_editors: super::plugin_editor_flow::PluginEditors::default(),
             plugin_manager_open: false,
             plugin_manager_tab: crate::application::plugin_manager_window::PluginManagerTab::default(),
             colours_of_a_file_window_open_for: None,
