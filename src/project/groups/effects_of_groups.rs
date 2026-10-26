@@ -38,7 +38,7 @@ use super::{Group, GroupId, Member};
 use crate::project::tracks::{ClipId, ClipKind, Track};
 use crate::project::{
     AnimationTarget, Badge, ChainItem, ChainItemKey, EditError, Effect, EffectInstanceId, EffectKind, Effects,
-    MOST_BYTES_OF_A_PLUGIN_STATE, MOST_EFFECTS_ON_ONE_THING, Project, PropertyId, PropertyValue,
+    MOST_EFFECTS_ON_ONE_THING, Project, PropertyId, PropertyValue,
 };
 
 /// What has a chain of effects: a clip, a track or a group.
@@ -364,21 +364,13 @@ impl Project {
     }
 
     /// Gives the effect that is named `instance` in the chain of `owner` the state that its plugin saved (see [`Effect::state`]), or takes it away (`None`). It is an error, and
-    /// nothing is changed, if there is no such thing as `owner`, or its chain has no such effect, or the state is bigger than [`MOST_BYTES_OF_A_PLUGIN_STATE`].
+    /// nothing is changed, if there is no such thing as `owner`, or its chain has no such effect. (A state may be as big as the plugin makes it.)
     pub fn set_effect_state(
         &mut self,
         owner: EffectOwner,
         instance: EffectInstanceId,
         state: Option<std::sync::Arc<[u8]>>,
     ) -> Result<(), EditError> {
-        if state
-            .as_ref()
-            .is_some_and(|bytes| bytes.len() > MOST_BYTES_OF_A_PLUGIN_STATE)
-        {
-            return Err(EditError::PluginStateTooBig {
-                limit: MOST_BYTES_OF_A_PLUGIN_STATE,
-            });
-        }
         let chain = self
             .chain_of_the_member_mut(owner)
             .ok_or_else(|| nothing_has_the_chain(owner))?;

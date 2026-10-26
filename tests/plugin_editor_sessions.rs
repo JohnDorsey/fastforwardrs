@@ -262,6 +262,26 @@ fn a_plugin_that_says_that_its_state_changed_because_it_was_given_one_is_not_hea
 }
 
 #[test]
+fn a_state_of_tens_of_megabytes_is_given_to_the_window_and_taken() {
+    // (A sampler keeps its samples in its state: there was a limit of 16 MiB until 2026-10-26. The test plugin reads the words of a state and ignores the rest.)
+    let mut windows = windows();
+    windows.open(the_key(), &what_to_open(EDITOR, &[], None)).unwrap();
+    let mut big = String::from("edits=9 ");
+    big.extend(std::iter::repeat_n(' ', 24 * 1024 * 1024));
+    let began = Instant::now();
+
+    windows.give_the_state(the_key(), &base64_of(&big));
+
+    let state = the_state(&mut windows);
+    assert!(state.contains("edits=9 "), "the plugin took it");
+    assert!(
+        began.elapsed() < Duration::from_secs(20),
+        "through the pipe in {:?}",
+        began.elapsed()
+    );
+}
+
+#[test]
 fn a_window_that_ends_after_its_state_was_asked_for_does_not_say_it_again() {
     let mut windows = windows();
     windows.open(the_key(), &what_to_open(EDITOR, &[], None)).unwrap();

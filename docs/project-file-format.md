@@ -57,7 +57,7 @@ a picture, a text object, a clip of a sound file (its effects are those of sound
 done in, which is its `effect` (the key of the type of effect: a namespace, a colon and an id, `builtin:hue_shift`), its `version` (the
 major and the minor number of the type that it was made with), its `instance` (the number that the effect has in this list, which no
 other effect of the list has: there may be several effects of one kind, and this is what tells them apart), its `state` (**only a plugin that has a window has one**: what the plugin saved of
-what is not one of its values, in base 64, which only the plugin can read; at most 16 MiB; left out when it saved none, and in a file of version 18 or earlier) and its `values`, an object
+what is not one of its values, in base 64, which only the plugin can read, of any size (a sampler's is tens of megabytes; there was a limit of 16 MiB until 2026-10-26); left out when it saved none, and in a file of version 18 or earlier) and its `values`, an object
 with a value for each of the values of the effect that is not what it begins with, **by the id of the value** (for the hue shift, `degrees`,
 the turn); they are what the effect is while its values have no keyframes (the keyframes of an effect's values are racks like any other,
 with the id of the value for the `property`, and the `effect` that they are of: the `instance` of that effect in the list of the clip or the

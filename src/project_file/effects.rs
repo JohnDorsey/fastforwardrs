@@ -24,9 +24,8 @@ use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
     ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
-    MOST_BYTES_OF_A_PLUGIN_STATE, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
-    MOST_IMAGES_A_SHADER_BRINGS, ParameterControl, ParameterDescriptor, Project, ShaderImage, ShaderLanguage,
-    ShaderSource, UnknownFields, ValueKind, ValueScale,
+    MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, ParameterControl,
+    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -431,14 +430,9 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
     let state = document
         .state
         .map(|text| {
-            let bytes = crate::base64::decode(&text).map_err(|reason| format!("the state of the {kind} effect: {reason}"))?;
-            if bytes.len() > MOST_BYTES_OF_A_PLUGIN_STATE {
-                return Err(format!(
-                    "the state of the {kind} effect is of {} bytes, and a project keeps at most {MOST_BYTES_OF_A_PLUGIN_STATE}",
-                    bytes.len()
-                ));
-            }
-            Ok(std::sync::Arc::<[u8]>::from(bytes))
+            crate::base64::decode(&text)
+                .map(std::sync::Arc::<[u8]>::from)
+                .map_err(|reason| format!("the state of the {kind} effect: {reason}"))
         })
         .transpose()?;
     Effect::with_values(kind, values)

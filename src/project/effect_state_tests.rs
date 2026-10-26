@@ -120,7 +120,7 @@ fn the_fingerprint_of_a_state_is_the_same_for_the_same_bytes_and_another_for_oth
 }
 
 #[test]
-fn a_state_goes_to_what_has_the_effect_and_nothing_else_and_one_that_is_too_big_is_refused() {
+fn a_state_goes_to_what_has_the_effect_and_nothing_else_and_as_big_a_state_as_a_plugin_makes_is_kept() {
     let _alone = the_installed_plugins_to_myself();
     let (mut project, target, instance, _) = a_video_with_a_plugin_effect();
 
@@ -132,16 +132,14 @@ fn a_state_goes_to_what_has_the_effect_and_nothing_else_and_one_that_is_too_big_
         }),
         "no such effect"
     );
-    let too_big: Arc<[u8]> = vec![0_u8; MOST_BYTES_OF_A_PLUGIN_STATE + 1].into();
-    assert_eq!(
-        project.set_effect_state(target.into(), instance, Some(too_big)),
-        Err(EditError::PluginStateTooBig {
-            limit: MOST_BYTES_OF_A_PLUGIN_STATE
-        })
-    );
     assert_eq!(the_state(&project, target, instance), None, "nothing was changed");
-    let biggest: Arc<[u8]> = vec![0_u8; MOST_BYTES_OF_A_PLUGIN_STATE].into();
+    // (There was a limit of 16 MiB until 2026-10-26, and a sampler's state is bigger: nothing is refused for its size.)
+    let big: Arc<[u8]> = vec![7_u8; 40 * 1024 * 1024].into();
     project
-        .set_effect_state(target.into(), instance, Some(biggest))
+        .set_effect_state(target.into(), instance, Some(Arc::clone(&big)))
         .unwrap();
+    assert_eq!(
+        the_state(&project, target, instance).map(|state| state.len()),
+        Some(big.len())
+    );
 }

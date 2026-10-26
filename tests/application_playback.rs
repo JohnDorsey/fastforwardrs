@@ -100,7 +100,9 @@ impl Recording {
 
     fn assert_the_preview_kept_up(&self) {
         let lags = self.lags();
-        assert!(lags.len() > 100, "enough frames were drawn to judge: {}", lags.len());
+        // (There were more than 100 until 2026-10-26, when this machine drew 86 to 99 in the same 2.5 s, before and after phase 10 alike: it is a debug build of the whole window, drawn by a test harness, and how many it draws
+        // in a time says how fast the machine is. 60 are enough to judge the percentiles below.)
+        assert!(lags.len() > 60, "enough frames were drawn to judge: {}", lags.len());
         let without_a_picture = lags.iter().filter(|lag| lag.is_none()).count();
         assert_eq!(without_a_picture, 0, "frames drawn with no picture at all");
         let mut lags: Vec<i64> = lags.into_iter().flatten().collect();

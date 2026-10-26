@@ -764,6 +764,37 @@ fn an_edit_while_playing_leaves_the_old_sound_playing_until_the_new_is_ready_and
 }
 
 #[test]
+fn the_frame_in_which_a_new_sound_takes_over_fills_the_speakers_again_from_it_and_does_not_leave_them_with_one_chunk() {
+    // (Found 2026-10-26: after a take-over what waited at the speakers was one chunk of the new sound, a twentieth of a second, and a frame of the window that was late made a gap in the sound
+    // while a slider was dragged. The target is the 0.3 s that the sound is kept waiting.)
+    let mut bench = Bench::new();
+    bench.update_playing_at(3.0);
+    let mut clock = bench.play_steadily(3.0, 1.0);
+    bench.starter.decoded_at_the_start.set(0);
+    bench.project = project_with_a_clip_that_is_louder_by(6.0);
+    clock = bench.play_steadily(clock, 0.25);
+    assert_eq!(bench.streams_started(), 2);
+    bench.stream(1).decoded_moments.set(u64::MAX / 4);
+
+    let mut waiting_when_it_took_over = None;
+    for _ in 0..60 {
+        clock = bench.play_steadily(clock, 1.0 / 60.0);
+        if bench.stream(0).was_stopped.get() {
+            let state = bench.speakers.borrow();
+            waiting_when_it_took_over = Some(state.waiting.len() / usize::from(bench.channel_count));
+            break;
+        }
+    }
+
+    let waiting = waiting_when_it_took_over.expect("the new sound took over");
+    let wanted = (SECONDS_OF_SOUND_KEPT_WAITING * f64::from(SAMPLE_RATE)) as usize;
+    assert!(
+        waiting >= wanted,
+        "{waiting} moments wait at the speakers in the frame it took over: the target is {wanted}"
+    );
+}
+
+#[test]
 fn what_the_plugins_of_the_sound_that_plays_and_of_the_one_that_is_being_made_have_said_is_taken_once() {
     let mut bench = Bench::new();
     bench.update_playing_at(3.0);

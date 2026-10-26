@@ -100,9 +100,6 @@ fn fingerprint_of_a_state(state: Option<&Arc<[u8]>>) -> u64 {
     hasher.finish()
 }
 
-/// The most bytes of a plugin's state that a project keeps for one effect: a state that is bigger is not kept (the plugin's values are, as they always were), and the window says so.
-pub const MOST_BYTES_OF_A_PLUGIN_STATE: usize = 16 * 1024 * 1024;
-
 impl Effect {
     /// The effect of this kind as it is when it is put on. (It is named [`EffectInstanceId::FIRST`] until a chain gives it the name it has
     /// there: see [`Effects::put_on`].)

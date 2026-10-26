@@ -51,11 +51,10 @@ pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
     Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
     EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, ImportedPicture, InstalledPlugin, LutOperation, LutSpace,
-    MOST_BYTES_OF_A_PLUGIN_STATE, MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER,
-    MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER,
-    MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor, PictureOperation, PluginAddress, ShaderImage,
-    ShaderLanguage, ShaderSource, UnknownFields, ValueScale, installed_plugin_for, installed_plugins,
-    installed_shaders, set_installed_plugins, set_installed_shaders,
+    MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS,
+    MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
+    PictureOperation, PluginAddress, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
+    installed_plugin_for, installed_plugins, installed_shaders, set_installed_plugins, set_installed_shaders,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
@@ -271,8 +270,6 @@ pub enum EditError {
     NotInTheChain { owner: Member, item: ChainItemKey },
     #[error("a clip, a track or a group can have at most {limit} effects, and this one has them")]
     TooManyEffects { limit: usize },
-    #[error("the state of a plugin is kept only up to {limit} bytes, and this one is bigger")]
-    PluginStateTooBig { limit: usize },
 }
 
 /// How many seconds a picture is shown for when it is put on a track, until it is changed.

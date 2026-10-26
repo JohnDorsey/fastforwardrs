@@ -464,7 +464,13 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
                 self.running = Some(stream);
             }
         }
+        let was_being_replaced = self.replacement.is_some();
         self.take_over_if_the_replacement_has_sound(clock);
+        if was_being_replaced && self.replacement.is_none() {
+            // The new sound has taken over, and what waits at the speakers is now what the join left: a chunk or so, where it was a third of a second. **Filled from the new stream
+            // in this very frame**, and not at the next, where a frame of the window that is late (a slow machine, a debug build) has the speakers run dry. (If it was let go of instead, this does nothing.)
+            let _ = self.feed_the_speakers(clock);
+        }
     }
 
     /// Stops the sound at once, and drops any replacement for it. (If nothing was running there is

@@ -479,9 +479,9 @@ fn a_state_that_nothing_made_the_plugin_say_is_a_step_of_its_own_and_a_state_tha
 }
 
 #[test]
-fn a_state_that_is_too_big_for_a_project_is_not_kept_and_the_effect_goes_on_as_it_was() {
+fn a_state_that_is_bigger_than_the_limit_there_was_is_kept_like_any_other() {
     let _alone = the_installed_plugins_to_myself();
-    let kind = a_clap_plugin("with_too_big_a_state", true);
+    let kind = a_clap_plugin("with_a_big_state", true);
     let (mut window, clip) = window_with_the_plugin_on_the_clip(kind);
     the_window_says(
         &mut window,
@@ -492,21 +492,18 @@ fn a_state_that_is_too_big_for_a_project_is_not_kept_and_the_effect_goes_on_as_i
         ],
     );
 
-    let too_big = vec![0_u8; crate::project::MOST_BYTES_OF_A_PLUGIN_STATE + 1];
+    // (There was a limit of 16 MiB until 2026-10-26.)
+    let big = vec![9_u8; 20 * 1024 * 1024];
     the_window_says(
         &mut window,
         clip,
         &[
             (Duration::from_secs(5), WindowEvent::StateChanged),
-            (Duration::from_secs(5), the_window_says_this_state(&too_big)),
+            (Duration::from_secs(5), the_window_says_this_state(&big)),
         ],
     );
 
-    assert_eq!(
-        the_state_kept(&window, clip),
-        Some(b"small".to_vec()),
-        "what the effect had is kept"
-    );
+    assert_eq!(the_state_kept(&window, clip), Some(big));
 }
 
 #[test]

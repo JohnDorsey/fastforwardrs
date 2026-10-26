@@ -10,9 +10,7 @@ use serde_json::{Value, json};
 
 use super::tests::{project_with_everything, saved, version_line};
 use super::*;
-use crate::project::{
-    AnimationTarget, EffectInstanceId, EffectKind, MOST_BYTES_OF_A_PLUGIN_STATE, set_installed_plugins,
-};
+use crate::project::{AnimationTarget, EffectInstanceId, EffectKind, set_installed_plugins};
 use crate::test_support::{an_installed_sound_plugin, put_an_effect_on, the_installed_plugins_to_myself};
 
 fn as_json(text: &str) -> Value {
@@ -113,9 +111,9 @@ fn the_state_of_an_effect_of_a_plugin_that_is_not_here_is_kept_and_written_back_
 }
 
 #[test]
-fn a_state_that_is_not_base_64_or_is_too_big_is_refused_and_says_which_effect() {
+fn a_state_that_is_not_base_64_is_refused_and_says_which_effect_and_a_big_one_is_read() {
     let _alone = the_installed_plugins_to_myself();
-    let (project, _, _, _) = a_project_with_a_plugin_that_has_a_state(Some(b"x"));
+    let (project, _, instance, _) = a_project_with_a_plugin_that_has_a_state(Some(b"x"));
     let file_with = |state: String| {
         let mut file = as_json(&saved(&project));
         for effect in file["tracks"][2]["clips"][0]["effects"].as_array_mut().unwrap() {
@@ -129,9 +127,10 @@ fn a_state_that_is_not_base_64_or_is_too_big_is_refused_and_says_which_effect() 
     let error = project_from_json_text(&file_with("this is !! not base 64".to_owned())).unwrap_err();
     assert!(error.to_string().contains("the state of the"), "{error}");
 
-    let at_most = file_with(crate::base64::encode(&vec![0_u8; MOST_BYTES_OF_A_PLUGIN_STATE]));
-    assert!(project_from_json_text(&at_most).is_ok(), "the biggest that is kept");
-    let over = file_with(crate::base64::encode(&vec![0_u8; MOST_BYTES_OF_A_PLUGIN_STATE + 1]));
-    let error = project_from_json_text(&over).unwrap_err();
-    assert!(error.to_string().contains("keeps at most"), "{error}");
+    // (A state of a sampler may be tens of megabytes: it was refused over 16 MiB until 2026-10-26.)
+    let big = vec![5_u8; 24 * 1024 * 1024];
+    let loaded = project_from_json_text(&file_with(crate::base64::encode(&big))).unwrap();
+    let there = the_effect_of(&loaded, the_first_video_of(&loaded), instance);
+    assert_eq!(there.state().map(|state| state.len()), Some(big.len()));
+    assert!(saved(&loaded).len() > big.len(), "and it is written back whole");
 }
