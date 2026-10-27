@@ -140,8 +140,11 @@ def check_manifest(manifest: dict, allow_local_addresses: bool = False) -> list[
                 taken, kept = member.get("from", ""), member.get("to", "")
                 if not taken or taken.startswith(("/", "\\")) or ".." in re.split(r"[\\/]", taken):
                     problems.append(f"{there}: the file {taken!r} is not a name inside the archive")
-                if not (_is_a_plain_file_name(kept) and kept.lower().endswith(".clap")):
-                    problems.append(f"{there}: {kept!r} is not a plain name of a .clap file")
+                if not (_is_a_plain_file_name(kept) and kept.lower().endswith((".clap", ".lv2"))):
+                    problems.append(f"{there}: {kept!r} is not a plain name of a .clap file or an .lv2 folder")
+                # (An LV2 bundle is a folder: out of a zip or a tar it is taken by the name of the folder with a `/` at the end, and without it only one file would be taken.)
+                if kept.lower().endswith(".lv2") and not installer and not taken.endswith("/"):
+                    problems.append(f"{there}: {taken!r} is a folder (an .lv2 bundle) and its name inside the archive must end with /")
                 if kept in targets:
                     problems.append(f"{there}: {kept!r} is taken twice")
                 targets.add(kept)
@@ -237,6 +240,35 @@ def _take_a_folder_from_a_zip(archive_path: pathlib.Path, wanted: str, to: pathl
         raise FetchError(f"{archive_path.name}: no folder called {wanted.rstrip('/')!r} inside")
 
 
+def _take_a_folder_from_a_tar(archive_path: pathlib.Path, wanted: str, to: pathlib.Path) -> None:
+    """The folder `wanted` of the tar (an LV2 bundle is one) with everything in it, at `to`: which files can be run is kept, and a link is made as a link. A leading `./` of the names is no part of them."""
+    prefix = wanted.rstrip("/")
+    found = False
+    with tarfile.open(archive_path, "r:*") as archive:
+        for member in archive:
+            name = member.name.removeprefix("./")
+            if name != prefix and not name.startswith(prefix + "/"):
+                continue
+            relative = name[len(prefix) :].lstrip("/")
+            if ".." in re.split(r"[\\/]", relative):
+                raise FetchError(f"{archive_path.name}: an entry whose name goes out of the folder: {member.name!r}")
+            found = True
+            target = to / relative if relative else to
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.issym():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(member.linkname, target)
+            elif member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                extracted = archive.extractfile(member)
+                if extracted is not None:
+                    target.write_bytes(extracted.read())
+                    target.chmod(member.mode & 0o777)
+    if not found:
+        raise FetchError(f"{archive_path.name}: no folder called {prefix!r} inside")
+
+
 def _run_a_program_of_macos(command: list[str], what: str) -> None:
     try:
         done = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -271,7 +303,7 @@ def _take_from_an_expanded_installer(expanded: pathlib.Path, wanted: str, to: pa
 
 
 def _take_the_members(archive_path: pathlib.Path, archive: dict, building: pathlib.Path) -> None:
-    """Puts the files the manifest names for this build in `building`: from a zip or a tar (a name that ends with `/` is a folder, of a zip), or from the installer in a disk image."""
+    """Puts the files the manifest names for this build in `building`: from a zip or a tar (a name that ends with `/` is a folder), or from the installer in a disk image."""
     members = archive["members"]
     if archive.get("installer"):
         with tempfile.TemporaryDirectory() as work, _expanded_installer(archive_path, archive["installer"], pathlib.Path(work)) as expanded:
@@ -279,8 +311,10 @@ def _take_the_members(archive_path: pathlib.Path, archive: dict, building: pathl
                 _take_from_an_expanded_installer(expanded, member["from"], building / member["to"])
         return
     for member in members:
-        if member["from"].endswith("/"):
+        if member["from"].endswith("/") and zipfile.is_zipfile(archive_path):
             _take_a_folder_from_a_zip(archive_path, member["from"], building / member["to"])
+        elif member["from"].endswith("/"):
+            _take_a_folder_from_a_tar(archive_path, member["from"], building / member["to"])
         else:
             (building / member["to"]).write_bytes(_member_bytes(archive_path, member["from"]))
 

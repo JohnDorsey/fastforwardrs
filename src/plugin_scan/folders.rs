@@ -121,13 +121,37 @@ pub fn is_an_lv2_bundle(path: &Path) -> bool {
     path.is_dir() && path.join("manifest.ttl").is_file()
 }
 
-/// The LV2 bundles in `folder`: the folders in it that have a `manifest.ttl`, in the order of their names. (A folder that is not there has none.)
+/// How many folders down from a folder that is looked in the LV2 bundles are looked for (as for CLAP: the plugins that the *Bundles* tab fetches are in a folder of their set).
+const MOST_FOLDERS_DOWN_FOR_LV2: usize = 6;
+
+/// The LV2 bundles in `folder` **and in the folders in it**, down to six folders: the folders that have a `manifest.ttl`, in the order of their paths without regard to case. A bundle
+/// is not looked into (what is in it is its own), nor is a `.clap` bundle of macOS, nor a folder that is a link to another, nor one that the *Bundles* tab is making. A folder that is
+/// not there has none; a folder inside that cannot be read is left out, and the folder that was asked for being unreadable is an error.
 pub fn lv2_bundles_in(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut bundles = Vec::new();
     match fs::read_dir(folder) {
-        Ok(_) => Ok(lv2_host::bundles_in(folder)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(error),
+        Ok(_) => collect_lv2_bundles(folder, MOST_FOLDERS_DOWN_FOR_LV2, &mut bundles)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
     }
+    sort_by_path_without_regard_to_case(&mut bundles);
+    Ok(bundles)
+}
+
+fn collect_lv2_bundles(folder: &Path, folders_down: usize, bundles: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(folder)? {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else { continue };
+        // (A link to a bundle is one, as it is in the folders of a system that links its bundles; a link to another folder is not looked into.)
+        if is_an_lv2_bundle(&path) {
+            bundles.push(path);
+        } else if kind.is_dir() && folders_down > 0 && !is_being_made(&path) && !is_a_clap_file(&path) {
+            // (A folder that cannot be read is left out: the rest of the folder is still looked in.)
+            let _ = collect_lv2_bundles(&path, folders_down - 1, bundles);
+        }
+    }
+    Ok(())
 }
 
 /// Whether `path` is named like a CLAP library: it ends in `.clap` (whatever case). On Windows and Linux a CLAP library is a file with that ending; on macOS it is a bundle, a

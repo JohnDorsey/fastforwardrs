@@ -289,6 +289,393 @@
           ]
         }
       }
+    },
+    {
+      "id": "dragonfly-reverb-lv2",
+      "name": "Dragonfly Reverb (LV2)",
+      "version": "3.2.10",
+      "authors": [
+        "Michael Willis",
+        "Rob van den Berg"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "homepage": "https://github.com/michaelwillis/dragonfly-reverb",
+      "plugins": [
+        "Dragonfly Early Reflections",
+        "Dragonfly Hall Reverb",
+        "Dragonfly Plate Reverb",
+        "Dragonfly Room Reverb"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/michaelwillis/dragonfly-reverb/3.2.10/LICENSE",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-src.tar.xz",
+        "sha256": "18af55a9592c9f50c4d5f86c9d5159132735d9ba53d49e9cfe7169b3109f7743"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-win64.zip",
+          "sha256": "ca5f35f9dcd9a33f06490d3c92f04061a1a798cb81257d5ca5851bdda0824c66",
+          "size": 22447365,
+          "members": [
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyEarlyReflections.lv2/",
+              "to": "DragonflyEarlyReflections.lv2"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyHallReverb.lv2/",
+              "to": "DragonflyHallReverb.lv2"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyPlateReverb.lv2/",
+              "to": "DragonflyPlateReverb.lv2"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyRoomReverb.lv2/",
+              "to": "DragonflyRoomReverb.lv2"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-linux-x86_64.tar.xz",
+          "sha256": "59f1593120de82e31dd194e2ab1536af14fec2b3ec6ec45abf6d9c8ac02ef430",
+          "size": 2267368,
+          "members": [
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyEarlyReflections.lv2/",
+              "to": "DragonflyEarlyReflections.lv2"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyHallReverb.lv2/",
+              "to": "DragonflyHallReverb.lv2"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyPlateReverb.lv2/",
+              "to": "DragonflyPlateReverb.lv2"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyRoomReverb.lv2/",
+              "to": "DragonflyRoomReverb.lv2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mverb-lv2",
+      "name": "MVerb (LV2)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Martin Eastwood",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "MVerb"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/MVerb/LICENSE",
+          "sha256": "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MVerb.lv2/",
+              "to": "MVerb.lv2"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MVerb.lv2/",
+              "to": "MVerb.lv2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dpf-mini-series-lv2",
+      "name": "DPF Mini-Series (LV2)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Michael Gruhn (3BandEQ)",
+        "Filipe Coelho and the DISTRHO team"
+      ],
+      "licence": "LGPL-3.0-only",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "3BandEQ",
+        "PingPongPan"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-LGPL-3.0.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/3BandEQ/LICENSE",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/3BandEQ.lv2/",
+              "to": "3BandEQ.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/PingPongPan.lv2/",
+              "to": "PingPongPan.lv2"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/3BandEQ.lv2/",
+              "to": "3BandEQ.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/PingPongPan.lv2/",
+              "to": "PingPongPan.lv2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dpf-max-gen-lv2",
+      "name": "DPF Max-Gen plugins (LV2)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Cycling '74 (the Gen~ export)",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "LGPL-3.0-only AND ISC",
+      "licence_note": "the licence table of DPF-Plugins says LGPL-3.0 for the Max-Gen plugins; the files of the wrapper that make the plugin (its own LICENSE) are ISC",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "MaBitcrush",
+        "MaFreeverb",
+        "MaGigaverb",
+        "MaPitchshift"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-LGPL-3.0.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/3BandEQ/LICENSE",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "LICENSE-ISC-wrapper.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/gigaverb/LICENSE",
+          "sha256": "eea569f3336a0555d089df54a263edfc04ab52ff103ca9f8b25508d9f8491699"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MaBitcrush.lv2/",
+              "to": "MaBitcrush.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaFreeverb.lv2/",
+              "to": "MaFreeverb.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaGigaverb.lv2/",
+              "to": "MaGigaverb.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaPitchshift.lv2/",
+              "to": "MaPitchshift.lv2"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MaBitcrush.lv2/",
+              "to": "MaBitcrush.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaFreeverb.lv2/",
+              "to": "MaFreeverb.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaGigaverb.lv2/",
+              "to": "MaGigaverb.lv2"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaPitchshift.lv2/",
+              "to": "MaPitchshift.lv2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cycleshifter-lv2",
+      "name": "CycleShifter (LV2)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Niall Moody",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "MIT",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "CycleShifter"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-MIT.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/AmplitudeImposer/LICENSE",
+          "sha256": "02693f5aee5cb6f82390d20f760a153ea87f02c4bc08c9e82e9a0f411c2829b3"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/CycleShifter.lv2/",
+              "to": "CycleShifter.lv2"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/CycleShifter.lv2/",
+              "to": "CycleShifter.lv2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "wolf-shaper-lv2",
+      "name": "Wolf Shaper (LV2)",
+      "version": "1.0.2",
+      "authors": [
+        "Patrick Desaulniers"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "licence_note": "the source files say GPL v3 or later in their SPDX line; the LICENSE file is the GPL version 3",
+      "homepage": "https://github.com/wolf-plugins/wolf-shaper",
+      "plugins": [
+        "Wolf Shaper"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/wolf-plugins/wolf-shaper/v1.0.2/LICENSE",
+          "sha256": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/wolf-plugins/wolf-shaper/releases/download/v1.0.2/wolf-shaper-v1.0.2-source.tar.gz",
+        "sha256": "b18e579410771bb0cb42b50cc609c51c2e1655c48ec4acbee386a090fb418c5c"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/wolf-plugins/wolf-shaper/releases/download/v1.0.2/wolf-shaper-v1.0.2%2B20230515144200-windows-x64.zip",
+          "sha256": "42a703a5f71b19855d9213d57f2261d2182c73c73d39730775188df3e4c47da9",
+          "size": 5481008,
+          "members": [
+            {
+              "from": "bin/wolf-shaper.lv2/",
+              "to": "wolf-shaper.lv2"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/wolf-plugins/wolf-shaper/releases/download/v1.0.2/wolf-shaper-v1.0.2-linux-x64.zip",
+          "sha256": "8b844e9b535d2b8a8a07fc6cec207beae8161f7d6da36e4a856a766aa441b848",
+          "size": 5089663,
+          "members": [
+            {
+              "from": "wolf-shaper.lv2/",
+              "to": "wolf-shaper.lv2"
+            }
+          ]
+        }
+      }
     }
   ]
 }

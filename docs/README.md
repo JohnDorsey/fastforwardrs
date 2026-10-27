@@ -19,6 +19,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`developer-readme.md`](developer-readme.md) | where it was tested, how to run it from source, the layers of the code, how it is tested (mutation testing included), the known limits |
 | [`distribution-notices.md`](distribution-notices.md) | what must go with a copy of the program: licence texts, ffmpeg's source offer, the bundled plugins |
 | [`bundleable-clap-plugins.md`](bundleable-clap-plugins.md) | which CLAP plugins can be bundled and what was measured of them |
+| [`bundleable-lv2-plugins.md`](bundleable-lv2-plugins.md) | which LV2 plugins the Bundles tab fetches, the ones left out, and what was tried with real plugins |
 | [`bundleable-isf-shaders.md`](bundleable-isf-shaders.md) | which ISF shaders can be fetched by the Bundles tab and why the others are left out |
 
 ## Design, plans and reports
@@ -31,7 +32,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`engine-phase-7-design.md`](engine-phase-7-design.md), [`engine-phase-7-report.md`](engine-phase-7-report.md) | the sound engine and LADSPA plugins |
 | [`engine-phase-7-clap-design.md`](engine-phase-7-clap-design.md), [`engine-phase-7-clap-report.md`](engine-phase-7-clap-report.md) | CLAP plugins |
 | [`engine-phase-9-design.md`](engine-phase-9-design.md), [`engine-phase-9-report.md`](engine-phase-9-report.md) | phase 9, text objects are made of an effect (the design, with what was built in its sections 6 to 8; and the report): the last phase of the plan |
-| [`engine-phase-11-lv2-design.md`](engine-phase-11-lv2-design.md), [`engine-phase-11-report.md`](engine-phase-11-report.md) | phase 11, LV2 plugins (a host of our own in Rust, no `lilv`; the scan of bundles, the sound, the state, windows): the design, with what was built in its sections 7, 8 and 10; and the report |
+| [`engine-phase-11-lv2-design.md`](engine-phase-11-lv2-design.md), [`engine-phase-11-report.md`](engine-phase-11-report.md) | phase 11, LV2 plugins (a host of our own in Rust, no `lilv`; the scan of bundles, the sound, the state, windows): the design, with what was built in its sections 7, 8 and 10; and the report; [`engine-phase-11-presets-design.md`](engine-phase-11-presets-design.md): presets of LV2 plugins (what the real bundles have, the plan) |
 | [`engine-phase-10-editors-design.md`](engine-phase-10-editors-design.md), [`engine-phase-10-report.md`](engine-phase-10-report.md) | phase 10, the windows of plugins (CLAP; a program of its own for each window, the state of a plugin kept in the project, file format 19): the design, with what was built in its section 6; and the report |
 | [`groups-feature-spec.md`](groups-feature-spec.md) | tags, clip groups and track groups |
 | [`licence-plugin-clarification-draft.md`](licence-plugin-clarification-draft.md) | the options for the plugin clarification (`LICENSE-PLUGIN-CLARIFICATION` is the adopted one) |

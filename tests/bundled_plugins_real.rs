@@ -9,7 +9,8 @@
 //! FFRS_BUNDLED_PLUGINS=target/bundled/plugins cargo test --release --test bundled_plugins_real -- --ignored
 //! ```
 //!
-//! What it checks is what a person is promised: every plugin of the manifest is found by the scan program, loads, can be an effect, and none of them is unreliable at its start.
+//! What it checks is what a person is promised: every plugin of the manifest (a CLAP file, or an LV2 bundle) is found by the scan program, loads, can be an effect, and no CLAP plugin is
+//! unreliable at its start.
 
 use std::path::PathBuf;
 
@@ -66,7 +67,19 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
                     );
                 }
             }
-            other => panic!("{file} was not scanned as a CLAP library: {other:?}"),
+            LibraryOutcome::ScannedLv2(lv2) => {
+                assert!(file.ends_with(".lv2"), "{file} was scanned as an LV2 bundle");
+                assert_eq!(
+                    lv2.problems,
+                    Vec::<String>::new(),
+                    "{file}: what could not be understood of the bundle"
+                );
+                assert!(!lv2.plugins.is_empty(), "{file} has no plugins");
+                for plugin in &lv2.plugins {
+                    assert!(plugin.problem.is_none(), "{file}: {:?}", plugin.problem);
+                }
+            }
+            other => panic!("{file} was not scanned as a plugin library or bundle: {other:?}"),
         }
     }
     let found = plugins_found_in(&scan.libraries);
@@ -89,4 +102,146 @@ fn manifest_file() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("bundled-plugins")
         .join("manifest.json")
+}
+
+/// What an LV2 plugin made of a steady test sound: whether every sample is finite, how loud it was, and how much it changed the sound.
+struct WhatItMade {
+    all_finite: bool,
+    peak: f32,
+    rms_out: f64,
+    rms_of_the_change: f64,
+    latency: u32,
+    outputs_of_control: Vec<(u32, f32)>,
+}
+
+/// Runs `plugin` for `blocks` blocks of 512 frames at 48 kHz with the sound of two tones and a little noise in each channel, with every control at its default, and says what came out of the last half.
+fn run_an_lv2_plugin(plugin: &lv2_host::PluginDescription, blocks: usize) -> Result<WhatItMade, String> {
+    const FRAMES: usize = 512;
+    let library = lv2_host::Library::open(&plugin.binary).map_err(|error| error.to_string())?;
+    let mut instance =
+        lv2_host::Instance::new(&library, plugin, 48_000.0, FRAMES as u32).map_err(|error| error.to_string())?;
+    let (inputs, outputs) = instance.audio_port_counts();
+    let mut seed = 0x9E37_79B9_u32;
+    let mut noise = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed as f32 / u32::MAX as f32 - 0.5) * 0.05
+    };
+    let mut made = WhatItMade {
+        all_finite: true,
+        peak: 0.0,
+        rms_out: 0.0,
+        rms_of_the_change: 0.0,
+        latency: 0,
+        outputs_of_control: Vec::new(),
+    };
+    let (mut summed_out, mut summed_change, mut counted) = (0.0_f64, 0.0_f64, 0_u64);
+    for block in 0..blocks {
+        let mut ins: Vec<Vec<f32>> = (0..inputs)
+            .map(|channel| {
+                (0..FRAMES)
+                    .map(|frame| {
+                        let at = (block * FRAMES + frame) as f32 / 48_000.0;
+                        let tone = if channel == 0 { 220.0 } else { 330.0 };
+                        0.25 * (std::f32::consts::TAU * tone * at).sin() + noise()
+                    })
+                    .collect()
+            })
+            .collect();
+        let heard = ins.clone();
+        let mut outs: Vec<Vec<f32>> = (0..outputs).map(|_| vec![0.0; FRAMES]).collect();
+        {
+            let mut in_slices: Vec<&mut [f32]> = ins.iter_mut().map(Vec::as_mut_slice).collect();
+            let mut out_slices: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
+            instance
+                .run(&mut in_slices, &mut out_slices, FRAMES)
+                .map_err(|error| error.to_string())?;
+        }
+        for (channel, out) in outs.iter().enumerate() {
+            for (frame, sample) in out.iter().enumerate() {
+                made.all_finite &= sample.is_finite();
+                made.peak = made.peak.max(sample.abs());
+                if block >= blocks / 2 {
+                    let same_place = heard.get(channel).map_or(0.0, |input| input[frame]);
+                    summed_out += f64::from(*sample).powi(2);
+                    summed_change += f64::from(sample - same_place).powi(2);
+                    counted += 1;
+                }
+            }
+        }
+    }
+    made.rms_out = (summed_out / counted.max(1) as f64).sqrt();
+    made.rms_of_the_change = (summed_change / counted.max(1) as f64).sqrt();
+    made.latency = instance.latency();
+    made.outputs_of_control = instance.control_outputs();
+    Ok(made)
+}
+
+#[test]
+#[ignore = "needs the folder of bundled plugins that tools/bundled_plugins/fetch_bundled_plugins.py makes (FFRS_BUNDLED_PLUGINS)"]
+fn every_real_lv2_plugin_makes_finite_sound_that_is_not_silent_and_is_changed_by_it() {
+    let folder = bundled_plugins_folder().expect("FFRS_BUNDLED_PLUGINS names the folder that the script made");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(manifest_file()).expect("the manifest is read"))
+            .expect("the manifest is JSON");
+    let platform = fastforwardrs::plugin_bundles::this_platform().expect("builds for this system");
+    // (How many bundles the manifest says this system gets: a system with none, macOS until its builds are known, has nothing to try.)
+    let expected: usize = manifest["sets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|set| set["platforms"][platform]["members"].as_array())
+        .flatten()
+        .filter(|member| member["to"].as_str().is_some_and(|to| to.ends_with(".lv2")))
+        .count();
+    if expected == 0 {
+        eprintln!("SKIPPED: the manifest has no LV2 bundles for {platform}");
+        return;
+    }
+    let bundles = fastforwardrs::plugin_scan::lv2_bundles_in(&folder).unwrap();
+    assert_eq!(bundles.len(), expected, "the LV2 bundles of {folder:?}: {bundles:?}");
+    let mut table = Vec::new();
+    let mut tried = 0;
+    for bundle in &bundles {
+        let description = lv2_host::describe_bundle(bundle).expect("the bundle is described");
+        for plugin in &description.plugins {
+            let count = |direction: lv2_host::PortDirection| {
+                plugin
+                    .ports
+                    .iter()
+                    .filter(|port| port.kind == lv2_host::PortKind::Audio && port.direction == direction)
+                    .count()
+            };
+            let (inputs, outputs) = (
+                count(lv2_host::PortDirection::Input),
+                count(lv2_host::PortDirection::Output),
+            );
+            if !matches!((inputs, outputs), (1, 1) | (2, 2) | (1, 2) | (2, 1)) {
+                println!(
+                    "{}: not an effect of the shapes the program uses ({inputs} in, {outputs} out)",
+                    plugin.name
+                );
+                continue;
+            }
+            tried += 1;
+            let made = run_an_lv2_plugin(plugin, 200).unwrap_or_else(|error| panic!("{}: {error}", plugin.name));
+            println!(
+                "{:<28} latency {:>5}  peak {:>7.4}  rms {:>8.5}  change {:>8.5}  control outputs {:?}",
+                plugin.name, made.latency, made.peak, made.rms_out, made.rms_of_the_change, made.outputs_of_control
+            );
+            table.push((plugin.name.clone(), made));
+        }
+    }
+    assert!(tried >= 10, "only {tried} plugins were tried");
+    for (name, made) in &table {
+        assert!(made.all_finite, "{name} made a sample that is not a number");
+        assert!(made.peak < 8.0, "{name} made a peak of {}", made.peak);
+        assert!(made.rms_out > 1e-5, "{name} made silence from a steady sound");
+        assert!(
+            made.outputs_of_control.iter().all(|(_, value)| value.is_finite()),
+            "{name}: {:?}",
+            made.outputs_of_control
+        );
+    }
 }

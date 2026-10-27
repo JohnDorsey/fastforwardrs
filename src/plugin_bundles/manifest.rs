@@ -98,7 +98,7 @@ pub struct Build {
 pub struct Member {
     /// Its name inside the archive.
     pub from: String,
-    /// The name it is given in the set's folder: a plain name of a `.clap` file.
+    /// The name it is given in the set's folder: a plain name of a `.clap` file, or of an `.lv2` bundle (a folder).
     pub to: String,
 }
 
@@ -189,8 +189,19 @@ impl Manifest {
                     if member.from.is_empty() || member.from.starts_with(['/', '\\']) || climbs {
                         problems.push(format!("{there}: {:?} is not a name inside the archive", member.from));
                     }
-                    if !(is_a_plain_file_name(&member.to) && member.to.to_ascii_lowercase().ends_with(".clap")) {
-                        problems.push(format!("{there}: {:?} is not a plain name of a .clap file", member.to));
+                    let lower = member.to.to_ascii_lowercase();
+                    if !(is_a_plain_file_name(&member.to) && (lower.ends_with(".clap") || lower.ends_with(".lv2"))) {
+                        problems.push(format!(
+                            "{there}: {:?} is not a plain name of a .clap file or an .lv2 folder",
+                            member.to
+                        ));
+                    }
+                    // (An LV2 bundle is a folder: out of a zip or a tar it is taken by the name of the folder with a `/` at the end, and without it only one file would be taken.)
+                    if lower.ends_with(".lv2") && build.installer.is_none() && !member.from.ends_with('/') {
+                        problems.push(format!(
+                            "{there}: {:?} is a folder (an .lv2 bundle) and its name inside the archive must end with /",
+                            member.from
+                        ));
                     }
                     if kept.contains(&member.to.as_str()) {
                         problems.push(format!("{there}: {:?} is taken twice", member.to));

@@ -33,14 +33,35 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             "Dragonfly Room Reverb",
             "MVerb",
             "MaGigaverb",
-            "Surge XT Effects"
+            "Surge XT Effects",
+            "Dragonfly Early Reflections",
+            "Dragonfly Hall Reverb",
+            "Dragonfly Plate Reverb",
+            "Dragonfly Room Reverb",
+            "MVerb",
+            "3BandEQ",
+            "PingPongPan",
+            "MaBitcrush",
+            "MaFreeverb",
+            "MaGigaverb",
+            "MaPitchshift",
+            "CycleShifter",
+            "Wolf Shaper"
         ]
     );
-    if let Some(platform) = this_platform() {
-        assert!(
-            manifest.sets.iter().all(|set| set.platforms.contains_key(platform)),
-            "{platform}"
-        );
+    // (The CLAP sets have a build for each system. The LV2 sets have builds for Windows and Linux: the builds for macOS are in the installers of disk images, whose layout has to be seen on a Mac.)
+    for set in &manifest.sets {
+        let is_lv2 = set.id.ends_with("-lv2");
+        for platform in ["windows-x86_64", "linux-x86_64"] {
+            assert!(set.platforms.contains_key(platform), "{} for {platform}", set.id);
+        }
+        assert_eq!(set.platforms.contains_key("macos-universal"), !is_lv2, "{}", set.id);
+        for build in set.platforms.values() {
+            assert_eq!(build.members.len(), set.plugins.len(), "{}", set.id);
+            for member in &build.members {
+                assert_eq!(member.to.ends_with(".lv2"), is_lv2, "{}: {}", set.id, member.to);
+            }
+        }
     }
 }
 
@@ -761,11 +782,22 @@ fn fetch_the_real_plugins_from_the_network_and_find_every_file_the_manifest_name
     )
     .expect("the plugins are fetched");
 
-    assert_eq!(outcome.sets.len(), manifest.sets.len());
-    for set in &manifest.sets {
+    // (A set that has no build for this system is not fetched: the LV2 sets have none for macOS yet.)
+    let sets_with_a_build: Vec<&BundleSet> = manifest
+        .sets
+        .iter()
+        .filter(|set| set.platforms.contains_key(platform))
+        .collect();
+    assert_eq!(outcome.sets.len(), sets_with_a_build.len());
+    for set in sets_with_a_build {
         for member in &set.platforms[platform].members {
             let file = folder.join(&set.id).join(&member.to);
-            assert!(size_of_a_file_or_a_folder(&file) > 100_000, "{file:?}");
+            if member.to.ends_with(".lv2") {
+                assert!(file.join("manifest.ttl").is_file(), "{file:?} is a bundle");
+                assert!(size_of_a_file_or_a_folder(&file) > 10_000, "{file:?}");
+            } else {
+                assert!(size_of_a_file_or_a_folder(&file) > 100_000, "{file:?}");
+            }
         }
         assert!(folder.join(&set.id).join("NOTICE.txt").is_file());
         for text in &set.licence_texts {
@@ -810,4 +842,217 @@ fn a_set_with_only_some_of_its_plugins_in_its_folder_is_not_fetched() {
 
     std::fs::write(folder.path().join("two").join("Second.clap"), b"x").unwrap();
     assert!(is_fetched(two, "windows-x86_64", folder.path()));
+}
+
+// --- LV2 bundles: a member that is a folder ---
+
+/// A fixture of one set whose plugin is an LV2 bundle in a zip (with files beside it that are not taken).
+fn a_fixture_with_an_lv2_bundle() -> Fixture {
+    let mut fixture = a_fixture();
+    let zip = a_zip(&[
+        ("pack/Thing.lv2/manifest.ttl", b"the manifest"),
+        ("pack/Thing.lv2/Thing_dsp.dll", b"the code"),
+        ("pack/Thing.lv2/resources/data.bin", b"inside a folder of the bundle"),
+        (
+            "pack/Thing.lv2x/other.txt",
+            b"a folder with a name that begins the same way",
+        ),
+        ("pack/Thing.clap", b"not taken"),
+    ]);
+    fixture
+        .files
+        .insert("https://example.org/thing.zip".to_owned(), zip.clone());
+    let mut set = fixture.manifest.sets.remove(0);
+    set.id = "thing".to_owned();
+    set.name = "THING".to_owned();
+    set.plugins = vec!["Thing".to_owned()];
+    let build = set.platforms.get_mut("windows-x86_64").unwrap();
+    build.url = "https://example.org/thing.zip".to_owned();
+    build.sha256 = super::test_support::sha(&zip);
+    build.size = zip.len() as u64;
+    build.members = vec![Member {
+        from: "pack/Thing.lv2/".to_owned(),
+        to: "Thing.lv2".to_owned(),
+    }];
+    fixture.manifest.sets = vec![set];
+    fixture
+}
+
+#[test]
+fn an_lv2_bundle_is_taken_as_a_folder_with_everything_in_it_and_nothing_that_only_begins_with_its_name() {
+    let fixture = a_fixture_with_an_lv2_bundle();
+    let fetcher = FakeFetcher::new(fixture.files.clone());
+    let folder = tempfile::tempdir().unwrap();
+
+    let outcome = fetch(&fixture, &fetcher, folder.path()).unwrap();
+
+    let set = folder.path().join("thing");
+    assert_eq!(outcome.plugin_files, [set.join("Thing.lv2")]);
+    assert_eq!(names_in(&set), ["LICENSE.txt", "NOTICE.txt", "Thing.lv2"]);
+    assert_eq!(
+        names_in(&set.join("Thing.lv2")),
+        ["Thing_dsp.dll", "manifest.ttl", "resources"]
+    );
+    assert_eq!(
+        std::fs::read(set.join("Thing.lv2").join("Thing_dsp.dll")).unwrap(),
+        b"the code"
+    );
+    assert_eq!(
+        std::fs::read(set.join("Thing.lv2").join("resources").join("data.bin")).unwrap(),
+        b"inside a folder of the bundle"
+    );
+    assert!(is_fetched(&fixture.manifest.sets[0], "windows-x86_64", folder.path()));
+}
+
+/// A tar archive made by the system's `tar` of `source` (the names with `prefix` in front of them), or `None` where there is no `tar`.
+fn a_tar_of(work: &Path, source: &Path, prefix: &str, file: &str) -> Option<Vec<u8>> {
+    if std::process::Command::new("tar").arg("--version").output().is_err() {
+        eprintln!("SKIPPED: there is no tar");
+        return None;
+    }
+    let archive = work.join(file);
+    let made = std::process::Command::new("tar")
+        .arg("-czf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(source)
+        .arg(format!("{prefix}pack"))
+        .status()
+        .unwrap();
+    assert!(made.success());
+    Some(std::fs::read(&archive).unwrap())
+}
+
+/// A manifest of one set with a build for `linux-x86_64` that is `release_file` at `https://example.org/<file>`, from which the folder `from` is taken as `to`.
+fn a_manifest_that_takes_a_folder_of(release_file: &[u8], file: &str, from: &str, to: &str) -> Manifest {
+    let mut set = a_fixture().manifest.sets.remove(0);
+    set.platforms = std::collections::BTreeMap::from([(
+        "linux-x86_64".to_owned(),
+        Build {
+            url: format!("https://example.org/{file}"),
+            sha256: super::test_support::sha(release_file),
+            size: release_file.len() as u64,
+            members: vec![Member {
+                from: from.to_owned(),
+                to: to.to_owned(),
+            }],
+            installer: None,
+        },
+    )]);
+    Manifest {
+        format: 1,
+        sets: vec![set],
+    }
+}
+
+#[test]
+fn a_tar_archive_gives_a_folder_with_everything_in_it_with_or_without_dot_slash() {
+    let work = tempfile::tempdir().unwrap();
+    let source = work.path().join("src");
+    let thing = source.join("pack").join("Thing.lv2");
+    std::fs::create_dir_all(thing.join("resources")).unwrap();
+    std::fs::create_dir_all(source.join("pack").join("Thing.lv2x")).unwrap();
+    std::fs::write(thing.join("manifest.ttl"), b"the manifest").unwrap();
+    std::fs::write(thing.join("Thing_dsp.so"), b"the code").unwrap();
+    std::fs::write(thing.join("resources").join("data.bin"), b"inside").unwrap();
+    std::fs::write(source.join("pack").join("Thing.lv2x").join("other.txt"), b"not taken").unwrap();
+    for (prefix, file) in [("./", "dot.tar.gz"), ("", "plain.tar.gz")] {
+        let Some(release_file) = a_tar_of(work.path(), &source, prefix, file) else {
+            return;
+        };
+        let mut files = a_fixture().files;
+        files.insert(format!("https://example.org/{file}"), release_file.clone());
+        let folder = tempfile::tempdir().unwrap();
+
+        let outcome = fetch_plugins(
+            &a_manifest_that_takes_a_folder_of(&release_file, file, "pack/Thing.lv2/", "Thing.lv2"),
+            "linux-x86_64",
+            folder.path(),
+            &FakeFetcher::new(files),
+            &mut |_| {},
+            &|| false,
+        )
+        .unwrap();
+
+        let bundle = folder.path().join("one").join("Thing.lv2");
+        assert_eq!(outcome.plugin_files, std::slice::from_ref(&bundle), "{file}");
+        assert_eq!(
+            names_in(&bundle),
+            ["Thing_dsp.so", "manifest.ttl", "resources"],
+            "{file}"
+        );
+        assert_eq!(
+            std::fs::read(bundle.join("Thing_dsp.so")).unwrap(),
+            b"the code",
+            "{file}"
+        );
+        assert_eq!(
+            std::fs::read(bundle.join("resources").join("data.bin")).unwrap(),
+            b"inside",
+            "{file}"
+        );
+        assert_eq!(
+            names_in(folder.path()),
+            ["one"],
+            "{file}: no folder that the unpacking used is left"
+        );
+    }
+}
+
+#[test]
+fn a_folder_that_is_not_in_a_tar_is_said_and_nothing_of_the_set_is_left() {
+    let work = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(work.path().join("src").join("pack")).unwrap();
+    std::fs::write(work.path().join("src").join("pack").join("A.txt"), b"a").unwrap();
+    let Some(release_file) = a_tar_of(work.path(), &work.path().join("src"), "", "things.tar.gz") else {
+        return;
+    };
+    let mut files = a_fixture().files;
+    files.insert("https://example.org/things.tar.gz".to_owned(), release_file.clone());
+    let folder = tempfile::tempdir().unwrap();
+
+    let error = fetch_plugins(
+        &a_manifest_that_takes_a_folder_of(&release_file, "things.tar.gz", "pack/Missing.lv2/", "Missing.lv2"),
+        "linux-x86_64",
+        folder.path(),
+        &FakeFetcher::new(files),
+        &mut |_| {},
+        &|| false,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("no folder called \"pack/Missing.lv2\""), "{error}");
+    assert_eq!(names_in(folder.path()), Vec::<String>::new());
+}
+
+#[test]
+fn an_lv2_member_is_a_name_of_a_folder_and_what_is_not_is_said() {
+    let with_the_member = |platform: &'static str, from: &'static str, to: &'static str| {
+        a_manifest_that_is_wrong_in(move |m| {
+            m.sets[0].platforms.get_mut(platform).unwrap().members[0] = Member {
+                from: from.to_owned(),
+                to: to.to_owned(),
+            };
+        })
+    };
+    let problems = with_the_member("windows-x86_64", "pack/Thing.lv2", "Thing.lv2");
+    assert!(
+        problems.contains("is a folder (an .lv2 bundle) and its name inside the archive must end with /"),
+        "{problems}"
+    );
+    assert_eq!(
+        with_the_member("windows-x86_64", "pack/Thing.lv2/", "Thing.LV2"),
+        "",
+        "a folder with its name ending in / and any case of .lv2 is fit"
+    );
+    let problems = with_the_member("windows-x86_64", "pack/Thing.lv2/", "Thing.vst3");
+    assert!(
+        problems.contains("is not a plain name of a .clap file or an .lv2 folder"),
+        "{problems}"
+    );
+    assert_eq!(
+        with_the_member("macos-universal", "dpf-x-lv2bundles.pkg/Payload/Thing.lv2", "Thing.lv2"),
+        "",
+        "out of the installer of a disk image the member is a path in what the installer holds, with no / at the end"
+    );
 }

@@ -431,6 +431,60 @@ fn look_at_the_window_of_the_test_interface() {
     program.tell(&ToProgram::Close);
 }
 
+/// The LV2 plugins with a window that a folder of bundled plugins has (`FFRS_BUNDLED_PLUGINS`, as `tools/bundled_plugins/fetch_bundled_plugins.py` makes it): the bundle, the URI, the name.
+fn real_plugins_with_a_window() -> Vec<(PathBuf, String, String)> {
+    let folder = fastforwardrs::plugin_scan::bundled_plugins_folder()
+        .expect("FFRS_BUNDLED_PLUGINS names the folder that the script made");
+    let mut found = Vec::new();
+    for bundle in fastforwardrs::plugin_scan::lv2_bundles_in(&folder).unwrap() {
+        let description = lv2_host::describe_bundle(&bundle).expect("the bundle is described");
+        for plugin in &description.plugins {
+            if lv2_host::window_of(plugin, fastforwardrs::plugin_editor::the_kind_of_window()).is_some() {
+                found.push((bundle.clone(), plugin.uri.clone(), plugin.name.clone()));
+            }
+        }
+    }
+    found
+}
+
+/// **The interfaces of real plugins, the ones that ship with the program**: each is opened by the editor-window program without a window (`--headless`: the interface is made, asked for its
+/// size, told values and idled) and is closed, and the program says it is ready and ends well.
+#[test]
+#[ignore = "needs the folder of bundled plugins that tools/bundled_plugins/fetch_bundled_plugins.py makes (FFRS_BUNDLED_PLUGINS)"]
+fn the_interfaces_of_the_real_bundled_plugins_open_without_a_window_and_close() {
+    let plugins = real_plugins_with_a_window();
+    assert!(plugins.len() >= 5, "only {} plugins have a window", plugins.len());
+    for (bundle, uri, name) in &plugins {
+        let mut program = Running::start(bundle, uri);
+        program.begin(&[], None);
+        let first = program.next();
+        println!("{name}: {first:?}");
+        assert!(matches!(first, FromProgram::Ready { .. }), "{name}: {first:?}");
+        program.tell(&ToProgram::Close);
+        let said = program.said_until(|message| matches!(message, FromProgram::Closed | FromProgram::Failed { .. }));
+        assert_eq!(said.last(), Some(&FromProgram::Closed), "{name}: {said:?}");
+        assert_eq!(program.exit_code(), Some(0), "{name}");
+    }
+}
+
+/// **For a person to look at**: opens the window of a real plugin (`FFRS_LOOK_BUNDLE` and `FFRS_LOOK_URI`) where there is a screen, and keeps it for `FFRS_LOOK_SECONDS` seconds (20 if not said).
+#[test]
+#[ignore = "opens a window and waits: run by hand"]
+fn look_at_the_window_of_a_real_plugin() {
+    let bundle = PathBuf::from(std::env::var_os("FFRS_LOOK_BUNDLE").expect("FFRS_LOOK_BUNDLE names the bundle"));
+    let uri = std::env::var("FFRS_LOOK_URI").expect("FFRS_LOOK_URI names the plugin");
+    let seconds = std::env::var("FFRS_LOOK_SECONDS")
+        .ok()
+        .and_then(|text| text.parse::<u64>().ok())
+        .unwrap_or(20);
+    let mut program = Running::start_with_or_without_a_window(&bundle, &uri, false);
+    program.begin(&[], None);
+    let ready = program.next();
+    println!("the program says: {ready:?}");
+    std::thread::sleep(Duration::from_secs(seconds));
+    program.tell(&ToProgram::Close);
+}
+
 // --- the editor's side ---
 
 fn the_key() -> WindowKey {

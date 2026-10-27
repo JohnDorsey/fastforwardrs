@@ -68,7 +68,13 @@ The *Bundles* tab of the plugin manager downloads the plugins of the manifest fo
 | MVerb (DPF-Plugins v1.7) | Martin Eastwood, Filipe Coelho | GPL-3.0-or-later | MVerb | the tag `v1.7` of DISTRHO/DPF-Plugins |
 | MaGigaverb (DPF-Plugins v1.7) | Cycling '74 (the Gen~ export), Filipe Coelho | LGPL-3.0-only AND ISC (the wrapper) | MaGigaverb | the tag `v1.7` of DISTRHO/DPF-Plugins |
 | Surge XT Effects 1.3.4 | the Surge Synth Team and the authors of Surge | GPL-3.0-or-later | Surge XT Effects | `surge-src-1.3.4.tar.gz` of its release (md5 published by the project) |
+| Dragonfly Reverb 3.2.10 (LV2) | Michael Willis, Rob van den Berg | GPL-3.0-or-later | Early Reflections, Hall, Plate and Room reverbs, as LV2 bundles | the same `dragonfly-reverb-3.2.10-src.tar.xz` |
+| MVerb (LV2) | Martin Eastwood, Filipe Coelho | GPL-3.0-or-later | MVerb | the tag `v1.7` of DISTRHO/DPF-Plugins |
+| DPF Mini-Series (LV2) | Michael Gruhn (3BandEQ), Filipe Coelho and the DISTRHO team | LGPL-3.0-only | 3BandEQ, PingPongPan | the tag `v1.7` of DISTRHO/DPF-Plugins |
+| DPF Max-Gen plugins (LV2) | Cycling '74 (the Gen~ export), Filipe Coelho | LGPL-3.0-only AND ISC (the wrapper) | MaBitcrush, MaFreeverb, MaGigaverb, MaPitchshift | the tag `v1.7` of DISTRHO/DPF-Plugins |
+| CycleShifter (LV2) | Niall Moody, Filipe Coelho | MIT | CycleShifter | the tag `v1.7` of DISTRHO/DPF-Plugins |
+| Wolf Shaper 1.0.2 (LV2) | Patrick Desaulniers | GPL-3.0-or-later ("GPL v3+" in the SPDX line of its source) | Wolf Shaper | `wolf-shaper-v1.0.2-source.tar.gz` of its release |
 
-**Left out on purpose:** Airwindows Consolidated (the maintainer's decision for now), the AGPL plugins (ZL), Nekobi (GPL-2.0-only), and the three plugins of DPF-Plugins v1.7 that share MVerb's CLAP id (3BandEQ, 3BandSplitter, PingPongPan).
+**Left out on purpose:** Airwindows Consolidated (the maintainer's decision for now), the AGPL plugins (ZL), Nekobi (GPL-2.0-only), and (as CLAP) the three plugins of DPF-Plugins v1.7 that share MVerb's CLAP id (as LV2 their URIs are their own, and 3BandEQ and PingPongPan are offered; 3BandSplitter and AmplitudeImposer have audio ports that no effect uses yet, and Zam Plugins' licences were not checked file by file: see `bundleable-lv2-plugins.md`) (3BandEQ, 3BandSplitter, PingPongPan).
 
 **Trust:** a folder called `plugins` beside the program, or the one that `FFRS_BUNDLED_PLUGINS` names, is looked in last and **trusted without the question** (in the editor and in `fastforwardrs-export`): its files are the release's own and are as trusted as the program. Where the licence texts could not be found in a release archive, they are taken from the project's repository at the tag that matches the version (the manifest says which, with a checksum). Where **the licence of a set is not the one its authors state in one place** (MaGigaverb: the DPF licence table says LGPL-3.0, the file of its wrapper says ISC), the manifest says which it took and why.

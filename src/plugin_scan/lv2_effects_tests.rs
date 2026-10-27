@@ -472,6 +472,52 @@ fn a_folder_with_a_manifest_is_a_bundle_and_the_bundles_of_a_folder_are_found_in
     );
 }
 
+/// Makes the bundle `relative` (a folder with a `manifest.ttl`) under `root`.
+fn a_bundle_at(root: &Path, relative: &str) {
+    let bundle = root.join(relative);
+    std::fs::create_dir_all(&bundle).unwrap();
+    std::fs::write(bundle.join("manifest.ttl"), "").unwrap();
+}
+
+#[test]
+fn bundles_are_found_in_the_folders_of_a_folder_as_the_bundles_tab_puts_them_but_not_in_bundles_or_where_a_download_goes_on_or_too_far_down()
+ {
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path();
+    // (Found: at the top, in the folder of a set, a few folders down, and on the last folder that is looked in.)
+    a_bundle_at(root, "Top.lv2");
+    a_bundle_at(root, "dragonfly/Hall.lv2");
+    a_bundle_at(root, "set/deeper/still/Deep.lv2");
+    a_bundle_at(root, "far/1/2/3/4/5/Last.lv2");
+    // (Not found: in a bundle, in a macOS bundle of CLAP, in what a download is making, and one folder too far down.)
+    a_bundle_at(root, "Top.lv2/Inner.lv2");
+    a_bundle_at(root, "Pack.clap/Q.lv2");
+    a_bundle_at(root, "set.building/Z.lv2");
+    a_bundle_at(root, ".downloading/W.lv2");
+    a_bundle_at(root, "far/1/2/3/4/5/6/TooFar.lv2");
+
+    let found: Vec<String> = lv2_bundles_in(root)
+        .unwrap()
+        .iter()
+        .map(|path| {
+            path.strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/")
+        })
+        .collect();
+
+    assert_eq!(
+        found,
+        vec![
+            "dragonfly/Hall.lv2",
+            "far/1/2/3/4/5/Last.lv2",
+            "set/deeper/still/Deep.lv2",
+            "Top.lv2"
+        ]
+    );
+}
+
 #[test]
 fn the_folders_that_bundles_are_looked_for_in_come_after_those_of_the_other_kinds_and_before_the_bundled_ones() {
     let lv2_folder = if cfg!(windows) {

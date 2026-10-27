@@ -123,7 +123,8 @@ class TheRealManifest(unittest.TestCase):
         self.assertEqual(fetcher.check_manifest(THE_REAL_MANIFEST), [])
 
     def test_it_has_what_the_maintainer_chose_and_not_what_the_maintainer_did_not(self):
-        names = [plugin for plugin_set in THE_REAL_MANIFEST["sets"] for plugin in plugin_set["plugins"]]
+        clap_sets = [s for s in THE_REAL_MANIFEST["sets"] if not s["id"].endswith("-lv2")]
+        names = [plugin for plugin_set in clap_sets for plugin in plugin_set["plugins"]]
         self.assertEqual(
             names,
             [
@@ -136,19 +137,56 @@ class TheRealManifest(unittest.TestCase):
             ],
         )
         # (What the sets are called, what they hold and how they are licensed: an address may name another plugin, as the text of the LGPL that MaGigaverb needs comes from the folder of 3BandEQ.)
-        named = json.dumps([[s["id"], s["name"], s["plugins"], s["licence"]] for s in THE_REAL_MANIFEST["sets"]]).lower()
+        # (Not in the CLAP sets: 3BandEQ, 3BandSplitter and PingPongPan share a CLAP id with MVerb. They are in the LV2 sets, whose URIs are their own.)
+        named = json.dumps([[s["id"], s["name"], s["plugins"], s["licence"]] for s in clap_sets]).lower()
         for left_out in ("airwindows", "agpl", "nekobi", "zl equalizer", "3bandeq", "pingpongpan", "3bandsplitter"):
             self.assertNotIn(left_out, named)
+        everything = json.dumps([[s["id"], s["name"], s["plugins"], s["licence"]] for s in THE_REAL_MANIFEST["sets"]]).lower()
+        # (3BandSplitter has 6 audio outputs and AmplitudeImposer 4 audio inputs, which no effect of the program uses yet: the scan finds them "not used", so they are not offered.)
+        for left_out in ("airwindows", "agpl", "nekobi", "zl equalizer", "3bandsplitter", "amplitudeimposer"):
+            self.assertNotIn(left_out, everything)
+
+    def test_the_lv2_sets_are_these_and_hold_what_their_authors_release_as_lv2_bundles(self):
+        lv2_sets = {s["id"]: s for s in THE_REAL_MANIFEST["sets"] if s["id"].endswith("-lv2")}
+        self.assertEqual(
+            {set_id: plugin_set["plugins"] for set_id, plugin_set in lv2_sets.items()},
+            {
+                "dragonfly-reverb-lv2": ["Dragonfly Early Reflections", "Dragonfly Hall Reverb", "Dragonfly Plate Reverb", "Dragonfly Room Reverb"],
+                "mverb-lv2": ["MVerb"],
+                "dpf-mini-series-lv2": ["3BandEQ", "PingPongPan"],
+                "dpf-max-gen-lv2": ["MaBitcrush", "MaFreeverb", "MaGigaverb", "MaPitchshift"],
+                "cycleshifter-lv2": ["CycleShifter"],
+                "wolf-shaper-lv2": ["Wolf Shaper"],
+            },
+        )
+        for plugin_set in lv2_sets.values():
+            for platform_name, build in plugin_set["platforms"].items():
+                for member in build["members"]:
+                    self.assertTrue(member["to"].endswith(".lv2"), member)
+                    if not build.get("installer"):
+                        self.assertTrue(member["from"].endswith(".lv2/"), member)
+                self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), (plugin_set["id"], platform_name))
+        # (A release file that a CLAP set is fetched from is the one the LV2 set of the same authors is fetched from, so that the Bundles tab downloads it once.)
+        by_id = {s["id"]: s for s in THE_REAL_MANIFEST["sets"]}
+        for lv2_id, clap_id in (("dragonfly-reverb-lv2", "dragonfly-reverb"), ("mverb-lv2", "mverb"), ("dpf-max-gen-lv2", "magigaverb")):
+            for platform_name in ("windows-x86_64", "linux-x86_64"):
+                self.assertEqual(
+                    by_id[lv2_id]["platforms"][platform_name]["sha256"], by_id[clap_id]["platforms"][platform_name]["sha256"], (lv2_id, platform_name)
+                )
 
     def test_every_set_has_a_build_for_windows_linux_and_macos_and_the_files_it_takes_are_the_plugins_it_names(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
-            self.assertEqual(set(plugin_set["platforms"]), {"windows-x86_64", "linux-x86_64", "macos-universal"}, plugin_set["id"])
+            # (The LV2 sets have builds for Windows and Linux; the builds for macOS are in the installers of the disk images, whose layout has to be seen on a Mac before it is written down.)
+            wanted = {"windows-x86_64", "linux-x86_64"} | (set() if plugin_set["id"].endswith("-lv2") else {"macos-universal"})
+            self.assertEqual(set(plugin_set["platforms"]), wanted, plugin_set["id"])
             for build in plugin_set["platforms"].values():
                 self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), plugin_set["id"])
 
     def test_the_builds_for_macos_are_a_folder_of_a_zip_or_the_folders_of_an_installer_in_a_disk_image(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
-            build = plugin_set["platforms"]["macos-universal"]
+            build = plugin_set["platforms"].get("macos-universal")
+            if build is None:
+                continue
             if build["url"].endswith(".dmg"):
                 self.assertTrue(build["installer"].endswith(".pkg"), plugin_set["id"])
                 for member in build["members"]:
@@ -212,7 +250,21 @@ class WhatIsWrongWithAManifest(unittest.TestCase):
         build["members"] = [{"from": "a/x.clap", "to": "x.clap"}, {"from": "b/x.clap", "to": "x.clap"}, {"from": "c/y.dll", "to": "y.dll"}]
         problems = self.problems()
         self.assertIn("'x.clap' is taken twice", problems)
-        self.assertIn("'y.dll' is not a plain name of a .clap file", problems)
+        self.assertIn("'y.dll' is not a plain name of a .clap file or an .lv2 folder", problems)
+
+    def test_an_lv2_member_is_a_name_of_a_folder_and_what_is_not_is_said(self):
+        build = self.first["platforms"]["windows-x86_64"]
+        build["members"] = [{"from": "pack/Thing.lv2", "to": "Thing.lv2"}]
+        self.assertIn("is a folder (an .lv2 bundle) and its name inside the archive must end with /", self.problems())
+        build["members"] = [{"from": "pack/Thing.lv2/", "to": "Thing.LV2"}]
+        self.assertEqual(self.problems(), "", "a folder with its name ending in / and any case of .lv2 is fit")
+        build["members"] = [{"from": "pack/Thing.lv2/", "to": "Thing.vst3"}]
+        self.assertIn("is not a plain name of a .clap file or an .lv2 folder", self.problems())
+        # (Out of the installer of a disk image the member is a path in what the installer holds, with no / at the end.)
+        self.setUp()
+        mac = self.first["platforms"]["macos-universal"]
+        mac["members"] = [{"from": "dpf-x-lv2bundles.pkg/Payload/Thing.lv2", "to": "Thing.lv2"}]
+        self.assertEqual(self.problems(), "")
 
     def test_a_platform_that_is_not_known_and_a_set_with_no_plugins_and_an_id_used_twice_are_said(self):
         self.first["platforms"]["amiga"] = copy.deepcopy(self.first["platforms"]["linux-x86_64"])
@@ -271,6 +323,68 @@ class AssemblingTheFolder(unittest.TestCase):
     def test_a_tar_archive_gives_its_files_by_the_names_inside_it(self):
         self.assemble(platform_name="linux-x86_64")
         self.assertEqual((self.out / "pack" / "Reverb.clap").read_bytes(), b"the reverb for linux")
+
+    def an_lv2_bundle_in(self, archive_path: pathlib.Path, platform_name: str, member_from: str) -> dict:
+        manifest = self.fixtures.manifest()
+        build = {
+            "url": archive_path.as_uri(),
+            "sha256": sha256(archive_path.read_bytes()),
+            "members": [{"from": member_from, "to": "Thing.lv2"}],
+        }
+        manifest["sets"][0]["platforms"] = {platform_name: build}
+        return manifest
+
+    def test_an_lv2_bundle_of_a_zip_is_taken_with_everything_in_it_and_nothing_that_only_begins_with_its_name(self):
+        path = self.root / "thing.zip"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("pack/Thing.lv2/manifest.ttl", b"the manifest")
+            archive.writestr("pack/Thing.lv2/Thing_dsp.dll", b"the code")
+            archive.writestr("pack/Thing.lv2/resources/data.bin", b"inside")
+            archive.writestr("pack/Thing.lv2x/other.txt", b"a folder whose name only begins like it")
+            archive.writestr("pack/Thing.clap", b"not taken")
+
+        made = self.assemble(self.an_lv2_bundle_in(path, "windows-x86_64", "pack/Thing.lv2/"))
+
+        bundle = self.out / "pack" / "Thing.lv2"
+        self.assertEqual(made, [bundle])
+        found = sorted(str(file.relative_to(bundle).as_posix()) for file in bundle.rglob("*") if file.is_file())
+        self.assertEqual(found, ["Thing_dsp.dll", "manifest.ttl", "resources/data.bin"])
+
+    def an_lv2_tar(self, prefix: str) -> pathlib.Path:
+        path = self.root / f"thing-{'dot' if prefix else 'plain'}.tar.gz"
+        with tarfile.open(path, "w:gz") as archive:
+            for name, data, mode in (
+                ("pack/Thing.lv2/manifest.ttl", b"the manifest", 0o644),
+                ("pack/Thing.lv2/Thing_dsp.so", b"the code", 0o755),
+                ("pack/Thing.lv2/resources/data.bin", b"inside", 0o644),
+                ("pack/Thing.lv2x/other.txt", b"a folder whose name only begins like it", 0o644),
+            ):
+                info = tarfile.TarInfo(prefix + name)
+                info.size = len(data)
+                info.mode = mode
+                archive.addfile(info, io.BytesIO(data))
+        return path
+
+    def test_an_lv2_bundle_of_a_tar_is_taken_with_everything_in_it_with_or_without_dot_slash_and_what_can_be_run_can_still_be(self):
+        for prefix in ("./", ""):
+            self.setUp()
+            path = self.an_lv2_tar(prefix)
+
+            made = self.assemble(self.an_lv2_bundle_in(path, "linux-x86_64", "pack/Thing.lv2/"), platform_name="linux-x86_64")
+
+            bundle = self.out / "pack" / "Thing.lv2"
+            self.assertEqual(made, [bundle], prefix)
+            found = sorted(str(file.relative_to(bundle).as_posix()) for file in bundle.rglob("*") if file.is_file())
+            self.assertEqual(found, ["Thing_dsp.so", "manifest.ttl", "resources/data.bin"], prefix)
+            self.assertEqual((bundle / "Thing_dsp.so").read_bytes(), b"the code")
+            if os.name == "posix":
+                self.assertEqual((bundle / "Thing_dsp.so").stat().st_mode & 0o777, 0o755)
+
+    def test_a_folder_that_is_not_in_the_tar_is_said_and_nothing_is_left_half_made(self):
+        path = self.an_lv2_tar("./")
+        with self.assertRaisesRegex(fetcher.FetchError, "no folder called 'pack/Missing.lv2'"):
+            self.assemble(self.an_lv2_bundle_in(path, "linux-x86_64", "pack/Missing.lv2/"), platform_name="linux-x86_64")
+        self.assertFalse((self.out / "pack").exists() or (self.out / "pack.building").exists())
 
     def a_zip_with_a_bundle_manifest(self, member_from: str) -> dict:
         path = self.root / "plugins-mac.zip"
