@@ -49,13 +49,18 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             "Wolf Shaper"
         ]
     );
-    // (The CLAP sets have a build for each system. The LV2 sets have builds for Windows and Linux: the builds for macOS are in the installers of disk images, whose layout has to be seen on a Mac.)
+    // (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
     for set in &manifest.sets {
         let is_lv2 = set.id.ends_with("-lv2");
         for platform in ["windows-x86_64", "linux-x86_64"] {
             assert!(set.platforms.contains_key(platform), "{} for {platform}", set.id);
         }
-        assert_eq!(set.platforms.contains_key("macos-universal"), !is_lv2, "{}", set.id);
+        assert_eq!(
+            set.platforms.contains_key("macos-universal"),
+            set.id != "wolf-shaper-lv2",
+            "{}",
+            set.id
+        );
         for build in set.platforms.values() {
             assert_eq!(build.members.len(), set.plugins.len(), "{}", set.id);
             for member in &build.members {

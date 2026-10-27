@@ -172,33 +172,6 @@ jobs:
           FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The scan of the fetched bundled plugins failed on macOS" cargo test --release --test bundled_plugins_real --no-fail-fast -- --ignored --nocapture
           echo "::notice title=Fetched bundled plugins (macOS)::$(find "$fetched" -maxdepth 2 | sed "s|$fetched/||" | tr '\n' '|')"
 
-      # A probe, for the LV2 builds for macOS that bundled-plugins/manifest.json does not have yet: what the installers inside the disk images of Dragonfly Reverb and DPF-Plugins hold
-      # (the CLAP bundles are in `dpf-<name>-clapbundles.pkg/Payload`; the LV2 ones are believed to be in a sibling, and a wrong name in the manifest would make every fetch on a Mac fail).
-      # It changes nothing and writes what it found as an annotation; a failure is a warning.
-      - name: List the LV2 bundles in the installers of the macOS disk images (a probe; failures are warnings)
-        if: ${{ runner.os == 'macOS' }}
-        timeout-minutes: 10
-        continue-on-error: true
-        shell: bash
-        run: |
-          probe="$RUNNER_TEMP/dmg-probe"
-          mkdir -p "$probe"
-          for address in \
-            "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-macos-universal.dmg" \
-            "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg"; do
-            name="${address##*/}"
-            curl --fail --location --silent --show-error --retry 5 --retry-all-errors --output "$probe/$name" "$address"
-            mkdir -p "$probe/$name.mounted"
-            hdiutil attach -nobrowse -readonly -noverify -noautoopen -mountpoint "$probe/$name.mounted" "$probe/$name" > /dev/null
-            found=""
-            for installer in "$probe/$name.mounted"/*.pkg; do
-              pkgutil --expand-full "$installer" "$probe/$name.expanded.$(basename "$installer")"
-              found="$found $(basename "$installer"): $(cd "$probe/$name.expanded.$(basename "$installer")" && find . -maxdepth 4 -name '*.lv2' | tr '\n' ' ')"
-            done
-            hdiutil detach -force -quiet "$probe/$name.mounted" || true
-            echo "::notice title=LV2 bundles in $name::$found"
-          done
-
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
       # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.
       - name: Show the graphics adapters

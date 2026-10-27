@@ -25,13 +25,19 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(manifest_file()).expect("the manifest is read"))
             .expect("the manifest is JSON");
-    let wanted_files: Vec<String> = manifest["sets"]
+    let platform = fastforwardrs::plugin_bundles::this_platform().expect("builds for this system");
+    // (The sets that have a build for this system: Wolf Shaper has none for macOS.)
+    let sets_here: Vec<&serde_json::Value> = manifest["sets"]
         .as_array()
         .unwrap()
         .iter()
+        .filter(|set| set["platforms"][platform].is_object())
+        .collect();
+    let wanted_files: Vec<String> = sets_here
+        .iter()
         .flat_map(|set| {
             // (The files the script takes for this system: the names are the same on every system.)
-            set["platforms"][fastforwardrs::plugin_bundles::this_platform().expect("builds for this system")]["members"]
+            set["platforms"][platform]["members"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -85,7 +91,7 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
     let found = plugins_found_in(&scan.libraries);
     assert_eq!(found.effects.len(), wanted_files.len(), "{:?}", found.not_used);
     // Every folder of the set has its licence text and its notice.
-    for set in manifest["sets"].as_array().unwrap() {
+    for set in sets_here {
         let set_folder = folder.join(set["id"].as_str().unwrap());
         assert!(
             set_folder.join("NOTICE.txt").is_file(),
@@ -336,11 +342,6 @@ fn the_presets_that_the_real_bundles_say_are_found_and_every_one_of_them_runs_in
         }
     }
     let names: std::collections::BTreeSet<&str> = tried.iter().map(|(name, _)| name.as_str()).collect();
-    if cfg!(target_os = "macos") {
-        // (The manifest has no LV2 builds for macOS yet.)
-        eprintln!("SKIPPED: no LV2 builds for macOS");
-        return;
-    }
     for wanted in ["mverb", "3 band eq", "ping pong pan", "cycle shifter"] {
         assert!(names.contains(wanted), "no preset of {wanted}: {names:?}");
     }

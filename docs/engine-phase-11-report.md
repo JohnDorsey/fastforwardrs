@@ -36,7 +36,7 @@ LV2 plugins after the CLAP ones (VST3 later, or through Carla), the 16 MiB limit
 
 ## 4b. After the report: meters, and real plugins (2026-10-27)
 
-Meters were added (section 10 of the design). Then the maintainer asked for LV2 plugins that can be bundled: **six LV2 sets are in the *Bundles* tab for Windows and Linux** (Dragonfly Reverb's four plugins, MVerb, 3BandEQ, PingPongPan, MaBitcrush, MaFreeverb, MaGigaverb, MaPitchshift, CycleShifter and Wolf Shaper), taken out of the release files that the CLAP sets already fetch (Wolf Shaper's is 5 MB more). The first real plugins the host met all scanned and ran on Windows [V]; the one claim that the report made as [B], "the ABI is only proven by a real plugin", is now [V] for the scan, the sound and the interfaces of these plugins on Windows. See [`bundleable-lv2-plugins.md`](bundleable-lv2-plugins.md).
+Meters were added (section 10 of the design). Then the maintainer asked for LV2 plugins that can be bundled: **six LV2 sets are in the *Bundles* tab** (for macOS too, all but Wolf Shaper) (Dragonfly Reverb's four plugins, MVerb, 3BandEQ, PingPongPan, MaBitcrush, MaFreeverb, MaGigaverb, MaPitchshift, CycleShifter and Wolf Shaper), taken out of the release files that the CLAP sets already fetch (Wolf Shaper's is 5 MB more). The first real plugins the host met all scanned and ran on Windows [V]; the one claim that the report made as [B], "the ABI is only proven by a real plugin", is now [V] for the scan, the sound and the interfaces of these plugins on Windows. See [`bundleable-lv2-plugins.md`](bundleable-lv2-plugins.md).
 
 ## 5. What is open for the maintainer
 

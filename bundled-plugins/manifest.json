@@ -363,6 +363,30 @@
               "to": "DragonflyRoomReverb.lv2"
             }
           ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-macos-universal.dmg",
+          "sha256": "e0b854b92a4e51ce5851320fb1a9f91ab1a4309f997de070e175b3e5cab4adaf",
+          "size": 24954281,
+          "installer": "dragonfly-reverb-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-dragonfly-reverb-lv2bundles.pkg/Payload/DragonflyEarlyReflections.lv2",
+              "to": "DragonflyEarlyReflections.lv2"
+            },
+            {
+              "from": "dpf-dragonfly-reverb-lv2bundles.pkg/Payload/DragonflyHallReverb.lv2",
+              "to": "DragonflyHallReverb.lv2"
+            },
+            {
+              "from": "dpf-dragonfly-reverb-lv2bundles.pkg/Payload/DragonflyPlateReverb.lv2",
+              "to": "DragonflyPlateReverb.lv2"
+            },
+            {
+              "from": "dpf-dragonfly-reverb-lv2bundles.pkg/Payload/DragonflyRoomReverb.lv2",
+              "to": "DragonflyRoomReverb.lv2"
+            }
+          ]
         }
       }
     },
@@ -415,6 +439,18 @@
           "members": [
             {
               "from": "DPF-Plugins-v1.7/MVerb.lv2/",
+              "to": "MVerb.lv2"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/MVerb.lv2",
               "to": "MVerb.lv2"
             }
           ]
@@ -479,6 +515,22 @@
             },
             {
               "from": "DPF-Plugins-v1.7/PingPongPan.lv2/",
+              "to": "PingPongPan.lv2"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/3BandEQ.lv2",
+              "to": "3BandEQ.lv2"
+            },
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/PingPongPan.lv2",
               "to": "PingPongPan.lv2"
             }
           ]
@@ -570,6 +622,30 @@
               "to": "MaPitchshift.lv2"
             }
           ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/MaBitcrush.lv2",
+              "to": "MaBitcrush.lv2"
+            },
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/MaFreeverb.lv2",
+              "to": "MaFreeverb.lv2"
+            },
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/MaGigaverb.lv2",
+              "to": "MaGigaverb.lv2"
+            },
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/MaPitchshift.lv2",
+              "to": "MaPitchshift.lv2"
+            }
+          ]
         }
       }
     },
@@ -622,6 +698,18 @@
           "members": [
             {
               "from": "DPF-Plugins-v1.7/CycleShifter.lv2/",
+              "to": "CycleShifter.lv2"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-lv2bundles.pkg/Payload/CycleShifter.lv2",
               "to": "CycleShifter.lv2"
             }
           ]

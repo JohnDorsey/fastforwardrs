@@ -176,8 +176,8 @@ class TheRealManifest(unittest.TestCase):
 
     def test_every_set_has_a_build_for_windows_linux_and_macos_and_the_files_it_takes_are_the_plugins_it_names(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
-            # (The LV2 sets have builds for Windows and Linux; the builds for macOS are in the installers of the disk images, whose layout has to be seen on a Mac before it is written down.)
-            wanted = {"windows-x86_64", "linux-x86_64"} | (set() if plugin_set["id"].endswith("-lv2") else {"macos-universal"})
+            # (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
+            wanted = {"windows-x86_64", "linux-x86_64"} | (set() if plugin_set["id"] == "wolf-shaper-lv2" else {"macos-universal"})
             self.assertEqual(set(plugin_set["platforms"]), wanted, plugin_set["id"])
             for build in plugin_set["platforms"].values():
                 self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), plugin_set["id"])
@@ -190,7 +190,8 @@ class TheRealManifest(unittest.TestCase):
             if build["url"].endswith(".dmg"):
                 self.assertTrue(build["installer"].endswith(".pkg"), plugin_set["id"])
                 for member in build["members"]:
-                    self.assertTrue(member["from"].endswith(".clap") and "/Payload/" in member["from"], member["from"])
+                    self.assertTrue(member["from"].endswith((".clap", ".lv2")) and "/Payload/" in member["from"], member["from"])
+                    self.assertEqual(member["to"].rsplit(".", 1)[1], member["from"].rsplit(".", 1)[1], "a bundle keeps its kind")
             else:
                 self.assertTrue(build["url"].endswith(".zip"), plugin_set["id"])
                 for member in build["members"]:

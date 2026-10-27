@@ -11,11 +11,11 @@ added, what was left out and why, and what was tried. **[V]** = I ran it or read
 *I am not a lawyer; this is a reading of the licences by someone who has to ship the result, not legal advice.* The policy is the one of `distribution-notices.md` (LG-02 as amended on
 2026-10-20): GPL and LGPL licences compatible with GPLv3 and the permissive ones; not AGPL, not GPL-2.0-only.
 
-## What was added: six sets, for Windows and Linux
+## What was added: six sets (five of them for macOS too)
 
 The authors of Dragonfly Reverb, DPF-Plugins and Wolf Shaper ship an **LV2 bundle (a folder) beside the CLAP file in the same release file** that the CLAP sets already fetch, so the
 Dragonfly and DPF sets cost **no extra download** (the Bundles tab downloads a release file once however many sets are in it). The only new file is Wolf Shaper (5 MB). Totals for the whole
-tab: **Windows 151.5 MB (was 146), Linux 114.5 MB (was 109), macOS 269.8 MB (unchanged: no LV2 builds yet, see below).**
+tab: **Windows 151.5 MB (was 146), Linux 114.5 MB (was 109), macOS 269.8 MB (unchanged: the LV2 bundles are in the disk images that the CLAP sets fetch).**
 
 | Set (id) | Licence | Plugins | From |
 |---|---|---|---|
@@ -65,8 +65,10 @@ A bundle is a folder, so a member of the manifest that ends in `.lv2` is a **fol
 of the installer of a macOS disk image it is a path in what the installer holds), and the scan now looks for bundles **in the folders of a folder that is looked in, down to six folders**,
 as it does for CLAP libraries (the Bundles tab puts a set in a folder of its own; a bundle is never looked into, nor a `.clap` bundle, nor a folder that a download is making).
 
-## macOS: not yet
+## macOS
 
-The CLAP builds for macOS come out of the installers of the disk images (`dpf-<name>-clapbundles.pkg/Payload/...`). The LV2 bundles are very probably in a sibling installer
-(`dpf-<name>-lv2bundles.pkg`), **[B]: nobody has looked**, and a wrong name would make the fetch of every set fail on a Mac. The CI has a step on a Mac that lists what those installers hold;
-the LV2 builds for macOS are added to the manifest when its answer is read. (Wolf Shaper's macOS file is a zip that holds a disk image: one more layer than the program opens.)
+The CLAP builds for macOS come out of the installers of the disk images (`dpf-<name>-clapbundles.pkg/Payload/...`). **The LV2 bundles are in a sibling installer,
+`dpf-<name>-lv2bundles.pkg/Payload/<Plugin>.lv2`, in the same two disk images (Dragonfly Reverb and DPF-Plugins) [V: a probe step of the CI on a Mac listed them, run 135]**, so five of the six
+sets have a macOS build, from files that are fetched anyway. **Wolf Shaper has none**: its macOS file is a zip that holds a disk image, which is one more layer than the program opens.
+The probe step is gone from the CI; what the next CI on a Mac does with them (the real fetch, the scan, the sound of each plugin, every preset) says whether they work there: **until it is
+read, they are [B] on macOS**, and nobody has heard or seen them on a Mac.
