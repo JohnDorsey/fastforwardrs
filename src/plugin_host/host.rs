@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use ladspa_host::Library;
 
-use super::effect::{Layout, PluginEffect, ProblemBoard};
+use super::effect::{Layout, MeterBoard, PluginEffect, ProblemBoard};
 use super::instance::{ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, PluginInstance};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
@@ -96,6 +96,8 @@ pub struct PluginHost {
     generation: AtomicU64,
     /// What is wrong with the plugins that were wanted, by their keys (see [`Self::problem_with`]).
     problems: ProblemBoard,
+    /// What the control outputs of the plugins that play hold, by their keys (see [`Self::meters_of`]).
+    meters: MeterBoard,
     /// Which CLAP plugins are alive, and for which streams, and which streams are being stopped.
     lives: std::sync::Arc<Mutex<Lives>>,
     /// How long a plugin that is made waits for the plugins of the same library that are being let go of (see [`Self::the_clap_instances_of`]).
@@ -129,6 +131,7 @@ impl PluginHost {
             breadcrumb: Mutex::new(None),
             generation: AtomicU64::new(0),
             problems: ProblemBoard::default(),
+            meters: MeterBoard::default(),
             lives: std::sync::Arc::default(),
             longest_wait_for_what_is_being_let_go_of: LONGEST_WAIT_FOR_WHAT_IS_BEING_LET_GO_OF,
             embedded_folders: Mutex::new(Vec::new()),
@@ -282,6 +285,25 @@ impl PluginHost {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
             .cloned()
+    }
+
+    /// What the control outputs of the plugin whose effect has the key `key` held after the last block that it made, as `(handle, value)`: what its window shows as meters. Empty if it
+    /// has none or has not played.
+    pub fn meters_of(&self, key: &str) -> Vec<(u32, f32)> {
+        self.meters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Says what the control outputs of the plugin whose effect has the key `key` hold (**for the tests**, which have no sound to play; the plugins say it themselves as they play).
+    pub fn note_the_meters_of(&self, key: &str, values: Vec<(u32, f32)>) {
+        self.meters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key.to_owned(), values);
     }
 
     /// The same, waiting no longer than `longest` for the plugins that are being let go of (for a test, which does not want to wait two seconds).
@@ -874,7 +896,10 @@ impl PluginRunner for PluginHost {
             std::sync::Arc::clone(notes),
         )
         .map(|made| {
-            Box::new(made.reporting_problems_on(std::sync::Arc::clone(&self.problems))) as Box<dyn BlockProcessor>
+            Box::new(
+                made.reporting_problems_on(std::sync::Arc::clone(&self.problems))
+                    .showing_meters_on(std::sync::Arc::clone(&self.meters)),
+            ) as Box<dyn BlockProcessor>
         })
     }
 }

@@ -31,6 +31,9 @@ pub const UI_SIZE: (u32, u32) = (360, 240);
 pub const UI_REAL_WINDOW_SIZE: (u32, u32) = (380, 250);
 /// The value of the gain that makes the window ask to be closed.
 pub const UI_CLOSE_VALUE: f32 = 3.0;
+/// The value that makes the window ask to be closed when it is told it for **the port after the gain** (a meter: the gain plugin has no such port, and a test that plays no sound
+/// says it as if the plugin made it).
+pub const UI_METER_CLOSE_VALUE: f32 = 7.0;
 
 type Write = unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const c_void);
 
@@ -394,7 +397,9 @@ unsafe extern "C" fn port_event(handle: *mut c_void, port: u32, size: u32, forma
         // SAFETY: protocol 0 is a `float` of four bytes, good for the call.
         let value = unsafe { std::ptr::read_unaligned(buffer.cast::<f32>()) };
         println!("lv2-test-ui: port_event {port} {value}");
-        if port == ui.gain_port && value == UI_CLOSE_VALUE {
+        if (port == ui.gain_port && value == UI_CLOSE_VALUE)
+            || (port == ui.gain_port.wrapping_add(1) && value == UI_METER_CLOSE_VALUE)
+        {
             ui.close_next = true;
         }
     }

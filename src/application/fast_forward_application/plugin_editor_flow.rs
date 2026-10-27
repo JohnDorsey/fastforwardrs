@@ -315,6 +315,7 @@ impl FastForwardApplication {
         }
         self.interface.plugin_editors.ask_for_the_states_that_changed(now);
         self.give_the_plugin_editors_the_state_that_the_project_has(now);
+        self.tell_the_plugin_editors_what_the_plugins_make();
         // (A window that is open keeps the window of the editor awake: what a hand does in it has to be seen.)
         context.request_repaint_after(Duration::from_millis(30));
         let editors = &self.interface.plugin_editors;
@@ -495,6 +496,29 @@ impl FastForwardApplication {
             value,
         };
         self.execute_all(vec![command], now, context);
+    }
+
+    /// Tells the window of each LV2 plugin what its control outputs hold, as the sound that plays made them (a meter): the window shows what the plugin makes. (A window is told
+    /// only what is not what it has; a plugin that is not playing has the values of its last block.)
+    fn tell_the_plugin_editors_what_the_plugins_make(&mut self) {
+        for key in self.interface.plugin_editors.windows.keys() {
+            let Some((_, plugin)) = self.the_plugin_of_an_effect(key.target, key.instance) else {
+                continue;
+            };
+            if !matches!(plugin.address, PluginAddress::Lv2 { .. }) {
+                continue;
+            }
+            let meters: Vec<(u32, f64)> = self
+                .environment
+                .plugin_host
+                .meters_of(&plugin.descriptor.key)
+                .into_iter()
+                .map(|(port, value)| (port, f64::from(value)))
+                .collect();
+            if !meters.is_empty() {
+                self.interface.plugin_editors.windows.tell_the_values(key, &meters);
+            }
+        }
     }
 
     /// Tells every open window what the project says its parameters are at the playhead (the window knows what it was told last, and only what is not that is said), except those that a

@@ -24,7 +24,9 @@ mod ui;
 use std::ffi::{CStr, c_char, c_void};
 use std::path::{Path, PathBuf};
 
-pub use ui::{FAILS_UI, GAIN_UI, QUIET_UI, UI_CLOSE_VALUE, UI_EDIT_VALUE, UI_REAL_WINDOW_SIZE, UI_SIZE};
+pub use ui::{
+    FAILS_UI, GAIN_UI, QUIET_UI, UI_CLOSE_VALUE, UI_EDIT_VALUE, UI_METER_CLOSE_VALUE, UI_REAL_WINDOW_SIZE, UI_SIZE,
+};
 
 pub const GAIN: &str = "urn:fastforwardrs:test:gain";
 pub const CONTROLS: &str = "urn:fastforwardrs:test:controls";

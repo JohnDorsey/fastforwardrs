@@ -36,6 +36,11 @@ pub trait PluginInstance: Send {
     /// How many samples later its sound comes out than the sound that goes in.
     fn latency(&self) -> usize;
 
+    /// What the plugin's control outputs hold now, as `(handle, value)`: what a window shows as meters. Nothing for a format that has none (or a plugin that has none).
+    fn outputs(&self) -> Vec<(u32, f32)> {
+        Vec::new()
+    }
+
     /// What a plugin has asked of the host that is done between blocks, and not in the middle of one (CLAP: a call on its main thread, a restart). Says what happened.
     fn between_blocks(&mut self) -> BetweenBlocks {
         BetweenBlocks::default()
@@ -82,6 +87,10 @@ impl PluginInstance for Lv2Copy {
 
     fn latency(&self) -> usize {
         self.0.latency() as usize
+    }
+
+    fn outputs(&self) -> Vec<(u32, f32)> {
+        self.0.control_outputs()
     }
 }
 

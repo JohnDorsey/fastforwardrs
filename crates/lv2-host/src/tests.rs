@@ -654,3 +654,36 @@ fn a_sound_that_has_a_sample_that_is_not_a_number_or_is_infinite_is_not_made_of_
     assert!(!is_made_of_numbers(&[vec![0.0], vec![f32::INFINITY]]));
     assert!(!is_made_of_numbers(&[vec![f32::NEG_INFINITY]]));
 }
+
+#[test]
+fn the_control_outputs_of_a_plugin_are_what_the_last_block_made_them_and_the_inputs_and_the_audio_are_not_among_them() {
+    let bundle = the_bundle();
+
+    let latency = bundle.make(LATENCY);
+    let outputs = latency.control_outputs();
+    assert_eq!(
+        outputs.iter().map(|(port, _)| *port).collect::<Vec<_>>(),
+        vec![bundle.port(LATENCY, "latency"), bundle.port(LATENCY, "activations")],
+        "the control outputs, in the order of the ports"
+    );
+    assert_eq!(
+        outputs[0].1, LATENCY_FRAMES as f32,
+        "what the plugin said when it was made and run once"
+    );
+
+    let mut options = bundle.make(OPTIONS);
+    let mut input = vec![0.0_f32; 64];
+    let mut output = vec![0.0_f32; 64];
+    options.run(&mut [&mut input], &mut [&mut output], 64).unwrap();
+    let sample_rate = options
+        .control_outputs()
+        .into_iter()
+        .find(|(port, _)| *port == bundle.port(OPTIONS, "sample_rate"))
+        .unwrap();
+    assert_eq!(sample_rate.1, RATE as f32, "a value that the plugin made in a block");
+
+    assert!(
+        bundle.make(GAIN).control_outputs().is_empty(),
+        "a plugin with no control output has none, and its control input is not one"
+    );
+}

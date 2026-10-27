@@ -2579,3 +2579,151 @@ fn an_lv2_plugin_whose_audio_ports_are_not_what_they_were_when_it_was_scanned_is
         notes.lock().unwrap()
     );
 }
+
+/// A plugin that copies its sound and has two control outputs that count the blocks it was run for.
+struct CountsItsBlocks {
+    blocks: f32,
+    /// Whether it has control outputs at all.
+    has_outputs: bool,
+}
+
+impl super::PluginInstance for CountsItsBlocks {
+    fn set_value(&mut self, _handle: u32, _value: f32, _at_sample: usize) {}
+
+    fn takes_values_at_samples(&self) -> bool {
+        false
+    }
+
+    fn most_samples_at_once(&self) -> Option<usize> {
+        None
+    }
+
+    fn run(&mut self, inputs: &mut [&mut [f32]], outputs: &mut [&mut [f32]], frames: usize) -> Result<(), String> {
+        self.blocks += 1.0;
+        for (out, input) in outputs.iter_mut().zip(inputs.iter()) {
+            out[..frames].copy_from_slice(&input[..frames]);
+        }
+        Ok(())
+    }
+
+    fn reset(&mut self) {}
+
+    fn latency(&self) -> usize {
+        0
+    }
+
+    fn outputs(&self) -> Vec<(u32, f32)> {
+        if self.has_outputs {
+            vec![(5, self.blocks), (7, -1.0)]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+#[test]
+fn a_plugin_that_plays_says_what_its_control_outputs_hold_after_each_block_on_the_board_that_it_was_given_and_nowhere_else()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_kind_of("ffrs_test_gain");
+    let plugin = kind.installed_plugin().unwrap();
+    let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs).unwrap();
+    let made = |board: Option<super::effect::MeterBoard>, has_outputs: bool| {
+        let instances: Vec<Box<dyn super::PluginInstance>> = (0..layout.instances())
+            .map(|_| {
+                Box::new(CountsItsBlocks {
+                    blocks: 0.0,
+                    has_outputs,
+                }) as Box<dyn super::PluginInstance>
+            })
+            .collect();
+        let effect = PluginEffect::new(
+            instances,
+            plugin,
+            the_effect(kind, &[1.0]),
+            thirty(),
+            0,
+            false,
+            Notes::default(),
+        )
+        .unwrap();
+        match board {
+            Some(board) => effect.showing_meters_on(board),
+            None => effect,
+        }
+    };
+    let board = super::effect::MeterBoard::default();
+    let mut effect = made(Some(Arc::clone(&board)), true);
+    let (mut left, mut right) = (vec![0.25_f32; 256], vec![0.25_f32; 256]);
+    assert!(board.lock().unwrap().is_empty(), "nothing is said before a block");
+
+    effect.process(&mut left, &mut right);
+    let first = board.lock().unwrap().get(&plugin.descriptor.key.to_string()).cloned();
+    effect.process(&mut left, &mut right);
+    let second = board.lock().unwrap().get(&plugin.descriptor.key.to_string()).cloned();
+
+    assert_eq!(
+        first,
+        Some(vec![(5, 1.0), (7, -1.0)]),
+        "by the key of the effect, with the handles"
+    );
+    assert!(
+        second.as_ref().is_some_and(|values| values[0].1 >= 2.0),
+        "and again after the next block: {second:?}"
+    );
+    let mut without_a_board = made(None, true);
+    without_a_board.process(&mut left, &mut right);
+    assert_eq!(
+        board.lock().unwrap().len(),
+        1,
+        "an effect that was given no board says nothing"
+    );
+    let empty_board = super::effect::MeterBoard::default();
+    let mut without_outputs = made(Some(Arc::clone(&empty_board)), false);
+    without_outputs.process(&mut left, &mut right);
+    assert!(
+        empty_board.lock().unwrap().is_empty(),
+        "a plugin with no control output is not written down as one with an empty list"
+    );
+}
+
+#[test]
+fn the_host_gives_the_effects_it_makes_a_board_that_it_reads_by_the_key_of_the_effect() {
+    use crate::plugin_scan::{effect_of_an_lv2_plugin, key_of_an_lv2_plugin};
+    let _alone = the_installed_plugins_to_myself();
+    let folder = tempfile::tempdir().unwrap();
+    let bundle = lv2_test_plugins::write_bundle(folder.path());
+    let scan = lv2_host::scan_bundle(&bundle, &mut |_| {}).unwrap();
+    set_installed_plugins(
+        scan.plugins
+            .iter()
+            .filter_map(|plugin| effect_of_an_lv2_plugin(&bundle, plugin).ok())
+            .collect(),
+    );
+    let key = key_of_an_lv2_plugin(lv2_test_plugins::LATENCY);
+    let kind = EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key() == key)
+        .unwrap();
+    let host = PluginHost::new();
+    host.allow_everything();
+    assert!(host.meters_of(&key).is_empty(), "nothing has played");
+    let effect = the_effect(kind, &[]);
+    let clip = a_clip_at(0, vec![effect.clone()]);
+    let mut processor = host
+        .processor_for(&effect, &clip, thirty(), &Notes::default(), false)
+        .expect("the plugin is made");
+    let (mut left, mut right) = (vec![0.0_f32; 512], vec![0.0_f32; 512]);
+
+    processor.process(&mut left, &mut right);
+
+    let meters = host.meters_of(&key);
+    assert_eq!(
+        meters.iter().map(|(port, _)| *port).collect::<Vec<_>>(),
+        vec![2, 3],
+        "the latency and the number of times it was started"
+    );
+    assert_eq!(meters[0].1, lv2_test_plugins::LATENCY_FRAMES as f32);
+    host.note_the_meters_of(&key, vec![(9, 0.5)]);
+    assert_eq!(host.meters_of(&key), vec![(9, 0.5)], "a test can say it too");
+}

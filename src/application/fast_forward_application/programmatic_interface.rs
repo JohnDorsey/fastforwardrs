@@ -33,6 +33,11 @@ impl FastForwardApplication {
         self.carry_out_all(vec![command], Instant::now(), &egui::Context::default());
     }
 
+    /// Says what the control outputs of the plugin whose effect has the key `key` hold, as if it were playing (**for the tests**, which have no sound): the windows of that plugin show them.
+    pub fn say_what_a_plugin_makes(&mut self, key: &str, values: Vec<(u32, f32)>) {
+        self.environment.plugin_host.note_the_meters_of(key, values);
+    }
+
     /// Whether the window of the plugin effect `instance` of `target` is open (phase 10).
     pub fn is_a_plugin_window_open(&self, target: AnimationTarget, instance: EffectInstanceId) -> bool {
         self.interface.plugin_editors.is_open(target, instance)

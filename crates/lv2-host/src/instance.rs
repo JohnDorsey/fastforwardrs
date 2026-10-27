@@ -295,6 +295,16 @@ impl Instance {
         is_a_control.then(|| self.controls[port as usize])
     }
 
+    /// What every control output holds now, as `(port, value)` in the order of the ports: what the last block made them (a meter, a latency). Empty if the plugin has none.
+    pub fn control_outputs(&self) -> Vec<(u32, f32)> {
+        self.description
+            .ports
+            .iter()
+            .filter(|port| port.kind == PortKind::Control && port.direction == PortDirection::Output)
+            .map(|port| (port.index, self.controls[port.index as usize]))
+            .collect()
+    }
+
     fn connect(&self, port: u32, pointer: *mut c_void) {
         // SAFETY: calling the plugin's `connect_port` (checked present when it was made) with its handle, a port that it described and a pointer to memory that the instance
         // owns and keeps where it is for as long as the plugin is connected to it (the boxes of this struct are never resized; the block's own buffers are connected again at

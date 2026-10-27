@@ -33,6 +33,10 @@ pub const SECONDS_TOO_SLOW: f64 = 2.0;
 /// not what was scanned, that could not be run, that was too slow). An entry is taken away when the plugin is wanted again and nothing is wrong.
 pub type ProblemBoard = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>;
 
+/// Where a plugin that is playing says what its control outputs hold, by the key of its effect, for the window that shows them as meters: `(handle, value)`. (Two effects of the same
+/// plugin that play at once write to the same place, and the last one is what is shown.)
+pub type MeterBoard = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<(u32, f32)>>>>;
+
 /// How a plugin is given the sound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
@@ -136,6 +140,8 @@ pub struct PluginEffect {
     notes: Notes,
     /// Where a plugin that is left out says why, for the window.
     problems: Option<ProblemBoard>,
+    /// Where the control outputs of the plugin are said after each block, if anyone looks at them.
+    meters: Option<MeterBoard>,
 }
 
 impl PluginEffect {
@@ -173,6 +179,7 @@ impl PluginEffect {
             has_said_its_start_is_unreliable: false,
             notes,
             problems: None,
+            meters: None,
         })
     }
 
@@ -191,6 +198,28 @@ impl PluginEffect {
     pub fn reporting_problems_on(mut self, board: ProblemBoard) -> Self {
         self.problems = Some(board);
         self
+    }
+
+    /// The same, saying what the plugin's control outputs hold on `board` after each block.
+    #[must_use]
+    pub fn showing_meters_on(mut self, board: MeterBoard) -> Self {
+        self.meters = Some(board);
+        self
+    }
+
+    /// Says on the board of meters, if there is one, what the (first copy of the) plugin's control outputs hold.
+    fn publish_the_meters(&self) {
+        let Some(board) = &self.meters else {
+            return;
+        };
+        let outputs = self.instances[0].outputs();
+        if outputs.is_empty() {
+            return;
+        }
+        board
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(self.plugin.descriptor.key.to_string(), outputs);
     }
 
     /// Says on the board, if there is one, why this plugin does nothing now.
@@ -425,6 +454,7 @@ impl BlockProcessor for PluginEffect {
             }
         }
         self.samples_done += total as u64;
+        self.publish_the_meters();
         if let Some(guard) = &mut self.guard {
             let block_seconds = total as f64 / f64::from(SAMPLE_RATE);
             let patience = guard.patience;

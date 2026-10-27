@@ -21,7 +21,7 @@ use fastforwardrs::project::{
     AnimationTarget, EffectInstanceId, EffectKind, PropertyId, PropertyValue, TimelineFrameIndex, set_installed_plugins,
 };
 use journey::Journey;
-use lv2_test_plugins::{UI_CLOSE_VALUE, UI_EDIT_VALUE};
+use lv2_test_plugins::{UI_CLOSE_VALUE, UI_EDIT_VALUE, UI_METER_CLOSE_VALUE};
 use support::{counter_video, scratch_directory};
 
 const SCANNER: &str = env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan");
@@ -248,4 +248,40 @@ fn a_plugin_that_has_no_window_has_no_button_for_one_and_a_plugin_whose_folder_n
         .problem_with_a_plugin_window(target, EffectInstanceId::FIRST)
         .expect("it says why");
     assert!(problem.contains("nobody has said yes"), "{problem}");
+}
+
+#[test]
+fn what_the_plugin_makes_reaches_its_window_as_it_plays_and_the_window_shows_it() {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let scratch = scratch_directory();
+    let (mut journey, target, kind) =
+        journey_with_an_lv2_plugin_on_the_clip(&toolchain, scratch.path(), "Test gain", true);
+    open_the_window(&mut journey);
+    draw_until(&mut journey, "the edit of the window", |journey| {
+        the_gain(journey, target, kind) == Some(PropertyValue::Number(UI_EDIT_VALUE))
+    });
+    assert!(
+        journey
+            .application()
+            .is_a_plugin_window_open(target, EffectInstanceId::FIRST)
+    );
+
+    // The plugin says (as it does when it plays: a test has no sound) that the port after its gain holds the value that the window of the test closes itself for.
+    journey
+        .application_mut()
+        .say_what_a_plugin_makes(kind.key(), vec![(3, UI_METER_CLOSE_VALUE)]);
+
+    draw_until(&mut journey, "the window to be told and close itself", |journey| {
+        !journey
+            .application()
+            .is_a_plugin_window_open(target, EffectInstanceId::FIRST)
+    });
+    assert!(
+        journey
+            .application()
+            .problem_with_a_plugin_window(target, EffectInstanceId::FIRST)
+            .is_none(),
+        "it was told and closed; it did not fail"
+    );
 }
