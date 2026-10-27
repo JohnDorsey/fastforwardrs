@@ -285,3 +285,79 @@ fn what_the_plugin_makes_reaches_its_window_as_it_plays_and_the_window_shows_it(
         "it was told and closed; it did not fail"
     );
 }
+
+#[test]
+fn a_preset_that_is_chosen_changes_the_value_in_the_project_and_the_window_that_is_open_is_told() {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let scratch = scratch_directory();
+    let (mut journey, target, kind) =
+        journey_with_an_lv2_plugin_on_the_clip(&toolchain, scratch.path(), "Test gain", true);
+    let presets = kind.installed_plugin().expect("it is installed").presets.clone();
+    assert_eq!(
+        presets.iter().map(|preset| preset.label.as_str()).collect::<Vec<_>>(),
+        vec![
+            lv2_test_plugins::GAIN_PRESET_CLOSES_THE_WINDOW_LABEL,
+            lv2_test_plugins::GAIN_PRESET_QUIET_LABEL
+        ],
+        "the presets of the bundle (from its Turtle, through the scan program) are the plugin's"
+    );
+    open_the_window(&mut journey);
+    draw_until(&mut journey, "the edit of the window", |journey| {
+        the_gain(journey, target, kind) == Some(PropertyValue::Number(UI_EDIT_VALUE))
+    });
+
+    // The preset that sets the gain to the value that the window closes itself for: it closes only if it was told.
+    journey
+        .application_mut()
+        .apply_a_preset_of_an_effect(target, EffectInstanceId::FIRST, 0);
+
+    assert_eq!(
+        the_gain(&journey, target, kind),
+        Some(PropertyValue::Number(UI_CLOSE_VALUE)),
+        "the preset's value is the effect's"
+    );
+    draw_until(
+        &mut journey,
+        "the window to be told the new value and close itself",
+        |journey| {
+            !journey
+                .application()
+                .is_a_plugin_window_open(target, EffectInstanceId::FIRST)
+        },
+    );
+    assert!(
+        journey
+            .application()
+            .problem_with_a_plugin_window(target, EffectInstanceId::FIRST)
+            .is_none(),
+        "it was told and closed; it did not fail"
+    );
+}
+
+/// **For a person to look at**: the *Presets* menu of the box of an LV2 plugin that has presets, open. Run by hand with
+/// `FASTFORWARDRS_SCREENSHOT_FOLDER=some/folder cargo test --test plugin_editor_lv2_journey -- --ignored write_a_screenshot_of_the_presets_menu`.
+#[test]
+#[ignore = "makes a picture for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_a_screenshot_of_the_presets_menu() {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let scratch = scratch_directory();
+    let (mut journey, _, _) = journey_with_an_lv2_plugin_on_the_clip(&toolchain, scratch.path(), "Test gain", true);
+    let folder = PathBuf::from(
+        std::env::var_os("FASTFORWARDRS_SCREENSHOT_FOLDER").expect("set FASTFORWARDRS_SCREENSHOT_FOLDER"),
+    );
+    std::fs::create_dir_all(&folder).unwrap();
+
+    let heading = journey.rectangle_of("Test gain").center();
+    journey.right_click(heading);
+    journey.open_the_smaller_menu("Presets");
+    journey.settle();
+
+    journey
+        .harness
+        .render()
+        .expect("the window could be drawn")
+        .save(folder.join("presets_menu.png"))
+        .expect("could not save the picture");
+}

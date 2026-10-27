@@ -406,6 +406,7 @@ fn a_bundle_found_by_a_scan_has_its_plugins_as_effects_or_as_plugins_not_used_an
         path: PathBuf::from("/lv2/amp.lv2"),
         outcome: LibraryOutcome::ScannedLv2(lv2_host::BundleScan {
             plugins: vec![usable, unusable],
+            presets: Vec::new(),
             problems: vec!["urn:x: its ports are not numbered from 0".to_owned()],
         }),
         from_cache: false,
@@ -428,6 +429,7 @@ fn the_same_lv2_plugin_in_two_folders_is_one_effect_the_first_wins() {
         path: PathBuf::from(bundle),
         outcome: LibraryOutcome::ScannedLv2(lv2_host::BundleScan {
             plugins: vec![plugin.clone()],
+            presets: Vec::new(),
             problems: Vec::new(),
         }),
         from_cache: false,
@@ -567,4 +569,300 @@ fn a_default_outside_the_range_is_brought_into_it() {
 
     assert_eq!(effect.descriptor.parameters[0].default, PropertyValue::Number(10.0));
     assert_eq!(effect.descriptor.parameters[1].default, PropertyValue::Number(0.0));
+}
+
+// --- presets (piece 11.7.2) ---
+
+fn a_preset(uri: &str, label: &str, applies_to: &str, values: &[(&str, f64)]) -> lv2_host::PresetDescription {
+    lv2_host::PresetDescription {
+        uri: uri.to_owned(),
+        label: label.to_owned(),
+        applies_to: vec![applies_to.to_owned()],
+        values: values
+            .iter()
+            .map(|(symbol, number)| ((*symbol).to_owned(), *number))
+            .collect(),
+        has_state: false,
+    }
+}
+
+/// A plugin with a value of each kind: a switch (slot 0), a whole number (1), a choice with three options (2), a logarithmic range (3), a range that is a fraction of the sample rate
+/// (4), a plain range (5), and a control output that is not a value (port 8).
+fn a_plugin_with_a_value_of_each_kind() -> ScannedPlugin {
+    let mut bypass = a_control(2, "bypass");
+    bypass.toggled = true;
+    let mut steps = a_control(3, "steps");
+    steps.integer = true;
+    (steps.minimum, steps.maximum, steps.default) = (Some(1.0), Some(16.0), Some(4.0));
+    let mut mode = a_control(4, "mode");
+    mode.integer = true;
+    mode.enumeration = true;
+    mode.scale_points = [(0.0, "Clean"), (1.0, "Warm"), (2.0, "Hot")]
+        .into_iter()
+        .map(|(value, label)| ScalePoint {
+            value,
+            label: label.to_owned(),
+        })
+        .collect();
+    mode.default = Some(1.0);
+    let mut cutoff = a_control(5, "cutoff");
+    cutoff.logarithmic = true;
+    (cutoff.minimum, cutoff.maximum, cutoff.default) = (Some(20.0), Some(20_000.0), Some(1000.0));
+    let mut rate = a_control(6, "rate");
+    rate.sample_rate_relative = true;
+    (rate.minimum, rate.maximum, rate.default) = (Some(0.0), Some(0.5), Some(0.25));
+    let mut gain = a_control(7, "gain");
+    (gain.minimum, gain.maximum, gain.default) = (Some(0.0), Some(4.0), Some(1.0));
+    let meter = a_port(8, "meter", PortDirection::Output, PortKind::Control);
+    a_plugin_with(vec![bypass, steps, mode, cutoff, rate, gain, meter])
+}
+
+fn the_report_of(
+    bundle: &str,
+    plugins: Vec<ScannedPlugin>,
+    presets: Vec<lv2_host::PresetDescription>,
+) -> LibraryReport {
+    LibraryReport {
+        path: PathBuf::from(bundle),
+        outcome: LibraryOutcome::ScannedLv2(lv2_host::BundleScan {
+            plugins,
+            presets,
+            problems: Vec::new(),
+        }),
+        from_cache: false,
+    }
+}
+
+const THE_AMP: &str = "http://example.org/plugins/amp";
+
+#[test]
+fn a_preset_sets_the_values_of_the_effect_as_the_controls_of_the_effect_make_them_and_in_the_order_the_preset_gives() {
+    let preset = a_preset(
+        "urn:p#1",
+        "Everything",
+        THE_AMP,
+        &[
+            ("gain", 9.0),
+            ("mode", 1.8),
+            ("bypass", 1.0),
+            ("rate", 12_000.0),
+            ("steps", 6.4),
+            ("cutoff", 5.0),
+        ],
+    );
+
+    let found = plugins_found_in(&[the_report_of(
+        "/lv2/amp.lv2",
+        vec![a_plugin_with_a_value_of_each_kind()],
+        vec![preset],
+    )]);
+
+    let presets = &found.effects[0].presets;
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].label, "Everything");
+    assert_eq!(
+        presets[0].values,
+        vec![
+            (5, PropertyValue::Number(4.0)),
+            (2, PropertyValue::Words("2".to_owned())),
+            (0, PropertyValue::Flag(true)),
+            (4, PropertyValue::Number(12_000.0)),
+            (1, PropertyValue::Number(6.0)),
+            (3, PropertyValue::Number(20.0)),
+        ],
+        "a number above the range is the top of it, the option that is nearest, a switch from 0.5, a whole number rounded, a number below the range is the bottom of it; the slot is the place of the value in the effect"
+    );
+    assert_eq!(presets[0].left_out, 0);
+    assert!(!presets[0].has_state);
+}
+
+#[test]
+fn a_switch_is_on_from_one_half_and_the_nearest_option_of_a_choice_is_taken_with_the_lower_one_for_a_tie_that_is_exact()
+{
+    let at = |bypass: f64, mode: f64| {
+        let found = plugins_found_in(&[the_report_of(
+            "/lv2/amp.lv2",
+            vec![a_plugin_with_a_value_of_each_kind()],
+            vec![a_preset("urn:p#1", "P", THE_AMP, &[("bypass", bypass), ("mode", mode)])],
+        )]);
+        found.effects[0].presets[0].values.clone()
+    };
+
+    assert_eq!(at(0.49, 0.4)[0].1, PropertyValue::Flag(false));
+    assert_eq!(at(0.5, 0.4)[0].1, PropertyValue::Flag(true));
+    assert_eq!(at(0.0, 0.4)[1].1, PropertyValue::Words("0".to_owned()));
+    assert_eq!(at(0.0, 0.6)[1].1, PropertyValue::Words("1".to_owned()));
+    assert_eq!(
+        at(0.0, 1.5)[1].1,
+        PropertyValue::Words("1".to_owned()),
+        "an exact tie: the first option"
+    );
+    assert_eq!(at(0.0, 100.0)[1].1, PropertyValue::Words("2".to_owned()));
+    assert_eq!(at(0.0, -5.0)[1].1, PropertyValue::Words("0".to_owned()));
+}
+
+#[test]
+fn what_the_effect_has_no_value_for_is_left_out_and_counted_and_the_rest_of_the_preset_is_kept() {
+    let preset = a_preset(
+        "urn:p#1",
+        "Mixed",
+        THE_AMP,
+        &[
+            ("gain", 2.0),
+            ("nothing_like_it", 1.0),
+            ("audio0", 1.0),
+            ("meter", 0.5),
+            ("steps", 8.0),
+        ],
+    );
+
+    let found = plugins_found_in(&[the_report_of(
+        "/lv2/amp.lv2",
+        vec![a_plugin_with_a_value_of_each_kind()],
+        vec![preset],
+    )]);
+
+    let preset = &found.effects[0].presets[0];
+    assert_eq!(
+        preset.values,
+        vec![(5, PropertyValue::Number(2.0)), (1, PropertyValue::Number(8.0))]
+    );
+    assert_eq!(
+        preset.left_out, 3,
+        "a symbol that is no port, an audio port, and a control output"
+    );
+}
+
+#[test]
+fn a_preset_that_sets_nothing_is_not_offered_and_one_with_a_state_as_well_is_offered_with_its_values_and_says_so() {
+    let nothing = a_preset("urn:p#1", "Nothing", THE_AMP, &[("nothing_like_it", 1.0)]);
+    let mut only_state = a_preset("urn:p#2", "Only state", THE_AMP, &[]);
+    only_state.has_state = true;
+    let mut both = a_preset("urn:p#3", "Both", THE_AMP, &[("gain", 3.0)]);
+    both.has_state = true;
+
+    let found = plugins_found_in(&[the_report_of(
+        "/lv2/amp.lv2",
+        vec![a_plugin_with_a_value_of_each_kind()],
+        vec![nothing, only_state, both],
+    )]);
+
+    let presets = &found.effects[0].presets;
+    assert_eq!(presets.len(), 1, "{presets:?}");
+    assert_eq!(presets[0].label, "Both");
+    assert!(presets[0].has_state, "the menu says that only its values are used");
+}
+
+#[test]
+fn a_plugin_is_given_the_presets_that_name_its_uri_from_every_bundle_in_the_order_of_the_bundles_and_a_preset_that_is_in_two_is_in_the_list_once()
+ {
+    let plugin = a_plugin_with_a_value_of_each_kind();
+    let other_uri = "http://example.org/plugins/other";
+    let reports = [
+        the_report_of(
+            "/lv2/amp.lv2",
+            vec![plugin.clone()],
+            vec![
+                a_preset("urn:p#a", "Own A", THE_AMP, &[("gain", 1.0)]),
+                a_preset("urn:p#b", "For the other", other_uri, &[("gain", 1.0)]),
+            ],
+        ),
+        // (A bundle of presets that has no plugin.)
+        the_report_of(
+            "/lv2/amp-presets.lv2",
+            Vec::new(),
+            vec![
+                a_preset("urn:q#1", "From elsewhere", THE_AMP, &[("gain", 2.0)]),
+                a_preset("urn:p#a", "Own A again", THE_AMP, &[("gain", 3.0)]),
+            ],
+        ),
+    ];
+
+    let found = plugins_found_in(&reports);
+
+    let labels: Vec<&str> = found.effects[0]
+        .presets
+        .iter()
+        .map(|preset| preset.label.as_str())
+        .collect();
+    assert_eq!(labels, vec!["Own A", "From elsewhere"]);
+    assert_eq!(
+        found.effects[0].presets[0].values[0].1,
+        PropertyValue::Number(1.0),
+        "the first of two presets with one URI is the one"
+    );
+}
+
+#[test]
+fn a_preset_that_names_two_plugins_is_given_to_both_and_a_plugin_that_is_not_an_effect_has_no_presets_to_give() {
+    let first = a_plugin_with_a_value_of_each_kind();
+    let mut second = a_plugin_with_a_value_of_each_kind();
+    second.description.uri = "http://example.org/plugins/second".to_owned();
+    let mut generator = a_plugin_of(vec![audio(0, PortDirection::Output), a_control(1, "gain")]);
+    generator.description.uri = "http://example.org/plugins/generator".to_owned();
+    let mut preset = a_preset("urn:p#1", "For both", THE_AMP, &[("gain", 2.0)]);
+    preset.applies_to.push("http://example.org/plugins/second".to_owned());
+    preset
+        .applies_to
+        .push("http://example.org/plugins/generator".to_owned());
+
+    let found = plugins_found_in(&[the_report_of(
+        "/lv2/amp.lv2",
+        vec![first, second, generator],
+        vec![preset],
+    )]);
+
+    assert_eq!(found.effects.len(), 2);
+    assert!(found.effects.iter().all(|effect| effect.presets.len() == 1));
+    assert_eq!(
+        found.not_used.len(),
+        1,
+        "the generator is not used and nothing more is said of its preset"
+    );
+}
+
+#[test]
+fn a_plugin_that_has_values_beyond_the_most_an_effect_may_have_gets_the_preset_values_it_has_a_slot_for_and_the_others_are_left_out()
+ {
+    let controls: Vec<PortDescription> = (0..MOST_VALUES_OF_AN_EFFECT as u32 + 2)
+        .map(|place| a_control(2 + place, &format!("v{place}")))
+        .collect();
+    let last = format!("v{}", MOST_VALUES_OF_AN_EFFECT + 1);
+    let first = "v0".to_owned();
+    let preset = lv2_host::PresetDescription {
+        uri: "urn:p#1".to_owned(),
+        label: "Wide".to_owned(),
+        applies_to: vec![THE_AMP.to_owned()],
+        values: vec![(first, 1.0), (last, 1.0)],
+        has_state: false,
+    };
+
+    let found = plugins_found_in(&[the_report_of(
+        "/lv2/amp.lv2",
+        vec![a_plugin_with(controls)],
+        vec![preset],
+    )]);
+
+    let preset = &found.effects[0].presets[0];
+    assert_eq!(preset.values.len(), 1);
+    assert_eq!(preset.values[0].0, 0);
+    assert_eq!(preset.left_out, 1);
+}
+
+#[test]
+fn the_same_plugin_without_a_preset_in_the_scan_has_none_and_the_key_and_the_values_do_not_depend_on_them() {
+    let plugin = a_plugin_with_a_value_of_each_kind();
+    let without = plugins_found_in(&[the_report_of("/lv2/amp.lv2", vec![plugin.clone()], Vec::new())]);
+    let with = plugins_found_in(&[the_report_of(
+        "/lv2/amp.lv2",
+        vec![plugin],
+        vec![a_preset("urn:p#1", "P", THE_AMP, &[("gain", 2.0)])],
+    )]);
+
+    assert!(without.effects[0].presets.is_empty());
+    assert_eq!(
+        without.effects[0].descriptor, with.effects[0].descriptor,
+        "a preset is not a part of what kind of effect it is: a project that has the effect is the same with or without presets"
+    );
+    assert_eq!(without.effects[0].value_handles, with.effects[0].value_handles);
 }

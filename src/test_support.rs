@@ -485,6 +485,7 @@ pub fn an_installed_sound_plugin(
         pre_roll_samples: 0,
         has_a_window: false,
         start_warning: None,
+        presets: Vec::new(),
     }
 }
 

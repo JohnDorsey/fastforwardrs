@@ -1090,3 +1090,147 @@ fn a_copy_of_an_effect_is_refused_when_there_are_sixty_four_already() {
     );
     assert_eq!(made.project.effects_of(clip(made.video)).unwrap().len(), 64);
 }
+
+// --- the values of a preset (piece 11.7.3) ---
+
+/// A sound plugin with three numbers is installed (the caller holds the list), and it is put on the sound of [`OneOfEach`]: its kind and the name it has in the chain of the sound.
+fn an_effect_with_three_values_on_the_sound(each: &mut OneOfEach) -> (EffectKind, EffectInstanceId) {
+    crate::project::set_installed_plugins(vec![crate::test_support::an_installed_sound_plugin(
+        "ladspa:presets:amp",
+        "Presets",
+        &[("gain", 0.0, None), ("tone", 0.0, None), ("mix", 0.0, None)],
+    )]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let instance = each.project.add_effect(clip(each.sound), kind).unwrap();
+    (kind, instance)
+}
+
+fn the_values_of(project: &Project, target: AnimationTarget, instance: EffectInstanceId) -> Vec<PropertyValue> {
+    project
+        .effects_of(target)
+        .unwrap()
+        .instance(instance)
+        .unwrap()
+        .values()
+        .to_vec()
+}
+
+#[test]
+fn the_values_of_a_preset_are_given_to_the_effect_in_one_call_and_a_value_that_has_keyframes_is_left_as_it_is_and_counted()
+ {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let mut each = one_of_each();
+    let (kind, instance) = an_effect_with_three_values_on_the_sound(&mut each);
+    let property = move |slot: usize| PropertyId::effect_value(kind, instance, slot as u8);
+    make_a_keyframe(&mut each.project, clip(each.sound), property(1), 5, turn(7.0));
+    make_a_keyframe(&mut each.project, clip(each.sound), property(1), 50, turn(9.0));
+
+    let kept = each
+        .project
+        .apply_values_to_an_effect(
+            clip(each.sound),
+            instance,
+            &[(0, turn(3.0)), (1, turn(100.0)), (2, turn(5.0))],
+            frame(20),
+        )
+        .unwrap();
+
+    assert_eq!(kept, 1, "the value with keyframes");
+    let values = the_values_of(&each.project, clip(each.sound), instance);
+    assert_eq!(values[0], turn(3.0));
+    assert_eq!(values[2], turn(5.0));
+    assert!(
+        each.project.is_animated(clip(each.sound), property(1)),
+        "its keyframes are there"
+    );
+    assert_eq!(
+        each.project.property_value_at(clip(each.sound), property(1), frame(5)),
+        Some(turn(7.0)),
+        "and say what they said"
+    );
+    assert_eq!(
+        each.project.property_value_at(clip(each.sound), property(1), frame(50)),
+        Some(turn(9.0))
+    );
+}
+
+#[test]
+fn a_slot_that_the_effect_has_no_value_for_is_ignored_and_a_value_of_the_wrong_kind_is_an_error_that_changes_nothing() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let mut each = one_of_each();
+    let (_, instance) = an_effect_with_three_values_on_the_sound(&mut each);
+
+    let kept = each
+        .project
+        .apply_values_to_an_effect(clip(each.sound), instance, &[(0, turn(1.0)), (9, turn(2.0))], frame(0))
+        .unwrap();
+
+    assert_eq!(kept, 0);
+    assert_eq!(
+        the_values_of(&each.project, clip(each.sound), instance),
+        vec![turn(1.0), turn(0.0), turn(0.0)]
+    );
+
+    let before = the_values_of(&each.project, clip(each.sound), instance);
+    let refused = each.project.apply_values_to_an_effect(
+        clip(each.sound),
+        instance,
+        &[(0, turn(5.0)), (1, PropertyValue::Flag(true))],
+        frame(0),
+    );
+    assert!(refused.is_err(), "a switch is not a number");
+    assert_eq!(
+        the_values_of(&each.project, clip(each.sound), instance),
+        before,
+        "the first value that was fit is not kept either: the call is all or nothing"
+    );
+}
+
+#[test]
+fn an_effect_that_is_not_there_is_an_error_for_a_preset_too() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let mut each = one_of_each();
+    let (_, instance) = an_effect_with_three_values_on_the_sound(&mut each);
+
+    let on_another_clip =
+        each.project
+            .apply_values_to_an_effect(clip(each.video), instance, &[(0, turn(1.0))], frame(0));
+    let on_a_clip_that_is_not_there = each.project.apply_values_to_an_effect(
+        clip(ClipId::new(TrackId::new(99), 0)),
+        instance,
+        &[(0, turn(1.0))],
+        frame(0),
+    );
+
+    assert!(matches!(on_another_clip, Err(EditError::DoesNotHaveThatEffect { .. })));
+    assert!(on_a_clip_that_is_not_there.is_err());
+}
+
+#[test]
+fn the_values_of_a_preset_are_given_to_the_effect_of_a_track_as_well() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let mut each = one_of_each();
+    crate::project::set_installed_plugins(vec![crate::test_support::an_installed_sound_plugin(
+        "ladspa:presets:amp",
+        "Presets",
+        &[("gain", 0.0, None), ("tone", 0.0, None)],
+    )]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let instance = each.project.add_effect(track(each.sound_track), kind).unwrap();
+
+    let kept = each
+        .project
+        .apply_values_to_an_effect(
+            track(each.sound_track),
+            instance,
+            &[(1, turn(8.0)), (0, turn(4.0))],
+            frame(0),
+        )
+        .unwrap();
+
+    assert_eq!(kept, 0);
+    assert_eq!(
+        the_values_of(&each.project, track(each.sound_track), instance),
+        vec![turn(4.0), turn(8.0)]
+    );
+}

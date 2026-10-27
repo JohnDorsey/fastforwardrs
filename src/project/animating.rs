@@ -439,7 +439,7 @@ fn the_frame_the_clip_is_at(placement: &ClipPlacement<'_>, timeline_frame: Timel
     timeline_frame.value().clamp(first, last)
 }
 
-fn not_a_property_of(target: AnimationTarget, property: PropertyId) -> EditError {
+pub(super) fn not_a_property_of(target: AnimationTarget, property: PropertyId) -> EditError {
     match target {
         AnimationTarget::Clip(clip) => ClipEditError::NotAPropertyOfThisClip { clip, property }.into(),
         AnimationTarget::Track(track) => EditError::NotAPropertyOfTheTrack { track, property },

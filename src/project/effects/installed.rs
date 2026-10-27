@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError, RwLock};
 
 use super::{EffectDescriptor, EffectKind};
+use crate::project::PropertyValue;
 
 /// Which plugin of a library a plugin is, in the way its format says (C14 of `docs/engine-phase-7-clap-design.md`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -42,6 +43,20 @@ impl PluginAddress {
     }
 }
 
+/// A preset of a plugin: values for some of the values of its effect, that a person picks from a menu (piece 11.7 of `docs/engine-phase-11-presets-design.md`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectPreset {
+    /// What the menu shows.
+    pub label: String,
+    /// The values it sets, in the order the preset gives them: the place of each in the values of the effect (its slot), and what it is. Made as the controls of the effect make a
+    /// value, so that a preset cannot be something that the effect's own control cannot show.
+    pub values: Vec<(usize, PropertyValue)>,
+    /// How many numbers of the preset the effect has no value for (a symbol that is no control input, a control that is not a value of the effect).
+    pub left_out: usize,
+    /// The preset also has a state, which is not used (the menu says that only its values are).
+    pub has_state: bool,
+}
+
 /// A plugin that is installed, as a type of effect, and where and how to find it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstalledPlugin {
@@ -64,6 +79,9 @@ pub struct InstalledPlugin {
     /// What the check of the plugin's start found, if it found something to tell a person (`StartCheck::warning` of `clap-host`): the plugin's sound at its start depends on what was in
     /// memory before it was made. `None` for a plugin that was found steady, that varies by itself, that was not checked (a LADSPA plugin is not).
     pub start_warning: Option<String>,
+    /// The presets that the plugin has, in the order of the folders they were found in, then of their URIs (LV2: those of the bundles that name the plugin, which may be bundles of
+    /// their own). A preset is not a part of what kind of effect this is: `descriptor` does not depend on it.
+    pub presets: Vec<EffectPreset>,
 }
 
 /// The plugins that are installed now, in the order of the folders they were found in.

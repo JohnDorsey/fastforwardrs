@@ -41,6 +41,13 @@ pub const CLOSE_EDITOR_LABEL: &str = "Close editor";
 /// What the box of a plugin says when its window could not be opened or ended: followed by why.
 pub const EDITOR_PROBLEM_NOTE: &str = "The plugin's window:";
 
+/// What the smaller menu of the menu of a box of a plugin effect that has presets is called, what it says under them, and what is put before the preset that the effect's values are
+/// now (and after the label of one that has a state too, which is not used).
+pub const PRESETS_LABEL: &str = "Presets";
+pub const PRESETS_NOTE: &str = "A value that has keyframes is kept as it is.";
+pub const PRESET_IS_SET_MARK: &str = "\u{2713} ";
+pub const PRESET_HAS_A_STATE_NOTE: &str = " (values only)";
+
 /// What the item of the menu of a box of an effect that deletes the effect is called.
 pub const DELETE_EFFECT_LABEL: &str = "Delete effect";
 

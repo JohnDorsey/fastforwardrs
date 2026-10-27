@@ -302,6 +302,14 @@ pub enum Command {
         value: PropertyValue,
     },
 
+    /// Give the values of the plugin effect `instance` of the clip or the track `target` what the preset number `preset` of its plugin says (from the *Presets* menu of the box of the
+    /// effect; piece 11.7 of `docs/engine-phase-11-presets-design.md`). It is one step of undo. A value that has keyframes is left as it is.
+    ApplyEffectPreset {
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+        preset: usize,
+    },
+
     /// Open the window of the plugin effect `instance` of the clip or the track `target` (phase 10), if it has one. What cannot be done is said in the box of the effect.
     OpenPluginEditor {
         target: AnimationTarget,
@@ -487,6 +495,7 @@ impl Command {
             | Self::NewGeneratorClipOfKind { .. }
             | Self::SetTextObject { .. }
             | Self::SetClipDuration { .. }
+            | Self::ApplyEffectPreset { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
@@ -624,6 +633,7 @@ impl Command {
             | Self::NewGeneratorClip { .. }
             | Self::NewGeneratorClipOfKind { .. }
             | Self::SetTextObject { .. }
+            | Self::ApplyEffectPreset { .. }
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }

@@ -19,10 +19,11 @@ use super::badge::{self, BadgeLook};
 use super::effects::{
     ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, CLOSE_EDITOR_LABEL, DELETE_EFFECT_LABEL,
     DEPENDS_ON_EARLIER_FRAMES_NOTE, DUPLICATE_EFFECT_LABEL, EDITOR_PROBLEM_NOTE, NO_EFFECT_FOUND_NOTE,
-    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, OPEN_EDITOR_LABEL, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL,
-    SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE, TRANSITION_NOTE, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE,
-    effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept,
-    show_the_control_of, show_the_control_of_a_group_effect,
+    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, OPEN_EDITOR_LABEL, PRESET_HAS_A_STATE_NOTE, PRESET_IS_SET_MARK,
+    PRESETS_LABEL, PRESETS_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
+    SWITCHED_OFF_NOTE, TRANSITION_NOTE, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match,
+    effects_to_offer, grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept, show_the_control_of,
+    show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -168,6 +169,13 @@ fn show_an_effect(
             (content.plugin_window_problem)(target, effect.instance()),
         )
     });
+    // (The presets of a plugin: a clip or a track has the menu of them, as it has the window; a group does not.)
+    let presets_of = match owner {
+        Member::Clip(clip) => Some(AnimationTarget::Clip(clip)),
+        Member::Track(track) => Some(AnimationTarget::Track(track)),
+        Member::Group(_) => None,
+    }
+    .zip(kind.installed_plugin().filter(|plugin| !plugin.presets.is_empty()));
     let title = chain.map_or_else(
         || what_an_effect_is_called(kind),
         |chain| what_an_effect_in_a_chain_is_called(chain, effect),
@@ -201,6 +209,33 @@ fn show_an_effect(
             {
                 to_toggle_the_editor.set(true);
                 ui.close();
+            }
+            if let Some((target, plugin)) = presets_of {
+                ui.menu_button(PRESETS_LABEL, |ui| {
+                    for (number, preset) in plugin.presets.iter().enumerate() {
+                        // (The preset that the effect is set to is marked: every value that it gives is the value that the effect has.)
+                        let is_set = preset
+                            .values
+                            .iter()
+                            .all(|(slot, value)| effect.values().get(*slot) == Some(value));
+                        let text = format!(
+                            "{}{}{}",
+                            if is_set { PRESET_IS_SET_MARK } else { "" },
+                            preset.label,
+                            if preset.has_state { PRESET_HAS_A_STATE_NOTE } else { "" }
+                        );
+                        if ui.button(text).clicked() {
+                            from_the_menu.push(Command::ApplyEffectPreset {
+                                target,
+                                instance: effect.instance(),
+                                preset: number,
+                            });
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.weak(PRESETS_NOTE);
+                });
             }
             if ui.button(label).clicked() {
                 to_be_switched = true;

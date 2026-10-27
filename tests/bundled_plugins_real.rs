@@ -245,3 +245,103 @@ fn every_real_lv2_plugin_makes_finite_sound_that_is_not_silent_and_is_changed_by
         );
     }
 }
+
+/// A value of an effect as the number that the plugin's port holds.
+fn number_of(value: &fastforwardrs::project::PropertyValue) -> f32 {
+    use fastforwardrs::project::PropertyValue;
+    match value {
+        PropertyValue::Number(number) => *number,
+        PropertyValue::Flag(on) => f32::from(u8::from(*on)),
+        PropertyValue::Words(id) => id.parse().expect("the id of an option of an LV2 choice is its number"),
+        other => panic!("not a value of an LV2 port: {other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "needs the folder of bundled plugins that tools/bundled_plugins/fetch_bundled_plugins.py makes (FFRS_BUNDLED_PLUGINS)"]
+fn the_presets_that_the_real_bundles_say_are_found_and_every_one_of_them_runs_in_its_plugin_with_finite_sound() {
+    let folder = bundled_plugins_folder().expect("FFRS_BUNDLED_PLUGINS names the folder that the script made");
+    let mut scanner = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory())
+        .with_time_limit(std::time::Duration::from_secs(30));
+    let scan = scanner.scan_folders(std::slice::from_ref(&folder));
+    let found = plugins_found_in(&scan.libraries);
+    let mut tried = Vec::new();
+    for effect in &found.effects {
+        let fastforwardrs::project::PluginAddress::Lv2 { uri } = &effect.address else {
+            continue;
+        };
+        if effect.presets.is_empty() {
+            continue;
+        }
+        let description = lv2_host::describe_bundle(&effect.library).expect("the bundle is described");
+        let plugin = description
+            .plugins
+            .iter()
+            .find(|plugin| plugin.uri == *uri)
+            .expect("the plugin is in its bundle");
+        let library = lv2_host::Library::open(&plugin.binary).expect("the library loads");
+        for preset in &effect.presets {
+            let mut instance = lv2_host::Instance::new(&library, plugin, 48_000.0, 512).expect("the plugin is made");
+            for (slot, value) in &preset.values {
+                assert!(
+                    instance.set_control(effect.value_handles[*slot], number_of(value)),
+                    "{}: {}: the port of slot {slot} is not a control input",
+                    effect.descriptor.name,
+                    preset.label
+                );
+            }
+            let (inputs, outputs) = instance.audio_port_counts();
+            let (mut peak, mut finite) = (0.0_f32, true);
+            for block in 0..50 {
+                let mut ins: Vec<Vec<f32>> = (0..inputs)
+                    .map(|channel| {
+                        (0..512)
+                            .map(|frame| {
+                                let at = (block * 512 + frame) as f32 / 48_000.0;
+                                0.25 * (std::f32::consts::TAU * (220.0 + 110.0 * channel as f32) * at).sin()
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let mut outs: Vec<Vec<f32>> = (0..outputs).map(|_| vec![0.0; 512]).collect();
+                let mut in_slices: Vec<&mut [f32]> = ins.iter_mut().map(Vec::as_mut_slice).collect();
+                let mut out_slices: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
+                instance
+                    .run(&mut in_slices, &mut out_slices, 512)
+                    .expect("the plugin runs");
+                for sample in outs.iter().flatten() {
+                    finite &= sample.is_finite();
+                    peak = peak.max(sample.abs());
+                }
+            }
+            println!(
+                "{:<14} {:<22} {} values ({} left out)  peak {peak:.3}",
+                effect.descriptor.name,
+                preset.label,
+                preset.values.len(),
+                preset.left_out
+            );
+            assert!(
+                finite,
+                "{}: {}: a sample that is not a number",
+                effect.descriptor.name, preset.label
+            );
+            assert!(
+                peak < 16.0,
+                "{}: {}: a peak of {peak}",
+                effect.descriptor.name,
+                preset.label
+            );
+            tried.push((effect.descriptor.name.to_string(), preset.label.clone()));
+        }
+    }
+    let names: std::collections::BTreeSet<&str> = tried.iter().map(|(name, _)| name.as_str()).collect();
+    if cfg!(target_os = "macos") {
+        // (The manifest has no LV2 builds for macOS yet.)
+        eprintln!("SKIPPED: no LV2 builds for macOS");
+        return;
+    }
+    for wanted in ["mverb", "3 band eq", "ping pong pan", "cycle shifter"] {
+        assert!(names.contains(wanted), "no preset of {wanted}: {names:?}");
+    }
+}

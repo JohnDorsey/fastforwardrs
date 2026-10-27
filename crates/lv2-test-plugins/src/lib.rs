@@ -932,7 +932,38 @@ const PREFIXES: &str = r#"@prefix atom: <http://lv2plug.in/ns/ext/atom#> .
 @prefix bufsz: <http://lv2plug.in/ns/ext/buf-size#> .
 @prefix log:  <http://lv2plug.in/ns/ext/log#> .
 @prefix ui:   <http://lv2plug.in/ns/extensions/ui#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
 "#;
+
+/// The presets of the test bundle (piece 11.7), as a bundle writes them: the nodes with their labels in the manifest, the values in `presets.ttl`. The gain plugin has two (the second
+/// sets the gain to the value that the window of the test interface closes itself for, so a window that was told the new values shows that it was), the controls plugin has one with a value
+/// of every kind, and one is for a plugin that is not in the bundle.
+pub const GAIN_PRESET_QUIET: &str = "urn:fastforwardrs:test:gain#quiet";
+pub const GAIN_PRESET_QUIET_LABEL: &str = "Quiet";
+pub const GAIN_PRESET_QUIET_VALUE: f32 = 0.25;
+pub const GAIN_PRESET_CLOSES_THE_WINDOW: &str = "urn:fastforwardrs:test:gain#close";
+pub const GAIN_PRESET_CLOSES_THE_WINDOW_LABEL: &str = "Closes the window";
+pub const CONTROLS_PRESET_EVERYTHING: &str = "urn:fastforwardrs:test:controls#everything";
+pub const CONTROLS_PRESET_EVERYTHING_LABEL: &str = "Everything";
+pub const PRESET_OF_ANOTHER_PLUGIN: &str = "urn:fastforwardrs:test:somewhere_else#preset";
+
+fn the_preset_nodes() -> String {
+    format!(
+        "\n<{GAIN_PRESET_QUIET}>\n    a pset:Preset ;\n    lv2:appliesTo <{GAIN}> ;\n    rdfs:label \"{GAIN_PRESET_QUIET_LABEL}\" ;\n    rdfs:seeAlso <presets.ttl> .\n\
+         \n<{GAIN_PRESET_CLOSES_THE_WINDOW}>\n    a pset:Preset ;\n    lv2:appliesTo <{GAIN}> ;\n    rdfs:label \"{GAIN_PRESET_CLOSES_THE_WINDOW_LABEL}\" ;\n    rdfs:seeAlso <presets.ttl> .\n\
+         \n<{CONTROLS_PRESET_EVERYTHING}>\n    a pset:Preset ;\n    lv2:appliesTo <{CONTROLS}> ;\n    rdfs:label \"{CONTROLS_PRESET_EVERYTHING_LABEL}\" ;\n    rdfs:seeAlso <presets.ttl> .\n\
+         \n<{PRESET_OF_ANOTHER_PLUGIN}>\n    a pset:Preset ;\n    lv2:appliesTo <urn:fastforwardrs:test:somewhere_else> ;\n    rdfs:label \"Not for this bundle\" ;\n    rdfs:seeAlso <presets.ttl> .\n"
+    )
+}
+
+fn the_preset_values() -> String {
+    format!(
+        "{PREFIXES}\n<{GAIN_PRESET_QUIET}>\n    lv2:port [ lv2:symbol \"gain\" ; pset:value {GAIN_PRESET_QUIET_VALUE} ] .\n\
+         \n<{GAIN_PRESET_CLOSES_THE_WINDOW}>\n    lv2:port [ lv2:symbol \"gain\" ; pset:value 3 ] .\n\
+         \n<{CONTROLS_PRESET_EVERYTHING}>\n    lv2:port [ lv2:symbol \"bypass\" ; pset:value 1 ] , [ lv2:symbol \"steps\" ; pset:value 6 ] , [ lv2:symbol \"mode\" ; pset:value 2 ] , [ lv2:symbol \"cutoff\" ; pset:value 440 ] , [ lv2:symbol \"rate\" ; pset:value 12000 ] .\n\
+         \n<{PRESET_OF_ANOTHER_PLUGIN}>\n    lv2:port [ lv2:symbol \"gain\" ; pset:value 1 ] .\n"
+    )
+}
 
 fn audio_pair() -> &'static str {
     r#"    lv2:port [
@@ -1107,6 +1138,7 @@ pub fn bundle_files(library_file_name: &str) -> Vec<(String, String)> {
             "\n<{uri}>\n    a lv2:Plugin ;\n{window}    lv2:binary <{library_file_name}> ;\n    rdfs:seeAlso <{file}> .\n"
         ));
     }
+    manifest.push_str(&the_preset_nodes());
     let class = if cfg!(windows) {
         "ui:WindowsUI"
     } else if cfg!(target_os = "macos") {
@@ -1119,7 +1151,10 @@ pub fn bundle_files(library_file_name: &str) -> Vec<(String, String)> {
             "\n<{window}>\n    a {class} ;\n    ui:binary <{library_file_name}> ;\n    lv2:requiredFeature ui:parent ;\n    lv2:optionalFeature ui:resize , ui:touch , ui:portMap ;\n    lv2:extensionData ui:idleInterface , ui:resize .\n"
         ));
     }
-    let mut files = vec![("manifest.ttl".to_owned(), manifest)];
+    let mut files = vec![
+        ("manifest.ttl".to_owned(), manifest),
+        ("presets.ttl".to_owned(), the_preset_values()),
+    ];
     files.extend(plugins);
     files
 }

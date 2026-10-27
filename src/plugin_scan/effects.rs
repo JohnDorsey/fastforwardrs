@@ -20,8 +20,8 @@ use ladspa_host::{PortDescription, PortDirection, PortKind, ScannedPlugin};
 
 use super::scanner::{LibraryOutcome, LibraryReport};
 use crate::project::{
-    ChoiceOption, EffectDescriptor, EffectDomain, InstalledPlugin, MOST_VALUES_OF_AN_EFFECT, ParameterControl,
-    ParameterDescriptor, PluginAddress, PropertyValue, UnknownFields, ValueScale,
+    ChoiceOption, EffectDescriptor, EffectDomain, EffectPreset, InstalledPlugin, MOST_VALUES_OF_AN_EFFECT,
+    ParameterControl, ParameterDescriptor, PluginAddress, PropertyValue, UnknownFields, ValueScale,
 };
 use crate::sound_engine::SAMPLE_RATE;
 
@@ -45,6 +45,18 @@ pub struct PluginsFound {
 /// `LADSPA_PATH`, then the usual ones, then those of CLAP).
 pub fn plugins_found_in(reports: &[LibraryReport]) -> PluginsFound {
     let mut found = PluginsFound::default();
+    // (The presets of every bundle, in the order of the bundles: a preset is given to the plugin whose URI it names, and may be in a bundle that has no plugin. Of two with one URI the
+    // first is the one.)
+    let mut presets: Vec<&lv2_host::PresetDescription> = Vec::new();
+    for report in reports {
+        if let LibraryOutcome::ScannedLv2(scan) = &report.outcome {
+            for preset in &scan.presets {
+                if !presets.iter().any(|known| known.uri == preset.uri) {
+                    presets.push(preset);
+                }
+            }
+        }
+    }
     for report in reports {
         match &report.outcome {
             LibraryOutcome::Scanned(scan) => {
@@ -73,7 +85,8 @@ pub fn plugins_found_in(reports: &[LibraryReport]) -> PluginsFound {
                         &report.path,
                         &plugin.description.uri,
                         &plugin.description.name,
-                        effect_of_an_lv2_plugin(&report.path, plugin),
+                        effect_of_an_lv2_plugin(&report.path, plugin)
+                            .map(|effect| with_the_presets(effect, plugin, &presets)),
                     );
                 }
                 // (What could not be understood of the bundle is said too, as a plugin that is not used.)
@@ -255,6 +268,7 @@ pub fn effect_of_a_plugin(library: &Path, plugin: &ScannedPlugin) -> Result<Inst
         pre_roll_samples: 0,
         has_a_window: false,
         start_warning: None,
+        presets: Vec::new(),
     })
 }
 
@@ -477,6 +491,7 @@ pub fn effect_of_a_clap_plugin(
         pre_roll_samples: pre_roll_of_a_clap_plugin(plugin.tail),
         has_a_window: plugin.has_gui,
         start_warning: plugin.start.warning(),
+        presets: Vec::new(),
     })
 }
 
@@ -601,6 +616,79 @@ fn value_of_an_lv2_port(port: &lv2_host::PortDescription) -> ParameterDescriptor
     }
 }
 
+/// What a number of a preset is as a value of the effect, made as the control of the value makes one: a switch is on from one half, a choice is the option whose number is the
+/// nearest (the first of two that are as near), a whole number is rounded, and a number is held to the range of the value where it has one.
+fn value_of_a_number_for(parameter: &ParameterDescriptor, number: f64) -> PropertyValue {
+    match &parameter.control {
+        ParameterControl::Toggle => PropertyValue::Flag(number >= 0.5),
+        ParameterControl::Choice(options) => {
+            let nearest = options
+                .iter()
+                .filter_map(|option| option.id.parse::<f64>().ok().map(|value| (option, value)))
+                .min_by(|(_, a), (_, b)| (a - number).abs().total_cmp(&(b - number).abs()));
+            match nearest {
+                Some((option, _)) => PropertyValue::Words(option.id.to_string()),
+                None => parameter.default.clone(),
+            }
+        }
+        control => {
+            let held = match parameter.range {
+                Some((least, most)) => number.clamp(f64::from(least), f64::from(most)),
+                None => number,
+            };
+            if matches!(control, ParameterControl::Integer) {
+                PropertyValue::Number(held.round() as f32)
+            } else {
+                PropertyValue::Number(held as f32)
+            }
+        }
+    }
+}
+
+/// `effect`, the type of effect that the LV2 plugin `plugin` is, with the presets of `presets` that name the plugin (those that have a number for some value of the effect: a preset that
+/// sets nothing is not offered). The numbers that the effect has no value for are counted.
+fn with_the_presets(
+    mut effect: InstalledPlugin,
+    plugin: &lv2_host::ScannedPlugin,
+    presets: &[&lv2_host::PresetDescription],
+) -> InstalledPlugin {
+    for preset in presets
+        .iter()
+        .filter(|preset| preset.applies_to.contains(&plugin.description.uri))
+    {
+        let mut values = Vec::new();
+        let mut left_out = 0;
+        for (symbol, number) in &preset.values {
+            let slot = plugin
+                .description
+                .ports
+                .iter()
+                .find(|port| {
+                    port.symbol == *symbol
+                        && port.kind == lv2_host::PortKind::Control
+                        && port.direction == lv2_host::PortDirection::Input
+                })
+                .and_then(|port| effect.value_handles.iter().position(|handle| *handle == port.index));
+            match slot {
+                Some(slot) => values.push((
+                    slot,
+                    value_of_a_number_for(&effect.descriptor.parameters[slot], *number),
+                )),
+                None => left_out += 1,
+            }
+        }
+        if !values.is_empty() {
+            effect.presets.push(EffectPreset {
+                label: preset.label.clone(),
+                values,
+                left_out,
+                has_state: preset.has_state,
+            });
+        }
+    }
+    effect
+}
+
 /// The type of effect that the LV2 plugin `plugin` of the bundle `bundle` is, or why it is not one. **The library of the effect is the folder of the bundle**, so that what is
 /// trusted is the folder that bundles are in (the folder that a person says yes to), as it is for the files of the other kinds.
 pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) -> Result<InstalledPlugin, String> {
@@ -693,5 +781,6 @@ pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) 
         // (An interface of this system's kind that this program can show.)
         has_a_window: lv2_host::window_of(description, crate::plugin_editor::the_kind_of_window()).is_some(),
         start_warning: None,
+        presets: Vec::new(),
     })
 }

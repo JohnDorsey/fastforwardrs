@@ -267,3 +267,58 @@ fn an_effect_is_offered_under_the_name_the_author_and_the_key_that_the_bundle_gi
     // The library of the effect is the bundle's folder (what is trusted is the folder that the bundles are in).
     assert_eq!(gain.library.file_name().unwrap(), "test.lv2");
 }
+
+#[test]
+fn the_presets_of_the_bundle_come_with_the_effects_they_are_for_with_their_values_made_as_the_controls_of_the_effect_make_them()
+ {
+    let found = what_the_scan_found();
+    let effect = |uri: &str| {
+        found
+            .effects
+            .iter()
+            .find(|effect| effect.descriptor.key == key_of_an_lv2_plugin(uri))
+            .unwrap()
+    };
+
+    let gain = effect(GAIN);
+    let labels: Vec<&str> = gain.presets.iter().map(|preset| preset.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec![
+            lv2_test_plugins::GAIN_PRESET_CLOSES_THE_WINDOW_LABEL,
+            lv2_test_plugins::GAIN_PRESET_QUIET_LABEL
+        ],
+        "in the order of their URIs"
+    );
+    assert_eq!(
+        gain.presets[1].values,
+        vec![(0, PropertyValue::Number(lv2_test_plugins::GAIN_PRESET_QUIET_VALUE))]
+    );
+    assert_eq!(gain.presets[0].values, vec![(0, PropertyValue::Number(3.0))]);
+    let controls = effect(CONTROLS);
+    assert_eq!(controls.presets.len(), 1);
+    assert_eq!(
+        controls.presets[0].label,
+        lv2_test_plugins::CONTROLS_PRESET_EVERYTHING_LABEL
+    );
+    assert_eq!(
+        controls.presets[0].values,
+        vec![
+            (0, PropertyValue::Flag(true)),
+            (1, PropertyValue::Number(6.0)),
+            (2, PropertyValue::Words("2".to_owned())),
+            (3, PropertyValue::Number(440.0)),
+            (4, PropertyValue::Number(12_000.0)),
+        ],
+        "a switch, a whole number, a choice, a frequency, and a range that is a fraction of the sample rate: all as numbers of the file, made into the values"
+    );
+    assert!(
+        found
+            .effects
+            .iter()
+            .filter(|effect| effect.descriptor.key != key_of_an_lv2_plugin(GAIN)
+                && effect.descriptor.key != key_of_an_lv2_plugin(CONTROLS))
+            .all(|effect| effect.presets.is_empty()),
+        "the other plugins have none, and the preset of a plugin that is not in the bundle is for no one"
+    );
+}

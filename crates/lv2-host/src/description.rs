@@ -36,6 +36,8 @@ const UI: &str = "http://lv2plug.in/ns/extensions/ui#";
 const PPROP: &str = "http://lv2plug.in/ns/ext/port-props#";
 const UNITS: &str = "http://lv2plug.in/ns/extensions/units#";
 const RSZ: &str = "http://lv2plug.in/ns/ext/resize-port#";
+const PSET: &str = "http://lv2plug.in/ns/ext/presets#";
+const STATE: &str = "http://lv2plug.in/ns/ext/state#";
 
 /// Whether a port takes sound or values in, or gives them out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,10 +177,28 @@ pub struct PluginDescription {
     pub user_interfaces: Vec<UiDescription>,
 }
 
-/// What a bundle says: its plugins, and one line for each thing that could not be understood.
+/// A preset that a bundle says (`pset:Preset`): numbers for the control ports of a plugin, by their symbols. A preset may be in the bundle of its plugin or in a bundle of its own
+/// that has no plugin.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PresetDescription {
+    /// What names the preset: a URI.
+    pub uri: String,
+    /// What a person is shown: its label, with the label of its bank before it (`Factory: Warm`), or the end of its URI if it has no label.
+    pub label: String,
+    /// The URIs of the plugins it is for, in the order the file gives.
+    pub applies_to: Vec<String>,
+    /// The control ports it sets, by symbol, with the numbers they are to have, in the order the file gives, each symbol once (the first is kept).
+    pub values: Vec<(String, f64)>,
+    /// Whether it also has a `state:state`, which a plugin is not given by this host.
+    pub has_state: bool,
+}
+
+/// What a bundle says: its plugins, its presets, and one line for each thing that could not be understood.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BundleDescription {
     pub plugins: Vec<PluginDescription>,
+    /// In the order of their URIs.
+    pub presets: Vec<PresetDescription>,
     pub problems: Vec<String>,
 }
 
@@ -415,7 +435,85 @@ pub fn describe_bundle(bundle: &Path) -> Result<BundleDescription, DescribeError
             Err(why) => description.problems.push(format!("{uri}: {why}")),
         }
     }
+    description.presets = describe_presets(&graph, &mut description.problems);
     Ok(description)
+}
+
+/// The name of a node as it is to be shown: a reference that is relative to a file was read against a base that is made up, which is no part of its name.
+fn without_the_made_up_base(iri: &str) -> String {
+    iri.strip_prefix(BUNDLE_BASE).unwrap_or(iri).to_owned()
+}
+
+/// The presets that the graph says: the nodes of the class `pset:Preset` that have a URI, in the order of their URIs. A preset that is not for any plugin is left out with a problem, and
+/// so is an entry of a preset that has no symbol or no number; the label of a preset that has none is the end of its URI.
+fn describe_presets(graph: &Graph, problems: &mut Vec<String>) -> Vec<PresetDescription> {
+    let preset_class = format!("{PSET}Preset");
+    let mut nodes: Vec<(String, Node)> = Vec::new();
+    for subject in graph.by_subject.keys() {
+        let Node::Iri(iri) = subject else { continue };
+        if graph.types(subject).contains(&preset_class) {
+            nodes.push((without_the_made_up_base(iri), subject.clone()));
+        }
+    }
+    nodes.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut presets = Vec::new();
+    for (uri, node) in nodes {
+        let applies_to: Vec<String> = graph
+            .iris(&node, &format!("{LV2}appliesTo"))
+            .iter()
+            .map(|iri| without_the_made_up_base(iri))
+            .collect();
+        if applies_to.is_empty() {
+            problems.push(format!(
+                "{uri}: a preset that has no lv2:appliesTo is not for any plugin"
+            ));
+            continue;
+        }
+        let own_label = graph
+            .text(&node, &format!("{RDFS}label"))
+            .map(|label| label.trim().to_owned())
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| uri.rsplit(['#', '/']).next().unwrap_or(&uri).to_owned());
+        let bank_label = graph
+            .nodes(&node, &format!("{PSET}bank"))
+            .first()
+            .and_then(|bank| graph.text(bank, &format!("{RDFS}label")))
+            .map(|label| label.trim().to_owned())
+            .filter(|label| !label.is_empty());
+        let label = match bank_label {
+            Some(bank) => format!("{bank}: {own_label}"),
+            None => own_label,
+        };
+        let mut values: Vec<(String, f64)> = Vec::new();
+        for entry in graph.nodes(&node, &format!("{LV2}port")) {
+            let Some(symbol) = graph
+                .text(&entry, &format!("{LV2}symbol"))
+                .map(|symbol| symbol.trim().to_owned())
+                .filter(|symbol| !symbol.is_empty())
+            else {
+                problems.push(format!("{uri}: an entry of a preset has no lv2:symbol"));
+                continue;
+            };
+            let Some(number) = graph.number(&entry, &format!("{PSET}value")) else {
+                problems.push(format!("{uri}: the value of {symbol} is not a number"));
+                continue;
+            };
+            if values.iter().any(|(known, _)| *known == symbol) {
+                problems.push(format!("{uri}: {symbol} is given twice, and the first is kept"));
+                continue;
+            }
+            values.push((symbol, number));
+        }
+        let has_state = graph.objects(&node, &format!("{STATE}state")).next().is_some();
+        presets.push(PresetDescription {
+            uri,
+            label,
+            applies_to,
+            values,
+            has_state,
+        });
+    }
+    presets
 }
 
 fn is_a_kind_of_plugin(class: &str) -> bool {

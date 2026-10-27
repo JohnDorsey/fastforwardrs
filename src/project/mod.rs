@@ -50,11 +50,12 @@ pub use animation::{
 pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
     Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, EffectsIter, HUE_SHIFT_KEY, ImportedPicture, InstalledPlugin, LutOperation, LutSpace,
-    MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS,
-    MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT, ParameterControl, ParameterDescriptor,
-    PictureOperation, PluginAddress, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
-    installed_plugin_for, installed_plugins, installed_shaders, set_installed_plugins, set_installed_shaders,
+    EffectKind, EffectPreset, Effects, EffectsIter, HUE_SHIFT_KEY, ImportedPicture, InstalledPlugin, LutOperation,
+    LutSpace, MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
+    MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT,
+    ParameterControl, ParameterDescriptor, PictureOperation, PluginAddress, ShaderImage, ShaderLanguage, ShaderSource,
+    UnknownFields, ValueScale, installed_plugin_for, installed_plugins, installed_shaders, set_installed_plugins,
+    set_installed_shaders,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};

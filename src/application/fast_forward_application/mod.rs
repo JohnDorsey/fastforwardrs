@@ -47,6 +47,9 @@ mod drawing;
 mod duplicate_tests;
 #[cfg(test)]
 mod effect_menu_tests;
+mod effect_preset_flow;
+#[cfg(test)]
+mod effect_preset_tests;
 #[cfg(test)]
 mod effect_tests;
 #[cfg(test)]

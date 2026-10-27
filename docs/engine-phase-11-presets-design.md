@@ -53,6 +53,17 @@ big ones ship them in their own window.
 * **11.7.4 panel**: the submenu in the box of the effect.
 * **11.7.5 docs and a try with the real MVerb**: apply "Dark" and the sound changes as the preset says; the window of MVerb shows the new knobs.
 
+## 3b. As built (2026-10-27) [V unless said]
+
+All five pieces are built; the design above is what was done, with these points:
+
+* **11.7.1** `lv2_host::PresetDescription` and `BundleDescription.presets` / `BundleScan.presets` (`crates/lv2-host/src/description.rs`, `scan.rs`); the presets are in the order of their URIs, the values in the order of the file; a bank puts its label in front (`Factory: Warm`); a preset with no label is called by the end of its URI; a relative URI loses the made-up base that the reader gives it. 7 new tests in `description_tests.rs`. **The scan cache format is 7** (a cache that was kept before presets were read is not believed).
+* **11.7.2** `InstalledPlugin.presets: Vec<EffectPreset>` (`label`, `values` as `(slot, PropertyValue)`, `left_out`, `has_state`); `plugin_scan::effects::with_the_presets` gives a plugin the presets that name its URI from **every** bundle in the order of the bundles (the first of two presets with one URI is the one). A number is made into a value as the control of the value is made: a switch is on from 0.5, a choice is the option nearest (the first of two that are as near), a whole number is rounded, a number is held to the range. **A preset that sets nothing is not offered** (a `state:state` alone, or only symbols that the effect has no value for). 10 new tests (`lv2_effects_tests.rs`) and one with the real scan program (`tests/plugin_scan_lv2.rs`; the LV2 test bundle now has presets, written as a bundle writes them).
+* **11.7.3** `Project::apply_values_to_an_effect` (a value with keyframes is left and counted; a value of the wrong kind refuses the whole call, nothing changed) and `Command::ApplyEffectPreset` (one step of undo). 4 + 6 new tests.
+* **11.7.4** the *Presets* smaller menu in the menu of the box (for a clip or a track; not a group), with the note about keyframes and a tick on the preset that is set; screenshot by `write_a_screenshot_of_the_presets_menu` in `tests/plugin_editor_lv2_journey.rs`.
+* **11.7.5, with real plugins [V on Windows]**: `the_presets_that_the_real_bundles_say_are_found_and_every_one_of_them_runs_in_its_plugin_with_finite_sound` finds MVerb's five presets (Halves, Dark, Cupboard, Stadium, Subtle) and the *Default* of 3BandEQ, PingPongPan and CycleShifter, none with a number left out, and sets each preset on a real instance and runs 50 blocks: finite sound for all. The journey `a_preset_that_is_chosen_changes_the_value_in_the_project_and_the_window_that_is_open_is_told` has a preset that sets the gain to the value that the test window closes itself for: it closes, so **a window that is open is told the new values**.
+* **Found while building it:** the real DPF bundles say their presets in two files (labels in `manifest.ttl`, values in `presets.ttl` with integer literals), as section 1 said; **a preset's number for a port that is sample-rate-relative is the value itself** (the bundle's minimum and maximum are fractions, the preset's number is not) and is not multiplied.
+
 ## 4. What I do not know [B]
 
 * Whether any other real bundle has presets in the shapes that I have not seen (a `pset:Preset` in the plugin's own Turtle, `state:state` only). The DPF ones are the only ones I have seen.

@@ -700,3 +700,261 @@ fn a_port_that_is_both_an_input_and_an_output_or_neither_is_a_problem_and_a_desi
         vec!["http://lv2plug.in/ns/lv2core#enabled".to_owned()]
     );
 }
+
+// ---- presets (piece 11.7.1) ----
+
+/// The manifest of a plugin whose presets are in a file of their own, as the DPF plugins write them: the nodes with their labels in the manifest, the values in the file the nodes
+/// lead to.
+const MANIFEST_WITH_PRESETS: &str = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+
+<urn:test:amp>
+    a lv2:Plugin ;
+    lv2:binary <amp.dll> ;
+    rdfs:seeAlso <amp.ttl> .
+
+<urn:test:amp#preset002>
+    a pset:Preset ;
+    lv2:appliesTo <urn:test:amp> ;
+    rdfs:label "Loud" ;
+    rdfs:seeAlso <presets.ttl> .
+
+<urn:test:amp#preset001>
+    a pset:Preset ;
+    lv2:appliesTo <urn:test:amp> ;
+    rdfs:label "Quiet" ;
+    rdfs:seeAlso <presets.ttl> .
+"#;
+
+/// The values of those presets: control ports by their symbols, whole numbers and decimals and a negative one.
+const PRESET_VALUES: &str = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+
+<urn:test:amp#preset001>
+    lv2:port [
+        lv2:symbol "gain" ;
+        pset:value -12 ;
+    ] ,
+    [
+        lv2:symbol "mix" ;
+        pset:value 0.25 ;
+    ] .
+
+<urn:test:amp#preset002>
+    lv2:port [
+        lv2:symbol "gain" ;
+        pset:value 6.5 ;
+    ] .
+"#;
+
+fn the_presets_of(files: &[(&str, &str)]) -> BundleDescription {
+    let folder = bundle_with(files);
+    describe_bundle(folder.path()).unwrap()
+}
+
+#[test]
+fn a_preset_is_read_with_its_label_what_it_applies_to_and_its_values_by_symbol_and_the_presets_are_in_the_order_of_their_uris()
+ {
+    let described = the_presets_of(&[
+        ("manifest.ttl", MANIFEST_WITH_PRESETS),
+        ("amp.ttl", AMP),
+        ("presets.ttl", PRESET_VALUES),
+    ]);
+
+    assert_eq!(described.problems, Vec::<String>::new());
+    assert_eq!(
+        described.presets,
+        vec![
+            PresetDescription {
+                uri: "urn:test:amp#preset001".to_owned(),
+                label: "Quiet".to_owned(),
+                applies_to: vec!["urn:test:amp".to_owned()],
+                values: vec![("gain".to_owned(), -12.0), ("mix".to_owned(), 0.25)],
+                has_state: false,
+            },
+            PresetDescription {
+                uri: "urn:test:amp#preset002".to_owned(),
+                label: "Loud".to_owned(),
+                applies_to: vec!["urn:test:amp".to_owned()],
+                values: vec![("gain".to_owned(), 6.5)],
+                has_state: false,
+            },
+        ],
+        "the order of the URIs, not of the file (which is not an order that is kept)"
+    );
+    assert_eq!(described.plugins.len(), 1, "the plugin is read as it was");
+}
+
+#[test]
+fn the_values_of_a_preset_are_in_the_order_the_file_writes_them_and_the_first_of_a_symbol_that_is_there_twice_is_kept_and_the_second_is_a_problem()
+ {
+    let values = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:test:amp#preset001>
+    lv2:port [ lv2:symbol "mix" ; pset:value 1 ] , [ lv2:symbol "gain" ; pset:value 2 ] , [ lv2:symbol "mix" ; pset:value 3 ] .
+"#;
+
+    let described = the_presets_of(&[
+        ("manifest.ttl", MANIFEST_WITH_PRESETS),
+        ("amp.ttl", AMP),
+        ("presets.ttl", values),
+    ]);
+
+    let quiet = described.presets.iter().find(|preset| preset.label == "Quiet").unwrap();
+    assert_eq!(quiet.values, vec![("mix".to_owned(), 1.0), ("gain".to_owned(), 2.0)]);
+    assert_eq!(described.problems.len(), 1, "{:?}", described.problems);
+    assert!(
+        described.problems[0].contains("mix") && described.problems[0].contains("preset001"),
+        "{:?}",
+        described.problems
+    );
+}
+
+#[test]
+fn an_entry_that_has_no_symbol_or_a_value_that_is_not_a_number_is_left_out_with_a_problem_and_the_rest_of_the_preset_is_kept()
+ {
+    let values = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:test:amp#preset001>
+    lv2:port [ pset:value 1 ] , [ lv2:symbol "gain" ; pset:value "loud" ] , [ lv2:symbol "mix" ; pset:value 0.5 ] , [ lv2:symbol "nothing" ] .
+"#;
+
+    let described = the_presets_of(&[
+        ("manifest.ttl", MANIFEST_WITH_PRESETS),
+        ("amp.ttl", AMP),
+        ("presets.ttl", values),
+    ]);
+
+    let quiet = described.presets.iter().find(|preset| preset.label == "Quiet").unwrap();
+    assert_eq!(quiet.values, vec![("mix".to_owned(), 0.5)]);
+    assert_eq!(described.problems.len(), 3, "{:?}", described.problems);
+}
+
+#[test]
+fn a_preset_with_no_applies_to_is_left_out_with_a_problem_and_one_with_no_label_is_called_by_the_end_of_its_uri() {
+    let manifest = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:test:amp> a lv2:Plugin ; lv2:binary <amp.dll> ; rdfs:seeAlso <amp.ttl> .
+<urn:test:amp#lonely> a pset:Preset ; rdfs:label "Applies to nothing" .
+<urn:test:amp#warm_room> a pset:Preset ; lv2:appliesTo <urn:test:amp> .
+<http://example.org/presets/bright> a pset:Preset ; lv2:appliesTo <urn:test:amp> , <urn:test:another> .
+"#;
+
+    let described = the_presets_of(&[("manifest.ttl", manifest), ("amp.ttl", AMP)]);
+
+    let labels: Vec<&str> = described.presets.iter().map(|preset| preset.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec!["bright", "warm_room"],
+        "in the order of the URIs: `http` before `urn`"
+    );
+    assert_eq!(
+        described.presets[0].applies_to,
+        vec!["urn:test:amp".to_owned(), "urn:test:another".to_owned()],
+        "what it applies to is in the order the file gives"
+    );
+    assert_eq!(described.problems.len(), 1, "{:?}", described.problems);
+    assert!(described.problems[0].contains("lonely"), "{:?}", described.problems);
+}
+
+#[test]
+fn a_preset_that_has_a_state_says_so_and_a_node_that_is_not_a_preset_or_has_no_uri_is_not_one() {
+    let manifest = r#"
+@prefix lv2:   <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pset:  <http://lv2plug.in/ns/ext/presets#> .
+@prefix state: <http://lv2plug.in/ns/ext/state#> .
+<urn:test:amp> a lv2:Plugin ; lv2:binary <amp.dll> ; rdfs:seeAlso <amp.ttl> .
+<urn:test:amp#with_state> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "With state" ;
+    lv2:port [ lv2:symbol "gain" ; pset:value 1 ] ;
+    state:state [ <urn:test:amp#thing> 5 ] .
+<urn:test:amp#only_state> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "Only state" ;
+    state:state [ <urn:test:amp#thing> 6 ] .
+<urn:test:amp#not_a_preset> lv2:appliesTo <urn:test:amp> ; rdfs:label "Not a preset" .
+[] a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "No name" .
+"#;
+
+    let described = the_presets_of(&[("manifest.ttl", manifest), ("amp.ttl", AMP)]);
+
+    let found: Vec<(&str, bool, usize)> = described
+        .presets
+        .iter()
+        .map(|preset| (preset.label.as_str(), preset.has_state, preset.values.len()))
+        .collect();
+    assert_eq!(found, vec![("Only state", true, 0), ("With state", true, 1)]);
+}
+
+#[test]
+fn a_bank_puts_its_label_in_front_of_the_label_of_its_presets() {
+    let manifest = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:test:amp> a lv2:Plugin ; lv2:binary <amp.dll> ; rdfs:seeAlso <amp.ttl> .
+<urn:test:amp#factory> a pset:Bank ; rdfs:label "Factory" .
+<urn:test:amp#a> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "Warm" ; pset:bank <urn:test:amp#factory> .
+<urn:test:amp#b> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "Cold" .
+<urn:test:amp#c> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "Lost" ; pset:bank <urn:test:amp#nowhere> .
+"#;
+
+    let described = the_presets_of(&[("manifest.ttl", manifest), ("amp.ttl", AMP)]);
+
+    let labels: Vec<&str> = described.presets.iter().map(|preset| preset.label.as_str()).collect();
+    assert_eq!(labels, vec!["Factory: Warm", "Cold", "Lost"]);
+}
+
+#[test]
+fn a_bundle_of_presets_that_has_no_plugin_is_read_and_its_presets_say_which_plugin_they_are_for() {
+    let manifest = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:other:amp-preset> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "From elsewhere" ; rdfs:seeAlso <preset.ttl> .
+"#;
+    let values = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:other:amp-preset> lv2:port [ lv2:symbol "gain" ; pset:value 3 ] .
+"#;
+
+    let described = the_presets_of(&[("manifest.ttl", manifest), ("preset.ttl", values)]);
+
+    assert!(described.plugins.is_empty());
+    assert_eq!(described.problems, Vec::<String>::new());
+    assert_eq!(described.presets.len(), 1);
+    assert_eq!(described.presets[0].applies_to, vec!["urn:test:amp".to_owned()]);
+    assert_eq!(described.presets[0].values, vec![("gain".to_owned(), 3.0)]);
+}
+
+#[test]
+fn a_preset_whose_uri_is_written_relative_to_a_file_has_no_whole_uri_and_is_called_by_the_name_in_it_without_the_made_up_base()
+ {
+    let manifest = r#"
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+<urn:test:amp> a lv2:Plugin ; lv2:binary <amp.dll> ; rdfs:seeAlso <amp.ttl> .
+<#warm> a pset:Preset ; lv2:appliesTo <urn:test:amp> ; rdfs:label "Warm" .
+"#;
+
+    let described = the_presets_of(&[("manifest.ttl", manifest), ("amp.ttl", AMP)]);
+
+    assert_eq!(described.presets.len(), 1);
+    assert!(
+        !described.presets[0].uri.contains("bundle.invalid"),
+        "the base that is made up to read a file is not part of the name: {}",
+        described.presets[0].uri
+    );
+    assert!(
+        described.presets[0].uri.ends_with("#warm"),
+        "{}",
+        described.presets[0].uri
+    );
+}

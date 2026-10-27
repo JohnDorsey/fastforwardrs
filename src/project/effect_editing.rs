@@ -7,11 +7,11 @@
 //! their values, when they are not animated, are with them; their keyframes are in racks like those of any property (see
 //! [`super::racks`]). So an effect that is taken off takes its keyframes with it, from wherever they are kept.
 
-use super::animating::AnimationTarget;
+use super::animating::{AnimationTarget, not_a_property_of};
 use super::animation::PropertyId;
 use super::effects::{EffectInstanceId, EffectKind, Effects, MOST_EFFECTS_ON_ONE_THING};
 use super::tracks::{ClipEditError, KeyframeId, RackKeyframe};
-use super::{EditError, Member, Project};
+use super::{EditError, Member, Project, TimelineFrameIndex};
 
 impl Project {
     /// The effects of the clip or the track `target`, if it is there.
@@ -87,5 +87,37 @@ impl Project {
             }
         }
         Ok(())
+    }
+
+    /// Gives some values of the effect that is named `instance` of the clip or the track `target` what a preset says (piece 11.7 of `docs/engine-phase-11-presets-design.md`): `values` are
+    /// the place of each value in the effect (its slot) and what it is to be. **A value that has keyframes is left as it is** (an animation is somebody's work, and a choice in a menu
+    /// does not overwrite it); how many were left so is what this gives. A slot that the effect has no value for is ignored. It is an error, and **nothing is changed**, if there is no
+    /// such effect or a value is of another kind than the one it is for.
+    pub fn apply_values_to_an_effect(
+        &mut self,
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+        values: &[(usize, super::PropertyValue)],
+        timeline_frame: TimelineFrameIndex,
+    ) -> Result<usize, EditError> {
+        let Some(effect) = self.effects_of_or_error(target)?.instance(instance) else {
+            return Err(EditError::DoesNotHaveThatEffect { target, instance });
+        };
+        let wanted: Vec<(PropertyId, &super::PropertyValue)> = values
+            .iter()
+            .filter_map(|(slot, value)| effect.property(*slot).map(|property| (property, value)))
+            .collect();
+        if let Some((property, _)) = wanted.iter().find(|(property, value)| value.kind() != property.kind()) {
+            return Err(not_a_property_of(target, *property));
+        }
+        let mut kept = 0;
+        for (property, value) in wanted {
+            if self.is_animated(target, property) {
+                kept += 1;
+            } else {
+                self.set_property_at(target, property, value.clone(), timeline_frame)?;
+            }
+        }
+        Ok(kept)
     }
 }

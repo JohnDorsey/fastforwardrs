@@ -33,6 +33,16 @@ impl FastForwardApplication {
         self.carry_out_all(vec![command], Instant::now(), &egui::Context::default());
     }
 
+    /// Gives the values of the plugin effect `instance` of `target` what the preset number `preset` of its plugin says, as the *Presets* menu of its box does: one edit of the history (piece 11.7).
+    pub fn apply_a_preset_of_an_effect(&mut self, target: AnimationTarget, instance: EffectInstanceId, preset: usize) {
+        let command = crate::application::commands::Command::ApplyEffectPreset {
+            target,
+            instance,
+            preset,
+        };
+        self.carry_out_all(vec![command], Instant::now(), &egui::Context::default());
+    }
+
     /// Says what the control outputs of the plugin whose effect has the key `key` hold, as if it were playing (**for the tests**, which have no sound): the windows of that plugin show them.
     pub fn say_what_a_plugin_makes(&mut self, key: &str, values: Vec<(u32, f32)>) {
         self.environment.plugin_host.note_the_meters_of(key, values);

@@ -31,7 +31,8 @@ mod worker;
 
 pub use description::{
     AtomPortDescription, BundleDescription, DescribeError, PluginDescription, PortDescription, PortDirection, PortKind,
-    ScalePoint, UiDescription, bundles_in, describe_bundle, ui_class_of_a_window, usual_folders, window_of,
+    PresetDescription, ScalePoint, UiDescription, bundles_in, describe_bundle, ui_class_of_a_window, usual_folders,
+    window_of,
 };
 
 pub use instance::{Instance, InstantiateError, RunError};

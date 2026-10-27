@@ -36,6 +36,8 @@ pub struct ScannedPlugin {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BundleScan {
     pub plugins: Vec<ScannedPlugin>,
+    /// The presets that the bundle says, for plugins of this bundle or of others (the scan cache of an older format is not believed: see `SCAN_FORMAT`).
+    pub presets: Vec<crate::description::PresetDescription>,
     /// What could not be understood of the bundle (its Turtle), one line for each.
     pub problems: Vec<String>,
 }
@@ -47,6 +49,7 @@ pub fn scan_bundle(bundle: &Path, step: &mut impl FnMut(&str)) -> Result<BundleS
     let described = describe_bundle(bundle)?;
     let mut scan = BundleScan {
         plugins: Vec::new(),
+        presets: described.presets,
         problems: described.problems,
     };
     // (A binary may have several plugins: it is loaded once, and what came of loading it is kept.)

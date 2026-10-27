@@ -285,6 +285,11 @@ impl FastForwardApplication {
                 property,
                 value,
             } => self.change_a_property_at_the_playhead(target, property, value, now),
+            Command::ApplyEffectPreset {
+                target,
+                instance,
+                preset,
+            } => self.apply_an_effect_preset(target, instance, preset, now),
 
             Command::CreateGroup { kind, members } => self.create_a_group(kind, &members),
             Command::AddToGroup { group, members } => self.add_to_a_group(group, &members),
