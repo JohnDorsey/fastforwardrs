@@ -100,10 +100,10 @@ pub use timecode::format_timecode;
 pub use tracks::{
     AdjustmentClip, Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner,
     CrateClip, CutEdges, Drawer, EmptyAdjustmentClip, EmptyClip, EmptyCrate, EmptyGeneratorClip, EmptyImageClip,
-    EmptyTextClip, FontSize, Gain, GeneratorClip, ImageClip, InsertError, KeyframeId, MediaClip, PictureDimensions,
-    PictureFit, PixelBox, Placement, PointOnThePicture, Rack, RackCut, RackEditError, RackId, RackKeyframe, Room,
-    SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track, TrackEntry, TrackHeight, TrackId,
-    fit_inside_picture, fitted_placement,
+    EmptyTextClip, FontSize, Gain, GeneratorClip, ImageClip, InsertError, KeyframeId, MediaClip, MidiClip,
+    PictureDimensions, PictureFit, PixelBox, Placement, PointOnThePicture, Rack, RackCut, RackEditError, RackId,
+    RackKeyframe, Room, SplitError, SplitOutcome, TextClip, TextColour, TextObject, Track, TrackEntry, TrackHeight,
+    TrackId, fit_inside_picture, fitted_placement,
 };
 
 /// The frame rate of a project that has no video to take one from.
@@ -351,7 +351,9 @@ impl Project {
                     Clip::Video(_) => SourceMediaKind::Video,
                     Clip::Audio(_) => SourceMediaKind::Audio,
                     Clip::Image(_) => SourceMediaKind::Image,
-                    Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => continue,
+                    Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) | Clip::Midi(_) => {
+                        continue;
+                    }
                 };
                 if source.kind() != wanted_kind {
                     return Err(InconsistentProject::ClipUsesSourceOfTheWrongKind {
@@ -1152,6 +1154,24 @@ impl Project {
         })
     }
 
+    /// Adds a MIDI clip to a track so that it starts at `timeline_frame` (phase 13). It lasts as long as the part of the music it covers says at its speed: it is refused, and nothing is
+    /// changed, if there is not room for all of it ([`EditError::NoRoomThere`]: no such track, or a clip is in the way), or if it would be in the rectangle of a clip group
+    /// ([`EditError::BreaksTheRulesOfGroups`]). **The file that it plays is a resource of the project** (see [`Self::add_resource`]); a clip that names one that the project has not is
+    /// kept, and says nothing, as a clip whose source file is missing does.
+    pub fn try_insert_midi_clip(
+        &mut self,
+        track: TrackId,
+        timeline_frame: TimelineFrameIndex,
+        clip: MidiClip,
+    ) -> Result<ClipId, EditError> {
+        self.keeping_the_groups_valid(|project| {
+            project
+                .track_mut(track)
+                .and_then(|track| track.insert_clip_at(timeline_frame, Clip::Midi(clip)).ok())
+                .ok_or(EditError::NoRoomThere)
+        })
+    }
+
     /// The clip whose content, what it makes, is the effect named `instance` in the chain of `owner`, if `owner` is a generator clip or a text clip and that is its content. **The content of a
     /// generator, or of a text, cannot be taken off, switched off, copied or moved.**
     pub fn the_clip_whose_content_is(&self, owner: Member, instance: EffectInstanceId) -> Option<ClipId> {
@@ -1210,6 +1230,8 @@ mod generator_clip_tests;
 mod keyframe_copying_tests;
 #[cfg(test)]
 mod keyframe_crossing_tests;
+#[cfg(test)]
+mod midi_clip_tests;
 #[cfg(test)]
 mod rack_editing_tests;
 #[cfg(test)]

@@ -18,7 +18,7 @@ use crate::application::naming::kind_name;
 use crate::application::timeline_panel::SourceLook;
 use crate::project::{
     AdjustmentClip, AnimationTarget, Clip, ClipId, ClipKind, ClipPlacement, Gain, GeneratorClip, ImageClip, MediaClip,
-    Member, PropertyId, SpeedFactor,
+    Member, MidiClip, PropertyId, SpeedFactor,
 };
 
 /// What the row of how big a video or a picture is is called.
@@ -39,6 +39,7 @@ pub(super) fn show(ui: &mut Ui, content: &PropertiesContent<'_>, clip: ClipId, c
         Clip::Crate(_) => {}
         Clip::Adjustment(adjustment) => show_an_adjustment_clip(ui, content, clip, adjustment, commands),
         Clip::Generator(generator) => show_a_generator_clip(ui, content, clip, generator, commands),
+        Clip::Midi(midi) => show_a_midi_clip(ui, content, clip, &placement, midi, commands),
     }
     chain::show(ui, content, Member::Clip(clip), commands);
 }
@@ -81,8 +82,34 @@ fn show_a_video_or_a_sound(
     let look = content.source_looks.get(&media.source());
     kind_box::show(ui, kind_name(placement.clip.kind()), |ui| {
         show_the_file_name(ui, look);
+        show_the_speed_the_volume_and_the_mute(
+            ui,
+            content,
+            clip,
+            placement,
+            (media.speed(), media.gain(), media.is_muted()),
+            commands,
+        );
 
-        if let Some(speed_factor) = labelled_row(ui, |ui| speed_slider(ui, media.speed())) {
+        if placement.clip.kind() == ClipKind::Video {
+            placement_controls::show(ui, content, clip, SIZE_LABEL, commands);
+        }
+        offer_to_choose_the_file_again(ui, look, media.source(), commands);
+    });
+}
+
+/// The speed, the volume and the mute switch of a clip that comes from a file: what a video, a sound and a MIDI clip have in common. `now` is what the clip says of the three.
+fn show_the_speed_the_volume_and_the_mute(
+    ui: &mut Ui,
+    content: &PropertiesContent<'_>,
+    clip: ClipId,
+    placement: &ClipPlacement<'_>,
+    now: (SpeedFactor, Gain, bool),
+    commands: &mut Vec<Command>,
+) {
+    let (speed, gain, is_muted) = now;
+    {
+        if let Some(speed_factor) = labelled_row(ui, |ui| speed_slider(ui, speed)) {
             commands.push(Command::SetClipSpeed { clip, speed_factor });
         }
         if let Some(track) = content.project.track_holding(clip)
@@ -96,9 +123,8 @@ fn show_a_video_or_a_sound(
         }
 
         let target = AnimationTarget::Clip(clip);
-        let gain_now = Gain::from_decibels(
-            number_at_the_playhead(content, target, PropertyId::Gain).unwrap_or(media.gain().decibels()),
-        );
+        let gain_now =
+            Gain::from_decibels(number_at_the_playhead(content, target, PropertyId::Gain).unwrap_or(gain.decibels()));
         let new_gain = animatable::row(
             ui,
             content,
@@ -110,7 +136,7 @@ fn show_a_video_or_a_sound(
             commands.push(Command::SetClipGain { clip, gain });
         }
 
-        let mut muted = flag_at_the_playhead(content, target, PropertyId::Muted).unwrap_or(media.is_muted());
+        let mut muted = flag_at_the_playhead(content, target, PropertyId::Muted).unwrap_or(is_muted);
         let muted_changed = animatable::row(
             ui,
             content,
@@ -121,11 +147,29 @@ fn show_a_video_or_a_sound(
         if muted_changed {
             commands.push(Command::SetClipMuted { clip, muted });
         }
+    }
+}
 
-        if placement.clip.kind() == ClipKind::Video {
-            placement_controls::show(ui, content, clip, SIZE_LABEL, commands);
-        }
-        offer_to_choose_the_file_again(ui, look, media.source(), commands);
+/// What a MIDI clip says of itself: its file and its track, its speed, its volume and its mute switch. (What plays its notes is the first synthesizer on its road: a clip that has none says so.)
+fn show_a_midi_clip(
+    ui: &mut Ui,
+    content: &PropertiesContent<'_>,
+    clip: ClipId,
+    placement: &ClipPlacement<'_>,
+    midi: &MidiClip,
+    commands: &mut Vec<Command>,
+) {
+    kind_box::show(ui, kind_name(ClipKind::Midi), |ui| {
+        ui.weak(midi.resource());
+        ui.add_space(4.0);
+        show_the_speed_the_volume_and_the_mute(
+            ui,
+            content,
+            clip,
+            placement,
+            (midi.speed(), midi.gain(), midi.is_muted()),
+            commands,
+        );
     });
 }
 

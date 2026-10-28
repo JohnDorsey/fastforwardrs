@@ -266,29 +266,34 @@ impl Track {
 
     /// Plays the clip `clip` at `speed`. The clips touching it move along to close up or make room.
     pub fn set_clip_speed(&mut self, clip: ClipId, speed: SpeedFactor) -> Result<(), ClipEditError> {
-        self.change_media_clip(clip, |media| media.with_speed(speed))
+        self.change_a_clip_of_a_file(clip, |media| media.with_speed(speed), |midi| midi.with_speed(speed))
     }
 
     /// Makes the clip `clip` louder or quieter than it was.
     pub fn set_clip_gain(&mut self, clip: ClipId, gain: Gain) -> Result<(), ClipEditError> {
-        self.change_media_clip(clip, |media| media.with_gain(gain))
+        self.change_a_clip_of_a_file(clip, |media| media.with_gain(gain), |midi| midi.with_gain(gain))
     }
 
     /// Mutes the clip `clip`, or lets it be heard again.
     pub fn set_clip_muted(&mut self, clip: ClipId, muted: bool) -> Result<(), ClipEditError> {
-        self.change_media_clip(clip, |media| media.with_muted(muted))
+        self.change_a_clip_of_a_file(clip, |media| media.with_muted(muted), |midi| midi.with_muted(muted))
     }
 
-    fn change_media_clip(
+    /// Changes a clip that comes from a file and has a speed, a volume and a mute switch: a video or a sound clip by `change`, a MIDI clip by `change_music`. (Another kind of clip is refused.)
+    fn change_a_clip_of_a_file(
         &mut self,
         clip: ClipId,
         change: impl FnOnce(&crate::project::tracks::media_clip::MediaClip) -> crate::project::tracks::media_clip::MediaClip,
+        change_music: impl FnOnce(
+            &crate::project::tracks::midi_clip::MidiClip,
+        ) -> crate::project::tracks::midi_clip::MidiClip,
     ) -> Result<(), ClipEditError> {
         let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
         let anchors = self.anchors();
         let changed = match &self.entries[index].clip {
             Clip::Video(media) => Clip::Video(change(media)),
             Clip::Audio(media) => Clip::Audio(change(media)),
+            Clip::Midi(midi) => Clip::Midi(change_music(midi)),
             Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => {
                 return Err(ClipEditError::NotAMediaClip { clip });
             }

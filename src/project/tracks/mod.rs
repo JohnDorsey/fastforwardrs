@@ -19,9 +19,11 @@ mod ids;
 mod image_clip;
 mod keyframe_fitting;
 mod media_clip;
+mod midi_clip;
 mod picture_fit;
 mod placement;
 mod rack;
+mod source_span;
 mod text_object;
 mod track;
 mod track_height;
@@ -35,9 +37,11 @@ pub use generator_clip::{EmptyGeneratorClip, GeneratorClip};
 pub use ids::{ClipId, KeyframeId, RackId, TrackId};
 pub use image_clip::{EmptyImageClip, ImageClip};
 pub use media_clip::{EmptyClip, MediaClip};
+pub use midi_clip::MidiClip;
 pub use picture_fit::{PictureFit, fit_inside_picture, fitted_placement};
 pub use placement::{Angle, CanvasArea, Corner, PictureDimensions, PixelBox, Placement, PointOnThePicture};
 pub use rack::{Rack, RackEditError, RackKeyframe};
+pub use source_span::SourceSpan;
 pub use text_object::{EmptyTextClip, FontSize, TextClip, TextColour, TextObject};
 pub use track::{
     ClipEditError, ClipPlacement, ClipToArrange, CutEdges, InsertError, RackCut, Room, SplitError, SplitOutcome, Track,

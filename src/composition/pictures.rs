@@ -639,7 +639,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                 Clip::Image(image) => u64::from(is_usable(image.source())),
                 Clip::Text(_) | Clip::Adjustment(_) | Clip::Generator(_) => 0,
                 // (Nothing is seen of a sound, or of a crate, which holds nothing but keyframes.)
-                Clip::Audio(_) | Clip::Crate(_) => continue,
+                Clip::Audio(_) | Clip::Crate(_) | Clip::Midi(_) => continue,
             };
             let where_it_is = match placement.clip {
                 // (An adjustment clip is the whole picture, and is not drawn: what it does is done to what is behind it.)
@@ -815,7 +815,7 @@ fn sections_between(
                 }
                 Clip::Generator(_) => layers.push(candidate.entry(LayerContent::Generator)),
                 Clip::Adjustment(_) => layers.push(candidate.entry(LayerContent::Adjustment)),
-                Clip::Audio(_) | Clip::Crate(_) => {}
+                Clip::Audio(_) | Clip::Crate(_) | Clip::Midi(_) => {}
             }
         }
 

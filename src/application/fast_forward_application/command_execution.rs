@@ -600,12 +600,15 @@ impl FastForwardApplication {
     }
 
     fn set_clip_speed(&mut self, clip: ClipId, speed_factor: SpeedFactor, now: Instant) {
-        let already = self
-            .document
-            .project
-            .placement_of(clip)
-            .and_then(|placement| placement.clip.as_media())
-            .is_some_and(|media| media.speed() == speed_factor);
+        let already = self.document.project.placement_of(clip).is_some_and(|placement| {
+            // (A video, a sound or a MIDI clip: whichever it is, it already plays at that speed.)
+            let own_speed = placement
+                .clip
+                .as_media()
+                .map(|media| media.speed())
+                .or_else(|| placement.clip.as_midi().map(|midi| midi.speed()));
+            own_speed == Some(speed_factor)
+        });
         if already {
             return;
         }

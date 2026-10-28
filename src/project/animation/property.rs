@@ -141,11 +141,11 @@ impl PropertyId {
         !self.is_heard()
     }
 
-    /// Whether a clip of this kind has this property: a video or a sound has its loudness and its mute switch, a
+    /// Whether a clip of this kind has this property: a video, a sound or a MIDI clip has its loudness and its mute switch, a
     /// video, a picture, a text object and a generator clip are somewhere on the picture. (What a text object says and how it looks are the values of its text effect.)
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         match self {
-            Self::Gain | Self::Muted => matches!(kind, ClipKind::Video | ClipKind::Audio),
+            Self::Gain | Self::Muted => matches!(kind, ClipKind::Video | ClipKind::Audio | ClipKind::Midi),
             Self::Position | Self::Size | Self::Rotation => {
                 matches!(
                     kind,
@@ -283,6 +283,8 @@ mod tests {
         // (The values of effects are those of what can have effects at all: whether it has the effect is for `is_had_by_a_clip`.)
         assert_eq!(of(ClipKind::Video), vec![Gain, Muted, Position, Size, Rotation, HUE]);
         assert_eq!(of(ClipKind::Audio), vec![Gain, Muted]);
+        // (A MIDI clip, phase 13: the volume of what its own effects make, and its mute switch; it is nowhere on the picture.)
+        assert_eq!(of(ClipKind::Midi), vec![Gain, Muted]);
         assert_eq!(of(ClipKind::Image), vec![Position, Size, Rotation, HUE]);
         // (Rewritten on purpose in phase 9: what a text says and how it looks are the values of its text effect, and are not properties of the clip, so they are not in this list;
         // a text that has the text effect has them as the values of an effect.)
@@ -314,7 +316,7 @@ mod tests {
                 "{kind:?}: another effect, not this one"
             );
         }
-        for kind in [ClipKind::Audio, ClipKind::Crate] {
+        for kind in [ClipKind::Audio, ClipKind::Crate, ClipKind::Midi] {
             assert!(!HUE.is_had_by_a_clip(kind, &with_the_effect), "{kind:?} cannot have it");
         }
         assert!(HUE.is_had_by_a_track(&with_the_effect));

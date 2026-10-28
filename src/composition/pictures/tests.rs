@@ -775,7 +775,7 @@ fn plainly_seen(project: &Project, timeline_frame: u64) -> (Vec<(ClipId, Option<
                 }
             }
             // (An adjustment clip has no picture of its own: it is a group of what is behind it, which these projects do not have.)
-            Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => {}
+            Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Midi(_) => {}
         }
     }
     front_to_back.reverse();

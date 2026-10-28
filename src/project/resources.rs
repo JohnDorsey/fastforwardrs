@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The resources of a project: files that its effects use and that are not pictures or sounds to cut (a `.cube` table of colours, to begin with). **A project has a list of
-//! them, and an effect names the one it uses by its name** (the value of a parameter whose control is a resource: see [`ParameterControl::Resource`](crate::project::ParameterControl::Resource)).
+//! The resources of a project: files that its effects use and that are not pictures or sounds to cut (a `.cube` table of colours, and, since phase 13, a `.mid` file of music that MIDI
+//! clips play). **A project has a list of them, and an effect (or a MIDI clip) names the one it uses by its name** (the value of a parameter whose control is a resource: see [`ParameterControl::Resource`](crate::project::ParameterControl::Resource)).
 //!
 //! A resource is **read into memory when the project is opened** and kept there (RS-07), so that a frame never waits for a disk. Where its bytes are kept for good is the
 //! same as for the source files of a project (see [`SourceMediaLink`]): *included* in the project file (an archive, a `.ffrs` file), which is the default, or *linked* by
@@ -24,6 +24,7 @@ use thiserror::Error;
 
 use super::source_media::SourceMediaLink;
 use crate::cube_table::{CubeTable, parse_cube};
+use crate::midi_file::{MidiFile, parse_midi_file};
 
 /// The most bytes that one resource may have (64 MiB).
 pub const MOST_BYTES_OF_A_RESOURCE: usize = 64 << 20;
@@ -39,15 +40,18 @@ pub const MOST_CHARACTERS_IN_THE_NAME_OF_A_RESOURCE: usize = 120;
 pub enum ResourceKind {
     /// A `.cube` table of colours: a look-up table that is applied to the colours of a picture (see the effect of the look-up table).
     Cube,
+    /// A Standard MIDI File: music that MIDI clips play (each clip is a track of it), through the synthesizers on its road.
+    Midi,
 }
 
 impl ResourceKind {
-    pub const ALL: [Self; 1] = [Self::Cube];
+    pub const ALL: [Self; 2] = [Self::Cube, Self::Midi];
 
     /// What the kind is called in a project file, and in the control of an effect's value that wants a resource of it (`"cube"`).
     pub fn key(self) -> &'static str {
         match self {
             Self::Cube => "cube",
+            Self::Midi => "midi",
         }
     }
 
@@ -59,6 +63,7 @@ impl ResourceKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Cube => ".cube table of colours",
+            Self::Midi => "Standard MIDI File",
         }
     }
 }
@@ -76,6 +81,18 @@ impl PartialEq for ReadOnce {
 
 impl Eq for ReadOnce {}
 
+/// What a resource of the kind `midi` is read as, once, and shared by the copies of the resource (as [`ReadOnce`] is for a table). **Not a part of what makes two resources equal.**
+#[derive(Clone, Debug, Default)]
+struct ReadOnceMidi(Arc<OnceLock<Result<Arc<MidiFile>, String>>>);
+
+impl PartialEq for ReadOnceMidi {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for ReadOnceMidi {}
+
 /// A file that the effects of a project use.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resource {
@@ -87,18 +104,39 @@ pub struct Resource {
     /// was when it was included, and are kept as they were.
     link: SourceMediaLink,
     read: ReadOnce,
+    read_as_music: ReadOnceMidi,
 }
 
 impl Resource {
     /// What the file is as a table, for a resource of the kind `cube`: the table, or what is wrong with the file (with the line, as [`crate::cube_table::CubeProblem`] tells it),
     /// or that the program has not got the bytes (it is missing). **Read once** and kept, so that asking again is nothing.
     pub fn cube_table(&self) -> Result<Arc<CubeTable>, String> {
+        if self.kind != ResourceKind::Cube {
+            return Err("the file is not a table of colours".to_owned());
+        }
         let bytes = self.bytes.as_ref().ok_or_else(|| "the file is missing".to_owned())?;
         self.read
             .0
             .get_or_init(|| match std::str::from_utf8(bytes) {
                 Ok(text) => parse_cube(text).map(Arc::new).map_err(|problem| problem.to_string()),
                 Err(_) => Err("the file is not text".to_owned()),
+            })
+            .clone()
+    }
+
+    /// What the file is as music, for a resource of the kind `midi`: the tracks of the Standard MIDI File, or what is wrong with it (what [`MidiFileProblem`](crate::midi_file::MidiFileProblem)
+    /// says), or that the program has not got the bytes (it is missing). **Read once** and kept, so that asking again is nothing: the music is the same `Arc`.
+    pub fn midi_file(&self) -> Result<Arc<MidiFile>, String> {
+        if self.kind != ResourceKind::Midi {
+            return Err("the file is not music".to_owned());
+        }
+        let bytes = self.bytes.as_ref().ok_or_else(|| "the file is missing".to_owned())?;
+        self.read_as_music
+            .0
+            .get_or_init(|| {
+                parse_midi_file(bytes)
+                    .map(Arc::new)
+                    .map_err(|problem| problem.to_string())
             })
             .clone()
     }
@@ -238,6 +276,7 @@ impl Resources {
             bytes: Some(bytes),
             link,
             read: ReadOnce::default(),
+            read_as_music: ReadOnceMidi::default(),
         });
         Ok(name)
     }
@@ -280,6 +319,7 @@ impl Resources {
             bytes,
             link,
             read: ReadOnce::default(),
+            read_as_music: ReadOnceMidi::default(),
         });
         Ok(())
     }

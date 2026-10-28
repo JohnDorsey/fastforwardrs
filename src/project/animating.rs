@@ -67,7 +67,7 @@ impl Project {
             }
             Clip::Text(text) => Some(text.placement()),
             Clip::Generator(generator) => Some(generator.placement()),
-            Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) => None,
+            Clip::Audio(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Midi(_) => None,
         }
     }
 
@@ -117,8 +117,12 @@ impl Project {
             PropertyId::EffectValue { .. } => placement.effects.value_of(property),
             PropertyId::Gain => clip
                 .as_media()
-                .map(|media| PropertyValue::Number(media.gain().decibels())),
-            PropertyId::Muted => clip.as_media().map(|media| PropertyValue::Flag(media.is_muted())),
+                .map(|media| PropertyValue::Number(media.gain().decibels()))
+                .or_else(|| clip.as_midi().map(|midi| PropertyValue::Number(midi.gain().decibels()))),
+            PropertyId::Muted => clip
+                .as_media()
+                .map(|media| PropertyValue::Flag(media.is_muted()))
+                .or_else(|| clip.as_midi().map(|midi| PropertyValue::Flag(midi.is_muted()))),
             PropertyId::Position | PropertyId::Size | PropertyId::Rotation => {
                 placement_value(&self.placement_on_the_picture(clip)?, property)
             }

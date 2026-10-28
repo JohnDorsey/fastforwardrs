@@ -36,10 +36,10 @@ use crate::media::MediaLocation;
 use crate::project::{
     AdjustmentClip, Angle, AnimationTarget, CanvasArea, ChainEntry, Clip, ClipId, ClipKind, ClipTailPolicy, CrateClip,
     Drawer, Effect, EffectInstanceId, EffectKind, EffectSharing, Effects, FontSize, GeneratorClip, ImageClip,
-    InputColourOverride, MediaClip, Placement, Project, ProjectSettings, PropertyValue, SourceAudioProperties,
-    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
-    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextColour, TextObject, Track, TrackHeight,
-    TrackId, ValueKind, values_of_a_text_object,
+    InputColourOverride, MediaClip, MidiClip, Placement, Project, ProjectSettings, PropertyValue,
+    SourceAudioProperties, SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink,
+    SourceMediaProperties, SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextColour,
+    TextObject, Track, TrackHeight, TrackId, ValueKind, values_of_a_text_object,
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
@@ -131,7 +131,11 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// group it is not in, by the place of the clip in the track: `edge` is `around`, `into` or `cut` and `depth` is `behind` or `in_front`; only the clips that are not the default are there), and the `tail` of a clip
 /// group or a track group (what the tails of its members do at its edge: `edge` is `keep_alive`, `release` or `cut`, and `depth`). A file of version 19 has none of them: it is read as a project in which each track
 /// has one copy of its effects for each run of clips (`per_run`) and every tail is as the design says it begins.
-pub const FILE_FORMAT_VERSION: u32 = 20;
+///
+/// **Version 21 added the MIDI clip** (phase 13, docs/engine-phase-13-midi-design.md): `"kind": "midi"`, a run of one track (`midi_track`) of a Standard MIDI File that is a resource of the project (`resource` names it; the
+/// kind of the resource is `midi`), with a speed, a volume and a mute switch as a sound clip has, and its effects (the synthesizers among them play its notes), and `makes_sound_from_notes` in the snapshot of an effect that
+/// is a synthesizer (left out when it is not). A file of version 20 has none of them.
+pub const FILE_FORMAT_VERSION: u32 = 21;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -782,6 +786,35 @@ fn clip_from_document(
                 racks: drawer,
             })
         }
+        ClipDocument::Midi {
+            gap_before_frames,
+            resource,
+            midi_track,
+            first_source_frame,
+            end_source_frame,
+            speed_factor,
+            gain_decibels,
+            muted,
+            drawer,
+            effects,
+            badges,
+        } => {
+            let midi = MidiClip::new(resource, midi_track, first_source_frame, end_source_frame, speed_factor)
+                .map_err(|error| error.to_string())?;
+            Ok(ClipFromDocument {
+                gap_before_frames,
+                clip: Clip::Midi(midi.with_gain(gain_decibels).with_muted(muted)),
+                effects: groups::chain_from_documents(
+                    effects,
+                    badges,
+                    kinds,
+                    |kind| kind.applies_to_a_clip_of_kind(ClipKind::Midi),
+                    group_count,
+                )?,
+                legacy_animation: AnimationDocument::default(),
+                racks: drawer,
+            })
+        }
         ClipDocument::Image {
             gap_before_frames,
             source_identifier,
@@ -1348,6 +1381,19 @@ fn clip_document_of(
             effects,
             badges,
         },
+        Clip::Midi(midi) => ClipDocument::Midi {
+            gap_before_frames,
+            resource: midi.resource().to_owned(),
+            midi_track: midi.midi_track(),
+            first_source_frame: midi.first_source_frame(),
+            end_source_frame: midi.end_source_frame(),
+            speed_factor: midi.speed(),
+            gain_decibels: midi.gain(),
+            muted: midi.is_muted(),
+            drawer,
+            effects,
+            badges,
+        },
         Clip::Image(image) => ClipDocument::Image {
             gap_before_frames,
             source_identifier: image.source(),
@@ -1455,6 +1501,8 @@ mod generator_clip_tests;
 mod groups_tests;
 #[cfg(test)]
 mod included_files_tests;
+#[cfg(test)]
+mod midi_clip_tests;
 #[cfg(test)]
 mod old_text_files_tests;
 #[cfg(test)]

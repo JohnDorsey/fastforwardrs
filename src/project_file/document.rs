@@ -396,6 +396,30 @@ pub(super) enum ClipDocument {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         badges: Vec<BadgeDocument>,
     },
+    /// A MIDI clip (format 21, phase 13): a run of one track of a MIDI file, which is a resource of the project (`resources`, of the kind `midi`) that the clip names. A frame of its source is a stretch
+    /// of the music as long as a frame of the project's video, counted from the start of the file. Its notes are played by the first synthesizer among its effects and those of what it is in.
+    Midi {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gap_before_frames: u64,
+        /// The name of the resource that has the file.
+        resource: String,
+        /// Which track of the file it plays, counted from 0.
+        midi_track: u16,
+        first_source_frame: SourceFrameIndex,
+        /// The frame just after the clip's last frame.
+        end_source_frame: SourceFrameIndex,
+        speed_factor: SpeedFactor,
+        #[serde(default, skip_serializing_if = "is_no_gain")]
+        gain_decibels: Gain,
+        #[serde(default, skip_serializing_if = "is_false")]
+        muted: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drawer: Vec<RackDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<EffectDocument>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        badges: Vec<BadgeDocument>,
+    },
     Image {
         #[serde(default, skip_serializing_if = "is_zero")]
         gap_before_frames: u64,

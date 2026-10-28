@@ -245,7 +245,7 @@ impl EffectKind {
 
     /// Whether a clip of this kind can have the effect: a picture effect can be on what is seen (a video, a picture, a text object, and an adjustment clip, which is what
     /// is behind it, seen: **but not a transition, which is put on a clip that has a picture of its own, phase 6.6**), and a
-    /// sound effect on what is heard (a sound, **and a video, which has a soundtrack**: it was only a sound until phase 7).
+    /// sound effect on what is heard (a sound, **a video, which has a soundtrack**: it was only a sound until phase 7, **and a MIDI clip**, whose notes the synthesizers among its effects play).
     pub fn applies_to_a_clip_of_kind(self, kind: ClipKind) -> bool {
         // (The text is what a text clip is made of, and nothing else can have it.)
         if self == Self::TEXT {
@@ -258,7 +258,7 @@ impl EffectKind {
                 ClipKind::Adjustment => !self.is_a_transition(),
                 _ => false,
             },
-            EffectDomain::Sound => matches!(kind, ClipKind::Audio | ClipKind::Video),
+            EffectDomain::Sound => matches!(kind, ClipKind::Audio | ClipKind::Video | ClipKind::Midi),
         }
     }
 

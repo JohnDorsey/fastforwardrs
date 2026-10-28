@@ -457,3 +457,120 @@ fn an_ending_of_sixteen_characters_with_its_dot_is_an_ending_and_one_of_seventee
         "a longer ending is not one: the number goes at the end"
     );
 }
+
+// --- music (phase 13, piece 13.3b): a resource of the kind `midi` ---
+
+use crate::test_support::a_midi_file;
+
+#[test]
+fn every_kind_of_resource_has_its_own_key_in_a_file_and_is_found_by_it() {
+    for kind in ResourceKind::ALL {
+        assert_eq!(ResourceKind::from_key(kind.key()), Some(kind));
+        assert!(!kind.label().is_empty());
+    }
+    assert_eq!(ResourceKind::Midi.key(), "midi");
+    assert_eq!(ResourceKind::Cube.key(), "cube");
+    assert_eq!(ResourceKind::from_key("mid"), None);
+    assert_ne!(ResourceKind::Midi.label(), ResourceKind::Cube.label());
+}
+
+#[test]
+fn a_resource_of_the_kind_midi_is_read_as_music_once_and_the_copies_of_it_share_what_was_read() {
+    let mut resources = Resources::default();
+    resources
+        .add("tune.mid", ResourceKind::Midi, a_midi_file(), linked("/music/tune.mid"))
+        .unwrap();
+    let resource = resources.get("tune.mid").unwrap();
+
+    let music = resource.midi_file().expect("the file is music");
+    let again = resource.midi_file().unwrap();
+    let copy = resources.clone();
+    let from_the_copy = copy.get("tune.mid").unwrap().midi_file().unwrap();
+
+    assert_eq!(music.tracks.len(), 1);
+    assert_eq!(music.tracks[0].notes.len(), 1);
+    assert_eq!(music.tracks[0].notes[0].end_us, 500_000);
+    assert!(Arc::ptr_eq(&music, &again), "it is read once");
+    assert!(
+        Arc::ptr_eq(&music, &from_the_copy),
+        "a copy of the project does not read it again"
+    );
+}
+
+#[test]
+fn a_file_that_is_not_music_says_what_is_wrong_and_a_missing_one_says_it_is_missing() {
+    let mut resources = Resources::default();
+    resources
+        .add(
+            "words.mid",
+            ResourceKind::Midi,
+            bytes("these are words"),
+            linked("/music/words.mid"),
+        )
+        .unwrap();
+    resources
+        .add_as_it_was_saved("gone.mid", ResourceKind::Midi, None, linked("/music/gone.mid"))
+        .unwrap();
+
+    let error = resources.get("words.mid").unwrap().midi_file().unwrap_err();
+    let missing = resources.get("gone.mid").unwrap().midi_file().unwrap_err();
+
+    assert!(error.contains("not a Standard MIDI File"), "{error}");
+    assert_eq!(missing, "the file is missing");
+}
+
+#[test]
+fn a_resource_is_read_as_what_its_kind_is_and_not_as_the_other() {
+    let mut resources = Resources::default();
+    resources
+        .add("tune.mid", ResourceKind::Midi, a_midi_file(), linked("/music/tune.mid"))
+        .unwrap();
+    resources
+        .add(
+            "grade.cube",
+            ResourceKind::Cube,
+            bytes("LUT_1D_SIZE 2"),
+            linked("/tables/grade.cube"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        resources.get("grade.cube").unwrap().midi_file().unwrap_err(),
+        "the file is not music"
+    );
+    assert_eq!(
+        resources.get("tune.mid").unwrap().cube_table().unwrap_err(),
+        "the file is not a table of colours"
+    );
+}
+
+#[test]
+fn files_of_two_kinds_with_the_same_bytes_are_two_resources_and_two_of_one_kind_are_one() {
+    let mut resources = Resources::default();
+    let same = a_midi_file();
+
+    let music = resources
+        .add(
+            "tune.mid",
+            ResourceKind::Midi,
+            Arc::clone(&same),
+            linked("/music/tune.mid"),
+        )
+        .unwrap();
+    let twice = resources
+        .add(
+            "other.mid",
+            ResourceKind::Midi,
+            Arc::clone(&same),
+            linked("/music/other.mid"),
+        )
+        .unwrap();
+    let as_a_table = resources
+        .add("odd.cube", ResourceKind::Cube, same, linked("/tables/odd.cube"))
+        .unwrap();
+
+    assert_eq!(music, "tune.mid");
+    assert_eq!(twice, "tune.mid");
+    assert_eq!(as_a_table, "odd.cube");
+    assert_eq!(resources.len(), 2);
+}

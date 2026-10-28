@@ -72,7 +72,7 @@ impl Project {
         self.resources.keep_at(name, link)
     }
 
-    /// The names of the resources that the effects of the project name, in the values that are resources: the effects of the clips, of the tracks and of the groups,
+    /// The names of the resources that the project uses: those that the effects of the clips, of the tracks and of the groups name, in the values that are resources, **and the files of music that MIDI clips play**,
     /// whether or not the project has a resource of that name. (Not what keyframes say, which is not for a value that is a resource: it has no keyframes.)
     pub fn resources_in_use(&self) -> BTreeSet<String> {
         let mut used = BTreeSet::new();
@@ -80,6 +80,9 @@ impl Project {
             names_of_resources_in(track.effects(), &mut used);
             for entry in track.entries() {
                 names_of_resources_in(entry.effects(), &mut used);
+                if let Some(midi) = entry.clip().as_midi() {
+                    used.insert(midi.resource().to_owned());
+                }
             }
         }
         for group in self.groups() {

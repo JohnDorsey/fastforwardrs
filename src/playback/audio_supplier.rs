@@ -295,6 +295,27 @@ impl AudioContent<'_> {
             for entry in track.entries() {
                 let media = match entry.clip() {
                     Clip::Video(media) | Clip::Audio(media) => media,
+                    // (A MIDI clip changes the sound through the synthesizers on its road: where it is, which music it plays, how fast and how loud, are what it is made of.)
+                    Clip::Midi(midi) => {
+                        entry.id().hash(&mut hasher);
+                        entry.gap_before_frames().hash(&mut hasher);
+                        midi.resource().hash(&mut hasher);
+                        midi.midi_track().hash(&mut hasher);
+                        midi.first_source_frame().value().hash(&mut hasher);
+                        midi.end_source_frame().value().hash(&mut hasher);
+                        midi.speed().value().hash(&mut hasher);
+                        midi.gain().decibels().to_bits().hash(&mut hasher);
+                        midi.is_muted().hash(&mut hasher);
+                        self.project
+                            .resources()
+                            .get(midi.resource())
+                            .and_then(crate::project::Resource::crc32)
+                            .hash(&mut hasher);
+                        animations
+                            .of(AnimationTarget::Clip(entry.id()))
+                            .hash_properties_into(&mut hasher, PropertyId::is_heard);
+                        continue;
+                    }
                     // Text, pictures, crates, adjustment clips and generator clips have no sound, and where they are changes nothing but the gaps (hashed below).
                     Clip::Image(_) | Clip::Text(_) | Clip::Crate(_) | Clip::Adjustment(_) | Clip::Generator(_) => {
                         continue;

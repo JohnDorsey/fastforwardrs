@@ -259,6 +259,15 @@ pub(super) fn draw_clips(
                     .map_or("Generator", |effect| effect.kind().name());
                 draw_label(painter, rectangles, made_by, theme::GENERATOR_CLIP_TEXT);
             }
+            Clip::Midi(midi) => {
+                painter.rect_filled(rectangles.whole, corner_radius, theme::MIDI_CLIP_BACKGROUND);
+                draw_label(
+                    painter,
+                    rectangles,
+                    &label_of_a_midi_clip(content.project, midi),
+                    theme::MIDI_CLIP_TEXT,
+                );
+            }
             Clip::Crate(_) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::CRATE_CLIP_BACKGROUND);
             }
@@ -269,6 +278,24 @@ pub(super) fn draw_clips(
         }
         draw_bevel(painter, rectangles, view);
         draw_grip_dots(painter, rectangles);
+    }
+}
+
+/// What a MIDI clip says of itself on the timeline: the name of its file and, if the track has one, the name of its track.
+fn label_of_a_midi_clip(project: &crate::project::Project, midi: &crate::project::MidiClip) -> String {
+    let track_name = project
+        .resources()
+        .get(midi.resource())
+        .and_then(|resource| resource.midi_file().ok())
+        .and_then(|file| {
+            file.tracks
+                .get(usize::from(midi.midi_track()))
+                .map(|track| track.name.clone())
+        })
+        .filter(|name| !name.is_empty());
+    match track_name {
+        Some(name) => format!("{} \u{b7} {name}", midi.resource()),
+        None => midi.resource().to_owned(),
     }
 }
 
@@ -556,6 +583,66 @@ mod tests {
         assert!(
             heights[10] > 0.5 * heights[20],
             "half as loud shows as more than half as tall"
+        );
+    }
+
+    /// A project with a MIDI clip that plays track `track` of the file `bytes` of the resource `tune.mid`.
+    fn project_with_music(
+        bytes: std::sync::Arc<[u8]>,
+        track: u16,
+    ) -> (crate::project::Project, crate::project::MidiClip) {
+        use crate::project::{MidiClip, Project, ResourceKind, SourceMediaLink, SpeedFactor};
+        let mut project = Project::empty();
+        project
+            .add_resource(
+                "tune.mid",
+                ResourceKind::Midi,
+                bytes,
+                SourceMediaLink::from_absolute_path(std::path::PathBuf::from("/music/tune.mid")),
+            )
+            .unwrap();
+        let clip = MidiClip::new(
+            "tune.mid",
+            track,
+            SourceFrameIndex::new(0),
+            SourceFrameIndex::new(30),
+            SpeedFactor::NORMAL,
+        )
+        .unwrap();
+        (project, clip)
+    }
+
+    #[test]
+    fn a_midi_clip_is_labelled_with_its_file_and_the_name_of_its_track_if_the_track_has_one() {
+        use crate::test_support::{a_midi_file, a_midi_file_whose_track_is_called};
+
+        let (named, clip) = project_with_music(a_midi_file_whose_track_is_called("Melody"), 0);
+        let (unnamed, same_clip) = project_with_music(a_midi_file(), 0);
+        let (other_track, beyond) = project_with_music(a_midi_file_whose_track_is_called("Melody"), 5);
+
+        assert_eq!(label_of_a_midi_clip(&named, &clip), "tune.mid \u{b7} Melody");
+        assert_eq!(label_of_a_midi_clip(&unnamed, &same_clip), "tune.mid");
+        assert_eq!(
+            label_of_a_midi_clip(&other_track, &beyond),
+            "tune.mid",
+            "a track that the file has not"
+        );
+    }
+
+    #[test]
+    fn a_midi_clip_whose_file_is_not_in_the_project_or_is_not_music_is_labelled_with_the_name_of_its_file() {
+        let (without, clip) = project_with_music(std::sync::Arc::from(&b"words"[..]), 0);
+        let nothing = crate::project::Project::empty();
+
+        assert_eq!(
+            label_of_a_midi_clip(&without, &clip),
+            "tune.mid",
+            "the bytes are not music"
+        );
+        assert_eq!(
+            label_of_a_midi_clip(&nothing, &clip),
+            "tune.mid",
+            "the project has no such file"
         );
     }
 

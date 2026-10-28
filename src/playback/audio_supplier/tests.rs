@@ -1420,3 +1420,94 @@ fn the_sound_engine_makes_the_sound_unless_the_environment_asks_for_the_filter_g
         "the name is exactly ffmpeg"
     );
 }
+
+// --- what the sound is made of: the MIDI clips (phase 13, piece 13.3) ---
+
+/// The signature of the sound of `project`, with the same sources and settings every time.
+fn the_signature_of(project: &Project) -> u64 {
+    let source_locations = HashMap::from([(VIDEO, MediaLocation::from("holiday.mp4"))]);
+    AudioContent {
+        project,
+        source_locations: &source_locations,
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        edge_fade: Default::default(),
+    }
+    .signature(0)
+}
+
+/// The project of one clip of the video, and a track in front of it with a MIDI clip that plays `track` of the file `resource` (which has `bytes`), from the frame `at`, for 60 frames of
+/// the music, at `speed`, with the volume `gain` and muted if `muted`.
+fn project_with_music(
+    resource: &str,
+    bytes: &[u8],
+    track: u16,
+    at: u64,
+    speed: u32,
+    gain: f32,
+    muted: bool,
+) -> Project {
+    use crate::project::{MidiClip, ResourceKind};
+    let mut project = project_of_clips(&[(0, 300, 1)]);
+    project
+        .add_resource(
+            resource,
+            ResourceKind::Midi,
+            std::sync::Arc::from(bytes),
+            SourceMediaLink::from_absolute_path(PathBuf::from(resource)),
+        )
+        .unwrap();
+    let front = project.add_track_in_front();
+    let clip = MidiClip::new(
+        resource,
+        track,
+        SourceFrameIndex::new(0),
+        SourceFrameIndex::new(60),
+        SpeedFactor::new(speed).unwrap(),
+    )
+    .unwrap()
+    .with_gain(Gain::from_decibels(gain))
+    .with_muted(muted);
+    project
+        .try_insert_midi_clip(front, crate::project::TimelineFrameIndex::new(at), clip)
+        .unwrap();
+    project
+}
+
+#[test]
+fn what_a_midi_clip_is_made_of_changes_the_signature_of_the_sound_and_the_same_project_has_the_same() {
+    let base = project_with_music("tune.mid", b"one", 0, 400, 1, 0.0, false);
+    let same_again = project_with_music("tune.mid", b"one", 0, 400, 1, 0.0, false);
+    let without = project_of_clips(&[(0, 300, 1)]);
+
+    assert_eq!(the_signature_of(&base), the_signature_of(&same_again));
+    for (what, other) in [
+        (
+            "another track of the file",
+            project_with_music("tune.mid", b"one", 1, 400, 1, 0.0, false),
+        ),
+        (
+            "another file of the same name",
+            project_with_music("tune.mid", b"two", 0, 400, 1, 0.0, false),
+        ),
+        (
+            "a file of another name",
+            project_with_music("song.mid", b"one", 0, 400, 1, 0.0, false),
+        ),
+        (
+            "another place",
+            project_with_music("tune.mid", b"one", 0, 500, 1, 0.0, false),
+        ),
+        (
+            "another speed",
+            project_with_music("tune.mid", b"one", 0, 400, 2, 0.0, false),
+        ),
+        (
+            "another volume",
+            project_with_music("tune.mid", b"one", 0, 400, 1, -6.0, false),
+        ),
+        ("muted", project_with_music("tune.mid", b"one", 0, 400, 1, 0.0, true)),
+        ("no MIDI clip at all", without),
+    ] {
+        assert_ne!(the_signature_of(&base), the_signature_of(&other), "{what}");
+    }
+}

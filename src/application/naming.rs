@@ -30,6 +30,7 @@ pub fn kind_name(kind: ClipKind) -> &'static str {
         ClipKind::Crate => "Keyframe crate",
         ClipKind::Adjustment => "Adjustment clip",
         ClipKind::Generator => "Generator clip",
+        ClipKind::Midi => "MIDI clip",
     }
 }
 
@@ -49,6 +50,8 @@ pub fn beginning_of(words: &str) -> String {
 pub fn detail_of_a_clip(clip: &Clip, effects: &Effects, source_looks: &SourceLooks<'_>) -> String {
     match clip {
         Clip::Text(text) => beginning_of(&words_of_a_text_clip(text, effects)),
+        // (The file of the music is a resource and not a source file, and its name is what the clip is told by.)
+        Clip::Midi(midi) => midi.resource().to_owned(),
         other => other
             .source()
             .and_then(|source| source_looks.get(&source))
@@ -398,6 +401,35 @@ mod tests {
         );
         let nobody = AnimationTarget::Clip(crate::project::ClipId::new(TrackId::new(99), 0));
         assert_eq!(what_a_target_is_called(&project, nobody, &no_looks), None);
+    }
+
+    #[test]
+    fn a_midi_clip_is_a_midi_clip_told_from_the_others_by_the_name_of_its_file() {
+        let mut project = Project::empty();
+        let track = project.tracks()[0].id();
+        let clip = project
+            .try_insert_midi_clip(
+                track,
+                TimelineFrameIndex::new(0),
+                crate::project::MidiClip::new(
+                    "tune.mid",
+                    1,
+                    crate::project::SourceFrameIndex::new(0),
+                    crate::project::SourceFrameIndex::new(30),
+                    crate::project::SpeedFactor::NORMAL,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let no_looks = SourceLooks::default();
+
+        assert_eq!(kind_name(ClipKind::Midi), "MIDI clip");
+        assert_eq!(
+            what_a_target_is_called(&project, AnimationTarget::Clip(clip), &no_looks).as_deref(),
+            Some("tune.mid")
+        );
+        let described = describe_a_clip(&project, &no_looks, clip).unwrap();
+        assert!(described.starts_with("MIDI clip: tune.mid (at "), "{described}");
     }
 
     #[test]

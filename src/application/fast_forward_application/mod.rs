@@ -105,6 +105,8 @@ mod lead_up_flow;
 mod lead_up_flow_tests;
 mod losing_keyframes;
 #[cfg(test)]
+mod midi_clip_tests;
+#[cfg(test)]
 mod navigation_key_tests;
 #[cfg(test)]
 mod picture_tests;

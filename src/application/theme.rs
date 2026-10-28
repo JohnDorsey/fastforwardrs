@@ -113,6 +113,10 @@ pub const ADJUSTMENT_CLIP_TEXT: Color32 = Color32::from_rgb(250, 244, 224);
 pub const GENERATOR_CLIP_BACKGROUND: Color32 = Color32::from_rgb(24, 92, 96);
 pub const GENERATOR_CLIP_TEXT: Color32 = Color32::from_rgb(226, 246, 244);
 
+/// A MIDI clip (phase 13): the name of its file and of its track on a deep violet, which no other kind of clip is.
+pub const MIDI_CLIP_BACKGROUND: Color32 = Color32::from_rgb(86, 56, 120);
+pub const MIDI_CLIP_TEXT: Color32 = Color32::from_rgb(242, 234, 250);
+
 /// A keyframe crate: a box that is nothing but a drawer that is always open, a little darker than the strip it is on.
 pub const CRATE_CLIP_BACKGROUND: Color32 = Color32::from_rgb(24, 26, 31);
 
@@ -215,6 +219,7 @@ mod tests {
         assert!(contrast_ratio(TEXT_CLIP_BACKGROUND, TEXT_CLIP_TEXT) > 4.5);
         assert!(contrast_ratio(ADJUSTMENT_CLIP_BACKGROUND, ADJUSTMENT_CLIP_TEXT) > 4.5);
         assert!(contrast_ratio(GENERATOR_CLIP_BACKGROUND, GENERATOR_CLIP_TEXT) > 4.5);
+        assert!(contrast_ratio(MIDI_CLIP_BACKGROUND, MIDI_CLIP_TEXT) > 4.5);
     }
 
     #[test]
@@ -265,6 +270,7 @@ mod tests {
             CRATE_CLIP_BACKGROUND,
             ADJUSTMENT_CLIP_BACKGROUND,
             GENERATOR_CLIP_BACKGROUND,
+            MIDI_CLIP_BACKGROUND,
         ];
         for (index, first) in colours.iter().enumerate() {
             for second in &colours[index + 1..] {

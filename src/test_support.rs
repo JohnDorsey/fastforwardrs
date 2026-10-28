@@ -108,6 +108,30 @@ pub fn the_descriptor_of_an_effect_the_program_does_not_have(
     }
 }
 
+/// A Standard MIDI File of one note: middle C at full velocity, a quarter note long (500 000 microseconds) at 120 a minute, on the first channel of its one track.
+pub fn a_midi_file() -> std::sync::Arc<[u8]> {
+    let mut file = b"MThd\0\0\0\x06\0\0\0\x01\x01\xE0".to_vec();
+    file.extend_from_slice(b"MTrk\0\0\0\x0D");
+    file.extend_from_slice(&[
+        0x00, 0x90, 0x3C, 0x64, 0x83, 0x60, 0x80, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00,
+    ]);
+    std::sync::Arc::from(file)
+}
+
+/// A Standard MIDI File like [`a_midi_file`] whose track has the name `name` (a name of at most 127 bytes).
+pub fn a_midi_file_whose_track_is_called(name: &str) -> std::sync::Arc<[u8]> {
+    let mut body = vec![0x00, 0xFF, 0x03, u8::try_from(name.len()).expect("a short name")];
+    body.extend_from_slice(name.as_bytes());
+    body.extend_from_slice(&[
+        0x00, 0x90, 0x3C, 0x64, 0x83, 0x60, 0x80, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00,
+    ]);
+    let mut file = b"MThd\0\0\0\x06\0\0\0\x01\x01\xE0".to_vec();
+    file.extend_from_slice(b"MTrk");
+    file.extend_from_slice(&u32::try_from(body.len()).expect("a short track").to_be_bytes());
+    file.extend_from_slice(&body);
+    std::sync::Arc::from(file)
+}
+
 /// The kind of an effect that the program does not have and that uses a resource: `test:uses_a_table`, with one value, `table`, which is the name of a resource of the
 /// kind `cube` (words, with the control that wants a resource; it begins as nothing).
 pub fn a_kind_of_effect_that_uses_a_resource() -> EffectKind {

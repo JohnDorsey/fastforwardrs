@@ -9,6 +9,7 @@ use super::crate_clip::CrateClip;
 use super::generator_clip::GeneratorClip;
 use super::image_clip::ImageClip;
 use super::media_clip::MediaClip;
+use super::midi_clip::MidiClip;
 use super::placement::Placement;
 use super::text_object::TextClip;
 use crate::project::{EffectInstanceId, FrameRate, SourceMediaIdentifier, SpeedFactor};
@@ -26,6 +27,8 @@ pub enum ClipKind {
     Adjustment,
     /// A generator clip: no media, a picture the program makes from a few values (a solid colour).
     Generator,
+    /// A MIDI clip: nothing to see or hear of its own; notes that the first synthesizer on its road plays (phase 13).
+    Midi,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +46,8 @@ pub enum Clip {
     Adjustment(AdjustmentClip),
     /// A generator clip: a picture the program makes (a solid colour), shown for a while.
     Generator(GeneratorClip),
+    /// A stretch of one track of a MIDI file: notes, for the synthesizers on its road.
+    Midi(MidiClip),
 }
 
 impl Clip {
@@ -55,6 +60,7 @@ impl Clip {
             Self::Crate(_) => ClipKind::Crate,
             Self::Adjustment(_) => ClipKind::Adjustment,
             Self::Generator(_) => ClipKind::Generator,
+            Self::Midi(_) => ClipKind::Midi,
         }
     }
 
@@ -62,7 +68,20 @@ impl Clip {
     pub fn as_media(&self) -> Option<&MediaClip> {
         match self {
             Self::Video(media) | Self::Audio(media) => Some(media),
-            Self::Image(_) | Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Generator(_) => None,
+            Self::Image(_)
+            | Self::Text(_)
+            | Self::Crate(_)
+            | Self::Adjustment(_)
+            | Self::Generator(_)
+            | Self::Midi(_) => None,
+        }
+    }
+
+    /// The part of the clip that is music, for a MIDI clip.
+    pub fn as_midi(&self) -> Option<&MidiClip> {
+        match self {
+            Self::Midi(midi) => Some(midi),
+            _ => None,
         }
     }
 
@@ -93,7 +112,9 @@ impl Clip {
         match self {
             Self::Text(text) => Some(text.content()),
             Self::Generator(generator) => Some(generator.content()),
-            Self::Video(_) | Self::Audio(_) | Self::Image(_) | Self::Crate(_) | Self::Adjustment(_) => None,
+            Self::Video(_) | Self::Audio(_) | Self::Image(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Midi(_) => {
+                None
+            }
         }
     }
 
@@ -102,7 +123,7 @@ impl Clip {
         match self {
             Self::Video(media) | Self::Audio(media) => Some(media.source()),
             Self::Image(image) => Some(image.source()),
-            Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Generator(_) => None,
+            Self::Text(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Generator(_) | Self::Midi(_) => None,
         }
     }
 
@@ -113,7 +134,7 @@ impl Clip {
         match self {
             Self::Video(media) => media.placement(),
             Self::Image(image) => image.placement(),
-            Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) => None,
+            Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Midi(_) => None,
             Self::Text(text) => Some(text.placement()),
             Self::Generator(generator) => Some(generator.placement()),
         }
@@ -125,7 +146,7 @@ impl Clip {
         match self {
             Self::Video(media) => Some(Self::Video(media.with_placement(Some(placement)))),
             Self::Image(image) => Some(Self::Image(image.with_placement(Some(placement)))),
-            Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) => None,
+            Self::Audio(_) | Self::Crate(_) | Self::Adjustment(_) | Self::Midi(_) => None,
             Self::Generator(generator) => Some(Self::Generator(generator.with_placement(placement))),
             Self::Text(text) => Some(Self::Text(text.with_placement(placement))),
         }
@@ -140,7 +161,7 @@ impl Clip {
             Self::Image(image) => Some(image.duration_in_frames()),
             Self::Adjustment(adjustment) => Some(adjustment.duration_in_frames()),
             Self::Generator(generator) => Some(generator.duration_in_frames()),
-            Self::Video(_) | Self::Audio(_) | Self::Crate(_) => None,
+            Self::Video(_) | Self::Audio(_) | Self::Crate(_) | Self::Midi(_) => None,
         }
     }
 
@@ -157,7 +178,7 @@ impl Clip {
             Self::Generator(generator) => generator
                 .with_duration_in_frames(duration_in_frames)
                 .map(Self::Generator),
-            Self::Video(_) | Self::Audio(_) | Self::Crate(_) => None,
+            Self::Video(_) | Self::Audio(_) | Self::Crate(_) | Self::Midi(_) => None,
         }
     }
 
@@ -168,6 +189,7 @@ impl Clip {
         match self {
             Self::Video(media) => Self::Video(media.retimed(from, to)),
             Self::Audio(media) => Self::Audio(media.retimed(from, to)),
+            Self::Midi(midi) => Self::Midi(midi.retimed(from, to)),
             Self::Image(_) | Self::Text(_) | Self::Adjustment(_) | Self::Generator(_) => {
                 let duration = self.duration_in_frames_it_says().unwrap_or(1);
                 let retimed = from.convert_frame_count_to(duration, to).max(1);
@@ -180,19 +202,20 @@ impl Clip {
         }
     }
 
-    /// Whether the clip comes from a file, and so has a speed and can have its sound changed.
+    /// Whether the clip comes from a file, and so has a speed and can have its sound changed (a video, a sound file, **and the music of a MIDI file**).
     /// Clips that do (and only those) are carried along when the clip before them changes its
     /// length: see [`super::Track`].
     pub fn is_media(&self) -> bool {
-        self.as_media().is_some()
+        matches!(self, Self::Video(_) | Self::Audio(_) | Self::Midi(_))
     }
 
     /// The speed the clip plays at when it is on a track that plays at `track_speed`: the two
     /// multiplied. A text clip or a picture has no speed, so this is normal speed for it.
     pub fn effective_speed(&self, track_speed: SpeedFactor) -> SpeedFactor {
-        match self.as_media() {
-            Some(media) => media.speed().times(track_speed),
-            None => SpeedFactor::NORMAL,
+        match (self.as_media(), self.as_midi()) {
+            (Some(media), _) => media.speed().times(track_speed),
+            (None, Some(midi)) => midi.speed().times(track_speed),
+            (None, None) => SpeedFactor::NORMAL,
         }
     }
 
@@ -200,6 +223,7 @@ impl Clip {
     pub fn timeline_frame_count(&self, track_speed: SpeedFactor) -> u64 {
         match self {
             Self::Video(media) | Self::Audio(media) => media.timeline_frame_count(self.effective_speed(track_speed)),
+            Self::Midi(midi) => midi.timeline_frame_count(self.effective_speed(track_speed)),
             Self::Image(image) => image.duration_in_frames(),
             Self::Text(text) => text.duration_in_frames(),
             Self::Crate(crate_clip) => crate_clip.duration_in_frames(),
@@ -241,6 +265,15 @@ impl Clip {
             Self::Generator(generator) => generator
                 .split_after(frames_in)
                 .map(|(first, second)| (Self::Generator(first), Self::Generator(second))),
+            Self::Midi(midi) => {
+                if frames_in == 0 || frames_in >= self.timeline_frame_count(track_speed) {
+                    return None;
+                }
+                let split_source_frame =
+                    midi.source_frame_at_timeline_offset(self.effective_speed(track_speed), frames_in)?;
+                let (first, second) = midi.split_before_source_frame(split_source_frame)?;
+                Some((Self::Midi(first), Self::Midi(second)))
+            }
         }
     }
 }
@@ -274,6 +307,97 @@ mod tests {
 
     fn picture(duration: u64) -> Clip {
         Clip::Image(ImageClip::new(PICTURE_FILE, duration).unwrap())
+    }
+
+    fn music(first: u64, end: u64, factor: u32) -> Clip {
+        Clip::Midi(
+            MidiClip::new(
+                "tune.mid",
+                1,
+                SourceFrameIndex::new(first),
+                SourceFrameIndex::new(end),
+                speed(factor),
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_midi_clip_says_it_is_one_and_is_a_clip_of_a_file_that_has_a_speed_and_no_picture() {
+        let clip = music(0, 90, 3);
+
+        assert_eq!(clip.kind(), ClipKind::Midi);
+        assert!(clip.is_media() && clip.as_media().is_none());
+        assert_eq!(clip.as_midi().map(MidiClip::resource), Some("tune.mid"));
+        assert!(text(5).as_midi().is_none() && Clip::Audio(media(0, 10, 1)).as_midi().is_none());
+        assert_eq!((clip.source(), clip.content(), clip.placement()), (None, None, None));
+        assert_eq!(clip.duration_in_frames_it_says(), None);
+        assert_eq!(clip.with_duration_in_frames_it_says(5), None);
+        assert!(!text(5).is_media() && !picture(5).is_media());
+    }
+
+    #[test]
+    fn a_midi_clip_plays_at_its_own_speed_times_the_tracks_and_lasts_as_long_as_a_sound_clip_of_the_same_run() {
+        let clip = music(0, 600, 3);
+
+        assert_eq!(clip.effective_speed(speed(1)), speed(3));
+        assert_eq!(clip.effective_speed(speed(2)), speed(6));
+        assert_eq!(clip.timeline_frame_count(speed(1)), 200);
+        assert_eq!(clip.timeline_frame_count(speed(2)), 100);
+        assert_eq!(
+            clip.timeline_frame_count(speed(2)),
+            Clip::Audio(media(0, 600, 3)).timeline_frame_count(speed(2))
+        );
+    }
+
+    #[test]
+    fn cutting_a_midi_clip_cuts_the_music_at_the_source_frame_that_the_timeline_frame_is_and_keeps_the_rest() {
+        let clip = music(100, 400, 3);
+
+        let (first, second) = clip.split_after(40, speed(1)).unwrap();
+
+        // (Forty frames of the timeline at three times the speed are 120 frames of the music.)
+        let (first, second) = (first.as_midi().unwrap(), second.as_midi().unwrap());
+        assert_eq!(
+            (first.first_source_frame().value(), first.end_source_frame().value()),
+            (100, 220)
+        );
+        assert_eq!(
+            (second.first_source_frame().value(), second.end_source_frame().value()),
+            (220, 400)
+        );
+        assert_eq!(
+            (first.resource(), first.midi_track(), first.speed()),
+            ("tune.mid", 1, speed(3))
+        );
+        assert_eq!(
+            (second.resource(), second.midi_track(), second.speed()),
+            ("tune.mid", 1, speed(3))
+        );
+        for frames_in in [0, 100, 101, 5000] {
+            assert_eq!(clip.split_after(frames_in, speed(1)), None, "{frames_in}");
+        }
+        assert!(clip.split_after(99, speed(1)).is_some());
+    }
+
+    #[test]
+    fn a_midi_clip_is_counted_again_at_another_frame_rate_as_a_sound_clip_is() {
+        let thirty = FrameRate::from_whole_frames_per_second(30).unwrap();
+        let sixty = FrameRate::from_whole_frames_per_second(60).unwrap();
+
+        let retimed = music(10, 100, 2).retimed(thirty, sixty);
+
+        assert_eq!(
+            retimed,
+            Clip::Midi(music(10, 100, 2).as_midi().unwrap().retimed(thirty, sixty))
+        );
+        assert_eq!(
+            (
+                retimed.as_midi().unwrap().first_source_frame().value(),
+                retimed.as_midi().unwrap().end_source_frame().value()
+            ),
+            (20, 200)
+        );
     }
 
     #[test]

@@ -3,13 +3,13 @@
 
 //! A clip made from a stretch of a video or of a sound file.
 
-use thiserror::Error;
-
 use super::gain::Gain;
 use super::placement::Placement;
+pub use super::source_span::EmptyClip;
+use super::source_span::SourceSpan;
 use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFactor};
 
-/// A run of whole frames from a source file, played at a single speed.
+/// A run of whole frames from a source file, played at a single speed (see [`SourceSpan`], which has the arithmetic of it).
 ///
 /// The clip covers source frames `first_source_frame` up to but not including
 /// `end_source_frame`. (For a sound file a frame is a stretch of the sound as long as a frame of
@@ -27,22 +27,10 @@ use crate::project::{FrameRate, SourceFrameIndex, SourceMediaIdentifier, SpeedFa
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MediaClip {
     source: SourceMediaIdentifier,
-    first_source_frame: SourceFrameIndex,
-    end_source_frame: SourceFrameIndex,
-    speed: SpeedFactor,
+    span: SourceSpan,
     gain: Gain,
     muted: bool,
     placement: Option<Placement>,
-}
-
-/// Returned when a clip would contain no frames.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
-#[error(
-    "a clip must contain at least one frame, but it was given {first_source_frame} up to (not including) {end_source_frame}"
-)]
-pub struct EmptyClip {
-    pub first_source_frame: SourceFrameIndex,
-    pub end_source_frame: SourceFrameIndex,
 }
 
 impl MediaClip {
@@ -54,17 +42,9 @@ impl MediaClip {
         end_source_frame: SourceFrameIndex,
         speed: SpeedFactor,
     ) -> Result<Self, EmptyClip> {
-        if first_source_frame >= end_source_frame {
-            return Err(EmptyClip {
-                first_source_frame,
-                end_source_frame,
-            });
-        }
         Ok(Self {
             source,
-            first_source_frame,
-            end_source_frame,
-            speed,
+            span: SourceSpan::new(first_source_frame, end_source_frame, speed)?,
             gain: Gain::UNCHANGED,
             muted: false,
             placement: None,
@@ -76,17 +56,17 @@ impl MediaClip {
     }
 
     pub fn first_source_frame(&self) -> SourceFrameIndex {
-        self.first_source_frame
+        self.span.first_source_frame()
     }
 
     /// The frame just after the clip's last frame (the end is exclusive).
     pub fn end_source_frame(&self) -> SourceFrameIndex {
-        self.end_source_frame
+        self.span.end_source_frame()
     }
 
     /// How much faster than normal the clip itself plays, not counting its track's speed.
     pub fn speed(&self) -> SpeedFactor {
-        self.speed
+        self.span.speed()
     }
 
     pub fn gain(&self) -> Gain {
@@ -105,7 +85,10 @@ impl MediaClip {
 
     #[must_use]
     pub fn with_speed(&self, speed: SpeedFactor) -> Self {
-        Self { speed, ..*self }
+        Self {
+            span: self.span.with_speed(speed),
+            ..*self
+        }
     }
 
     #[must_use]
@@ -128,26 +111,21 @@ impl MediaClip {
     /// least one frame of it). Pieces cut from one file that touch each other still do.
     #[must_use]
     pub fn retimed(&self, from: FrameRate, to: FrameRate) -> Self {
-        let first_source_frame = from.convert_frame_count_to(self.first_source_frame.value(), to);
-        let end_source_frame = from
-            .convert_frame_count_to(self.end_source_frame.value(), to)
-            .max(first_source_frame + 1);
         Self {
-            first_source_frame: SourceFrameIndex::new(first_source_frame),
-            end_source_frame: SourceFrameIndex::new(end_source_frame),
+            span: self.span.retimed(from, to),
             ..*self
         }
     }
 
     /// How many source frames the clip covers.
     pub fn source_frame_count(&self) -> u64 {
-        self.end_source_frame.value() - self.first_source_frame.value()
+        self.span.source_frame_count()
     }
 
     /// How many frames the clip occupies on the timeline when it plays at `effective_speed`: every
     /// `effective_speed`th source frame.
     pub fn timeline_frame_count(&self, effective_speed: SpeedFactor) -> u64 {
-        self.source_frame_count().div_ceil(u64::from(effective_speed.value()))
+        self.span.timeline_frame_count(effective_speed)
     }
 
     /// The source frame shown by the clip's frame number `offset_within_clip` (0 is the clip's
@@ -157,13 +135,8 @@ impl MediaClip {
         effective_speed: SpeedFactor,
         offset_within_clip: u64,
     ) -> Option<SourceFrameIndex> {
-        if offset_within_clip >= self.timeline_frame_count(effective_speed) {
-            return None;
-        }
-        let skipped_source_frames = offset_within_clip * u64::from(effective_speed.value());
-        Some(SourceFrameIndex::new(
-            self.first_source_frame.value() + skipped_source_frames,
-        ))
+        self.span
+            .source_frame_at_timeline_offset(effective_speed, offset_within_clip)
     }
 
     /// The clip's frame number (0 is its first) that is on screen while `source_frame` of the
@@ -174,28 +147,23 @@ impl MediaClip {
         effective_speed: SpeedFactor,
         source_frame: SourceFrameIndex,
     ) -> Option<u64> {
-        if source_frame < self.first_source_frame || source_frame >= self.end_source_frame {
-            return None;
-        }
-        let source_frames_in = source_frame.value() - self.first_source_frame.value();
-        Some(source_frames_in / u64::from(effective_speed.value()))
+        self.span.timeline_offset_of_source_frame(effective_speed, source_frame)
     }
 
     /// Cuts the clip in two just before `split_source_frame`; both halves keep everything else
     /// about the clip. Returns `None` if the split point is not strictly inside the clip.
     pub fn split_before_source_frame(&self, split_source_frame: SourceFrameIndex) -> Option<(Self, Self)> {
-        if split_source_frame <= self.first_source_frame || split_source_frame >= self.end_source_frame {
-            return None;
-        }
-        let first_half = Self {
-            end_source_frame: split_source_frame,
-            ..*self
-        };
-        let second_half = Self {
-            first_source_frame: split_source_frame,
-            ..*self
-        };
-        Some((first_half, second_half))
+        let (first_span, second_span) = self.span.split_before_source_frame(split_source_frame)?;
+        Some((
+            Self {
+                span: first_span,
+                ..*self
+            },
+            Self {
+                span: second_span,
+                ..*self
+            },
+        ))
     }
 }
 
