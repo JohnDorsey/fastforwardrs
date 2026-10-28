@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use std::collections::HashMap;
 
-use self::tail_routes::{Emitter, GroupGeometry, tail_routes_of};
+use self::tail_routes::{Emitter, GroupGeometry, tail_routes_of, window_routes_of};
 pub use self::tail_routes::{TailDestination, TailRoute};
 use super::pictures::{LayerEffect, layer_effect_of};
 use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, Track, TrackId};
@@ -143,8 +143,11 @@ pub struct SoundBus {
     pub last_item: usize,
     /// The effects of the track, one after another, with their values and the keyframes of them (the frames of which are frames of the timeline).
     pub effects: Vec<LayerEffect>,
+    /// Where what the instance makes goes (phase 12, piece 12.3): the group that the clips it hears are sent to, or the sum of all the sound. (For an instance that groups take windows of,
+    /// where it goes outside the windows.)
+    pub sent_to: Option<usize>,
     /// Where the sound that the instance goes on making after its last clip goes, from some frame on: the policy of the last clip of the run and of the groups it is in (the tail of a run
-    /// is its last clip's). Empty: it goes where the clips go.
+    /// is its last clip's). Empty: it goes where the clips go. (For an instance that groups take windows of, the windows.)
     pub tail_routes: Vec<TailRoute>,
 }
 
@@ -295,6 +298,8 @@ struct GroupsOfTheSound {
     nodes: Vec<SoundGroup>,
     sent_to: HashMap<ClipId, usize>,
     geometry: Vec<GroupGeometry>,
+    /// Which place in `nodes` each group that is one has.
+    places: HashMap<GroupId, usize>,
 }
 
 /// The clip groups and track groups that have a sound effect that is installed (the others are pass-through), with where the sum of each goes, and for each clip that is inside
@@ -327,6 +332,7 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> Groups
                         last_track: 0,
                     }),
                 tail_edge: group.tail_policy().edge,
+                is_a_clip_group: group.kind() == crate::project::GroupKind::ClipGroup,
             });
         }
     }
@@ -336,6 +342,7 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> Groups
             nodes: groups,
             sent_to,
             geometry,
+            places,
         };
     }
     for track in project.tracks() {
@@ -358,6 +365,7 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> Groups
         nodes: groups,
         sent_to,
         geometry,
+        places,
     }
 }
 
@@ -494,7 +502,12 @@ fn strip_of(
     }
     shared_effects.truncate(items.len());
     shared_effects.resize(items.len(), None);
-    let mut buses = runs_of_clips_that_share_the_effects_of_the_track(&items, &shared_effects, project.frame_rate());
+    let mut buses = runs_of_clips_that_share_the_effects_of_the_track(
+        &items,
+        &shared_effects,
+        project.frame_rate(),
+        track.sharing().sound,
+    );
     give_the_rings_their_routes(project, groups, track, &mut items, &mut buses);
     let strip_frames: u64 = items.iter().map(SoundItem::timeline_frame_count).sum();
     let muted = muted_stretches_of_the_track(animations, track, from, from + strip_frames);
@@ -549,13 +562,24 @@ fn give_the_rings_their_routes(
             .max()
             .unwrap_or(0)
             + tail_samples_of_a_chain(&bus.effects);
+        let ring_from = last.first_timeline_frame + last.timeline_frame_count;
+        let ring_frames = frames_that_reach(frame_rate, ring_samples);
+        if track.sharing().sound == TrackSharing::PerTrackWithWindows {
+            // Groups take windows of the one instance: outside them its sound goes to the track group that holds the track, if one has sound effects, or to the sum.
+            let default = track_groups_round(project, track)
+                .into_iter()
+                .find_map(|group| groups.places.get(&group).copied());
+            bus.sent_to = default;
+            bus.tail_routes = window_routes_of(&groups.geometry, row, default, ring_from + ring_frames);
+            continue;
+        }
         bus.tail_routes = tail_routes_of(
             &groups.nodes,
             &groups.geometry,
             &Emitter {
                 row,
-                ring_from: last.first_timeline_frame + last.timeline_frame_count,
-                ring_frames: frames_that_reach(frame_rate, ring_samples),
+                ring_from,
+                ring_frames,
                 sent_to: last.sent_to,
                 policy: policy_of(last.clip),
             },
@@ -582,6 +606,22 @@ fn give_the_rings_their_routes(
     }
 }
 
+/// The track groups that hold `track`, the nearest first.
+fn track_groups_round(project: &Project, track: &Track) -> Vec<GroupId> {
+    let Some(entry) = track.entries().first() else {
+        return Vec::new();
+    };
+    project
+        .groups_round_the_clip(entry.id())
+        .into_iter()
+        .filter(|group| {
+            project
+                .group(*group)
+                .is_some_and(|found| found.kind() == crate::project::GroupKind::TrackGroup)
+        })
+        .collect()
+}
+
 /// The runs of clips that share the effects of their track: clips that have the effects of the track at the end of their chain, one after another, **with no more silence between two
 /// of them than the effects go on for after their input ends** (their tail, 6 of docs/engine-phase-12-design.md): where the silence is longer the memory of the effects is gone, and
 /// the next clip has them as they were made, which is the same sound and costs nothing while it is idle. A clip that does not share them (it has its own copy where its badge is)
@@ -590,6 +630,7 @@ fn runs_of_clips_that_share_the_effects_of_the_track(
     items: &[SoundItem],
     shared: &[Option<Vec<LayerEffect>>],
     frame_rate: FrameRate,
+    sharing: TrackSharing,
 ) -> Vec<SoundBus> {
     let mut buses: Vec<SoundBus> = Vec::new();
     for (place, effects) in shared.iter().enumerate() {
@@ -597,11 +638,23 @@ fn runs_of_clips_that_share_the_effects_of_the_track(
             continue;
         };
         let tail_frames = frames_that_reach(frame_rate, tail_samples_of_a_chain(effects));
+        let is_one_instance_for_the_track = matches!(
+            sharing,
+            TrackSharing::PerTrackWithWindows | TrackSharing::PerTrackIndivisible
+        );
         match buses.last_mut() {
-            // (A run is clips that go to the same place: the edge of a group ends it, and a copy of the effects that the clips inside it have is not one that hears the clips outside.)
+            // (With one instance for the track, a run goes on across any silence and any edge of a group: only a clip that has a copy of its own ends it. Otherwise a run is clips that
+            // go to the same place, with no more silence between them than the tail: the edge of a group ends it, and a copy of the effects that the clips inside it have is not one
+            // that hears the clips outside.)
             Some(last)
-                if only_silence_that_is_not_longer_than(&items[last.last_item + 1..place], tail_frames)
-                    && sent_to_by(&items[last.last_item]) == sent_to_by(&items[place]) =>
+                if if is_one_instance_for_the_track {
+                    items[last.last_item + 1..place]
+                        .iter()
+                        .all(|item| matches!(item, SoundItem::Silence { .. }))
+                } else {
+                    only_silence_that_is_not_longer_than(&items[last.last_item + 1..place], tail_frames)
+                        && sent_to_by(&items[last.last_item]) == sent_to_by(&items[place])
+                } =>
             {
                 last.last_item = place;
             }
@@ -609,6 +662,7 @@ fn runs_of_clips_that_share_the_effects_of_the_track(
                 first_item: place,
                 last_item: place,
                 effects: effects.clone(),
+                sent_to: sent_to_by(&items[place]),
                 tail_routes: Vec::new(),
             }),
         }
@@ -865,6 +919,8 @@ mod buses_tests;
 mod effects_tests;
 #[cfg(test)]
 mod groups_tests;
+#[cfg(test)]
+mod sharing_tests;
 #[cfg(test)]
 mod tail_routes_tests;
 #[cfg(test)]

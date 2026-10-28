@@ -4,7 +4,7 @@
 //! Where the ring of a clip goes at the edges of groups (phase 12, piece 12.3d; docs/engine-phase-12-design.md, section 7): the interpreter of the policies on made-up groups, and what the
 //! plan says of the clips and the instances of a track's effects of a real project.
 
-use super::tail_routes::{Emitter, GroupGeometry, tail_routes_of};
+use super::tail_routes::{Emitter, GroupGeometry, tail_routes_of, window_routes_of};
 use super::*;
 use crate::composition::test_projects::{SOUND_FILE, media_clip, project_of};
 use crate::project::tracks::Clip;
@@ -41,6 +41,7 @@ fn where_it_is(
             last_track,
         },
         tail_edge,
+        is_a_clip_group: true,
     }
 }
 
@@ -321,6 +322,76 @@ fn a_ring_that_enters_a_group_and_the_group_round_it_at_once_is_in_the_inner_one
         tail_routes_of(&groups, &geometry, &emitter(None, ClipTailEdge::Into)),
         [route(60, TailDestination::Group(0))],
         "it is in the inner group, and so already in the outer one: it does not go out of the one to be in the other"
+    );
+}
+
+// --- the windows of one instance for the track, on made-up groups ---
+
+#[test]
+fn a_window_inside_another_is_the_one_that_is_taken_while_it_lasts_and_the_outer_one_comes_back_if_it_is_lengthened() {
+    // Row 0. The outer window is frames 90 to 230 and keeps its tails alive; the inner one is 120 to 150 and releases. The sound ends at frame 260.
+    let geometry = [
+        where_it_is(90, 230, 0, 1, GroupTailEdge::KeepAlive),
+        where_it_is(120, 150, 0, 1, GroupTailEdge::Release),
+    ];
+    assert_eq!(
+        window_routes_of(&geometry, 0, None, 260),
+        [
+            route(90, TailDestination::Group(0)),
+            route(120, TailDestination::Group(1)),
+            route(150, TailDestination::Group(0)),
+            route(260, TailDestination::Sum),
+        ]
+    );
+}
+
+#[test]
+fn of_two_windows_that_begin_at_one_frame_the_inner_one_is_taken() {
+    let geometry = [
+        where_it_is(90, 230, 0, 1, GroupTailEdge::Release),
+        where_it_is(90, 120, 0, 1, GroupTailEdge::Release),
+    ];
+    assert_eq!(
+        window_routes_of(&geometry, 0, None, 260),
+        [
+            route(90, TailDestination::Group(1)),
+            route(120, TailDestination::Group(0)),
+            route(230, TailDestination::Sum),
+        ]
+    );
+}
+
+#[test]
+fn a_group_whose_rectangle_does_not_reach_the_track_takes_no_window_and_nor_does_a_track_group() {
+    let mut track_group = where_it_is(0, 300, 0, 3, GroupTailEdge::KeepAlive);
+    track_group.is_a_clip_group = false;
+    let geometry = [where_it_is(90, 120, 1, 2, GroupTailEdge::Release), track_group];
+    assert_eq!(window_routes_of(&geometry, 0, None, 260), Vec::new());
+    assert_eq!(
+        window_routes_of(&geometry, 1, Some(1), 260),
+        [
+            route(90, TailDestination::Group(0)),
+            route(120, TailDestination::Group(1))
+        ],
+        "(on row 1 the group does take one, and outside it the sound goes where it was told to)"
+    );
+}
+
+#[test]
+fn windows_that_overlap_make_a_route_only_where_what_is_taken_changes() {
+    // (The rules do not let two clip groups with effects that have clips on a track overlap in time; where they do not stop it, and for one whose clips are not on the track, they are
+    // not made to give a route at every edge.)
+    let geometry = [
+        where_it_is(0, 40, 0, 1, GroupTailEdge::Release),
+        where_it_is(10, 50, 0, 1, GroupTailEdge::Release),
+    ];
+    assert_eq!(
+        window_routes_of(&geometry, 0, None, 100),
+        [
+            route(0, TailDestination::Group(0)),
+            route(10, TailDestination::Group(1)),
+            route(50, TailDestination::Sum),
+        ]
     );
 }
 

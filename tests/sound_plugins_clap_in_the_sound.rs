@@ -757,6 +757,7 @@ fn the_clips_of_a_run_are_heard_by_one_echo_so_two_clips_that_follow_each_other_
         last_item: 1,
         effects: vec![an_echo()],
         tail_routes: Vec::new(),
+        sent_to: None,
     }];
 
     let (exported, notes) = by_the_export(&toolchain, &as_a_run_of_one_instance, &sources, host());
@@ -829,6 +830,7 @@ fn an_echo_for_each_clip_that_rings_on_and_one_echo_for_the_run_sound_the_same_b
         last_item: 1,
         effects: vec![a_long_ringing_echo()],
         tail_routes: Vec::new(),
+        sent_to: None,
     }];
     let mut a_copy_for_each_clip = run;
     for item in &mut a_copy_for_each_clip.strips[0].items {
@@ -1074,6 +1076,107 @@ fn the_ring_of_a_clip_that_its_group_releases_is_not_done_to_by_the_effects_of_t
             0..edge + 2 * 9600
         ) < 1e-6,
         "(the control: kept alive, which is what a group does if nobody says otherwise, the ring is halved too)"
+    );
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+// --- Phase 12.4: one instance for the whole track, and the windows that groups take of it ---
+
+#[test]
+fn a_group_takes_a_window_of_the_one_echo_of_a_track_and_what_still_rings_in_it_from_before_is_done_to_too_in_the_export_and_in_the_preview()
+ {
+    use fastforwardrs::composition::{TailDestination, TailRoute};
+    use fastforwardrs::media::export::{SoundBusToExport, SoundGroupToExport};
+
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+    // A clip, three frames of silence, and a clip: the echo of the track (200 milliseconds, six frames) is still ringing from the first when the second begins.
+    let long_echo = LayerEffect {
+        tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        ..an_echo()
+    };
+    let one_echo = |windows: bool| {
+        let mut specification = specification_of_frames_with(70, Vec::new());
+        let SoundItemToExport::Clip(template) = specification.strips[0].items[0].clone() else {
+            unreachable!("one clip");
+        };
+        let mut first = template.clone();
+        first.timeline_frame_count = 30;
+        first.end_source_frame = 30;
+        let mut second = template;
+        second.first_timeline_frame = 33;
+        second.first_source_frame = 33;
+        second.end_source_frame = 63;
+        second.timeline_frame_count = 30;
+        second.sent_to = windows.then_some(0);
+        specification.strips[0].items = vec![
+            SoundItemToExport::Clip(first),
+            SoundItemToExport::Silence { frame_count: 3 },
+            SoundItemToExport::Clip(second),
+        ];
+        specification.strips[0].buses = vec![SoundBusToExport {
+            first_item: 0,
+            last_item: 2,
+            effects: vec![long_echo.clone()],
+            sent_to: None,
+            tail_routes: if windows {
+                vec![
+                    TailRoute {
+                        from_frame: 33,
+                        to: TailDestination::Group(0),
+                    },
+                    TailRoute {
+                        from_frame: 63,
+                        to: TailDestination::Sum,
+                    },
+                ]
+            } else {
+                Vec::new()
+            },
+        }];
+        if windows {
+            specification.groups = vec![SoundGroupToExport {
+                effects: vec![a_gain(the_kind_of(clap_test_plugins::GAIN), 0.5)],
+                parent: None,
+            }];
+        }
+        specification.edge_fade_milliseconds = 0;
+        specification
+    };
+
+    let (alone, _) = by_the_export(&toolchain, &one_echo(false), &sources, host());
+    let windows = one_echo(true);
+    let (exported, notes) = by_the_export(&toolchain, &windows, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &windows, &sources, host());
+
+    let (window_begins, window_ends) = (33 * SAMPLES_IN_A_FRAME, 63 * SAMPLES_IN_A_FRAME);
+    assert_eq!(exported.len(), alone.len());
+    let worst = |range: std::ops::Range<usize>, weight: f32| {
+        range
+            .map(|index| (exported[index] - alone[index] * weight).abs())
+            .fold(0.0_f32, f32::max)
+    };
+    assert!(
+        worst(0..window_begins, 1.0) < 1e-6,
+        "outside the window the sound is the instance's, as it is"
+    );
+    assert!(
+        worst(window_begins..window_ends, 0.5) < 1e-6,
+        "inside it the group halves what the instance makes"
+    );
+    assert!(
+        worst(window_ends..exported.len(), 1.0) < 1e-6,
+        "and after it the sound is as it was"
+    );
+    assert!(
+        alone[window_begins..window_begins + 3 * SAMPLES_IN_A_FRAME]
+            .iter()
+            .any(|sample| sample.abs() > 0.01),
+        "(a premise: the echo of the first clip is still ringing when the window begins: it is in the window, and halved with the rest, which is what a window cannot help)"
     );
     assert_eq!(previewed, exported, "the preview makes what the export makes");
     assert!(notes.is_empty(), "{notes:?}");

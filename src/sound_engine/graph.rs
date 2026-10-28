@@ -459,17 +459,10 @@ impl SoundGraph {
                             .map(Item::rings_until)
                             .max()
                             .unwrap_or(0);
-                        let mut sent_to_by_its_clips =
-                            strip.items[bus.first_item..=bus.last_item]
-                                .iter()
-                                .filter_map(|item| match item {
-                                    SoundItemToExport::Clip(clip) => Some(clip.sent_to),
-                                    SoundItemToExport::Silence { .. } => None,
-                                });
-                        let sent_to = sent_to_by_its_clips.next().flatten();
+                        let sent_to = bus.sent_to;
                         assert!(
-                            sent_to_by_its_clips.all(|other| other == sent_to),
-                            "the clips that a bus hears are sent to the same place"
+                            sent_to.is_none_or(|group| group < group_count),
+                            "a bus is sent to a group that is there"
                         );
                         let start = items[bus.first_item].start;
                         let mut end = rings_on_until + tail_samples_of_a_chain(&bus.effects);

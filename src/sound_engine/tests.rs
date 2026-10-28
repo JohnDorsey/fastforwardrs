@@ -1466,16 +1466,24 @@ fn specification_with_buses(
         strips: strips
             .into_iter()
             .map(|(items, buses)| SoundStripToExport {
-                items,
+                // (A bus sends what it makes where the clips it hears are sent.)
                 buses: buses
                     .into_iter()
                     .map(|(first_item, last_item)| crate::media::export::SoundBusToExport {
                         first_item,
                         last_item,
                         effects: Vec::new(),
+                        sent_to: items[first_item..=last_item]
+                            .iter()
+                            .find_map(|item| match item {
+                                SoundItemToExport::Clip(clip) => Some(clip.sent_to),
+                                SoundItemToExport::Silence { .. } => None,
+                            })
+                            .flatten(),
                         tail_routes: Vec::new(),
                     })
                     .collect(),
+                items,
                 loudness: Default::default(),
                 muted: Vec::new(),
             })

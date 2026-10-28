@@ -110,6 +110,9 @@ pub struct SoundBusToExport {
     pub last_item: usize,
     /// The effects, one after another, with their values and keyframes (whose frames are frames of the timeline).
     pub effects: Vec<crate::composition::LayerEffect>,
+    /// Where what the instance makes goes: this group of `SoundGraphSpecification::groups`, or, if none, the sum of all the sound (where the sound that an instance makes goes outside
+    /// the windows that groups take of it, if it is one that groups take windows of).
+    pub sent_to: Option<usize>,
     /// Where the sound that the instance goes on making after its last clip goes, from some frame on (see `SoundClipToExport::tail_routes`). Empty: it goes where the clips do.
     pub tail_routes: Vec<crate::composition::TailRoute>,
 }

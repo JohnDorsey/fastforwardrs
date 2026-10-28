@@ -86,6 +86,7 @@ pub fn sound_graph_specification(
                         first_item: bus.first_item,
                         last_item: bus.last_item,
                         effects: bus.effects.clone(),
+                        sent_to: bus.sent_to,
                         tail_routes: bus.tail_routes.clone(),
                     })
                     .collect(),

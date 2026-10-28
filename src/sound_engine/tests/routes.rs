@@ -439,3 +439,38 @@ fn the_effects_of_a_ring_that_is_cut_are_let_go_of_where_it_has_faded_out_and_no
         "(the control: a ring that goes on is not let go of until its tail has ended, 4800 samples after the clip)"
     );
 }
+
+#[test]
+fn an_instance_that_groups_take_windows_of_sends_what_it_makes_to_the_sum_outside_them_whatever_its_clips_are_sent_to()
+{
+    // Two clips that are said to be sent to the group, with a silence between, heard by one instance that sends what it makes to the sum and gives the group the frame 2 (a window).
+    let mut specification = specification_with_buses(
+        thirty(),
+        4,
+        vec![(vec![a_member(1, 0), silence(1), a_member(1, 0)], vec![(0, 2)])],
+    );
+    specification.groups = vec![SoundGroupToExport {
+        effects: Vec::new(),
+        parent: None,
+    }];
+    specification.edge_fade_milliseconds = 0;
+    specification.strips[0].buses[0].sent_to = None;
+    specification.strips[0].buses[0].tail_routes =
+        vec![route(2, TailDestination::Group(0)), route(3, TailDestination::Sum)];
+
+    let left = the_left_of(specification, GroupInsertions::new(|_| vec![Box::new(Scales(0.5))]));
+
+    let (first, last) = (
+        |index: usize| value_of(0, 0, index),
+        |index: usize| value_of(0, 2, index),
+    );
+    for (index, sample) in left.iter().enumerate() {
+        let expected = match index {
+            0..1600 => first(index),
+            1600..3200 => 0.0,
+            3200..4800 => last(index - 3200) * 0.5,
+            _ => 0.0,
+        };
+        assert_eq!(*sample, expected, "sample {index}");
+    }
+}

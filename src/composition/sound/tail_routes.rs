@@ -44,6 +44,8 @@ pub struct TailRoute {
 pub(super) struct GroupGeometry {
     pub rectangle: Rectangle,
     pub tail_edge: GroupTailEdge,
+    /// A clip group (a track group has no window of a track: it has all of it).
+    pub is_a_clip_group: bool,
 }
 
 /// Something that rings: a clip that is not heard by an instance of its track's effects, or such an instance.
@@ -82,6 +84,66 @@ fn is_in(groups: &[SoundGroup], mut at: Option<usize>, group: usize) -> bool {
 
 fn destination_of(at: Option<usize>) -> TailDestination {
     at.map_or(TailDestination::Sum, TailDestination::Group)
+}
+
+/// The routes of the sound of **one instance of the effects of a track that the clip groups take windows of** (the sharing *per track, with windows*, section 5.3 of the design): the
+/// instance hears all the track, and **each clip group whose rectangle reaches across the track takes what the instance makes while it is there**, so that what is in the window is
+/// what the group's effects are done to. `default` is where the sound goes outside the windows (the track group round the track that has sound effects, or the sum of all the sound), and
+/// `ring_end_frame` is the frame the sound of the instance has ended by.
+///
+/// A window is the frames of the rectangle of its group; one whose group keeps its tails alive is **lengthened** to the end of the sound, but not past the first frame of the next window
+/// (which it ends at). A window inside another is the one that is taken (the one that began last is: the inner one). A group that cuts, which a window cannot do (what is after its edge
+/// is also what other clips make), releases.
+pub(super) fn window_routes_of(
+    geometry: &[GroupGeometry],
+    row: usize,
+    default: Option<usize>,
+    ring_end_frame: u64,
+) -> Vec<TailRoute> {
+    let reaching: Vec<usize> = (0..geometry.len())
+        .filter(|&group| geometry[group].is_a_clip_group && geometry[group].rectangle.reaches_the_track_at(row))
+        .collect();
+    // Where each window ends: at the end of the rectangle, or, if the group keeps its tails alive, as far as the sound goes unless another window begins first.
+    let windows: Vec<(usize, u64, u64)> = reaching
+        .iter()
+        .map(|&group| {
+            let rectangle = geometry[group].rectangle;
+            let end = if geometry[group].tail_edge == GroupTailEdge::KeepAlive {
+                let next_window_begins = reaching
+                    .iter()
+                    .map(|&other| geometry[other].rectangle.first_frame)
+                    .filter(|&first| first >= rectangle.end_frame)
+                    .min();
+                next_window_begins
+                    .unwrap_or(u64::MAX)
+                    .min(ring_end_frame.max(rectangle.end_frame))
+            } else {
+                rectangle.end_frame
+            };
+            (group, rectangle.first_frame, end)
+        })
+        .collect();
+    let mut frames: Vec<u64> = windows.iter().flat_map(|&(_, first, end)| [first, end]).collect();
+    frames.sort_unstable();
+    frames.dedup();
+    let mut routes: Vec<TailRoute> = Vec::new();
+    let mut before = default;
+    for frame in frames {
+        let taken = windows
+            .iter()
+            .filter(|&&(_, first, end)| first <= frame && frame < end)
+            .max_by_key(|&&(group, first, _)| (first, std::cmp::Reverse(geometry[group].rectangle.end_frame)))
+            .map(|&(group, _, _)| group);
+        let now = taken.or(default);
+        if now != before {
+            routes.push(TailRoute {
+                from_frame: frame,
+                to: destination_of(now),
+            });
+            before = now;
+        }
+    }
+    routes
 }
 
 /// The routes of the ring of `emitter`, in the order of the frames they begin at. Empty where the ring goes where its clip does all the way (which is what no policy does).
