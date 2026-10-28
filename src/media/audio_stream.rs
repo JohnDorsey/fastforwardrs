@@ -360,6 +360,7 @@ mod tests {
                         frames_of_the_clip_before: 0,
                         effects: Vec::new(),
                     })],
+                    buses: Vec::new(),
                 }],
                 sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
             },

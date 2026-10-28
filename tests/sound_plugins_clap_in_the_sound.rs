@@ -114,6 +114,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 frames_of_the_clip_before: 0,
                 effects,
             })],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     }
@@ -643,4 +644,82 @@ fn a_clip_that_follows_another_one_with_the_same_effect_has_an_echo_of_its_own_t
         "and the echo is heard later (the control: the test can tell)"
     );
     assert_eq!(previewed, exported, "the preview makes what the export makes");
+}
+
+// --- Phase 12.2: one instance of the effects of a track for the clips of a run ---
+
+#[test]
+fn the_clips_of_a_run_are_heard_by_one_echo_so_two_clips_that_follow_each_other_sound_as_the_one_they_were_cut_from_does()
+ {
+    use fastforwardrs::media::export::SoundBusToExport;
+
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+
+    // Two seconds of noise through the echo, as one clip.
+    let (played_through, _) = by_the_export(
+        &toolchain,
+        &specification_of_frames_with(60, vec![an_echo()]),
+        &sources,
+        host(),
+    );
+
+    // The same two seconds as two clips, a second each, one after the other, whose track has the echo: one instance of it hears both.
+    let mut as_a_run = specification_of_frames_with(60, Vec::new());
+    let SoundItemToExport::Clip(template) = as_a_run.strips[0].items[0].clone() else {
+        unreachable!("the strip is one clip");
+    };
+    let mut second = template.clone();
+    second.first_source_frame = 30;
+    second.end_source_frame = 60;
+    second.first_timeline_frame = 30;
+    let mut first = template;
+    first.end_source_frame = 30;
+    first.timeline_frame_count = 30;
+    as_a_run.strips[0].items = vec![
+        SoundItemToExport::Clip(first.clone()),
+        SoundItemToExport::Clip(second.clone()),
+    ];
+    let mut as_a_run_of_one_instance = as_a_run.clone();
+    as_a_run_of_one_instance.strips[0].buses = vec![SoundBusToExport {
+        first_item: 0,
+        last_item: 1,
+        effects: vec![an_echo()],
+    }];
+
+    let (exported, notes) = by_the_export(&toolchain, &as_a_run_of_one_instance, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &as_a_run_of_one_instance, &sources, host());
+
+    assert_eq!(exported.len(), played_through.len());
+    let worst = exported
+        .iter()
+        .zip(&played_through)
+        .map(|(made, was)| (made - was).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst < 1e-4,
+        "one echo that hears the two clips sounds as the one clip does: the worst difference is {worst}"
+    );
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+    assert!(notes.is_empty(), "{notes:?}");
+
+    // The control, the other sharing: an echo in the chain of each clip begins again at the second clip, whose first echoes are not those of what came before it.
+    let mut per_clip = as_a_run;
+    for item in &mut per_clip.strips[0].items {
+        let SoundItemToExport::Clip(clip) = item else {
+            unreachable!("two clips")
+        };
+        clip.effects = vec![an_echo()];
+    }
+    let (one_for_each, _) = by_the_export(&toolchain, &per_clip, &sources, host());
+    let start_of_the_second = 30 * SAMPLES_IN_A_FRAME;
+    let worst_at_the_start = one_for_each[start_of_the_second..start_of_the_second + 400]
+        .iter()
+        .zip(&played_through[start_of_the_second..start_of_the_second + 400])
+        .map(|(made, was)| (made - was).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(worst_at_the_start > 0.05, "{worst_at_the_start}");
 }

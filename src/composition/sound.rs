@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use super::pictures::{LayerEffect, layer_effect_of};
 use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, Track, TrackId};
 use crate::project::{
-    AnimationTarget, AppliedEffect, EffectDomain, FrameRate, Project, PropertyId, ResolvedAnimations,
-    SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex,
+    AnimationTarget, AppliedEffect, EffectDomain, FrameRate, Member, Project, PropertyId, ResolvedAnimations,
+    SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex, TrackSharing,
 };
 
 /// How loud a stretch of sound is at a frame of it: the loudness of the clip and of its track together.
@@ -115,6 +115,20 @@ impl SoundItem {
 pub struct SoundStrip {
     pub track: TrackId,
     pub items: Vec<SoundItem>,
+    /// The instances of the effects of the track that clips share (phase 12, piece 12.2): one for each **run** of clips, in the order of `items`. A clip that is in none has
+    /// all of its effects in its own chain.
+    pub buses: Vec<SoundBus>,
+}
+
+/// One instance of the sound effects of a track, which hears the clips of a run one after another: they are put together (each as its own effects and its volume make it) and
+/// given to the effects, which have one state from the first of them to the last.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundBus {
+    /// The first and the last item of the strip that it hears (the items between are heard too).
+    pub first_item: usize,
+    pub last_item: usize,
+    /// The effects of the track, one after another, with their values and the keyframes of them (the frames of which are frames of the timeline).
+    pub effects: Vec<LayerEffect>,
 }
 
 impl SoundStrip {
@@ -181,6 +195,8 @@ pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::has
                 let layer = layer_effect_of(project, &animations, effect);
                 entry.id().hash(hasher);
                 layer.instance.number().hash(hasher);
+                // (How much of the track one copy of its effects covers is heard too.)
+                track.sharing().sound.hash(hasher);
                 layer.kind.key().hash(hasher);
                 layer.kind.version().hash(hasher);
                 layer
@@ -208,6 +224,8 @@ fn strip_of(
     is_usable: &impl Fn(SourceMediaIdentifier) -> bool,
 ) -> Option<SoundStrip> {
     let mut items: Vec<SoundItem> = Vec::new();
+    // What each item shares with the other clips of the track: the effects of the track, for a clip that has them at the end of its chain (see `effects_of_a_clip`).
+    let mut shared_effects: Vec<Option<Vec<LayerEffect>>> = Vec::new();
     let mut next_frame = from;
     for placement in track.placements() {
         let Some(media) = placement.clip.as_media() else {
@@ -219,6 +237,7 @@ fn strip_of(
         }
         let start = placement.first_timeline_frame.value().max(from);
         push_silence(&mut items, start - next_frame);
+        shared_effects.resize(items.len(), None);
 
         let has_sound = project
             .source(media.source())
@@ -227,21 +246,26 @@ fn strip_of(
         if has_sound {
             for stretch in stretches_heard_or_not(animations, track, &placement, media, start, end) {
                 if stretch.is_heard {
+                    let (own, shared) = effects_of_a_clip(project, animations, effects, track, placement.id);
+                    shared_effects.resize(items.len(), None);
                     items.push(SoundItem::Clip(sound_clip_over(
                         animations,
-                        sound_effects_of_the_clip(project, animations, effects, placement.id),
+                        own,
                         track,
                         &placement,
                         media,
                         stretch.first_frame,
                         stretch.end_frame,
                     )));
+                    shared_effects.push(shared);
                 } else {
                     push_silence(&mut items, stretch.end_frame - stretch.first_frame);
+                    shared_effects.resize(items.len(), None);
                 }
             }
         } else {
             push_silence(&mut items, end - start);
+            shared_effects.resize(items.len(), None);
         }
         next_frame = end;
     }
@@ -249,26 +273,67 @@ fn strip_of(
     while matches!(items.last(), Some(SoundItem::Silence { .. })) {
         items.pop();
     }
+    shared_effects.truncate(items.len());
+    shared_effects.resize(items.len(), None);
+    let buses = runs_of_clips_that_share_the_effects_of_the_track(&shared_effects);
     (!items.is_empty()).then_some(SoundStrip {
         track: track.id(),
         items,
+        buses,
     })
 }
 
-/// The sound effects that are applied to the clip `clip`, with their values and keyframes, in the order they are applied in. (Its picture effects are not here.)
-fn sound_effects_of_the_clip(
+/// The runs of clips that share the effects of their track: consecutive items that are clips and have the effects of the track at the end of their chain, with no silence
+/// between them (a silence ends the run: where the next clip begins after one, the effects begin again as they were made). Each is one instance, with the effects that all of
+/// its clips have.
+fn runs_of_clips_that_share_the_effects_of_the_track(shared: &[Option<Vec<LayerEffect>>]) -> Vec<SoundBus> {
+    let mut buses: Vec<SoundBus> = Vec::new();
+    for (place, effects) in shared.iter().enumerate() {
+        let Some(effects) = effects else {
+            continue;
+        };
+        match buses.last_mut() {
+            Some(last) if last.last_item + 1 == place => last.last_item = place,
+            _ => buses.push(SoundBus {
+                first_item: place,
+                last_item: place,
+                effects: effects.clone(),
+            }),
+        }
+    }
+    buses
+}
+
+/// The sound effects that are applied to the clip `clip` (a clip of `track`), with their values and keyframes, in the order they are applied in, as two lists: **the clip's own**
+/// (its own effects and those of its tags), and **the effects of its track, if the track's effects at the end of the chain are to be shared with the clips next to it** (`None`
+/// when they are not: they are then part of the clip's own). They are shared when the track's sharing of its sound effects is not one copy for each clip, and the effects of the
+/// track come after all the others in the clip's chain (a clip whose badge of its track is moved to the middle of its chain has its own copy of them, where the badge is).
+/// (Its picture effects are not here.)
+fn effects_of_a_clip(
     project: &Project,
     animations: &ResolvedAnimations,
     effects: &HashMap<ClipId, Vec<AppliedEffect<'_>>>,
+    track: &Track,
     clip: ClipId,
-) -> Vec<LayerEffect> {
-    effects
+) -> (Vec<LayerEffect>, Option<Vec<LayerEffect>>) {
+    let applied: Vec<&AppliedEffect<'_>> = effects
         .get(&clip)
         .map_or(&[][..], Vec::as_slice)
         .iter()
         .filter(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
-        .map(|applied| layer_effect_of(project, animations, applied))
-        .collect()
+        .collect();
+    let is_the_tracks = |applied: &&AppliedEffect<'_>| applied.owner == Member::Track(track.id());
+    let those_of_the_track = applied.iter().filter(|applied| is_the_tracks(applied)).count();
+    let at_the_end = applied[applied.len() - those_of_the_track..].iter().all(is_the_tracks);
+    let layer_of = |applied: &&AppliedEffect<'_>| layer_effect_of(project, animations, applied);
+    if those_of_the_track == 0 || !at_the_end || track.sharing().sound == TrackSharing::PerClip {
+        return (applied.iter().map(layer_of).collect(), None);
+    }
+    let (own, track_effects) = applied.split_at(applied.len() - those_of_the_track);
+    (
+        own.iter().map(layer_of).collect(),
+        Some(track_effects.iter().map(layer_of).collect()),
+    )
 }
 
 /// A stretch of a clip, from `first_frame` up to `end_frame` of the timeline, over which it is heard, or is not
@@ -419,6 +484,8 @@ fn push_silence(items: &mut Vec<SoundItem>, frame_count: u64) {
 
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod buses_tests;
 #[cfg(test)]
 mod effects_tests;
 #[cfg(test)]

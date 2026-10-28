@@ -48,7 +48,10 @@ fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_neve
     let specification = SoundGraphSpecification {
         frame_rate: FrameRate::new(30, 1).unwrap(),
         total_frame_count: 1200,
-        strips: vec![SoundStripToExport { items: clips }],
+        strips: vec![SoundStripToExport {
+            items: clips,
+            buses: Vec::new(),
+        }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };
     let request = AudioStreamRequest {

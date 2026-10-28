@@ -118,7 +118,7 @@ fn a_picture_effect_is_not_in_the_sound_plan() {
 }
 
 #[test]
-fn the_effects_of_the_track_are_in_the_plan_of_each_clip_of_it_where_the_badge_of_the_track_is_in_its_chain() {
+fn the_effects_of_the_track_are_the_instance_of_its_strip_that_its_clips_share_and_not_in_the_chain_of_a_clip() {
     let _alone = the_installed_plugins_to_myself();
     let kind = kind_of(&plugin("ladspa:a:on_a_track"));
     let mut project = project_with_a_video_and_a_sound();
@@ -131,9 +131,16 @@ fn the_effects_of_the_track_are_in_the_plan_of_each_clip_of_it_where_the_badge_o
     );
     let plan = plan(&project);
     let video = clips_of(&plan)[0];
-    assert_eq!(video.effects.len(), 1);
-    assert_eq!(video.effects[0].values[0], PropertyValue::Number(4.0));
+    assert!(
+        video.effects.is_empty(),
+        "since phase 12 the effects of the track are not in the chain of its clips"
+    );
+    let buses = &plan.strips[0].buses;
+    assert_eq!(buses.len(), 1);
+    assert_eq!(buses[0].effects.len(), 1);
+    assert_eq!(buses[0].effects[0].values[0], PropertyValue::Number(4.0));
     assert!(clips_of(&plan)[1].effects.is_empty(), "the other track is not affected");
+    assert!(plan.strips[1].buses.is_empty());
 }
 
 #[test]

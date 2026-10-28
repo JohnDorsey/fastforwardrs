@@ -6,7 +6,8 @@
 use std::collections::BTreeSet;
 
 use super::filter_graph::{
-    LoudnessToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport, SoundStripToExport,
+    LoudnessToExport, SoundBusToExport, SoundClipToExport, SoundGraphSpecification, SoundItemToExport,
+    SoundStripToExport,
 };
 use crate::composition::{Loudness, SoundItem, SoundPlan};
 use crate::project::{SourceMediaIdentifier, SpedUpClipSound};
@@ -67,6 +68,15 @@ pub fn sound_graph_specification(
                             frames_of_the_clip_before: clip.frames_of_the_clip_before,
                             effects: clip.effects.clone(),
                         }),
+                    })
+                    .collect(),
+                buses: strip
+                    .buses
+                    .iter()
+                    .map(|bus| SoundBusToExport {
+                        first_item: bus.first_item,
+                        last_item: bus.last_item,
+                        effects: bus.effects.clone(),
                     })
                     .collect(),
             })

@@ -187,6 +187,7 @@ fn one_clap_plugin_of_a_library_on_a_clip_for_the_driver() {
                     frames_of_the_clip_before: 0,
                     effects,
                 })],
+                buses: Vec::new(),
             }],
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         };

@@ -111,6 +111,7 @@ fn specification_of_a_second_with(effects: Vec<LayerEffect>) -> SoundGraphSpecif
                 frames_of_the_clip_before: 0,
                 effects,
             })],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     }

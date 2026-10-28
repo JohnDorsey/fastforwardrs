@@ -2,17 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! What the sound plan makes of the effects of tracks and groups **today**, written down before phase 12 changes it (docs/engine-phase-12-design.md, section 1): an effect of a track is
-//! stamped into the chain of **each** clip of the track, so that each clip has a copy of its own that ends where the clip does; and a clip group or a track group has no sound effect.
-//! When phase 12 gives a track one instance for a run of clips, and groups sound effects, these tests are the ones that change, on purpose.
+//! stamped into the chain of **each** clip of the track (until piece 12.2, which gave a run of clips one instance of them: see `buses_tests.rs`, and the sharing *one copy for each clip*, which is
+//! still this); and a clip group or a track group has no sound effect. When phase 12 gives groups sound effects (12.3) the second of these tests is the one that changes, on purpose.
 
 use super::*;
 use crate::composition::plan_pictures;
 use crate::composition::test_projects::{LONG_VIDEO, SOUND_FILE, media_clip, project_of};
 use crate::project::tracks::Clip;
-use crate::project::{
-    AnimationTarget, EditError, EffectKind, GroupKind, InstalledPlugin, Member, PropertyValue, set_installed_plugins,
-};
-use crate::test_support::{an_installed_sound_plugin, put_an_effect_on, the_installed_plugins_to_myself};
+use crate::project::{EditError, EffectKind, GroupKind, InstalledPlugin, Member, set_installed_plugins};
+use crate::test_support::{an_installed_sound_plugin, the_installed_plugins_to_myself};
 
 fn plan(project: &Project) -> SoundPlan {
     plan_sound(project, TimelineFrameIndex::new(0), |_| true)
@@ -48,32 +46,6 @@ fn a_track_of_two_clips_and_another_of_one() -> Project {
 
 fn clip_at(project: &Project, track: usize, index: usize) -> crate::project::ClipId {
     project.tracks()[track].placement_at_index(index).unwrap().id
-}
-
-#[test]
-fn an_effect_of_a_track_is_a_copy_in_the_chain_of_each_clip_of_it_and_the_clips_are_not_told_that_they_share_it() {
-    let _alone = the_installed_plugins_to_myself();
-    let (_, kind) = a_sound_effect();
-    let mut project = a_track_of_two_clips_and_another_of_one();
-    let track = project.tracks()[0].id();
-    put_an_effect_on(
-        &mut project,
-        AnimationTarget::Track(track),
-        kind,
-        &[PropertyValue::Number(2.0)],
-    );
-
-    let plan = plan(&project);
-    let clips = clips_of(&plan);
-    assert_eq!(clips.len(), 3);
-    for (index, clip) in clips.iter().take(2).enumerate() {
-        assert_eq!(clip.effects.len(), 1, "clip {index} of the track has the effect");
-        assert_eq!(clip.effects[0].values, [PropertyValue::Number(2.0)]);
-    }
-    assert!(clips[2].effects.is_empty(), "the other track has none");
-    // (There is nowhere in the plan to say that two clips share an effect: a strip is clips and silences, and what an effect hears is the clip it is in the chain of.)
-    assert_eq!(plan.strips.len(), 2);
-    assert_eq!(plan.strips[0].items.len(), 2, "the two clips, with no silence between");
 }
 
 #[test]

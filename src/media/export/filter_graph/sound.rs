@@ -88,10 +88,25 @@ impl SoundItemToExport {
     }
 }
 
-/// The sound of one track: its items one after another.
+/// One instance of the sound effects of a track, which hears several items of the strip one after another (phase 12, piece 12.2; docs/engine-phase-12-design.md): the clips of a **run**,
+/// each made as the clip says (its own effects, its volume), **added together**, and then given to the effects, which are one instance, with one state, from the first of the clips
+/// to the last. **The filter graph of ffmpeg does not do them** (it cannot); the sound engine does.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundBusToExport {
+    /// The first and the last item of the strip that the instance hears (a place in `items`: the items between are heard too, the silences among them as silence).
+    pub first_item: usize,
+    pub last_item: usize,
+    /// The effects, one after another, with their values and keyframes (whose frames are frames of the timeline).
+    pub effects: Vec<crate::composition::LayerEffect>,
+}
+
+/// The sound of one track: its items one after another, and the instances of the track's effects that hear some of them together.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundStripToExport {
     pub items: Vec<SoundItemToExport>,
+    /// The instances of the effects of the track that are shared by clips: one for each run of clips, in the order of `items`, none sharing an item with another. The clips that
+    /// are in none have all of their effects in their own chain.
+    pub buses: Vec<SoundBusToExport>,
 }
 
 impl SoundStripToExport {

@@ -51,9 +51,11 @@ fn programs_running_just_after_dropping_the_stream(format: AudioFormat) -> Optio
         strips: vec![
             SoundStripToExport {
                 items: vec![clip_of_the_long_file(270)],
+                buses: Vec::new(),
             },
             SoundStripToExport {
                 items: vec![clip_of_the_long_file(270)],
+                buses: Vec::new(),
             },
         ],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
@@ -120,6 +122,7 @@ fn a_stream_that_was_read_to_its_end_is_dropped_with_no_program_left() {
             total_frame_count: 15,
             strips: vec![SoundStripToExport {
                 items: vec![clip_of_the_long_file(15)],
+                buses: Vec::new(),
             }],
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         },

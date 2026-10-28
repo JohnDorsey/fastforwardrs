@@ -113,6 +113,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 frames_of_the_clip_before: 0,
                 effects,
             })],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     }

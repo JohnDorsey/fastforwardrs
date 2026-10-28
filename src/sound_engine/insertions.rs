@@ -5,6 +5,8 @@
 //! there is any plugin to put in them).
 
 use super::feed::ClipRequest;
+use crate::composition::LayerEffect;
+use crate::media::export::SoundClipToExport;
 
 /// Something that changes sound a block at a time, in place: an effect.
 pub trait BlockProcessor: Send {
@@ -31,6 +33,25 @@ pub trait BlockProcessor: Send {
 pub trait Insertions {
     fn for_clip(&mut self, request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>>;
     fn for_strip(&mut self, strip: usize) -> Vec<Box<dyn BlockProcessor>>;
+
+    /// What gives the graph the effects of **a bus**: one instance of the effects of a track, which hears the clips of a run one after another (phase 12, piece 12.2). It is
+    /// asked for when the first of the clips is first heard, and let go of when the last has ended. No effects, unless it says otherwise.
+    fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        Vec::new()
+    }
+}
+
+/// Which bus of the specification the effects are asked for.
+#[derive(Clone, Copy)]
+pub struct BusRequest<'specification> {
+    /// Which strip it is in (the strips are numbered from 0, in the order of the specification).
+    pub strip: usize,
+    /// Which bus of the strip it is.
+    pub bus: usize,
+    /// The first clip of the run that it hears, which is where its effects begin (the keyframes of their values are frames of the timeline, counted from where it is).
+    pub first_clip: &'specification SoundClipToExport,
+    /// The effects of the track, one after another.
+    pub effects: &'specification [LayerEffect],
 }
 
 /// No effects at all.

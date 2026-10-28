@@ -46,7 +46,13 @@ fn specification(
     SoundGraphSpecification {
         frame_rate,
         total_frame_count: total_frames,
-        strips: strips.into_iter().map(|items| SoundStripToExport { items }).collect(),
+        strips: strips
+            .into_iter()
+            .map(|items| SoundStripToExport {
+                items,
+                buses: Vec::new(),
+            })
+            .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     }
 }
@@ -1316,5 +1322,341 @@ fn a_clip_at_the_start_of_its_file_or_one_that_is_sped_up_or_with_a_plugin_that_
             (0..4800).map(|n| n as f32).collect::<Vec<_>>(),
             "{why}: the clip is heard from its first sample"
         );
+    }
+}
+
+// --- buses: one instance of the effects of a track that hears the clips of a run (phase 12, piece 12.2) ---
+
+/// A strip of items, and the runs of them that one instance of effects hears (each a first and a last item).
+type StripWithBuses = (Vec<SoundItemToExport>, Vec<(usize, usize)>);
+
+/// A specification of strips with buses.
+fn specification_with_buses(
+    frame_rate: FrameRate,
+    total_frames: u64,
+    strips: Vec<StripWithBuses>,
+) -> SoundGraphSpecification {
+    SoundGraphSpecification {
+        frame_rate,
+        total_frame_count: total_frames,
+        strips: strips
+            .into_iter()
+            .map(|(items, buses)| SoundStripToExport {
+                items,
+                buses: buses
+                    .into_iter()
+                    .map(|(first_item, last_item)| crate::media::export::SoundBusToExport {
+                        first_item,
+                        last_item,
+                        effects: Vec::new(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+    }
+}
+
+/// Gives every sample the sum of it and all the samples that it was given before (each channel by itself): a state that goes on from one sample to the next, and so from one
+/// clip to the next if it is one instance.
+#[derive(Default)]
+struct Sums {
+    left: f32,
+    right: f32,
+}
+
+impl BlockProcessor for Sums {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for sample in left {
+            self.left += *sample;
+            *sample = self.left;
+        }
+        for sample in right {
+            self.right += *sample;
+            *sample = self.right;
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// Insertions that give the effects of a bus (and of nothing else, or of each clip too, if `for_clips`), and count the instances that are made and are alive.
+struct BusInsertions {
+    make: fn() -> Vec<Box<dyn BlockProcessor>>,
+    for_clips: bool,
+    made: Arc<AtomicUsize>,
+    alive: Arc<AtomicUsize>,
+}
+
+/// Counts itself as alive while it is, and does what `Sums` does.
+struct SumsThatAreCounted {
+    inside: Sums,
+    alive: Arc<AtomicUsize>,
+}
+
+impl BlockProcessor for SumsThatAreCounted {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.inside.process(left, right);
+    }
+
+    fn reset(&mut self) {
+        self.inside.reset();
+    }
+}
+
+impl Drop for SumsThatAreCounted {
+    fn drop(&mut self) {
+        self.alive.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl BusInsertions {
+    fn new(make: fn() -> Vec<Box<dyn BlockProcessor>>, for_clips: bool) -> Self {
+        Self {
+            make,
+            for_clips,
+            made: Arc::default(),
+            alive: Arc::default(),
+        }
+    }
+
+    fn counted(&self) -> Vec<Box<dyn BlockProcessor>> {
+        self.made.fetch_add(1, Ordering::SeqCst);
+        self.alive.fetch_add(1, Ordering::SeqCst);
+        vec![Box::new(SumsThatAreCounted {
+            inside: Sums::default(),
+            alive: Arc::clone(&self.alive),
+        })]
+    }
+}
+
+impl Insertions for BusInsertions {
+    fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        if self.for_clips { self.counted() } else { Vec::new() }
+    }
+
+    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+        Vec::new()
+    }
+
+    fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        if self.for_clips { (self.make)() } else { self.counted() }
+    }
+}
+
+fn running_sum_of(samples: impl IntoIterator<Item = f32>) -> Vec<f32> {
+    let mut total = 0.0_f32;
+    samples
+        .into_iter()
+        .map(|sample| {
+            total += sample;
+            total
+        })
+        .collect()
+}
+
+#[test]
+fn the_clips_of_a_bus_are_heard_by_one_instance_whose_state_goes_on_from_one_clip_to_the_next() {
+    let ramps = Ramps::default();
+    let two_clips = || {
+        vec![
+            clip(1, LoudnessToExport::UNCHANGED),
+            clip(1, LoudnessToExport::UNCHANGED),
+        ]
+    };
+    let mut shared = SoundGraph::new(
+        specification_with_buses(thirty(), 2, vec![(two_clips(), vec![(0, 1)])]),
+        Box::new(ramps.clone()),
+        Box::new(BusInsertions::new(Vec::new, false)),
+    );
+    let mut separate = SoundGraph::new(
+        specification_with_buses(thirty(), 2, vec![(two_clips(), Vec::new())]),
+        Box::new(ramps.clone()),
+        Box::new(BusInsertions::new(Vec::new, true)),
+    );
+
+    let (shared_left, shared_right) = shared.render_to_the_end(512);
+    let (separate_left, _) = separate.render_to_the_end(512);
+
+    let feed = |item: usize| (0..1600).map(move |index| value_of(0, item, index));
+    assert_eq!(
+        shared_left,
+        running_sum_of(feed(0).chain(feed(1))),
+        "one instance heard the two clips one after the other, and its sum went on"
+    );
+    let right_feed = |item: usize| (0..1600).map(move |index| -value_of(0, item, index));
+    assert_eq!(shared_right, running_sum_of(right_feed(0).chain(right_feed(1))));
+    let mut restarted = running_sum_of(feed(0));
+    restarted.extend(running_sum_of(feed(1)));
+    assert_eq!(
+        separate_left, restarted,
+        "(the control: an instance for each clip begins again at each clip)"
+    );
+    assert_ne!(shared_left, separate_left);
+}
+
+#[test]
+fn an_instance_of_a_bus_is_made_when_its_first_clip_is_first_heard_and_let_go_of_after_its_last_sample() {
+    let ramps = Ramps::default();
+    let insertions = BusInsertions::new(Vec::new, false);
+    let (made, alive) = (Arc::clone(&insertions.made), Arc::clone(&insertions.alive));
+    let mut graph = SoundGraph::new(
+        specification_with_buses(
+            thirty(),
+            5,
+            vec![(
+                vec![
+                    silence(1),
+                    clip(1, LoudnessToExport::UNCHANGED),
+                    clip(1, LoudnessToExport::UNCHANGED),
+                    silence(1),
+                    clip(1, LoudnessToExport::UNCHANGED),
+                ],
+                vec![(1, 2), (4, 4)],
+            )],
+        ),
+        Box::new(ramps),
+        Box::new(insertions),
+    );
+    let (mut left, mut right) = (vec![0.0; 1600], vec![0.0; 1600]);
+    let mut seen = Vec::new();
+    // A frame at a time (1600 samples): the instances alive after each, and how many were made.
+    for _ in 0..5 {
+        graph.render(&mut left, &mut right);
+        seen.push((alive.load(Ordering::SeqCst), made.load(Ordering::SeqCst)));
+    }
+
+    assert_eq!(
+        seen,
+        [
+            (0, 0),
+            (1, 1), // the run of two clips is first heard
+            (0, 1), // and let go of after its last sample, which is the last of the second frame
+            (0, 1),
+            (0, 2), // the last clip's run is made, heard and let go of in its frame
+        ],
+        "frame by frame: how many are alive, and how many were made so far"
+    );
+}
+
+#[test]
+fn the_sound_of_a_bus_is_the_same_for_any_size_of_block() {
+    let ramps = Ramps::default().with_length(0, 1, 2000);
+    let make = |block: usize| {
+        SoundGraph::new(
+            specification_with_buses(
+                thirty(),
+                4,
+                vec![
+                    (
+                        vec![
+                            clip(1, LoudnessToExport::Constant(0.5)),
+                            clip(1, LoudnessToExport::UNCHANGED),
+                            silence(1),
+                            clip(1, LoudnessToExport::UNCHANGED),
+                        ],
+                        vec![(0, 1), (3, 3)],
+                    ),
+                    (vec![clip(4, LoudnessToExport::UNCHANGED)], Vec::new()),
+                ],
+            ),
+            Box::new(ramps.clone()),
+            Box::new(BusInsertions::new(Vec::new, false)),
+        )
+        .render_to_the_end(block)
+    };
+    let whole = make(1_000_000);
+    for block in [1, 7, 512, 1599, 1600, 1601] {
+        assert_eq!(make(block), whole, "blocks of {block}");
+    }
+}
+
+#[test]
+fn the_volume_of_each_clip_is_done_before_the_instance_hears_it_and_what_is_not_in_a_bus_is_as_it_was() {
+    let ramps = Ramps::default();
+    let mut graph = SoundGraph::new(
+        specification_with_buses(
+            thirty(),
+            2,
+            vec![
+                (
+                    vec![
+                        clip(1, LoudnessToExport::Constant(0.5)),
+                        clip(1, LoudnessToExport::UNCHANGED),
+                    ],
+                    vec![(0, 1)],
+                ),
+                (vec![clip(2, LoudnessToExport::Constant(0.25))], Vec::new()),
+            ],
+        ),
+        Box::new(ramps.clone()),
+        Box::new(BusInsertions::new(Vec::new, false)),
+    );
+    let (left, _) = graph.render_to_the_end(512);
+
+    let heard_by_the_instance = (0..1600)
+        .map(|index| value_of(0, 0, index) * 0.5)
+        .chain((0..1600).map(|index| value_of(0, 1, index)));
+    let other_track = (0..3200).map(|index| value_of(1, 0, index) * 0.25);
+    let expected: Vec<f32> = running_sum_of(heard_by_the_instance)
+        .into_iter()
+        .zip(other_track)
+        .map(|(bus, other)| bus + other)
+        .collect();
+    assert_eq!(
+        left, expected,
+        "the first clip's volume is before the sum; the other track is added as it is"
+    );
+}
+
+#[test]
+fn an_effect_of_a_bus_that_has_a_latency_is_made_up_for_across_the_clips_it_hears_for_any_blocks() {
+    struct Delaying {
+        latency: usize,
+        given: Arc<AtomicUsize>,
+    }
+    impl Insertions for Delaying {
+        fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+            Vec::new()
+        }
+
+        fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+            Vec::new()
+        }
+
+        fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+            vec![Box::new(Delays::new(self.latency, &self.given))]
+        }
+    }
+    let ramps = Ramps::default().with_length(0, 1, 1000);
+    let items = || {
+        vec![
+            clip(2, LoudnessToExport::Constant(0.5)),
+            clip(1, LoudnessToExport::UNCHANGED),
+            silence(1),
+            clip(1, LoudnessToExport::UNCHANGED),
+        ]
+    };
+    let plain = graph_of(specification(thirty(), 5, vec![items()]), &ramps)
+        .render_to_the_end(512)
+        .0;
+    for latency in [1_usize, 64, 300, 2000] {
+        for block in [1, 13, 512, 100_000] {
+            let given = Arc::new(AtomicUsize::new(0));
+            let made = SoundGraph::new(
+                specification_with_buses(thirty(), 5, vec![(items(), vec![(0, 1), (3, 3)])]),
+                Box::new(ramps.clone()),
+                Box::new(Delaying {
+                    latency,
+                    given: Arc::clone(&given),
+                }),
+            )
+            .render_to_the_end(block)
+            .0;
+
+            assert_eq!(made, plain, "latency {latency}, blocks of {block}");
+        }
     }
 }

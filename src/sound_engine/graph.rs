@@ -5,7 +5,7 @@
 
 use super::feed::{ClipFeed, ClipFeeds, ClipRequest};
 use super::gain::GainCurve;
-use super::insertions::{BlockProcessor, Insertions};
+use super::insertions::{BlockProcessor, BusRequest, Insertions};
 use super::position::{pre_roll_samples_of, sample_at_frame};
 use crate::media::export::{SoundGraphSpecification, SoundItemToExport};
 
@@ -28,11 +28,53 @@ struct Scratch {
     right: Vec<f32>,
 }
 
+impl Scratch {
+    /// Makes room for `count` samples, and makes the first `count` of them silent.
+    fn silent_for(&mut self, count: usize) {
+        if self.left.len() < count {
+            self.left.resize(count, 0.0);
+            self.right.resize(count, 0.0);
+        }
+        self.left[..count].fill(0.0);
+        self.right[..count].fill(0.0);
+    }
+}
+
 struct Strip {
     items: Vec<Item>,
     /// The first item that has not ended yet.
     current: usize,
     processors: Vec<Box<dyn BlockProcessor>>,
+    /// The instances of the effects of the track that clips share (phase 12): each hears the items from its first to its last, put together.
+    buses: Vec<Bus>,
+    /// For each item, which bus it is heard by, if one.
+    bus_of_item: Vec<Option<usize>>,
+}
+
+/// One instance of the effects of a track that hears several items together: what the effects are, from the first item to the last, once they are made.
+struct Bus {
+    first_item: usize,
+    last_item: usize,
+    /// The first sample of the first item, and the sample just after the last of the last.
+    start: u64,
+    end: u64,
+    state: BusState,
+    /// The sound of the items, put together, while a block is made, before the effects are given it.
+    input: Scratch,
+}
+
+enum BusState {
+    /// Not heard yet: its effects are made when it is.
+    Waiting,
+    Running(RunningBus),
+    /// Heard to its end: its effects are let go of.
+    Done,
+}
+
+struct RunningBus {
+    processors: Vec<Box<dyn BlockProcessor>>,
+    /// How many samples ahead of the sound that comes out the sound that goes in is made: the latency of the effects (see [`BlockProcessor::latency`]), which they are made up for by.
+    ahead: u64,
 }
 
 struct Item {
@@ -131,7 +173,7 @@ impl SoundGraph {
             .enumerate()
             .map(|(strip_number, strip)| {
                 let mut frames_before = 0_u64;
-                let items = strip
+                let items: Vec<Item> = strip
                     .items
                     .iter()
                     .map(|item| {
@@ -152,10 +194,36 @@ impl SoundGraph {
                         Item { start, end, kind }
                     })
                     .collect();
+                let mut bus_of_item = vec![None; items.len()];
+                let buses = strip
+                    .buses
+                    .iter()
+                    .enumerate()
+                    .map(|(bus_number, bus)| {
+                        assert!(
+                            bus.first_item <= bus.last_item && bus.last_item < items.len(),
+                            "a bus hears items that are there"
+                        );
+                        for heard_by in &mut bus_of_item[bus.first_item..=bus.last_item] {
+                            assert!(heard_by.is_none(), "an item is heard by one bus at most");
+                            *heard_by = Some(bus_number);
+                        }
+                        Bus {
+                            first_item: bus.first_item,
+                            last_item: bus.last_item,
+                            start: items[bus.first_item].start,
+                            end: items[bus.last_item].end,
+                            state: BusState::Waiting,
+                            input: Scratch::default(),
+                        }
+                    })
+                    .collect();
                 Strip {
                     items,
                     current: 0,
                     processors: insertions.for_strip(strip_number),
+                    buses,
+                    bus_of_item,
                 }
             })
             .collect();
@@ -193,11 +261,8 @@ impl SoundGraph {
         }
         let (from, to) = (self.position, self.position + count as u64);
         let mut scratch = std::mem::take(&mut self.scratch);
-        scratch.left.resize(count.max(scratch.left.len()), 0.0);
-        scratch.right.resize(count.max(scratch.right.len()), 0.0);
         for strip_number in 0..self.strips.len() {
-            scratch.left[..count].fill(0.0);
-            scratch.right[..count].fill(0.0);
+            scratch.silent_for(count);
             self.render_strip(strip_number, from, to, &mut scratch);
             for processor in &mut self.strips[strip_number].processors {
                 processor.process(&mut scratch.left[..count], &mut scratch.right[..count]);
@@ -227,45 +292,120 @@ impl SoundGraph {
         while strip.current < strip.items.len() && strip.items[strip.current].end <= from {
             strip.current += 1;
         }
+        // The instances of the effects of the track that are first heard in this block are made, and given the sound that makes up for their latency.
+        for bus_number in 0..strip.buses.len() {
+            let bus = &strip.buses[bus_number];
+            if matches!(bus.state, BusState::Waiting) && bus.start < to && from < bus.end {
+                let specification_of_the_bus = &specification.strips[strip_number].buses[bus_number];
+                let first_clip = (bus.first_item..=bus.last_item).find_map(|place| {
+                    match &specification.strips[strip_number].items[place] {
+                        SoundItemToExport::Clip(clip) => Some(clip),
+                        SoundItemToExport::Silence { .. } => None,
+                    }
+                });
+                let processors = match first_clip {
+                    Some(first_clip) => insertions.for_bus(&BusRequest {
+                        strip: strip_number,
+                        bus: bus_number,
+                        first_clip,
+                        effects: &specification_of_the_bus.effects,
+                    }),
+                    None => Vec::new(),
+                };
+                let ahead: usize = processors.iter().map(|processor| processor.latency()).sum();
+                let mut running = RunningBus {
+                    processors,
+                    ahead: ahead as u64,
+                };
+                let first = from.max(bus.start);
+                if ahead > 0 {
+                    // (What the effects are given before they make the first sample that is heard: the sound that comes out of them from then on is where it is.)
+                    let mut input = Scratch::default();
+                    input.silent_for(ahead);
+                    render_the_items_of_a_bus(
+                        strip_number,
+                        &mut strip.items,
+                        (bus.first_item, bus.last_item),
+                        specification,
+                        feeds,
+                        insertions,
+                        (first, first + ahead as u64),
+                        &mut input,
+                    );
+                    for processor in &mut running.processors {
+                        processor.process(&mut input.left[..ahead], &mut input.right[..ahead]);
+                    }
+                }
+                strip.buses[bus_number].state = BusState::Running(running);
+            }
+        }
+        // The items that no instance hears, made where they are.
         let mut number = strip.current;
         while number < strip.items.len() && strip.items[number].start < to {
-            let item = &mut strip.items[number];
-            let (first, last) = (item.start.max(from), item.end.min(to));
-            if let ItemKind::Clip { gain, live: slot } = &mut item.kind {
-                let SoundItemToExport::Clip(clip) = &specification.strips[strip_number].items[number] else {
-                    unreachable!("an item that is a clip here is a clip in the specification");
-                };
-                let request = ClipRequest {
-                    strip: strip_number,
-                    item: number,
-                    clip,
-                };
-                let live = slot.get_or_insert_with(|| Live {
-                    feed: feeds.open(&request),
-                    processors: insertions.for_clip(&request),
-                    feed_has_ended: false,
-                    has_made_up_for_the_latency: false,
-                    pre_roll_samples: pre_roll_samples_of(specification.frame_rate, clip),
-                });
-                live.make_up_for_the_latency();
+            if strip.bus_of_item[number].is_none() {
+                let item = &mut strip.items[number];
+                let (first, last) = (item.start.max(from), item.end.min(to));
                 let offset = (first - from) as usize;
                 let length = (last - first) as usize;
-                let left = &mut scratch.left[offset..offset + length];
-                let right = &mut scratch.right[offset..offset + length];
-                if !live.feed_has_ended {
-                    let given = live.feed.read(left, right);
-                    // (What the feed did not give stays silent: the clip is as long as its place on the timeline whatever the file has.)
-                    live.feed_has_ended = given < length;
-                }
-                for processor in &mut live.processors {
-                    processor.process(left, right);
-                }
-                gain.apply(first - item.start, left, right);
-                if last == item.end {
-                    *slot = None;
-                }
+                render_the_item(
+                    strip_number,
+                    number,
+                    item,
+                    specification,
+                    feeds,
+                    insertions,
+                    (first, last),
+                    &mut scratch.left[offset..offset + length],
+                    &mut scratch.right[offset..offset + length],
+                );
             }
             number += 1;
+        }
+        // The items that an instance hears: put together, given to the effects, and added.
+        for bus_number in 0..strip.buses.len() {
+            let (first_item, last_item, start, end) = {
+                let bus = &strip.buses[bus_number];
+                (bus.first_item, bus.last_item, bus.start, bus.end)
+            };
+            let (first, last) = (from.max(start), to.min(end));
+            if first < last {
+                let length = (last - first) as usize;
+                let mut input = std::mem::take(&mut strip.buses[bus_number].input);
+                if let BusState::Running(running) = &mut strip.buses[bus_number].state {
+                    input.silent_for(length);
+                    // (The sound that goes in is `ahead` samples later than the sound that comes out is: see `RunningBus`.)
+                    render_the_items_of_a_bus(
+                        strip_number,
+                        &mut strip.items,
+                        (first_item, last_item),
+                        specification,
+                        feeds,
+                        insertions,
+                        (first + running.ahead, last + running.ahead),
+                        &mut input,
+                    );
+                    for processor in &mut running.processors {
+                        processor.process(&mut input.left[..length], &mut input.right[..length]);
+                    }
+                    let offset = (first - from) as usize;
+                    for (sum, sample) in scratch.left[offset..offset + length]
+                        .iter_mut()
+                        .zip(&input.left[..length])
+                    {
+                        *sum += *sample;
+                    }
+                    for (sum, sample) in scratch.right[offset..offset + length]
+                        .iter_mut()
+                        .zip(&input.right[..length])
+                    {
+                        *sum += *sample;
+                    }
+                }
+                strip.buses[bus_number].input = input;
+            }
+            if to >= end {
+                strip.buses[bus_number].state = BusState::Done;
+            }
         }
     }
 
@@ -282,5 +422,86 @@ impl SoundGraph {
             left.extend_from_slice(&block_left[..count]);
             right.extend_from_slice(&block_right[..count]);
         }
+    }
+}
+
+/// Makes the sound of item `number` of strip `strip_number` from sample `first` to sample `last` (not including it), which is in the item, into `left` and `right` (which are as
+/// long as that, and are added to: they are silent when they are given). A silence makes nothing.
+#[allow(clippy::too_many_arguments)]
+fn render_the_item(
+    strip_number: usize,
+    number: usize,
+    item: &mut Item,
+    specification: &SoundGraphSpecification,
+    feeds: &mut Box<dyn ClipFeeds + Send>,
+    insertions: &mut Box<dyn Insertions + Send>,
+    (first, last): (u64, u64),
+    left: &mut [f32],
+    right: &mut [f32],
+) {
+    let ItemKind::Clip { gain, live: slot } = &mut item.kind else {
+        return;
+    };
+    let SoundItemToExport::Clip(clip) = &specification.strips[strip_number].items[number] else {
+        unreachable!("an item that is a clip here is a clip in the specification");
+    };
+    let request = ClipRequest {
+        strip: strip_number,
+        item: number,
+        clip,
+    };
+    let live = slot.get_or_insert_with(|| Live {
+        feed: feeds.open(&request),
+        processors: insertions.for_clip(&request),
+        feed_has_ended: false,
+        has_made_up_for_the_latency: false,
+        pre_roll_samples: pre_roll_samples_of(specification.frame_rate, clip),
+    });
+    live.make_up_for_the_latency();
+    if !live.feed_has_ended {
+        let given = live.feed.read(left, right);
+        // (What the feed did not give stays silent: the clip is as long as its place on the timeline whatever the file has.)
+        live.feed_has_ended = given < left.len();
+    }
+    for processor in &mut live.processors {
+        processor.process(left, right);
+    }
+    gain.apply(first - item.start, left, right);
+    if last == item.end {
+        *slot = None;
+    }
+}
+
+/// Makes the sound that the items from `items.0` to `items.1` of strip `strip_number` have from sample `range.0` to sample `range.1` (not including it), put together, into the
+/// start of `input`, which is silent when it is given and has room for that many samples.
+#[allow(clippy::too_many_arguments)]
+fn render_the_items_of_a_bus(
+    strip_number: usize,
+    items: &mut [Item],
+    (first_item, last_item): (usize, usize),
+    specification: &SoundGraphSpecification,
+    feeds: &mut Box<dyn ClipFeeds + Send>,
+    insertions: &mut Box<dyn Insertions + Send>,
+    (from, to): (u64, u64),
+    input: &mut Scratch,
+) {
+    for (number, item) in items.iter_mut().enumerate().take(last_item + 1).skip(first_item) {
+        let (first, last) = (item.start.max(from), item.end.min(to));
+        if first >= last {
+            continue;
+        }
+        let offset = (first - from) as usize;
+        let length = (last - first) as usize;
+        render_the_item(
+            strip_number,
+            number,
+            item,
+            specification,
+            feeds,
+            insertions,
+            (first, last),
+            &mut input.left[offset..offset + length],
+            &mut input.right[offset..offset + length],
+        );
     }
 }

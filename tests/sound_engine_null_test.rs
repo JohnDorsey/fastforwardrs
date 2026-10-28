@@ -252,7 +252,10 @@ fn a_specification(
                 })
                 .collect();
             longest_strip = longest_strip.max(frames);
-            SoundStripToExport { items }
+            SoundStripToExport {
+                items,
+                buses: Vec::new(),
+            }
         })
         .collect();
     SoundGraphSpecification {
@@ -397,6 +400,7 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
                 frames_of_the_clip_before: 0,
                 effects: Vec::new(),
             })],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };
@@ -631,6 +635,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     effects: Vec::new(),
                 }),
             ],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };
@@ -851,6 +856,7 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
                 frames_of_the_clip_before: 0,
                 effects: Vec::new(),
             })],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };

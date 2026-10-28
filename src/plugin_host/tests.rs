@@ -661,6 +661,7 @@ fn sound_of(
         total_frame_count: clip.timeline_frame_count,
         strips: vec![SoundStripToExport {
             items: vec![SoundItemToExport::Clip(clip)],
+            buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
     };

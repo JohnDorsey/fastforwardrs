@@ -31,7 +31,7 @@ pub use crate::media::export::SAMPLE_RATE;
 pub use feed::{ClipFeed, ClipFeeds, ClipRequest, SoundInMemory};
 pub use gain::GainCurve;
 pub use graph::SoundGraph;
-pub use insertions::{BlockProcessor, Insertions, NoInsertions};
+pub use insertions::{BlockProcessor, BusRequest, Insertions, NoInsertions};
 pub use lookahead::{ClipSpawner, LookAheadFeeds, MOST_FEEDS_OPEN, SECONDS_OF_LOOK_AHEAD};
 pub use plugins::{Notes, PluginInsertions, PluginRunner};
 pub use position::{pre_roll_samples_of, sample_at_frame};

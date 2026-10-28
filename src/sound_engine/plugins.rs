@@ -15,7 +15,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::feed::ClipRequest;
-use super::insertions::{BlockProcessor, Insertions};
+use super::insertions::{BlockProcessor, BusRequest, Insertions};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::project::FrameRate;
@@ -88,5 +88,22 @@ impl Insertions for PluginInsertions {
 
     fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
         Vec::new()
+    }
+
+    fn for_bus(&mut self, request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        request
+            .effects
+            .iter()
+            .filter(|effect| effect.kind.installed_plugin().is_some())
+            .filter_map(|effect| {
+                self.runner.processor_for(
+                    effect,
+                    request.first_clip,
+                    self.frame_rate,
+                    &self.notes,
+                    self.is_for_the_preview,
+                )
+            })
+            .collect()
     }
 }

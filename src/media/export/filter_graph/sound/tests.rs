@@ -35,7 +35,10 @@ fn silence(frame_count: u64) -> SoundItemToExport {
 }
 
 fn strip(items: Vec<SoundItemToExport>) -> SoundStripToExport {
-    SoundStripToExport { items }
+    SoundStripToExport {
+        items,
+        buses: Vec::new(),
+    }
 }
 
 fn specification(strips: Vec<SoundStripToExport>) -> SoundGraphSpecification {
@@ -492,6 +495,7 @@ fn several_tracks_are_each_made_as_long_as_the_sound_and_mixed_with_the_volume_p
                 source_input: 1,
                 ..clip(0, 60, 1)
             })],
+            buses: Vec::new(),
         },
         strip(vec![silence(10), clip_item(30, 40, 1)]),
     ]);
