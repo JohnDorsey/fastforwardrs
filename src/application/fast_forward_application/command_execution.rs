@@ -255,6 +255,28 @@ impl FastForwardApplication {
             } => {
                 let _ = self.document.project.set_effect_enabled(owner, instance, enabled);
             }
+            Command::SetTrackSharing { track, domain, sharing } => {
+                if let Err(error) = self.document.project.set_track_sharing(track, domain, sharing) {
+                    self.say_why_a_group_edit_was_refused("The sharing of the effects cannot be changed", &error);
+                }
+            }
+            Command::SetClipTailPolicy { clips, policy } => {
+                for clip in clips {
+                    let _ = self.document.project.set_clip_tail_policy(clip, policy);
+                }
+            }
+            Command::SetGroupTailPolicy { group, policy } => {
+                if let Err(error) = self.document.project.set_group_tail_policy(group, policy) {
+                    self.say_why_a_group_edit_was_refused("The tails of the group cannot be set", &error);
+                }
+            }
+            Command::SetEffectTailLength {
+                owner,
+                instance,
+                length,
+            } => {
+                let _ = self.document.project.set_effect_tail_length(owner, instance, length);
+            }
             Command::SetPluginState { owner, instance, state } => {
                 if let Err(error) = self.document.project.set_effect_state(owner, instance, state) {
                     self.say_why_an_effect_was_refused("The state of the plugin cannot be kept", &error);

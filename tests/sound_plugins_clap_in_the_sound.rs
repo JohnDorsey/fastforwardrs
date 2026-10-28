@@ -519,3 +519,128 @@ fn a_stream_of_the_preview_tells_the_runner_of_its_plugins_when_it_is_stopped_wi
     let told = runner.told.lock().unwrap();
     assert_eq!(told.len(), 1, "once, when it is stopped");
 }
+
+// --- Phase 12.0: what the tail of an effect does today, written down before it is changed (docs/engine-phase-12-design.md, section 1) ---
+//
+// Today an effect of a track is made a separate copy for each clip, and a copy ends where its clip does. The tests below say so with the echo of the CLAP test library, so that the
+// change of phase 12 (an effect that hears the clips of a track one after the other, and rings on past a clip) is a change that these tests show, and is made on purpose.
+
+/// The echo of the test library (it says a tail of 1000 samples, and its echoes are `ECHO_SAMPLES` apart), as an effect of a clip.
+fn an_echo() -> LayerEffect {
+    LayerEffect {
+        state: None,
+        clock: Default::default(),
+        instance: EffectInstanceId::FIRST,
+        kind: the_kind_of(clap_test_plugins::TAIL),
+        values: Vec::new(),
+        animation: Animation::default(),
+        tables: Vec::new(),
+    }
+}
+
+/// A strip of `items`, in a project of `frames` frames, made from the strip of a second of noise (whose clip is the one that every clip below is made from).
+fn specification_of_items(
+    frames: u64,
+    items: impl FnOnce(&SoundClipToExport) -> Vec<SoundItemToExport>,
+) -> SoundGraphSpecification {
+    let mut specification = specification_of_frames_with(30, Vec::new());
+    let SoundItemToExport::Clip(template) = &specification.strips[0].items[0] else {
+        unreachable!("the strip is one clip");
+    };
+    specification.strips[0].items = items(template);
+    specification.total_frame_count = frames;
+    specification
+}
+
+const SAMPLES_IN_A_FRAME: usize = 1600 * 2;
+
+#[test]
+fn the_echo_of_an_effect_is_cut_where_its_clip_ends_and_nothing_of_it_is_heard_after_in_the_export_and_in_the_preview()
+{
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+
+    // A second of noise through the echo, and then a second of silence, in which the echo (it says a tail of 1000 samples) would be heard if it went on.
+    let specification = specification_of_items(60, |clip| {
+        let mut with_the_echo = clip.clone();
+        with_the_echo.effects = vec![an_echo()];
+        vec![
+            SoundItemToExport::Clip(with_the_echo),
+            SoundItemToExport::Silence { frame_count: 30 },
+        ]
+    });
+    let (exported, notes) = by_the_export(&toolchain, &specification, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &specification, &sources, host());
+    let (plain, _) = by_the_export(
+        &toolchain,
+        &specification_of_frames_with(30, Vec::new()),
+        &sources,
+        None,
+    );
+
+    assert_eq!(exported.len(), 60 * SAMPLES_IN_A_FRAME);
+    let (inside, after) = exported.split_at(30 * SAMPLES_IN_A_FRAME);
+    assert!(
+        after.iter().all(|sample| *sample == 0.0),
+        "after the clip there is silence, and no echo of it"
+    );
+    assert!(
+        inside
+            .iter()
+            .zip(&plain)
+            .any(|(heard, said)| (heard - said).abs() > 0.05),
+        "the echo is there inside the clip (the control: the test can tell)"
+    );
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
+fn a_clip_that_follows_another_one_with_the_same_effect_has_an_echo_of_its_own_that_begins_empty_and_hears_nothing_of_the_one_before()
+ {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+
+    // The same second of noise twice, one clip right after the other, each with the echo (which is what an echo on a track is, today: a copy for each clip).
+    let specification = specification_of_items(60, |clip| {
+        let mut first = clip.clone();
+        first.effects = vec![an_echo()];
+        let mut second = first.clone();
+        second.first_timeline_frame = 30;
+        vec![SoundItemToExport::Clip(first), SoundItemToExport::Clip(second)]
+    });
+    let (exported, _) = by_the_export(&toolchain, &specification, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &specification, &sources, host());
+    let (plain, _) = by_the_export(
+        &toolchain,
+        &specification_of_frames_with(30, Vec::new()),
+        &sources,
+        None,
+    );
+
+    let (first, second) = exported.split_at(30 * SAMPLES_IN_A_FRAME);
+    assert_eq!(
+        first, second,
+        "the second clip sounds as the first does: it begins with an empty echo, and the end of the first clip is not heard in it"
+    );
+    let echo_free_start = clap_test_plugins::ECHO_SAMPLES * 2;
+    assert_eq!(
+        &second[..echo_free_start],
+        &plain[..echo_free_start],
+        "the first echo of the second clip is still to come: its first moments are the file's"
+    );
+    assert!(
+        second
+            .iter()
+            .zip(&plain)
+            .any(|(heard, said)| (heard - said).abs() > 0.05),
+        "and the echo is heard later (the control: the test can tell)"
+    );
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+}

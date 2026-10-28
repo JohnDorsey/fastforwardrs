@@ -8,10 +8,11 @@
 use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, EffectInstanceId, EffectKind,
-    FrameRate, Gain, GroupColour, GroupId, GroupKind, InputColourOverride, KeyframeId, KeyframeMove, Member, Placement,
-    ProjectSettings, PropertyId, PropertyValue, RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor,
-    SpeedIndicatorLayout, TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSide,
+    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, ClipTailPolicy, EffectDomain,
+    EffectInstanceId, EffectKind, FrameRate, Gain, GroupColour, GroupId, GroupKind, GroupTailPolicy,
+    InputColourOverride, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings, PropertyId, PropertyValue,
+    RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TailLength,
+    TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSharing, TrackSide,
 };
 
 /// Something the user has asked for.
@@ -251,6 +252,29 @@ pub enum Command {
         owner: Member,
         instance: EffectInstanceId,
         enabled: bool,
+    },
+    /// Say how much of a track one instance of its effects of `domain` covers (from the menu of the box of the track; phase 12): see [`TrackSharing`]. Refused, with the reason, if
+    /// a rule of groups would be broken (a group with effects that takes only some of the clips of a track that is never divided).
+    SetTrackSharing {
+        track: TrackId,
+        domain: EffectDomain,
+        sharing: TrackSharing,
+    },
+    /// Say what the tails of `clips` do at the edge of a group that they are not in (from the menu of a clip; phase 12): one step of undo for all of them.
+    SetClipTailPolicy {
+        clips: Vec<ClipId>,
+        policy: ClipTailPolicy,
+    },
+    /// Say what the tails of the members of a clip group or a track group do at its edge (from the menu of its bar; phase 12).
+    SetGroupTailPolicy {
+        group: GroupId,
+        policy: GroupTailPolicy,
+    },
+    /// Say how long the effect that is named `instance` in the chain of `owner` goes on after its input ends (from the menu of its box; phase 12).
+    SetEffectTailLength {
+        owner: Member,
+        instance: EffectInstanceId,
+        length: TailLength,
     },
     /// A plugin saved its state (phase 10): the effect that is named `instance` in the chain of `owner` keeps it (`None` takes it away). It is not an edit of its own as far as undo goes: it
     /// is **joined to the step of the edit in the window that made the plugin say so** (see [`Command::is_a_rider`]).
@@ -499,6 +523,10 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::SetTrackSharing { .. }
+            | Self::SetClipTailPolicy { .. }
+            | Self::SetGroupTailPolicy { .. }
+            | Self::SetEffectTailLength { .. }
             | Self::SetPluginState { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }
@@ -637,6 +665,10 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::SetTrackSharing { .. }
+            | Self::SetClipTailPolicy { .. }
+            | Self::SetGroupTailPolicy { .. }
+            | Self::SetEffectTailLength { .. }
             | Self::SetPluginState { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }

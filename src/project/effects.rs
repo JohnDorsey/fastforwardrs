@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use super::animation::{PropertyId, PropertyValue};
 use super::groups::GroupId;
+use super::tails::TailLength;
 
 mod built_in;
 mod descriptor;
@@ -89,6 +90,8 @@ pub struct Effect {
     state: Option<Arc<[u8]>>,
     /// A number made from the bytes of the state (see [`fingerprint_of_a_state`]), so that what is heard can be told to have changed without reading them again.
     state_fingerprint: u64,
+    /// How long the effect goes on after its input ends, when its person has said (phase 12): what the plugin says, and the defaults, are used otherwise.
+    tail_length: TailLength,
 }
 
 /// A number that is different whenever the bytes are (to all intents and purposes): it is worked out once, when an effect is given a state, and not at every frame that the sound asks
@@ -112,6 +115,7 @@ impl Effect {
             enabled: true,
             state: None,
             state_fingerprint: fingerprint_of_a_state(None),
+            tail_length: TailLength::default(),
         }
     }
 
@@ -130,6 +134,7 @@ impl Effect {
             enabled: true,
             state: None,
             state_fingerprint: fingerprint_of_a_state(None),
+            tail_length: TailLength::default(),
         })
     }
 
@@ -143,6 +148,18 @@ impl Effect {
     /// Whether the effect is switched on (see [`Self::with_enabled`]).
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// The same effect, with `tail_length` for how long it goes on after its input ends (see [`Self::tail_length`]).
+    #[must_use]
+    pub fn with_tail_length(mut self, tail_length: TailLength) -> Self {
+        self.tail_length = tail_length.limited();
+        self
+    }
+
+    /// How long the effect goes on after its input ends, when its person has said; [`TailLength::Automatic`] when they have not.
+    pub fn tail_length(&self) -> TailLength {
+        self.tail_length
     }
 
     /// The same effect, with the state that its plugin saved (see [`Self::state`]).
@@ -244,6 +261,7 @@ impl Effect {
                 enabled: self.enabled,
                 state: self.state.clone(),
                 state_fingerprint: self.state_fingerprint,
+                tail_length: self.tail_length,
             }
         })
     }
@@ -491,6 +509,19 @@ impl Effects {
             {
                 effect.state_fingerprint = fingerprint_of_a_state(state.as_ref());
                 effect.state = state;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Says how long the effect that is named `instance` goes on after its input ends. `false` if there is no such effect.
+    pub fn set_tail_length(&mut self, instance: EffectInstanceId, tail_length: TailLength) -> bool {
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link
+                && effect.instance() == instance
+            {
+                effect.tail_length = tail_length.limited();
                 return true;
             }
         }

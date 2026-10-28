@@ -422,4 +422,6 @@ mod animation_tests;
 #[cfg(test)]
 mod effects_tests;
 #[cfg(test)]
+mod tails_as_they_are_tests;
+#[cfg(test)]
 mod tests;

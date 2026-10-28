@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{Room, Track, TrackEntry};
-use crate::project::EffectInstanceId;
 use crate::project::tracks::adjustment_clip::AdjustmentClip;
 use crate::project::tracks::clip::Clip;
 use crate::project::tracks::drawer::Drawer;
@@ -22,6 +21,7 @@ use crate::project::{
     AnimationTarget, EffectKind, Effects, PropertyId, PropertyValue, properties_of_the_text_effect,
     values_of_a_text_object,
 };
+use crate::project::{ClipTailPolicy, EffectInstanceId, EffectSharing};
 use crate::project::{SpeedFactor, TimelineFrameIndex};
 
 /// What a cut puts at the edges of the two parts, in each of the racks of the cut clip's own keyframes: the value that the
@@ -106,6 +106,18 @@ impl Track {
 
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
+    }
+
+    /// Says how much of the track one instance of its effects covers (phase 12). The rules about groups are the project's to check: see `Project::set_track_sharing`.
+    pub fn set_sharing(&mut self, sharing: EffectSharing) {
+        self.sharing = sharing;
+    }
+
+    /// Says what the tail of the clip `clip` does at the edge of a group that it is not in.
+    pub fn set_clip_tail_policy(&mut self, clip: ClipId, policy: ClipTailPolicy) -> Result<(), ClipEditError> {
+        let index = self.index_of(clip).ok_or(ClipEditError::UnknownClip { clip })?;
+        self.entries[index].tail_policy = policy;
+        Ok(())
     }
 
     pub fn set_height(&mut self, height: TrackHeight) {
@@ -201,8 +213,9 @@ impl Track {
 
         let second_id = self.take_next_clip_id();
         let first_id = self.entries[index].id;
-        // (Both halves have the effects the clip had.)
+        // (Both halves have the effects the clip had, and its tail policy.)
         let effects = self.entries[index].effects.clone();
+        let tail_policy = self.entries[index].tail_policy;
         let drawer_before = std::mem::take(&mut self.entries[index].drawer);
         let mut first_drawer = Drawer::default();
         let mut second_drawer = Drawer::default();
@@ -240,6 +253,7 @@ impl Track {
                 clip: second_half,
                 drawer: second_drawer,
                 effects,
+                tail_policy,
                 gap_before_frames: 0,
             },
         );
@@ -457,6 +471,7 @@ impl Track {
                 clip,
                 drawer: Drawer::default(),
                 effects: Effects::none(),
+                tail_policy: ClipTailPolicy::default(),
                 gap_before_frames: new_start - from_frame,
             },
         );

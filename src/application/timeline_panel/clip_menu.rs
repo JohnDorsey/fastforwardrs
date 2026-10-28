@@ -265,6 +265,7 @@ pub(super) fn show(ui: &mut Ui, clips: &[ClipId], groups: &[GroupId], project: &
     }
     ui.separator();
     show_the_items_that_make_groups(ui, clips, groups, project, commands);
+    crate::application::tail_menus::show_the_tail_menu_of_clips(ui, clips, project, commands);
     ui.separator();
     if ui.button(delete_label(count)).clicked() {
         commands.push(Command::DeleteClips(clips.to_vec()));

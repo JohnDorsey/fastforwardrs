@@ -89,7 +89,7 @@ fn show_the_bar(ui: &mut Ui, group: &Group, look: BadgeLook, commands: &mut Vec<
     let corner = CornerRadius::same(theme::CLIP_CORNER_RADIUS.saturating_sub(OUTLINE_THICKNESS as u8));
     ui.painter()
         .rect_filled(bar, CornerRadius { sw: 0, se: 0, ..corner }, look.fill);
-    background.context_menu(|ui| show_the_menu_of_the_bar(ui, group.id(), commands));
+    background.context_menu(|ui| show_the_menu_of_the_bar(ui, group, commands));
 
     let mut inside = ui.new_child(
         UiBuilder::new()
@@ -122,7 +122,7 @@ fn show_the_bar(ui: &mut Ui, group: &Group, look: BadgeLook, commands: &mut Vec<
             ),
     );
     name_response.widget_info(|| WidgetInfo::text_edit(true, group.name(), name.clone(), NAME_LABEL));
-    name_response.context_menu(|ui| show_the_menu_of_the_bar(ui, group.id(), commands));
+    name_response.context_menu(|ui| show_the_menu_of_the_bar(ui, group, commands));
     if name != group.name() {
         commands.push(Command::RenameGroup {
             group: group.id(),
@@ -143,7 +143,9 @@ fn show_the_bar(ui: &mut Ui, group: &Group, look: BadgeLook, commands: &mut Vec<
 }
 
 /// The menu of the bar: take the group apart, or delete it with what is in it.
-fn show_the_menu_of_the_bar(ui: &mut Ui, group: GroupId, commands: &mut Vec<Command>) {
+fn show_the_menu_of_the_bar(ui: &mut Ui, found: &Group, commands: &mut Vec<Command>) {
+    let group = found.id();
+    crate::application::tail_menus::show_the_tail_menu_of_a_group(ui, found, commands);
     if ui
         .button(DISBAND_LABEL)
         .on_hover_text("Delete the group and keep what is in it")

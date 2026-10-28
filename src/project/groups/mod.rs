@@ -45,6 +45,7 @@ pub use joining::ClipGroupBeforeTheDrag;
 pub use rectangles::Rectangle;
 pub use rules::GroupProblem;
 
+use super::GroupTailPolicy;
 use super::effects::Effects;
 use super::tracks::{ClipId, TrackId};
 
@@ -180,6 +181,8 @@ pub struct Group {
     name: String,
     colour: GroupColour,
     effects: Effects,
+    /// What the tails of the members do at the edge of the group (phase 12; a tag has no edge, and keeps the default).
+    tail_policy: GroupTailPolicy,
     members: Vec<Member>,
 }
 
@@ -192,6 +195,7 @@ impl Group {
             name: name.into(),
             colour,
             effects: Effects::none(),
+            tail_policy: GroupTailPolicy::default(),
             members: Vec::new(),
         }
     }
@@ -209,6 +213,22 @@ impl Group {
     pub fn with_effects(mut self, effects: Effects) -> Self {
         self.effects = effects;
         self
+    }
+
+    /// The same group with `policy` for what the tails of its members do at its edge.
+    #[must_use]
+    pub fn with_tail_policy(mut self, policy: GroupTailPolicy) -> Self {
+        self.tail_policy = policy;
+        self
+    }
+
+    /// What the tails of the members do at the edge of the group.
+    pub fn tail_policy(&self) -> GroupTailPolicy {
+        self.tail_policy
+    }
+
+    pub(in crate::project) fn set_tail_policy(&mut self, policy: GroupTailPolicy) {
+        self.tail_policy = policy;
     }
 
     pub fn id(&self) -> GroupId {
@@ -260,6 +280,10 @@ impl Group {
 
 #[cfg(test)]
 pub(crate) mod random_edits_tests;
+#[cfg(test)]
+mod sharing_rules_tests;
+#[cfg(test)]
+mod tail_cases_tests;
 #[cfg(test)]
 pub(crate) mod test_projects;
 #[cfg(test)]

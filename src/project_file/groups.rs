@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 
 use super::document::{
-    BadgeDocument, BadgeOfDocument, GroupColourDocument, GroupDocument, GroupKindDocument, MemberDocument,
+    BadgeDocument, BadgeOfDocument, GroupColourDocument, GroupDocument, GroupKindDocument, GroupTailDocument,
+    MemberDocument,
 };
 use super::drawers::Positions;
 use super::effects::{EffectDocument, KindsOfEffects, effect_documents_of, effects_from_documents};
 use crate::project::{
-    Badge, ChainEntry, ClipId, EffectKind, Effects, Group, GroupId, GroupKind, Member, Project, TrackId,
+    Badge, ChainEntry, ClipId, EffectKind, Effects, Group, GroupId, GroupKind, GroupTailPolicy, Member, Project,
+    TrackId,
 };
 
 /// The chain that the effects and the badges of a clip or a group make, if they make one: effects of kinds that it can have, each with a name
@@ -154,6 +156,9 @@ pub(super) fn groups_from_documents(
     for (number, document) in documents.into_iter().enumerate() {
         let describe = |reason: String| format!("group number {}: {reason}", number + 1);
         let kind = kind_from_document(document.kind);
+        if kind == GroupKind::Tag && !document.tail.is_the_default() {
+            return Err(describe("a tag has no edge, and so no policy for tails".to_owned()));
+        }
         let members = document
             .members
             .into_iter()
@@ -176,7 +181,11 @@ pub(super) fn groups_from_documents(
                 document.colour.0,
             )
             .with_members(members)
-            .with_effects(effects),
+            .with_effects(effects)
+            .with_tail_policy(GroupTailPolicy {
+                edge: document.tail.edge,
+                depth: document.tail.depth,
+            }),
         );
     }
     Ok(groups)
@@ -203,6 +212,10 @@ pub(super) fn group_documents_of(
                     .collect::<Result<Vec<_>, _>>()?,
                 effects: effect_documents_of(group.effects()),
                 badges: badge_documents_of(group.effects(), numbers)?,
+                tail: GroupTailDocument {
+                    edge: group.tail_policy().edge,
+                    depth: group.tail_policy().depth,
+                },
             })
         })
         .collect()

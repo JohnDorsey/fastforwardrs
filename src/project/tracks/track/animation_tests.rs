@@ -414,6 +414,7 @@ fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stre
         drawer: a_drawer_with_the_loudness_of(clip_id(7), &[(60, -6.0)]),
         effects: Effects::none(),
         start: 0,
+        tail_policy: Default::default(),
         frames_it_lasted_before: 100,
     }])
     .unwrap();
@@ -430,6 +431,7 @@ fn a_clip_arranged_on_a_track_that_plays_at_another_speed_has_its_keyframes_stre
             .with_each_rack_changed(|rack| rack.rescaled(50, 100)),
         effects: Effects::none(),
         start: 5,
+        tail_policy: Default::default(),
         frames_it_lasted_before: 100,
     }])
     .unwrap();
@@ -550,6 +552,7 @@ fn a_clip_arranged_on_a_track_that_plays_faster_keeps_keyframes_that_are_close_t
         drawer: a_drawer_with_the_loudness_of(clip_id(7), &[(40, 0.0), (41, 1.0), (42, 2.0), (43, 3.0), (44, 4.0)]),
         effects: Effects::none(),
         start: 0,
+        tail_policy: Default::default(),
         frames_it_lasted_before: 100,
     }])
     .unwrap();

@@ -33,6 +33,8 @@ mod source_colour;
 mod source_media;
 mod speed_factor;
 mod speed_indicator_layout;
+mod tail_editing;
+mod tails;
 mod timecode;
 pub mod tracks;
 
@@ -78,9 +80,10 @@ pub use resources::{
     why_not_the_name_of_a_resource,
 };
 pub use settings::{
-    AnyGlobalSetting, AnySetting, CheckpointInterval, CheckpointMemoryBudget, DisplayTransform, GLOBAL_ONLY_SETTINGS,
-    GlobalSetting, HowToKeepAResource, OutputColourSpace, ProjectFileKind, ProjectSettings, ResourceStorage, SETTINGS,
-    Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound, WorkingColourSpace, every_global_setting,
+    AnyGlobalSetting, AnySetting, CheckpointInterval, CheckpointMemoryBudget, DisplayTransform, EdgeFade,
+    GLOBAL_ONLY_SETTINGS, GlobalSetting, HowToKeepAResource, OutputColourSpace, ProjectFileKind, ProjectSettings,
+    ResourceStorage, SETTINGS, Setting, SettingControlKind, SettingValue, Settings, SpedUpClipSound,
+    WorkingColourSpace, every_global_setting,
 };
 pub use source_colour::InputColourOverride;
 pub use source_media::{
@@ -89,6 +92,10 @@ pub use source_media::{
 };
 pub use speed_factor::{SpeedFactor, ZeroSpeedFactor};
 pub use speed_indicator_layout::SpeedIndicatorLayout;
+pub use tails::{
+    ClipTailEdge, ClipTailPolicy, EffectSharing, GroupTailEdge, GroupTailPolicy, LONGEST_TAIL_IN_MILLISECONDS,
+    TailDepth, TailLength, TrackSharing,
+};
 pub use timecode::format_timecode;
 pub use tracks::{
     AdjustmentClip, Angle, CanvasArea, Clip, ClipEditError, ClipId, ClipKind, ClipPlacement, ClipToArrange, Corner,
@@ -271,6 +278,8 @@ pub enum EditError {
     NotInTheChain { owner: Member, item: ChainItemKey },
     #[error("a clip, a track or a group can have at most {limit} effects, and this one has them")]
     TooManyEffects { limit: usize },
+    #[error("{group} is a tag, which is not a shape and has no edge for a tail to cross")]
+    ATagHasNoEdge { group: GroupId },
 }
 
 /// How many seconds a picture is shown for when it is put on a track, until it is changed.
@@ -976,6 +985,7 @@ impl Project {
                     clip: placement.clip.clone(),
                     drawer: placement.drawer.clone(),
                     effects: placement.effects.clone(),
+                    tail_policy: placement.tail_policy,
                     start: placement.first_timeline_frame.value(),
                     frames_it_lasted_before: placement.timeline_frame_count(),
                 })
@@ -989,6 +999,7 @@ impl Project {
                     clip: leaving.clip.clone(),
                     drawer: leaving.drawer.clone(),
                     effects: leaving.effects.clone(),
+                    tail_policy: leaving.tail_policy,
                     start: departure.start,
                     frames_it_lasted_before: leaving.timeline_frame_count(),
                 });

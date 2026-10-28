@@ -11,8 +11,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::project::{
-    CheckpointInterval, CheckpointMemoryBudget, DisplayTransform, OutputColourSpace, ResourceStorage, SpedUpClipSound,
-    WorkingColourSpace,
+    CheckpointInterval, CheckpointMemoryBudget, DisplayTransform, EdgeFade, OutputColourSpace, ResourceStorage,
+    SpedUpClipSound, WorkingColourSpace,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,6 +45,9 @@ pub(super) struct SettingsValuesDocument {
     /// How the files that effects use are kept when they are added (phase 4): not there in the files of earlier versions, which get the default.
     #[serde(default)]
     pub resource_storage: Option<ResourceStorage>,
+    /// How long the fade is where a sound meets the edge of a group (phase 12): not there in the files of earlier versions, which get the default.
+    #[serde(default)]
+    pub edge_fade: Option<EdgeFade>,
     /// What the preview does after a jump for the effects that depend on earlier frames (phase 6): not there in the files of earlier versions, which get the defaults.
     #[serde(default)]
     pub generate_lead_up_on_seek: Option<bool>,

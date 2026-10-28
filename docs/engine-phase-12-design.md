@@ -1,0 +1,368 @@
+<!--
+SPDX-FileCopyrightText: 2026 John Dorsey
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+# Effects that act on the sum, and tails that cross the edges of groups: design (phase 12, 2026-10-27)
+
+**Status: a design, nothing is built.** The maintainer asked (2026-10-27): "Audio needs better handling, like video has, when it comes to applying [effects] to groups. [...] I would like audio effects on tracks or contiguous clip groups to
+act on the sum of the things in that group. If reverb is added to a track, one clip's reverb should be able to overlap another clip, because it should really only be one reverb effect that hears both clips in sequence. [...] I might
+want a video effect to create a ghostly after-image of a clip after that clip is over, much like how reverb would do for audio. [...] once someone knows how the application processes video, they should immediately be able to guess how
+it processes audio. I want to eliminate quirks and hacks and make the system as powerful as everyone expects it to be or hopes it could be."
+
+Then (after the first exploration, section 4): "Default scope is run. User should be able to choose unshared, shared with desharing allowed, shared with slicing around, or shared atomic. (These choices are per-track for now.) [...] If shared
+atomic is chosen, the user can't accidentally put those clips in a group with effects. Add the per-clip control for what will be done with the clip's tail when it interferes with another group, and per-group control for what to do with
+the group's tail in relation to other clips it may interfere with."
+
+**[V]** = I read it in the code or ran it (the enumeration of section 4 was run on a model of the rules, not on the program); **[P]** = a plan, not built; **[B]** = belief; **[D]** = a decision that is the maintainer's to confirm (section 12).
+The old decisions that this document changes are named by their numbers in `groups-feature-spec.md` (G-xx).
+
+## 1. What is wrong today [V by reading]
+
+* **A track's effects are copied into every clip, in picture and in sound.** `Project::effects_applied_to_every_clip` stamps the clip's effects, then the track's, then the tags' (where their badges are) into the chain of each clip, and the picture
+  (`composition/pictures.rs`, `Layer.effects`) and the sound (`composition/sound`, `sound_engine/plugins.rs`: "in the chain of every clip") both use it. So a tag and a track are the same mechanism.
+* **State is kept per clip.** A feedback shader's state is keyed by `hash_of(clip)` (`state_id` in `pictures.rs`), and a sound clip's processors live in `Live` and are dropped at the clip's end. So an effect with memory starts clear at every clip and
+  its tail is cut where the clip ends. A reverb on a track cannot ring over the next clip, and an after-image cannot outlive its clip.
+* **Groups act on a composite in picture only.** Clip groups and track groups are nodes in the layer tree (`composition/pictures/group_nodes.rs`, `GroupSpan`, `PlaceGroup`) and keep one state for the whole group. In sound they do nothing (G-15), and
+  `PluginInsertions::for_strip` (the hook for an effect on a whole track) returns an empty list.
+* **A group exists only where it has layers.** `nodes_of` builds a group node from the consecutive layers that are in it, so in a frame where no member has a layer there is no node. Nothing of a group can outlive its members.
+* **The rules about groups talk about clips only.** "No clip that is not in a clip group is inside its rectangle" (`rules.rs`) is the only rule about what may be in a rectangle. A tail is the first thing that is in a rectangle and is not a clip.
+
+## 2. The model in one page [P]
+
+Everything that can have effects has a **chain**. What a chain acts on is the **sum** of what is below it, and picture and sound agree on that:
+
+| Where the effects are | What they act on | One instance for... |
+|---|---|---|
+| a clip | that clip | the clip |
+| a tag | each member, at its badge's place (as today) | each member (a tag is never a shared state) |
+| a track | the sum of the clips of the track | depends on the track's **sharing** (section 5): the clip, the run, the track |
+| a clip group or a track group | the sum of its members after their own chains (innermost first) | the group |
+| (later) the project | the sum of everything | the project |
+
+The order is G-13 with sound added: **clip chain (with tag badges) -> the track's chain -> clip groups, innermost first -> track groups, innermost first.**
+
+Four words, used in the same way for picture and sound:
+
+* **Tail**: how long an effect goes on after its input has ended (a reverb's ring, a delay's repeats, an after-image). Section 6.
+* **Sharing** of a track: how much of a track an instance of its effects covers. Section 5.
+* **Edge**: the border of a clip group's rectangle in time. A tail that crosses an edge is handled by a **tail policy**. Section 7.
+* **Owner** of a tail: the thing that decides what happens to it at an edge. Section 7.1.
+
+"Run" means: a stretch of consecutive clips on one track that are in the same groups (the same chain of clip groups and track groups) and whose gaps are no longer than the tail. It is the unit that a shared instance covers by default.
+
+## 3. How groups work, and what this changes in them
+
+### 3.1 Track groups, as they are implemented [V by reading `rules.rs`, `queries.rs`, `group_nodes.rs`]
+
+* A track group's **direct members are tracks and track groups** (G-01). A clip on a member track is **inside** the group by where it is, not a member (`clip_is_inside`), and has no badge of it. A new clip on the track is simply inside.
+* Its rectangle is **all the time of the project** and the rows of its tracks, which must be next to each other with no track between that is not in it (`IsBetweenTheTracksOfATrackGroupWithoutBeingInIt`).
+* A **track group is not in a clip group** and a **clip group may be in a track group only by geometry**.
+* **A clip group cannot straddle the edge of a track group: yes, that is correct.** `ClipGroupReachesAcrossTheEdgeOfATrackGroup` is a problem whenever a clip group's tracks are neither all inside the track group's tracks nor all apart from them. Two track
+  groups may not partly overlap either (G-06).
+* In the picture a track group is a node in the layer tree like a clip group, from the layers of its tracks, and its effects run on the composite with a state keyed by the group (`SpanOwner::Group`).
+
+### 3.2 Is there a new conflict with track groups? No [V by reasoning, B that the code agrees]
+
+A tail stays on the row of its own track, and a track is wholly inside or wholly outside a track group, so **a tail never crosses the edge of a track group**. A clip group inside a track group is in its composite as a member of it. A track group's effect
+is one instance on the sum of its tracks, so a clip group can't take part of its input: the clip group is a member of the sum. What is new is only that **a track group gets sound effects** (G-15 is reversed, section 9), and one thing to remember:
+a track's sharing (section 5) is per track, and a track group does not choose it for its tracks (a possible later addition, section 14).
+
+### 3.3 The old decisions that matter, and what happens to each
+
+| Decision | Now |
+|---|---|
+| G-04: any number of tags, at most one clip group or track group directly | kept |
+| G-06: rectangles of two clip groups that are not nested may overlap where there is no clip | kept; but on a track whose sharing is **per track, with windows** (5.3) the time ranges of two groups that both have members on that track must not overlap: one more rule |
+| G-10: an edit that would break a rule is refused | kept; two rules added (5.4, 5.3) and the refusals say why |
+| G-13: the order of the chains | kept, extended to sound |
+| G-14: group effects are not animated | kept (possible later, section 14) |
+| G-15: groups have no sound effects | **reversed**: groups have sound effects, on the sum of the sounds of their members |
+| the invariant "no clip that is not in a clip group is inside its rectangle" | kept; **tails may be inside a rectangle**, which the tail policies (section 7) decide |
+
+## 4. The cases: what the enumeration found [V]
+
+A tail is not special: a signal made inside one group context (the groups a clip is in) is present, later, in another. The same thing happens when a shared instance carries the state of one clip into the next. So **one question covers both**:
+*a signal made in context A is present at a place in context B: what happens at the edges between them?*
+
+I enumerated every layout the rules allow on small grids (`tools/group_cases/overlap_cases.py`, a model of `rules.rs`: clips of one cell, a clip group is a set of clips whose tight rectangle holds no other clip, two groups are nested or share no clip,
+rectangles may overlap in empty space; a tail of 1 to 2 cells follows a clip on its own track) and classified every place a clip's tail is present:
+
+| Grid | Layouts | Situations | Classes |
+|---|---|---|---|
+| 2 tracks x 5 frames, up to 2 groups | 60,911 | 547,492 | 12 |
+| 3 tracks x 4 frames, up to 3 groups | 1,682,401 | 16,640,657 | 23 |
+
+**Every class is "(groups exited, groups entered)", plus one more kind.** Depth (2 or 3 groups at once) only repeats the same step, so the base cases are:
+
+| Case | Meaning | Example |
+|---|---|---|
+| A: same context | nothing crosses an edge | a and b in one group; one reverb hears both |
+| B: exit | a member's tail goes past its group's edge | the last clip of a group, and a clip that is not in it comes next |
+| C: enter | a tail of a clip that is not in a group runs into a group's rectangle | a clip, then a group's first clip |
+| D: cross | exit one group and enter another | two groups one after the other on a track |
+| E: claimed twice | the tail lands in empty space that **two rectangles that are not nested** share | found by the 3 x 4 grid: tracks 1-2 x frames 1-2 and tracks 2-3 x frames 2-3 share one cell |
+
+Four findings:
+
+1. **Only one thing can be cut: a track.** A clip group cuts a track when it has some of its clips and the track has others. Clip groups never cut each other (their members are disjoint), and track groups never cut anything (3.2). So every
+   conflict of sharing is a track's effect meeting a clip group's edge.
+2. **Case E exists only for tails** (it never happened on a clip), and **only an attribution by place has no answer there**: whose is a tail in a cell that two rectangles claim? An attribution by origin ("a tail belongs to the clip it came from")
+   has an answer in every case. That is why the design is by origin, and place is used only where a shared instance gives no choice (5.3).
+3. **In sound, nothing has a depth, so a foreign tail inside a group just adds up around it.** In picture a group is one flat layer, and a foreign tail inside its rectangle would sit **between** layers of the group (`nodes_of` would split the group in
+   two). That is a conflict that sound does not have (section 8), and the one place where the two media cannot be fully alike.
+4. **The enumeration is of a model and of small grids.** It says the cases are these on every grid I could afford; it does not prove it for all projects, and it does not model track groups (3.2 is an argument). Section 11 makes it a test of the real rules.
+
+## 5. The sharing of a track [P]
+
+A track has a **sharing**, one of four values, chosen per track (the track's menu, "Sharing of effects", two submenus; nothing always visible). **The default is *run*.** The sharing applies to the effects of the track in picture and in sound
+(**D7: two settings per track, one for its picture effects and one for its sound effects**, each with the same four values).
+
+| Value | The maintainer's words | One instance for | Tails | A clip group with effects may take... |
+|---|---|---|---|---|
+| **Separate for each clip** (`PerClip`) | unshared | each clip | each clip's own, by origin | any of the clips |
+| **One copy for each run of clips** (`PerRun`, default) | shared, desharing allowed | each run | the run's, by origin | any of the clips (a copy for each run: a group's edge starts a new copy) |
+| **One for the track, groups take a window** (`PerTrackWithWindows`) | shared, slicing | the track | one for the track, by place | any of the clips (a group takes a window of the one instance's output) |
+| **One for the track, never divided** (`PerTrackIndivisible`) | shared, atomic | the track | one for the track | **none**, unless it has all the clips of the track |
+
+In the text below the four are called *per clip*, *per run*, *per track with windows* and *per track, indivisible*. (The words "split" and "sliced" are not used: they looked too alike.)
+
+### 5.1 Per clip and per run: by origin [P]
+
+Each instance hears only the clips it covers, so what comes out of it **belongs to those clips** and goes with them into the groups they are in. This is exact for linear effects (a reverb of two clips is the sum of the reverbs of the clips: two copies
+summed give the same sound as one instance, which I will test, section 11), and it is what the maintainer calls desharing: a copy of the track effect for the clips inside a group and another for the clips outside, so a tail never crosses from one to the
+other. For an effect that is **not** linear (a compressor, a limiter) the copies sound different from one instance, because each does not hear the others' loudness. That is the point of the choice and the reason it is the user's: **the program cannot tell**
+(a plugin does not say whether it is linear).
+
+*Run* is the middle of the two: clips that are together in the same groups share an instance (so "one reverb that hears both clips in sequence" is true), and a group's edge starts a new one.
+
+### 5.2 Runs and gaps [P]
+
+A run ends where the groups of the next clip are different, **or where the gap before the next clip is longer than the tail** of the chain (6.3): after a gap that long the instance's memory is gone, so a new instance is the same sound and costs nothing while
+it is idle. (The one thing that is not the same: an effect whose own clock goes on, an LFO, starts again at the same phase. **[B]** that nobody will hear it.) A run's instance is **keyed by the run's first clip** (6.5).
+
+### 5.3 Per track with windows: by place, with its costs said out loud [P]
+
+One instance for the whole track; **a group takes a window of its output** (the time of its rectangle, extended by the group's tail policy, 7.4). This is the only choice for an effect whose state mixes the clips, and it has three costs that no setting can remove:
+
+* **A foreign tail leaks in**: the window holds whatever the instance outputs then, including the tail of a clip that is not in the group. The two cannot be pulled apart.
+* **A hard edge**: where the window ends, the group's effect stops acting on the member's tail, which goes on unprocessed. The program puts a short fade (the **edge fade**, a setting, default 10 ms, see 9) on both sides of a window's edge so that it does not click.
+* **The windows must not overlap** (case E): on a track with windows, **two clip groups with effects that both have members on that track must not overlap in time** (refused as an edit, as everything in G-10; `OverlappingWindows`). A window that is lengthened by
+  a keep-alive (7.4) ends where the next window starts.
+
+In picture the window is the same: the track's layer (and its after-image) is a child of the group's node in the frames of the window, **at its real depth**, so a track with windows has no depth conflict.
+
+### 5.4 Per track, indivisible: the group cannot cut it [P]
+
+A track that is indivisible is one block: one instance, never divided into copies, never given out in windows. So **a clip group that has effects cannot take only some of its clips.** The rule (`CutsAnIndivisibleTrack`, in `rules.rs` beside the others, so it is checked after every edit and the existing machinery
+that takes an edit back, `upkeep`, applies it): a clip group that **has an effect that is switched on** and has at least one member on a track that is *indivisible* (in the medium of that effect: see below), while that track has a clip that is not inside the group, is a problem. It is refused when:
+
+* a clip group is made, or its membership changes, and it would break the rule;
+* an **effect is added to a clip group** (or switched on) that has members on an indivisible track and does not have all its clips;
+* a track's sharing is **changed to indivisible** while a clip group with effects cuts it (the message names the group);
+* a clip is inserted, imported, moved or duplicated onto an indivisible track where a clip group with effects has members on it and the clip would not be inside the group.
+
+A group that has **no effect that does anything** is not affected (as it is not a node in the picture today); a group that **has all the clips of the track** is not either; tags are never affected; a track group is never a cut (3.2). The message says what to
+do: "Clip group Intro has effects and would take some of the clips of Track 2, whose sound effects are indivisible. Change the sharing of Track 2, or take the effects off the group."
+
+**This rule is deliberately static**: it looks at the structure and not at whether an effect has a tail or whether it is a picture effect or a sound effect, so a refusal never appears or goes away because a plugin's tail changed. It sometimes refuses
+something that would have been harmless (a group with a picture effect on a track that has only sound effects). **[D]** I prefer the simple rule.
+
+## 6. Tails [P]
+
+### 6.1 What a tail is, and where it comes from
+
+The **tail of an effect** is how long it goes on making output after its input ends. Where it comes from, in this order:
+
+1. **A value the maintainer set on the effect** (the effect box's menu: "Tail...": *Automatic*, *None*, or a length). Nothing is added that is always visible.
+2. **What the plugin says**: a CLAP plugin's `tail` extension (the program already uses it as the pre-roll: [V] `pre_roll_frames_of`, "a clip with a tail says how much sound from before a clip it wants").
+3. **A default**: for a sound plugin that says nothing (CLAP without the extension, LV2, which has none) **0.5 s**, as the pre-roll has today; for a built-in effect **0** unless it declares one; for a picture effect that keeps a buffer between frames (a feedback shader)
+   **the bound of EN-14, 300 frames** [B that this is the number the code uses: read it again before building] , because such a shader never ends by itself; for a picture effect with no state, 0.
+
+The tail of a **chain** is the sum of the tails of the effects in it (a safe upper bound).
+
+### 6.2 What the tail changes
+
+* An instance lives from the start of its first clip to the end of its last clip **plus the tail**; after that it is gone and costs nothing. A clip's tail is its clip effects' tails and the track's, in the instance that has them.
+* **In picture a clip leaves a ghost layer**: after the clip's last frame the layer goes on existing for the tail, with no source and the state of its effects as input, so an after-image is drawn. (Today a layer exists only where its clip does.)
+* **The same number is the lead-up** (EN-14) **and the pre-roll**: to make the state right at a frame, run the instance from one tail before it. The file-based pre-roll of sound ("the sound of the file from before the clip") goes away: it was a
+  substitute for a state that the next clip could not have, and it played noise from before the clip's in-point. A seek into the middle of a tail gets the same "approximate" marker as picture (EN-14 E1) **[P]**.
+
+### 6.3 Gaps: see 5.2.
+
+### 6.4 Tails in time, and sped-up clips
+
+Tails are measured in time of the timeline, after the clip's speed (the effects see the sped-up sound). Today a sped-up clip has no pre-roll; it gets a tail like any clip. **[B]** that the effects see the sound after the speed change: check in `composition::sound`
+before building.
+
+### 6.5 The state of an instance, and edits [P]
+
+The identity of an instance (for the states kept between frames, `EffectState { id, frame }`, and for the sound's processors) is: *per clip*: the clip; *per run*: the run's first clip and the effect; *per track with windows* and *per track, indivisible*: the track and the effect. An edit that
+changes a run (a clip joins a group, a gap is closed) makes **new ids**, so the states start clear and the lead-up (6.2) puts them right. Nobody has to remember anything across such an edit.
+
+## 7. Tail policies at an edge [P]
+
+### 7.1 One rule: the owner decides
+
+A tail at an edge is handled by the policy of its **owner**, and an owner is **the innermost thing that holds it**: a clip's tail is held by the clip's groups from the innermost out; when a group lets it go, or no group held it, the clip holds it again. **A group a tail is
+not in cannot refuse it**: the policy belongs to the one that emits the tail. A run's tail belongs to the **last clip of the run** [D] (a tail begins where the clip it follows ends).
+
+There are three things that can happen at an edge, the same three for every tail, in picture and in sound:
+
+| Outcome | A tail that **leaves its own group** | A tail that **enters a group that it is not in** |
+|---|---|---|
+| **Processed** | **Keep alive**: the group goes on after its last member for the tail, and its effects process it | **Into**: the group adopts it for as long as it is inside, and its effects process it (and it is then like a member for that group's own edge) |
+| **Untouched** | **Release**: it leaves the group at the edge, unprocessed by the group, and is the clip's again (the clip's policy decides at the next edge) | **Around**: it goes past the group untouched |
+| **Cut** | the tail ends at the edge (with the edge fade) | the tail ends at the edge (with the edge fade) |
+
+Nested groups: the tail is handled at each edge in turn, from the innermost; a tail that is released from an inner group and is still inside an outer group is in the outer group's sum.
+
+### 7.2 The per-clip control (the clip's menu: "Tail toward other groups") [P]
+
+*Around* (default) / *Into* / *Cut*, plus a picture setting **where it is drawn when it goes around**: *behind the group* (default) / *in front of the group*. It decides what happens to **this clip's tail where it enters a group that the clip is not in**
+(and, after a group has released it, at the next edge). The track's sharing limits the choices (7.5).
+
+### 7.3 Where "around" is drawn in the picture [P]
+
+A group is one flat layer, so a tail that goes around cannot sit between its layers. **Behind** draws it just behind the group's node, **in front** just in front. Where it would not be inside any group's depths, it is drawn at the depth of its own track, as always. A live
+clip is always in front of the tails of its own track. **This is the one place where picture has a rule that sound does not** (sound adds the tail up around the group), and it is a declared setting and not a hidden choice. **[D]** default behind: a memory is behind what is live.
+
+### 7.4 The per-group control (the group's menu: "Tail of members") [P]
+
+*Keep alive* (default) / *Release* / *Cut*, plus *behind* (default) / *in front* for where a kept-alive group's tail is drawn when it lands over clips that are not in it. A kept-alive tail is **always around** a group it is not in: if the maintainer wants another group
+to process it, the first group *releases* it and the clip's own policy (*Into*) applies.
+
+The group's **own effects' tail** (a reverb on the group) is not a member's tail: it rings out for the **tail of the effect** (6.1; set it to *None* to cut it), is owned by the group, and goes around everything else, with the same *behind/in front* setting.
+
+A group that has **no effect that does anything** is not a node (as today) and its policy does nothing: its members' tails belong to what holds the group.
+
+### 7.5 What each sharing allows [P]
+
+Whether a tail can be kept apart from other sound depends on whether the instance holds only that tail. *Group has members on the track* is the case where a group and other clips share the track.
+
+| Sharing | Clip: Around / Into / Cut (toward a group with members on the track) | Group: Keep alive / Release / Cut |
+|---|---|---|
+| Per clip, per run | all three | all three |
+| Per track with windows | **Into only** (the window takes it; shown as such in the menu) | **Keep alive** (the window is lengthened) or **Release** (the window is the rectangle, with the fade). Cut is not possible: the output after the edge also holds other clips |
+| Per track, indivisible | not applicable: such a group cannot have effects (5.4) | all three: the group has all the clips of the track, so the output after the edge is its own tail |
+
+Where a group has **no members on the track** (the track only passes through its rectangle, empty), what is inside the window is only tails, and all three of the clip's policies work with any sharing. A choice that is not possible is not hidden: the menu shows it and,
+when it is chosen, says why (as the refusals of G-10 do), and the control shows the value that is in force.
+
+## 8. Picture and sound side by side [P]
+
+| Thing | Picture | Sound | Alike? |
+|---|---|---|---|
+| a chain acts on the sum below it | yes | yes | yes |
+| track effects: sharing | 4 values | 4 values | yes |
+| tail of an effect, its source | shader state: the EN-14 bound or the setting | plugin tail, or the setting | yes (one control) |
+| after the last clip | a ghost layer | the instance goes on | yes |
+| lead-up on a seek | EN-14 (checkpoints, lead-up, chase) | the same tail as pre-roll, same marker | yes |
+| group effects | on the composite | on the sum | yes |
+| tail policy at an edge | three outcomes | three outcomes | yes |
+| a foreign tail inside a group's rectangle | **depth conflict**: needs *behind / in front* | adds up | **no: intrinsic** (depth) |
+| mute, gain | opacity and visibility, if they exist | gain and mute | see section 13 |
+
+## 9. What changes in the model [P]
+
+* `Track.picture_sharing` and `Track.sound_sharing`, each a `TrackSharing { PerClip, PerRun, PerTrackWithWindows, PerTrackIndivisible }` (default `PerRun`).
+* `Clip.tail_policy: ClipTailPolicy { edge: Around | Into | Cut, depth: Behind | InFront }`, `Group.tail_policy: GroupTailPolicy { edge: KeepAlive | Release | Cut, depth: Behind | InFront }` (clip groups and track groups; a tag has none), and an optional **tail override** on every effect.
+* **File format 20** (now 19). A file of format 19 or earlier gets `PerRun` for both on every track and the defaults everywhere: **a behaviour change** (an effect with memory on a track now rings over the next clip; a clip's effect rings out past the clip).
+  **[D]** I consider it a bug fix and do not offer a compatibility switch. (A project file stays readable by the old program only as far as it always did: not.)
+* Rules (`rules.rs`): `CutsAnIndivisibleTrack`, `OverlappingWindows`; both in the random-edit tests and in the refusals.
+* **The sound plan** (`composition::sound`, shared by the export's graph and the live preview, [V] `sound_plan.rs`) says **instances** (clip, run, track, group) with the clips they hear, their tails, and **windows** for tracks with windows, instead of a chain stamped into every
+  clip; `sound_engine` makes a `Live` for each instance and keeps it for its lifetime. G-15 is reversed: groups get sound effects (`PluginInsertions::for_strip` stops being empty).
+* **The picture plan**: ghost layers, group nodes that exist for a tail, instances with the keys of 6.5, windows, and the depth setting. `nodes_of` builds a group from its layers **and the ghost layers that belong to it**.
+* **G-14 stays** (group effects are not animated); effect values of a track's effects are keyed by time as today, so a run's instance sees the track's racks as one.
+* **The edge fade** is a setting of the project (length in milliseconds, default 10, in the project's settings, not in a menu of the timeline), stored in the file with format 20 and used by every edge, in picture-less sound only (a picture has no click).
+* Menus: the track's *Sharing of picture effects* and *Sharing of sound effects*, the clip's *Tail toward other groups*, the group's *Tail of members*, the effect's *Tail...*. All in menus that exist; nothing is added that is always visible.
+
+## 10. Pieces, and the order [P]
+
+Each piece: tests first that lock the present behaviour, then the change, then the same tests unmodified where the behaviour is meant to stay, then a campaign of planted mistakes. **Suggested effort: high for all; 12.2 and 12.5 are the risky ones** (they change what the plans mean).
+
+* **12.0 Lock and enumerate.** Pin today's behaviour (a track effect is per clip, tails cut: this is the *per clip* sharing with tail 0). Move the enumeration of section 4 into a test of the real rules (11). No behaviour change.
+  **12.0 as built (2026-10-27) [V]:**
+  * `src/composition/sound/tails_as_they_are_tests.rs` (2 tests): a track's effect is a copy in the chain of each clip, and nothing in the plan says two clips share it; **a sound effect cannot be put on a clip group or a track group at all** (`applies_to_a_group_of_kind`
+    allows only picture effects there, so G-15 holds by refusal and not by "ignoring"; a tag can have any effect, and it is a copy in each member). The picture side was already locked by `pictures/state_tests.rs` (a state for each clip, and for each group).
+  * `tests/sound_plugins_clap_in_the_sound.rs` (2 tests, the real echo plugin, export and preview): the echo is cut where its clip ends (exact silence after), and a second clip with the same effect has an echo of its own that begins empty.
+  * `src/project/groups/tail_cases_tests.rs` (4 tests): **the real editing (`create_group`) accepts a set of clip groups exactly when the model of section 4 says** (every rectangle holds only its own clips; two groups are nested or have no clip in common), on every layout of 2 x 3 and
+    2 x 4 cells (all sets of clips, so the refusals are tested too) and, run by hand, on 3 x 4 (474,110 layouts, 4,404,071 places), **and the classes and their numbers are those of `tools/group_cases/overlap_cases.py`, including the 192 places that two groups claim**.
+    A planted-mistake run: 5 of 7 noticed; the 2 that were not are equivalent mutants (a tail of 3 cells on a grid 3 cells wide; "share any clip" for "one is in the other", which is the same while no two groups partly overlap, and **would differ if they could: the to-do of section 15**).
+  * Whole library suite 5442 passed, 0 failed, 11 ignored; clippy and fmt clean on Windows and Linux (WSL). No behaviour changed.
+* **12.1 The model, the rules, the file, the menus.** Fields, `CutsAnIndivisibleTrack`, `OverlappingWindows`, format 20 with a migration test, the menus and the refusals. The engines ignore the new values.
+  **12.1 as built (2026-10-27) [V]:**
+  * **The model** (`src/project/tails.rs`, `tail_editing.rs`): `TrackSharing` (`PerClip`, `PerRun` the default, `PerTrackWithWindows`, `PerTrackIndivisible`) in `EffectSharing { picture, sound }` on a track; `ClipTailPolicy`, kept by each clip entry and carried by a cut, a copy, a move to another track and a copy of a track; `GroupTailPolicy` on a clip group or a track group (a tag is refused: `ATagHasNoEdge`); `TailLength` on an effect (`Automatic`, `None`, `Milliseconds`, at most ten minutes), kept by a copy of the effect. 7 tests (`tail_editing/tests.rs`) and one (in `composition/sound/tails_as_they_are_tests.rs`) that **nothing in the sound plan or the picture plan changes when any of them does**.
+  * **The two rules** (`rules.rs`, `GroupProblem::CutsAnIndivisibleTrack` and `OverlappingWindows`), looked at per medium and only for clip groups with an effect that is switched on; the edits that could break them are checked and taken back with the others: `set_track_sharing`, adding an effect to a group, switching a group's effect on, copying a group's effect, and (as they were already) putting a clip on a track, moving it and so on. 9 tests (`sharing_rules_tests.rs`), and a run of random edits (60 seeds of 400 edits, one in four about sharing and tails, `Randomly::with_sharing`) in which every edit keeps every rule, a refused edit changes nothing, and the rules are refused for hundreds of times. Two tests that existed were changed on purpose: one that pinned the file format (19 to 20), and `a_group_in_itself_does_not_make_what_is_applied_go_on_for_ever`, which built a group in itself *first* and then gave the groups effects through the editing, which now checks the rules of a project that has a group in itself (it builds the groups first and puts them in each other after).
+  * **The file, format 20** (`format_20_tests.rs`, 9 tests): `sharing`, `clip_tails` (by the place of the clip), `tail` of a group, `tail` of an effect and the project's `edge_fade`, all left out when they are the default; a file of format 19 is read as the defaults; a tag with a tail, a clip that is not there, a word that is not one, and a file that breaks the two rules are refused with the reason. `docs/project-file-format.md` says all of it.
+  * **The setting** `EdgeFade` (*No fade*, 5, **10 ms**, 20, 50 ms), a setting of both layers (the global one and one that a project may set for itself), so the settings windows show it and the two settings files keep it.
+  * **The commands and the menus** (`tail_menus.rs`; `SetTrackSharing`, `SetClipTailPolicy`, `SetGroupTailPolicy`, `SetEffectTailLength`; 10 tests in `tail_menu_tests.rs`): *Sharing of picture effects* and *of sound effects* in the menu of the box of a track, *Tail toward other groups* in the menu of a clip (of all the selected clips, in one step), *Tail of members* in the menu of the bar of a clip group or a track group (a tag has none), *Tail length* in the menu of the box of an effect; the one in force is marked; each is one step of undo; a sharing that a rule would break is refused with the reason in a message and changes nothing.
+  * **Decisions made while building, to be said**: a policy that cannot be in force where it is made (7.5: a clip on a track that gives windows) is **stored all the same**, and the menu says what is in force; for several selected clips with different policies, a choice sets the whole policy of all of them; the *Tail length* menu is on every effect but what a generator makes. **Sound effects are still refused on a clip group or a track group** (the permission flips with 12.3, when the sound engine can process them: until then they would be accepted and do nothing).
+  * **Verified**: whole library suite 5480 passed, 0 failed, 11 ignored (5442 before); the integration programs that read project files and settings pass (`application_journeys` 32, `command_line_export` 9, `text_objects_as_they_are` 6, `sound_plugins_journey` 4, `sound_plugins_clap_journey` 1); clippy, fmt and doc clean on Windows and, for clippy, Linux (WSL). **24 planted mistakes in the new code, all noticed** (the rules, the edits that check them, what a cut, a copy, a move and a copy of a track carry, what the file writes and reads, the default of the setting, the length limit, the commands and the menus). Not run: macOS, and a real window.
+* **12.2 Sound: instances, tails, runs.** *per clip* and *per run*; a clip's tail rings out; the gap rule; lead-up from the tail; the file pre-roll goes. *Risky: the sound plan changes.*
+* **12.3 Sound: group effects.** Clip groups and track groups on the sum; the three outcomes, with the fade.
+* **12.4 Sound: per track with windows, and indivisible.**
+* **12.5 Picture: ghost layers, instances, groups with tails, depth.** *Risky: the layer list per frame changes and `nodes_of` with it.*
+* **12.6 Picture: per track with windows, and indivisible.**
+* **12.7 Report.** `engine-phase-12-report.md`; the table of cases as it is built.
+
+## 11. How we will know that every case is accounted for [P]
+
+1. **A pure function** (`edges::outcome`) of a layout, a source of tail, the sharing and the policies gives, for every place a tail is present, one of: *processed by these groups*, *around, drawn behind or in front*, *cut at this edge*, or *refused by this rule*.
+   There is no case in which it is not defined.
+2. **The enumeration of section 4 becomes a test** over the same grids, on the **real group rules** (`problems_with_the_groups`, so a layout the rules refuse is not counted and one they allow is not missed), and checks, for every layout, every sharing and every
+   policy: (a) the function is defined; (b) **conservation**: each moment of each tail goes to exactly one place, and nothing is processed twice or dropped, except where the policy is *Cut*; (c) the cases found are the classes of section 4 and no others
+   (a new class makes the test fail with the layout, so a rule that nobody thought of is found by a test and not by a user).
+3. **The table of cases is generated** from that test (a golden file) and so is the gallery page the maintainer sees (the explorer of the first exploration, made from the real data), so the picture of the cases cannot be out of date.
+4. **Numbers, not trust**: *per clip* and *per run* give **the same sound** for a linear effect (a reverb) on a real project (a null test); a track with no groups gives the same sound and picture in all four sharings; *per track with windows* equals *per run* when no tail crosses an edge;
+   a layout with no tails is **bit-identical to today**.
+5. **Planted mistakes** in the function, the rules and both plans, as in every phase; a survivor gets a test.
+
+## 12. Decisions that are the maintainer's [D]
+
+| # | Decision | My answer |
+|---|---|---|
+| D1 | Old projects get *per run* and the defaults (a behaviour change), with no compatibility switch | **decided: yes** |
+| D2 | The rule for an indivisible track is static (5.4); with two settings per track it is looked at **per medium**: a group counts for a medium if it has a switched-on effect of that medium | **decided: yes** (per medium follows from D7) |
+| D3 | A run's tail belongs to its last clip | yes |
+| D4 | *Behind* is the default depth for a tail that goes around | **decided: yes** |
+| D5 | The fade at an edge is a setting, default 10 ms | **decided: a setting, default 10 ms** |
+| D6 | The defaults of a tail: setting, plugin, 0.5 s (sound), 300 frames (a picture state), 0 otherwise | yes |
+| D7 | One sharing per track for picture and sound | **decided: two settings per track, one for each medium** |
+| D8 | A transition clip has no tail (its effect belongs to the moment of the change) and an adjustment clip has the policy of a group | yes |
+| D9 | Mute and gain of a track act **after** the effects, so the state goes on running while muted and a tail is not cut by muting | **decided: yes** |
+
+## 13. What we may have missed [B]
+
+Things that are in the design because of this list are marked; the others are open.
+
+1. **Gaps and runs** (5.2): a run ends after a gap longer than the tail. In the design.
+2. **Plugin latency**: a plugin that reports latency delays the sound; a copy for a run and a window must have the same delay as the others and the sum must be compensated. The bundled plugins report none ([V] `bundleable-lv2-plugins.md`), so nothing tests it yet. **Open.**
+3. **Mute, solo and gain** of tracks and groups: where they are in the chain (D9). A group has no gain or mute today; with sound effects on groups someone will ask.
+4. **Adjustment clips** are groups made on the spot (`make_the_adjustments_groups`): the policy of a group (D8). **Transitions**: D8.
+5. **Export and preview must agree**: both consume the sound plan ([V] `sound_plan.rs`), so the instances must be in the plan, and the null test of the export against the preview must run for each sharing. In piece 12.2.
+6. **A sound-less clip in a group** (a text clip, a crate) has no sound tail; **a clip with no picture** (a sound clip) has no ghost layer. The rules for which clip counts as "in" a group for which medium do not change.
+7. **Cost**: tails keep instances alive after the clips; a feedback shader's tail (300 frames by default) costs real time in the preview. The setting and "None" are the answer; the chase (EN-14) already has a budget.
+8. **Effects whose own clock goes on** (an LFO) restart after a gap or at a new copy (5.2).
+9. **Undo**: the sharing and the policies are commands with one undo step each; a change of sharing restarts the states (6.5), which is expected.
+10. **Discoverability**: everything is in right-click menus (the maintainer's rule: nothing unrequested and always visible), so a person who never opens a track's menu never learns that sharing exists. If this turns out to be a problem, a small mark on a track whose sharing is not the default is the cheapest answer, and it is not in this design.
+11. **A tag's effect with memory** is one instance per member (a tag is scattered: there is no sum). Offered as nothing.
+12. **A group's effect that makes something from nothing** (a generator on a group) does not exist in the frames where the group has no layer (1); the spec says a track group spans the whole project. **Open**; not changed here.
+13. **Keyframes on a track's effect across a new copy**: the values are by time of the timeline, so each copy sees the same values; **[B]**, to be tested in 12.2.
+
+## 14. Not implemented, but possible
+
+Each of these can be asked for later; the design leaves them possible and none is scheduled.
+
+* **Keyframes on group effects** (G-14).
+* **A master chain**: one more node above everything, for both media.
+* **A sharing for a track group's tracks** (set on the group, inherited by its tracks).
+* **A sidechain / backdrop in sound** (the sound of one place as the control of an effect in another), the counterpart of the backdrop of a transition in picture. Needs explicit wires, so it belongs to the question of effect graphs (Q-30, EN-15, ID-10).
+* **A group's effect that makes something from nothing in the frames where it has no member** (13.12).
+* **A per-clip flag "keep this clip out of shared state"**, if the sharing of the track turns out not to be fine enough.
+
+## 15. Unscheduled to-do
+
+* **Contiguous groups of clips that overlap without nesting** (asked 2026-10-27, "in the future"). **I do not know yet whether this is possible**, so it is a to-do and not a possibility. What I know: today a clip is directly in **one** clip group or track group at most (`InTwoShapes`, `rules.rs`; G-04),
+  and a rectangle may overlap another only where there is no clip (G-06). What would have to be answered first: what a clip that is in two composites is in the layer tree (drawn twice? in which order?); whose effects come first (G-13 would need a second badge at the end of the chain);
+  what the tail policies (7) mean when the cell is a member of both (section 4, case E would no longer be empty space); and what the rectangle invariant becomes. The enumeration of section 4 is the tool to look at it with.

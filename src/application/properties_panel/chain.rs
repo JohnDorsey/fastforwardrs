@@ -245,6 +245,13 @@ fn show_an_effect(
                 to_be_duplicated = true;
                 ui.close();
             }
+            crate::application::tail_menus::show_the_tail_length_menu_of_an_effect(
+                ui,
+                owner,
+                effect.instance(),
+                effect.tail_length(),
+                &mut from_the_menu,
+            );
             for (label, command) in items_for_where_the_tables_are_kept(content.project, effect) {
                 if ui.button(label).clicked() {
                     from_the_menu.push(command);

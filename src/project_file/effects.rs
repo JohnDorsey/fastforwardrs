@@ -25,7 +25,8 @@ use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::{
     ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
     MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, ParameterControl,
-    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueKind, ValueScale,
+    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, TailLength, UnknownFields, ValueKind,
+    ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -69,6 +70,10 @@ fn yes() -> bool {
 
 fn is_true(flag: &bool) -> bool {
     *flag
+}
+
+fn is_the_automatic_tail(length: &TailLength) -> bool {
+    length.is_the_default()
 }
 
 /// What a type of effect works on.
@@ -154,6 +159,9 @@ pub(super) struct EffectDocument {
     /// versions before 19.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// How long the effect goes on after its input ends, when its person has said (format 20 and after): `none`, or `{ "milliseconds": n }`. Left out for what the plugin says or the default.
+    #[serde(default, skip_serializing_if = "is_the_automatic_tail")]
+    pub tail: TailLength,
     /// What this version of the program does not know of the effect, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
@@ -440,6 +448,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
             effect
                 .with_unknown_fields(UnknownFields::new(document.unknown))
                 .with_enabled(document.enabled)
+                .with_tail_length(document.tail)
                 .with_state(state)
         })
         .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
@@ -518,6 +527,7 @@ pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
                 values: ValuesDocument::ById(values),
                 enabled: effect.is_enabled(),
                 state: effect.state().map(|bytes| crate::base64::encode(bytes)),
+                tail: effect.tail_length(),
                 unknown: effect.unknown_fields().fields().clone(),
             }
         })

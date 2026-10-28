@@ -47,7 +47,7 @@ impl Project {
         self.groups.iter().find(|candidate| candidate.id() == group)
     }
 
-    pub(super) fn group_mut(&mut self, group: GroupId) -> Option<&mut Group> {
+    pub(in crate::project) fn group_mut(&mut self, group: GroupId) -> Option<&mut Group> {
         self.groups.iter_mut().find(|candidate| candidate.id() == group)
     }
 

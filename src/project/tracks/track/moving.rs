@@ -5,12 +5,12 @@
 
 use super::editing::ClipEditError;
 use super::{Track, TrackEntry};
-use crate::project::Effects;
 use crate::project::tracks::clip::Clip;
 use crate::project::tracks::drawer::Drawer;
 use crate::project::tracks::ids::ClipId;
+use crate::project::{ClipTailPolicy, Effects};
 
-/// A clip that is to be put on a track: with its id, its drawer of racks of keyframes, its effects, where it starts, and how long
+/// A clip that is to be put on a track: with its id, its drawer of racks of keyframes, its effects, its tail policy, where it starts, and how long
 /// it lasted where it was (which is not how long it will last if it comes from a track that played at another speed).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClipToArrange {
@@ -18,6 +18,7 @@ pub struct ClipToArrange {
     pub clip: Clip,
     pub drawer: Drawer,
     pub effects: Effects,
+    pub tail_policy: ClipTailPolicy,
     pub start: u64,
     pub frames_it_lasted_before: u64,
 }
@@ -44,6 +45,7 @@ impl Track {
                 clip: entry.clip.clone(),
                 drawer: entry.drawer.clone(),
                 effects: entry.effects.clone(),
+                tail_policy: entry.tail_policy,
                 start,
                 frames_it_lasted_before: entry.clip.timeline_frame_count(self.speed),
             })
@@ -77,6 +79,7 @@ impl Track {
                     .drawer
                     .with_each_rack_changed(|rack| rack.rescaled(arranged.frames_it_lasted_before, length)),
                 effects: arranged.effects,
+                tail_policy: arranged.tail_policy,
                 gap_before_frames,
             });
         }

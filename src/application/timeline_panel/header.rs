@@ -120,6 +120,7 @@ fn show_the_menu(
         });
         ui.close();
     }
+    crate::application::tail_menus::show_the_sharing_menus_of_a_track(ui, track, commands);
     ui.separator();
     let item = ui.add_enabled(can_delete, Button::new(DELETE_TRACK_LABEL));
     if item.clicked() {

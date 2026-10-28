@@ -9,7 +9,7 @@
 
 use super::{ClipEditError, Track};
 use crate::project::tracks::ids::ClipId;
-use crate::project::{EffectInstanceId, EffectKind, Effects, PropertyId, PropertyValue};
+use crate::project::{ClipTailPolicy, EffectInstanceId, EffectKind, Effects, PropertyId, PropertyValue};
 
 impl Track {
     /// The same track with `effects` for the effects of its own, which are used as they are. (For making a track from its parts.)
@@ -25,6 +25,15 @@ impl Track {
     pub fn with_effects_on_its_clips(mut self, effects: impl IntoIterator<Item = Effects>) -> Self {
         for (entry, effects) in self.entries.iter_mut().zip(effects) {
             entry.effects = effects;
+        }
+        self
+    }
+
+    /// The same track with `policies` for the tail policies of its clips, one for each clip, in the order of the clips. (For making a track from its parts.)
+    #[must_use]
+    pub fn with_tail_policies_on_its_clips(mut self, policies: impl IntoIterator<Item = ClipTailPolicy>) -> Self {
+        for (entry, policy) in self.entries.iter_mut().zip(policies) {
+            entry.tail_policy = policy;
         }
         self
     }

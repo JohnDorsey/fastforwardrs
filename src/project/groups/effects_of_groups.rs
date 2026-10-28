@@ -295,6 +295,15 @@ impl Project {
     /// group. (There may be effects of that kind on it already: it is one more.) It is an error, and nothing is changed, if there is no such
     /// group, or a group of its kind cannot have the effect (see [`EffectKind::applies_to_a_group_of_kind`]).
     pub fn add_effect_to_the_group(&mut self, group: GroupId, kind: EffectKind) -> Result<EffectInstanceId, EditError> {
+        // (A group that has an effect now may be one that takes part of a track whose effects are never divided: the rules of groups are checked.)
+        self.keeping_the_groups_valid(|project| project.add_effect_to_the_group_without_the_rules(group, kind))
+    }
+
+    fn add_effect_to_the_group_without_the_rules(
+        &mut self,
+        group: GroupId,
+        kind: EffectKind,
+    ) -> Result<EffectInstanceId, EditError> {
         let found = self.group_mut(group).ok_or(EditError::UnknownGroup { group })?;
         if !kind.applies_to_a_group_of_kind(found.kind()) {
             return Err(EditError::NotAnEffectOfTheGroup { group, kind });
@@ -347,6 +356,21 @@ impl Project {
         instance: EffectInstanceId,
         enabled: bool,
     ) -> Result<(), EditError> {
+        if matches!(owner, Member::Group(_)) {
+            // (An effect of a group that is switched on may make it take part of a track whose effects are never divided: see `add_effect_to_the_group`.)
+            return self.keeping_the_groups_valid(|project| {
+                project.set_effect_enabled_without_the_rules(owner, instance, enabled)
+            });
+        }
+        self.set_effect_enabled_without_the_rules(owner, instance, enabled)
+    }
+
+    fn set_effect_enabled_without_the_rules(
+        &mut self,
+        owner: EffectOwner,
+        instance: EffectInstanceId,
+        enabled: bool,
+    ) -> Result<(), EditError> {
         if let Some(clip) = self.the_clip_whose_content_is(owner, instance) {
             return Err(EditError::TheContentOfAGenerator { clip });
         }
@@ -388,6 +412,18 @@ impl Project {
     /// effect of the chain is, and gives that name. **Its keyframes are not copied**: the values the copy has are the values the original has when it is not animated. It is an
     /// error, and nothing is changed, if there is no such thing as `owner`, or its chain has no such effect.
     pub fn duplicate_effect(
+        &mut self,
+        owner: EffectOwner,
+        instance: EffectInstanceId,
+    ) -> Result<EffectInstanceId, EditError> {
+        if matches!(owner, Member::Group(_)) {
+            return self
+                .keeping_the_groups_valid(|project| project.duplicate_effect_without_the_rules(owner, instance));
+        }
+        self.duplicate_effect_without_the_rules(owner, instance)
+    }
+
+    fn duplicate_effect_without_the_rules(
         &mut self,
         owner: EffectOwner,
         instance: EffectInstanceId,

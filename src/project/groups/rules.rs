@@ -21,15 +21,18 @@
 //! * a track group has next to each other in the list of tracks, with no track between that is not in it, the tracks that are in it,
 //!   directly or in the track groups that are in it;
 //! * a clip group that has tracks in common with a track group is inside it: its tracks are all tracks of the track group (it is not
-//!   across the edge of a track group, and a track group is not in the rectangle of a clip group).
+//!   across the edge of a track group, and a track group is not in the rectangle of a clip group);
+//! * (phase 12, docs/engine-phase-12-design.md, sections 5.3 and 5.4) **a clip group that has an effect that is switched on does not take part of a track whose effects
+//!   of that medium are one instance that is never divided**, and **two clip groups that are not in one another, that have effects of a medium and clips on a track whose effects of
+//!   that medium give each group a window of one instance, do not overlap in time**.
 
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
 use super::{Group, GroupId, GroupKind, Member};
-use crate::project::Project;
 use crate::project::tracks::{ClipId, TrackId};
+use crate::project::{EffectDomain, Project, TrackSharing};
 
 /// One way in which the groups of a project break a rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -68,6 +71,23 @@ pub enum GroupProblem {
     IsBetweenTheTracksOfATrackGroupWithoutBeingInIt { group: GroupId, track: TrackId },
     #[error("{clip_group} reaches across the edge of {track_group}: part of it is inside, and part is not")]
     ClipGroupReachesAcrossTheEdgeOfATrackGroup { clip_group: GroupId, track_group: GroupId },
+    #[error(
+        "{group} has {domain:?} effects and takes some of the clips of {track}, whose {domain:?} effects are one instance that is never divided"
+    )]
+    CutsAnIndivisibleTrack {
+        group: GroupId,
+        track: TrackId,
+        domain: EffectDomain,
+    },
+    #[error(
+        "{first} and {second} both have {domain:?} effects and clips on {track}, whose {domain:?} effects give each group a window of one instance, and their windows overlap in time"
+    )]
+    OverlappingWindows {
+        first: GroupId,
+        second: GroupId,
+        track: TrackId,
+        domain: EffectDomain,
+    },
 }
 
 impl GroupProblem {
@@ -85,6 +105,8 @@ impl GroupProblem {
             | Self::IsBetweenTheTracksOfATrackGroupWithoutBeingInIt { group, .. } => Some(*group),
             Self::InTwoShapes { second, .. } => Some(*second),
             Self::ClipGroupReachesAcrossTheEdgeOfATrackGroup { clip_group, .. } => Some(*clip_group),
+            Self::CutsAnIndivisibleTrack { group, .. } => Some(*group),
+            Self::OverlappingWindows { second, .. } => Some(*second),
             Self::HasTheBadgeOfATrackAndIsNotAClip { .. } => None,
         }
     }
@@ -103,6 +125,9 @@ impl Project {
         // (Where things are is only looked at when what is in what makes sense, which the rectangles are worked out from.)
         if problems.is_empty() {
             self.look_at_the_shapes(&mut problems);
+        }
+        if problems.is_empty() {
+            self.look_at_the_sharing(&mut problems);
         }
         problems
     }
@@ -240,6 +265,84 @@ impl Project {
             }
             if chain.keeps_the_badge_of_the_track() && !matches!(owner, Member::Clip(_)) {
                 problems.push(GroupProblem::HasTheBadgeOfATrackAndIsNotAClip { owner });
+            }
+        }
+    }
+
+    /// Checks the rules about the sharing of a track's effects (phase 12): that no clip group that has effects of a medium takes part of a track whose effects of that medium are
+    /// indivisible, and that the groups that would take windows of one instance do not have windows that overlap.
+    fn look_at_the_sharing(&self, problems: &mut Vec<GroupProblem>) {
+        for domain in [EffectDomain::Picture, EffectDomain::Sound] {
+            // The clip groups that have an effect of this medium that is switched on, and the tracks they have clips on.
+            let acting: Vec<(GroupId, Vec<TrackId>)> = self
+                .groups
+                .iter()
+                .filter(|group| group.kind() == GroupKind::ClipGroup)
+                .filter(|group| {
+                    group
+                        .effects()
+                        .iter()
+                        .any(|effect| effect.is_enabled() && effect.kind().domain() == domain)
+                })
+                .map(|group| {
+                    let mut tracks: Vec<TrackId> = Vec::new();
+                    for clip in self.clips_in(group.id()) {
+                        if let Some(track) = self.track_holding(clip).map(|track| track.id())
+                            && !tracks.contains(&track)
+                        {
+                            tracks.push(track);
+                        }
+                    }
+                    (group.id(), tracks)
+                })
+                .collect();
+            for (group, tracks) in &acting {
+                for track in tracks {
+                    let Some(found) = self.track(*track) else {
+                        continue;
+                    };
+                    let takes_part = found
+                        .entries()
+                        .iter()
+                        .any(|entry| !self.clip_is_inside(entry.id(), *group));
+                    if found.sharing().of(domain).is_indivisible() && takes_part {
+                        problems.push(GroupProblem::CutsAnIndivisibleTrack {
+                            group: *group,
+                            track: *track,
+                            domain,
+                        });
+                    }
+                }
+            }
+            let depth = self.groups.len();
+            let parents = self.parents();
+            for (place, (first, first_tracks)) in acting.iter().enumerate() {
+                for (second, second_tracks) in &acting[place + 1..] {
+                    let in_one_another = parents.is_inside(Member::Group(*first), *second, depth)
+                        || parents.is_inside(Member::Group(*second), *first, depth);
+                    let (Some(of_first), Some(of_second)) = (
+                        self.rectangle_of_the_group(*first),
+                        self.rectangle_of_the_group(*second),
+                    ) else {
+                        continue;
+                    };
+                    if in_one_another || !of_first.has_any_of_the_frames(of_second.first_frame, of_second.end_frame) {
+                        continue;
+                    }
+                    for track in first_tracks.iter().filter(|track| second_tracks.contains(track)) {
+                        let gives_windows = self
+                            .track(*track)
+                            .is_some_and(|track| track.sharing().of(domain) == TrackSharing::PerTrackWithWindows);
+                        if gives_windows {
+                            problems.push(GroupProblem::OverlappingWindows {
+                                first: *first,
+                                second: *second,
+                                track: *track,
+                                domain,
+                            });
+                        }
+                    }
+                }
             }
         }
     }

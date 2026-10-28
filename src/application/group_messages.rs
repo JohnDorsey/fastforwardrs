@@ -8,7 +8,7 @@
 //! in the lists of the properties panel (see [`describe_a_member`]).
 
 use super::naming::{SourceLooks, describe_a_member};
-use crate::project::{EditError, GroupId, GroupProblem, Member, Project};
+use crate::project::{EditError, EffectDomain, GroupId, GroupProblem, Member, Project};
 
 /// What a group is called in a message: its kind and its name ("the clip group \"Intro\""). A group that is not in the project is
 /// "a group".
@@ -24,6 +24,14 @@ fn the_member(project: &Project, source_looks: &SourceLooks<'_>, member: Member)
     match describe_a_member(project, source_looks, member) {
         Some(description) => format!("\"{description}\""),
         None => "something".to_owned(),
+    }
+}
+
+/// What a medium is called in a message.
+fn the_medium(domain: EffectDomain) -> &'static str {
+    match domain {
+        EffectDomain::Picture => "picture",
+        EffectDomain::Sound => "sound",
     }
 }
 
@@ -79,6 +87,28 @@ fn in_words(project: &Project, source_looks: &SourceLooks<'_>, problem: &GroupPr
             the_group(project, clip_group),
             the_group(project, track_group)
         ),
+        GroupProblem::CutsAnIndivisibleTrack { group, track, domain } => format!(
+            "{} has {} effects and would take some of the clips of {}, whose {} effects are one instance that is never divided. Change the sharing of the track's {} effects, or take the effects off the group.",
+            the_group(project, group),
+            the_medium(domain),
+            member(Member::Track(track)),
+            the_medium(domain),
+            the_medium(domain)
+        ),
+        GroupProblem::OverlappingWindows {
+            first,
+            second,
+            track,
+            domain,
+        } => format!(
+            "{} and {} both have {} effects and clips on {}, whose {} effects give each group a window of one instance, and the two windows would overlap in time. Change the sharing of the track's {} effects, or take the effects off one group.",
+            the_group(project, first),
+            the_group(project, second),
+            the_medium(domain),
+            member(Member::Track(track)),
+            the_medium(domain),
+            the_medium(domain)
+        ),
         GroupProblem::HasNoBadgeOfTheGroupItIsIn { .. }
         | GroupProblem::HasTheBadgeOfAGroupItIsNotIn { .. }
         | GroupProblem::HasTheBadgeOfATrackAndIsNotAClip { .. } => {
@@ -110,6 +140,10 @@ pub fn the_reason(project: &Project, source_looks: &SourceLooks<'_>, error: &Edi
             the_group(project, *group)
         )),
         EditError::UnknownGroup { .. } => Some("That group is not in the project any more.".to_owned()),
+        EditError::ATagHasNoEdge { group } => Some(format!(
+            "{} is a tag: it has no edge, so there is no tail that crosses it.",
+            the_group(project, *group)
+        )),
         EditError::NotAClipGroup { group } => Some(format!(
             "{} has no edges to move: it is not a clip group.",
             the_group(project, *group)

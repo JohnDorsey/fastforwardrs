@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 use super::effects::{EffectDocument, PluginDocument};
 use crate::colour_space::{StandardPrimaries, TransferFunction, VideoMatrix, VideoRange};
 use crate::project::{
-    DisplayTransform, FrameRate, Gain, GroupColour, InputColourOverride, OutputColourSpace, ResourceStorage,
-    SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor, TextColour, TrackHeight, WorkingColourSpace,
+    ClipTailEdge, DisplayTransform, EdgeFade, FrameRate, Gain, GroupColour, GroupTailEdge, InputColourOverride,
+    OutputColourSpace, ResourceStorage, SourceFrameIndex, SourceMediaIdentifier, SpedUpClipSound, SpeedFactor,
+    TailDepth, TextColour, TrackHeight, TrackSharing, WorkingColourSpace,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -142,6 +143,10 @@ pub(super) struct ProjectSettingsDocument {
     /// follows the global one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_storage: Option<ResourceStorage>,
+    /// How long the fade is where a sound meets the edge of a group (format 20 and after). Not there in the files of earlier versions, and not there for a setting that
+    /// follows the global one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_fade: Option<EdgeFade>,
 }
 
 /// A file the project is made from.
@@ -253,7 +258,74 @@ pub(super) struct TrackDocument {
     /// versions before 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectDocument>,
+    /// How much of the track one instance of its effects covers, for its picture effects and for its sound effects (format 20 and after). Left out for a track whose two are
+    /// the default (one copy for each run of clips), and in the files of earlier versions.
+    #[serde(default, skip_serializing_if = "SharingDocument::is_the_default")]
+    pub sharing: SharingDocument,
+    /// What the tail of a clip does at the edge of a group it is not in, for the clips where that is not the default (format 20 and after): the clip is named by its place in
+    /// `clips` (counted from 0).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clip_tails: Vec<ClipTailDocument>,
     pub clips: Vec<ClipDocument>,
+}
+
+/// The sharing of a track, as the file has it: a part that is the default is left out.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SharingDocument {
+    #[serde(default, skip_serializing_if = "is_the_default_sharing")]
+    pub picture: TrackSharing,
+    #[serde(default, skip_serializing_if = "is_the_default_sharing")]
+    pub sound: TrackSharing,
+}
+
+fn is_the_default_sharing(sharing: &TrackSharing) -> bool {
+    *sharing == TrackSharing::default()
+}
+
+impl SharingDocument {
+    pub fn is_the_default(&self) -> bool {
+        is_the_default_sharing(&self.picture) && is_the_default_sharing(&self.sound)
+    }
+}
+
+/// What the tail of one clip does at the edge of a group it is not in (see [`TrackDocument::clip_tails`]): a part that is the default is left out.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ClipTailDocument {
+    pub clip: usize,
+    #[serde(default, skip_serializing_if = "is_the_default_clip_edge")]
+    pub edge: ClipTailEdge,
+    #[serde(default, skip_serializing_if = "is_the_default_depth")]
+    pub depth: TailDepth,
+}
+
+fn is_the_default_clip_edge(edge: &ClipTailEdge) -> bool {
+    *edge == ClipTailEdge::default()
+}
+
+fn is_the_default_depth(depth: &TailDepth) -> bool {
+    *depth == TailDepth::default()
+}
+
+fn is_the_default_group_edge(edge: &GroupTailEdge) -> bool {
+    *edge == GroupTailEdge::default()
+}
+
+/// What the tails of the members of a clip group or a track group do at its edge, as the file has it: a part that is the default is left out.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GroupTailDocument {
+    #[serde(default, skip_serializing_if = "is_the_default_group_edge")]
+    pub edge: GroupTailEdge,
+    #[serde(default, skip_serializing_if = "is_the_default_depth")]
+    pub depth: TailDepth,
+}
+
+impl GroupTailDocument {
+    pub fn is_the_default(&self) -> bool {
+        is_the_default_group_edge(&self.edge) && is_the_default_depth(&self.depth)
+    }
 }
 
 fn normal_height_in_points() -> f32 {
@@ -434,6 +506,9 @@ pub(super) struct GroupDocument {
     /// The badges in the chain of the group: those of the tags it is in. Left out for a group that is in no tag.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub badges: Vec<BadgeDocument>,
+    /// What the tails of its members do at its edge (format 20 and after). Left out for a tag, and for a group where that is the default.
+    #[serde(default, skip_serializing_if = "GroupTailDocument::is_the_default")]
+    pub tail: GroupTailDocument,
 }
 
 /// The kinds of group, as the file names them.

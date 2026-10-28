@@ -34,18 +34,18 @@ use thiserror::Error;
 use crate::atomic_file::write_file_atomically;
 use crate::media::MediaLocation;
 use crate::project::{
-    AdjustmentClip, Angle, AnimationTarget, CanvasArea, ChainEntry, Clip, ClipId, ClipKind, CrateClip, Drawer, Effect,
-    EffectInstanceId, EffectKind, Effects, FontSize, GeneratorClip, ImageClip, InputColourOverride, MediaClip,
-    Placement, Project, ProjectSettings, PropertyValue, SourceAudioProperties, SourceImageProperties, SourceMedia,
-    SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties, SourceVideoProperties, SpedUpClipSound,
-    SpeedIndicatorLayout, TextClip, TextColour, TextObject, Track, TrackHeight, TrackId, ValueKind,
-    values_of_a_text_object,
+    AdjustmentClip, Angle, AnimationTarget, CanvasArea, ChainEntry, Clip, ClipId, ClipKind, ClipTailPolicy, CrateClip,
+    Drawer, Effect, EffectInstanceId, EffectKind, EffectSharing, Effects, FontSize, GeneratorClip, ImageClip,
+    InputColourOverride, MediaClip, Placement, Project, ProjectSettings, PropertyValue, SourceAudioProperties,
+    SourceImageProperties, SourceMedia, SourceMediaIdentifier, SourceMediaLink, SourceMediaProperties,
+    SourceVideoProperties, SpedUpClipSound, SpeedIndicatorLayout, TextClip, TextColour, TextObject, Track, TrackHeight,
+    TrackId, ValueKind, values_of_a_text_object,
 };
 use archive::{ArchiveError, ArchiveState, FileToInclude};
 use document::{
-    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ColourDocument, InputColourDocument,
-    KeyframeValueDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument, RackDocument, SourceDocument,
-    SpeedIndicatorDocument, TrackDocument,
+    AnimationDocument, BadgeDocument, CanvasAreaDocument, ClipDocument, ClipTailDocument, ColourDocument,
+    InputColourDocument, KeyframeValueDocument, PlacementDocument, ProjectDocument, ProjectSettingsDocument,
+    RackDocument, SharingDocument, SourceDocument, SpeedIndicatorDocument, TrackDocument,
 };
 use effects::{
     EffectDocument, KindsOfEffects, chain_of_the_effects_from_documents, effect_documents_of, plugin_documents_of,
@@ -125,7 +125,13 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 ///
 /// **Version 19 added the `state` of an effect** (phase 10): what the plugin of the effect saved of what is not one of its values, which its window made it say, in base 64 (left out when
 /// it saved none). A file of version 18 has none.
-pub const FILE_FORMAT_VERSION: u32 = 19;
+///
+/// **Version 20 added what phase 12 asks of the model** (docs/engine-phase-12-design.md): the `sharing` of a track (how much of it one instance of its effects covers, for its `picture` effects and for its
+/// `sound` effects: `per_clip`, `per_run`, `per_track_with_windows` or `per_track_indivisible`; left out when both are `per_run`), the `clip_tails` of a track (what the tail of a clip does at the edge of a
+/// group it is not in, by the place of the clip in the track: `edge` is `around`, `into` or `cut` and `depth` is `behind` or `in_front`; only the clips that are not the default are there), and the `tail` of a clip
+/// group or a track group (what the tails of its members do at its edge: `edge` is `keep_alive`, `release` or `cut`, and `depth`). A file of version 19 has none of them: it is read as a project in which each track
+/// has one copy of its effects for each run of clips (`per_run`) and every tail is as the design says it begins.
+pub const FILE_FORMAT_VERSION: u32 = 20;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -571,6 +577,7 @@ fn settings_from_document(document: Option<ProjectSettingsDocument>) -> ProjectS
             working_colour_space: settings.working_colour_space,
             output_colour_space: settings.output_colour_space,
             resource_storage: settings.resource_storage,
+            edge_fade: settings.edge_fade,
         }
     })
 }
@@ -992,6 +999,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
     // The clips are made first: the racks of keyframes may be of any clip of any track, and which clips there are, of what
     // kind, and how long each lasts is what the racks are checked against.
     let mut loaded_tracks = Vec::with_capacity(document.tracks.len());
+    let mut tail_policies_of_the_tracks: Vec<Vec<ClipTailPolicy>> = Vec::with_capacity(document.tracks.len());
     for (track_number, track) in document.tracks.into_iter().enumerate() {
         let TrackDocument {
             title,
@@ -1002,6 +1010,8 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             animation,
             drawer,
             effects,
+            sharing,
+            clip_tails,
             clips: clip_documents,
         } = track;
         let effects = chain_of_the_effects_from_documents(effects, &kinds, EffectKind::applies_to_a_track)
@@ -1020,7 +1030,27 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .with_gain(gain_decibels)
             .with_speed(speed_factor)
             .with_muted(muted)
-            .with_height(TrackHeight::from_points(height_in_points));
+            .with_height(TrackHeight::from_points(height_in_points))
+            .with_sharing(EffectSharing {
+                picture: sharing.picture,
+                sound: sharing.sound,
+            });
+        let mut tail_policies = vec![ClipTailPolicy::default(); clips.len()];
+        for document in clip_tails {
+            let Some(policy) = tail_policies.get_mut(document.clip) else {
+                return Err(invalid_project(format!(
+                    "track number {}: a tail policy is of the clip number {}, and the track has {} clips (counted from 0)",
+                    track_number + 1,
+                    document.clip,
+                    clips.len()
+                )));
+            };
+            *policy = ClipTailPolicy {
+                edge: document.edge,
+                depth: document.depth,
+            };
+        }
+        tail_policies_of_the_tracks.push(tail_policies);
         loaded_tracks.push((parts.with_effects(effects), animation, drawer, clips));
     }
     let clips_in_each_track: Vec<usize> = loaded_tracks.iter().map(|(_, _, _, clips)| clips.len()).collect();
@@ -1084,7 +1114,8 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             track
                 .with_drawer(drawer_of_the_track)
                 .with_clips_and_drawers(entries)
-                .with_effects_on_its_clips(effects_of_the_clips),
+                .with_effects_on_its_clips(effects_of_the_clips)
+                .with_tail_policies_on_its_clips(tail_policies_of_the_tracks[track_number].iter().copied()),
         );
     }
 
@@ -1216,6 +1247,21 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                 animation: AnimationDocument::default(),
                 drawer: racks_of(AnimationTarget::Track(track.id()), track.drawer())?,
                 effects: effect_documents_of(track.effects()),
+                sharing: SharingDocument {
+                    picture: track.sharing().picture,
+                    sound: track.sharing().sound,
+                },
+                clip_tails: track
+                    .entries()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| !entry.tail_policy().is_the_default())
+                    .map(|(number, entry)| ClipTailDocument {
+                        clip: number,
+                        edge: entry.tail_policy().edge,
+                        depth: entry.tail_policy().depth,
+                    })
+                    .collect(),
                 clips: track
                     .entries()
                     .iter()
@@ -1258,6 +1304,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
             working_colour_space: settings.working_colour_space,
             output_colour_space: settings.output_colour_space,
             resource_storage: settings.resource_storage,
+            edge_fade: settings.edge_fade,
         }),
         frame_rate: project.chosen_frame_rate(),
     })
@@ -1400,6 +1447,8 @@ mod effects_tests;
 mod format_13_tests;
 #[cfg(test)]
 mod format_19_tests;
+#[cfg(test)]
+mod format_20_tests;
 #[cfg(test)]
 mod generator_clip_tests;
 #[cfg(test)]

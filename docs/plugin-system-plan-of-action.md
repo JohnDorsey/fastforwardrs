@@ -316,6 +316,18 @@ HDR and PQ/HLG (the working format holds it; CM-13), EXR/DPX and image sequences
 audio-reactive shaders (Q-22), a node-editor interface (Q-30), a render process (Q-31), presets (EF-08), per-keyframe interpolation (AN-03), linking one parameter to another and expressions (AN-07), masks and tracking, VST3 and LV2,
 WASM plugins, OpenFX (shelved). Each can be asked for later; the features list says what keeps each possible.
 
+**The remaining gaps of the LV2 and plugin work (added 2026-10-27 at the maintainer's request; none is scheduled).** What exists is in `engine-phase-11-report.md`, `engine-phase-11-lv2-design.md` section 4 and `bundleable-lv2-plugins.md`.
+
+* **Atom ports and plugin state in windows:** an LV2 plugin that keeps its state in atoms or in files (a sampler's file, a plugin that saves a patch) is refused today with the reason; its window cannot send or receive atoms.
+* **Instruments and MIDI:** an atom port that carries MIDI is a stub; no instrument plays. (Being designed on its own: MIDI as a kind of signal that flows through effect chains.)
+* **`time:Position`** (the host tells a plugin the tempo and the place in the project) **and `log:log`** (a plugin's messages go to the program's notes): neither is offered to a plugin.
+* **LV2 interfaces of the Gtk and Qt kinds** (only the native class of the system's window is shown; Wolf Shaper on Windows declares `ui:X11UI` and gets only the panel of controls), and **sidechain inputs** (the first audio input is the one).
+* **Presets:** the presets of CLAP plugins (the preset-discovery extension) are not read; a person cannot **save their own presets** of a plugin; presets that live inside a plugin's own window (Dragonfly, Wolf Shaper) are not reachable from the menu.
+* **The Bundles tab:** a **choice of sets to download** (see below) before Zam Plugins (128 MB, licence of each file unchecked) or any other large set can be added; Wolf Shaper has no macOS build (its file is a zip that holds a disk image); LV2 on macOS, Linux windows and macOS windows have not been seen on a screen.
+* **VST3** (later, or through Carla).
+
+A *choice of sets* means: the tab has one button, "Download all (size)...", that fetches every set of the manifest for this system. The choice would be a tick (or a button) for each set, with its size, and the button would fetch what is ticked; a release file that two sets share would count once.
+
 ## 6. Risks, and what would change the plan
 
 * **Parity is the risky phase (1).** If the oracle comparison keeps finding small differences in text, rotation or filtering, the right response is to list them and let the maintainer accept each, not to loosen the tolerance silently.

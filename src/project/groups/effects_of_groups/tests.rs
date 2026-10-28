@@ -821,16 +821,21 @@ fn a_group_in_itself_does_not_make_what_is_applied_go_on_for_ever() {
     let mut laid = four_tracks();
     let clip = laid.clip(0, 0);
     let (first, second) = (GroupId::new(0), GroupId::new(1));
+    // (The groups are right while the effects are put on, which checks the rules of groups, as every edit of the effects of a group does since phase 12; they are in each other after.)
     laid.project.groups = vec![
-        Group::new(first, GroupKind::Tag, "a", GroupColour::PALETTE[0])
-            .with_members([Member::Clip(clip), Member::Group(second)]),
-        Group::new(second, GroupKind::Tag, "b", GroupColour::PALETTE[1]).with_members([Member::Group(first)]),
+        Group::new(first, GroupKind::Tag, "a", GroupColour::PALETTE[0]).with_members([Member::Clip(clip)]),
+        Group::new(second, GroupKind::Tag, "b", GroupColour::PALETTE[1]).with_members([Member::Clip(clip)]),
     ];
     for group in [first, second] {
         laid.project
             .put_the_badge_of_a_tag_in_the_chain_of(Member::Clip(clip), group);
+    }
+    for group in [first, second] {
         laid.project.add_effect_to_the_group(group, HUE_SHIFT).unwrap();
     }
+    laid.project.groups[0].members_mut().push(Member::Group(second));
+    laid.project.groups[1].members_mut().clear();
+    laid.project.groups[1].members_mut().push(Member::Group(first));
     laid.project
         .put_the_badge_of_a_tag_in_the_chain_of(Member::Group(second), first);
     laid.project

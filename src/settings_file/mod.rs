@@ -106,6 +106,7 @@ pub fn settings_from_json_text(text: &str) -> Result<Settings, String> {
             .output_colour_space
             .unwrap_or(Settings::DEFAULT.output_colour_space),
         resource_storage: values.resource_storage.unwrap_or(Settings::DEFAULT.resource_storage),
+        edge_fade: values.edge_fade.unwrap_or(Settings::DEFAULT.edge_fade),
         generate_lead_up_on_seek: values
             .generate_lead_up_on_seek
             .unwrap_or(Settings::DEFAULT.generate_lead_up_on_seek),
@@ -131,6 +132,7 @@ pub fn settings_to_json_text(settings: Settings) -> String {
             working_colour_space: Some(settings.working_colour_space),
             output_colour_space: Some(settings.output_colour_space),
             resource_storage: Some(settings.resource_storage),
+            edge_fade: Some(settings.edge_fade),
             generate_lead_up_on_seek: Some(settings.generate_lead_up_on_seek),
             checkpoint_interval: Some(settings.checkpoint_interval),
             checkpoint_memory_budget: Some(settings.checkpoint_memory_budget),
@@ -155,6 +157,7 @@ mod tests {
             working_colour_space: crate::project::WorkingColourSpace::AcesCg,
             output_colour_space: crate::project::OutputColourSpace::Srgb,
             resource_storage: crate::project::ResourceStorage::Ask,
+            edge_fade: crate::project::EdgeFade::Milliseconds50,
             generate_lead_up_on_seek: false,
             checkpoint_interval: CheckpointInterval::Every300Frames,
             checkpoint_memory_budget: CheckpointMemoryBudget::Gib4,
@@ -180,6 +183,7 @@ mod tests {
     "working_colour_space": "linear_rec709",
     "output_colour_space": "rec709_as_previewed",
     "resource_storage": "embed",
+    "edge_fade": "10_ms",
     "generate_lead_up_on_seek": true,
     "checkpoint_interval": "every_60_frames",
     "checkpoint_memory_budget": "1_gib"
@@ -240,6 +244,7 @@ mod tests {
                 working_colour_space: crate::project::WorkingColourSpace::AcesCg,
                 output_colour_space: crate::project::OutputColourSpace::Srgb,
                 resource_storage: crate::project::ResourceStorage::Link,
+                edge_fade: crate::project::EdgeFade::Milliseconds10,
                 generate_lead_up_on_seek: true,
                 checkpoint_interval: CheckpointInterval::Every60Frames,
                 checkpoint_memory_budget: CheckpointMemoryBudget::Gib1,

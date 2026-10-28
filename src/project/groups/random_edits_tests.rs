@@ -128,6 +128,8 @@ struct Randomly {
     laid: Laid,
     log: Vec<String>,
     tally: Tally,
+    /// Whether the edits include the ones of phase 12: the sharing of a track and the tail policies. (A run that does not has the same edits for a seed as it had before them.)
+    with_sharing: bool,
 }
 
 impl Randomly {
@@ -164,6 +166,15 @@ impl Randomly {
             },
             log: Vec::new(),
             tally: Tally::default(),
+            with_sharing: false,
+        }
+    }
+
+    /// A run that also changes the sharing of tracks and the tail policies (phase 12), one edit in six.
+    fn with_sharing(seed: u64) -> Self {
+        Self {
+            with_sharing: true,
+            ..Self::new(seed)
         }
     }
 
@@ -299,7 +310,84 @@ impl Randomly {
         self.log[start..].join("\n")
     }
 
+    /// An edit of the sharing of a track, or of a tail policy.
+    fn a_sharing_edit(&mut self) -> (&'static str, bool, String) {
+        use crate::project::{
+            ClipTailEdge, ClipTailPolicy, EffectDomain, GroupTailEdge, GroupTailPolicy, TailDepth, TrackSharing,
+        };
+        let depth = TailDepth::ALL[self.below(2)];
+        match self.below(8) {
+            0..=2 => {
+                let track = self.some_track();
+                let domain = [EffectDomain::Picture, EffectDomain::Sound][self.below(2)];
+                // (The two that the rules are about are chosen more often than the two that they are not.)
+                let sharing = [
+                    TrackSharing::PerClip,
+                    TrackSharing::PerRun,
+                    TrackSharing::PerTrackWithWindows,
+                    TrackSharing::PerTrackIndivisible,
+                    TrackSharing::PerTrackWithWindows,
+                    TrackSharing::PerTrackIndivisible,
+                ][self.below(6)];
+                let result = self.laid.project.set_track_sharing(track, domain, sharing);
+                (
+                    "set the sharing of a track",
+                    result.is_ok(),
+                    format!("{track} {domain:?} {sharing:?}"),
+                )
+            }
+            3 | 4 => {
+                let Some(group) = self.some_group(Some(GroupKind::ClipGroup)) else {
+                    return ("give a clip group an effect", false, "no clip group".to_owned());
+                };
+                let result = if self.below(3) == 0
+                    && let Some(instance) = self
+                        .laid
+                        .project
+                        .group(group)
+                        .and_then(|found| found.effects().iter().next().map(|effect| effect.instance()))
+                {
+                    let enabled = self.below(2) == 0;
+                    self.laid
+                        .project
+                        .set_effect_enabled(Member::Group(group), instance, enabled)
+                } else {
+                    self.laid
+                        .project
+                        .add_effect_to_the_group(group, EffectKind::HUE_SHIFT)
+                        .map(|_| ())
+                };
+                ("give a clip group an effect", result.is_ok(), format!("{group}"))
+            }
+            5 => {
+                let Some(clip) = self.some_clip() else {
+                    return ("set the tail policy of a clip", false, "no clip".to_owned());
+                };
+                let edge = ClipTailEdge::ALL[self.below(3)];
+                let result = self
+                    .laid
+                    .project
+                    .set_clip_tail_policy(clip, ClipTailPolicy { edge, depth });
+                ("set the tail policy of a clip", result.is_ok(), format!("{clip:?}"))
+            }
+            _ => {
+                let Some(group) = self.some_group(None) else {
+                    return ("set the tail policy of a group", false, "no group".to_owned());
+                };
+                let edge = GroupTailEdge::ALL[self.below(3)];
+                let result = self
+                    .laid
+                    .project
+                    .set_group_tail_policy(group, GroupTailPolicy { edge, depth });
+                ("set the tail policy of a group", result.is_ok(), format!("{group}"))
+            }
+        }
+    }
+
     fn make_a_random_edit(&mut self) -> (&'static str, bool, String) {
+        if self.with_sharing && self.below(4) == 0 {
+            return self.a_sharing_edit();
+        }
         let choice = self.below(114);
         match choice {
             0..=11 => {
@@ -790,6 +878,78 @@ fn whatever_edits_are_made_in_whatever_order_no_rule_of_groups_is_left_broken_an
             tally.refused
         );
     }
+}
+
+#[test]
+fn whatever_edits_are_made_among_those_that_change_the_sharing_of_tracks_the_rules_of_sharing_are_kept_and_a_refused_edit_changes_nothing()
+ {
+    let mut tally = Tally::default();
+    let mut seen_indivisible_with_a_group_that_has_effects = 0;
+    let mut seen_windows_with_two_groups_that_have_effects = 0;
+    for seed in 1..=60 {
+        let mut run = Randomly::with_sharing(seed);
+        for _ in 0..400 {
+            run.edit_at_random();
+            // (`edit_at_random` has checked every rule of groups, and these are two of them; here is what the project looks like, so that the test says what it was tried on.)
+            let project = &run.laid.project;
+            let acting = |group: &crate::project::Group, domain| {
+                group
+                    .effects()
+                    .iter()
+                    .any(|effect| effect.is_enabled() && effect.kind().domain() == domain)
+            };
+            for domain in [
+                crate::project::EffectDomain::Picture,
+                crate::project::EffectDomain::Sound,
+            ] {
+                let groups_with_effects = project
+                    .groups()
+                    .iter()
+                    .filter(|group| group.kind() == GroupKind::ClipGroup && acting(group, domain))
+                    .count();
+                for track in project.tracks() {
+                    match track.sharing().of(domain) {
+                        crate::project::TrackSharing::PerTrackIndivisible if groups_with_effects > 0 => {
+                            seen_indivisible_with_a_group_that_has_effects += 1;
+                        }
+                        crate::project::TrackSharing::PerTrackWithWindows if groups_with_effects >= 2 => {
+                            seen_windows_with_two_groups_that_have_effects += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        tally.add(&run.tally);
+    }
+    for edit in [
+        "set the sharing of a track",
+        "set the tail policy of a clip",
+        "set the tail policy of a group",
+        "give a clip group an effect",
+    ] {
+        assert!(
+            tally.made.get(edit).copied().unwrap_or(0) >= 50,
+            "{edit} was made too few times: {:?} {:?}",
+            tally.made,
+            tally.refused
+        );
+    }
+    // The rules are only tried if edits are refused for them: the sharing of a track, and a group that is given an effect, are refused sometimes.
+    assert!(
+        tally.refused.get("set the sharing of a track").copied().unwrap_or(0) >= 20,
+        "{:?}",
+        tally.refused
+    );
+    assert!(
+        tally.refused.get("give a clip group an effect").copied().unwrap_or(0) >= 20,
+        "{:?}",
+        tally.refused
+    );
+    assert!(
+        seen_indivisible_with_a_group_that_has_effects >= 100 && seen_windows_with_two_groups_that_have_effects >= 20,
+        "{seen_indivisible_with_a_group_that_has_effects} {seen_windows_with_two_groups_that_have_effects}"
+    );
 }
 
 #[test]

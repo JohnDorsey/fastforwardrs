@@ -238,6 +238,56 @@ impl ResourceStorage {
     }
 }
 
+/// How long the fade is where a sound meets the edge of a group, so that a sound that goes into a group's effects, or out of them, does not click (phase 12, D5 of
+/// docs/engine-phase-12-design.md). It is the length of the crossfade at every such edge, in the preview and in the exported video.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EdgeFade {
+    /// No fade: a hard edge.
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "5_ms")]
+    Milliseconds5,
+    #[default]
+    #[serde(rename = "10_ms")]
+    Milliseconds10,
+    #[serde(rename = "20_ms")]
+    Milliseconds20,
+    #[serde(rename = "50_ms")]
+    Milliseconds50,
+}
+
+impl EdgeFade {
+    pub const ALL: [Self; 5] = [
+        Self::Off,
+        Self::Milliseconds5,
+        Self::Milliseconds10,
+        Self::Milliseconds20,
+        Self::Milliseconds50,
+    ];
+
+    /// What the settings windows call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "No fade",
+            Self::Milliseconds5 => "5 ms",
+            Self::Milliseconds10 => "10 ms",
+            Self::Milliseconds20 => "20 ms",
+            Self::Milliseconds50 => "50 ms",
+        }
+    }
+
+    /// How many thousandths of a second the fade lasts.
+    pub fn milliseconds(self) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Milliseconds5 => 5,
+            Self::Milliseconds10 => 10,
+            Self::Milliseconds20 => 20,
+            Self::Milliseconds50 => 50,
+        }
+    }
+}
+
 /// How far apart, in frames, the preview keeps a copy of the state of an effect that depends on earlier frames (EN-14): a **checkpoint**. After a jump the preview goes on from
 /// the nearest checkpoint before the place it jumped to, so that a shorter interval is less to make again and more memory kept. **A global-only setting.**
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -342,6 +392,8 @@ pub struct Settings {
     pub output_colour_space: OutputColourSpace,
     /// How the files that effects use are kept when they are added.
     pub resource_storage: ResourceStorage,
+    /// How long the fade is where a sound meets the edge of a group (phase 12).
+    pub edge_fade: EdgeFade,
     /// After a jump in the timeline, make the frames that lead up to the playhead in the background, so that an effect that depends on earlier frames shows what the
     /// export shows (EN-14, the View menu). Off: the preview goes on from the nearest checkpoint and says that the picture is approximate. **A global-only setting.**
     pub generate_lead_up_on_seek: bool,
@@ -360,6 +412,7 @@ impl Settings {
         working_colour_space: WorkingColourSpace::LinearRec709,
         output_colour_space: OutputColourSpace::Rec709AsPreviewed,
         resource_storage: ResourceStorage::Embed,
+        edge_fade: EdgeFade::Milliseconds10,
         generate_lead_up_on_seek: true,
         checkpoint_interval: CheckpointInterval::Every60Frames,
         checkpoint_memory_budget: CheckpointMemoryBudget::Gib1,
@@ -381,6 +434,7 @@ pub struct ProjectSettings {
     pub working_colour_space: Option<WorkingColourSpace>,
     pub output_colour_space: Option<OutputColourSpace>,
     pub resource_storage: Option<ResourceStorage>,
+    pub edge_fade: Option<EdgeFade>,
 }
 
 impl ProjectSettings {
@@ -392,6 +446,7 @@ impl ProjectSettings {
         working_colour_space: None,
         output_colour_space: None,
         resource_storage: None,
+        edge_fade: None,
     };
 
     /// The settings in effect for the project: its own where it has set them, the global ones
@@ -404,6 +459,7 @@ impl ProjectSettings {
             working_colour_space: self.working_colour_space.unwrap_or(global.working_colour_space),
             output_colour_space: self.output_colour_space.unwrap_or(global.output_colour_space),
             resource_storage: self.resource_storage.unwrap_or(global.resource_storage),
+            edge_fade: self.edge_fade.unwrap_or(global.edge_fade),
             generate_lead_up_on_seek: global.generate_lead_up_on_seek,
             checkpoint_interval: global.checkpoint_interval,
             checkpoint_memory_budget: global.checkpoint_memory_budget,
@@ -480,6 +536,15 @@ impl SettingValue for ResourceStorage {
 
     fn label(self) -> &'static str {
         ResourceStorage::label(self)
+    }
+}
+
+impl SettingValue for EdgeFade {
+    const ALL: &'static [Self] = &EdgeFade::ALL;
+    const CONTROL: SettingControlKind = SettingControlKind::Dropdown;
+
+    fn label(self) -> &'static str {
+        EdgeFade::label(self)
     }
 }
 
@@ -651,6 +716,12 @@ const RESOURCE_STORAGE: Setting<ResourceStorage> = Setting {
     project: |settings| &mut settings.resource_storage,
 };
 
+const EDGE_FADE: Setting<EdgeFade> = Setting {
+    label: "Fade at the edge of a group (sound)",
+    global: |settings| &mut settings.edge_fade,
+    project: |settings| &mut settings.edge_fade,
+};
+
 const GENERATE_LEAD_UP_ON_SEEK: GlobalSetting<bool> = GlobalSetting {
     label: "Generate lead-up on seek",
     global: |settings| &mut settings.generate_lead_up_on_seek,
@@ -667,13 +738,14 @@ const CHECKPOINT_MEMORY_BUDGET: GlobalSetting<CheckpointMemoryBudget> = GlobalSe
 };
 
 /// Every setting that a project can set for itself too, in the order the settings windows show them.
-pub static SETTINGS: [&dyn AnySetting; 6] = [
+pub static SETTINGS: [&dyn AnySetting; 7] = [
     &AUTOSAVE,
     &SPED_UP_CLIP_SOUND,
     &DISPLAY_TRANSFORM,
     &WORKING_COLOUR_SPACE,
     &OUTPUT_COLOUR_SPACE,
     &RESOURCE_STORAGE,
+    &EDGE_FADE,
 ];
 
 /// Every setting that only the global layer has, in the order the Global settings window shows them (after those of [`SETTINGS`]).
@@ -708,6 +780,7 @@ mod tests {
             working_colour_space: WorkingColourSpace::AcesCg,
             output_colour_space: OutputColourSpace::Srgb,
             resource_storage: ResourceStorage::Ask,
+            edge_fade: EdgeFade::Milliseconds50,
             generate_lead_up_on_seek: false,
             checkpoint_interval: CheckpointInterval::Every300Frames,
             checkpoint_memory_budget: CheckpointMemoryBudget::Gib4,
@@ -853,7 +926,7 @@ mod tests {
                 checkpoint_memory_budget: Settings::DEFAULT.checkpoint_memory_budget,
                 ..everything_off_its_default()
             },
-            "and the rows of the project's table are the first six"
+            "and the rows of the project's table are the first seven"
         );
     }
 
@@ -878,6 +951,7 @@ mod tests {
             working_colour_space: Some(WorkingColourSpace::AcesCg),
             output_colour_space: Some(OutputColourSpace::Srgb),
             resource_storage: Some(ResourceStorage::Link),
+            edge_fade: Some(EdgeFade::Milliseconds20),
         };
         for global in [Settings::DEFAULT, everything_off_its_default()] {
             let in_effect = everything_set_by_the_project.resolve(global);
@@ -1017,6 +1091,8 @@ mod tests {
                     "Files that effects use (tables of colours)",
                     SettingControlKind::Dropdown
                 ),
+                // (Added on purpose in phase 12: the length of the fade where a sound meets the edge of a group.)
+                ("Fade at the edge of a group (sound)", SettingControlKind::Dropdown),
             ]
         );
     }

@@ -38,6 +38,7 @@ mod scrub_slider;
 mod selection;
 mod settings_windows;
 mod start_time_hold;
+mod tail_menus;
 mod textures;
 mod theme;
 mod timeline_geometry;

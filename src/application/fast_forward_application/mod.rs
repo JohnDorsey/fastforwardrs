@@ -170,6 +170,8 @@ mod table_keeping_tests;
 #[cfg(test)]
 mod table_tests;
 #[cfg(test)]
+mod tail_menu_tests;
+#[cfg(test)]
 mod test_window;
 #[cfg(test)]
 mod text_object_tests;
