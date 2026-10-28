@@ -63,6 +63,7 @@ fn a_clip_at(first_timeline_frame: u64, effects: Vec<LayerEffect>) -> SoundClipT
         first_timeline_frame,
         frames_of_the_clip_before: 0,
         effects,
+        sent_to: None,
     }
 }
 
@@ -609,7 +610,6 @@ fn the_insertions_of_a_graph_ask_the_runner_for_the_plugin_effects_of_a_clip_and
     let processors = insertions.for_clip(&request);
     assert_eq!(processors.len(), 1, "one of the two is a plugin that is installed");
     assert_eq!(*runner.asked.lock().unwrap(), 1, "and the runner was asked for it only");
-    assert!(insertions.for_strip(0).is_empty());
 }
 
 // --- the whole graph, with the real test plugins and sound made in memory ---
@@ -668,6 +668,7 @@ fn sound_of(
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
+        groups: Vec::new(),
     };
     let mut graph = SoundGraph::new(
         specification,
@@ -705,6 +706,7 @@ fn the_clip(
         first_timeline_frame,
         frames_of_the_clip_before: 0,
         effects,
+        sent_to: None,
     }
 }
 

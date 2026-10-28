@@ -52,8 +52,11 @@ pub(super) fn effects_of_the_groups_that_make_pictures(
         let effects: Vec<LayerEffect> = project
             .effects_applied_to_the_group(group.id())
             .iter()
-            // (An effect that the program does not have, which a project file brought, does nothing to the picture.)
-            .filter(|applied| applied.effect.kind().is_installed())
+            // (An effect that the program does not have, which a project file brought, does nothing to the picture; and a sound effect of the group is done to the sound: phase 12, piece 12.3.)
+            .filter(|applied| {
+                applied.effect.kind().is_installed()
+                    && applied.effect.kind().domain() == crate::project::EffectDomain::Picture
+            })
             .map(|applied| super::layer_effect_of(project, animations, applied))
             .collect();
         if !super::operations_of_effects(&effects, TimelineFrameIndex::new(0), 0).is_empty() {

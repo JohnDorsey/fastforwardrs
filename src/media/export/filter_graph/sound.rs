@@ -77,6 +77,9 @@ pub struct SoundClipToExport {
     /// The sound effects that are done to the sound of the clip before its loudness is, one after another, with their values and keyframes (whose frames are frames of the
     /// timeline). **The filter graph of ffmpeg does not do them** (it cannot); the sound engine does.
     pub effects: Vec<crate::composition::LayerEffect>,
+    /// Where the sound of the clip goes once its effects, its volume and the effects of its track have done what they do (phase 12, piece 12.3): into the sum of this group of
+    /// `SoundGraphSpecification::groups`, or, if none, into the sum of all the sound.
+    pub sent_to: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,6 +107,17 @@ pub struct SoundBusToExport {
     pub last_item: usize,
     /// The effects, one after another, with their values and keyframes (whose frames are frames of the timeline).
     pub effects: Vec<crate::composition::LayerEffect>,
+}
+
+/// A clip group or a track group that has sound effects (phase 12, piece 12.3; docs/engine-phase-12-design.md): what its members make is **added together** and given to its effects,
+/// which are one instance, with one state, for as long as the group is heard; what comes out goes into the sum of its parent (or, with none, of all the sound). **The filter graph of
+/// ffmpeg does not do the effects** (it cannot): it adds the clips as it always did; the sound engine does them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundGroupToExport {
+    /// The effects, one after another, with their values (a group's effects have no keyframes).
+    pub effects: Vec<crate::composition::LayerEffect>,
+    /// The group of the specification that holds this one and has effects too: its sum goes into theirs. `None`: into the sum of all the sound.
+    pub parent: Option<usize>,
 }
 
 /// The sound of one track: its items one after another, and the instances of the track's effects that hear some of them together.

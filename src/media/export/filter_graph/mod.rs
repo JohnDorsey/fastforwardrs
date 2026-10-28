@@ -17,8 +17,8 @@ mod sound;
 use crate::project::{FrameRate, SpedUpClipSound};
 
 pub use sound::{
-    LoudnessToExport, SAMPLE_RATE, SoundBusToExport, SoundClipToExport, SoundItemToExport, SoundStripToExport,
-    clip_feed_filters, pre_roll_frames_of,
+    LoudnessToExport, SAMPLE_RATE, SoundBusToExport, SoundClipToExport, SoundGroupToExport, SoundItemToExport,
+    SoundStripToExport, clip_feed_filters, pre_roll_frames_of,
 };
 
 /// The ffmpeg option that reads a filter graph from the file named after it. A graph for a project with many clips is far longer than a command line allows, so it
@@ -40,6 +40,9 @@ pub struct SoundGraphSpecification {
     pub total_frame_count: u64,
     /// The sound of each track.
     pub strips: Vec<SoundStripToExport>,
+    /// The clip groups and track groups that have sound effects (phase 12, piece 12.3): where their members' sound is added together and given to the effects. Empty: every clip goes
+    /// into the sum of all the sound.
+    pub groups: Vec<SoundGroupToExport>,
     pub sped_up_clip_sound: SpedUpClipSound,
     /// How many frames at the start of the sound are **made and not heard** (phase 12, piece 12.2d): the sound begins that many frames before the place it is wanted from, so that effects that
     /// remember (a reverb, a filter) have been given what they would have heard on the way there, and what comes out of the graph is the sound from where it is wanted. They are part
@@ -107,6 +110,7 @@ mod tests {
             first_timeline_frame: 0,
             frames_of_the_clip_before: 0,
             effects: Vec::new(),
+            sent_to: None,
         })
     }
 
@@ -128,6 +132,7 @@ mod tests {
             }],
             sped_up_clip_sound,
             lead_in_frames: 0,
+            groups: Vec::new(),
         }
     }
 

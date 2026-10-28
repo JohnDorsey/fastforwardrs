@@ -12,7 +12,8 @@
 //! * a clip is made **exactly as long as its place on the timeline**: its sound is cut off if it is longer, and silence follows it if it is shorter;
 //! * the clips and silences of a track are put one after another, where each item begins at **the sample that its frame is at, worked out from the frame and not by
 //!   adding up the lengths of the items before** (see [`sample_at_frame`]), so that a frame rate that is not a whole number of samples to a frame does not drift;
-//! * the insertions of the track are applied, and the tracks are **added** (a plain sum, as the filter graph does it; nothing limits it: the speakers and the encoder do).
+//! * the insertions of the track are applied (one instance for a run of clips, a **bus**), and what a track makes is sent to the sum of all the sound or to a **group** that has sound
+//!   effects, whose members are **added** and given to its effects (a plain sum, as the filter graph does it; nothing limits it: the speakers and the encoder do).
 //!
 //! Nothing here uses ffmpeg, a thread, a device or `unsafe`: it is arithmetic on buffers, so that all of it can be tested exactly. The same graph is called by the preview
 //! (a thread that keeps the speakers' queue full ahead of the clock) and by the export (a loop that runs as fast as it can).
@@ -31,7 +32,7 @@ pub use crate::media::export::SAMPLE_RATE;
 pub use feed::{ClipFeed, ClipFeeds, ClipRequest, SoundInMemory};
 pub use gain::GainCurve;
 pub use graph::SoundGraph;
-pub use insertions::{BlockProcessor, BusRequest, Insertions, NoInsertions};
+pub use insertions::{BlockProcessor, BusRequest, GroupRequest, Insertions, NoInsertions};
 pub use lookahead::{ClipSpawner, LookAheadFeeds, MOST_FEEDS_OPEN, SECONDS_OF_LOOK_AHEAD};
 pub use plugins::{Notes, PluginInsertions, PluginRunner};
 pub use position::{pre_roll_samples_of, sample_at_frame};

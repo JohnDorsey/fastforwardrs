@@ -9,7 +9,7 @@ use super::*;
 use crate::composition::plan_pictures;
 use crate::composition::test_projects::{LONG_VIDEO, SOUND_FILE, media_clip, project_of};
 use crate::project::tracks::Clip;
-use crate::project::{EditError, EffectKind, GroupKind, InstalledPlugin, Member, set_installed_plugins};
+use crate::project::{EffectKind, GroupKind, InstalledPlugin, Member, set_installed_plugins};
 use crate::test_support::{an_installed_sound_plugin, the_installed_plugins_to_myself};
 
 fn plan(project: &Project) -> SoundPlan {
@@ -49,8 +49,10 @@ fn clip_at(project: &Project, track: usize, index: usize) -> crate::project::Cli
 }
 
 #[test]
-fn a_clip_group_and_a_track_group_cannot_have_a_sound_effect_and_a_tag_can_and_it_is_a_copy_in_the_chain_of_each_member()
+fn a_clip_group_and_a_track_group_can_have_a_sound_effect_that_is_not_in_the_chain_of_any_clip_and_a_tag_has_a_copy_in_the_chain_of_each_member()
  {
+    // (Rewritten on purpose in phase 12, piece 12.3: a sound effect was refused on a clip group and a track group, which made G-15 hold by refusal; now it is done to the sum of what the
+    // members make, in a group of the plan: what is locked here is that it is still in the chain of **no clip**, as a tag's is in the chain of each member.)
     let _alone = the_installed_plugins_to_myself();
     let (_, kind) = a_sound_effect();
     let mut project = a_track_of_two_clips_and_another_of_one();
@@ -64,15 +66,16 @@ fn a_clip_group_and_a_track_group_cannot_have_a_sound_effect_and_a_tag_can_and_i
         .unwrap();
 
     for group in [clip_group, track_group] {
-        assert!(
-            matches!(
-                project.add_effect_to_the_group(group, kind),
-                Err(EditError::NotAnEffectOfTheGroup { .. })
-            ),
-            "a group that makes one picture of its members has no sound effect (G-15)"
-        );
+        project
+            .add_effect_to_the_group(group, kind)
+            .expect("a group is given the sum of its members' sound");
     }
-    assert!(clips_of(&plan(&project)).iter().all(|clip| clip.effects.is_empty()));
+    let with_groups = plan(&project);
+    assert!(
+        clips_of(&with_groups).iter().all(|clip| clip.effects.is_empty()),
+        "the effects of a clip group or a track group are not applied to each member"
+    );
+    assert_eq!(with_groups.groups.len(), 2, "they are two groups of the plan");
 
     let tag = project
         .create_group(GroupKind::Tag, &[Member::Clip(first), Member::Clip(second)])

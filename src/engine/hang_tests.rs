@@ -202,7 +202,8 @@ fn the_child_that_gives_the_engine_a_shader_that_does_not_finish() {
         println!("CHILD: no software adapter");
         return;
     };
-    let mut settings = EngineSettings::new(AdapterChoice::SoftwareOnly);
+    // (An adapter of its own: the device that replaces the one the shader hangs must not be made from the instance that the hung work is on.)
+    let mut settings = EngineSettings::new(AdapterChoice::SoftwareOnlyOfItsOwn);
     settings.frame_timeout = THE_CHILD_WAITS_FOR_A_FRAME;
     // The guard's limit on loops is put out of the way: this is the shader that the guard does not help with, which only the watchdog catches.
     settings.most_passes_of_a_loop = u32::MAX;

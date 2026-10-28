@@ -175,6 +175,29 @@ pub fn put_an_effect_on(
     instance
 }
 
+/// Puts an effect of `kind` on the clip group or track group `group`, with `values` for what its values are (a group's effects have no keyframes), and gives the name it has in the
+/// chain of the group.
+pub fn put_an_effect_on_a_group(
+    project: &mut Project,
+    group: crate::project::GroupId,
+    kind: EffectKind,
+    values: &[PropertyValue],
+) -> EffectInstanceId {
+    let instance = project
+        .add_effect_to_the_group(group, kind)
+        .expect("a group of this kind can have the effect");
+    for (slot, value) in values.iter().enumerate() {
+        project
+            .set_effect_value_of_the_group(
+                group,
+                PropertyId::effect_value(kind, instance, u8::try_from(slot).expect("few values")),
+                value,
+            )
+            .expect("the effect was just put on");
+    }
+    instance
+}
+
 /// Puts a keyframe at `timeline_frame` that makes `property` of `target` have `value` there. (The property is animated from
 /// then on, if it was not.)
 pub fn make_a_keyframe(

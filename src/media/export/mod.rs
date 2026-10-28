@@ -12,7 +12,8 @@ mod video_encoder;
 pub(crate) use filter_graph::FILTER_GRAPH_FILE_OPTION;
 pub use filter_graph::{
     AudioGraph, LoudnessToExport, SAMPLE_RATE, SoundBusToExport, SoundClipToExport, SoundGraphSpecification,
-    SoundItemToExport, SoundStripToExport, build_audio_graph, clip_feed_filters, pre_roll_frames_of,
+    SoundGroupToExport, SoundItemToExport, SoundStripToExport, build_audio_graph, clip_feed_filters,
+    pre_roll_frames_of,
 };
 pub use progress::frames_written_in_progress_line;
 pub use sound_plan::{sound_graph_specification, sources_of_sound};

@@ -111,6 +111,7 @@ fn specification_of_a_second_with(effects: Vec<LayerEffect>) -> SoundGraphSpecif
                 first_timeline_frame: 0,
                 frames_of_the_clip_before: 0,
                 effects,
+                sent_to: None,
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -118,6 +119,7 @@ fn specification_of_a_second_with(effects: Vec<LayerEffect>) -> SoundGraphSpecif
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
+        groups: Vec::new(),
     }
 }
 

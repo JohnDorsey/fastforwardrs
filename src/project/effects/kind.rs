@@ -262,17 +262,11 @@ impl EffectKind {
         self != Self::TEXT && !self.is_a_transition()
     }
 
-    /// Whether a group of kind `kind` can have the effect: a tag, which has it applied to each member, can have any; and a clip group or a track
-    /// group, which have it done to the picture that their members make together (phase 5: the engine makes that picture), any picture effect. (A sound effect is not for a picture
-    /// of a group.)
-    pub fn applies_to_a_group_of_kind(self, kind: GroupKind) -> bool {
-        if self == Self::TEXT {
-            return false;
-        }
-        match kind {
-            GroupKind::Tag => true,
-            GroupKind::ClipGroup | GroupKind::TrackGroup => self.0.domain == EffectDomain::Picture,
-        }
+    /// Whether a group of kind `kind` can have the effect: a tag, which has it applied to each member, can have any; and a clip group or a track group, which have it done to
+    /// what their members make together, any: a picture effect to the picture (phase 5: the engine makes that picture), **and a sound effect to the sum of the sound of the
+    /// members** (phase 12, piece 12.3: `composition::sound` makes a node of the group, and the sound engine sums what its members make and gives it to the effects).
+    pub fn applies_to_a_group_of_kind(self, _kind: GroupKind) -> bool {
+        self != Self::TEXT
     }
 
     /// What the effect asks to be done to a picture when its values are `values` (one for each of its values, in order), if the program has the effect. (`None`

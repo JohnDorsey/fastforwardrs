@@ -479,9 +479,10 @@ fn what_a_kind_can_be_put_on_follows_its_domain() {
         "a blur is of the picture that the members of the group make together"
     );
     assert!(blur.applies_to_a_group_of_kind(GroupKind::TrackGroup));
+    // (Rewritten on purpose in phase 12, piece 12.3: a sound effect is done to the sum of the sound of the members of a group.)
     assert!(
-        !sound.applies_to_a_group_of_kind(GroupKind::ClipGroup),
-        "a sound effect is not for a picture of a group"
+        sound.applies_to_a_group_of_kind(GroupKind::ClipGroup),
+        "a sound effect is for the sum of the sound of the members of a group"
     );
 }
 
@@ -576,9 +577,9 @@ fn a_sound_effect_is_for_sounds_and_for_no_picture_and_its_values_are_the_proper
         assert!(!property.applies_to_a_clip_of_kind(seen), "{seen:?}");
     }
     assert!(property.applies_to_a_track());
-    // (An effect that changes each pixel by itself is of pictures: what it changes is not in a sound, so a group of pictures does not have it.)
-    assert!(!sound.applies_to_a_group_of_kind(GroupKind::ClipGroup));
-    assert!(!sound.applies_to_a_group_of_kind(GroupKind::TrackGroup));
+    // (Rewritten on purpose in phase 12, piece 12.3: a sound effect is done to the sum of the sound that the members of a group make, so a group of any kind can have one.)
+    assert!(sound.applies_to_a_group_of_kind(GroupKind::ClipGroup));
+    assert!(sound.applies_to_a_group_of_kind(GroupKind::TrackGroup));
     assert!(sound.applies_to_a_group_of_kind(GroupKind::Tag));
 }
 

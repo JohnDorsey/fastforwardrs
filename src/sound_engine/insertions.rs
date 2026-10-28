@@ -28,17 +28,34 @@ pub trait BlockProcessor: Send {
     fn about_to_be_given_sound_from_before_the_clip(&mut self, _samples: usize) {}
 }
 
-/// What gives the graph the effects of a clip and of a track. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a
-/// track; **a track's are applied to the sound of the track after its clips are put together** and before it is added to the others.
+/// What gives the graph the effects of a clip, of a track and of a group. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a
+/// track; **a track's are applied by a bus, to the sound of the clips of a run put together** (see [`Self::for_bus`]); **a group's are applied to the sum of what its members make**
+/// (see [`Self::for_group`]).
 pub trait Insertions {
     fn for_clip(&mut self, request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>>;
-    fn for_strip(&mut self, strip: usize) -> Vec<Box<dyn BlockProcessor>>;
 
     /// What gives the graph the effects of **a bus**: one instance of the effects of a track, which hears the clips of a run one after another (phase 12, piece 12.2). It is
     /// asked for when the first of the clips is first heard, and let go of when the last has ended. No effects, unless it says otherwise.
     fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
         Vec::new()
     }
+
+    /// What gives the graph the effects of **a group** (phase 12, piece 12.3): one instance of the effects of a clip group or a track group, which hears what its members make, added
+    /// together. It is asked for when the first of them is first heard, and let go of when the last has ended and the effects have rung on. No effects, unless it says otherwise.
+    fn for_group(&mut self, _request: &GroupRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        Vec::new()
+    }
+}
+
+/// Which group of the specification the effects are asked for.
+#[derive(Clone, Copy)]
+pub struct GroupRequest<'specification> {
+    /// Which group it is (the groups are numbered from 0, in the order of the specification).
+    pub group: usize,
+    /// The first clip that the group hears, which is where its effects begin.
+    pub first_clip: &'specification SoundClipToExport,
+    /// The effects of the group, one after another.
+    pub effects: &'specification [LayerEffect],
 }
 
 /// Which bus of the specification the effects are asked for.
@@ -59,10 +76,6 @@ pub struct NoInsertions;
 
 impl Insertions for NoInsertions {
     fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
-        Vec::new()
-    }
-
-    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
         Vec::new()
     }
 }

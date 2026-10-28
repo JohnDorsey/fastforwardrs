@@ -16,6 +16,8 @@ use crate::media::export::{
 use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 use crate::test_support::check_every_case_at_once;
 
+mod groups;
+
 fn thirty() -> FrameRate {
     FrameRate::new(30, 1).unwrap()
 }
@@ -31,6 +33,7 @@ fn clip(frames: u64, loudness: LoudnessToExport) -> SoundItemToExport {
         first_timeline_frame: 0,
         frames_of_the_clip_before: 0,
         effects: Vec::new(),
+        sent_to: None,
     })
 }
 
@@ -57,6 +60,7 @@ fn specification(
             .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
+        groups: Vec::new(),
     }
 }
 
@@ -478,9 +482,11 @@ impl BlockProcessor for Counts {
     }
 }
 
+/// The same effects, made again, for every clip, every bus and every group.
 struct FixedInsertions {
     for_clips: fn() -> Vec<Box<dyn BlockProcessor>>,
-    for_strips: fn(usize) -> Vec<Box<dyn BlockProcessor>>,
+    for_buses: fn() -> Vec<Box<dyn BlockProcessor>>,
+    for_groups: fn() -> Vec<Box<dyn BlockProcessor>>,
 }
 
 impl Insertions for FixedInsertions {
@@ -488,8 +494,12 @@ impl Insertions for FixedInsertions {
         (self.for_clips)()
     }
 
-    fn for_strip(&mut self, strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-        (self.for_strips)(strip)
+    fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        (self.for_buses)()
+    }
+
+    fn for_group(&mut self, _request: &GroupRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        (self.for_groups)()
     }
 }
 
@@ -513,7 +523,8 @@ fn the_effects_of_a_clip_are_applied_before_its_volume_and_the_effects_of_a_trac
     // A clip's effect adds 1 and then the volume halves: (x + 1) / 2, not x / 2 + 1.
     let (left, _) = make(FixedInsertions {
         for_clips: || vec![Box::new(Adds(1.0))],
-        for_strips: |_| Vec::new(),
+        for_buses: Vec::new,
+        for_groups: Vec::new,
     })
     .render_to_the_end(512);
     let (plain, _) = graph_of(
@@ -541,11 +552,23 @@ fn the_effects_of_a_clip_are_applied_before_its_volume_and_the_effects_of_a_trac
     );
     assert_ne!(left[first_strip_clip], plain[first_strip_clip]);
 
-    // A track's effect adds 100 to the sound of its strip, silence included, once, before the strips are added: two strips make 200.
-    let (left, _) = make(FixedInsertions {
-        for_clips: Vec::new,
-        for_strips: |_| vec![Box::new(Adds(100.0))],
-    })
+    // The effects of a track are one instance for the items it hears, which hears the silence among them too: this one adds 100, once, before the strips are added: two strips make 200.
+    let (left, _) = SoundGraph::new(
+        specification_with_buses(
+            thirty(),
+            2,
+            vec![
+                (vec![silence(1), clip(1, LoudnessToExport::Constant(0.5))], vec![(0, 1)]),
+                (vec![clip(2, LoudnessToExport::UNCHANGED)], vec![(0, 0)]),
+            ],
+        ),
+        Box::new(ramps.clone()),
+        Box::new(FixedInsertions {
+            for_clips: Vec::new,
+            for_buses: || vec![Box::new(Adds(100.0))],
+            for_groups: Vec::new,
+        }),
+    )
     .render_to_the_end(512);
     assert_eq!(
         left[0],
@@ -558,13 +581,17 @@ fn the_effects_of_a_clip_are_applied_before_its_volume_and_the_effects_of_a_trac
     );
 }
 
-/// One strip of a clip of `frames` frames, with the volume and the mutes of the track.
+/// One strip of a clip of `frames` frames, heard by a bus (the effects of the track), with the volume and the mutes of the track.
 fn strip_with_a_volume_and_mutes(
     frames: u64,
     loudness: LoudnessToExport,
     muted: Vec<(u64, u64)>,
 ) -> SoundGraphSpecification {
-    let mut specification = specification(thirty(), frames, vec![vec![clip(frames, LoudnessToExport::UNCHANGED)]]);
+    let mut specification = specification_with_buses(
+        thirty(),
+        frames,
+        vec![(vec![clip(frames, LoudnessToExport::UNCHANGED)], vec![(0, 0)])],
+    );
     specification.strips[0].loudness = loudness;
     specification.strips[0].muted = muted;
     specification
@@ -578,7 +605,8 @@ fn the_volume_of_a_track_is_done_after_its_effects() {
         Box::new(ramps.clone()),
         Box::new(FixedInsertions {
             for_clips: Vec::new,
-            for_strips: |_| vec![Box::new(Adds(100.0))],
+            for_buses: || vec![Box::new(Adds(100.0))],
+            for_groups: Vec::new,
         }),
     );
 
@@ -607,7 +635,8 @@ fn a_volume_of_a_track_that_changes_is_counted_from_the_start_of_the_sound_in_wh
             Box::new(ramps.clone()),
             Box::new(FixedInsertions {
                 for_clips: Vec::new,
-                for_strips: |_| Vec::new(),
+                for_buses: Vec::new,
+                for_groups: Vec::new,
             }),
         )
         .render_to_the_end(block);
@@ -629,7 +658,8 @@ fn a_track_that_is_muted_is_silent_after_its_effects_and_what_they_remember_goes
             Box::new(ramps.clone()),
             Box::new(FixedInsertions {
                 for_clips: Vec::new,
-                for_strips: |_| vec![Box::new(Counts::default())],
+                for_buses: || vec![Box::new(Counts::default())],
+                for_groups: Vec::new,
             }),
         )
         .render_to_the_end(block)
@@ -664,7 +694,8 @@ fn an_effect_is_given_every_sample_of_its_clip_once_and_in_order_whatever_the_bl
             Box::new(ramps.clone()),
             Box::new(FixedInsertions {
                 for_clips: || vec![Box::<Counts>::default()],
-                for_strips: |_| Vec::new(),
+                for_buses: Vec::new,
+                for_groups: Vec::new,
             }),
         )
     };
@@ -1104,10 +1135,6 @@ fn a_graph_with_delays(latencies: &'static [usize], given: &Arc<AtomicUsize>, ra
                 .map(|latency| Box::new(Delays::new(*latency, &self.given)) as Box<dyn BlockProcessor>)
                 .collect()
         }
-
-        fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-            Vec::new()
-        }
     }
     SoundGraph::new(
         specification(
@@ -1187,10 +1214,6 @@ fn an_effect_that_delays_the_sound_and_does_not_say_so_is_heard_late_by_what_it_
     impl Insertions for Lying {
         fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
             vec![Box::new(DelaysAndDoesNotSay(Delays::new(10, &self.0)))]
-        }
-
-        fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-            Vec::new()
         }
     }
 
@@ -1281,10 +1304,6 @@ impl Insertions for ListeningInsertions {
             calls: Arc::clone(&self.calls),
         })]
     }
-
-    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-        Vec::new()
-    }
 }
 
 /// A clip of `frames` frames at 30 a second that begins `first_source_frame` frames into its file, with an effect of a plugin that asks for `pre_roll_samples` of sound from before.
@@ -1317,6 +1336,7 @@ fn clip_that_has_sound_from_before(
             tables: Vec::new(),
             tail_length: Default::default(),
         }],
+        sent_to: None,
     })
 }
 
@@ -1457,6 +1477,7 @@ fn specification_with_buses(
             .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
+        groups: Vec::new(),
     }
 }
 
@@ -1538,10 +1559,6 @@ impl BusInsertions {
 impl Insertions for BusInsertions {
     fn for_clip(&mut self, _request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
         if self.for_clips { self.counted() } else { Vec::new() }
-    }
-
-    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-        Vec::new()
     }
 
     fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
@@ -1725,10 +1742,6 @@ fn an_effect_of_a_bus_that_has_a_latency_is_made_up_for_across_the_clips_it_hear
             Vec::new()
         }
 
-        fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-            Vec::new()
-        }
-
         fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
             vec![Box::new(Delays::new(self.latency, &self.given))]
         }
@@ -1870,10 +1883,6 @@ impl Insertions for RingingInsertions {
         } else {
             Vec::new()
         }
-    }
-
-    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-        Vec::new()
     }
 
     fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {

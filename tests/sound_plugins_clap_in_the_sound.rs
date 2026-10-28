@@ -114,6 +114,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 first_timeline_frame: 0,
                 frames_of_the_clip_before: 0,
                 effects,
+                sent_to: None,
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -121,6 +122,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
+        groups: Vec::new(),
     }
 }
 
@@ -890,4 +892,99 @@ fn sound_that_is_wanted_from_a_frame_after_the_clip_has_the_ring_of_the_clip_thr
     );
     assert_eq!(previewed, exported, "the preview makes what the export makes");
     assert!(notes.is_empty(), "{notes:?}");
+}
+
+// --- Phase 12.3: the effects of a group are done to the sum of what its members make ---
+
+/// Two strips of a second of noise each, from two different files (one clip on each), and the echo that rings on for 200 milliseconds, which leaves nothing of it out.
+fn two_strips_of_noise_and_a_long_echo() -> (SoundGraphSpecification, LayerEffect) {
+    let mut specification = specification_of_frames_with(45, Vec::new());
+    let mut other = specification.strips[0].clone();
+    let SoundItemToExport::Clip(clip) = &mut other.items[0] else {
+        unreachable!("the strip is one clip");
+    };
+    clip.source_input = 1;
+    specification.strips.push(other);
+    let echo = LayerEffect {
+        tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        ..an_echo()
+    };
+    (specification, echo)
+}
+
+#[test]
+fn the_echo_of_a_group_hears_the_sum_of_its_members_so_it_sounds_as_an_echo_for_each_of_them_does_because_an_echo_is_linear()
+ {
+    use fastforwardrs::media::export::SoundGroupToExport;
+
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+    let (two_strips, echo) = two_strips_of_noise_and_a_long_echo();
+
+    // One echo for the group that both clips are sent to.
+    let mut grouped = two_strips.clone();
+    for strip in &mut grouped.strips {
+        let SoundItemToExport::Clip(clip) = &mut strip.items[0] else {
+            unreachable!("one clip")
+        };
+        clip.sent_to = Some(0);
+    }
+    grouped.groups = vec![SoundGroupToExport {
+        effects: vec![echo.clone()],
+        parent: None,
+    }];
+    // The control: an echo for each clip, and no group.
+    let mut one_for_each = two_strips;
+    for strip in &mut one_for_each.strips {
+        let SoundItemToExport::Clip(clip) = &mut strip.items[0] else {
+            unreachable!("one clip")
+        };
+        clip.effects = vec![echo.clone()];
+    }
+    let (plain, _) = by_the_export(
+        &toolchain,
+        &{
+            let mut plain = one_for_each.clone();
+            for strip in &mut plain.strips {
+                let SoundItemToExport::Clip(clip) = &mut strip.items[0] else {
+                    unreachable!("one clip")
+                };
+                clip.effects.clear();
+            }
+            plain
+        },
+        &sources,
+        None,
+    );
+
+    let (by_the_group, notes) = by_the_export(&toolchain, &grouped, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &grouped, &sources, host());
+    let (by_the_clips, _) = by_the_export(&toolchain, &one_for_each, &sources, host());
+
+    assert_eq!(by_the_group.len(), by_the_clips.len());
+    let worst = by_the_group
+        .iter()
+        .zip(&by_the_clips)
+        .map(|(one, other)| (one - other).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst < 1e-4,
+        "the same sound for an effect that is linear: the worst difference is {worst}"
+    );
+    assert_eq!(previewed, by_the_group, "the preview makes what the export makes");
+    assert!(notes.is_empty(), "{notes:?}");
+    // The echo is there at all (a sound that was not given to the effects is the plain sum), and it rings on after the clips, which end at frame 45 of 45... so look inside them.
+    let inside = 20 * SAMPLES_IN_A_FRAME;
+    let difference_from_plain = by_the_group[inside..inside + 2000]
+        .iter()
+        .zip(&plain[inside..inside + 2000])
+        .map(|(echoed, plain)| (echoed - plain).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        difference_from_plain > 0.05,
+        "the echo was done: {difference_from_plain}"
+    );
 }

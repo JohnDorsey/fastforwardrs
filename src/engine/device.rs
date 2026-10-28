@@ -30,6 +30,11 @@ pub enum AdapterChoice {
     /// For the tests of what happens when the engine cannot start: there is no adapter.
     #[cfg(test)]
     NoAdapterAtAll,
+    /// A software adapter of an instance of the graphics library **of its own for every device that is made from it** (what [`Self::SoftwareOnly`] was before the tests shared one):
+    /// for the test of a shader that never finishes, whose work on lavapipe goes on until the end of the process and holds up whatever else is made from its instance, so that a
+    /// device that replaces the one it was on must come from another.
+    #[cfg(test)]
+    SoftwareOnlyOfItsOwn,
 }
 
 impl std::fmt::Debug for AdapterChoice {
@@ -40,6 +45,8 @@ impl std::fmt::Debug for AdapterChoice {
             Self::BestAvailable => write!(formatter, "the best graphics adapter the computer has"),
             #[cfg(test)]
             Self::NoAdapterAtAll => write!(formatter, "no adapter at all"),
+            #[cfg(test)]
+            Self::SoftwareOnlyOfItsOwn => write!(formatter, "a software adapter of its own"),
         }
     }
 }
@@ -85,6 +92,8 @@ impl EngineDevice {
             AdapterChoice::BestAvailable => best_adapter().ok_or(DeviceError::NoGraphicsAdapter)?,
             #[cfg(test)]
             AdapterChoice::NoAdapterAtAll => return Err(DeviceError::NoSoftwareAdapter),
+            #[cfg(test)]
+            AdapterChoice::SoftwareOnlyOfItsOwn => software_adapter().ok_or(DeviceError::NoSoftwareAdapter)?,
         };
         let adapter_information = adapter.get_info();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -168,12 +177,26 @@ pub(super) fn says_that_any_adapter_will_do(value: Option<&std::ffi::OsStr>) -> 
 
 /// The adapter that "a software adapter" is asked for: a software one, or, where the computer has none and its environment says that the tests may use any, the best
 /// adapter there is.
+///
+/// **On Linux, one adapter, and so one instance of the graphics library, for all the tests of a program**, made when the first of them asks. A test that made an instance of its own
+/// (and let go of it when it ended) while others were drawing made lavapipe, the software adapter of Linux, crash with a segmentation fault one run in four (measured on the tests of
+/// the engine's worker: 5 runs of 20 in WSL with an instance for each device and none of 42 with one for all; and four of the five runs of the CI on Ubuntu that followed an update of
+/// the image of the runner). **Not elsewhere: on Windows it is the other way round** (WARP, with one adapter for all the tests, crashed with an access violation in 11 of 12 runs of the
+/// tests of the engine, and in none of 12 with one for each device), so each test there has an adapter of its own, as every test did before.
 fn adapter_for_the_tests() -> Option<wgpu::Adapter> {
-    software_adapter().or_else(|| {
-        says_that_any_adapter_will_do(std::env::var_os(TESTS_MAY_USE_ANY_ADAPTER_VARIABLE).as_deref())
-            .then(best_adapter)
-            .flatten()
-    })
+    let find = || {
+        software_adapter().or_else(|| {
+            says_that_any_adapter_will_do(std::env::var_os(TESTS_MAY_USE_ANY_ADAPTER_VARIABLE).as_deref())
+                .then(best_adapter)
+                .flatten()
+        })
+    };
+    if cfg!(target_os = "linux") {
+        static THE_ADAPTER: std::sync::OnceLock<Option<wgpu::Adapter>> = std::sync::OnceLock::new();
+        THE_ADAPTER.get_or_init(find).clone()
+    } else {
+        find()
+    }
 }
 
 /// The software adapter, if there is one: of device type `Cpu`, and of the backend that is liked best if several are (Vulkan before Direct3D

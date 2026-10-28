@@ -7,15 +7,14 @@
 //! keyframes of them) and the clip it is on, and gives back what changes the sound of the clip a block at a time, or nothing, which is **the sound passing through unchanged**
 //! (the plugin is not installed, nobody has said that it may be run, it could not be made, it is not the plugin that was scanned...). The editor's runner is `plugin_host`.
 //!
-//! **A track's effects are applied to the sound of each of its clips**: the plan puts the effects of the track in the chain of every clip of it where its badge is (see
-//! `composition::sound`), so what is applied after the clips are put together in the design (G9) is applied to each clip before it is. For an effect with no memory that is the
-//! same sound; for one that has (a filter, a reverb) a clip ends where the effect's memory of it ends, and the next clip begins with the effect as it was made. (A strip that
-//! has its own effects, [`Insertions::for_strip`], is not used yet: a track that is a group of tracks is where it will be.)
+//! **A track's effects are done by a bus** (phase 12, piece 12.2): one instance of them hears the clips of a run one after another, so its memory goes on from one clip to the next
+//! and a reverb rings on after the last of them ([`Insertions::for_bus`]); a track with one copy of its effects for each clip has them in the chain of each clip. **A group's effects are
+//! done to the sum of what its members make** ([`Insertions::for_group`], piece 12.3).
 
 use std::sync::{Arc, Mutex};
 
 use super::feed::ClipRequest;
-use super::insertions::{BlockProcessor, BusRequest, Insertions};
+use super::insertions::{BlockProcessor, BusRequest, GroupRequest, Insertions};
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::project::FrameRate;
@@ -86,11 +85,24 @@ impl Insertions for PluginInsertions {
             .collect()
     }
 
-    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
-        Vec::new()
+    fn for_bus(&mut self, request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        request
+            .effects
+            .iter()
+            .filter(|effect| effect.kind.installed_plugin().is_some())
+            .filter_map(|effect| {
+                self.runner.processor_for(
+                    effect,
+                    request.first_clip,
+                    self.frame_rate,
+                    &self.notes,
+                    self.is_for_the_preview,
+                )
+            })
+            .collect()
     }
 
-    fn for_bus(&mut self, request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+    fn for_group(&mut self, request: &GroupRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
         request
             .effects
             .iter()

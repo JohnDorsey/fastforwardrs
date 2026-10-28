@@ -109,6 +109,7 @@ fn the_sound_comes_to(window: &Window, kind: EffectKind, notes: &Notes) {
         first_timeline_frame: 0,
         frames_of_the_clip_before: 0,
         effects: vec![effect.clone()],
+        sent_to: None,
     };
     let _ =
         window

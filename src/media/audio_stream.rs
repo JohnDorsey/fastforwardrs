@@ -359,6 +359,7 @@ mod tests {
                         first_timeline_frame: 0,
                         frames_of_the_clip_before: 0,
                         effects: Vec::new(),
+                        sent_to: None,
                     })],
                     buses: Vec::new(),
                     loudness: Default::default(),
@@ -366,6 +367,7 @@ mod tests {
                 }],
                 sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
                 lead_in_frames: 0,
+                groups: Vec::new(),
             },
             format: AudioFormat {
                 sample_rate: 44_100,

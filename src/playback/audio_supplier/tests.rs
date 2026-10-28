@@ -424,6 +424,7 @@ fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
             first_timeline_frame: 320, // (where the playhead was when the sound was asked for: from there on the clip is heard)
             frames_of_the_clip_before: 20, // (the playhead is 20 frames into the clip: they were not heard, and are the most sound from before that a plugin that remembers is given)
             effects: Vec::new(),
+            sent_to: None,
         })]
     );
     assert_eq!(request.sound.sped_up_clip_sound, SpedUpClipSound::Mute);
