@@ -19,6 +19,7 @@ use crate::abi::{self, Handle, RawAtomSequenceHeader, RawDescriptor, RawStateInt
 use crate::description::{PluginDescription, PortDirection, PortKind};
 use crate::features::{FeatureSet, UridTable};
 use crate::library::{Library, Loaded};
+use crate::notes::{NoteEvent, sequence_of};
 use crate::worker::{Worker, WorkerShared};
 
 /// How many frames of silence are run to learn a plugin's latency when it is made.
@@ -50,6 +51,8 @@ pub enum RunError {
     BlockTooBig { frames: usize, most: usize },
     #[error("a buffer has {has} frames and the block is {block}")]
     BufferTooShort { has: usize, block: usize },
+    #[error("a note is at the frame {time} and the block has {frames} frames")]
+    NoteOutsideTheBlock { time: u32, frames: usize },
 }
 
 /// The buffer of an atom port: words, so that it is aligned to 8 bytes as atoms must be.
@@ -75,6 +78,8 @@ pub struct Instance {
     silent: Box<[f32]>,
     sink: Box<[f32]>,
     atoms: Vec<AtomBuffer>,
+    /// Which of `atoms` is the first input that says it takes MIDI events (where notes are written), if any.
+    midi_in: Option<usize>,
     latency_port: Option<u32>,
     latency: u32,
     sample_rate: f64,
@@ -166,6 +171,7 @@ impl Instance {
         let mut audio_inputs = Vec::new();
         let mut audio_outputs = Vec::new();
         let mut atoms = Vec::new();
+        let mut midi_in = None;
         let mut latency_port = None;
         for port in &description.ports {
             match port.kind {
@@ -186,6 +192,14 @@ impl Instance {
                         .as_ref()
                         .and_then(|atom| atom.minimum_size)
                         .map_or(ATOM_BUFFER_BYTES, |bytes| (bytes as usize).max(ATOM_BUFFER_BYTES));
+                    let takes_midi = port.direction == PortDirection::Input
+                        && port
+                            .atom
+                            .as_ref()
+                            .is_some_and(|atom| atom.supports.iter().any(|kind| kind == abi::MIDI_EVENT));
+                    if takes_midi && midi_in.is_none() {
+                        midi_in = Some(atoms.len());
+                    }
                     atoms.push(AtomBuffer {
                         port: port.index,
                         direction: port.direction,
@@ -222,6 +236,7 @@ impl Instance {
             silent: vec![0.0; most_frames].into_boxed_slice(),
             sink: vec![0.0; most_frames].into_boxed_slice(),
             atoms,
+            midi_in,
             latency_port,
             latency: 0,
             sample_rate,
@@ -262,6 +277,11 @@ impl Instance {
     /// The most frames of a block that this instance was made for.
     pub fn most_frames(&self) -> usize {
         self.most_frames
+    }
+
+    /// Whether the plugin has an input that takes MIDI events: the one that [`Self::run_with_notes`] writes notes to.
+    pub fn takes_midi(&self) -> bool {
+        self.midi_in.is_some()
     }
 
     /// How many audio inputs and audio outputs the plugin has (CV ports are not counted).
@@ -377,6 +397,22 @@ impl Instance {
         outputs: &mut [&mut [f32]],
         frames: usize,
     ) -> Result<(), RunError> {
+        self.run_with_notes(inputs, outputs, frames, &[])
+    }
+
+    /// [`Self::run`] with notes: they are written, in order of time (each at a frame of the block), to the first atom input that takes MIDI events; a plugin that has none is given none.
+    /// **The events that do not fit in the port's buffer are left out.**
+    pub fn run_with_notes(
+        &mut self,
+        inputs: &mut [&mut [f32]],
+        outputs: &mut [&mut [f32]],
+        frames: usize,
+        notes: &[NoteEvent],
+    ) -> Result<(), RunError> {
+        debug_assert!(
+            notes.windows(2).all(|pair| pair[0].time <= pair[1].time),
+            "notes are in order of time"
+        );
         if frames > self.most_frames {
             return Err(RunError::BlockTooBig {
                 frames,
@@ -395,8 +431,15 @@ impl Instance {
                 });
             }
         }
+        if let Some(note) = notes.iter().find(|note| note.time as usize >= frames) {
+            return Err(RunError::NoteOutsideTheBlock {
+                time: note.time,
+                frames,
+            });
+        }
         self.activate();
         self.get_the_atom_buffers_ready();
+        self.write_the_notes(notes);
         self.give_the_plugin_what_its_work_answered();
         for (place, port) in self.audio_inputs.clone().into_iter().enumerate() {
             let pointer: *mut c_void = match inputs.get_mut(place) {
@@ -430,6 +473,24 @@ impl Instance {
             };
         }
         Ok(())
+    }
+
+    /// Writes `notes` into the sequence of the plugin's MIDI input (which `get_the_atom_buffers_ready` has just left empty).
+    fn write_the_notes(&mut self, notes: &[NoteEvent]) {
+        let (Some(place), false) = (self.midi_in, notes.is_empty()) else {
+            return;
+        };
+        let bytes = sequence_of(
+            notes,
+            self.table.map(abi::ATOM_SEQUENCE),
+            self.table.map(abi::MIDI_EVENT),
+            self.atoms[place].words.len() * 8,
+        );
+        for (word, chunk) in self.atoms[place].words.iter_mut().zip(bytes.chunks(8)) {
+            let mut eight = [0_u8; 8];
+            eight[..chunk.len()].copy_from_slice(chunk);
+            *word = u64::from_ne_bytes(eight);
+        }
     }
 
     /// An atom input holds an empty sequence, and an atom output has all its room, as the standard says the host leaves them before each `run`.

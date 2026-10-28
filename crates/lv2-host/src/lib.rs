@@ -24,6 +24,7 @@ pub mod description;
 mod features;
 mod instance;
 mod library;
+mod notes;
 mod scan;
 mod state;
 mod ui;
@@ -37,12 +38,15 @@ pub use description::{
 
 pub use instance::{Instance, InstantiateError, RunError};
 pub use library::{Library, OpenError};
+pub use notes::{NoteEvent, NoteEventKind};
 pub use scan::{BundleScan, PROBE_BLOCK_FRAMES, PROBE_SAMPLE_RATE, ScannedPlugin, scan_bundle};
 pub use state::StateError;
 pub use ui::{DEFAULT_WINDOW_SIZE, UiError, UiEvent, UiWindow};
 
 #[cfg(test)]
 mod description_tests;
+#[cfg(test)]
+mod note_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

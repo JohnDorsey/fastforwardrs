@@ -43,7 +43,7 @@ fn a_bundle_is_scanned_by_the_scan_program_and_each_of_its_plugins_says_whether_
 
     assert!(!report.from_cache);
     let scan = scanned(report.outcome);
-    assert_eq!(scan.plugins.len(), 9);
+    assert_eq!(scan.plugins.len(), 10);
     assert_eq!(scan.problems, Vec::<String>::new());
     let of = |uri: &str| {
         scan.plugins
@@ -163,11 +163,15 @@ fn the_plugins_of_a_bundle_that_work_are_effects_and_the_others_say_why_not() {
     expected.sort();
     assert_eq!(keys, expected);
     let reasons: Vec<&str> = found.not_used.iter().map(|not_used| not_used.reason.as_str()).collect();
-    assert_eq!(reasons.len(), 2, "{reasons:?}");
+    assert_eq!(reasons.len(), 3, "{reasons:?}");
     assert!(reasons.iter().any(|reason| reason.contains("log#log")), "{reasons:?}");
     assert!(
         reasons.iter().any(|reason| reason.contains("gave nothing")),
         "{reasons:?}"
+    );
+    assert!(
+        reasons.iter().any(|reason| reason.contains("no audio input")),
+        "the instrument is not an effect yet: {reasons:?}"
     );
 }
 

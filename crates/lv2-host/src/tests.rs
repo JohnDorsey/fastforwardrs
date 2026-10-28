@@ -20,14 +20,14 @@ const RATE: f64 = 48_000.0;
 const MOST: u32 = 512;
 
 /// The bundle of the test plugins, in a folder of its own, with what it says; the folder is kept for as long as the first is.
-struct Bundle {
+pub(crate) struct Bundle {
     _folder: TempDir,
     folder: PathBuf,
     plugins: Vec<PluginDescription>,
     library: Library,
 }
 
-fn the_bundle() -> Bundle {
+pub(crate) fn the_bundle() -> Bundle {
     let folder = tempfile::tempdir().unwrap();
     let bundle = lv2_test_plugins::write_bundle(folder.path());
     let described = describe_bundle(&bundle).expect("the bundle is described");
@@ -42,19 +42,19 @@ fn the_bundle() -> Bundle {
 }
 
 impl Bundle {
-    fn plugin(&self, uri: &str) -> &PluginDescription {
+    pub(crate) fn plugin(&self, uri: &str) -> &PluginDescription {
         self.plugins
             .iter()
             .find(|plugin| plugin.uri == uri)
             .unwrap_or_else(|| panic!("no plugin {uri}"))
     }
 
-    fn make(&self, uri: &str) -> Instance {
+    pub(crate) fn make(&self, uri: &str) -> Instance {
         Instance::new(&self.library, self.plugin(uri), RATE, MOST)
             .unwrap_or_else(|error| panic!("{uri} was not made: {error}"))
     }
 
-    fn port(&self, uri: &str, symbol: &str) -> u32 {
+    pub(crate) fn port(&self, uri: &str, symbol: &str) -> u32 {
         self.plugin(uri)
             .ports
             .iter()
@@ -87,7 +87,18 @@ fn the_test_bundle_is_described_with_all_its_plugins_and_its_library_has_them() 
 
     let mut uris: Vec<&str> = bundle.plugins.iter().map(|plugin| plugin.uri.as_str()).collect();
     uris.sort_unstable();
-    let mut expected = vec![GAIN, CONTROLS, LATENCY, ATOMS, OPTIONS, WORKER, NEEDS_LOG, STATE, FAILS];
+    let mut expected = vec![
+        GAIN,
+        CONTROLS,
+        LATENCY,
+        ATOMS,
+        OPTIONS,
+        WORKER,
+        NEEDS_LOG,
+        STATE,
+        FAILS,
+        lv2_test_plugins::INSTRUMENT,
+    ];
     expected.sort_unstable();
     assert_eq!(uris, expected);
     for plugin in &bundle.plugins {
@@ -576,14 +587,23 @@ fn the_scan_of_the_test_bundle_says_which_plugins_work_and_why_the_others_do_not
     let scan = crate::scan_bundle(&bundle, &mut |step| steps.push(step.to_owned())).expect("the bundle is scanned");
 
     assert_eq!(scan.problems, Vec::<String>::new());
-    assert_eq!(scan.plugins.len(), 9);
+    assert_eq!(scan.plugins.len(), 10);
     let of = |uri: &str| {
         scan.plugins
             .iter()
             .find(|plugin| plugin.description.uri == uri)
             .unwrap()
     };
-    for working in [GAIN, CONTROLS, LATENCY, ATOMS, OPTIONS, WORKER, STATE] {
+    for working in [
+        GAIN,
+        CONTROLS,
+        LATENCY,
+        ATOMS,
+        OPTIONS,
+        WORKER,
+        STATE,
+        lv2_test_plugins::INSTRUMENT,
+    ] {
         assert_eq!(of(working).problem, None, "{working}");
     }
     assert!(
@@ -606,7 +626,7 @@ fn the_scan_of_the_test_bundle_says_which_plugins_work_and_why_the_others_do_not
     assert_eq!(of(GAIN).latency, 0);
     assert!(of(STATE).has_state && !of(GAIN).has_state);
 
-    // The steps come before what they say is done, and the binary is loaded once for all nine.
+    // The steps come before what they say is done, and the binary is loaded once for all ten.
     assert!(steps[0].starts_with("reading the Turtle"), "{steps:?}");
     assert_eq!(
         steps.iter().filter(|step| step.starts_with("loading ")).count(),
@@ -633,7 +653,7 @@ fn a_bundle_whose_binary_is_not_there_has_every_plugin_with_the_reason_and_a_man
 
     let scan = crate::scan_bundle(&bundle, &mut |_| {}).unwrap();
 
-    assert_eq!(scan.plugins.len(), 9);
+    assert_eq!(scan.plugins.len(), 10);
     assert!(
         scan.plugins.iter().all(|plugin| plugin
             .problem

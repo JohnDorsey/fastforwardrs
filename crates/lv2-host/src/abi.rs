@@ -168,6 +168,7 @@ pub(crate) const ATOM_FLOAT: &str = "http://lv2plug.in/ns/ext/atom#Float";
 pub(crate) const ATOM_INT: &str = "http://lv2plug.in/ns/ext/atom#Int";
 pub(crate) const ATOM_SEQUENCE: &str = "http://lv2plug.in/ns/ext/atom#Sequence";
 pub(crate) const ATOM_CHUNK: &str = "http://lv2plug.in/ns/ext/atom#Chunk";
+pub(crate) const MIDI_EVENT: &str = "http://lv2plug.in/ns/ext/midi#MidiEvent";
 
 /// The features that this host can give a plugin that says it needs them (and the ones that need nothing from the host but a yes). A plugin that requires another is not made.
 pub(crate) const SUPPORTED_FEATURES: [&str; 9] = [

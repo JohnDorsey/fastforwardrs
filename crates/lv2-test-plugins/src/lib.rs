@@ -14,6 +14,7 @@
 //! | `urn:fastforwardrs:test:needs_log` | **requires `log:log`**, which a host may not give: it is a gain if it is made |
 //! | `urn:fastforwardrs:test:state` | a gain that has a **state** (`state:interface`): a number that it multiplies by (set by a control input, and kept by `save` and `restore`) and a name |
 //! | `urn:fastforwardrs:test:fails` | whose `instantiate` gives nothing |
+//! | `urn:fastforwardrs:test:instrument` | **an instrument**: no audio input, a MIDI input (an atom port), two audio outputs; see [`INSTRUMENT`] |
 //!
 //! The Turtle is written by [`write_bundle`] with the library copied beside it.
 
@@ -37,6 +38,11 @@ pub const WORKER: &str = "urn:fastforwardrs:test:worker";
 pub const NEEDS_LOG: &str = "urn:fastforwardrs:test:needs_log";
 pub const STATE: &str = "urn:fastforwardrs:test:state";
 pub const FAILS: &str = "urn:fastforwardrs:test:fails";
+/// An instrument: port 0 is an atom input that takes MIDI events, 1 and 2 are the audio outputs (the same sound in both), 3 is a control output that says how many MIDI events the last block had.
+/// **It makes sound that is plain arithmetic**: while notes are held, every sample is the sum, over the held notes, of `velocity * key / 100` (the velocity is the byte over 127), plus the pitch
+/// wheel as `(wheel - 8192) / 8192 * 0.5` (the wheel is 8192 at the start), plus, while any note is held, the sustain pedal (controller 64) as `value / 127 * 0.25`. A note off ends the note of
+/// its channel and key at once, and "all sound off" or "all notes off" (controller 120 or 123) ends every note **of its own channel**.
+pub const INSTRUMENT: &str = "urn:fastforwardrs:test:instrument";
 
 /// How many frames the `latency` plugin delays its sound by.
 pub const LATENCY_FRAMES: usize = 64;
@@ -131,6 +137,7 @@ const WORKER_INTERFACE: &str = "http://lv2plug.in/ns/ext/worker#interface";
 const STATE_INTERFACE: &str = "http://lv2plug.in/ns/ext/state#interface";
 const ATOM_SEQUENCE: &str = "http://lv2plug.in/ns/ext/atom#Sequence";
 const ATOM_CHUNK: &str = "http://lv2plug.in/ns/ext/atom#Chunk";
+const MIDI_EVENT: &str = "http://lv2plug.in/ns/ext/midi#MidiEvent";
 const ATOM_FLOAT: &str = "http://lv2plug.in/ns/ext/atom#Float";
 const ATOM_STRING: &str = "http://lv2plug.in/ns/ext/atom#String";
 const PARAM_SAMPLE_RATE: &str = "http://lv2plug.in/ns/ext/parameters#sampleRate";
@@ -383,6 +390,117 @@ impl Plugin for Atoms {
     }
 }
 
+/// `instrument`: port 0 is the MIDI input, 1 and 2 the audio outputs, 3 says how many events the last block had.
+struct Instrument {
+    events_in: *const u8,
+    out: [*mut f32; 2],
+    says_events: *mut f32,
+    sequence: u32,
+    midi_event: u32,
+    /// `(channel, key, velocity)` of the notes that are held.
+    held: Vec<(u8, u8, f32)>,
+    wheel: u16,
+    sustain: u8,
+}
+
+impl Instrument {
+    fn level(&self) -> f32 {
+        let notes: f32 = self
+            .held
+            .iter()
+            .map(|&(_, key, velocity)| velocity * f32::from(key) / 100.0)
+            .sum();
+        let wheel = (f32::from(self.wheel) - 8192.0) / 8192.0 * 0.5;
+        let pedal = if self.held.is_empty() {
+            0.0
+        } else {
+            f32::from(self.sustain) / 127.0 * 0.25
+        };
+        notes + wheel + pedal
+    }
+
+    fn hear(&mut self, bytes: [u8; 3]) {
+        let channel = bytes[0] & 15;
+        match bytes[0] & 0xF0 {
+            0x90 if bytes[2] > 0 => self.held.push((channel, bytes[1], f32::from(bytes[2]) / 127.0)),
+            0x90 | 0x80 => {
+                if let Some(place) = self
+                    .held
+                    .iter()
+                    .position(|note| note.0 == channel && note.1 == bytes[1])
+                {
+                    self.held.remove(place);
+                }
+            }
+            0xB0 if bytes[1] == 120 || bytes[1] == 123 => self.held.retain(|note| note.0 != channel),
+            0xB0 if bytes[1] == 64 => self.sustain = bytes[2],
+            0xE0 => self.wheel = u16::from(bytes[1]) | (u16::from(bytes[2]) << 7),
+            _ => {}
+        }
+    }
+}
+
+impl Plugin for Instrument {
+    fn connect(&mut self, port: u32, data: *mut c_void) {
+        match port {
+            0 => self.events_in = data.cast(),
+            1 => self.out[0] = data.cast(),
+            2 => self.out[1] = data.cast(),
+            3 => self.says_events = data.cast(),
+            _ => {}
+        }
+    }
+
+    fn run(&mut self, frames: usize) {
+        // The events of the block: (frame, bytes), read from the sequence that the host wrote.
+        let mut events: Vec<(usize, [u8; 3])> = Vec::new();
+        if !self.events_in.is_null() {
+            // SAFETY: the host connected the atom input to a buffer that begins with an `LV2_Atom_Sequence` (an atom of a size and a type, 4 bytes each, and the body's own 8 bytes) and keeps it
+            // for the call; the events that follow, up to the size, are each a time stamp of 8 bytes, an atom header of 8 and a body padded to a multiple of 8, as the standard says.
+            unsafe {
+                let (size, type_) = (
+                    self.events_in.cast::<u32>().read(),
+                    self.events_in.cast::<u32>().add(1).read(),
+                );
+                if type_ == self.sequence && size >= 8 {
+                    let end = 8 + size as usize;
+                    let mut place = 16;
+                    while place + 16 <= end {
+                        let frame = self.events_in.add(place).cast::<i64>().read_unaligned();
+                        let body_size = self.events_in.add(place + 8).cast::<u32>().read() as usize;
+                        let event_type = self.events_in.add(place + 12).cast::<u32>().read();
+                        if event_type == self.midi_event && body_size == 3 {
+                            let body = [
+                                self.events_in.add(place + 16).read(),
+                                self.events_in.add(place + 17).read(),
+                                self.events_in.add(place + 18).read(),
+                            ];
+                            events.push((usize::try_from(frame).unwrap_or(0), body));
+                        }
+                        place += 16 + body_size.div_ceil(8) * 8;
+                    }
+                }
+            }
+        }
+        write_control(self.says_events, events.len() as f32);
+        let mut next = 0;
+        for moment in 0..frames {
+            while next < events.len() && events[next].0 <= moment {
+                let bytes = events[next].1;
+                self.hear(bytes);
+                next += 1;
+            }
+            let level = self.level();
+            for out in self.out {
+                if !out.is_null() {
+                    // SAFETY: the host connected the audio output to a buffer of at least `frames` samples before `run` and keeps it for the call.
+                    unsafe { out.add(moment).write(level) };
+                }
+            }
+        }
+    }
+}
+
 /// `options`: ports 2 to 6 say what it was made with.
 struct Options {
     ports: Ports,
@@ -508,6 +626,7 @@ const KIND_WORKER: usize = 5;
 const KIND_NEEDS_LOG: usize = 6;
 const KIND_STATE: usize = 7;
 const KIND_FAILS: usize = 8;
+const KIND_INSTRUMENT: usize = 9;
 
 /// Makes the plugin of a kind, from what the host gave.
 fn make(kind: usize, given: &Given<'_>) -> Option<Box<dyn Plugin>> {
@@ -590,6 +709,16 @@ fn make(kind: usize, given: &Given<'_>) -> Option<Box<dyn Plugin>> {
             request: std::ptr::null(),
             boost: 1.0,
             name: "default".to_owned(),
+        }),
+        KIND_INSTRUMENT => Box::new(Instrument {
+            events_in: std::ptr::null(),
+            out: [std::ptr::null_mut(); 2],
+            says_events: std::ptr::null_mut(),
+            sequence: given.map(ATOM_SEQUENCE),
+            midi_event: given.map(MIDI_EVENT),
+            held: Vec::new(),
+            wheel: 8192,
+            sustain: 0,
         }),
         _ => return None,
     })
@@ -894,7 +1023,7 @@ macro_rules! descriptor {
     };
 }
 
-static DESCRIPTORS: [Descriptor; 9] = [
+static DESCRIPTORS: [Descriptor; 10] = [
     descriptor!("urn:fastforwardrs:test:gain", KIND_GAIN),
     descriptor!("urn:fastforwardrs:test:controls", KIND_CONTROLS),
     descriptor!("urn:fastforwardrs:test:latency", KIND_LATENCY),
@@ -904,6 +1033,7 @@ static DESCRIPTORS: [Descriptor; 9] = [
     descriptor!("urn:fastforwardrs:test:needs_log", KIND_NEEDS_LOG),
     descriptor!("urn:fastforwardrs:test:state", KIND_STATE),
     descriptor!("urn:fastforwardrs:test:fails", KIND_FAILS),
+    descriptor!("urn:fastforwardrs:test:instrument", KIND_INSTRUMENT),
 ];
 
 /// The function that an LV2 library exports.
@@ -973,6 +1103,30 @@ fn audio_pair() -> &'static str {
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 1 ; lv2:symbol "out" ; lv2:name "Out" ;
     ]"#
+}
+
+/// The Turtle of the instrument, which has no audio input (so it is not made by `description_of`, which gives every plugin one).
+fn instrument_description() -> (String, String) {
+    (
+        "instrument.ttl".to_owned(),
+        format!(
+            "{PREFIXES}\n<{INSTRUMENT}>\n    a lv2:Plugin , lv2:InstrumentPlugin ;\n    doap:name \"Test instrument\" ;\n    doap:maintainer [ foaf:name \"fastforwardrs tests\" ] ;\n    lv2:minorVersion 1 ;\n    lv2:microVersion 0 ;\n    lv2:requiredFeature urid:map ;\n{ports} .\n",
+            ports = r#"    lv2:port [
+        a lv2:InputPort , atom:AtomPort ;
+        atom:bufferType atom:Sequence ; atom:supports midi:MidiEvent ;
+        lv2:index 0 ; lv2:symbol "events_in" ; lv2:name "Events in" ;
+    ] , [
+        a lv2:OutputPort , lv2:AudioPort ;
+        lv2:index 1 ; lv2:symbol "out_left" ; lv2:name "Out left" ;
+    ] , [
+        a lv2:OutputPort , lv2:AudioPort ;
+        lv2:index 2 ; lv2:symbol "out_right" ; lv2:name "Out right" ;
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 3 ; lv2:symbol "events_seen" ; lv2:name "Events seen" ;
+    ]"#
+        ),
+    )
 }
 
 /// The file name and the text of the Turtle of each of the plugins.
@@ -1123,8 +1277,11 @@ pub fn bundle_files(library_file_name: &str) -> Vec<(String, String)> {
         lv2:index 2 ; lv2:symbol "spare" ; lv2:name "Spare" ; lv2:default 0.0 ; lv2:minimum 0.0 ; lv2:maximum 1.0 ;
     ]"#,
         ),
+        instrument_description(),
     ];
-    let uris = [GAIN, CONTROLS, LATENCY, ATOMS, OPTIONS, WORKER, NEEDS_LOG, STATE, FAILS];
+    let uris = [
+        GAIN, CONTROLS, LATENCY, ATOMS, OPTIONS, WORKER, NEEDS_LOG, STATE, FAILS, INSTRUMENT,
+    ];
     let mut manifest = String::from(PREFIXES);
     for ((file, _), uri) in plugins.iter().zip(uris) {
         // (The gain plugin has a window, and so has the one that fails: whose window does not come. A window is of the class of the system that this was built for.)
