@@ -38,6 +38,8 @@ fn strip(items: Vec<SoundItemToExport>) -> SoundStripToExport {
     SoundStripToExport {
         items,
         buses: Vec::new(),
+        loudness: Default::default(),
+        muted: Vec::new(),
     }
 }
 
@@ -497,6 +499,8 @@ fn several_tracks_are_each_made_as_long_as_the_sound_and_mixed_with_the_volume_p
                 ..clip(0, 60, 1)
             })],
             buses: Vec::new(),
+            loudness: Default::default(),
+            muted: Vec::new(),
         },
         strip(vec![silence(10), clip_item(30, 40, 1)]),
     ]);

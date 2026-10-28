@@ -54,6 +54,9 @@ struct Strip {
     buses: Vec<Bus>,
     /// For each item, which bus it is heard by, if one.
     bus_of_item: Vec<Option<usize>>,
+    /// How loud the track is, after its effects (counted from the first sample of the sound), and where it is muted, in samples: each from a sample up to a sample (not including it).
+    gain: GainCurve,
+    muted: Vec<(u64, u64)>,
 }
 
 /// One instance of the effects of a track that hears several items together: what the effects are, from the first item to the last, once they are made.
@@ -249,6 +252,12 @@ impl SoundGraph {
                     processors: insertions.for_strip(strip_number),
                     buses,
                     bus_of_item,
+                    gain: GainCurve::new(&strip.loudness, frame_rate),
+                    muted: strip
+                        .muted
+                        .iter()
+                        .map(|&(first, end)| (sample_at_frame(frame_rate, first), sample_at_frame(frame_rate, end)))
+                        .collect(),
                 }
             })
             .collect();
@@ -304,8 +313,21 @@ impl SoundGraph {
         for strip_number in 0..self.strips.len() {
             scratch.silent_for(count);
             self.render_strip(strip_number, from, to, &mut scratch);
-            for processor in &mut self.strips[strip_number].processors {
+            let strip = &mut self.strips[strip_number];
+            for processor in &mut strip.processors {
                 processor.process(&mut scratch.left[..count], &mut scratch.right[..count]);
+            }
+            // (The volume and the mute of the track come after its effects: what they remember goes on while it is muted.)
+            strip
+                .gain
+                .apply(from, &mut scratch.left[..count], &mut scratch.right[..count]);
+            for &(first, end) in &strip.muted {
+                let (first, end) = (first.max(from), end.min(to));
+                if first < end {
+                    let (first, end) = ((first - from) as usize, (end - from) as usize);
+                    scratch.left[first..end].fill(0.0);
+                    scratch.right[first..end].fill(0.0);
+                }
             }
             for (sum, sample) in left[..count].iter_mut().zip(&scratch.left[..count]) {
                 *sum += *sample;

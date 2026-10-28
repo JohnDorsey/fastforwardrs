@@ -123,6 +123,8 @@ mod tests {
                     .map(|&(first, end, factor)| sound_clip(first, end, factor))
                     .collect(),
                 buses: Vec::new(),
+                loudness: Default::default(),
+                muted: Vec::new(),
             }],
             sped_up_clip_sound,
             lead_in_frames: 0,

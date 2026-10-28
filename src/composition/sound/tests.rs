@@ -165,18 +165,41 @@ fn a_track_that_is_muted_has_no_sound_at_all() {
 }
 
 #[test]
-fn the_gain_of_the_clip_and_of_its_track_are_both_applied() {
+fn the_gain_of_the_clip_is_the_loudness_of_its_clip_and_that_of_its_track_is_the_loudness_of_its_strip_and_both_are_applied()
+ {
     let mut project = project_of(vec![vec![(0, sound_file(0, 50, 1))]]);
     let location = project.tracks()[0].entries()[0].id();
     let track = project.tracks()[0].id();
     project.set_clip_gain(location, Gain::from_decibels(6.0)).unwrap();
     project.set_track_gain(track, Gain::from_decibels(-6.0)).unwrap();
-    let factor = constant_loudness_factor(&first_clip(&plan(&project).strips[0]));
-    assert!((factor - 1.0).abs() < 1e-12, "+6 and -6 decibels cancel: {factor}");
+    let both = |plan: &SoundPlan| {
+        let strip = &plan.strips[0];
+        let Loudness::Constant(of_the_track) = strip.loudness else {
+            panic!("the track is as loud all the way through: {strip:?}");
+        };
+        (constant_loudness_factor(&first_clip(strip)), of_the_track)
+    };
+    let (of_the_clip, of_the_track) = both(&plan(&project));
+    assert!(
+        (of_the_clip - Gain::from_decibels(6.0).linear_factor()).abs() < 1e-12,
+        "the clip's own: {of_the_clip}"
+    );
+    assert!(
+        (of_the_track - Gain::from_decibels(-6.0).linear_factor()).abs() < 1e-12,
+        "the track's own: {of_the_track}"
+    );
+    assert!(
+        (of_the_clip * of_the_track - 1.0).abs() < 1e-12,
+        "+6 and -6 decibels cancel"
+    );
 
     project.set_track_gain(track, Gain::from_decibels(14.0)).unwrap();
-    let factor = constant_loudness_factor(&first_clip(&plan(&project).strips[0]));
-    assert!((factor - 10.0).abs() < 1e-9, "+20 decibels is ten times: {factor}");
+    let (of_the_clip, of_the_track) = both(&plan(&project));
+    assert!(
+        (of_the_clip * of_the_track - 10.0).abs() < 1e-9,
+        "+20 decibels is ten times: {}",
+        of_the_clip * of_the_track
+    );
 }
 
 #[test]
@@ -250,6 +273,10 @@ fn a_clip_that_has_ended_before_the_start_is_not_part_of_the_plan() {
 
 /// What track `strip` plays at `offset` frames from its start: the clip and its source frame.
 fn heard_at(strip: &SoundStrip, offset: u64) -> Option<(ClipId, u64)> {
+    // (The mute of the track is done to the sound of the whole track, after its effects: it is in the strip, and not in its items.)
+    if strip.muted.iter().any(|&(first, end)| first <= offset && offset < end) {
+        return None;
+    }
     let mut item_start = 0;
     for item in &strip.items {
         let length = item.timeline_frame_count();

@@ -51,6 +51,8 @@ fn specification(
             .map(|items| SoundStripToExport {
                 items,
                 buses: Vec::new(),
+                loudness: Default::default(),
+                muted: Vec::new(),
             })
             .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
@@ -554,6 +556,102 @@ fn the_effects_of_a_clip_are_applied_before_its_volume_and_the_effects_of_a_trac
         left[first_strip_clip],
         (value_of(0, 1, 5) * 0.5 + 100.0) + (value_of(1, 0, 1605) + 100.0)
     );
+}
+
+/// One strip of a clip of `frames` frames, with the volume and the mutes of the track.
+fn strip_with_a_volume_and_mutes(
+    frames: u64,
+    loudness: LoudnessToExport,
+    muted: Vec<(u64, u64)>,
+) -> SoundGraphSpecification {
+    let mut specification = specification(thirty(), frames, vec![vec![clip(frames, LoudnessToExport::UNCHANGED)]]);
+    specification.strips[0].loudness = loudness;
+    specification.strips[0].muted = muted;
+    specification
+}
+
+#[test]
+fn the_volume_of_a_track_is_done_after_its_effects() {
+    let ramps = Ramps::default();
+    let mut graph = SoundGraph::new(
+        strip_with_a_volume_and_mutes(2, LoudnessToExport::Constant(0.5), Vec::new()),
+        Box::new(ramps.clone()),
+        Box::new(FixedInsertions {
+            for_clips: Vec::new,
+            for_strips: |_| vec![Box::new(Adds(100.0))],
+        }),
+    );
+
+    let (left, right) = graph.render_to_the_end(512);
+
+    // The effect adds 100 and then the volume halves: (x + 100) / 2, not x / 2 + 100 (as a volume that came first would make it).
+    for index in [0, 5, 1599, 1600, 3199] {
+        assert_eq!(left[index], (value_of(0, 0, index) + 100.0) * 0.5, "left {index}");
+        assert_eq!(right[index], (-value_of(0, 0, index) + 100.0) * 0.5, "right {index}");
+    }
+}
+
+#[test]
+fn a_volume_of_a_track_that_changes_is_counted_from_the_start_of_the_sound_in_whatever_blocks_it_is_made() {
+    let ramps = Ramps::default();
+    let points = [(0, -12.0), (1, 0.0), (3, 6.0)];
+    // The same volume done to the clip, which begins where the sound does, and so counts from there too, is what it must be.
+    let (on_the_clip_left, on_the_clip_right) = graph_of(
+        specification(thirty(), 3, vec![vec![clip(3, changing(&points))]]),
+        &ramps,
+    )
+    .render_to_the_end(512);
+    for block in [1, 512, 1600, 5000] {
+        let (left, right) = SoundGraph::new(
+            strip_with_a_volume_and_mutes(3, changing(&points), Vec::new()),
+            Box::new(ramps.clone()),
+            Box::new(FixedInsertions {
+                for_clips: Vec::new,
+                for_strips: |_| Vec::new(),
+            }),
+        )
+        .render_to_the_end(block);
+        assert_eq!(
+            (left, right),
+            (on_the_clip_left.clone(), on_the_clip_right.clone()),
+            "blocks of {block}"
+        );
+    }
+}
+
+#[test]
+fn a_track_that_is_muted_is_silent_after_its_effects_and_what_they_remember_goes_on_meanwhile_for_any_blocks() {
+    let ramps = Ramps::default();
+    let render = |block: usize| {
+        SoundGraph::new(
+            // The second of three frames is muted.
+            strip_with_a_volume_and_mutes(3, LoudnessToExport::UNCHANGED, vec![(1, 2)]),
+            Box::new(ramps.clone()),
+            Box::new(FixedInsertions {
+                for_clips: Vec::new,
+                for_strips: |_| vec![Box::new(Counts::default())],
+            }),
+        )
+        .render_to_the_end(block)
+    };
+
+    let (left, right) = render(512);
+
+    assert_eq!(left.len(), 4800);
+    for (index, sample) in left.iter().enumerate() {
+        // Counts writes its number of samples so far into every sample, whether or not the sample is heard.
+        let heard = value_of(0, 0, index) + index as f32;
+        let expected = if (1600..3200).contains(&index) { 0.0 } else { heard };
+        assert_eq!(*sample, expected, "left {index}");
+    }
+    assert!(
+        right[1600..3200].iter().all(|sample| *sample == 0.0),
+        "silent on the right too"
+    );
+    assert_ne!(right[3200], 0.0, "and heard again after the mute");
+    for block in [1, 700, 1600, 4800, 10_000] {
+        assert_eq!(render(block), (left.clone(), right.clone()), "blocks of {block}");
+    }
 }
 
 #[test]
@@ -1353,6 +1451,8 @@ fn specification_with_buses(
                         effects: Vec::new(),
                     })
                     .collect(),
+                loudness: Default::default(),
+                muted: Vec::new(),
             })
             .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,

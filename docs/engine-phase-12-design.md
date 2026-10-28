@@ -331,6 +331,18 @@ Each piece: tests first that lock the present behaviour, then the change, then t
   sound is the end of the sound made from the start, for any blocks; the position counts what is heard), plan 3 (the lead-in, its limits, the tails of a chain added, ten seconds), a null test with the filter
   graph, and with the real echo: **sound wanted from the frame where its clip ends has the ring of the clip, and is the sound that playing through makes**, in the export and in the preview. *Not yet: the
   "approximate" mark that video has (EN-14 E1) for a ring longer than the lead-in.*
+  **12.2e as built (2026-10-28) [V]: the volume and the mute of a track come after its effects (D9).** `SoundStrip` has `loudness` (the track's own volume, counted from the start of the plan) and `muted`
+  (the stretches, in frames from the start of the plan, where the track is muted); a clip's `loudness` is now **only its own**, and the mute of a track no longer cuts its clips into heard and silent items (a clip's
+  own mute still does). So the effects of a track hear the sound as its clips make it, **and what they remember goes on while the track is muted** (a muted track's reverb has been listening all along, and
+  is not empty when the mute ends). The engine (`Strip`) does the volume (`GainCurve`, counted from the first sample of the sound) and then the mutes (silence over their samples) to the sound of the
+  strip after its processors; the filter graph of ffmpeg, which has no effects of a track, does the same to the joined clips (`volume=` and `volume=0:enable=between(t,..)` after `concat`). **A track muted
+  all the way through has no strip** (nothing of it is ever heard, whatever its effects remember). Measured, not assumed: the filter graph switches `enable` a chunk of sound at a time, so at the edge of
+  a mute it is up to one chunk (4096 moments) out of step with the block graph, which is exact to the sample; the null test compares them to one rounding of a sample everywhere else and checks that the edges
+  do differ (so that it is not comparing nothing). Tests: engine 3 (the volume is after the effects: `(x + 100) / 2`, not `x / 2 + 100`; a changing volume is counted from the start of the sound for any
+  blocks; a mute is silent after the effects, **the effect's count goes on meanwhile**, any block size), plan: 4 tests that pinned the clip-and-track product were rewritten on purpose (the clip's volume and the track's
+  are two curves that together say what both say; a muted stretch is a stretch of the strip and its clips are all there; a clip's mute and a track's mute are two things), the randomised plan check also counts strips with a changing
+  volume; a null test with the filter graph (a volume for a whole track: exact; the mutes: exact but at the edges). **6 planted mistakes in the engine, all noticed** (the mute does nothing, forgets a channel, begins late, ends early;
+  the volume does nothing, counts from the wrong sample). Whole library suite 5510 passed, 0 failed, 11 ignored; the sound integration programs and `application_journeys` pass; clippy clean on Windows.
 * **12.3 Sound: group effects.** Clip groups and track groups on the sum; the three outcomes, with the fade.
 * **12.4 Sound: per track with windows, and indivisible.**
 * **12.5 Picture: ghost layers, instances, groups with tails, depth.** *Risky: the layer list per frame changes and `nodes_of` with it.*

@@ -70,6 +70,13 @@ pub fn sound_graph_specification(
                         }),
                     })
                     .collect(),
+                loudness: match &strip.loudness {
+                    Loudness::Constant(factor) => LoudnessToExport::Constant(*factor),
+                    Loudness::Changing(points) => {
+                        LoudnessToExport::Changing(points.iter().map(|point| (point.frame, point.decibels)).collect())
+                    }
+                },
+                muted: strip.muted.clone(),
                 buses: strip
                     .buses
                     .iter()

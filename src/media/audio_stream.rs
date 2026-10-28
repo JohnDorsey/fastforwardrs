@@ -361,6 +361,8 @@ mod tests {
                         effects: Vec::new(),
                     })],
                     buses: Vec::new(),
+                    loudness: Default::default(),
+                    muted: Vec::new(),
                 }],
                 sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
                 lead_in_frames: 0,

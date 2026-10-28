@@ -117,7 +117,8 @@ fn a_clip_whose_gain_has_keyframes_is_as_loud_as_they_say_changing_evenly_betwee
 }
 
 #[test]
-fn the_gain_of_the_clip_and_of_its_track_add_up_between_all_the_keyframes_of_both() {
+fn the_gain_of_the_clip_is_the_loudness_of_the_clip_and_that_of_its_track_is_the_loudness_of_the_strip_and_together_they_are_what_both_say()
+ {
     let (mut project, clip) = project_with_a_sound_clip();
     let track = project.tracks()[0].id();
     make_a_keyframe(
@@ -160,19 +161,41 @@ fn the_gain_of_the_clip_and_of_its_track_add_up_between_all_the_keyframes_of_bot
             },
             DecibelsAt {
                 frame: 40,
-                decibels: -4.0
-            },
-            DecibelsAt {
-                frame: 80,
-                decibels: 0.0
+                decibels: -8.0
             },
             DecibelsAt {
                 frame: 90,
-                decibels: 0.0
+                decibels: -8.0
             },
         ]),
-        "-8 and +4 at frame 40, and -8 and +8 from frame 80 on"
+        "the clip's own: down 8 decibels by frame 40 and there for the rest of the clip"
     );
+    assert_eq!(
+        plan.strips[0].loudness,
+        Loudness::Changing(vec![
+            DecibelsAt {
+                frame: 0,
+                decibels: 0.0
+            },
+            DecibelsAt {
+                frame: 80,
+                decibels: 8.0
+            },
+            DecibelsAt {
+                frame: 90,
+                decibels: 8.0
+            },
+        ]),
+        "the track's own, counted from the start of the plan: up 8 decibels by frame 80, and there to the end of the strip"
+    );
+    // Together they are what the two say: -4 decibels at frame 20 (-4 and +4... the clip is at -4, the track at +2), and so on.
+    let together = |frame: u64| {
+        the_clip(&plan.strips[0], 0).loudness.linear_factor_at(frame) * plan.strips[0].loudness.linear_factor_at(frame)
+    };
+    let factor = |decibels: f64| 10f64.powf(decibels / 20.0);
+    assert!((together(20) - factor(-4.0 + 2.0)).abs() < 1e-9);
+    assert!((together(40) - factor(-8.0 + 4.0)).abs() < 1e-9);
+    assert!((together(80) - factor(-8.0 + 8.0)).abs() < 1e-9);
 }
 
 #[test]
@@ -299,7 +322,7 @@ fn a_clip_that_is_muted_by_keyframes_all_the_time_makes_no_strip() {
 }
 
 #[test]
-fn a_track_muted_by_keyframes_silences_all_its_clips_for_as_long_as_it_says() {
+fn a_track_muted_by_keyframes_is_muted_after_its_effects_for_as_long_as_it_says_and_its_clips_are_all_there() {
     let mut project = project_of(vec![vec![(0, sound_file(0, 40, 1)), (0, sound_file(40, 100, 1))]]);
     let track = AnimationTarget::Track(project.tracks()[0].id());
     make_a_keyframe(&mut project, track, PropertyId::Muted, 0, PropertyValue::Flag(false));
@@ -310,17 +333,18 @@ fn a_track_muted_by_keyframes_silences_all_its_clips_for_as_long_as_it_says() {
 
     assert_eq!(
         pieces(&plan.strips[0]),
-        vec![
-            (30, Some((0, 30))),
-            // The silence is over the end of the first clip and the start of the second, and is one silence.
-            (20, None),
-            (50, Some((50, 100))),
-        ]
+        vec![(40, Some((0, 40))), (60, Some((40, 100)))],
+        "the clips are as they are: the track is muted after its effects, and what its effects remember goes on"
+    );
+    assert_eq!(
+        plan.strips[0].muted,
+        vec![(30, 50)],
+        "the mute is a stretch of the strip, from frame 30 up to frame 50"
     );
 }
 
 #[test]
-fn a_clip_is_silent_while_either_it_or_its_track_is_muted() {
+fn a_clip_is_silent_while_it_is_muted_and_a_track_is_muted_after_its_effects_while_it_is() {
     let (mut project, clip) = project_with_a_sound_clip();
     let track = AnimationTarget::Track(project.tracks()[0].id());
     let clip = AnimationTarget::Clip(clip);
@@ -335,8 +359,13 @@ fn a_clip_is_silent_while_either_it_or_its_track_is_muted() {
 
     assert_eq!(
         pieces(&plan.strips[0]),
-        vec![(20, Some((0, 20))), (40, None), (30, Some((60, 90)))],
-        "silent from 20 (the clip) to 40 (the clip) and from 30 (the track) to 60 (the track): so from 20 to 60"
+        vec![(20, Some((0, 20))), (20, None), (50, Some((40, 90)))],
+        "silent from 20 to 40, where the clip is muted"
+    );
+    assert_eq!(
+        plan.strips[0].muted,
+        vec![(30, 60)],
+        "and the track is muted from 30 to 60, after its effects: so the two are silent from 20 to 60"
     );
 }
 
@@ -405,6 +434,10 @@ fn plainly_heard(
 
 /// What the strip plays at `offset` frames from its start: the clip, its source frame and its loudness factor.
 fn heard_at(strip: &SoundStrip, offset: u64) -> Option<(ClipId, u64, f64)> {
+    // (The mute and the volume of the track are done to the sound of the whole track, after its effects: they are in the strip, and not in its items.)
+    if strip.muted.iter().any(|&(first, end)| first <= offset && offset < end) {
+        return None;
+    }
     let mut item_start = 0;
     for item in &strip.items {
         let length = item.timeline_frame_count();
@@ -414,7 +447,7 @@ fn heard_at(strip: &SoundStrip, offset: u64) -> Option<(ClipId, u64, f64)> {
                 SoundItem::Clip(clip) => Some((
                     clip.clip,
                     clip.first_source_frame + (offset - item_start) * u64::from(clip.speed.value()),
-                    clip.loudness.linear_factor_at(offset - item_start),
+                    clip.loudness.linear_factor_at(offset - item_start) * strip.loudness.linear_factor_at(offset),
                 )),
             };
         }
@@ -452,6 +485,8 @@ fn the_plan_has_at_every_frame_exactly_the_sound_and_loudness_the_project_says_w
                     )
                 })
                 .count();
+            // (A track's own volume is in its strip, not in its clips: those count too.)
+            changing_checked += usize::from(matches!(strip.loudness, Loudness::Changing(_)));
         }
         for track in project.tracks() {
             let strip = plan.strips.iter().find(|strip| strip.track == track.id());

@@ -51,6 +51,8 @@ fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_neve
         strips: vec![SoundStripToExport {
             items: clips,
             buses: Vec::new(),
+            loudness: Default::default(),
+            muted: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,

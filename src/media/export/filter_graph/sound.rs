@@ -51,6 +51,12 @@ impl LoudnessToExport {
     pub const UNCHANGED: Self = Self::Constant(1.0);
 }
 
+impl Default for LoudnessToExport {
+    fn default() -> Self {
+        Self::UNCHANGED
+    }
+}
+
 /// A stretch of the sound of one source file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundClipToExport {
@@ -107,6 +113,11 @@ pub struct SoundStripToExport {
     /// The instances of the effects of the track that are shared by clips: one for each run of clips, in the order of `items`, none sharing an item with another. The clips that
     /// are in none have all of their effects in their own chain.
     pub buses: Vec<SoundBusToExport>,
+    /// How loud the track is, **after its effects** (the frames are counted from the start of the sound). The filter graph of ffmpeg, which does not do the effects, does it after the
+    /// clips are joined.
+    pub loudness: LoudnessToExport,
+    /// The stretches of the sound, each from a frame up to a frame (not including it), where the track is muted, after its effects.
+    pub muted: Vec<(u64, u64)>,
 }
 
 impl SoundStripToExport {
@@ -185,7 +196,11 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
         };
         statements.push(statement(
             &item_labels.iter().map(String::as_str).collect::<Vec<_>>(),
-            &format!("concat=n={}:v=0:a=1", item_labels.len()),
+            &format!(
+                "concat=n={}:v=0:a=1{}",
+                item_labels.len(),
+                filters_of_the_track(frame_rate, strip)
+            ),
             &[&label],
         ));
         strip_labels.push(label);
@@ -219,6 +234,28 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
         ));
     }
     with_the_lead_in_cut_off(statements, specification)
+}
+
+/// The filters that do the volume and the mutes of a track to its sound once its clips are joined (the filter graph of ffmpeg has no effects of a track to be after): `,volume=...` and one
+/// `,volume=0:enable=...` for each stretch where it is muted. Nothing for a track whose volume is not changed and is never muted.
+fn filters_of_the_track(frame_rate: FrameRate, strip: &SoundStripToExport) -> String {
+    let mut filters = String::new();
+    match &strip.loudness {
+        LoudnessToExport::Constant(factor) if *factor == 1.0 => {}
+        LoudnessToExport::Constant(factor) => filters.push_str(&format!(",volume={}", format_number(*factor))),
+        LoudnessToExport::Changing(points) => filters.push_str(&format!(
+            ",volume='pow(10,({})/20)':eval=frame",
+            decibels_expression(frame_rate, points)
+        )),
+    }
+    for &(first, end) in &strip.muted {
+        filters.push_str(&format!(
+            ",volume=0:enable='between(t,{},{})'",
+            format_seconds(frame_rate.seconds_at_frame(first)),
+            format_seconds(frame_rate.seconds_at_frame(end))
+        ));
+    }
+    filters
 }
 
 /// The statements, with one more at the end that cuts the first `lead_in_frames` frames off the sound (they are made so that effects that remember have heard what comes before the place

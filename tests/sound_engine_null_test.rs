@@ -255,6 +255,8 @@ fn a_specification(
             SoundStripToExport {
                 items,
                 buses: Vec::new(),
+                loudness: Default::default(),
+                muted: Vec::new(),
             }
         })
         .collect();
@@ -402,6 +404,8 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
                 effects: Vec::new(),
             })],
             buses: Vec::new(),
+            loudness: Default::default(),
+            muted: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
@@ -638,6 +642,8 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                 }),
             ],
             buses: Vec::new(),
+            loudness: Default::default(),
+            muted: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
@@ -860,6 +866,8 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
                 effects: Vec::new(),
             })],
             buses: Vec::new(),
+            loudness: Default::default(),
+            muted: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
@@ -933,6 +941,81 @@ fn a_lead_in_is_cut_off_the_front_of_the_sound_by_the_block_graph_and_by_the_fil
             *whole_samples - *cut_samples,
             2 * 1600 * *lead_in_frames as usize,
             "the sound is shorter by the lead-in: {name}"
+        );
+    }
+}
+
+#[test]
+fn the_volume_and_the_mutes_of_a_track_are_done_after_its_clips_are_joined_by_the_block_graph_and_by_the_filter_graph_alike()
+ {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let kinds = Kinds {
+        sped_up: false,
+        changing_volume: false,
+        wrong_lengths: false,
+    };
+    let seeds: Vec<u64> = (0..6).collect();
+    let results = in_parallel(&seeds, |&seed| {
+        let mut with_a_volume = a_specification(
+            seed * 5 + 1,
+            FrameRate::new(30, 1).unwrap(),
+            kinds,
+            SpedUpClipSound::MaintainPitch,
+        );
+        for strip in &mut with_a_volume.strips {
+            strip.loudness = LoudnessToExport::Constant(0.3 + seed as f64 / 10.0);
+        }
+        let mut with_mutes = with_a_volume.clone();
+        with_mutes.strips[0].muted = vec![(2, 9), (20, 21)];
+        (
+            difference_for(&toolchain, &with_a_volume, &sources),
+            by_the_filter_graph(&toolchain, &with_mutes, &sources),
+            by_the_block_graph(&toolchain, &with_mutes, &sources, 512),
+            by_the_block_graph(&toolchain, &with_a_volume, &sources, 512),
+        )
+    });
+    for (seed, (difference, mutes_by_the_filter_graph, mutes_by_the_block_graph, without_mutes)) in
+        seeds.iter().zip(&results)
+    {
+        assert_eq!(
+            difference.moments_of_the_oracle, difference.moments_of_the_block_graph,
+            "seed {seed}"
+        );
+        assert!(
+            difference.largest <= ONE_ROUNDING_OF_A_SAMPLE,
+            "a volume for the whole track, seed {seed}: {}",
+            difference.largest
+        );
+        // The mutes: measured, not assumed. The filter graph turns a filter on and off a chunk of sound at a time, so the edges of a mute are not at the very sample.
+        let edges_in_moments = [2 * 1600_i64, 9 * 1600, 20 * 1600, 21 * 1600];
+        let mut largest_away_from_the_edges = 0.0_f32;
+        let mut largest_at_the_edges = 0.0_f32;
+        for (moment, (by_the_filter_graph, by_the_block_graph)) in mutes_by_the_filter_graph
+            .chunks(2)
+            .zip(mutes_by_the_block_graph.chunks(2))
+            .enumerate()
+        {
+            let difference = (by_the_filter_graph[0] - by_the_block_graph[0]).abs();
+            if edges_in_moments.iter().any(|edge| (moment as i64 - edge).abs() <= 4096) {
+                largest_at_the_edges = largest_at_the_edges.max(difference);
+            } else {
+                largest_away_from_the_edges = largest_away_from_the_edges.max(difference);
+            }
+        }
+        assert!(
+            largest_away_from_the_edges <= ONE_ROUNDING_OF_A_SAMPLE,
+            "mutes, seed {seed}: the two sounds are the same but for a chunk of sound at each edge of a mute: {largest_away_from_the_edges}"
+        );
+        assert!(
+            largest_at_the_edges > 0.01,
+            "(the control: the edges of the mutes are where the filter graph is a chunk out, or there is nothing to compare) seed {seed}: {largest_at_the_edges}"
+        );
+        assert_eq!(
+            mutes_by_the_block_graph.len(),
+            without_mutes.len(),
+            "a mute does not change how long the sound is: seed {seed}"
         );
     }
 }

@@ -118,6 +118,11 @@ pub struct SoundStrip {
     /// The instances of the effects of the track that clips share (phase 12, piece 12.2): one for each **run** of clips, in the order of `items`. A clip that is in none has
     /// all of its effects in its own chain.
     pub buses: Vec<SoundBus>,
+    /// How loud the track is, **after its effects** (D9 of docs/engine-phase-12-design.md: the volume and the mute of a track are done to what its clips and its effects make, so that
+    /// the memory of the effects goes on while it is muted and the effects hear the sound as the clips made it). The frames are counted from the start of the plan.
+    pub loudness: Loudness,
+    /// The stretches of the plan, from a frame up to a frame (not including it), counted from the start of the plan, where the track is muted: silent, after its effects.
+    pub muted: Vec<(u64, u64)>,
 }
 
 /// One instance of the sound effects of a track, which hears the clips of a run one after another: they are put together (each as its own effects and its volume make it) and
@@ -315,14 +320,13 @@ fn strip_of(
             .is_some_and(|source| source.properties.has_sound())
             && is_usable(media.source());
         if has_sound {
-            for stretch in stretches_heard_or_not(animations, track, &placement, media, start, end) {
+            for stretch in stretches_heard_or_not(animations, &placement, media, start, end) {
                 if stretch.is_heard {
                     let (own, shared) = effects_of_a_clip(project, animations, effects, track, placement.id);
                     shared_effects.resize(items.len(), None);
                     items.push(SoundItem::Clip(sound_clip_over(
                         animations,
                         own,
-                        track,
                         &placement,
                         media,
                         stretch.first_frame,
@@ -347,8 +351,14 @@ fn strip_of(
     shared_effects.truncate(items.len());
     shared_effects.resize(items.len(), None);
     let buses = runs_of_clips_that_share_the_effects_of_the_track(&items, &shared_effects, project.frame_rate());
-    (!items.is_empty()).then_some(SoundStrip {
+    let strip_frames: u64 = items.iter().map(SoundItem::timeline_frame_count).sum();
+    let muted = muted_stretches_of_the_track(animations, track, from, from + strip_frames);
+    // (A track that is muted all the way through makes no sound whatever its effects remember: it has no strip.)
+    let is_muted_all_the_way = muted.as_slice() == [(0, strip_frames)];
+    (!items.is_empty() && !is_muted_all_the_way).then(|| SoundStrip {
         track: track.id(),
+        loudness: loudness_of_the_track(animations, track, from, from + strip_frames),
+        muted,
         items,
         buses,
     })
@@ -435,33 +445,23 @@ struct Stretch {
     is_heard: bool,
 }
 
-/// The stretches, one after another, that the frames `start` up to `end` of the clip `placement` (a clip of `track`) are
-/// cut into by turning the mute switch of the clip or of the track on and off with keyframes. A clip that is not muted by
-/// keyframes is one stretch.
+/// The stretches, one after another, that the frames `start` up to `end` of the clip `placement` are cut into by turning the mute switch of the clip on and off with keyframes. A clip
+/// that is not muted by keyframes is one stretch. (The mute of its **track** is not here: it is done after the effects of the track, to the sound of the whole track: see
+/// [`muted_stretches_of_the_track`].)
 fn stretches_heard_or_not(
     animations: &ResolvedAnimations,
-    track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
     start: u64,
     end: u64,
 ) -> Vec<Stretch> {
     let clip_animation = animations.of(AnimationTarget::Clip(placement.id));
-    let track_animation = animations.of(AnimationTarget::Track(track.id()));
-    let is_heard_at = |frame: u64| {
-        !clip_animation.is_muted_at(media.is_muted(), frame) && !track_animation.is_muted_at(track.is_muted(), frame)
-    };
-    // The switches only turn at a keyframe, and what is between two is what the earlier one says.
+    let is_heard_at = |frame: u64| !clip_animation.is_muted_at(media.is_muted(), frame);
+    // The switch only turns at a keyframe, and what is between two is what the earlier one says.
     let frames_it_may_turn_at: BTreeSet<u64> = clip_animation
         .keyframes_of(PropertyId::Muted)
         .into_iter()
         .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame))
-        .chain(
-            track_animation
-                .keyframes_of(PropertyId::Muted)
-                .into_iter()
-                .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame)),
-        )
         .filter(|frame| start < *frame && *frame < end)
         .collect();
 
@@ -485,11 +485,10 @@ fn stretches_heard_or_not(
     stretches
 }
 
-/// The sound of the clip `placement` (a clip of `track`) that is heard from `first_frame` up to `end_frame` of the timeline.
+/// The sound of the clip `placement` that is heard from `first_frame` up to `end_frame` of the timeline.
 fn sound_clip_over(
     animations: &ResolvedAnimations,
     effects: Vec<LayerEffect>,
-    track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
     first_frame: u64,
@@ -510,47 +509,65 @@ fn sound_clip_over(
             .min(first_source_frame + (end_frame - first_frame) * speed),
         speed: placement.effective_speed,
         timeline_frame_count: end_frame - first_frame,
-        loudness: loudness_over(animations, track, placement, media, first_frame, end_frame),
+        loudness: loudness_over(animations, placement, media, first_frame, end_frame),
         effects,
     }
 }
 
-/// How loud the clip `placement` (a clip of `track`) is, together with its track, from `first_frame` up to `end_frame` of
-/// the timeline.
+/// How loud the clip `placement` is from `first_frame` up to `end_frame` of the timeline (its own volume: its track's is done to the sound of the whole track, after the effects of the
+/// track: see [`loudness_of_the_track`]).
 fn loudness_over(
     animations: &ResolvedAnimations,
-    track: &Track,
     placement: &ClipPlacement<'_>,
     media: &MediaClip,
     first_frame: u64,
     end_frame: u64,
 ) -> Loudness {
-    let clip_animation = animations.of(AnimationTarget::Clip(placement.id));
-    let track_animation = animations.of(AnimationTarget::Track(track.id()));
-    let clip_gain_keyframes = clip_animation.keyframes_of(PropertyId::Gain);
-    let track_gain_keyframes = track_animation.keyframes_of(PropertyId::Gain);
-    if clip_gain_keyframes.is_none() && track_gain_keyframes.is_none() {
-        return Loudness::Constant(media.gain().combined_linear_factor(track.gain()));
+    loudness_between(
+        animations.of(AnimationTarget::Clip(placement.id)),
+        media.gain(),
+        first_frame,
+        end_frame,
+        first_frame,
+    )
+}
+
+/// How loud `track` is from the frame `from` (the start of the plan) up to `end_frame`, counted from `from`: its volume, which is done after the effects of the track.
+fn loudness_of_the_track(animations: &ResolvedAnimations, track: &Track, from: u64, end_frame: u64) -> Loudness {
+    loudness_between(
+        animations.of(AnimationTarget::Track(track.id())),
+        track.gain(),
+        from,
+        end_frame,
+        from,
+    )
+}
+
+/// How loud something that is animated by `animation` and has the volume `gain` when it is not animated is, from `first_frame` up to `end_frame`: a number if it does not change, and
+/// otherwise how loud, in decibels, at each frame it bends at, counted from `counted_from`.
+fn loudness_between(
+    animation: &crate::project::Animation,
+    gain: Gain,
+    first_frame: u64,
+    end_frame: u64,
+    counted_from: u64,
+) -> Loudness {
+    let gain_keyframes = animation.keyframes_of(PropertyId::Gain);
+    if gain_keyframes.is_none() {
+        return Loudness::Constant(gain.linear_factor());
     }
-    let decibels_at = |frame: u64| {
-        clip_animation.gain_at(media.gain(), frame).decibels() + track_animation.gain_at(track.gain(), frame).decibels()
-    };
-    // Both change evenly between their keyframes, so together they do between all the keyframes of both.
-    let frames_it_may_bend_at: BTreeSet<u64> = clip_gain_keyframes
+    let decibels_at = |frame: u64| animation.gain_at(gain, frame).decibels();
+    // It changes evenly between its keyframes.
+    let frames_it_may_bend_at: BTreeSet<u64> = gain_keyframes
         .into_iter()
         .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame))
-        .chain(
-            track_gain_keyframes
-                .into_iter()
-                .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame)),
-        )
         .filter(|frame| first_frame < *frame && *frame < end_frame)
         .chain([first_frame, end_frame])
         .collect();
     let points: Vec<DecibelsAt> = frames_it_may_bend_at
         .into_iter()
         .map(|frame| DecibelsAt {
-            frame: frame - first_frame,
+            frame: frame - counted_from,
             decibels: decibels_at(frame),
         })
         .collect();
@@ -559,6 +576,37 @@ fn loudness_over(
     } else {
         Loudness::Changing(points)
     }
+}
+
+/// The stretches from the frame `from` (the start of the plan) up to `end_frame` where `track` is muted, counted from `from`: each from a frame up to a frame (not including it). The
+/// switch only turns at a keyframe, and what is between two keyframes is what the earlier one says. The sound of the track is silent there, **after its effects**.
+fn muted_stretches_of_the_track(
+    animations: &ResolvedAnimations,
+    track: &Track,
+    from: u64,
+    end_frame: u64,
+) -> Vec<(u64, u64)> {
+    let animation = animations.of(AnimationTarget::Track(track.id()));
+    let frames_it_may_turn_at: BTreeSet<u64> = animation
+        .keyframes_of(PropertyId::Muted)
+        .into_iter()
+        .flat_map(|keyframes| keyframes.iter().map(|keyframe| keyframe.frame))
+        .filter(|frame| from < *frame && *frame < end_frame)
+        .collect();
+    let mut stretches: Vec<(u64, u64)> = Vec::new();
+    let mut turns: Vec<u64> = std::iter::once(from).chain(frames_it_may_turn_at).collect();
+    turns.push(end_frame);
+    for window in turns.windows(2) {
+        if !animation.is_muted_at(track.is_muted(), window[0]) {
+            continue;
+        }
+        let (first, end) = (window[0] - from, window[1] - from);
+        match stretches.last_mut() {
+            Some(last) if last.1 == first => last.1 = end,
+            _ => stretches.push((first, end)),
+        }
+    }
+    stretches
 }
 
 /// Adds `frame_count` frames of silence, joined to the silence before if there is any.

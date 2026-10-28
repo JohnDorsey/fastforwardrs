@@ -183,6 +183,8 @@ fn one_plugin_of_a_library_on_a_clip_for_the_driver() {
                 effects,
             })],
             buses: Vec::new(),
+            loudness: Default::default(),
+            muted: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
