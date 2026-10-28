@@ -86,11 +86,14 @@ impl<Spawner: ClipSpawner> LookAheadFeeds<Spawner> {
                 let length = match content {
                     SoundItemToExport::Silence { frame_count } => *frame_count,
                     SoundItemToExport::Clip(clip) => {
-                        upcoming.push(Upcoming {
-                            first_sample: sample_at_frame(frame_rate, frames),
-                            strip,
-                            item,
-                        });
+                        // (A MIDI clip has no file: no process is started for it.)
+                        if clip.music.is_none() {
+                            upcoming.push(Upcoming {
+                                first_sample: sample_at_frame(frame_rate, frames),
+                                strip,
+                                item,
+                            });
+                        }
                         clip.timeline_frame_count
                     }
                 };

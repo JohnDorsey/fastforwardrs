@@ -37,6 +37,7 @@ fn clip_of_the_long_file(frames: u64) -> SoundItemToExport {
         effects: Vec::new(),
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     })
 }
 

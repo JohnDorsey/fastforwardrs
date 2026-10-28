@@ -17,6 +17,7 @@ use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 use crate::test_support::check_every_case_at_once;
 
 mod groups;
+mod music;
 mod routes;
 
 fn thirty() -> FrameRate {
@@ -36,6 +37,7 @@ fn clip(frames: u64, loudness: LoudnessToExport) -> SoundItemToExport {
         effects: Vec::new(),
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     })
 }
 
@@ -1342,6 +1344,7 @@ fn clip_that_has_sound_from_before(
         }],
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     })
 }
 

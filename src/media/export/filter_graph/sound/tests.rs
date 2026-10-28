@@ -25,6 +25,7 @@ fn clip(first: u64, end: u64, factor: u32) -> SoundClipToExport {
         effects: Vec::new(),
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     }
 }
 

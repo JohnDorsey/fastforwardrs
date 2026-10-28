@@ -18,7 +18,7 @@ pub fn sources_of_sound(plan: &SoundPlan) -> BTreeSet<SourceMediaIdentifier> {
         .iter()
         .flat_map(|strip| &strip.items)
         .filter_map(|item| match item {
-            SoundItem::Clip(clip) => Some(clip.source),
+            SoundItem::Clip(clip) => clip.source,
             SoundItem::Silence { .. } => None,
         })
         .collect()
@@ -53,7 +53,8 @@ pub fn sound_graph_specification(
                             frame_count: *frame_count,
                         },
                         SoundItem::Clip(clip) => SoundItemToExport::Clip(SoundClipToExport {
-                            source_input: input_of_source(clip.source),
+                            // (A MIDI clip has no file: its input is 0 and means nothing.)
+                            source_input: clip.source.map_or(0, input_of_source),
                             first_source_frame: clip.first_source_frame,
                             end_source_frame: clip.end_source_frame,
                             speed_factor: clip.speed,
@@ -69,6 +70,7 @@ pub fn sound_graph_specification(
                             effects: clip.effects.clone(),
                             sent_to: clip.sent_to,
                             tail_routes: clip.tail_routes.clone(),
+                            music: clip.music.clone(),
                         }),
                     })
                     .collect(),

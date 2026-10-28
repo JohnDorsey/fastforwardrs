@@ -31,6 +31,18 @@ pub trait ClipFeeds {
     fn about_to_render(&mut self, _first_sample: u64) {}
 }
 
+/// Silence for ever: the sound of a clip that has none of its own (a MIDI clip: what is heard of it is made by the synthesizer that plays its notes, which is among its effects).
+pub struct SilentFeed;
+
+impl ClipFeed for SilentFeed {
+    fn read(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        let count = left.len().min(right.len());
+        left[..count].fill(0.0);
+        right[..count].fill(0.0);
+        count
+    }
+}
+
 /// Sound that is all in memory.
 pub struct SoundInMemory {
     left: Vec<f32>,

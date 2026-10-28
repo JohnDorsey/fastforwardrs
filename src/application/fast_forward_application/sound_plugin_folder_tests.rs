@@ -112,6 +112,7 @@ fn the_sound_comes_to(window: &Window, kind: EffectKind, notes: &Notes) {
         effects: vec![effect.clone()],
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     };
     let _ =
         window

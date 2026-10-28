@@ -66,6 +66,7 @@ fn a_clip_at(first_timeline_frame: u64, effects: Vec<LayerEffect>) -> SoundClipT
         effects,
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     }
 }
 
@@ -724,6 +725,7 @@ fn the_clip(
         effects,
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     }
 }
 

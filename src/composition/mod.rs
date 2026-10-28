@@ -17,8 +17,9 @@ pub use pictures::{
     operations_of_effects, plan_pictures,
 };
 pub use sound::{
-    DecibelsAt, Loudness, SOUND_SAMPLES_A_SECOND, SoundBus, SoundClip, SoundGroup, SoundItem, SoundPlan, SoundStrip,
-    TailDestination, TailRoute, frames_that_reach, hash_the_sound_effects_into, plan_sound, tail_samples_of,
+    DecibelsAt, Loudness, Music, NoteConsumer, PlannedControl, PlannedNote, SOUND_SAMPLES_A_SECOND, SoundBus,
+    SoundClip, SoundGroup, SoundItem, SoundPlan, SoundStrip, StretchOfMusic, TailDestination, TailRoute,
+    frames_that_reach, hash_the_sound_effects_into, music_of_a_stretch, plan_sound, tail_samples_of,
     tail_samples_of_a_chain,
 };
 

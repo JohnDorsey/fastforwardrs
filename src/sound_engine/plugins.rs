@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use super::feed::ClipRequest;
 use super::insertions::{BlockProcessor, BusRequest, GroupRequest, Insertions};
+use super::music::TakesTheNotes;
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
 use crate::project::FrameRate;
@@ -66,56 +67,40 @@ impl PluginInsertions {
     }
 }
 
-impl Insertions for PluginInsertions {
-    fn for_clip(&mut self, request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
-        request
-            .clip
-            .effects
+impl PluginInsertions {
+    /// The processors of a chain of `effects` whose keyframes are counted from `clip`: **an effect that changes sound** that the runner makes one of, **and a synthesizer whatever happens to it**: one
+    /// that is not installed, or that the runner says nothing for, is [`TakesTheNotes`], which makes no sound and takes the notes, so that the first synthesizer of the chain is the same here as in the
+    /// plan (phase 13, piece 13.4).
+    fn processors_of(&self, effects: &[LayerEffect], clip: &SoundClipToExport) -> Vec<Box<dyn BlockProcessor>> {
+        effects
             .iter()
-            .filter(|effect| effect.kind.installed_plugin().is_some())
             .filter_map(|effect| {
-                self.runner.processor_for(
-                    effect,
-                    request.clip,
-                    self.frame_rate,
-                    &self.notes,
-                    self.is_for_the_preview,
-                )
+                let made = effect.kind.installed_plugin().and_then(|_| {
+                    self.runner
+                        .processor_for(effect, clip, self.frame_rate, &self.notes, self.is_for_the_preview)
+                });
+                match made {
+                    Some(processor) => Some(processor),
+                    None if effect.kind.makes_sound_from_notes() => {
+                        Some(Box::new(TakesTheNotes) as Box<dyn BlockProcessor>)
+                    }
+                    None => None,
+                }
             })
             .collect()
+    }
+}
+
+impl Insertions for PluginInsertions {
+    fn for_clip(&mut self, request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        self.processors_of(&request.clip.effects, request.clip)
     }
 
     fn for_bus(&mut self, request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
-        request
-            .effects
-            .iter()
-            .filter(|effect| effect.kind.installed_plugin().is_some())
-            .filter_map(|effect| {
-                self.runner.processor_for(
-                    effect,
-                    request.first_clip,
-                    self.frame_rate,
-                    &self.notes,
-                    self.is_for_the_preview,
-                )
-            })
-            .collect()
+        self.processors_of(request.effects, request.first_clip)
     }
 
     fn for_group(&mut self, request: &GroupRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
-        request
-            .effects
-            .iter()
-            .filter(|effect| effect.kind.installed_plugin().is_some())
-            .filter_map(|effect| {
-                self.runner.processor_for(
-                    effect,
-                    request.first_clip,
-                    self.frame_rate,
-                    &self.notes,
-                    self.is_for_the_preview,
-                )
-            })
-            .collect()
+        self.processors_of(request.effects, request.first_clip)
     }
 }

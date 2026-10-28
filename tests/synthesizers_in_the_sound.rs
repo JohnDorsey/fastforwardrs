@@ -92,6 +92,7 @@ fn the_processor_of(effect: &LayerEffect) -> Box<dyn BlockProcessor> {
         effects: vec![effect.clone()],
         sent_to: None,
         tail_routes: Vec::new(),
+        music: None,
     };
     host.processor_for(effect, &clip, thirty(), &Notes::default(), false)
         .expect("the plugin is run")

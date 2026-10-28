@@ -44,6 +44,7 @@ fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_neve
                 effects: Vec::new(),
                 sent_to: None,
                 tail_routes: Vec::new(),
+                music: None,
             })
         })
         .collect();

@@ -4,11 +4,14 @@
 //! The block graph itself.
 
 use super::SAMPLE_RATE;
-use super::feed::{ClipFeed, ClipFeeds, ClipRequest};
+use std::collections::HashMap;
+
+use super::feed::{ClipFeed, ClipFeeds, ClipRequest, SilentFeed};
 use super::gain::GainCurve;
 use super::insertions::{BlockProcessor, BusRequest, GroupRequest, Insertions};
+use super::music::{TimedNote, events_of, give_the_notes_of_the_block, put_in_order};
 use super::position::{pre_roll_samples_of, sample_at_frame};
-use crate::composition::{TailDestination, TailRoute, tail_samples_of_a_chain};
+use crate::composition::{NoteConsumer, TailDestination, TailRoute, tail_samples_of_a_chain};
 use crate::media::export::{SoundGraphSpecification, SoundItemToExport};
 
 /// The sound of a project, made a block at a time (see the top of this module's parent for what it does). It is given the specification once, and asked for the sound from its
@@ -239,6 +242,8 @@ struct Bus {
     input: Scratch,
     /// Where what it makes goes, if it does not all go to `sent_to`.
     routed: Option<Routed>,
+    /// The notes and controllers that its first synthesizer plays (phase 13: those of the MIDI clips that it hears and that the plan says it plays), in samples from the start of the sound.
+    events: Vec<TimedNote>,
 }
 
 enum BusState {
@@ -268,6 +273,8 @@ struct GroupNode {
     state: BusState,
     /// The clip that is first heard of those it hears (its strip and its item), which is where its effects begin (see [`GroupRequest`]).
     first_clip: Option<(usize, usize)>,
+    /// The notes and controllers that its first synthesizer plays (see `Bus::events`).
+    events: Vec<TimedNote>,
 }
 
 struct Item {
@@ -281,6 +288,8 @@ struct Item {
     kind: ItemKind,
     /// Where what it makes goes, if it does not all go to `sent_to`.
     routed: Option<Routed>,
+    /// For a MIDI clip whose own effects have the synthesizer that plays its notes: the notes and controllers, in samples from the start of the sound. Empty for the others.
+    events: Vec<TimedNote>,
 }
 
 impl Item {
@@ -343,7 +352,7 @@ impl Live {
 
     /// Gives the effects, before the first sample of the clip is made, as many samples of the feed as their latency in all, and throws away what comes out: the sound that comes out
     /// of them from then on is the sound of the clip, where it is. (The effects are given silence after the end of the feed, so the last samples of the clip come out too.)
-    fn make_up_for_the_latency(&mut self) {
+    fn make_up_for_the_latency(&mut self, events: &[TimedNote], item_start: u64) {
         if std::mem::replace(&mut self.has_made_up_for_the_latency, true) {
             return;
         }
@@ -357,6 +366,8 @@ impl Live {
             let given = self.feed.read(&mut left, &mut right);
             self.feed_has_ended = given < latency;
         }
+        // (The samples that make up for the latency are the sound from the start of the clip on: the notes are those of the same stretch.)
+        give_the_notes_of_the_block(&mut self.processors, events, item_start, latency);
         for processor in &mut self.processors {
             processor.process(&mut left, &mut right);
         }
@@ -437,6 +448,7 @@ impl SoundGraph {
                             tail,
                             kind,
                             routed,
+                            events: Vec::new(),
                         }
                     })
                     .collect();
@@ -485,6 +497,7 @@ impl SoundGraph {
                             state: BusState::Waiting,
                             input: Scratch::default(),
                             routed,
+                            events: Vec::new(),
                         }
                     })
                     .collect();
@@ -502,7 +515,9 @@ impl SoundGraph {
                 }
             })
             .collect();
-        let groups = groups_of(&specification, &strips);
+        let mut strips = strips;
+        let mut groups = groups_of(&specification, &strips);
+        give_the_synthesizers_their_notes(&specification, &mut strips, &mut groups);
         Self {
             total_samples: sample_at_frame(frame_rate, specification.total_frame_count),
             lead_in_samples: sample_at_frame(frame_rate, specification.lead_in_frames),
@@ -646,11 +661,14 @@ impl SoundGraph {
             // (The sound that goes in is `ahead` samples later than the sound that comes out is.)
             let mut input = self.take_a_buffer(length);
             self.render_what_goes_to(Some(number), (first + ahead, last + ahead), &mut input);
+            let events = std::mem::take(&mut self.groups[number].events);
             if let BusState::Running(running) = &mut self.groups[number].state {
+                give_the_notes_of_the_block(&mut running.processors, &events, first + ahead, length);
                 for processor in &mut running.processors {
                     processor.process(&mut input.left[..length], &mut input.right[..length]);
                 }
             }
+            self.groups[number].events = events;
             out.add_at((first - from) as usize, &input, length);
             self.give_back(input);
         }
@@ -694,6 +712,7 @@ impl SoundGraph {
             // (What the effects are given before they make the first sample that is heard: the sound that comes out of them from then on is where it is.)
             let mut input = self.take_a_buffer(ahead);
             self.render_what_goes_to(Some(number), (first, first + ahead as u64), &mut input);
+            give_the_notes_of_the_block(&mut running.processors, &self.groups[number].events, first, ahead);
             for processor in &mut running.processors {
                 processor.process(&mut input.left[..ahead], &mut input.right[..ahead]);
             }
@@ -953,6 +972,7 @@ fn start_the_bus(
             (first, first + ahead as u64),
             (&mut input, everything.work),
         );
+        give_the_notes_of_the_block(&mut running.processors, &strip.buses[bus_number].events, first, ahead);
         for processor in &mut running.processors {
             processor.process(&mut input.left[..ahead], &mut input.right[..ahead]);
         }
@@ -975,6 +995,7 @@ fn run_the_bus(
     let (first_item, last_item) = (strip.buses[bus_number].first_item, strip.buses[bus_number].last_item);
     let length = (last - first) as usize;
     let mut input = std::mem::take(&mut strip.buses[bus_number].input);
+    let events = std::mem::take(&mut strip.buses[bus_number].events);
     let mut made_any = false;
     if let BusState::Running(running) = &mut strip.buses[bus_number].state {
         input.silent_for(length);
@@ -989,6 +1010,7 @@ fn run_the_bus(
             (first + running.ahead, last + running.ahead),
             (&mut input, everything.work),
         );
+        give_the_notes_of_the_block(&mut running.processors, &events, first + running.ahead, length);
         for processor in &mut running.processors {
             processor.process(&mut input.left[..length], &mut input.right[..length]);
         }
@@ -1001,7 +1023,66 @@ fn run_the_bus(
         made_any = true;
     }
     strip.buses[bus_number].input = input;
+    strip.buses[bus_number].events = events;
     made_any
+}
+
+/// Where the events of the music of a MIDI clip go: to the synthesizer among its own effects, to the one among the effects of the instance of its track that hears it, or to the one among those of
+/// a group (see `NoteConsumer`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum WhoPlays {
+    Item(usize, usize),
+    Bus(usize, usize),
+    Group(usize),
+}
+
+/// Makes the list of events that the synthesizer of each chain plays, in samples from the start of the sound, from the music of the MIDI clips that the plan says it plays (phase 13, piece 13.4):
+/// every consumer has its own list in order of time, with the notes numbered from 0.
+fn give_the_synthesizers_their_notes(
+    specification: &SoundGraphSpecification,
+    strips: &mut [Strip],
+    groups: &mut [GroupNode],
+) {
+    let mut collected: HashMap<WhoPlays, (Vec<TimedNote>, u32)> = HashMap::new();
+    for (strip_number, strip) in specification.strips.iter().enumerate() {
+        for (item_number, item) in strip.items.iter().enumerate() {
+            let SoundItemToExport::Clip(clip) = item else {
+                continue;
+            };
+            let Some(music) = &clip.music else {
+                continue;
+            };
+            let (start, length) = {
+                let built = &strips[strip_number].items[item_number];
+                (built.start, built.end - built.start)
+            };
+            let who = match music.consumer {
+                NoteConsumer::Clip => Some(WhoPlays::Item(strip_number, item_number)),
+                NoteConsumer::Bus => strips[strip_number].bus_of_item[item_number]
+                    .map(|bus_number| WhoPlays::Bus(strip_number, bus_number)),
+                NoteConsumer::Group(group) => {
+                    assert!(
+                        group < groups.len(),
+                        "a clip's notes are played by a group that is there"
+                    );
+                    Some(WhoPlays::Group(group))
+                }
+                NoteConsumer::Nobody => None,
+            };
+            if let Some(who) = who {
+                let (events, next_id) = collected.entry(who).or_insert_with(|| (Vec::new(), 0));
+                events.extend(events_of(music, start, length, next_id));
+            }
+        }
+    }
+    for (who, (mut events, _)) in collected {
+        put_in_order(&mut events);
+        match who {
+            WhoPlays::Item(strip, item) => strips[strip].items[item].events = events,
+            WhoPlays::Bus(strip, bus) => strips[strip].buses[bus].events = events,
+            WhoPlays::Group(group) => groups[group].events = events,
+        }
+    }
 }
 
 /// The groups of the specification as the graph has them: where each hears from and until, and the first clip it hears.
@@ -1090,6 +1171,7 @@ fn groups_of(specification: &SoundGraphSpecification, strips: &[Strip]) -> Vec<G
             end: 0,
             state: BusState::Waiting,
             first_clip: first_clips[group],
+            events: Vec::new(),
         })
         .collect();
     for group in innermost_first {
@@ -1168,15 +1250,28 @@ fn render_the_item(
         item: number,
         clip,
     };
+    let is_music = clip.music.is_some();
     let live = slot.get_or_insert_with(|| Live {
-        feed: feeds.open(&request),
+        // (A MIDI clip has no file and no sound from before it: what is heard of it is its synthesizer's.)
+        feed: if is_music {
+            Box::new(SilentFeed)
+        } else {
+            feeds.open(&request)
+        },
         processors: insertions.for_clip(&request),
         feed_has_ended: false,
         has_made_up_for_the_latency: false,
-        pre_roll_samples: pre_roll_samples_of(specification.frame_rate, clip),
+        pre_roll_samples: if is_music {
+            0
+        } else {
+            pre_roll_samples_of(specification.frame_rate, clip)
+        },
     });
-    live.make_up_for_the_latency();
+    live.make_up_for_the_latency(&item.events, item_start);
     let length = (last - first) as usize;
+    // (The effects are given their sound ahead by what they delay it: the notes that the sound has `first + latency` samples in are the ones for the synthesizer among them.)
+    let latency: usize = live.processors.iter().map(|processor| processor.latency()).sum();
+    give_the_notes_of_the_block(&mut live.processors, &item.events, first + latency as u64, length);
     work.silent_for(length);
     // (The first part is the clip itself, which its feed gives; what comes after it, while its effects ring on, is the effects given silence.)
     let of_the_clip = (item_end.saturating_sub(first)).min(last - first) as usize;

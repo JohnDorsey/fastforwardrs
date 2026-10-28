@@ -83,6 +83,9 @@ pub struct SoundClipToExport {
     /// Where the sound that the effects of the clip go on making after it ends goes, from some frame on (phase 12, piece 12.3d; see `crate::composition::TailRoute`). Empty: it
     /// goes where the clip does. Only for a clip that is not heard by an instance of its track's effects (the instance has the routes then).
     pub tail_routes: Vec<crate::composition::TailRoute>,
+    /// For a MIDI clip (phase 13): the notes and controllers for the synthesizer that plays them, and which one it is (see `crate::composition::Music`). **Such a clip has no file**: `source_input` means
+    /// nothing for it (it is 0), the sound of the clip itself is silence, and the filter graph of ffmpeg makes silence of it; the sound engine plays its notes.
+    pub music: Option<Box<crate::composition::Music>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -158,7 +161,10 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
     let mut clip_numbers_using_each_source: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     let mut next_clip_number = 0;
     for item in specification.strips.iter().flat_map(|strip| &strip.items) {
-        if let SoundItemToExport::Clip(clip) = item {
+        // (A MIDI clip has no file: it is silence here.)
+        if let SoundItemToExport::Clip(clip) = item
+            && clip.music.is_none()
+        {
             clip_numbers_using_each_source
                 .entry(clip.source_input)
                 .or_default()
@@ -186,9 +192,15 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
     for (strip_number, strip) in specification.strips.iter().enumerate() {
         let item_labels = numbered_labels(&format!("strip_{strip_number}_item"), strip.items.len());
         for (item, item_label) in strip.items.iter().zip(&item_labels) {
+            // (A MIDI clip has no sound of its own: the plain sum of the filter graph hears silence of it.)
+            let silent_for = match item {
+                SoundItemToExport::Silence { frame_count } => Some(*frame_count),
+                SoundItemToExport::Clip(clip) if clip.music.is_some() => Some(clip.timeline_frame_count),
+                SoundItemToExport::Clip(_) => None,
+            };
             match item {
-                SoundItemToExport::Silence { frame_count } => {
-                    let length = format_seconds(frame_rate.seconds_at_frame(*frame_count));
+                _ if silent_for.is_some() => {
+                    let length = format_seconds(frame_rate.seconds_at_frame(silent_for.unwrap_or(0)));
                     statements.push(statement(
                         &[],
                         &format!(
@@ -197,6 +209,7 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
                         &[item_label],
                     ));
                 }
+                SoundItemToExport::Silence { .. } => {}
                 SoundItemToExport::Clip(clip) => {
                     statements.extend(clip_statements(
                         frame_rate,

@@ -118,6 +118,40 @@ pub fn a_midi_file() -> std::sync::Arc<[u8]> {
     std::sync::Arc::from(file)
 }
 
+/// A Standard MIDI File of one track with these notes, each `(start in milliseconds, end in milliseconds, key)`, on the first channel, at the velocity 100: a tick is a millisecond (a thousand
+/// ticks to a quarter note, a second a quarter note), so that the times in the file are the numbers given.
+pub fn a_midi_file_with_notes(notes: &[(u32, u32, u8)]) -> std::sync::Arc<[u8]> {
+    // (Each as an event at a tick: a note off sorts before a note on at the same tick.)
+    let mut events: Vec<(u32, u8, [u8; 3])> = Vec::new();
+    for &(start, end, key) in notes {
+        events.push((start, 1, [0x90, key, 100]));
+        events.push((end, 0, [0x80, key, 64]));
+    }
+    events.sort();
+    let mut body = vec![0x00, 0xFF, 0x51, 0x03, 0x0F, 0x42, 0x40];
+    let mut tick = 0_u32;
+    for (at, _, bytes) in events {
+        let mut delta = at - tick;
+        tick = at;
+        // (A number that is seven bits to a byte, the last without the high bit.)
+        let mut number = vec![(delta & 0x7F) as u8];
+        delta >>= 7;
+        while delta > 0 {
+            number.push((delta & 0x7F) as u8 | 0x80);
+            delta >>= 7;
+        }
+        number.reverse();
+        body.extend(number);
+        body.extend_from_slice(&bytes);
+    }
+    body.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
+    let mut file = b"MThd\0\0\0\x06\0\0\0\x01\x03\xE8".to_vec();
+    file.extend_from_slice(b"MTrk");
+    file.extend_from_slice(&u32::try_from(body.len()).expect("a short track").to_be_bytes());
+    file.extend_from_slice(&body);
+    std::sync::Arc::from(file)
+}
+
 /// A Standard MIDI File like [`a_midi_file`] whose track has the name `name` (a name of at most 127 bytes).
 pub fn a_midi_file_whose_track_is_called(name: &str) -> std::sync::Arc<[u8]> {
     let mut body = vec![0x00, 0xFF, 0x03, u8::try_from(name.len()).expect("a short name")];

@@ -250,6 +250,7 @@ fn a_specification(
                         effects: Vec::new(),
                         sent_to: None,
                         tail_routes: Vec::new(),
+                        music: None,
                     })
                 })
                 .collect();
@@ -408,6 +409,7 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
                 effects: Vec::new(),
                 sent_to: None,
                 tail_routes: Vec::new(),
+                music: None,
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -638,6 +640,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     effects: Vec::new(),
                     sent_to: None,
                     tail_routes: Vec::new(),
+                    music: None,
                 }),
                 SoundItemToExport::Clip(SoundClipToExport {
                     source_input: 1,
@@ -651,6 +654,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     effects: Vec::new(),
                     sent_to: None,
                     tail_routes: Vec::new(),
+                    music: None,
                 }),
             ],
             buses: Vec::new(),
@@ -880,6 +884,7 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
                 effects: Vec::new(),
                 sent_to: None,
                 tail_routes: Vec::new(),
+                music: None,
             })],
             buses: Vec::new(),
             loudness: Default::default(),

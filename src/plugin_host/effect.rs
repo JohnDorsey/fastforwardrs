@@ -523,6 +523,10 @@ impl BlockProcessor for PluginEffect {
         self.samples_before_the_clip = samples as u64;
     }
 
+    fn plays_notes(&self) -> bool {
+        self.layout.is_a_source()
+    }
+
     fn give_notes(&mut self, notes: &[NoteEvent]) {
         // (Only a synthesizer hears notes: an effect lets them go.)
         if self.layout.is_a_source() {

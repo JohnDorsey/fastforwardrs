@@ -49,7 +49,7 @@ fn items(strip: &SoundStrip) -> Vec<ItemSummary> {
             SoundItem::Clip(clip) => (
                 clip.timeline_frame_count,
                 Some((
-                    clip.source.value(),
+                    clip.source.expect("a clip of a file").value(),
                     clip.first_source_frame,
                     clip.end_source_frame,
                     clip.speed.value(),

@@ -114,6 +114,7 @@ fn specification_of_a_second_with(effects: Vec<LayerEffect>) -> SoundGraphSpecif
                 effects,
                 sent_to: None,
                 tail_routes: Vec::new(),
+                music: None,
             })],
             buses: Vec::new(),
             loudness: Default::default(),

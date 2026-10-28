@@ -117,6 +117,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 effects,
                 sent_to: None,
                 tail_routes: Vec::new(),
+                music: None,
             })],
             buses: Vec::new(),
             loudness: Default::default(),

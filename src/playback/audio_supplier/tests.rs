@@ -427,6 +427,7 @@ fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
             effects: Vec::new(),
             sent_to: None,
             tail_routes: Vec::new(),
+            music: None,
         })]
     );
     assert_eq!(request.sound.sped_up_clip_sound, SpedUpClipSound::Mute);

@@ -13,10 +13,11 @@ use std::collections::BTreeSet;
 
 use std::collections::HashMap;
 
+pub use self::music::{Music, NoteConsumer, PlannedControl, PlannedNote, StretchOfMusic, music_of_a_stretch};
 use self::tail_routes::{Emitter, GroupGeometry, tail_routes_of, window_routes_of};
 pub use self::tail_routes::{TailDestination, TailRoute};
 use super::pictures::{LayerEffect, layer_effect_of};
-use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, Track, TrackId};
+use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, MidiClip, Track, TrackId};
 use crate::project::{
     AnimationTarget, AppliedEffect, EffectDomain, FrameRate, GroupId, Member, Project, PropertyId, ResolvedAnimations,
     SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex, TrackSharing,
@@ -68,7 +69,8 @@ impl Loudness {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundClip {
     pub clip: ClipId,
-    pub source: SourceMediaIdentifier,
+    /// The file whose sound it is. **`None` for a MIDI clip** (phase 13), which has no sound of its own: see `music`.
+    pub source: Option<SourceMediaIdentifier>,
     /// The frame of the timeline at which this stretch of the clip is first heard. (The frames of the keyframes of its effects are frames of the timeline.)
     pub first_timeline_frame: u64,
     /// How many frames of the timeline the clip was heard for before this stretch of it begins: the stretches of it that came before, or the part that a seek skipped. **It is
@@ -98,6 +100,10 @@ pub struct SoundClip {
     /// Where the sound that its effects go on making after it ends goes, from some frame on (phase 12, piece 12.3d: the tail policies of the clip and of the groups it is in; see
     /// `tail_routes`). Empty: it goes where the clip does. Only for a clip that is not heard by an instance of its track's effects (the instance has the routes then, see `SoundBus`).
     pub tail_routes: Vec<TailRoute>,
+    /// For a MIDI clip: the notes and controllers that a synthesizer is to play over this stretch of it, and which synthesizer (phase 13, piece 13.4; the sound of the clip itself is silence, and its effects
+    /// and its volume are as for any clip, which is what the synthesizer's sound goes through). `None` for a clip of a file.
+    /// (Boxed: a clip of sound is much the more common, and `SoundItem` should not be as large as the music makes it.)
+    pub music: Option<Box<Music>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -315,7 +321,11 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> Groups
             .filter(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
             .map(|applied| layer_effect_of(project, animations, applied))
             .collect();
-        if effects.iter().any(|effect| effect.kind.is_installed()) {
+        // (A synthesizer that is not installed makes the group a node too: it takes the notes of what is in the group, and plays nothing.)
+        if effects
+            .iter()
+            .any(|effect| effect.kind.is_installed() || is_a_synthesizer(effect))
+        {
             places.insert(group.id(), groups.len());
             groups.push(SoundGroup {
                 group: group.id(),
@@ -455,6 +465,52 @@ fn strip_of(
     let mut shared_effects: Vec<Option<Vec<LayerEffect>>> = Vec::new();
     let mut next_frame = from;
     for placement in track.placements() {
+        if let Some(midi) = placement.clip.as_midi() {
+            let end = placement.end_timeline_frame.value();
+            if end <= from {
+                continue;
+            }
+            let start = placement.first_timeline_frame.value().max(from);
+            push_silence(&mut items, start - next_frame);
+            shared_effects.resize(items.len(), None);
+            // (A clip whose file is not in the project, is not music, or has not the track that the clip plays is silent, as a clip of a file that is not there is.)
+            let the_music = project
+                .resources()
+                .get(midi.resource())
+                .and_then(|resource| resource.midi_file().ok())
+                .filter(|file| usize::from(midi.midi_track()) < file.tracks.len());
+            match the_music {
+                Some(file) => {
+                    let track_of_the_file = &file.tracks[usize::from(midi.midi_track())];
+                    for stretch in stretches_heard_or_not(animations, &placement, midi.is_muted(), start, end) {
+                        if stretch.is_heard {
+                            let (own, shared) = effects_of_a_clip(project, animations, effects, track, placement.id);
+                            shared_effects.resize(items.len(), None);
+                            items.push(SoundItem::Clip(music_clip_over(
+                                project,
+                                animations,
+                                own,
+                                &placement,
+                                midi,
+                                track_of_the_file,
+                                (stretch.first_frame, stretch.end_frame),
+                                groups.sent_to.get(&placement.id).copied(),
+                            )));
+                            shared_effects.push(shared);
+                        } else {
+                            push_silence(&mut items, stretch.end_frame - stretch.first_frame);
+                            shared_effects.resize(items.len(), None);
+                        }
+                    }
+                }
+                None => {
+                    push_silence(&mut items, end - start);
+                    shared_effects.resize(items.len(), None);
+                }
+            }
+            next_frame = end;
+            continue;
+        }
         let Some(media) = placement.clip.as_media() else {
             continue;
         };
@@ -471,7 +527,7 @@ fn strip_of(
             .is_some_and(|source| source.properties.has_sound())
             && is_usable(media.source());
         if has_sound {
-            for stretch in stretches_heard_or_not(animations, &placement, media, start, end) {
+            for stretch in stretches_heard_or_not(animations, &placement, media.is_muted(), start, end) {
                 if stretch.is_heard {
                     let (own, shared) = effects_of_a_clip(project, animations, effects, track, placement.id);
                     shared_effects.resize(items.len(), None);
@@ -509,6 +565,7 @@ fn strip_of(
         track.sharing().sound,
     );
     give_the_rings_their_routes(project, groups, track, &mut items, &mut buses);
+    give_the_music_its_consumers(groups, &mut items, &buses);
     let strip_frames: u64 = items.iter().map(SoundItem::timeline_frame_count).sum();
     let muted = muted_stretches_of_the_track(animations, track, from, from + strip_frames);
     // (A track that is muted all the way through makes no sound whatever its effects remember: it has no strip.)
@@ -736,12 +793,12 @@ struct Stretch {
 fn stretches_heard_or_not(
     animations: &ResolvedAnimations,
     placement: &ClipPlacement<'_>,
-    media: &MediaClip,
+    is_muted: bool,
     start: u64,
     end: u64,
 ) -> Vec<Stretch> {
     let clip_animation = animations.of(AnimationTarget::Clip(placement.id));
-    let is_heard_at = |frame: u64| !clip_animation.is_muted_at(media.is_muted(), frame);
+    let is_heard_at = |frame: u64| !clip_animation.is_muted_at(is_muted, frame);
     // The switch only turns at a keyframe, and what is between two is what the earlier one says.
     let frames_it_may_turn_at: BTreeSet<u64> = clip_animation
         .keyframes_of(PropertyId::Muted)
@@ -785,7 +842,7 @@ fn sound_clip_over(
     let first_source_frame = media.first_source_frame().value() + frames_cut_off_the_start * speed;
     SoundClip {
         clip: placement.id,
-        source: media.source(),
+        source: Some(media.source()),
         first_timeline_frame: first_frame,
         frames_of_the_clip_before: frames_cut_off_the_start,
         first_source_frame,
@@ -795,10 +852,104 @@ fn sound_clip_over(
             .min(first_source_frame + (end_frame - first_frame) * speed),
         speed: placement.effective_speed,
         timeline_frame_count: end_frame - first_frame,
-        loudness: loudness_over(animations, placement, media, first_frame, end_frame),
+        loudness: loudness_over(animations, placement, media.gain(), first_frame, end_frame),
         effects,
         sent_to,
         tail_routes: Vec::new(),
+        music: None,
+    }
+}
+
+/// The sound of the MIDI clip `placement` that is heard from `first_frame` up to `end_frame` of the timeline: no sound of its own, and the notes of its track of the file in that stretch for the
+/// synthesizer that plays them (which it is is told by [`give_the_music_its_consumers`], once the buses and the groups are known).
+#[allow(clippy::too_many_arguments)]
+fn music_clip_over(
+    project: &Project,
+    animations: &ResolvedAnimations,
+    effects: Vec<LayerEffect>,
+    placement: &ClipPlacement<'_>,
+    midi: &MidiClip,
+    track_of_the_file: &crate::midi_file::MidiTrack,
+    (first_frame, end_frame): (u64, u64),
+    sent_to: Option<usize>,
+) -> SoundClip {
+    let speed = u64::from(placement.effective_speed.value());
+    let frames_cut_off_the_start = first_frame - placement.first_timeline_frame.value();
+    let first_source_frame = midi.first_source_frame().value() + frames_cut_off_the_start * speed;
+    let end_source_frame = midi
+        .end_source_frame()
+        .value()
+        .min(first_source_frame + (end_frame - first_frame) * speed);
+    let (notes, controls) = music_of_a_stretch(
+        track_of_the_file,
+        StretchOfMusic {
+            frame_rate: project.frame_rate(),
+            clip_first_source_frame: midi.first_source_frame().value(),
+            first_source_frame,
+            end_source_frame,
+            speed: placement.effective_speed.value(),
+        },
+    );
+    SoundClip {
+        clip: placement.id,
+        source: None,
+        first_timeline_frame: first_frame,
+        frames_of_the_clip_before: frames_cut_off_the_start,
+        first_source_frame,
+        end_source_frame,
+        speed: placement.effective_speed,
+        timeline_frame_count: end_frame - first_frame,
+        loudness: loudness_over(animations, placement, midi.gain(), first_frame, end_frame),
+        effects,
+        sent_to,
+        tail_routes: Vec::new(),
+        music: Some(Box::new(Music {
+            notes,
+            controls,
+            consumer: NoteConsumer::Nobody,
+        })),
+    }
+}
+
+/// Whether the effect is a synthesizer: **it plays the notes that reach it, installed or not** (one that is not installed makes no sound and still takes the notes, so that a project does not
+/// play its notes with another synthesizer where this one is missing).
+fn is_a_synthesizer(effect: &LayerEffect) -> bool {
+    effect.kind.makes_sound_from_notes()
+}
+
+/// Says which synthesizer plays the notes of each MIDI clip of a strip: **the first of the chains that the notes go through that has one**: the effects of the clip itself, then the instance of the
+/// track's effects that hears the clip, then the effects of the groups the clip is sent to, from the nearest out (see 13.4 of docs/engine-phase-13-midi-design.md). A clip with none on its road has no
+/// one to play it.
+fn give_the_music_its_consumers(groups: &GroupsOfTheSound, items: &mut [SoundItem], buses: &[SoundBus]) {
+    for (place, item) in items.iter_mut().enumerate() {
+        let SoundItem::Clip(clip) = item else {
+            continue;
+        };
+        if clip.music.is_none() {
+            continue;
+        }
+        let consumer = if clip.effects.iter().any(is_a_synthesizer) {
+            NoteConsumer::Clip
+        } else if buses
+            .iter()
+            .any(|bus| bus.first_item <= place && place <= bus.last_item && bus.effects.iter().any(is_a_synthesizer))
+        {
+            NoteConsumer::Bus
+        } else {
+            let mut group = clip.sent_to;
+            let mut found = NoteConsumer::Nobody;
+            while let Some(number) = group {
+                if groups.nodes[number].effects.iter().any(is_a_synthesizer) {
+                    found = NoteConsumer::Group(number);
+                    break;
+                }
+                group = groups.nodes[number].parent;
+            }
+            found
+        };
+        if let Some(music) = &mut clip.music {
+            music.consumer = consumer;
+        }
     }
 }
 
@@ -807,13 +958,13 @@ fn sound_clip_over(
 fn loudness_over(
     animations: &ResolvedAnimations,
     placement: &ClipPlacement<'_>,
-    media: &MediaClip,
+    gain: Gain,
     first_frame: u64,
     end_frame: u64,
 ) -> Loudness {
     loudness_between(
         animations.of(AnimationTarget::Clip(placement.id)),
-        media.gain(),
+        gain,
         first_frame,
         end_frame,
         first_frame,
@@ -909,6 +1060,7 @@ fn push_silence(items: &mut Vec<SoundItem>, frame_count: u64) {
     }
 }
 
+mod music;
 mod tail_routes;
 
 #[cfg(test)]
@@ -919,6 +1071,8 @@ mod buses_tests;
 mod effects_tests;
 #[cfg(test)]
 mod groups_tests;
+#[cfg(test)]
+mod music_clip_tests;
 #[cfg(test)]
 mod sharing_tests;
 #[cfg(test)]

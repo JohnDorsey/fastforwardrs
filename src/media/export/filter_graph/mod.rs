@@ -123,6 +123,7 @@ mod tests {
             effects: Vec::new(),
             sent_to: None,
             tail_routes: Vec::new(),
+            music: None,
         })
     }
 

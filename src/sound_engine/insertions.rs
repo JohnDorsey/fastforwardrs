@@ -30,6 +30,12 @@ pub trait BlockProcessor: Send {
     /// Said before a call of [`Self::process`]: the notes that reach it in the block that it is about to be given, each at the sample of the block that it is at (phase 13). A synthesizer plays
     /// them; **any other effect lets them go** (it does not hear them). The notes are not kept after the block.
     fn give_notes(&mut self, _notes: &[crate::sound_engine::NoteEvent]) {}
+
+    /// Whether this plays the notes that reach a chain it is in (a synthesizer; or what stands in for one that is not installed, which plays nothing and takes the notes). **The graph gives the
+    /// notes of a chain to the first processor of it that does** (phase 13, piece 13.4).
+    fn plays_notes(&self) -> bool {
+        false
+    }
 }
 
 /// What gives the graph the effects of a clip, of a track and of a group. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a
