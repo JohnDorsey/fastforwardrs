@@ -52,8 +52,8 @@ failed=$(grep -E '^test .* FAILED$' "$log" | head -n 40)
 said=$(grep -A8 -E '^---- .* stdout ----$' "$log" | cut -c1-300 | head -n 60)
 # (When no test is named as failed, the command itself ended badly: a program of tests killed or aborted, a build that failed. Its last lines say how.)
 if [ -z "$failed" ] && [ -z "$said" ]; then
-    failed="no test is named as failed; the last lines of what the command printed:"
-    said=$(tail -n 40 "$log" | cut -c1-300)
+    failed="no test is named as failed; what the command printed about how it ended (and its last lines):"
+    said=$( { grep -n -B3 -A6 -E "process didn't exit|signal:|overflowed its stack|fatal runtime error|SIGSEGV|SIGABRT|SIGKILL|Killed|Caused by|out of memory|memory allocation|error: test failed" "$log" | head -n 40; echo '--- the last lines:'; tail -n 15 "$log"; } | cut -c1-300)
 fi
 annotate "$(printf '%s\n\n%s' "$failed" "$said" | head -c 3500)" "$level" "$title"
 if [ "$level" = "warning" ]; then
