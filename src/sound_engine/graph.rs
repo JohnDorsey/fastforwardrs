@@ -7,6 +7,7 @@ use super::feed::{ClipFeed, ClipFeeds, ClipRequest};
 use super::gain::GainCurve;
 use super::insertions::{BlockProcessor, BusRequest, Insertions};
 use super::position::{pre_roll_samples_of, sample_at_frame};
+use crate::composition::tail_samples_of_a_chain;
 use crate::media::export::{SoundGraphSpecification, SoundItemToExport};
 
 /// The sound of a project, made a block at a time (see the top of this module's parent for what it does). It is given the specification once, and asked for the sound from
@@ -19,6 +20,8 @@ pub struct SoundGraph {
     total_samples: u64,
     position: u64,
     scratch: Scratch,
+    /// Where the sound of one item is made before it is added to what is there (items that ring on overlap the ones after them).
+    work: Scratch,
 }
 
 /// The sound of one strip while a block is made, before it is added to the others.
@@ -55,7 +58,7 @@ struct Strip {
 struct Bus {
     first_item: usize,
     last_item: usize,
-    /// The first sample of the first item, and the sample just after the last of the last.
+    /// The first sample of the first item, and the sample just after the last that it makes: the last item has rung on, and the effects of the bus after it.
     start: u64,
     end: u64,
     state: BusState,
@@ -81,7 +84,16 @@ struct Item {
     /// The first sample of the item, and the sample just after its last.
     start: u64,
     end: u64,
+    /// How many samples its effects go on making sound after it (phase 12: the tails of its own effects, added up).
+    tail: u64,
     kind: ItemKind,
+}
+
+impl Item {
+    /// The sample just after the last that the item makes: its effects have rung on.
+    fn rings_until(&self) -> u64 {
+        self.end + self.tail
+    }
 }
 
 enum ItemKind {
@@ -184,14 +196,17 @@ impl SoundGraph {
                         let start = sample_at_frame(frame_rate, frames_before);
                         frames_before += frames;
                         let end = sample_at_frame(frame_rate, frames_before);
-                        let kind = match item {
-                            SoundItemToExport::Silence { .. } => ItemKind::Silence,
-                            SoundItemToExport::Clip(clip) => ItemKind::Clip {
-                                gain: GainCurve::new(&clip.loudness, frame_rate),
-                                live: None,
-                            },
+                        let (kind, tail) = match item {
+                            SoundItemToExport::Silence { .. } => (ItemKind::Silence, 0),
+                            SoundItemToExport::Clip(clip) => (
+                                ItemKind::Clip {
+                                    gain: GainCurve::new(&clip.loudness, frame_rate),
+                                    live: None,
+                                },
+                                tail_samples_of_a_chain(&clip.effects),
+                            ),
                         };
-                        Item { start, end, kind }
+                        Item { start, end, tail, kind }
                     })
                     .collect();
                 let mut bus_of_item = vec![None; items.len()];
@@ -208,11 +223,16 @@ impl SoundGraph {
                             assert!(heard_by.is_none(), "an item is heard by one bus at most");
                             *heard_by = Some(bus_number);
                         }
+                        let rings_on_until = items[bus.first_item..=bus.last_item]
+                            .iter()
+                            .map(Item::rings_until)
+                            .max()
+                            .unwrap_or(0);
                         Bus {
                             first_item: bus.first_item,
                             last_item: bus.last_item,
                             start: items[bus.first_item].start,
-                            end: items[bus.last_item].end,
+                            end: rings_on_until + tail_samples_of_a_chain(&bus.effects),
                             state: BusState::Waiting,
                             input: Scratch::default(),
                         }
@@ -235,6 +255,7 @@ impl SoundGraph {
             strips,
             position: 0,
             scratch: Scratch::default(),
+            work: Scratch::default(),
         }
     }
 
@@ -286,10 +307,11 @@ impl SoundGraph {
             feeds,
             insertions,
             strips,
+            work,
             ..
         } = self;
         let strip = &mut strips[strip_number];
-        while strip.current < strip.items.len() && strip.items[strip.current].end <= from {
+        while strip.current < strip.items.len() && strip.items[strip.current].rings_until() <= from {
             strip.current += 1;
         }
         // The instances of the effects of the track that are first heard in this block are made, and given the sound that makes up for their latency.
@@ -330,7 +352,7 @@ impl SoundGraph {
                         feeds,
                         insertions,
                         (first, first + ahead as u64),
-                        &mut input,
+                        (&mut input, work),
                     );
                     for processor in &mut running.processors {
                         processor.process(&mut input.left[..ahead], &mut input.right[..ahead]);
@@ -342,9 +364,9 @@ impl SoundGraph {
         // The items that no instance hears, made where they are.
         let mut number = strip.current;
         while number < strip.items.len() && strip.items[number].start < to {
-            if strip.bus_of_item[number].is_none() {
-                let item = &mut strip.items[number];
-                let (first, last) = (item.start.max(from), item.end.min(to));
+            let item = &mut strip.items[number];
+            let (first, last) = (item.start.max(from), item.rings_until().min(to));
+            if strip.bus_of_item[number].is_none() && first < last {
                 let offset = (first - from) as usize;
                 let length = (last - first) as usize;
                 render_the_item(
@@ -355,6 +377,7 @@ impl SoundGraph {
                     feeds,
                     insertions,
                     (first, last),
+                    work,
                     &mut scratch.left[offset..offset + length],
                     &mut scratch.right[offset..offset + length],
                 );
@@ -382,7 +405,7 @@ impl SoundGraph {
                         feeds,
                         insertions,
                         (first + running.ahead, last + running.ahead),
-                        &mut input,
+                        (&mut input, work),
                     );
                     for processor in &mut running.processors {
                         processor.process(&mut input.left[..length], &mut input.right[..length]);
@@ -425,8 +448,9 @@ impl SoundGraph {
     }
 }
 
-/// Makes the sound of item `number` of strip `strip_number` from sample `first` to sample `last` (not including it), which is in the item, into `left` and `right` (which are as
-/// long as that, and are added to: they are silent when they are given). A silence makes nothing.
+/// Makes the sound of item `number` of strip `strip_number` from sample `first` to sample `last` (not including it), which is in the item **or in the time its effects ring on after
+/// it**, and **adds** it to `left` and `right` (which are as long as that: what is in them is the sound of other items, which ring on over this one). A silence makes nothing. `work`
+/// is where it is made before it is added.
 #[allow(clippy::too_many_arguments)]
 fn render_the_item(
     strip_number: usize,
@@ -436,9 +460,11 @@ fn render_the_item(
     feeds: &mut Box<dyn ClipFeeds + Send>,
     insertions: &mut Box<dyn Insertions + Send>,
     (first, last): (u64, u64),
+    work: &mut Scratch,
     left: &mut [f32],
     right: &mut [f32],
 ) {
+    let (item_start, item_end, rings_until) = (item.start, item.end, item.rings_until());
     let ItemKind::Clip { gain, live: slot } = &mut item.kind else {
         return;
     };
@@ -458,16 +484,28 @@ fn render_the_item(
         pre_roll_samples: pre_roll_samples_of(specification.frame_rate, clip),
     });
     live.make_up_for_the_latency();
-    if !live.feed_has_ended {
-        let given = live.feed.read(left, right);
+    let length = (last - first) as usize;
+    work.silent_for(length);
+    // (The first part is the clip itself, which its feed gives; what comes after it, while its effects ring on, is the effects given silence.)
+    let of_the_clip = (item_end.saturating_sub(first)).min(last - first) as usize;
+    if of_the_clip > 0 && !live.feed_has_ended {
+        let given = live
+            .feed
+            .read(&mut work.left[..of_the_clip], &mut work.right[..of_the_clip]);
         // (What the feed did not give stays silent: the clip is as long as its place on the timeline whatever the file has.)
-        live.feed_has_ended = given < left.len();
+        live.feed_has_ended = given < of_the_clip;
     }
     for processor in &mut live.processors {
-        processor.process(left, right);
+        processor.process(&mut work.left[..length], &mut work.right[..length]);
     }
-    gain.apply(first - item.start, left, right);
-    if last == item.end {
+    gain.apply(first - item_start, &mut work.left[..length], &mut work.right[..length]);
+    for (sum, sample) in left.iter_mut().zip(&work.left[..length]) {
+        *sum += *sample;
+    }
+    for (sum, sample) in right.iter_mut().zip(&work.right[..length]) {
+        *sum += *sample;
+    }
+    if last == rings_until {
         *slot = None;
     }
 }
@@ -483,10 +521,10 @@ fn render_the_items_of_a_bus(
     feeds: &mut Box<dyn ClipFeeds + Send>,
     insertions: &mut Box<dyn Insertions + Send>,
     (from, to): (u64, u64),
-    input: &mut Scratch,
+    (input, work): (&mut Scratch, &mut Scratch),
 ) {
     for (number, item) in items.iter_mut().enumerate().take(last_item + 1).skip(first_item) {
-        let (first, last) = (item.start.max(from), item.end.min(to));
+        let (first, last) = (item.start.max(from), item.rings_until().min(to));
         if first >= last {
             continue;
         }
@@ -500,6 +538,7 @@ fn render_the_items_of_a_bus(
             feeds,
             insertions,
             (first, last),
+            work,
             &mut input.left[offset..offset + length],
             &mut input.right[offset..offset + length],
         );

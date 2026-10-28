@@ -572,6 +572,7 @@ fn clip_with_plugins_that_ask_for(first: u64, end: u64, factor: u32, pre_rolls: 
             values: Vec::new(),
             animation: Animation::default(),
             tables: Vec::new(),
+            tail_length: Default::default(),
         })
         .collect();
     with_effects

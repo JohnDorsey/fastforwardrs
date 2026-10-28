@@ -48,6 +48,7 @@ fn the_effect(kind: EffectKind, values: &[f32]) -> LayerEffect {
         values: values.iter().map(|value| PropertyValue::Number(*value)).collect(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     }
 }
 
@@ -1333,6 +1334,7 @@ fn the_clap_effect(id: &str, values: Vec<PropertyValue>) -> LayerEffect {
         values,
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     }
 }
 
@@ -1564,6 +1566,7 @@ fn a_clap_plugin_that_says_process_failed_is_left_out_and_said_and_the_sound_is_
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     };
 
     let ((left, right, notes), (plain_left, plain_right)) = with_and_without(effect, 3, 512);
@@ -1819,6 +1822,7 @@ fn a_plugin_that_is_left_out_while_it_runs_says_why_on_the_board() {
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     };
     let host = a_host_that_runs_everything();
 
@@ -2140,6 +2144,7 @@ fn a_plugin_whose_start_is_unreliable_says_so_once_in_the_sound_it_is_run_in_and
         values: kind.default_values(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     };
 
     let ((_, _, notes), _) = with_and_without(effect(), 3, 512);

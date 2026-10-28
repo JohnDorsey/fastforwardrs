@@ -27,7 +27,7 @@ use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, Tr
 use crate::project::{
     Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, ImportedPicture,
     Member, PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier,
-    SpeedFactor, TimelineFrameIndex, text_object_of_values,
+    SpeedFactor, TailLength, TimelineFrameIndex, text_object_of_values,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -112,6 +112,9 @@ pub struct LayerEffect {
     /// What its plugin saved of what is not one of its values, if the project has it (see [`crate::project::Effect::state`]): a plugin that is made for the sound is given it before
     /// its values.
     pub state: Option<Arc<[u8]>>,
+    /// How long the effect goes on after its input ends, when its person has said (see [`crate::project::Effect::tail_length`]): a sound plugin that goes on is given silence for that long
+    /// (phase 12).
+    pub tail_length: TailLength,
 }
 
 impl LayerEffect {
@@ -549,6 +552,7 @@ pub(crate) fn layer_effect_of(
         kind,
         values: applied.effect.values().to_vec(),
         state: applied.effect.state().cloned(),
+        tail_length: applied.effect.tail_length(),
         animation,
         tables: kind
             .parameters()

@@ -310,6 +310,17 @@ Each piece: tests first that lock the present behaviour, then the change, then t
   Tests: 8 of the plan (`buses_tests.rs`), 5 of the engine with made-up effects (the state goes on from one clip to the next; made when first heard and let go of after the last sample; any block size; the
   volume before the instance; a latency made up for across clips), and one with the real echo plugin (**one echo that hears two clips sounds as the one clip they were cut from does**, with the other
   sharing as the control); whole library suite 5492 passed, the sound integration programs pass, clippy clean.
+  **12.2c as built (2026-10-28) [V]: tails.** `tail_samples_of` (`composition::sound`, with a test that holds its 48,000 to the engine's `SAMPLE_RATE`): an effect that is a plugin that is installed rings on
+  for what its person said (`None`, or a length: `LayerEffect.tail_length`) and where they said nothing for what the plugin says (the tail of a CLAP plugin, up to two seconds; half a second for LV2; none
+  for LADSPA: `InstalledPlugin.pre_roll_samples`, which was already that); a chain for the tails added up. **The engine**: a clip's chain is given silence for its tail after the clip ends and its
+  `Live` is let go of when the ring ends; a ring overlaps the clips after it, so an item is made in a work buffer and **added**; the volume of the clip is done to the ring too; a bus is heard from its first
+  clip until its last clip has rung on, **and then for the tail of the track's effects**; a ring past the end of the timeline is cut there (the sound is as long as the timeline). **The plan: the gap rule**:
+  a run goes on across a silence that is no longer than the tail of the track's effects (the silence is items of the bus, heard as silence), and a clip that does not share them ends a run. Tests: engine 7
+  (the ring is exactly the effect given silence for its tail and then nothing; it is as loud as the clip and added to the next clip; let go of when it ends; any block size; cut at the end of the
+  sound; a bus rings on for the tail of the track's effects; a clip's own ring goes through the bus), plan 3 (the tails, frames that reach, the gap rule), and with the real echo plugin: it rings
+  on for the tail it says and for no longer, **`None` is the old behaviour (cut where the clip ends)**, a length that was said is the length it rings for, the ring of one clip is added to the start of the
+  next, and **an echo for each clip that rings on and one echo for the run sound the same (an echo is linear: the null test of the design, to 1e-4 with a tail long enough that nothing is left out)**.
+  The two tests that pinned the old cutting were rewritten on purpose. *Not yet: the lead-up (a seek into a ring: 12.2d), the track's volume and mute after the effects (D9: 12.2e).*
 * **12.3 Sound: group effects.** Clip groups and track groups on the sum; the three outcomes, with the fade.
 * **12.4 Sound: per track with windows, and indivisible.**
 * **12.5 Picture: ghost layers, instances, groups with tails, depth.** *Risky: the layer list per frame changes and `nodes_of` with it.*

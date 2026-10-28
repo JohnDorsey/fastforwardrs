@@ -75,6 +75,7 @@ fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
         values: vec![PropertyValue::Number(gain)],
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     }
 }
 
@@ -337,6 +338,7 @@ fn a_clap_plugin_that_delays_the_sound_is_made_up_for_in_the_export_and_in_the_p
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     };
     let (plain, _) = by_the_export(&toolchain, &specification_of_a_second_with(Vec::new()), &sources, None);
     let specification = specification_of_a_second_with(vec![delaying]);
@@ -427,6 +429,7 @@ fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_
             values: Vec::new(),
             animation: Animation::default(),
             tables: Vec::new(),
+            tail_length: Default::default(),
         }
     };
     let host = || Some(a_host_that_runs_everything());
@@ -523,8 +526,8 @@ fn a_stream_of_the_preview_tells_the_runner_of_its_plugins_when_it_is_stopped_wi
 
 // --- Phase 12.0: what the tail of an effect does today, written down before it is changed (docs/engine-phase-12-design.md, section 1) ---
 //
-// Today an effect of a track is made a separate copy for each clip, and a copy ends where its clip does. The tests below say so with the echo of the CLAP test library, so that the
-// change of phase 12 (an effect that hears the clips of a track one after the other, and rings on past a clip) is a change that these tests show, and is made on purpose.
+// Before phase 12 an effect was cut where its clip ended; piece 12.2c made it ring on for its tail. The tests below say so with the echo of the CLAP test library (it says a tail of 1000
+// samples), and pin what a person who says that an effect has no tail gets: the effect cut where its clip ends.
 
 /// The echo of the test library (it says a tail of 1000 samples, and its echoes are `ECHO_SAMPLES` apart), as an effect of a clip.
 fn an_echo() -> LayerEffect {
@@ -536,6 +539,7 @@ fn an_echo() -> LayerEffect {
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     }
 }
 
@@ -555,26 +559,38 @@ fn specification_of_items(
 
 const SAMPLES_IN_A_FRAME: usize = 1600 * 2;
 
-#[test]
-fn the_echo_of_an_effect_is_cut_where_its_clip_ends_and_nothing_of_it_is_heard_after_in_the_export_and_in_the_preview()
-{
-    let toolchain = toolchain_or_skip!();
-    let _alone = the_installed_plugins_to_myself();
-    let folder = scratch_directory();
-    let sources = the_sources(folder.path());
-    let host = || Some(a_host_that_runs_everything());
-
-    // A second of noise through the echo, and then a second of silence, in which the echo (it says a tail of 1000 samples) would be heard if it went on.
+/// What the echo of the test library (it says a tail of 1000 samples) does with a second of noise that is its clip, and then a second of silence, when its tail is `tail_length`: the
+/// export, the preview, and what the preview and the export say.
+fn the_echo_of_a_clip_and_a_second_of_silence(
+    toolchain: &FfmpegToolchain,
+    sources: &[PathBuf],
+    tail_length: fastforwardrs::project::TailLength,
+) -> (Vec<f32>, Vec<f32>, Vec<String>) {
     let specification = specification_of_items(60, |clip| {
         let mut with_the_echo = clip.clone();
-        with_the_echo.effects = vec![an_echo()];
+        with_the_echo.effects = vec![LayerEffect {
+            tail_length,
+            ..an_echo()
+        }];
         vec![
             SoundItemToExport::Clip(with_the_echo),
             SoundItemToExport::Silence { frame_count: 30 },
         ]
     });
-    let (exported, notes) = by_the_export(&toolchain, &specification, &sources, host());
-    let (previewed, _) = by_the_preview(&toolchain, &specification, &sources, host());
+    let (exported, notes) = by_the_export(toolchain, &specification, sources, Some(a_host_that_runs_everything()));
+    let (previewed, _) = by_the_preview(toolchain, &specification, sources, Some(a_host_that_runs_everything()));
+    (exported, previewed, notes)
+}
+
+#[test]
+fn the_echo_of_an_effect_goes_on_after_its_clip_for_the_tail_it_says_and_for_no_longer_and_none_is_cut_where_the_clip_ends()
+ {
+    use fastforwardrs::project::TailLength;
+
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
     let (plain, _) = by_the_export(
         &toolchain,
         &specification_of_frames_with(30, Vec::new()),
@@ -582,11 +598,19 @@ fn the_echo_of_an_effect_is_cut_where_its_clip_ends_and_nothing_of_it_is_heard_a
         None,
     );
 
+    // The echo says a tail of 1000 samples (2000 in the interleaved sound), which is what it rings on for.
+    let (exported, previewed, notes) =
+        the_echo_of_a_clip_and_a_second_of_silence(&toolchain, &sources, TailLength::Automatic);
     assert_eq!(exported.len(), 60 * SAMPLES_IN_A_FRAME);
     let (inside, after) = exported.split_at(30 * SAMPLES_IN_A_FRAME);
+    let ring = clap_test_plugins::TAIL_SAMPLES as usize * 2;
     assert!(
-        after.iter().all(|sample| *sample == 0.0),
-        "after the clip there is silence, and no echo of it"
+        after[..ring].iter().any(|sample| sample.abs() > 0.001),
+        "the echo rings on after the clip"
+    );
+    assert!(
+        after[ring..].iter().all(|sample| *sample == 0.0),
+        "and then nothing is heard: the tail it says is over"
     );
     assert!(
         inside
@@ -597,53 +621,90 @@ fn the_echo_of_an_effect_is_cut_where_its_clip_ends_and_nothing_of_it_is_heard_a
     );
     assert_eq!(previewed, exported, "the preview makes what the export makes");
     assert!(notes.is_empty(), "{notes:?}");
+
+    // A person who says that it has no tail has the echo cut where the clip ends, as it always was.
+    let (cut, cut_previewed, _) = the_echo_of_a_clip_and_a_second_of_silence(&toolchain, &sources, TailLength::None);
+    assert!(cut[30 * SAMPLES_IN_A_FRAME..].iter().all(|sample| *sample == 0.0));
+    assert_eq!(cut_previewed, cut);
+    assert_eq!(
+        &cut[..30 * SAMPLES_IN_A_FRAME],
+        inside,
+        "(and what is heard of the clip is the same)"
+    );
+
+    // One that gives a length: 20 milliseconds is 960 samples, so 1920 in the interleaved sound.
+    let (twenty, _, _) = the_echo_of_a_clip_and_a_second_of_silence(&toolchain, &sources, TailLength::Milliseconds(20));
+    assert!(
+        twenty[30 * SAMPLES_IN_A_FRAME + 1920..]
+            .iter()
+            .all(|sample| *sample == 0.0)
+    );
+    assert!(
+        twenty[30 * SAMPLES_IN_A_FRAME + 1500..30 * SAMPLES_IN_A_FRAME + 1920]
+            .iter()
+            .any(|sample| sample.abs() > 0.001),
+        "it rings for the length that was said, which is not the one that the plugin says"
+    );
 }
 
 #[test]
-fn a_clip_that_follows_another_one_with_the_same_effect_has_an_echo_of_its_own_that_begins_empty_and_hears_nothing_of_the_one_before()
+fn a_clip_that_follows_another_one_with_the_same_effect_has_an_echo_of_its_own_and_the_ring_of_the_one_before_is_added_to_its_start()
  {
+    use fastforwardrs::project::TailLength;
+
     let toolchain = toolchain_or_skip!();
     let _alone = the_installed_plugins_to_myself();
     let folder = scratch_directory();
     let sources = the_sources(folder.path());
     let host = || Some(a_host_that_runs_everything());
+    let two_clips = |tail_length: TailLength| {
+        // The same second of noise twice, one clip right after the other, each with the echo in its own chain.
+        specification_of_items(60, |clip| {
+            let mut first = clip.clone();
+            first.effects = vec![LayerEffect {
+                tail_length,
+                ..an_echo()
+            }];
+            let mut second = first.clone();
+            second.first_timeline_frame = 30;
+            vec![SoundItemToExport::Clip(first), SoundItemToExport::Clip(second)]
+        })
+    };
 
-    // The same second of noise twice, one clip right after the other, each with the echo (which is what an echo on a track is, today: a copy for each clip).
-    let specification = specification_of_items(60, |clip| {
-        let mut first = clip.clone();
-        first.effects = vec![an_echo()];
-        let mut second = first.clone();
-        second.first_timeline_frame = 30;
-        vec![SoundItemToExport::Clip(first), SoundItemToExport::Clip(second)]
-    });
-    let (exported, _) = by_the_export(&toolchain, &specification, &sources, host());
-    let (previewed, _) = by_the_preview(&toolchain, &specification, &sources, host());
+    // With the tail as the echo says it: the second clip begins with its own echo, from nothing, and with the ring of the first added to it.
+    let (exported, _) = by_the_export(&toolchain, &two_clips(TailLength::Automatic), &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &two_clips(TailLength::Automatic), &sources, host());
+    let (alone, _, _) = the_echo_of_a_clip_and_a_second_of_silence(&toolchain, &sources, TailLength::Automatic);
+    let ring_of_the_first = &alone[30 * SAMPLES_IN_A_FRAME..30 * SAMPLES_IN_A_FRAME + 2000];
+    let (first, second) = exported.split_at(30 * SAMPLES_IN_A_FRAME);
+    let worst = second[..2000]
+        .iter()
+        .zip(first[..2000].iter().zip(ring_of_the_first))
+        .map(|(heard, (own, ring))| (heard - (own + ring)).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst < 1e-4,
+        "the start of the second clip is what it is alone, and the ring of the first clip: the worst difference is {worst}"
+    );
+    assert_ne!(first, second, "(the control: the ring is something)");
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+
+    // With no tail: the second clip sounds as the first does, and begins with an empty echo.
     let (plain, _) = by_the_export(
         &toolchain,
         &specification_of_frames_with(30, Vec::new()),
         &sources,
         None,
     );
-
-    let (first, second) = exported.split_at(30 * SAMPLES_IN_A_FRAME);
-    assert_eq!(
-        first, second,
-        "the second clip sounds as the first does: it begins with an empty echo, and the end of the first clip is not heard in it"
-    );
+    let (cut, _) = by_the_export(&toolchain, &two_clips(TailLength::None), &sources, host());
+    let (first, second) = cut.split_at(30 * SAMPLES_IN_A_FRAME);
+    assert_eq!(first, second, "the end of the first clip is not heard in the second");
     let echo_free_start = clap_test_plugins::ECHO_SAMPLES * 2;
     assert_eq!(
         &second[..echo_free_start],
         &plain[..echo_free_start],
         "the first echo of the second clip is still to come: its first moments are the file's"
     );
-    assert!(
-        second
-            .iter()
-            .zip(&plain)
-            .any(|(heard, said)| (heard - said).abs() > 0.05),
-        "and the echo is heard later (the control: the test can tell)"
-    );
-    assert_eq!(previewed, exported, "the preview makes what the export makes");
 }
 
 // --- Phase 12.2: one instance of the effects of a track for the clips of a run ---
@@ -706,13 +767,17 @@ fn the_clips_of_a_run_are_heard_by_one_echo_so_two_clips_that_follow_each_other_
     assert_eq!(previewed, exported, "the preview makes what the export makes");
     assert!(notes.is_empty(), "{notes:?}");
 
-    // The control, the other sharing: an echo in the chain of each clip begins again at the second clip, whose first echoes are not those of what came before it.
+    // The control, the other sharing, with no tail: an echo in the chain of each clip begins again at the second clip, whose first echoes are not those of what came before it.
     let mut per_clip = as_a_run;
     for item in &mut per_clip.strips[0].items {
         let SoundItemToExport::Clip(clip) = item else {
             unreachable!("two clips")
         };
-        clip.effects = vec![an_echo()];
+        // (With no tail: with one that rings on, an echo is linear and the copies of it add up to what one instance makes, which the next test of this file says.)
+        clip.effects = vec![LayerEffect {
+            tail_length: fastforwardrs::project::TailLength::None,
+            ..an_echo()
+        }];
     }
     let (one_for_each, _) = by_the_export(&toolchain, &per_clip, &sources, host());
     let start_of_the_second = 30 * SAMPLES_IN_A_FRAME;
@@ -722,4 +787,58 @@ fn the_clips_of_a_run_are_heard_by_one_echo_so_two_clips_that_follow_each_other_
         .map(|(made, was)| (made - was).abs())
         .fold(0.0_f32, f32::max);
     assert!(worst_at_the_start > 0.05, "{worst_at_the_start}");
+}
+
+#[test]
+fn an_echo_for_each_clip_that_rings_on_and_one_echo_for_the_run_sound_the_same_because_an_echo_is_linear() {
+    use fastforwardrs::media::export::SoundBusToExport;
+
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+    // (The echo says a tail of 1000 samples, where what it rings is a little more than a thousandth of the sound still: a tail of 200 milliseconds leaves nothing of it out.)
+    let a_long_ringing_echo = || LayerEffect {
+        tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        ..an_echo()
+    };
+    let mut run = specification_of_frames_with(60, Vec::new());
+    let SoundItemToExport::Clip(template) = run.strips[0].items[0].clone() else {
+        unreachable!("the strip is one clip");
+    };
+    let mut first = template.clone();
+    first.end_source_frame = 30;
+    first.timeline_frame_count = 30;
+    let mut second = template;
+    second.first_source_frame = 30;
+    second.end_source_frame = 60;
+    second.first_timeline_frame = 30;
+    run.strips[0].items = vec![SoundItemToExport::Clip(first), SoundItemToExport::Clip(second)];
+    let mut one_instance = run.clone();
+    one_instance.strips[0].buses = vec![SoundBusToExport {
+        first_item: 0,
+        last_item: 1,
+        effects: vec![a_long_ringing_echo()],
+    }];
+    let mut a_copy_for_each_clip = run;
+    for item in &mut a_copy_for_each_clip.strips[0].items {
+        let SoundItemToExport::Clip(clip) = item else {
+            unreachable!("two clips")
+        };
+        clip.effects = vec![a_long_ringing_echo()];
+    }
+
+    let (shared, _) = by_the_export(&toolchain, &one_instance, &sources, host());
+    let (separate, _) = by_the_export(&toolchain, &a_copy_for_each_clip, &sources, host());
+
+    let worst = shared
+        .iter()
+        .zip(&separate)
+        .map(|(one, other)| (one - other).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst < 1e-4,
+        "the same sound for an effect that is linear: the worst difference is {worst}"
+    );
 }

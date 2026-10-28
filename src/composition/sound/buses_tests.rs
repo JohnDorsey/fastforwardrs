@@ -9,6 +9,7 @@ use std::hash::{DefaultHasher, Hasher};
 use super::*;
 use crate::composition::test_projects::{SOUND_FILE, media_clip, project_of};
 use crate::media::export::sound_graph_specification;
+use crate::project::FrameRate;
 use crate::project::tracks::Clip;
 use crate::project::{
     Badge, ChainItemKey, EffectDomain, EffectKind, InstalledPlugin, Member, PropertyValue, SourceMediaIdentifier,
@@ -290,5 +291,124 @@ fn a_change_of_how_much_of_the_track_one_copy_of_its_sound_effects_covers_is_a_c
         hash(&project),
         with_the_sound_alone,
         "the sharing of the picture effects is not heard"
+    );
+}
+
+// --- tails ---
+
+fn a_plugin_effect(tail_length: crate::project::TailLength, pre_roll_samples: usize) -> LayerEffect {
+    let mut plugin = an_installed_sound_plugin("ladspa:a:tail", "Maker", &[("gain", 1.0, Some((0.0, 4.0)))]);
+    plugin.pre_roll_samples = pre_roll_samples;
+    set_installed_plugins(vec![plugin]);
+    LayerEffect {
+        clock: Default::default(),
+        instance: crate::project::EffectInstanceId::FIRST,
+        kind: EffectKind::installed_plugin_kinds()[0],
+        values: vec![PropertyValue::Number(1.0)],
+        animation: Default::default(),
+        tables: Vec::new(),
+        state: None,
+        tail_length,
+    }
+}
+
+#[test]
+fn the_tail_of_an_effect_is_what_its_person_said_and_where_they_said_nothing_what_its_plugin_says_and_an_effect_that_is_not_a_plugin_has_none()
+ {
+    use crate::project::TailLength;
+    let _alone = the_installed_plugins_to_myself();
+
+    assert_eq!(tail_samples_of(&a_plugin_effect(TailLength::Automatic, 24_000)), 24_000);
+    assert_eq!(tail_samples_of(&a_plugin_effect(TailLength::None, 24_000)), 0);
+    assert_eq!(
+        tail_samples_of(&a_plugin_effect(TailLength::Milliseconds(250), 24_000)),
+        12_000
+    );
+    assert_eq!(
+        tail_samples_of(&a_plugin_effect(TailLength::Milliseconds(2_500), 0)),
+        120_000
+    );
+    let mut not_a_plugin = a_plugin_effect(TailLength::Milliseconds(250), 0);
+    not_a_plugin.kind = EffectKind::HUE_SHIFT;
+    assert_eq!(tail_samples_of(&not_a_plugin), 0, "the sound goes through it unchanged");
+    assert_eq!(
+        tail_samples_of_a_chain(&[
+            a_plugin_effect(TailLength::Milliseconds(100), 0),
+            a_plugin_effect(TailLength::Milliseconds(200), 0)
+        ]),
+        14_400,
+        "a chain rings on for the tails of its effects added up"
+    );
+    assert_eq!(tail_samples_of_a_chain(&[]), 0);
+}
+
+#[test]
+fn a_number_of_samples_reaches_a_whole_number_of_frames_rounded_up_and_the_plan_counts_samples_as_the_engine_does() {
+    let thirty = FrameRate::new(30, 1).unwrap();
+    assert_eq!(frames_that_reach(thirty, 0), 0);
+    assert_eq!(frames_that_reach(thirty, 1), 1);
+    assert_eq!(frames_that_reach(thirty, 1600), 1);
+    assert_eq!(frames_that_reach(thirty, 1601), 2);
+    assert_eq!(frames_that_reach(FrameRate::new(24, 1).unwrap(), 48_000), 24);
+    assert_eq!(frames_that_reach(FrameRate::new(30_000, 1001).unwrap(), 48_000), 30);
+    assert_eq!(SOUND_SAMPLES_A_SECOND, u64::from(crate::sound_engine::SAMPLE_RATE));
+}
+
+/// The clips of `gaps` (the number before each is the frames of silence before it) with the effect on the track given this tail: the runs that the plan makes, as the first and the last item of each.
+fn runs_with_a_tail_of(tail: crate::project::TailLength, gaps: &[u64]) -> Vec<(usize, usize)> {
+    let mut project = a_track_of_clips_with_gaps(gaps);
+    let (kind, _) = two_kinds();
+    let track = project.tracks()[0].id();
+    let instance = put_an_effect_on(
+        &mut project,
+        AnimationTarget::Track(track),
+        kind,
+        &[PropertyValue::Number(2.0)],
+    );
+    project
+        .set_effect_tail_length(Member::Track(track), instance, tail)
+        .unwrap();
+    plan(&project).strips[0]
+        .buses
+        .iter()
+        .map(|bus| (bus.first_item, bus.last_item))
+        .collect()
+}
+
+#[test]
+fn a_gap_that_is_no_longer_than_the_tail_of_the_effects_of_the_track_is_inside_a_run_and_a_longer_one_ends_it() {
+    use crate::project::TailLength;
+    let _alone = the_installed_plugins_to_myself();
+
+    // A tail of a second is 30 frames at 30 frames a second.
+    assert_eq!(
+        runs_with_a_tail_of(TailLength::Milliseconds(1_000), &[0, 15]),
+        [(0, 2)],
+        "15 frames of silence between: the effects are still ringing, one instance hears both clips and the silence"
+    );
+    assert_eq!(
+        runs_with_a_tail_of(TailLength::Milliseconds(1_000), &[0, 30]),
+        [(0, 2)],
+        "as long as the tail: still one"
+    );
+    assert_eq!(
+        runs_with_a_tail_of(TailLength::Milliseconds(1_000), &[0, 31]),
+        [(0, 0), (2, 2)],
+        "one frame longer than the tail: the memory is gone, and the next clip has the effects as they were made"
+    );
+    assert_eq!(
+        runs_with_a_tail_of(TailLength::None, &[0, 1]),
+        [(0, 0), (2, 2)],
+        "no tail: a silence of any length ends a run"
+    );
+    assert_eq!(
+        runs_with_a_tail_of(TailLength::None, &[0, 0]),
+        [(0, 1)],
+        "and clips that touch are one"
+    );
+    // (Each gap is its own silence: three gaps of ten frames between four clips are three silences, each within the tail, and one run.)
+    assert_eq!(
+        runs_with_a_tail_of(TailLength::Milliseconds(1_000), &[0, 10, 10, 10]),
+        [(0, 6)]
     );
 }

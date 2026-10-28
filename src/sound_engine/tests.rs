@@ -1216,6 +1216,7 @@ fn clip_that_has_sound_from_before(
             values: Vec::new(),
             animation: Animation::default(),
             tables: Vec::new(),
+            tail_length: Default::default(),
         }],
     })
 }
@@ -1659,4 +1660,357 @@ fn an_effect_of_a_bus_that_has_a_latency_is_made_up_for_across_the_clips_it_hear
             assert_eq!(made, plain, "latency {latency}, blocks of {block}");
         }
     }
+}
+
+// --- tails: an effect goes on after its clip, and after the last clip of a bus (phase 12, piece 12.2) ---
+
+/// A sound effect, installed, that has the tail `tail` (and the clip that has it in its chain says so: the engine reads the tail from the specification and the effect itself is
+/// made up by [`Echoes`]).
+fn an_effect_that_rings_for(tail: crate::project::TailLength) -> crate::composition::LayerEffect {
+    let plugin =
+        crate::test_support::an_installed_sound_plugin("ladspa:a:rings", "Maker", &[("gain", 1.0, Some((0.0, 4.0)))]);
+    crate::project::set_installed_plugins(vec![plugin]);
+    crate::composition::LayerEffect {
+        clock: Default::default(),
+        instance: crate::project::EffectInstanceId::FIRST,
+        kind: crate::project::EffectKind::installed_plugin_kinds()[0],
+        values: vec![crate::project::PropertyValue::Number(1.0)],
+        animation: Default::default(),
+        tables: Vec::new(),
+        state: None,
+        tail_length: tail,
+    }
+}
+
+/// An effect that has a tail without end: every sample it gives is the sample it is given and half of what it gave before (each channel by itself).
+#[derive(Default)]
+struct Echoes {
+    left: f32,
+    right: f32,
+}
+
+impl BlockProcessor for Echoes {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for sample in left {
+            self.left = *sample + 0.5 * self.left;
+            *sample = self.left;
+        }
+        for sample in right {
+            self.right = *sample + 0.5 * self.right;
+            *sample = self.right;
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// What `Echoes` gives for `input`.
+fn echoed(input: impl IntoIterator<Item = f32>) -> Vec<f32> {
+    let mut memory = 0.0_f32;
+    input
+        .into_iter()
+        .map(|sample| {
+            memory = sample + 0.5 * memory;
+            memory
+        })
+        .collect()
+}
+
+/// Gives `Echoes` to the clips whose item number is in `items` (of any strip), to a bus too if `for_buses`, and counts the ones that are alive.
+struct RingingInsertions {
+    items: &'static [usize],
+    for_buses: bool,
+    alive: Arc<AtomicUsize>,
+}
+
+struct EchoesThatAreCounted(Echoes, Arc<AtomicUsize>);
+
+impl BlockProcessor for EchoesThatAreCounted {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.0.process(left, right);
+    }
+
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
+impl Drop for EchoesThatAreCounted {
+    fn drop(&mut self) {
+        self.1.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl RingingInsertions {
+    fn new(items: &'static [usize], for_buses: bool) -> Self {
+        Self {
+            items,
+            for_buses,
+            alive: Arc::default(),
+        }
+    }
+
+    fn one(&self) -> Vec<Box<dyn BlockProcessor>> {
+        self.alive.fetch_add(1, Ordering::SeqCst);
+        vec![Box::new(EchoesThatAreCounted(
+            Echoes::default(),
+            Arc::clone(&self.alive),
+        ))]
+    }
+}
+
+impl Insertions for RingingInsertions {
+    fn for_clip(&mut self, request: &ClipRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        if self.items.contains(&request.item) {
+            self.one()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn for_strip(&mut self, _strip: usize) -> Vec<Box<dyn BlockProcessor>> {
+        Vec::new()
+    }
+
+    fn for_bus(&mut self, _request: &BusRequest<'_>) -> Vec<Box<dyn BlockProcessor>> {
+        if self.for_buses { self.one() } else { Vec::new() }
+    }
+}
+
+/// A clip of `frames` frames that has `effect` in its chain.
+fn a_clip_that_has(
+    frames: u64,
+    loudness: LoudnessToExport,
+    effect: &crate::composition::LayerEffect,
+) -> SoundItemToExport {
+    let SoundItemToExport::Clip(mut clip) = clip(frames, loudness) else {
+        unreachable!("a clip");
+    };
+    clip.effects = vec![effect.clone()];
+    SoundItemToExport::Clip(clip)
+}
+
+const A_TAIL_OF_960: crate::project::TailLength = crate::project::TailLength::Milliseconds(20);
+
+#[test]
+fn the_effects_of_a_clip_go_on_after_it_for_their_tail_and_no_longer() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(A_TAIL_OF_960);
+    let ramps = Ramps::default();
+    let mut graph = SoundGraph::new(
+        specification(
+            thirty(),
+            3,
+            vec![vec![
+                a_clip_that_has(1, LoudnessToExport::UNCHANGED, &effect),
+                silence(2),
+            ]],
+        ),
+        Box::new(ramps),
+        Box::new(RingingInsertions::new(&[0], false)),
+    );
+
+    let (left, right) = graph.render_to_the_end(512);
+
+    let feed = (0..1600).map(|index| value_of(0, 0, index));
+    let expected = echoed(feed.chain(std::iter::repeat_n(0.0, 960)));
+    assert_eq!(
+        &left[..1600 + 960],
+        &expected[..],
+        "the clip, and then the effect given silence for its tail of 960 samples"
+    );
+    assert!(
+        left[1600 + 960..].iter().all(|sample| *sample == 0.0),
+        "and then nothing: the tail ended"
+    );
+    assert_eq!(right.len(), left.len());
+    assert!(
+        expected[1600..].iter().any(|sample| *sample != 0.0),
+        "(the control: the tail is something)"
+    );
+}
+
+#[test]
+fn the_tail_of_a_clip_is_made_as_loud_as_the_clip_and_is_added_to_the_clips_that_come_after_it() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(A_TAIL_OF_960);
+    let ramps = Ramps::default();
+    let mut graph = SoundGraph::new(
+        specification(
+            thirty(),
+            3,
+            vec![vec![
+                a_clip_that_has(1, LoudnessToExport::Constant(0.5), &effect),
+                clip(1, LoudnessToExport::UNCHANGED),
+            ]],
+        ),
+        Box::new(ramps),
+        Box::new(RingingInsertions::new(&[0], false)),
+    );
+
+    let (left, _) = graph.render_to_the_end(512);
+
+    let first_clip = echoed(
+        (0..1600)
+            .map(|index| value_of(0, 0, index))
+            .chain(std::iter::repeat_n(0.0, 960)),
+    );
+    let mut expected: Vec<f32> = first_clip.iter().map(|sample| sample * 0.5).collect();
+    expected.resize(3200, 0.0);
+    for (index, sample) in (0..1600).map(|index| value_of(0, 1, index)).enumerate() {
+        expected[1600 + index] += sample;
+    }
+    assert_eq!(
+        &left[..3200],
+        &expected[..3200],
+        "the next clip's sound, with the ring of the one before it added to its first samples, at the volume of the one before"
+    );
+}
+
+#[test]
+fn the_effects_of_a_clip_that_ring_on_are_let_go_of_when_the_ring_has_ended_and_not_before() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(A_TAIL_OF_960);
+    let insertions = RingingInsertions::new(&[0], false);
+    let alive = Arc::clone(&insertions.alive);
+    let mut graph = SoundGraph::new(
+        specification(
+            thirty(),
+            3,
+            vec![vec![
+                a_clip_that_has(1, LoudnessToExport::UNCHANGED, &effect),
+                silence(2),
+            ]],
+        ),
+        Box::new(Ramps::default()),
+        Box::new(insertions),
+    );
+    let (mut left, mut right) = (vec![0.0; 800], vec![0.0; 800]);
+    let mut seen = Vec::new();
+    // Blocks of 800 samples: the clip is 1600, its ring 960 more, so the ring ends in the fourth block.
+    for _ in 0..6 {
+        graph.render(&mut left, &mut right);
+        seen.push(alive.load(Ordering::SeqCst));
+    }
+
+    assert_eq!(seen, [1, 1, 1, 0, 0, 0]);
+}
+
+#[test]
+fn the_sound_of_a_tail_is_the_same_for_any_size_of_block() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(A_TAIL_OF_960);
+    let make = |block: usize| {
+        SoundGraph::new(
+            specification(
+                thirty(),
+                4,
+                vec![vec![
+                    a_clip_that_has(1, LoudnessToExport::Constant(0.5), &effect),
+                    silence(1),
+                    a_clip_that_has(1, LoudnessToExport::UNCHANGED, &effect),
+                ]],
+            ),
+            Box::new(Ramps::default().with_length(0, 2, 1000)),
+            Box::new(RingingInsertions::new(&[0, 2], false)),
+        )
+        .render_to_the_end(block)
+    };
+    let whole = make(1_000_000);
+    for block in [1, 7, 512, 1599, 1601, 960] {
+        assert_eq!(make(block), whole, "blocks of {block}");
+    }
+}
+
+#[test]
+fn a_tail_that_would_be_heard_after_the_end_of_the_sound_is_cut_there() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(crate::project::TailLength::Milliseconds(5_000));
+    let mut graph = SoundGraph::new(
+        specification(
+            thirty(),
+            2,
+            vec![vec![
+                a_clip_that_has(1, LoudnessToExport::UNCHANGED, &effect),
+                silence(1),
+            ]],
+        ),
+        Box::new(Ramps::default()),
+        Box::new(RingingInsertions::new(&[0], false)),
+    );
+
+    let (left, _) = graph.render_to_the_end(512);
+
+    assert_eq!(
+        left.len(),
+        3200,
+        "the sound is as long as the timeline, whatever rings on"
+    );
+}
+
+#[test]
+fn the_effects_of_a_bus_ring_on_after_its_last_clip_for_the_tail_of_the_effects_of_the_track() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(A_TAIL_OF_960);
+    let mut specification = specification_with_buses(
+        thirty(),
+        4,
+        vec![(
+            vec![
+                clip(1, LoudnessToExport::UNCHANGED),
+                clip(1, LoudnessToExport::UNCHANGED),
+                silence(2),
+            ],
+            vec![(0, 1)],
+        )],
+    );
+    specification.strips[0].buses[0].effects = vec![effect];
+    let mut graph = SoundGraph::new(
+        specification,
+        Box::new(Ramps::default()),
+        Box::new(RingingInsertions::new(&[], true)),
+    );
+
+    let (left, _) = graph.render_to_the_end(512);
+
+    let feed = |item: usize| (0..1600).map(move |index| value_of(0, item, index));
+    let expected = echoed(feed(0).chain(feed(1)).chain(std::iter::repeat_n(0.0, 960)));
+    assert_eq!(&left[..3200 + 960], &expected[..]);
+    assert!(left[3200 + 960..].iter().all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn a_clip_of_a_bus_that_has_effects_of_its_own_that_ring_on_is_heard_by_the_bus_for_as_long_as_it_rings() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let own = an_effect_that_rings_for(A_TAIL_OF_960);
+    let mut specification = specification_with_buses(
+        thirty(),
+        3,
+        vec![(
+            vec![a_clip_that_has(1, LoudnessToExport::UNCHANGED, &own), silence(2)],
+            vec![(0, 0)],
+        )],
+    );
+    // (The effects of the bus: none that ring.)
+    specification.strips[0].buses[0].effects = Vec::new();
+    let mut graph = SoundGraph::new(
+        specification,
+        Box::new(Ramps::default()),
+        Box::new(RingingInsertions::new(&[0], false)),
+    );
+
+    let (left, _) = graph.render_to_the_end(512);
+
+    let expected = echoed(
+        (0..1600)
+            .map(|index| value_of(0, 0, index))
+            .chain(std::iter::repeat_n(0.0, 960)),
+    );
+    assert_eq!(
+        &left[..1600 + 960],
+        &expected[..],
+        "the ring of the clip's own effects goes through the bus: the bus is heard until it has ended"
+    );
 }

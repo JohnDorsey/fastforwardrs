@@ -74,6 +74,7 @@ fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
         values: vec![PropertyValue::Number(gain)],
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     }
 }
 

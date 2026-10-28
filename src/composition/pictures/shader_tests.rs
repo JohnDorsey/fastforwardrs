@@ -183,6 +183,7 @@ fn a_shader_that_is_not_installed_is_no_operation_even_when_it_is_in_the_effects
         values: Vec::new(),
         animation: Animation::default(),
         tables: Vec::new(),
+        tail_length: Default::default(),
     };
 
     assert_eq!(

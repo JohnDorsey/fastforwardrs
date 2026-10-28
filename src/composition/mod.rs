@@ -17,7 +17,8 @@ pub use pictures::{
     operations_of_effects, plan_pictures,
 };
 pub use sound::{
-    DecibelsAt, Loudness, SoundClip, SoundItem, SoundPlan, SoundStrip, hash_the_sound_effects_into, plan_sound,
+    DecibelsAt, Loudness, SOUND_SAMPLES_A_SECOND, SoundBus, SoundClip, SoundItem, SoundPlan, SoundStrip,
+    frames_that_reach, hash_the_sound_effects_into, plan_sound, tail_samples_of, tail_samples_of_a_chain,
 };
 
 #[cfg(test)]

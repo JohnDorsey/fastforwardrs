@@ -149,6 +149,38 @@ pub struct SoundPlan {
     pub strips: Vec<SoundStrip>,
 }
 
+/// How many samples a second the sound is made of: the sound engine's `SAMPLE_RATE`, which this module cannot name (the engine is built on the plan, and not the plan on the engine);
+/// a test holds the two to each other.
+pub const SOUND_SAMPLES_A_SECOND: u64 = 48_000;
+
+/// How many samples an effect goes on making sound after its input has ended (phase 12, section 6.1 of docs/engine-phase-12-design.md): what its person said (`None`, or a length), and
+/// where they said nothing what its plugin says (the tail of a CLAP plugin, up to two seconds; half a second for an LV2 plugin, which does not say; nothing for a LADSPA plugin). An
+/// effect that is not a plugin that is installed makes the sound pass through unchanged, and has none.
+pub fn tail_samples_of(effect: &LayerEffect) -> u64 {
+    use crate::project::TailLength;
+    let Some(plugin) = effect.kind.installed_plugin() else {
+        return 0;
+    };
+    match effect.tail_length {
+        TailLength::Automatic => plugin.pre_roll_samples as u64,
+        TailLength::None => 0,
+        TailLength::Milliseconds(milliseconds) => u64::from(milliseconds) * SOUND_SAMPLES_A_SECOND / 1000,
+    }
+}
+
+/// How many samples a chain of effects goes on after its input has ended: the tails of its effects added up (each hears what the one before it makes, tail and all).
+pub fn tail_samples_of_a_chain(effects: &[LayerEffect]) -> u64 {
+    effects.iter().map(tail_samples_of).sum()
+}
+
+/// How many frames of the timeline `samples` samples reach, rounded up.
+pub fn frames_that_reach(frame_rate: FrameRate, samples: u64) -> u64 {
+    let seconds_times_the_denominator = u128::from(samples) * u128::from(frame_rate.numerator());
+    let frames = seconds_times_the_denominator
+        .div_ceil(u128::from(frame_rate.denominator()) * u128::from(SOUND_SAMPLES_A_SECOND));
+    u64::try_from(frames).unwrap_or(u64::MAX)
+}
+
 /// Works out the sound of the project from `from` to the end, as it is when all the sound is
 /// on (the setting for what sped-up clips sound like is for whatever turns the plan into sound).
 /// The sound of a file that is not `usable` is left out.
@@ -275,7 +307,7 @@ fn strip_of(
     }
     shared_effects.truncate(items.len());
     shared_effects.resize(items.len(), None);
-    let buses = runs_of_clips_that_share_the_effects_of_the_track(&shared_effects);
+    let buses = runs_of_clips_that_share_the_effects_of_the_track(&items, &shared_effects, project.frame_rate());
     (!items.is_empty()).then_some(SoundStrip {
         track: track.id(),
         items,
@@ -283,17 +315,25 @@ fn strip_of(
     })
 }
 
-/// The runs of clips that share the effects of their track: consecutive items that are clips and have the effects of the track at the end of their chain, with no silence
-/// between them (a silence ends the run: where the next clip begins after one, the effects begin again as they were made). Each is one instance, with the effects that all of
-/// its clips have.
-fn runs_of_clips_that_share_the_effects_of_the_track(shared: &[Option<Vec<LayerEffect>>]) -> Vec<SoundBus> {
+/// The runs of clips that share the effects of their track: clips that have the effects of the track at the end of their chain, one after another, **with no more silence between two
+/// of them than the effects go on for after their input ends** (their tail, 6 of docs/engine-phase-12-design.md): where the silence is longer the memory of the effects is gone, and
+/// the next clip has them as they were made, which is the same sound and costs nothing while it is idle. A clip that does not share them (it has its own copy where its badge is)
+/// ends a run too. Each is one instance, with the effects that all of its clips have.
+fn runs_of_clips_that_share_the_effects_of_the_track(
+    items: &[SoundItem],
+    shared: &[Option<Vec<LayerEffect>>],
+    frame_rate: FrameRate,
+) -> Vec<SoundBus> {
     let mut buses: Vec<SoundBus> = Vec::new();
     for (place, effects) in shared.iter().enumerate() {
         let Some(effects) = effects else {
             continue;
         };
+        let tail_frames = frames_that_reach(frame_rate, tail_samples_of_a_chain(effects));
         match buses.last_mut() {
-            Some(last) if last.last_item + 1 == place => last.last_item = place,
+            Some(last) if only_silence_that_is_not_longer_than(&items[last.last_item + 1..place], tail_frames) => {
+                last.last_item = place;
+            }
             _ => buses.push(SoundBus {
                 first_item: place,
                 last_item: place,
@@ -302,6 +342,18 @@ fn runs_of_clips_that_share_the_effects_of_the_track(shared: &[Option<Vec<LayerE
         }
     }
     buses
+}
+
+/// Whether `items` are all silences, and together last no more than `frames` frames.
+fn only_silence_that_is_not_longer_than(items: &[SoundItem], frames: u64) -> bool {
+    let mut total = 0_u64;
+    for item in items {
+        match item {
+            SoundItem::Silence { frame_count } => total += frame_count,
+            SoundItem::Clip(_) => return false,
+        }
+    }
+    total <= frames
 }
 
 /// The sound effects that are applied to the clip `clip` (a clip of `track`), with their values and keyframes, in the order they are applied in, as two lists: **the clip's own**
