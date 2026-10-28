@@ -92,6 +92,8 @@ pub struct Effect {
     state_fingerprint: u64,
     /// How long the effect goes on after its input ends, when its person has said (phase 12): what the plugin says, and the defaults, are used otherwise.
     tail_length: TailLength,
+    /// For a synthesizer (phase 13, piece 13.5): whether the notes that reach it go on to the next synthesizer too, as well as being played by it. Off when the effect is put on.
+    passes_notes_on: bool,
 }
 
 /// A number that is different whenever the bytes are (to all intents and purposes): it is worked out once, when an effect is given a state, and not at every frame that the sound asks
@@ -116,6 +118,7 @@ impl Effect {
             state: None,
             state_fingerprint: fingerprint_of_a_state(None),
             tail_length: TailLength::default(),
+            passes_notes_on: false,
         }
     }
 
@@ -135,6 +138,7 @@ impl Effect {
             state: None,
             state_fingerprint: fingerprint_of_a_state(None),
             tail_length: TailLength::default(),
+            passes_notes_on: false,
         })
     }
 
@@ -160,6 +164,18 @@ impl Effect {
     /// How long the effect goes on after its input ends, when its person has said; [`TailLength::Automatic`] when they have not.
     pub fn tail_length(&self) -> TailLength {
         self.tail_length
+    }
+
+    /// The same effect, with the switch that makes a synthesizer pass the notes that reach it on (see [`Self::passes_notes_on`]).
+    #[must_use]
+    pub fn with_passes_notes_on(mut self, passes_notes_on: bool) -> Self {
+        self.passes_notes_on = passes_notes_on;
+        self
+    }
+
+    /// Whether the effect, if it is a synthesizer, passes the notes that reach it on to the next synthesizer on their road (phase 13, piece 13.5). It does not by default: a synthesizer consumes them.
+    pub fn passes_notes_on(&self) -> bool {
+        self.passes_notes_on
     }
 
     /// The same effect, with the state that its plugin saved (see [`Self::state`]).
@@ -262,6 +278,7 @@ impl Effect {
                 state: self.state.clone(),
                 state_fingerprint: self.state_fingerprint,
                 tail_length: self.tail_length,
+                passes_notes_on: self.passes_notes_on,
             }
         })
     }
@@ -522,6 +539,19 @@ impl Effects {
                 && effect.instance() == instance
             {
                 effect.tail_length = tail_length.limited();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Says whether the effect that is named `instance` passes the notes that reach it on. `false` if there is no such effect.
+    pub fn set_passes_notes_on(&mut self, instance: EffectInstanceId, passes_notes_on: bool) -> bool {
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link
+                && effect.instance() == instance
+            {
+                effect.passes_notes_on = passes_notes_on;
                 return true;
             }
         }

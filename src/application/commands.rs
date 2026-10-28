@@ -276,6 +276,12 @@ pub enum Command {
         instance: EffectInstanceId,
         length: TailLength,
     },
+    /// Say whether the synthesizer that is named `instance` in the chain of `owner` passes the notes that reach it on to the next synthesizer (from the menu of its box; phase 13).
+    SetEffectPassesNotesOn {
+        owner: Member,
+        instance: EffectInstanceId,
+        passes_notes_on: bool,
+    },
     /// A plugin saved its state (phase 10): the effect that is named `instance` in the chain of `owner` keeps it (`None` takes it away). It is not an edit of its own as far as undo goes: it
     /// is **joined to the step of the edit in the window that made the plugin say so** (see [`Command::is_a_rider`]).
     SetPluginState {
@@ -527,6 +533,7 @@ impl Command {
             | Self::SetClipTailPolicy { .. }
             | Self::SetGroupTailPolicy { .. }
             | Self::SetEffectTailLength { .. }
+            | Self::SetEffectPassesNotesOn { .. }
             | Self::SetPluginState { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }
@@ -669,6 +676,7 @@ impl Command {
             | Self::SetClipTailPolicy { .. }
             | Self::SetGroupTailPolicy { .. }
             | Self::SetEffectTailLength { .. }
+            | Self::SetEffectPassesNotesOn { .. }
             | Self::SetPluginState { .. }
             | Self::DuplicateEffect { .. }
             | Self::UseATable { .. }

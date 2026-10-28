@@ -37,6 +37,7 @@ struct Recorder {
     most: Option<usize>,
     calls: Calls,
     fails: bool,
+    latency: usize,
 }
 
 impl PluginInstance for Recorder {
@@ -67,7 +68,7 @@ impl PluginInstance for Recorder {
     fn reset(&mut self) {}
 
     fn latency(&self) -> usize {
-        0
+        self.latency
     }
 }
 
@@ -138,6 +139,7 @@ fn the_effect_of(plugin: &'static InstalledPlugin) -> LayerEffect {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     }
 }
@@ -154,6 +156,7 @@ fn an_effect_of(inputs: usize, outputs: usize, levels: &[f32], most: Option<usiz
                 most,
                 calls: Arc::clone(&calls),
                 fails: false,
+                latency: 0,
             }) as Box<dyn PluginInstance>
         })
         .collect();
@@ -347,6 +350,7 @@ fn a_synthesizer_that_fails_is_left_out_and_the_sound_goes_by_unchanged_and_its_
             most: None,
             calls: Arc::clone(&calls),
             fails: true,
+            latency: 0,
         })],
         plugin,
         the_effect_of(plugin),
@@ -369,4 +373,77 @@ fn a_synthesizer_that_fails_is_left_out_and_the_sound_goes_by_unchanged_and_its_
     assert_eq!((again_left, again_right), the_sound(0.25, -0.25, 8));
     assert_eq!(calls.lock().unwrap().len(), 1, "it was not run again");
     assert_eq!(notes.lock().unwrap().len(), 1, "it is said once");
+}
+
+/// An effect of a plugin with `inputs` audio inputs and `outputs` audio outputs whose instance says its latency is `latency`, with the switch "pass notes on" as given.
+fn an_effect_with_latency(inputs: usize, outputs: usize, latency: usize, passes_notes_on: bool) -> PluginEffect {
+    let plugin = a_plugin(inputs, outputs);
+    let mut effect = the_effect_of(plugin);
+    effect.passes_notes_on = passes_notes_on;
+    let layout = Layout::of(inputs, outputs).unwrap();
+    let instances = (0..layout.instances())
+        .map(|_| {
+            Box::new(Recorder {
+                levels: vec![0.5; outputs],
+                most: None,
+                calls: Calls::default(),
+                fails: false,
+                latency,
+            }) as Box<dyn PluginInstance>
+        })
+        .collect();
+    PluginEffect::new(instances, plugin, effect, thirty(), 0, false, Notes::default()).expect("the effect is made")
+}
+
+#[test]
+fn the_sound_that_passes_by_a_synthesizer_is_held_back_by_its_latency_so_that_it_comes_out_with_what_the_synthesizer_makes()
+ {
+    let mut effect = an_effect_with_latency(0, 1, 5, false);
+    let first: Vec<f32> = (1..=8).map(|n| n as f32 * 0.125).collect();
+    let second: Vec<f32> = (9..=12).map(|n| n as f32 * 0.125).collect();
+    let (mut left, mut right) = (first.clone(), first.clone());
+    let (mut later_left, mut later_right) = (second.clone(), second.clone());
+
+    effect.process(&mut left, &mut right);
+    effect.process(&mut later_left, &mut later_right);
+
+    // (5 samples of nothing, and then the sound from its start: and what the synthesizer makes, 0.5, is added to each.)
+    let held_back: Vec<f32> = [0.0; 5]
+        .into_iter()
+        .chain(first.iter().chain(&second).copied())
+        .collect();
+    let wanted: Vec<f32> = held_back.iter().map(|sound| sound + 0.5).collect();
+    assert_eq!(
+        left.iter().chain(&later_left).copied().collect::<Vec<_>>(),
+        wanted[..12].to_vec()
+    );
+    assert_eq!(right, left, "both channels");
+    assert_eq!(later_right, later_left);
+}
+
+#[test]
+fn resetting_a_synthesizer_forgets_the_sound_that_was_held_back() {
+    let mut effect = an_effect_with_latency(0, 1, 4, false);
+    let (mut left, mut right) = the_sound(1.0, 1.0, 4);
+    effect.process(&mut left, &mut right);
+
+    effect.reset();
+    let (mut after_left, mut after_right) = the_sound(0.25, 0.25, 4);
+    effect.process(&mut after_left, &mut after_right);
+
+    assert_eq!(
+        after_left,
+        vec![0.5; 4],
+        "nothing of the first block comes out of the line again"
+    );
+}
+
+#[test]
+fn a_synthesizer_that_is_switched_to_pass_notes_on_says_so_and_nothing_else_does() {
+    assert!(an_effect_with_latency(0, 1, 0, true).passes_notes_on());
+    assert!(!an_effect_with_latency(0, 1, 0, false).passes_notes_on());
+    assert!(an_effect_with_latency(0, 1, 0, false).plays_notes());
+    // (An effect that changes sound has no notes to pass on, whatever its switch says.)
+    let changer = an_effect_with_latency(2, 2, 0, true);
+    assert!(!changer.passes_notes_on() && !changer.plays_notes());
 }

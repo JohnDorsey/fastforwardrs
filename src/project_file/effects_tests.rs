@@ -504,6 +504,7 @@ fn an_effect_that_what_it_is_on_cannot_have_is_refused_whichever_effect_it_is() 
             instance: None,
             values: ValuesDocument::default(),
             tail: Default::default(),
+            passes_notes_on: false,
             enabled: true,
             state: None,
             unknown: std::collections::BTreeMap::new(),

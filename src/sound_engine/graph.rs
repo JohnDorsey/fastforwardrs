@@ -1056,22 +1056,23 @@ fn give_the_synthesizers_their_notes(
                 let built = &strips[strip_number].items[item_number];
                 (built.start, built.end - built.start)
             };
-            let who = match music.consumer {
-                NoteConsumer::Clip => Some(WhoPlays::Item(strip_number, item_number)),
-                NoteConsumer::Bus => strips[strip_number].bus_of_item[item_number]
-                    .map(|bus_number| WhoPlays::Bus(strip_number, bus_number)),
-                NoteConsumer::Group(group) => {
-                    assert!(
-                        group < groups.len(),
-                        "a clip's notes are played by a group that is there"
-                    );
-                    Some(WhoPlays::Group(group))
+            for consumer in &music.consumers {
+                let who = match *consumer {
+                    NoteConsumer::Clip => Some(WhoPlays::Item(strip_number, item_number)),
+                    NoteConsumer::Bus => strips[strip_number].bus_of_item[item_number]
+                        .map(|bus_number| WhoPlays::Bus(strip_number, bus_number)),
+                    NoteConsumer::Group(group) => {
+                        assert!(
+                            group < groups.len(),
+                            "a clip's notes are played by a group that is there"
+                        );
+                        Some(WhoPlays::Group(group))
+                    }
+                };
+                if let Some(who) = who {
+                    let (events, next_id) = collected.entry(who).or_insert_with(|| (Vec::new(), 0));
+                    events.extend(events_of(music, start, length, next_id));
                 }
-                NoteConsumer::Nobody => None,
-            };
-            if let Some(who) = who {
-                let (events, next_id) = collected.entry(who).or_insert_with(|| (Vec::new(), 0));
-                events.extend(events_of(music, start, length, next_id));
             }
         }
     }

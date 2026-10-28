@@ -49,6 +49,7 @@ fn the_effect(kind: EffectKind, values: &[f32]) -> LayerEffect {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     }
 }
@@ -1359,6 +1360,7 @@ fn the_clap_effect(id: &str, values: Vec<PropertyValue>) -> LayerEffect {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     }
 }
@@ -1592,6 +1594,7 @@ fn a_clap_plugin_that_says_process_failed_is_left_out_and_said_and_the_sound_is_
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     };
 
@@ -1849,6 +1852,7 @@ fn a_plugin_that_is_left_out_while_it_runs_says_why_on_the_board() {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     };
     let host = a_host_that_runs_everything();
@@ -2172,6 +2176,7 @@ fn a_plugin_whose_start_is_unreliable_says_so_once_in_the_sound_it_is_run_in_and
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     };
 

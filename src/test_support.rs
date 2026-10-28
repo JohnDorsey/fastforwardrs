@@ -571,6 +571,16 @@ pub fn an_installed_sound_plugin(
     }
 }
 
+/// A synthesizer that is installed, as the scan makes one (phase 13): like [`an_installed_sound_plugin`] with one value, `gain`, but with no audio input and two outputs, and a kind of effect that
+/// makes sound from notes.
+pub fn an_installed_synthesizer(key: &str) -> crate::project::InstalledPlugin {
+    let mut plugin = an_installed_sound_plugin(key, "Maker", &[("gain", 1.0, Some((0.0, 4.0)))]);
+    plugin.descriptor.makes_sound_from_notes = true;
+    plugin.audio_inputs = 0;
+    plugin.audio_outputs = 2;
+    plugin
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

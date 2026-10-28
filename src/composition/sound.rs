@@ -416,6 +416,8 @@ pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::has
                 layer.animation.hash_properties_into(hasher, |_| true);
                 // (What its plugin saved is heard too: a window changed it. A number that was made when it was saved: the bytes are not read at every frame.)
                 effect.effect.state_fingerprint().hash(hasher);
+                // (Where the notes of a MIDI clip go is heard: a synthesizer that passes them on is a different sound.)
+                effect.effect.passes_notes_on().hash(hasher);
             }
         }
     }
@@ -906,7 +908,7 @@ fn music_clip_over(
         music: Some(Box::new(Music {
             notes,
             controls,
-            consumer: NoteConsumer::Nobody,
+            consumers: Vec::new(),
         })),
     }
 }
@@ -917,9 +919,10 @@ fn is_a_synthesizer(effect: &LayerEffect) -> bool {
     effect.kind.makes_sound_from_notes()
 }
 
-/// Says which synthesizer plays the notes of each MIDI clip of a strip: **the first of the chains that the notes go through that has one**: the effects of the clip itself, then the instance of the
-/// track's effects that hears the clip, then the effects of the groups the clip is sent to, from the nearest out (see 13.4 of docs/engine-phase-13-midi-design.md). A clip with none on its road has no
-/// one to play it.
+/// Says which chains have the synthesizers that play the notes of each MIDI clip of a strip. **The notes go along the road of the clip: its own effects, then the instance of the track's effects
+/// that hears the clip, then the effects of the groups the clip is sent to, from the nearest out** (see 13.4 of docs/engine-phase-13-midi-design.md). A chain that has no synthesizer lets them by.
+/// **A chain that has some plays them, and they go on to the next chain only if every synthesizer of it passes notes on** (13.5: the one that is off consumes them). A clip with no synthesizer
+/// on its road has no one to play it.
 fn give_the_music_its_consumers(groups: &GroupsOfTheSound, items: &mut [SoundItem], buses: &[SoundBus]) {
     for (place, item) in items.iter_mut().enumerate() {
         let SoundItem::Clip(clip) = item else {
@@ -928,27 +931,31 @@ fn give_the_music_its_consumers(groups: &GroupsOfTheSound, items: &mut [SoundIte
         if clip.music.is_none() {
             continue;
         }
-        let consumer = if clip.effects.iter().any(is_a_synthesizer) {
-            NoteConsumer::Clip
-        } else if buses
+        let mut road: Vec<(NoteConsumer, &[LayerEffect])> = vec![(NoteConsumer::Clip, &clip.effects)];
+        if let Some(bus) = buses
             .iter()
-            .any(|bus| bus.first_item <= place && place <= bus.last_item && bus.effects.iter().any(is_a_synthesizer))
+            .find(|bus| bus.first_item <= place && place <= bus.last_item)
         {
-            NoteConsumer::Bus
-        } else {
-            let mut group = clip.sent_to;
-            let mut found = NoteConsumer::Nobody;
-            while let Some(number) = group {
-                if groups.nodes[number].effects.iter().any(is_a_synthesizer) {
-                    found = NoteConsumer::Group(number);
-                    break;
-                }
-                group = groups.nodes[number].parent;
+            road.push((NoteConsumer::Bus, &bus.effects));
+        }
+        let mut group = clip.sent_to;
+        while let Some(number) = group {
+            road.push((NoteConsumer::Group(number), &groups.nodes[number].effects));
+            group = groups.nodes[number].parent;
+        }
+        let mut consumers = Vec::new();
+        for (consumer, effects) in road {
+            let mut synthesizers = effects.iter().filter(|effect| is_a_synthesizer(effect)).peekable();
+            if synthesizers.peek().is_none() {
+                continue;
             }
-            found
-        };
+            consumers.push(consumer);
+            if !synthesizers.all(|effect| effect.passes_notes_on) {
+                break;
+            }
+        }
         if let Some(music) = &mut clip.music {
-            music.consumer = consumer;
+            music.consumers = consumers;
         }
     }
 }

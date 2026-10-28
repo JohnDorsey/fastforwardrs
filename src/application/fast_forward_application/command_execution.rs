@@ -277,6 +277,19 @@ impl FastForwardApplication {
             } => {
                 let _ = self.document.project.set_effect_tail_length(owner, instance, length);
             }
+            Command::SetEffectPassesNotesOn {
+                owner,
+                instance,
+                passes_notes_on,
+            } => {
+                if let Err(error) = self
+                    .document
+                    .project
+                    .set_effect_passes_notes_on(owner, instance, passes_notes_on)
+                {
+                    self.say_why_an_effect_was_refused("The switch cannot be set", &error);
+                }
+            }
             Command::SetPluginState { owner, instance, state } => {
                 if let Err(error) = self.document.project.set_effect_state(owner, instance, state) {
                     self.say_why_an_effect_was_refused("The state of the plugin cannot be kept", &error);

@@ -309,6 +309,99 @@ fn the_first_instrument_takes_the_notes_and_the_one_after_it_is_silent() {
     );
 }
 
+/// A target that is a clip, as the member that owns its effects.
+fn member_of(target: AnimationTarget) -> Member {
+    match target {
+        AnimationTarget::Clip(clip) => Member::Clip(clip),
+        AnimationTarget::Track(track) => Member::Track(track),
+    }
+}
+
+#[test]
+fn an_instrument_that_passes_the_notes_on_and_the_one_after_it_in_the_chain_both_play_them() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = the_clap_kind_of(INSTRUMENT);
+    let mut project = project_with_music(&[0]);
+    let clip = the_clip_of(&project, 0);
+    let first = project.add_effect(clip, instrument).unwrap();
+    project.add_effect(clip, instrument).unwrap();
+    project
+        .set_effect_passes_notes_on(member_of(clip), first, true)
+        .unwrap();
+
+    let sound = heard_from(&project, 0, 4096);
+
+    let wanted: Vec<f32> = the_sound_of_the_tune(144_000, 0)
+        .into_iter()
+        .map(|made| made * 2.0)
+        .collect();
+    close(&sound, &wanted, "two instruments' worth");
+}
+
+#[test]
+fn an_instrument_of_the_clip_that_passes_the_notes_on_and_one_of_its_track_and_one_of_a_group_all_play_them() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = the_clap_kind_of(INSTRUMENT);
+    let mut project = project_with_music(&[0, 0]);
+    let (first, second) = (
+        project.tracks()[0].placement_at_index(0).unwrap().id,
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(first), Member::Clip(second)])
+        .unwrap();
+    // (Only the first clip has its own instrument and the track's: the second clip's notes go to the group's.)
+    let on_the_clip = project.add_effect(AnimationTarget::Clip(first), instrument).unwrap();
+    let track = AnimationTarget::Track(project.tracks()[0].id());
+    let on_the_track = project.add_effect(track, instrument).unwrap();
+    project.add_effect_to_the_group(group, instrument).unwrap();
+    let one_tune = the_sound_of_the_tune(144_000, 0);
+    let times = |factor: f32| -> Vec<f32> { one_tune.iter().map(|made| made * factor).collect() };
+
+    // (Nobody passes the notes on: the first clip's own instrument plays its notes and the second clip's go to the group's.)
+    close(&heard_from(&project, 0, 2048), &times(2.0), "each clip is played once");
+
+    project
+        .set_effect_passes_notes_on(Member::Clip(first), on_the_clip, true)
+        .unwrap();
+    // (The notes of the first clip are played by its own instrument, and by the track's; the second clip's by the group's.)
+    close(
+        &heard_from(&project, 0, 2048),
+        &times(3.0),
+        "the first clip is played twice",
+    );
+
+    project
+        .set_effect_passes_notes_on(member_of(track), on_the_track, true)
+        .unwrap();
+    close(
+        &heard_from(&project, 0, 2048),
+        &times(4.0),
+        "the first clip is played three times",
+    );
+}
+
+#[test]
+fn the_sound_made_from_a_seek_is_what_the_whole_sound_has_from_there_when_the_notes_are_passed_on() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = the_clap_kind_of(INSTRUMENT);
+    let mut project = project_with_music(&[0]);
+    let clip = the_clip_of(&project, 0);
+    let first = project.add_effect(clip, instrument).unwrap();
+    project.add_effect(clip, instrument).unwrap();
+    project
+        .set_effect_passes_notes_on(member_of(clip), first, true)
+        .unwrap();
+    let whole = heard_from(&project, 0, 4096);
+
+    for from in [8, 20, 30, 55, 70] {
+        let from_there = heard_from(&project, from, 1000);
+
+        let samples_before = (from * 1600) as usize;
+        close(&from_there, &whole[samples_before..], &format!("from frame {from}"));
+    }
+}
+
 #[test]
 fn an_instrument_that_is_not_installed_takes_the_notes_and_the_instrument_after_it_plays_none() {
     let _alone = the_installed_plugins_to_myself();

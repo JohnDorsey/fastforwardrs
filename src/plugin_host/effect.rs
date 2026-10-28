@@ -149,6 +149,9 @@ pub struct PluginEffect {
     /// Whether the warning that the plugin's start is unreliable (if it has one) has been said.
     has_said_its_start_is_unreliable: bool,
     notes: Notes,
+    /// For a synthesizer: the sound that passes by it, held back by the plugin's latency (a plugin that makes its sound that much after its notes is made to hold back what passes by too, so that both
+    /// come out together, as an effect's latency holds back its sound; see `BlockProcessor::latency`). One line for each channel.
+    passing_by: [std::collections::VecDeque<f32>; 2],
     /// The notes that reach the plugin in the block that is being made (see `BlockProcessor::give_notes`); only a synthesizer keeps them.
     notes_of_the_block: Vec<NoteEvent>,
     /// Where a plugin that is left out says why, for the window.
@@ -191,6 +194,7 @@ impl PluginEffect {
             has_said_it_gave_too_much: false,
             has_said_its_start_is_unreliable: false,
             notes,
+            passing_by: [std::collections::VecDeque::new(), std::collections::VecDeque::new()],
             notes_of_the_block: Vec::new(),
             problems: None,
             meters: None,
@@ -390,14 +394,33 @@ impl PluginEffect {
         let mut was_unfit = false;
         // (A synthesizer's sound is added to the sound that passes by it; an effect's replaces it.)
         let adds = self.layout.is_a_source();
-        for (sound, made) in left
-            .iter_mut()
-            .zip(output_left.iter())
-            .chain(right.iter_mut().zip(output_right.iter()))
+        let latency = self
+            .instances
+            .iter()
+            .map(|instance| instance.latency())
+            .max()
+            .unwrap_or(0);
+        for (channel, (sounds, mades)) in [(&mut *left, &*output_left), (&mut *right, &*output_right)]
+            .into_iter()
+            .enumerate()
         {
-            was_unfit |= !is_fit(*made);
-            let made = if is_fit(*made) { *made } else { 0.0 };
-            *sound = if adds { *sound + made } else { made };
+            for (sound, made) in sounds.iter_mut().zip(mades.iter()) {
+                was_unfit |= !is_fit(*made);
+                let made = if is_fit(*made) { *made } else { 0.0 };
+                *sound = if adds {
+                    // (What passes by is held back by the latency, as what an effect makes is.)
+                    let line = &mut self.passing_by[channel];
+                    line.push_back(*sound);
+                    let passing_by = if line.len() > latency {
+                        line.pop_front().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
+                    passing_by + made
+                } else {
+                    made
+                };
+            }
         }
         if was_unfit && !self.has_said_it_gave_too_much {
             self.has_said_it_gave_too_much = true;
@@ -517,6 +540,9 @@ impl BlockProcessor for PluginEffect {
             instance.reset();
         }
         self.given.clear();
+        for line in &mut self.passing_by {
+            line.clear();
+        }
     }
 
     fn about_to_be_given_sound_from_before_the_clip(&mut self, samples: usize) {
@@ -525,6 +551,10 @@ impl BlockProcessor for PluginEffect {
 
     fn plays_notes(&self) -> bool {
         self.layout.is_a_source()
+    }
+
+    fn passes_notes_on(&self) -> bool {
+        self.layout.is_a_source() && self.effect.passes_notes_on
     }
 
     fn give_notes(&mut self, notes: &[NoteEvent]) {

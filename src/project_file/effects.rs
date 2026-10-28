@@ -165,6 +165,9 @@ pub(super) struct EffectDocument {
     /// How long the effect goes on after its input ends, when its person has said (format 20 and after): `none`, or `{ "milliseconds": n }`. Left out for what the plugin says or the default.
     #[serde(default, skip_serializing_if = "is_the_automatic_tail")]
     pub tail: TailLength,
+    /// For a synthesizer (format 22 and after): `true` when it passes the notes that reach it on to the next synthesizer (phase 13, piece 13.5). Left out when it does not, which is how it is put on.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub passes_notes_on: bool,
     /// What this version of the program does not know of the effect, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
@@ -453,6 +456,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 .with_unknown_fields(UnknownFields::new(document.unknown))
                 .with_enabled(document.enabled)
                 .with_tail_length(document.tail)
+                .with_passes_notes_on(document.passes_notes_on)
                 .with_state(state)
         })
         .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
@@ -532,6 +536,7 @@ pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
                 enabled: effect.is_enabled(),
                 state: effect.state().map(|bytes| crate::base64::encode(bytes)),
                 tail: effect.tail_length(),
+                passes_notes_on: effect.passes_notes_on(),
                 unknown: effect.unknown_fields().fields().clone(),
             }
         })

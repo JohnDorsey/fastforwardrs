@@ -23,21 +23,35 @@ type Log = Arc<Mutex<Vec<Vec<NoteEvent>>>>;
 /// Makes 1.0 (the velocity over 127, so 1.0 for 127) from a note on to its note off, on top of what it is given, **delayed by `latency` samples**, and records what it is given.
 struct Synth {
     latency: usize,
+    passes_on: bool,
     level: f32,
     queue: VecDeque<f32>,
+    /// What passes by, held back by the latency as a plugin that is a source holds it back.
+    passing_by: VecDeque<(f32, f32)>,
     pending: Vec<NoteEvent>,
     log: Log,
 }
 
 impl Synth {
     fn boxed(latency: usize, log: &Log) -> Box<dyn BlockProcessor> {
-        Box::new(Self {
+        Box::new(Self::made(latency, false, log))
+    }
+
+    /// A synthesizer whose switch "pass notes on" is on.
+    fn passing_on(latency: usize, log: &Log) -> Box<dyn BlockProcessor> {
+        Box::new(Self::made(latency, true, log))
+    }
+
+    fn made(latency: usize, passes_on: bool, log: &Log) -> Self {
+        Self {
             latency,
+            passes_on,
             level: 0.0,
             queue: VecDeque::new(),
+            passing_by: VecDeque::new(),
             pending: Vec::new(),
             log: Arc::clone(log),
-        })
+        }
     }
 }
 
@@ -59,8 +73,14 @@ impl BlockProcessor for Synth {
             } else {
                 0.0
             };
-            left[place] += made;
-            right[place] += made;
+            self.passing_by.push_back((left[place], right[place]));
+            let (passing_left, passing_right) = if self.passing_by.len() > self.latency {
+                self.passing_by.pop_front().unwrap_or((0.0, 0.0))
+            } else {
+                (0.0, 0.0)
+            };
+            left[place] = passing_left + made;
+            right[place] = passing_right + made;
         }
         self.pending.clear();
     }
@@ -73,6 +93,10 @@ impl BlockProcessor for Synth {
 
     fn plays_notes(&self) -> bool {
         true
+    }
+
+    fn passes_notes_on(&self) -> bool {
+        self.passes_on
     }
 
     fn give_notes(&mut self, notes: &[NoteEvent]) {
@@ -111,8 +135,8 @@ impl BlockProcessor for Delays {
     }
 }
 
-/// A music clip of `frames` frames (30 a second, 1600 samples each) with these notes, each `(start, end)` in samples, played by `consumer`.
-fn music_clip(frames: u64, notes: &[(u64, u64)], consumer: NoteConsumer) -> SoundItemToExport {
+/// A music clip of `frames` frames (30 a second, 1600 samples each) with these notes, each `(start, end)` in samples, played by `consumers`.
+fn music_clip(frames: u64, notes: &[(u64, u64)], consumers: &[NoteConsumer]) -> SoundItemToExport {
     let SoundItemToExport::Clip(mut clip) = clip(frames, LoudnessToExport::UNCHANGED) else {
         unreachable!("a clip");
     };
@@ -128,7 +152,7 @@ fn music_clip(frames: u64, notes: &[(u64, u64)], consumer: NoteConsumer) -> Soun
             })
             .collect(),
         controls: Vec::new(),
-        consumer,
+        consumers: consumers.to_vec(),
     }));
     SoundItemToExport::Clip(clip)
 }
@@ -156,6 +180,19 @@ impl Chains {
             for_clip: Box::new(Vec::new),
             for_bus: Box::new(for_bus),
             for_group: Box::new(Vec::new),
+            made: Arc::default(),
+        }
+    }
+
+    fn on_every_road(
+        for_clip: impl FnMut() -> Vec<Box<dyn BlockProcessor>> + Send + 'static,
+        for_bus: impl FnMut() -> Vec<Box<dyn BlockProcessor>> + Send + 'static,
+        for_group: impl FnMut() -> Vec<Box<dyn BlockProcessor>> + Send + 'static,
+    ) -> Self {
+        Self {
+            for_clip: Box::new(for_clip),
+            for_bus: Box::new(for_bus),
+            for_group: Box::new(for_group),
             made: Arc::default(),
         }
     }
@@ -221,7 +258,7 @@ fn the_synthesizer_among_the_effects_of_a_clip_plays_its_notes_at_their_samples_
         let specification = specification_with_buses(
             thirty(),
             10,
-            vec![(vec![music_clip(10, &NOTES, NoteConsumer::Clip)], Vec::new())],
+            vec![(vec![music_clip(10, &NOTES, &[NoteConsumer::Clip])], Vec::new())],
         );
 
         let sound = heard(
@@ -245,7 +282,7 @@ fn a_music_clip_that_is_later_has_its_notes_counted_from_where_it_starts() {
         vec![(
             vec![
                 silence(10),
-                music_clip(10, &[(0, 800), (4800, 6400)], NoteConsumer::Clip),
+                music_clip(10, &[(0, 800), (4800, 6400)], &[NoteConsumer::Clip]),
             ],
             Vec::new(),
         )],
@@ -263,11 +300,7 @@ fn a_music_clip_that_is_later_has_its_notes_counted_from_where_it_starts() {
 #[test]
 fn a_music_clip_has_no_feed_and_its_sound_is_silence_where_no_synthesizer_plays_it() {
     let ramps = Ramps::default();
-    let specification = specification_with_buses(
-        thirty(),
-        10,
-        vec![(vec![music_clip(10, &NOTES, NoteConsumer::Nobody)], Vec::new())],
-    );
+    let specification = specification_with_buses(thirty(), 10, vec![(vec![music_clip(10, &NOTES, &[])], Vec::new())]);
     let mut graph = SoundGraph::new(specification, Box::new(ramps.clone()), Box::new(NoInsertions));
 
     let (left, right) = graph.render_to_the_end(512);
@@ -280,11 +313,7 @@ fn a_music_clip_has_no_feed_and_its_sound_is_silence_where_no_synthesizer_plays_
 fn a_music_clip_gives_no_notes_to_anyone_where_the_plan_says_nobody_plays_them() {
     let log = the_log();
     let chain = Arc::clone(&log);
-    let specification = specification_with_buses(
-        thirty(),
-        10,
-        vec![(vec![music_clip(10, &NOTES, NoteConsumer::Nobody)], Vec::new())],
-    );
+    let specification = specification_with_buses(thirty(), 10, vec![(vec![music_clip(10, &NOTES, &[])], Vec::new())]);
 
     let sound = heard(specification, Chains::clips(move || vec![Synth::boxed(0, &chain)]), 512);
 
@@ -310,7 +339,7 @@ fn the_notes_are_made_up_for_what_the_effects_before_and_after_the_synthesizer_d
             let specification = specification_with_buses(
                 thirty(),
                 10,
-                vec![(vec![music_clip(10, &NOTES, NoteConsumer::Clip)], Vec::new())],
+                vec![(vec![music_clip(10, &NOTES, &[NoteConsumer::Clip])], Vec::new())],
             );
 
             let sound = heard(
@@ -350,10 +379,10 @@ fn the_synthesizer_among_the_effects_of_a_bus_plays_the_notes_of_all_the_clips_t
             40,
             vec![(
                 vec![
-                    music_clip(10, &[(0, 800), (4800, 6400)], NoteConsumer::Bus),
-                    music_clip(10, &[(100, 200)], NoteConsumer::Bus),
+                    music_clip(10, &[(0, 800), (4800, 6400)], &[NoteConsumer::Bus]),
+                    music_clip(10, &[(100, 200)], &[NoteConsumer::Bus]),
                     silence(10),
-                    music_clip(10, &[(0, 1600)], NoteConsumer::Bus),
+                    music_clip(10, &[(0, 1600)], &[NoteConsumer::Bus]),
                 ],
                 vec![(0, 3)],
             )],
@@ -390,13 +419,17 @@ fn the_synthesizer_among_the_effects_of_a_group_plays_the_notes_of_the_clips_of_
             20,
             vec![
                 (
-                    vec![sent_to_the_group(music_clip(10, &[(0, 800)], NoteConsumer::Group(0)))],
+                    vec![sent_to_the_group(music_clip(
+                        10,
+                        &[(0, 800)],
+                        &[NoteConsumer::Group(0)],
+                    ))],
                     Vec::new(),
                 ),
                 (
                     vec![
                         silence(5),
-                        sent_to_the_group(music_clip(10, &[(0, 400), (3200, 3600)], NoteConsumer::Group(0))),
+                        sent_to_the_group(music_clip(10, &[(0, 400), (3200, 3600)], &[NoteConsumer::Group(0)])),
                     ],
                     Vec::new(),
                 ),
@@ -431,7 +464,7 @@ fn only_the_first_synthesizer_of_a_chain_is_given_notes() {
     let specification = specification_with_buses(
         thirty(),
         10,
-        vec![(vec![music_clip(10, &NOTES, NoteConsumer::Clip)], Vec::new())],
+        vec![(vec![music_clip(10, &NOTES, &[NoteConsumer::Clip])], Vec::new())],
     );
 
     let sound = heard(
@@ -455,12 +488,12 @@ fn a_stand_in_for_a_synthesizer_that_is_not_there_takes_the_notes_and_the_next_s
     let specification = specification_with_buses(
         thirty(),
         10,
-        vec![(vec![music_clip(10, &NOTES, NoteConsumer::Clip)], Vec::new())],
+        vec![(vec![music_clip(10, &NOTES, &[NoteConsumer::Clip])], Vec::new())],
     );
 
     let sound = heard(
         specification,
-        Chains::clips(move || vec![Box::new(TakesTheNotes), Synth::boxed(0, &chain)]),
+        Chains::clips(move || vec![Box::new(TakesTheNotes::consuming()), Synth::boxed(0, &chain)]),
         1000,
     );
 
@@ -475,7 +508,7 @@ fn an_effect_that_does_not_play_notes_is_not_given_any_and_does_its_work_on_what
     let specification = specification_with_buses(
         thirty(),
         10,
-        vec![(vec![music_clip(10, &NOTES, NoteConsumer::Clip)], Vec::new())],
+        vec![(vec![music_clip(10, &NOTES, &[NoteConsumer::Clip])], Vec::new())],
     );
 
     let sound = heard(
@@ -496,7 +529,7 @@ fn an_effect_that_does_not_play_notes_is_not_given_any_and_does_its_work_on_what
 fn the_volume_of_a_music_clip_is_done_to_what_its_synthesizer_makes_and_the_events_of_a_pedal_and_a_wheel_are_given() {
     let log = the_log();
     let chain = Arc::clone(&log);
-    let SoundItemToExport::Clip(mut clip) = music_clip(10, &[(0, 1600)], NoteConsumer::Clip) else {
+    let SoundItemToExport::Clip(mut clip) = music_clip(10, &[(0, 1600)], &[NoteConsumer::Clip]) else {
         unreachable!("a clip");
     };
     clip.loudness = LoudnessToExport::Constant(0.5);
@@ -561,8 +594,8 @@ fn the_notes_of_the_clips_of_one_synthesizer_are_numbered_so_that_each_note_off_
         20,
         vec![(
             vec![
-                music_clip(10, &[(0, 400), (200, 600)], NoteConsumer::Bus),
-                music_clip(10, &[(0, 400)], NoteConsumer::Bus),
+                music_clip(10, &[(0, 400), (200, 600)], &[NoteConsumer::Bus]),
+                music_clip(10, &[(0, 400)], &[NoteConsumer::Bus]),
             ],
             vec![(0, 1)],
         )],
@@ -599,9 +632,9 @@ fn the_notes_of_the_second_of_two_buses_are_played_by_the_second_and_not_the_fir
         30,
         vec![(
             vec![
-                music_clip(10, &[(0, 800)], NoteConsumer::Bus),
+                music_clip(10, &[(0, 800)], &[NoteConsumer::Bus]),
                 silence(10),
-                music_clip(10, &[(100, 900)], NoteConsumer::Bus),
+                music_clip(10, &[(100, 900)], &[NoteConsumer::Bus]),
             ],
             vec![(0, 0), (2, 2)],
         )],
@@ -620,7 +653,7 @@ fn the_notes_of_the_second_of_two_buses_are_played_by_the_second_and_not_the_fir
 fn the_notes_sent_to_the_second_of_two_groups_are_played_by_the_second_and_not_the_first() {
     let log = the_log();
     let chain = Arc::clone(&log);
-    let mut clip = music_clip(10, &[(0, 800), (4800, 6400)], NoteConsumer::Group(1));
+    let mut clip = music_clip(10, &[(0, 800), (4800, 6400)], &[NoteConsumer::Group(1)]);
     if let SoundItemToExport::Clip(clip) = &mut clip {
         clip.sent_to = Some(1);
     }
@@ -656,7 +689,7 @@ fn a_note_that_the_plan_leaves_going_past_the_clip_is_ended_where_the_clip_ends_
         vec![(
             vec![
                 silence(10),
-                music_clip(10, &[(15_000, 20_000)], NoteConsumer::Bus),
+                music_clip(10, &[(15_000, 20_000)], &[NoteConsumer::Bus]),
                 silence(10),
             ],
             vec![(0, 2)],
@@ -707,7 +740,7 @@ fn a_music_clip_that_begins_in_the_middle_of_its_file_is_given_no_sound_from_bef
             velocity: 127,
         }],
         controls: Vec::new(),
-        consumer: NoteConsumer::Clip,
+        consumers: vec![NoteConsumer::Clip],
     }));
     let specification = specification_with_buses(thirty(), 10, vec![(vec![SoundItemToExport::Clip(clip)], Vec::new())]);
 
@@ -730,4 +763,77 @@ fn a_music_clip_that_begins_in_the_middle_of_its_file_is_given_no_sound_from_bef
         0,
         "nothing was told that sound from before comes"
     );
+}
+
+#[test]
+fn a_synthesizer_that_passes_notes_on_and_the_one_after_it_in_the_next_chain_both_play_them_whatever_each_delays_the_sound_by()
+ {
+    for (clip_latency, bus_latency, group_latency) in [(0, 0, 0), (100, 240, 0), (333, 0, 480), (1200, 17, 5000)] {
+        for block in [64, 777, 4096] {
+            let log = the_log();
+            let (for_the_clip, for_the_bus, for_the_group) = (Arc::clone(&log), Arc::clone(&log), Arc::clone(&log));
+            let mut clip = music_clip(
+                10,
+                &NOTES,
+                &[NoteConsumer::Clip, NoteConsumer::Bus, NoteConsumer::Group(0)],
+            );
+            if let SoundItemToExport::Clip(clip) = &mut clip {
+                clip.sent_to = Some(0);
+            }
+            let mut specification = specification_with_buses(thirty(), 10, vec![(vec![clip], vec![(0, 0)])]);
+            specification.groups = vec![SoundGroupToExport {
+                effects: Vec::new(),
+                parent: None,
+            }];
+            let chains = Chains::on_every_road(
+                move || vec![Synth::passing_on(clip_latency, &for_the_clip)],
+                move || vec![Synth::passing_on(bus_latency, &for_the_bus)],
+                move || vec![Synth::boxed(group_latency, &for_the_group)],
+            );
+
+            let sound = heard(specification, chains, block);
+
+            let one = what_notes_make(16_000, 0, &NOTES);
+            let wanted: Vec<f32> = one.iter().map(|level| level * 3.0).collect();
+            assert_eq!(
+                sound, wanted,
+                "three synthesizers play the same notes: latencies {clip_latency}, {bus_latency}, {group_latency}, blocks of {block}"
+            );
+        }
+    }
+}
+
+#[test]
+fn two_synthesizers_in_one_chain_both_play_the_notes_if_the_first_passes_them_on_and_only_the_first_if_it_does_not() {
+    for first_passes_on in [true, false] {
+        let log = the_log();
+        let chain = Arc::clone(&log);
+        let specification = specification_with_buses(
+            thirty(),
+            10,
+            vec![(vec![music_clip(10, &NOTES, &[NoteConsumer::Clip])], Vec::new())],
+        );
+
+        let sound = heard(
+            specification,
+            Chains::clips(move || {
+                vec![
+                    if first_passes_on {
+                        Synth::passing_on(50, &chain)
+                    } else {
+                        Synth::boxed(50, &chain)
+                    },
+                    Synth::boxed(120, &chain),
+                ]
+            }),
+            1000,
+        );
+
+        let one = what_notes_make(16_000, 0, &NOTES);
+        let wanted: Vec<f32> = one
+            .iter()
+            .map(|level| level * if first_passes_on { 2.0 } else { 1.0 })
+            .collect();
+        assert_eq!(sound, wanted, "the first passes the notes on: {first_passes_on}");
+    }
 }

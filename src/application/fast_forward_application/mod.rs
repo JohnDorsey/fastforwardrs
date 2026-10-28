@@ -109,6 +109,8 @@ mod midi_clip_tests;
 #[cfg(test)]
 mod navigation_key_tests;
 #[cfg(test)]
+mod note_passing_menu_tests;
+#[cfg(test)]
 mod picture_tests;
 #[cfg(test)]
 mod playing_edit_tests;

@@ -74,6 +74,7 @@ fn an_effect(kind: EffectKind, values: Vec<PropertyValue>) -> LayerEffect {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     }
 }

@@ -85,23 +85,37 @@ pub fn put_in_order(events: &mut [TimedNote]) {
 }
 
 /// Gives the first of `processors` that plays notes the events that are in the block it is about to process, which is `length` samples long and whose **input** is the sound `audio_start`
-/// samples from the start of the sound (a chain whose effects delay the sound is given its sound ahead: see `BlockProcessor::latency`). The synthesizer is after the processors that are before it
+/// samples from the start of the sound (a chain whose effects delay the sound is given its sound ahead: see `BlockProcessor::latency`). A synthesizer is after the processors that are before it
 /// in the chain, which delay what goes through them, so that **its block is the one that begins `L_before` samples earlier in the sound**, `L_before` being the sum of their latencies: that is
 /// where the notes are taken from (the sum of the latencies of it and the processors after it is how late what it makes comes out, which makes up for the rest). Each event is given at its
-/// sample of the block. A chain with no processor that plays notes is given nothing, and **no processor after the first that plays notes is given any**.
+/// sample of the block. A chain with no processor that plays notes is given nothing. **A synthesizer that passes notes on (its switch, phase 13 piece 13.5) gives them to the next processor that plays
+/// notes as well, and so on; the first that does not pass them on is the last that is given any.**
 pub fn give_the_notes_of_the_block(
     processors: &mut [Box<dyn BlockProcessor>],
     events: &[TimedNote],
     audio_start: u64,
     length: usize,
 ) {
-    let Some(place) = processors.iter().position(|processor| processor.plays_notes()) else {
-        return;
-    };
-    let before: i64 = processors[..place]
-        .iter()
-        .map(|processor| i64::try_from(processor.latency()).unwrap_or(i64::MAX))
-        .sum();
+    let mut before: i64 = 0;
+    for processor in processors.iter_mut() {
+        if processor.plays_notes() {
+            give_the_notes_to(processor, events, audio_start, length, before);
+            if !processor.passes_notes_on() {
+                return;
+            }
+        }
+        before = before.saturating_add(i64::try_from(processor.latency()).unwrap_or(i64::MAX));
+    }
+}
+
+/// Gives `processor`, which has `before` samples of delay before it in its chain, the events of its block (see [`give_the_notes_of_the_block`]).
+fn give_the_notes_to(
+    processor: &mut Box<dyn BlockProcessor>,
+    events: &[TimedNote],
+    audio_start: u64,
+    length: usize,
+    before: i64,
+) {
     let start = i64::try_from(audio_start).unwrap_or(i64::MAX).saturating_sub(before);
     let end = start.saturating_add(i64::try_from(length).unwrap_or(i64::MAX));
     let first = events.partition_point(|event| i64::try_from(event.time).is_ok_and(|time| time < start));
@@ -113,12 +127,26 @@ pub fn give_the_notes_of_the_block(
             what: event.what,
         })
         .collect();
-    processors[place].give_notes(&batch);
+    processor.give_notes(&batch);
 }
 
 /// What takes the place of a synthesizer that is not installed, or that could not be run: it plays no notes and makes no sound, and **takes the notes that reach it**, so that they are not
-/// played by the next synthesizer in the chain (the plan decided that this chain has the first). The sound that goes through it is as it is.
-pub struct TakesTheNotes;
+/// played by the next synthesizer in the chain (the plan decided that this chain has the first), or **passes them on if its switch says so**. The sound that goes through it is as it is.
+pub struct TakesTheNotes {
+    passes_them_on: bool,
+}
+
+impl TakesTheNotes {
+    /// The stand-in for a synthesizer whose switch is off: it consumes the notes.
+    pub fn consuming() -> Self {
+        Self { passes_them_on: false }
+    }
+
+    /// The stand-in for a synthesizer whose switch is on.
+    pub fn passing_them_on() -> Self {
+        Self { passes_them_on: true }
+    }
+}
 
 impl BlockProcessor for TakesTheNotes {
     fn process(&mut self, _left: &mut [f32], _right: &mut [f32]) {}
@@ -127,6 +155,10 @@ impl BlockProcessor for TakesTheNotes {
 
     fn plays_notes(&self) -> bool {
         true
+    }
+
+    fn passes_notes_on(&self) -> bool {
+        self.passes_them_on
     }
 }
 

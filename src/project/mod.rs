@@ -22,6 +22,7 @@ mod frame_index;
 mod frame_rate;
 pub(crate) mod groups;
 mod keyframe_copying;
+mod note_editing;
 mod plugin_libraries;
 mod rack_editing;
 mod rack_merging;
@@ -280,6 +281,8 @@ pub enum EditError {
     TooManyEffects { limit: usize },
     #[error("{group} is a tag, which is not a shape and has no edge for a tail to cross")]
     ATagHasNoEdge { group: GroupId },
+    #[error("the {instance} of {owner} is not a synthesizer, so it has no notes to pass on")]
+    NotASynthesizer { owner: Member, instance: EffectInstanceId },
 }
 
 /// How many seconds a picture is shown for when it is put on a track, until it is changed.

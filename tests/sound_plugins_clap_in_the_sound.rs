@@ -76,6 +76,7 @@ fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     }
 }
@@ -348,6 +349,7 @@ fn a_clap_plugin_that_delays_the_sound_is_made_up_for_in_the_export_and_in_the_p
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     };
     let (plain, _) = by_the_export(&toolchain, &specification_of_a_second_with(Vec::new()), &sources, None);
@@ -440,6 +442,7 @@ fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_
             animation: Animation::default(),
             tables: Vec::new(),
             tail_length: Default::default(),
+            passes_notes_on: false,
             shared_by: None,
         }
     };
@@ -551,6 +554,7 @@ fn an_echo() -> LayerEffect {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        passes_notes_on: false,
         shared_by: None,
     }
 }
@@ -790,6 +794,7 @@ fn the_clips_of_a_run_are_heard_by_one_echo_so_two_clips_that_follow_each_other_
         // (With no tail: with one that rings on, an echo is linear and the copies of it add up to what one instance makes, which the next test of this file says.)
         clip.effects = vec![LayerEffect {
             tail_length: fastforwardrs::project::TailLength::None,
+            passes_notes_on: false,
             ..an_echo()
         }];
     }
@@ -815,6 +820,7 @@ fn an_echo_for_each_clip_that_rings_on_and_one_echo_for_the_run_sound_the_same_b
     // (The echo says a tail of 1000 samples, where what it rings is a little more than a thousandth of the sound still: a tail of 200 milliseconds leaves nothing of it out.)
     let a_long_ringing_echo = || LayerEffect {
         tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        passes_notes_on: false,
         ..an_echo()
     };
     let mut run = specification_of_frames_with(60, Vec::new());
@@ -918,6 +924,7 @@ fn two_strips_of_noise_and_a_long_echo() -> (SoundGraphSpecification, LayerEffec
     specification.strips.push(other);
     let echo = LayerEffect {
         tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        passes_notes_on: false,
         ..an_echo()
     };
     (specification, echo)
@@ -1016,6 +1023,7 @@ fn the_ring_of_a_clip_that_its_group_releases_is_not_done_to_by_the_effects_of_t
     // The clip is a second of noise with the echo, which rings on for 200 milliseconds (a tail long enough to be most of what it is) after it; the group halves what it is given.
     let long_echo = LayerEffect {
         tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        passes_notes_on: false,
         ..an_echo()
     };
     let halving = a_gain(the_kind_of(clap_test_plugins::GAIN), 0.5);
@@ -1102,6 +1110,7 @@ fn a_group_takes_a_window_of_the_one_echo_of_a_track_and_what_still_rings_in_it_
     // A clip, three frames of silence, and a clip: the echo of the track (200 milliseconds, six frames) is still ringing from the first when the second begins.
     let long_echo = LayerEffect {
         tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        passes_notes_on: false,
         ..an_echo()
     };
     let one_echo = |windows: bool| {

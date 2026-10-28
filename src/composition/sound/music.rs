@@ -32,7 +32,7 @@ pub struct PlannedControl {
     pub what: MidiControlKind,
 }
 
-/// What plays the notes of a MIDI clip: the first synthesizer of the first of these chains that has one (see `docs/engine-phase-13-midi-design.md`, 13.4).
+/// What plays the notes of a MIDI clip: the first synthesizer of a chain of its road (see `docs/engine-phase-13-midi-design.md`, 13.4; and 13.5 for the notes that go on to the next chain).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoteConsumer {
     /// The effects of the clip itself.
@@ -41,8 +41,6 @@ pub enum NoteConsumer {
     Bus,
     /// The effects of a group that the clip is sent to, or that holds one that it is sent to (the place in `SoundPlan::groups`).
     Group(usize),
-    /// No synthesizer is on its road: the notes are not played.
-    Nobody,
 }
 
 /// What a MIDI clip says to the synthesizer that plays it, over a stretch of it.
@@ -52,7 +50,8 @@ pub struct Music {
     pub notes: Vec<PlannedNote>,
     /// In the order of their times.
     pub controls: Vec<PlannedControl>,
-    pub consumer: NoteConsumer,
+    /// The chains whose synthesizers play the notes, in the order of the road. **Empty: no synthesizer is on the road, and nothing plays them.**
+    pub consumers: Vec<NoteConsumer>,
 }
 
 /// Which part of a track of a MIDI file a stretch of a clip plays, and how.

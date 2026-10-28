@@ -81,9 +81,12 @@ impl PluginInsertions {
                 });
                 match made {
                     Some(processor) => Some(processor),
-                    None if effect.kind.makes_sound_from_notes() => {
-                        Some(Box::new(TakesTheNotes) as Box<dyn BlockProcessor>)
-                    }
+                    None if effect.kind.makes_sound_from_notes() => Some(Box::new(if effect.passes_notes_on {
+                        TakesTheNotes::passing_them_on()
+                    } else {
+                        TakesTheNotes::consuming()
+                    })
+                        as Box<dyn BlockProcessor>),
                     None => None,
                 }
             })

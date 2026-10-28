@@ -11,12 +11,12 @@ use crate::composition::test_projects::{SOUND_FILE, media_clip, project_of};
 use crate::midi_file::MidiControlKind;
 use crate::project::tracks::Clip;
 use crate::project::{
-    AnimationTarget, EffectKind, GroupKind, InstalledPlugin, Member, MidiClip, PropertyValue, ResourceKind,
-    SourceFrameIndex, SourceMediaLink, SpeedFactor, TrackSharing, set_installed_plugins,
+    AnimationTarget, EffectKind, GroupKind, Member, MidiClip, PropertyValue, ResourceKind, SourceFrameIndex,
+    SourceMediaLink, SpeedFactor, TrackSharing, set_installed_plugins,
 };
 use crate::test_support::{
-    a_midi_file_with_notes, an_installed_sound_plugin, make_a_keyframe, put_an_effect_on, put_an_effect_on_a_group,
-    the_installed_plugins_to_myself,
+    a_midi_file_with_notes, an_installed_sound_plugin, an_installed_synthesizer, make_a_keyframe, put_an_effect_on,
+    put_an_effect_on_a_group, the_installed_plugins_to_myself,
 };
 
 fn frame(number: u64) -> TimelineFrameIndex {
@@ -42,19 +42,10 @@ fn clips_of(strip: &SoundStrip) -> Vec<&SoundClip> {
         .collect()
 }
 
-/// A synthesizer that is installed, as a kind of effect: no audio input, two outputs.
-fn a_synthesizer_plugin(key: &str) -> InstalledPlugin {
-    let mut plugin = an_installed_sound_plugin(key, "Maker", &[("gain", 1.0, Some((0.0, 4.0)))]);
-    plugin.descriptor.makes_sound_from_notes = true;
-    plugin.audio_inputs = 0;
-    plugin.audio_outputs = 2;
-    plugin
-}
-
 /// The kinds of effect that are installed: a synthesizer, and an effect that changes sound.
 fn the_kinds() -> (EffectKind, EffectKind) {
     set_installed_plugins(vec![
-        a_synthesizer_plugin("clap:test:synth"),
+        an_installed_synthesizer("clap:test:synth"),
         an_installed_sound_plugin("clap:test:effect", "Maker", &[("mix", 0.5, None)]),
     ]);
     let kinds = EffectKind::installed_plugin_kinds();
@@ -106,8 +97,8 @@ fn notes_of(clip: &SoundClip) -> Vec<(u64, u64, u8)> {
         .collect()
 }
 
-fn consumer_of(clip: &SoundClip) -> NoteConsumer {
-    clip.music.as_ref().expect("a MIDI clip has music").consumer
+fn consumers_of(clip: &SoundClip) -> Vec<NoteConsumer> {
+    clip.music.as_ref().expect("a MIDI clip has music").consumers.clone()
 }
 
 #[test]
@@ -131,8 +122,8 @@ fn a_midi_clip_is_a_clip_with_no_file_whose_music_is_its_notes_in_samples_from_w
         "a half second is 24000 samples"
     );
     assert_eq!(
-        consumer_of(clips[0]),
-        NoteConsumer::Nobody,
+        consumers_of(clips[0]),
+        Vec::<NoteConsumer>::new(),
         "no synthesizer is on its road: nothing plays them"
     );
     assert_eq!(clips[0].loudness, Loudness::Constant(1.0));
@@ -262,7 +253,7 @@ fn the_synthesizer_among_the_effects_of_the_clip_plays_its_notes() {
 
     let plan = plan(&project);
 
-    assert_eq!(consumer_of(clips_of(&plan.strips[0])[0]), NoteConsumer::Clip);
+    assert_eq!(consumers_of(clips_of(&plan.strips[0])[0]), vec![NoteConsumer::Clip]);
 }
 
 #[test]
@@ -273,14 +264,17 @@ fn an_effect_that_changes_sound_does_not_play_notes_and_the_notes_go_on_to_the_s
     let clip = AnimationTarget::Clip(the_clip_of(&project, 0));
     put_an_effect_on(&mut project, clip, effect, &[PropertyValue::Number(0.5)]);
     assert_eq!(
-        consumer_of(clips_of(&plan(&project).strips[0])[0]),
-        NoteConsumer::Nobody,
+        consumers_of(clips_of(&plan(&project).strips[0])[0]),
+        Vec::<NoteConsumer>::new(),
         "an effect takes none"
     );
 
     put_an_effect_on(&mut project, clip, synthesizer, &[PropertyValue::Number(1.0)]);
 
-    assert_eq!(consumer_of(clips_of(&plan(&project).strips[0])[0]), NoteConsumer::Clip);
+    assert_eq!(
+        consumers_of(clips_of(&plan(&project).strips[0])[0]),
+        vec![NoteConsumer::Clip]
+    );
 }
 
 #[test]
@@ -298,7 +292,7 @@ fn the_synthesizer_among_the_effects_of_the_track_plays_the_notes_of_the_clips_t
         1,
         "the effects of the track are one instance for the run"
     );
-    assert_eq!(consumer_of(clips_of(&plan.strips[0])[0]), NoteConsumer::Bus);
+    assert_eq!(consumers_of(clips_of(&plan.strips[0])[0]), vec![NoteConsumer::Bus]);
 }
 
 #[test]
@@ -320,7 +314,7 @@ fn with_one_copy_of_the_tracks_effects_for_each_clip_the_synthesizer_of_the_trac
     let plan = plan(&project);
 
     assert_eq!(plan.strips[0].buses, Vec::new());
-    assert_eq!(consumer_of(clips_of(&plan.strips[0])[0]), NoteConsumer::Clip);
+    assert_eq!(consumers_of(clips_of(&plan.strips[0])[0]), vec![NoteConsumer::Clip]);
 }
 
 #[test]
@@ -344,11 +338,14 @@ fn the_notes_of_a_clip_and_the_notes_of_a_sound_clip_after_it_are_heard_by_the_s
         (plan.strips[0].buses[0].first_item, plan.strips[0].buses[0].last_item),
         (0, 2)
     );
-    let consumers: Vec<Option<NoteConsumer>> = clips_of(&plan.strips[0])
+    let consumers: Vec<Option<Vec<NoteConsumer>>> = clips_of(&plan.strips[0])
         .iter()
-        .map(|clip| clip.music.as_ref().map(|music| music.consumer))
+        .map(|clip| clip.music.as_ref().map(|music| music.consumers.clone()))
         .collect();
-    assert_eq!(consumers, vec![Some(NoteConsumer::Bus), None, Some(NoteConsumer::Bus)]);
+    assert_eq!(
+        consumers,
+        vec![Some(vec![NoteConsumer::Bus]), None, Some(vec![NoteConsumer::Bus])]
+    );
 }
 
 #[test]
@@ -368,15 +365,15 @@ fn the_synthesizer_of_a_group_plays_the_notes_of_the_clips_sent_to_it_and_of_the
     put_an_effect_on_a_group(&mut project, inner, effect, &[PropertyValue::Number(0.5)]);
     let plan_with_the_effect = plan(&project);
     assert_eq!(
-        consumer_of(clips_of(&plan_with_the_effect.strips[0])[0]),
-        NoteConsumer::Nobody
+        consumers_of(clips_of(&plan_with_the_effect.strips[0])[0]),
+        Vec::<NoteConsumer>::new()
     );
 
     put_an_effect_on_a_group(&mut project, inner, synthesizer, &[PropertyValue::Number(1.0)]);
 
     let plan = plan(&project);
     assert_eq!(plan.groups.len(), 1);
-    assert_eq!(consumer_of(clips_of(&plan.strips[0])[0]), NoteConsumer::Group(0));
+    assert_eq!(consumers_of(clips_of(&plan.strips[0])[0]), vec![NoteConsumer::Group(0)]);
 }
 
 #[test]
@@ -409,8 +406,8 @@ fn the_synthesizer_of_a_group_that_holds_the_group_a_clip_is_sent_to_plays_its_n
     assert_eq!(plan.groups.len(), 2);
     let outer_place = plan.groups.iter().position(|group| group.group == outer).unwrap();
     assert_eq!(
-        consumer_of(clips_of(&plan.strips[0])[0]),
-        NoteConsumer::Group(outer_place)
+        consumers_of(clips_of(&plan.strips[0])[0]),
+        vec![NoteConsumer::Group(outer_place)]
     );
 }
 
@@ -431,8 +428,8 @@ fn the_chain_nearest_the_clip_that_has_a_synthesizer_plays_the_notes_and_the_oth
     let track = AnimationTarget::Track(project.tracks()[0].id());
     put_an_effect_on(&mut project, track, synthesizer, &[PropertyValue::Number(1.0)]);
     assert_eq!(
-        consumer_of(clips_of(&plan(&project).strips[0])[0]),
-        NoteConsumer::Bus,
+        consumers_of(clips_of(&plan(&project).strips[0])[0]),
+        vec![NoteConsumer::Bus],
         "the track's before the group's"
     );
 
@@ -444,8 +441,8 @@ fn the_chain_nearest_the_clip_that_has_a_synthesizer_plays_the_notes_and_the_oth
     );
 
     assert_eq!(
-        consumer_of(clips_of(&plan(&project).strips[0])[0]),
-        NoteConsumer::Clip,
+        consumers_of(clips_of(&plan(&project).strips[0])[0]),
+        vec![NoteConsumer::Clip],
         "the clip's own before the track's"
     );
 }
@@ -454,7 +451,7 @@ fn the_chain_nearest_the_clip_that_has_a_synthesizer_plays_the_notes_and_the_oth
 fn a_synthesizer_that_is_not_installed_still_takes_the_notes_and_so_does_the_group_that_has_only_it() {
     let _alone = the_installed_plugins_to_myself();
     // (A synthesizer of a plugin that is not here: a kind that a file's snapshot made.)
-    let mut descriptor = a_synthesizer_plugin("clap:test:gone").descriptor;
+    let mut descriptor = an_installed_synthesizer("clap:test:gone").descriptor;
     descriptor.key = "clap:test:gone".into();
     let gone = EffectKind::from_snapshot(descriptor).unwrap();
     set_installed_plugins(Vec::new());
@@ -468,8 +465,8 @@ fn a_synthesizer_that_is_not_installed_still_takes_the_notes_and_so_does_the_gro
 
     put_an_effect_on(&mut project, AnimationTarget::Clip(music), gone, &[]);
     assert_eq!(
-        consumer_of(clips_of(&plan(&project).strips[0])[0]),
-        NoteConsumer::Clip,
+        consumers_of(clips_of(&plan(&project).strips[0])[0]),
+        vec![NoteConsumer::Clip],
         "a missing synthesizer takes the notes and plays nothing: they do not go on to another"
     );
 
@@ -488,7 +485,223 @@ fn a_synthesizer_that_is_not_installed_still_takes_the_notes_and_so_does_the_gro
         1,
         "a group that has only a missing synthesizer is a group of the plan"
     );
-    assert_eq!(consumer_of(clips_of(&plan.strips[0])[0]), NoteConsumer::Group(0));
+    assert_eq!(consumers_of(clips_of(&plan.strips[0])[0]), vec![NoteConsumer::Group(0)]);
+}
+
+// --- the switch "pass notes on" (13.5) ---
+
+/// A MIDI clip on the first track and a sound clip on the second that are in a clip group, and the synthesizers: one among the effects of the clip, one among those of its track and one among those
+/// of the group (all of them off, which is how a synthesizer is put on). Their instances, to switch them by.
+struct ARoadWithThreeSynthesizers {
+    project: Project,
+    clip: crate::project::ClipId,
+    clip_synthesizer: crate::project::EffectInstanceId,
+    track_synthesizer: crate::project::EffectInstanceId,
+    group_synthesizer: crate::project::EffectInstanceId,
+    group: crate::project::GroupId,
+}
+
+fn a_road_with_three_synthesizers(synthesizer: EffectKind) -> ARoadWithThreeSynthesizers {
+    let mut project = project_of(vec![
+        vec![(0, the_midi_clip(0, 90, 1))],
+        vec![(0, Clip::Audio(media_clip(SOUND_FILE, 0, 60, 1)))],
+    ]);
+    add_the_file(&mut project, &[(0, 500, 60)]);
+    let (clip, sound) = (the_clip_of(&project, 0), the_clip_of(&project, 1));
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(clip), Member::Clip(sound)])
+        .unwrap();
+    let clip_synthesizer = put_an_effect_on(
+        &mut project,
+        AnimationTarget::Clip(clip),
+        synthesizer,
+        &[PropertyValue::Number(1.0)],
+    );
+    let track = AnimationTarget::Track(project.tracks()[0].id());
+    let track_synthesizer = put_an_effect_on(&mut project, track, synthesizer, &[PropertyValue::Number(1.0)]);
+    let group_synthesizer = put_an_effect_on_a_group(&mut project, group, synthesizer, &[PropertyValue::Number(1.0)]);
+    ARoadWithThreeSynthesizers {
+        project,
+        clip,
+        clip_synthesizer,
+        track_synthesizer,
+        group_synthesizer,
+        group,
+    }
+}
+
+impl ARoadWithThreeSynthesizers {
+    fn consumers(&self) -> Vec<NoteConsumer> {
+        consumers_of(clips_of(&plan(&self.project).strips[0])[0])
+    }
+
+    fn pass_on(&mut self, owner: Member, instance: crate::project::EffectInstanceId) {
+        self.project.set_effect_passes_notes_on(owner, instance, true).unwrap();
+    }
+
+    fn the_track(&self) -> crate::project::TrackId {
+        self.project.tracks()[0].id()
+    }
+}
+
+#[test]
+fn a_synthesizer_that_consumes_the_notes_is_the_last_on_the_road_and_one_that_passes_them_on_lets_them_go_to_the_next_chain()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let (synthesizer, _) = the_kinds();
+    let mut road = a_road_with_three_synthesizers(synthesizer);
+    assert_eq!(
+        road.consumers(),
+        vec![NoteConsumer::Clip],
+        "off: the first consumes them"
+    );
+    let (clip, track, group) = (
+        Member::Clip(road.clip),
+        Member::Track(road.the_track()),
+        Member::Group(road.group),
+    );
+
+    // (The track's passes them on, but the clip's, which is before it, does not: they do not get as far.)
+    road.pass_on(track, road.track_synthesizer);
+    assert_eq!(road.consumers(), vec![NoteConsumer::Clip]);
+
+    road.pass_on(clip, road.clip_synthesizer);
+    assert_eq!(
+        road.consumers(),
+        vec![NoteConsumer::Clip, NoteConsumer::Bus, NoteConsumer::Group(0)],
+        "the track's passes them on to the group's, which consumes them"
+    );
+
+    // (And the track's, switched off again, is the last.)
+    road.project
+        .set_effect_passes_notes_on(track, road.track_synthesizer, false)
+        .unwrap();
+    assert_eq!(road.consumers(), vec![NoteConsumer::Clip, NoteConsumer::Bus]);
+
+    // (The group's passing them on changes nothing: there is no chain after it.)
+    road.pass_on(group, road.group_synthesizer);
+    assert_eq!(road.consumers(), vec![NoteConsumer::Clip, NoteConsumer::Bus]);
+}
+
+#[test]
+fn a_chain_with_two_synthesizers_lets_the_notes_go_on_only_if_both_pass_them_on() {
+    let _alone = the_installed_plugins_to_myself();
+    let (synthesizer, _) = the_kinds();
+    let mut road = a_road_with_three_synthesizers(synthesizer);
+    let (clip, track) = (Member::Clip(road.clip), Member::Track(road.the_track()));
+    let second = put_an_effect_on(
+        &mut road.project,
+        AnimationTarget::Clip(road.clip),
+        synthesizer,
+        &[PropertyValue::Number(1.0)],
+    );
+    road.pass_on(clip, road.clip_synthesizer);
+    road.pass_on(track, road.track_synthesizer);
+    assert_eq!(
+        road.consumers(),
+        vec![NoteConsumer::Clip],
+        "the second one in the chain consumes them"
+    );
+
+    road.pass_on(clip, second);
+
+    assert_eq!(
+        road.consumers(),
+        vec![NoteConsumer::Clip, NoteConsumer::Bus, NoteConsumer::Group(0)]
+    );
+}
+
+#[test]
+fn a_chain_that_has_no_synthesizer_lets_the_notes_by_and_one_that_is_switched_off_is_not_a_chain_that_has_one() {
+    let _alone = the_installed_plugins_to_myself();
+    let (synthesizer, effect) = the_kinds();
+    let mut road = a_road_with_three_synthesizers(synthesizer);
+    let clip = Member::Clip(road.clip);
+    road.pass_on(clip, road.clip_synthesizer);
+    // (The track has an effect that changes sound, and no synthesizer: the notes go through it.)
+    let track = AnimationTarget::Track(road.the_track());
+    road.project.remove_effect(track, road.track_synthesizer).unwrap();
+    put_an_effect_on(&mut road.project, track, effect, &[PropertyValue::Number(0.5)]);
+    assert_eq!(road.consumers(), vec![NoteConsumer::Clip, NoteConsumer::Group(0)]);
+
+    // (The synthesizer of the group, switched off, does not play them or take them: the road has no one else.)
+    road.project
+        .set_effect_enabled(Member::Group(road.group), road.group_synthesizer, false)
+        .unwrap();
+    assert_eq!(road.consumers(), vec![NoteConsumer::Clip]);
+}
+
+#[test]
+fn the_notes_go_out_through_the_groups_that_hold_a_group_as_far_as_the_first_that_consumes_them() {
+    let _alone = the_installed_plugins_to_myself();
+    let (synthesizer, _) = the_kinds();
+    let mut project = project_of(vec![
+        vec![(0, the_midi_clip(0, 90, 1))],
+        vec![(0, Clip::Audio(media_clip(SOUND_FILE, 0, 60, 1)))],
+    ]);
+    add_the_file(&mut project, &[(0, 500, 60)]);
+    let (music, sound) = (the_clip_of(&project, 0), the_clip_of(&project, 1));
+    let inner = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(music), Member::Clip(sound)])
+        .unwrap();
+    let outer = project
+        .create_group(
+            GroupKind::TrackGroup,
+            &[
+                Member::Track(project.tracks()[0].id()),
+                Member::Track(project.tracks()[1].id()),
+            ],
+        )
+        .unwrap();
+    let in_the_inner = put_an_effect_on_a_group(&mut project, inner, synthesizer, &[PropertyValue::Number(1.0)]);
+    put_an_effect_on_a_group(&mut project, outer, synthesizer, &[PropertyValue::Number(1.0)]);
+    let places = |project: &Project| {
+        let plan = plan(project);
+        let place_of = |group| plan.groups.iter().position(|node| node.group == group).unwrap();
+        (
+            consumers_of(clips_of(&plan.strips[0])[0]),
+            place_of(inner),
+            place_of(outer),
+        )
+    };
+    let (consumers, inner_place, _) = places(&project);
+    assert_eq!(
+        consumers,
+        vec![NoteConsumer::Group(inner_place)],
+        "the inner consumes them"
+    );
+
+    project
+        .set_effect_passes_notes_on(Member::Group(inner), in_the_inner, true)
+        .unwrap();
+
+    let (consumers, inner_place, outer_place) = places(&project);
+    assert_eq!(
+        consumers,
+        vec![NoteConsumer::Group(inner_place), NoteConsumer::Group(outer_place)]
+    );
+}
+
+#[test]
+fn a_synthesizer_that_is_not_installed_passes_the_notes_on_if_it_is_set_to() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut descriptor = an_installed_synthesizer("clap:test:gone").descriptor;
+    descriptor.key = "clap:test:gone".into();
+    let gone = EffectKind::from_snapshot(descriptor).unwrap();
+    set_installed_plugins(Vec::new());
+    let mut project = a_track_with_music();
+    let clip = the_clip_of(&project, 0);
+    let track = AnimationTarget::Track(project.tracks()[0].id());
+    let on_the_clip = put_an_effect_on(&mut project, AnimationTarget::Clip(clip), gone, &[]);
+    put_an_effect_on(&mut project, track, gone, &[]);
+    let consumers = |project: &Project| consumers_of(clips_of(&plan(project).strips[0])[0]);
+    assert_eq!(consumers(&project), vec![NoteConsumer::Clip]);
+
+    project
+        .set_effect_passes_notes_on(Member::Clip(clip), on_the_clip, true)
+        .unwrap();
+
+    assert_eq!(consumers(&project), vec![NoteConsumer::Clip, NoteConsumer::Bus]);
 }
 
 // --- the stretches of a clip ---

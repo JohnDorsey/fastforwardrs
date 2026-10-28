@@ -135,7 +135,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// **Version 21 added the MIDI clip** (phase 13, docs/engine-phase-13-midi-design.md): `"kind": "midi"`, a run of one track (`midi_track`) of a Standard MIDI File that is a resource of the project (`resource` names it; the
 /// kind of the resource is `midi`), with a speed, a volume and a mute switch as a sound clip has, and its effects (the synthesizers among them play its notes), and `makes_sound_from_notes` in the snapshot of an effect that
 /// is a synthesizer (left out when it is not). A file of version 20 has none of them.
-pub const FILE_FORMAT_VERSION: u32 = 21;
+///
+/// **Version 22 added `passes_notes_on` to an effect** (phase 13, piece 13.5): `true` for a synthesizer that passes the notes that reach it on to the next one (left out when it does not, which is how it
+/// is put on). A file of version 21 has none: every synthesizer in it consumes the notes.
+pub const FILE_FORMAT_VERSION: u32 = 22;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1503,6 +1506,8 @@ mod groups_tests;
 mod included_files_tests;
 #[cfg(test)]
 mod midi_clip_tests;
+#[cfg(test)]
+mod note_passing_tests;
 #[cfg(test)]
 mod old_text_files_tests;
 #[cfg(test)]

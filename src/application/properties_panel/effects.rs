@@ -66,6 +66,11 @@ pub const DEPENDS_ON_EARLIER_FRAMES_NOTE: &str = "Depends on earlier frames: it 
 pub const TRANSITION_NOTE: &str = "A transition: it reads what is behind the clip. Animate its progress from 0 to 1 to bring the clip in over what is behind it. It is not run on a clip in a group that has effects.";
 pub const SWITCHED_OFF_NOTE: &str = "Switched off: it is not done, and its values and keyframes are kept.";
 
+/// What the item of the menu of the box of a synthesizer that makes it pass on the notes it is given is called (marked when it is on, as the tail length is), and what the box says while it is.
+pub const PASS_NOTES_ON_LABEL: &str = "Pass notes on";
+pub const PASSES_NOTES_ON_NOTE: &str =
+    "Passes the notes on to the next synthesizer: it plays them, and so does the next one they reach.";
+
 /// What the box of an effect that the program does not have says (a project file can bring one): that it does nothing, and that nothing of it is
 /// lost.
 pub const NOT_INSTALLED_NOTE: &str = "Not installed: it does nothing here, and its values are kept.";

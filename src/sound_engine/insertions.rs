@@ -36,6 +36,12 @@ pub trait BlockProcessor: Send {
     fn plays_notes(&self) -> bool {
         false
     }
+
+    /// Whether this, if it plays notes, passes them on: **the graph gives the notes of a chain to the next processor that plays notes too, as long as the one before passes them on** (phase 13,
+    /// piece 13.5: the switch of a synthesizer).
+    fn passes_notes_on(&self) -> bool {
+        false
+    }
 }
 
 /// What gives the graph the effects of a clip, of a track and of a group. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a

@@ -23,7 +23,7 @@ fn music(notes: Vec<PlannedNote>, controls: Vec<PlannedControl>) -> Music {
     Music {
         notes,
         controls,
-        consumer: NoteConsumer::Clip,
+        consumers: vec![NoteConsumer::Clip],
     }
 }
 
@@ -230,6 +230,7 @@ type Log = Arc<Mutex<Vec<Vec<(u32, String)>>>>;
 
 struct Plays {
     plays: bool,
+    passes_on: bool,
     latency: usize,
     log: Log,
 }
@@ -245,6 +246,10 @@ impl BlockProcessor for Plays {
 
     fn plays_notes(&self) -> bool {
         self.plays
+    }
+
+    fn passes_notes_on(&self) -> bool {
+        self.passes_on
     }
 
     fn give_notes(&mut self, notes: &[NoteEvent]) {
@@ -269,6 +274,17 @@ impl BlockProcessor for Plays {
 fn plays(plays: bool, latency: usize, log: &Log) -> Box<dyn BlockProcessor> {
     Box::new(Plays {
         plays,
+        passes_on: false,
+        latency,
+        log: Arc::clone(log),
+    })
+}
+
+/// A synthesizer whose switch is on: it plays the notes and passes them on.
+fn passes_on(latency: usize, log: &Log) -> Box<dyn BlockProcessor> {
+    Box::new(Plays {
+        plays: true,
+        passes_on: true,
         latency,
         log: Arc::clone(log),
     })
@@ -375,5 +391,62 @@ fn a_synthesizer_is_given_a_block_with_no_events_in_it_and_the_stand_in_for_one_
         vec![Vec::new()],
         "it is told, that there are none"
     );
-    assert!(TakesTheNotes.plays_notes());
+    assert!(TakesTheNotes::consuming().plays_notes());
+}
+
+#[test]
+fn a_synthesizer_that_passes_notes_on_gives_them_to_the_next_one_too_each_at_the_time_that_makes_the_latency_before_it_right()
+ {
+    let (first, second) = (Log::default(), Log::default());
+    // (An effect that delays by 3 samples, a synthesizer that passes the notes on and delays by 2, and another: the second has 5 samples of delay before it, the first 3.)
+    let mut chain = vec![
+        plays(false, 3, &Log::default()),
+        passes_on(2, &first),
+        plays(true, 7, &second),
+    ];
+
+    give_the_notes_of_the_block(&mut chain, &the_events(), 10, 7);
+
+    // (The first has the sound's samples 7 to 14: the event at 10, at 3 of its block. The second has 5 to 12: the events at 5 and 10, at 0 and 5.)
+    assert_eq!(*first.lock().unwrap(), vec![vec![(3, "on 2".to_owned())]]);
+    assert_eq!(
+        *second.lock().unwrap(),
+        vec![vec![(0, "on 1".to_owned()), (5, "on 2".to_owned())]]
+    );
+}
+
+#[test]
+fn the_second_synthesizer_is_given_the_notes_by_its_own_place_in_the_chain_and_not_the_first_ones() {
+    let (first, second) = (Log::default(), Log::default());
+    // (The first synthesizer passes them on and delays by 4 samples; the second is after it.)
+    let mut chain = vec![passes_on(4, &first), plays(true, 0, &second)];
+
+    give_the_notes_of_the_block(&mut chain, &the_events(), 9, 5);
+
+    // (The first has the sound from 9 up to 14 - its own latency is not a latency *before* it: 9 to 14, so the event at 10, at 1. The second is 4 samples earlier: 5 up to 10, the event at 5, at 0.)
+    assert_eq!(*first.lock().unwrap(), vec![vec![(1, "on 2".to_owned())]]);
+    assert_eq!(*second.lock().unwrap(), vec![vec![(0, "on 1".to_owned())]]);
+}
+
+#[test]
+fn the_notes_stop_at_the_first_synthesizer_that_does_not_pass_them_on_however_many_come_after_it() {
+    let (first, second, third) = (Log::default(), Log::default(), Log::default());
+    let mut chain = vec![passes_on(0, &first), plays(true, 0, &second), passes_on(0, &third)];
+
+    give_the_notes_of_the_block(&mut chain, &the_events(), 0, 100);
+
+    assert_eq!(first.lock().unwrap().len(), 1);
+    assert_eq!(
+        second.lock().unwrap().len(),
+        1,
+        "it is given them, and does not pass them on"
+    );
+    assert!(third.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_stand_in_for_a_synthesizer_passes_the_notes_on_if_it_is_made_to() {
+    assert!(!TakesTheNotes::consuming().passes_notes_on());
+    assert!(TakesTheNotes::passing_them_on().passes_notes_on());
+    assert!(TakesTheNotes::consuming().plays_notes() && TakesTheNotes::passing_them_on().plays_notes());
 }

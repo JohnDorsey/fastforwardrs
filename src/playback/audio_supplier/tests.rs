@@ -1512,3 +1512,38 @@ fn what_a_midi_clip_is_made_of_changes_the_signature_of_the_sound_and_the_same_p
         assert_ne!(the_signature_of(&base), the_signature_of(&other), "{what}");
     }
 }
+
+#[test]
+fn the_switch_that_makes_a_synthesizer_pass_notes_on_changes_the_signature_of_the_sound() {
+    use crate::project::{AnimationTarget, EffectKind, Member, set_installed_plugins};
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    set_installed_plugins(vec![crate::test_support::an_installed_synthesizer(
+        "clap:com.example.synth",
+    )]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_music("tune.mid", b"one", 0, 400, 1, 0.0, false);
+    let clip = project
+        .tracks()
+        .iter()
+        .flat_map(|track| track.entries())
+        .find(|entry| entry.clip().as_midi().is_some())
+        .unwrap()
+        .id();
+    let instance = crate::test_support::put_an_effect_on(&mut project, AnimationTarget::Clip(clip), kind, &[]);
+    let consuming = the_signature_of(&project);
+
+    project
+        .set_effect_passes_notes_on(Member::Clip(clip), instance, true)
+        .unwrap();
+    let passing = the_signature_of(&project);
+    project
+        .set_effect_passes_notes_on(Member::Clip(clip), instance, false)
+        .unwrap();
+
+    assert_ne!(consuming, passing, "the sound is made again when the switch is turned");
+    assert_eq!(
+        the_signature_of(&project),
+        consuming,
+        "and is the same when it is turned back"
+    );
+}

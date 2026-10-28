@@ -115,6 +115,8 @@ pub struct LayerEffect {
     /// How long the effect goes on after its input ends, when its person has said (see [`crate::project::Effect::tail_length`]): a sound plugin that goes on is given silence for that long
     /// (phase 12).
     pub tail_length: TailLength,
+    /// For a synthesizer: whether the notes that reach it go on to the next one too (see [`crate::project::Effect::passes_notes_on`]; phase 13, piece 13.5).
+    pub passes_notes_on: bool,
     /// **What tells the clips that share one state of this effect** (phase 12, piece 12.5; section 5 of docs/engine-phase-12-design.md): an effect of a track whose sharing of picture effects is not
     /// *one copy for each clip* is one instance for a run of clips (or for the whole track), so the clips of the run have the same number here, and the state that a shader that depends on
     /// earlier frames keeps goes on from one of them to the next. `None`: the state is the clip's own, as it is for the effects of a clip and of a tag.
@@ -561,6 +563,7 @@ pub(crate) fn layer_effect_of(
         values: applied.effect.values().to_vec(),
         state: applied.effect.state().cloned(),
         tail_length: applied.effect.tail_length(),
+        passes_notes_on: applied.effect.passes_notes_on(),
         shared_by: None,
         animation,
         tables: kind

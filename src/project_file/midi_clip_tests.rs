@@ -81,7 +81,7 @@ fn a_midi_clip_is_saved_with_the_name_of_its_file_its_track_and_its_run_and_read
     write_project_file(&project, &destination).unwrap();
 
     let file = json_of(&destination);
-    assert_eq!(file["file_format_version"], 21);
+    assert_eq!(file["file_format_version"], 22);
     let document = the_document_of_the_midi_clip(&file);
     assert_eq!(document["resource"], "tune.mid");
     assert_eq!(document["midi_track"], 2);

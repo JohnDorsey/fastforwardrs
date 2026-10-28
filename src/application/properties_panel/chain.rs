@@ -19,11 +19,11 @@ use super::badge::{self, BadgeLook};
 use super::effects::{
     ADD_EFFECT_FROM_FILE_LABEL, ADD_EFFECT_LABEL, CLOSE_EDITOR_LABEL, DELETE_EFFECT_LABEL,
     DEPENDS_ON_EARLIER_FRAMES_NOTE, DUPLICATE_EFFECT_LABEL, EDITOR_PROBLEM_NOTE, NO_EFFECT_FOUND_NOTE,
-    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, OPEN_EDITOR_LABEL, PRESET_HAS_A_STATE_NOTE, PRESET_IS_SET_MARK,
-    PRESETS_LABEL, PRESETS_NOTE, SEARCH_EFFECTS_HINT, SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL,
-    SWITCHED_OFF_NOTE, TRANSITION_NOTE, VALUES_ARE_KEPT_NOTE, WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match,
-    effects_to_offer, grouped_by_category, grouped_by_source, items_for_where_the_tables_are_kept, show_the_control_of,
-    show_the_control_of_a_group_effect,
+    NOT_INSTALLED_NOTE, NOT_RUNNING_NOTE, OPEN_EDITOR_LABEL, PASS_NOTES_ON_LABEL, PASSES_NOTES_ON_NOTE,
+    PRESET_HAS_A_STATE_NOTE, PRESET_IS_SET_MARK, PRESETS_LABEL, PRESETS_NOTE, SEARCH_EFFECTS_HINT,
+    SWITCH_EFFECT_OFF_LABEL, SWITCH_EFFECT_ON_LABEL, SWITCHED_OFF_NOTE, TRANSITION_NOTE, VALUES_ARE_KEPT_NOTE,
+    WHAT_A_GENERATOR_MAKES_NOTE, effects_that_match, effects_to_offer, grouped_by_category, grouped_by_source,
+    items_for_where_the_tables_are_kept, show_the_control_of, show_the_control_of_a_group_effect,
 };
 use super::kind_box;
 use super::selection_list::select_when_double_clicked;
@@ -252,6 +252,22 @@ fn show_an_effect(
                 effect.tail_length(),
                 &mut from_the_menu,
             );
+            if kind.makes_sound_from_notes() {
+                let passes_notes_on = effect.passes_notes_on();
+                let label = if passes_notes_on {
+                    format!("{}{PASS_NOTES_ON_LABEL}", crate::application::tail_menus::IN_FORCE_MARK)
+                } else {
+                    PASS_NOTES_ON_LABEL.to_owned()
+                };
+                if ui.button(label).clicked() {
+                    from_the_menu.push(Command::SetEffectPassesNotesOn {
+                        owner,
+                        instance: effect.instance(),
+                        passes_notes_on: !passes_notes_on,
+                    });
+                    ui.close();
+                }
+            }
             for (label, command) in items_for_where_the_tables_are_kept(content.project, effect) {
                 if ui.button(label).clicked() {
                     from_the_menu.push(command);
@@ -281,6 +297,9 @@ fn show_an_effect(
             }
             if !effect.is_enabled() {
                 ui.label(RichText::new(SWITCHED_OFF_NOTE).weak());
+            }
+            if kind.makes_sound_from_notes() && effect.passes_notes_on() {
+                ui.label(RichText::new(PASSES_NOTES_ON_NOTE).weak());
             }
             if let Some((_, is_open, problem)) = &editor_of {
                 if ui

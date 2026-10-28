@@ -1340,6 +1340,7 @@ fn clip_that_has_sound_from_before(
             animation: Animation::default(),
             tables: Vec::new(),
             tail_length: Default::default(),
+            passes_notes_on: false,
             shared_by: None,
         }],
         sent_to: None,
@@ -1812,6 +1813,7 @@ fn an_effect_that_rings_for(tail: crate::project::TailLength) -> crate::composit
         tables: Vec::new(),
         state: None,
         tail_length: tail,
+        passes_notes_on: false,
         shared_by: None,
     }
 }
