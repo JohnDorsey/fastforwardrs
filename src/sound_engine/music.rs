@@ -79,7 +79,7 @@ pub fn events_of(music: &Music, item_start: u64, item_length: u64, next_id: &mut
     events
 }
 
-/// Puts events in order of time, and those at one sample in the order of [`rank_of`] (and the others as they were).
+/// Puts events in order of time, and those at one sample in the order of `rank_of` (and the others as they were).
 pub fn put_in_order(events: &mut [TimedNote]) {
     events.sort_by_key(|event| (event.time, rank_of(&event.what)));
 }
