@@ -54,6 +54,7 @@ fn specification(
             })
             .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     }
 }
 
@@ -1355,6 +1356,7 @@ fn specification_with_buses(
             })
             .collect(),
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     }
 }
 
@@ -2012,5 +2014,72 @@ fn a_clip_of_a_bus_that_has_effects_of_its_own_that_ring_on_is_heard_by_the_bus_
         &left[..1600 + 960],
         &expected[..],
         "the ring of the clip's own effects goes through the bus: the bus is heard until it has ended"
+    );
+}
+
+// --- lead-in: sound that is made and not heard, so that the effects have heard what leads up to the place the sound is wanted from (phase 12, piece 12.2d) ---
+
+#[test]
+fn the_lead_in_is_made_and_not_heard_so_the_sound_is_the_end_of_the_sound_that_is_made_from_the_start_for_any_blocks() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let effect = an_effect_that_rings_for(A_TAIL_OF_960);
+    let items = || {
+        vec![
+            a_clip_that_has(1, LoudnessToExport::UNCHANGED, &effect),
+            silence(1),
+            a_clip_that_has(1, LoudnessToExport::Constant(0.5), &effect),
+        ]
+    };
+    let made = |lead_in_frames: u64, block: usize| {
+        let mut specification = specification(thirty(), 3, vec![items()]);
+        specification.lead_in_frames = lead_in_frames;
+        let mut graph = SoundGraph::new(
+            specification,
+            Box::new(Ramps::default()),
+            Box::new(RingingInsertions::new(&[0, 2], false)),
+        );
+        let total = (graph.total_samples(), graph.position());
+        (graph.render_to_the_end(block), total)
+    };
+    let (from_the_start, total) = made(0, 512);
+    assert_eq!(total, (4800, 0));
+
+    for lead_in_frames in [1, 2] {
+        for block in [1, 13, 512, 100_000] {
+            let ((left, right), total) = made(lead_in_frames, block);
+            let thrown_away = 1600 * lead_in_frames as usize;
+            assert_eq!(
+                left,
+                from_the_start.0[thrown_away..],
+                "{lead_in_frames} frames of lead-in, blocks of {block}"
+            );
+            assert_eq!(right, from_the_start.1[thrown_away..]);
+            assert_eq!(
+                total,
+                (4800 - thrown_away as u64, 0),
+                "the length is what is heard, and nothing has been made yet"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_position_of_a_graph_that_has_a_lead_in_counts_what_is_heard() {
+    let mut specification = specification(thirty(), 3, vec![vec![clip(3, LoudnessToExport::UNCHANGED)]]);
+    specification.lead_in_frames = 1;
+    let mut graph = graph_of(specification, &Ramps::default());
+    let (mut left, mut right) = (vec![0.0; 100], vec![0.0; 100]);
+
+    graph.render(&mut left, &mut right);
+
+    assert_eq!(
+        graph.position(),
+        100,
+        "the lead-in was made, and what is counted is the sound after it"
+    );
+    assert_eq!(
+        left[0],
+        value_of(0, 0, 1600),
+        "and the first sample heard is the one that comes after the lead-in"
     );
 }

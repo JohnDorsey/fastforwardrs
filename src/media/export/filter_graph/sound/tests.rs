@@ -52,6 +52,7 @@ fn specification(strips: Vec<SoundStripToExport>) -> SoundGraphSpecification {
         total_frame_count,
         strips,
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     }
 }
 

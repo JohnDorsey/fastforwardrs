@@ -18,6 +18,8 @@ pub struct SoundGraph {
     insertions: Box<dyn Insertions + Send>,
     strips: Vec<Strip>,
     total_samples: u64,
+    /// How many samples at the start are made and not heard (see `SoundGraphSpecification::lead_in_frames`).
+    lead_in_samples: u64,
     position: u64,
     scratch: Scratch,
     /// Where the sound of one item is made before it is added to what is there (items that ring on overlap the ones after them).
@@ -172,6 +174,9 @@ impl Live {
 /// The most samples of sound from before a clip that are given to its effects in one block.
 const MOST_PRE_ROLL_AT_ONCE: usize = 4096;
 
+/// The most samples of lead-in that are made, and thrown away, in one block.
+const MOST_LEAD_IN_AT_ONCE: usize = 4096;
+
 impl SoundGraph {
     pub fn new(
         specification: SoundGraphSpecification,
@@ -249,6 +254,7 @@ impl SoundGraph {
             .collect();
         Self {
             total_samples: sample_at_frame(frame_rate, specification.total_frame_count),
+            lead_in_samples: sample_at_frame(frame_rate, specification.lead_in_frames),
             specification,
             feeds,
             insertions,
@@ -259,19 +265,32 @@ impl SoundGraph {
         }
     }
 
-    /// How many samples the sound has in all.
+    /// How many samples the sound has in all (not those at the start that are made and not heard).
     pub fn total_samples(&self) -> u64 {
-        self.total_samples
+        self.total_samples - self.lead_in_samples
     }
 
-    /// How many samples have been made so far.
+    /// How many samples of the sound have been made so far (not those at the start that are made and not heard).
     pub fn position(&self) -> u64 {
-        self.position
+        self.position.saturating_sub(self.lead_in_samples)
     }
 
     /// Makes the next samples of the sound into `left` and `right` (as long as each other, or the shorter is used) and says how many: all that fit, until the sound ends,
-    /// and then none.
+    /// and then none. (The first call makes the lead-in first, and throws it away: see [`SoundGraphSpecification::lead_in_frames`].)
     pub fn render(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
+        if self.position < self.lead_in_samples {
+            let (mut left_to_throw_away, mut right_to_throw_away) =
+                (vec![0.0_f32; MOST_LEAD_IN_AT_ONCE], vec![0.0_f32; MOST_LEAD_IN_AT_ONCE]);
+            while self.position < self.lead_in_samples {
+                let length = ((self.lead_in_samples - self.position) as usize).min(MOST_LEAD_IN_AT_ONCE);
+                self.render_a_block(&mut left_to_throw_away[..length], &mut right_to_throw_away[..length]);
+            }
+        }
+        self.render_a_block(left, right)
+    }
+
+    /// [`Self::render`] for the samples that come next, wherever they are.
+    fn render_a_block(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
         let wanted = left.len().min(right.len());
         self.feeds.about_to_render(self.position);
         let count = (self.total_samples - self.position).min(wanted as u64) as usize;

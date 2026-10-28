@@ -82,6 +82,7 @@ pub fn sound_graph_specification(
             })
             .collect(),
         sped_up_clip_sound,
+        lead_in_frames: plan.lead_in_frames,
     }
 }
 

@@ -41,6 +41,10 @@ pub struct SoundGraphSpecification {
     /// The sound of each track.
     pub strips: Vec<SoundStripToExport>,
     pub sped_up_clip_sound: SpedUpClipSound,
+    /// How many frames at the start of the sound are **made and not heard** (phase 12, piece 12.2d): the sound begins that many frames before the place it is wanted from, so that effects that
+    /// remember (a reverb, a filter) have been given what they would have heard on the way there, and what comes out of the graph is the sound from where it is wanted. They are part
+    /// of `total_frame_count`; the filter graph of ffmpeg, which does not run the effects, cuts them off the front. 0 for sound that is wanted from its start.
+    pub lead_in_frames: u64,
 }
 
 /// A filter graph that makes only sound: the sound of the finished video and of the live preview.
@@ -121,6 +125,7 @@ mod tests {
                 buses: Vec::new(),
             }],
             sped_up_clip_sound,
+            lead_in_frames: 0,
         }
     }
 

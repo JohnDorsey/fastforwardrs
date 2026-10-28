@@ -263,6 +263,7 @@ fn a_specification(
         total_frame_count: longest_strip + random.next_below(4),
         strips,
         sped_up_clip_sound,
+        lead_in_frames: 0,
     }
 }
 
@@ -403,6 +404,7 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
             buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     };
     let sources = [steady];
     let oracle = by_the_filter_graph(&toolchain, &specification, &sources);
@@ -638,6 +640,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
             buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     };
     let request = AudioStreamRequest {
         source_files: sources.iter().map(|path| path.clone().into()).collect(),
@@ -859,6 +862,7 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
             buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     };
     let began = Instant::now();
     let result = render_sound_to_file(
@@ -880,4 +884,55 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
         "it was stopped after {:?}",
         began.elapsed()
     );
+}
+
+#[test]
+fn a_lead_in_is_cut_off_the_front_of_the_sound_by_the_block_graph_and_by_the_filter_graph_alike() {
+    let toolchain = toolchain_or_skip!();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let kinds = Kinds {
+        sped_up: false,
+        changing_volume: false,
+        wrong_lengths: false,
+    };
+    let mut cases = Vec::new();
+    for seed in 0..4_u64 {
+        for lead_in_frames in [1_u64, 7] {
+            cases.push((seed, lead_in_frames));
+        }
+    }
+    let results = in_parallel(&cases, |&(seed, lead_in_frames)| {
+        let whole = a_specification(
+            seed * 7 + 3,
+            FrameRate::new(30, 1).unwrap(),
+            kinds,
+            SpedUpClipSound::MaintainPitch,
+        );
+        let mut with_a_lead_in = whole.clone();
+        with_a_lead_in.lead_in_frames = lead_in_frames;
+        (
+            whole.total_frame_count,
+            difference_for(&toolchain, &with_a_lead_in, &sources),
+            by_the_block_graph(&toolchain, &whole, &sources, 512).len(),
+            by_the_block_graph(&toolchain, &with_a_lead_in, &sources, 512).len(),
+        )
+    });
+    for ((seed, lead_in_frames), (total, difference, whole_samples, cut_samples)) in cases.iter().zip(&results) {
+        let name = format!("seed {seed}, a lead-in of {lead_in_frames} frames of {total}");
+        assert_eq!(
+            difference.moments_of_the_oracle, difference.moments_of_the_block_graph,
+            "the two sounds are as long as each other: {name}"
+        );
+        assert!(
+            difference.largest <= ONE_ROUNDING_OF_A_SAMPLE,
+            "{name}: {}",
+            difference.largest
+        );
+        assert_eq!(
+            *whole_samples - *cut_samples,
+            2 * 1600 * *lead_in_frames as usize,
+            "the sound is shorter by the lead-in: {name}"
+        );
+    }
 }

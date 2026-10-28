@@ -118,6 +118,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
             buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     }
 }
 
@@ -841,4 +842,50 @@ fn an_echo_for_each_clip_that_rings_on_and_one_echo_for_the_run_sound_the_same_b
         worst < 1e-4,
         "the same sound for an effect that is linear: the worst difference is {worst}"
     );
+}
+
+#[test]
+fn sound_that_is_wanted_from_a_frame_after_the_clip_has_the_ring_of_the_clip_through_a_lead_in_in_the_export_and_in_the_preview()
+ {
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+    // A second of noise through the echo, and then a second of silence.
+    let specification = specification_of_items(60, |clip| {
+        let mut with_the_echo = clip.clone();
+        with_the_echo.effects = vec![an_echo()];
+        vec![
+            SoundItemToExport::Clip(with_the_echo),
+            SoundItemToExport::Silence { frame_count: 30 },
+        ]
+    });
+    let (played_through, _) = by_the_export(&toolchain, &specification, &sources, host());
+    // The same, wanted from the frame where the clip ends (frame 30), with the second before it made and not heard (a lead-in of 30 frames).
+    let mut from_the_end_of_the_clip = specification;
+    from_the_end_of_the_clip.lead_in_frames = 30;
+
+    let (exported, notes) = by_the_export(&toolchain, &from_the_end_of_the_clip, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &from_the_end_of_the_clip, &sources, host());
+
+    let heard_from = 30 * SAMPLES_IN_A_FRAME;
+    assert_eq!(exported.len(), played_through.len() - heard_from);
+    let worst = exported
+        .iter()
+        .zip(&played_through[heard_from..])
+        .map(|(made, was)| (made - was).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        worst < 1e-6,
+        "the sound from the end of the clip is what it is when played through: {worst}"
+    );
+    assert!(
+        exported[..clap_test_plugins::TAIL_SAMPLES as usize * 2]
+            .iter()
+            .any(|sample| sample.abs() > 0.001),
+        "and the ring of the clip is heard in it (the control)"
+    );
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+    assert!(notes.is_empty(), "{notes:?}");
 }

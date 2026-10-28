@@ -59,6 +59,7 @@ fn programs_running_just_after_dropping_the_stream(format: AudioFormat) -> Optio
             },
         ],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     };
     let request = AudioStreamRequest {
         source_files: sources.iter().map(|path| path.clone().into()).collect(),
@@ -125,6 +126,7 @@ fn a_stream_that_was_read_to_its_end_is_dropped_with_no_program_left() {
                 buses: Vec::new(),
             }],
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+            lead_in_frames: 0,
         },
         format: AudioFormat {
             sample_rate: 48_000,

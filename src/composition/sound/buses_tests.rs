@@ -412,3 +412,125 @@ fn a_gap_that_is_no_longer_than_the_tail_of_the_effects_of_the_track_is_inside_a
         [(0, 6)]
     );
 }
+
+// --- lead-in ---
+
+/// A track of three clips of 30 frames, one after the other (0 to 90), with the track's effect given this tail, planned from `from`.
+fn planned_from(from: u64, tail: crate::project::TailLength) -> SoundPlan {
+    let mut project = a_track_of_clips_with_gaps(&[0, 0, 0]);
+    let (kind, _) = two_kinds();
+    let track = project.tracks()[0].id();
+    let instance = put_an_effect_on(
+        &mut project,
+        AnimationTarget::Track(track),
+        kind,
+        &[PropertyValue::Number(2.0)],
+    );
+    project
+        .set_effect_tail_length(Member::Track(track), instance, tail)
+        .unwrap();
+    plan_sound(&project, TimelineFrameIndex::new(from), |_| true)
+}
+
+#[test]
+fn a_plan_from_a_frame_begins_before_it_by_as_much_as_the_effects_ring_on_for_and_what_is_made_of_that_is_not_heard() {
+    use crate::project::TailLength;
+    let _alone = the_installed_plugins_to_myself();
+
+    // A tail of a second is 30 frames: the plan from frame 60 begins at frame 30, with the clip that ended there, and the first of the 30 frames that it has more is not heard.
+    let plan = planned_from(60, TailLength::Milliseconds(1_000));
+
+    assert_eq!(plan.lead_in_frames, 30);
+    assert_eq!(
+        plan.total_frame_count, 60,
+        "from frame 30 to the end of the timeline (frame 90)"
+    );
+    let strip = &plan.strips[0];
+    let first_frames: Vec<u64> = clips_of(strip).iter().map(|clip| clip.first_timeline_frame).collect();
+    assert_eq!(
+        first_frames,
+        [30, 60],
+        "the clip that is heard from frame 60, and the one before it, which the effects are still ringing from"
+    );
+}
+
+#[test]
+fn the_lead_in_is_no_more_than_there_is_before_the_frame_and_is_nothing_where_nothing_rings_and_from_the_start() {
+    use crate::project::TailLength;
+    let _alone = the_installed_plugins_to_myself();
+
+    assert_eq!(
+        planned_from(10, TailLength::Milliseconds(1_000)).lead_in_frames,
+        10,
+        "there is only so much before it"
+    );
+    assert_eq!(
+        planned_from(0, TailLength::Milliseconds(1_000)).lead_in_frames,
+        0,
+        "from the start there is no before"
+    );
+    assert_eq!(
+        planned_from(60, TailLength::None).lead_in_frames,
+        0,
+        "no tail: nothing rings"
+    );
+    let from_the_middle = planned_from(60, TailLength::None);
+    assert_eq!(from_the_middle.total_frame_count, 30);
+    assert_eq!(
+        planned_from(80, TailLength::Milliseconds(60_000)).lead_in_frames,
+        80,
+        "a minute is more than there is before it: no more than is before it"
+    );
+    let mut project = a_track_of_clips_with_gaps(&[0, 0, 0]);
+    // (A project with no sound effects at all has none, wherever it is planned from.)
+    project
+        .set_track_sharing(project.tracks()[0].id(), EffectDomain::Sound, TrackSharing::PerClip)
+        .unwrap();
+    assert_eq!(
+        plan_sound(&project, TimelineFrameIndex::new(60), |_| true).lead_in_frames,
+        0
+    );
+}
+
+#[test]
+fn the_lead_in_is_no_more_than_ten_seconds_and_the_tails_of_what_a_clip_goes_through_are_added() {
+    use crate::project::TailLength;
+    let _alone = the_installed_plugins_to_myself();
+    let (own_kind, track_kind) = two_kinds();
+    let mut project = a_track_of_clips_with_gaps(&[0]);
+    let track = project.tracks()[0].id();
+    let clip = clip_at(&project, 0, 0);
+    let on_the_clip = put_an_effect_on(
+        &mut project,
+        AnimationTarget::Clip(clip),
+        own_kind,
+        &[PropertyValue::Number(3.0)],
+    );
+    let on_the_track = put_an_effect_on(
+        &mut project,
+        AnimationTarget::Track(track),
+        track_kind,
+        &[PropertyValue::Number(2.0)],
+    );
+    project
+        .set_effect_tail_length(Member::Clip(clip), on_the_clip, TailLength::Milliseconds(500))
+        .unwrap();
+    project
+        .set_effect_tail_length(Member::Track(track), on_the_track, TailLength::Milliseconds(500))
+        .unwrap();
+
+    // 500 ms and 500 ms: the sound of the clip goes through both, so the lead-in is 30 frames.
+    assert_eq!(
+        plan_sound(&project, TimelineFrameIndex::new(1_000), |_| true).lead_in_frames,
+        30
+    );
+
+    project
+        .set_effect_tail_length(Member::Track(track), on_the_track, TailLength::Milliseconds(600_000))
+        .unwrap();
+    assert_eq!(
+        plan_sound(&project, TimelineFrameIndex::new(100_000), |_| true).lead_in_frames,
+        300,
+        "ten seconds at 30 frames a second, however long they ring"
+    );
+}

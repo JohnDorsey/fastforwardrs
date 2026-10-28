@@ -193,7 +193,7 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
     }
 
     if strip_count == 1 && strip_is_as_long_as_the_sound[0] {
-        return statements;
+        return with_the_lead_in_cut_off(statements, specification);
     }
     // Every strip is made as long as the sound, so that they end together, and then they are mixed.
     // (Mixing divides each by the number of strips, which the volume afterwards puts back.)
@@ -218,6 +218,25 @@ pub(super) fn sound_statements(specification: &SoundGraphSpecification) -> Vec<S
             &[AUDIO_OUTPUT_LABEL],
         ));
     }
+    with_the_lead_in_cut_off(statements, specification)
+}
+
+/// The statements, with one more at the end that cuts the first `lead_in_frames` frames off the sound (they are made so that effects that remember have heard what comes before the place
+/// the sound is wanted from, and are not heard), if there are any: the last statement of `statements` makes the finished sound, which is then the one that is cut.
+fn with_the_lead_in_cut_off(mut statements: Vec<String>, specification: &SoundGraphSpecification) -> Vec<String> {
+    if specification.lead_in_frames == 0 {
+        return statements;
+    }
+    let last = statements.pop().expect("there is a statement that makes the sound");
+    let made = format!("[{AUDIO_OUTPUT_LABEL}]");
+    let uncut_label = "audio_with_its_lead_in";
+    let cut_off = format_seconds(specification.frame_rate.seconds_at_frame(specification.lead_in_frames));
+    statements.push(last.replacen(&made, &format!("[{uncut_label}]"), 1));
+    statements.push(statement(
+        &[uncut_label],
+        &format!("atrim=start={cut_off},asetpts=PTS-STARTPTS"),
+        &[AUDIO_OUTPUT_LABEL],
+    ));
     statements
 }
 

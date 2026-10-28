@@ -665,6 +665,7 @@ fn sound_of(
             buses: Vec::new(),
         }],
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        lead_in_frames: 0,
     };
     let mut graph = SoundGraph::new(
         specification,

@@ -321,6 +321,16 @@ Each piece: tests first that lock the present behaviour, then the change, then t
   on for the tail it says and for no longer, **`None` is the old behaviour (cut where the clip ends)**, a length that was said is the length it rings for, the ring of one clip is added to the start of the
   next, and **an echo for each clip that rings on and one echo for the run sound the same (an echo is linear: the null test of the design, to 1e-4 with a tail long enough that nothing is left out)**.
   The two tests that pinned the old cutting were rewritten on purpose. *Not yet: the lead-up (a seek into a ring: 12.2d), the track's volume and mute after the effects (D9: 12.2e).*
+  **12.2d as built (2026-10-28) [V]: the lead-in (what the design calls the lead-up, for sound).** A plan wanted from a frame begins before it by as much as the effects ring on for (`SoundPlan.lead_in_frames`): for
+  each clip, the tails of all the sound effects that its sound goes through (its own, its tags' and its track's) added up; the greatest of those, no more than **ten seconds**
+  (`MOST_SECONDS_OF_LEAD_IN`: past that the sound at the start is as it would be if the effects had begun to listen ten seconds before) and no more than there is before the frame. The sound begins there,
+  and **the first frames are made and not heard**: `SoundGraphSpecification.lead_in_frames`, which the block graph makes and throws away at its first call (so every consumer, the preview's stream and the
+  export, gets the sound from where it is wanted; `total_samples()` and `position()` count what is heard), and which the filter graph of ffmpeg cuts off the front (`atrim`; a null test holds the two alike). So a
+  seek to just after a clip, or into the middle of a run, hears the ring of what came before it, and the effects of a run are in the state that playing through gives them. (The sound that the file has
+  from before a clip's first frame, `pre_roll_frames_of`, is as it was: the lead-in makes it not needed for a clip that began earlier, and it is only given to clips that begin in the lead-in.) Tests: engine 2 (the
+  sound is the end of the sound made from the start, for any blocks; the position counts what is heard), plan 3 (the lead-in, its limits, the tails of a chain added, ten seconds), a null test with the filter
+  graph, and with the real echo: **sound wanted from the frame where its clip ends has the ring of the clip, and is the sound that playing through makes**, in the export and in the preview. *Not yet: the
+  "approximate" mark that video has (EN-14 E1) for a ring longer than the lead-in.*
 * **12.3 Sound: group effects.** Clip groups and track groups on the sum; the three outcomes, with the fade.
 * **12.4 Sound: per track with windows, and indivisible.**
 * **12.5 Picture: ghost layers, instances, groups with tails, depth.** *Risky: the layer list per frame changes and `nodes_of` with it.*

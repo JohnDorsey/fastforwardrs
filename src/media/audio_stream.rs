@@ -363,6 +363,7 @@ mod tests {
                     buses: Vec::new(),
                 }],
                 sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+                lead_in_frames: 0,
             },
             format: AudioFormat {
                 sample_rate: 44_100,

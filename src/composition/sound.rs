@@ -145,6 +145,9 @@ pub struct SoundPlan {
     /// How many frames the plan lasts: from where it starts to the end of the timeline. The strips
     /// are no longer than this.
     pub total_frame_count: u64,
+    /// How many frames at the start of the plan are made and not heard (phase 12, piece 12.2d): the plan begins that many frames before the place the sound is wanted from, so that
+    /// effects that remember have heard what comes before it (see [`plan_sound`]). Part of `total_frame_count`.
+    pub lead_in_frames: u64,
     /// The strips of the tracks that have any sound, the one in front first.
     pub strips: Vec<SoundStrip>,
 }
@@ -157,15 +160,47 @@ pub const SOUND_SAMPLES_A_SECOND: u64 = 48_000;
 /// where they said nothing what its plugin says (the tail of a CLAP plugin, up to two seconds; half a second for an LV2 plugin, which does not say; nothing for a LADSPA plugin). An
 /// effect that is not a plugin that is installed makes the sound pass through unchanged, and has none.
 pub fn tail_samples_of(effect: &LayerEffect) -> u64 {
+    tail_samples(effect.kind, effect.tail_length)
+}
+
+/// [`tail_samples_of`] for an effect of this kind that has this tail length.
+fn tail_samples(kind: crate::project::EffectKind, tail_length: crate::project::TailLength) -> u64 {
     use crate::project::TailLength;
-    let Some(plugin) = effect.kind.installed_plugin() else {
+    let Some(plugin) = kind.installed_plugin() else {
         return 0;
     };
-    match effect.tail_length {
+    match tail_length {
         TailLength::Automatic => plugin.pre_roll_samples as u64,
         TailLength::None => 0,
         TailLength::Milliseconds(milliseconds) => u64::from(milliseconds) * SOUND_SAMPLES_A_SECOND / 1000,
     }
+}
+
+/// The most seconds of sound before the place it is wanted from that are made so that effects that remember have heard what comes before it. (A tail of a minute is not made again at every
+/// jump of the playhead: past this the sound at the start is as it would be if the effects had begun to listen this long before.)
+pub const MOST_SECONDS_OF_LEAD_IN: u64 = 10;
+
+/// How many frames before `from` the sound is to begin so that the effects of it that remember have heard what they would have on the way there: the greatest, over the clips, of
+/// what all the sound effects that are applied to a clip (its own, its tags' and its track's) ring on for added up (the sound of a clip goes through all of them one after another),
+/// and no more than [`MOST_SECONDS_OF_LEAD_IN`] seconds and no more than there is before `from`. 0 where nothing rings on.
+fn lead_in_frames_before(project: &Project, effects: &HashMap<ClipId, Vec<AppliedEffect<'_>>>, from: u64) -> u64 {
+    if from == 0 {
+        return 0;
+    }
+    let ring = effects
+        .values()
+        .map(|applied| {
+            applied
+                .iter()
+                .filter(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
+                .map(|applied| tail_samples(applied.effect.kind(), applied.effect.tail_length()))
+                .sum::<u64>()
+        })
+        .max()
+        .unwrap_or(0);
+    let frame_rate = project.frame_rate();
+    let most = frames_that_reach(frame_rate, MOST_SECONDS_OF_LEAD_IN * SOUND_SAMPLES_A_SECOND);
+    frames_that_reach(frame_rate, ring).min(most).min(from)
 }
 
 /// How many samples a chain of effects goes on after its input has ended: the tails of its effects added up (each hears what the one before it makes, tail and all).
@@ -189,10 +224,13 @@ pub fn plan_sound(
     from: TimelineFrameIndex,
     is_usable: impl Fn(SourceMediaIdentifier) -> bool,
 ) -> SoundPlan {
-    let from = from.value();
-    let total_frame_count = project.total_frame_count().saturating_sub(from);
+    let wanted_from = from.value();
     let animations = project.resolved_animations();
     let effects = project.effects_applied_to_every_clip();
+    // The plan begins before the place the sound is wanted from by as much as the effects ring on for: what is made of that is not heard, and the effects have heard what leads up to it.
+    let lead_in_frames = lead_in_frames_before(project, &effects, wanted_from);
+    let from = wanted_from - lead_in_frames;
+    let total_frame_count = project.total_frame_count().saturating_sub(from);
     let strips = project
         .tracks()
         .iter()
@@ -201,6 +239,7 @@ pub fn plan_sound(
     SoundPlan {
         frame_rate: project.frame_rate(),
         total_frame_count,
+        lead_in_frames,
         strips,
     }
 }
