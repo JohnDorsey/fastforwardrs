@@ -46,6 +46,7 @@ pub mod frame_scene;
 pub mod isf;
 pub mod lead_up;
 pub mod media;
+pub mod midi_file;
 pub mod playback;
 pub mod plugin_bundles;
 pub mod plugin_editor;
