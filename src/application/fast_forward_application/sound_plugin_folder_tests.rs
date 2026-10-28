@@ -98,6 +98,7 @@ fn the_sound_comes_to(window: &Window, kind: EffectKind, notes: &Notes) {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        shared_by: None,
     };
     let clip = SoundClipToExport {
         source_input: 0,

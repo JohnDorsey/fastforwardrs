@@ -166,6 +166,7 @@ fn one_plugin_of_a_library_on_a_clip_for_the_driver() {
         animation: Animation::default(),
         tables: Vec::new(),
         tail_length: Default::default(),
+        shared_by: None,
     };
     let specification = |effects: Vec<LayerEffect>| SoundGraphSpecification {
         frame_rate: FrameRate::new(30, 1).unwrap(),

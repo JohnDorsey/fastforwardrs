@@ -115,6 +115,10 @@ pub struct LayerEffect {
     /// How long the effect goes on after its input ends, when its person has said (see [`crate::project::Effect::tail_length`]): a sound plugin that goes on is given silence for that long
     /// (phase 12).
     pub tail_length: TailLength,
+    /// **What tells the clips that share one state of this effect** (phase 12, piece 12.5; section 5 of docs/engine-phase-12-design.md): an effect of a track whose sharing of picture effects is not
+    /// *one copy for each clip* is one instance for a run of clips (or for the whole track), so the clips of the run have the same number here, and the state that a shader that depends on
+    /// earlier frames keeps goes on from one of them to the next. `None`: the state is the clip's own, as it is for the effects of a clip and of a tag.
+    pub shared_by: Option<u64>,
 }
 
 impl LayerEffect {
@@ -268,7 +272,11 @@ fn hash_of(value: impl Hash) -> u64 {
 /// frame, and **not the same for another clip, another place in the chain, or another kind of effect**. (An effect of a track or of a tag is done to each clip it reaches, with one
 /// instance, so the instance alone would not tell them apart; a change of the order of the chain makes the effect start clear.)
 fn state_id(seed: u64, place: usize, effect: &LayerEffect) -> u64 {
-    hash_of((seed, place, effect.instance, effect.kind.key()))
+    // (An effect that clips share is the same state whatever clip it is done to and wherever it is in the chain of that clip.)
+    match effect.shared_by {
+        Some(shared_by) => hash_of((shared_by, effect.instance, effect.kind.key())),
+        None => hash_of((seed, place, effect.instance, effect.kind.key())),
+    }
 }
 
 /// The images that the shader of `effect` brings with it, as pictures, in the order its file lists them (none for an effect that is not a shader). One that cannot be read leaves the list
@@ -553,6 +561,7 @@ pub(crate) fn layer_effect_of(
         values: applied.effect.values().to_vec(),
         state: applied.effect.state().cloned(),
         tail_length: applied.effect.tail_length(),
+        shared_by: None,
         animation,
         tables: kind
             .parameters()
@@ -567,6 +576,49 @@ pub(crate) fn layer_effect_of(
     }
 }
 
+/// For each clip on a track whose sharing of picture effects is not *one copy for each clip*, the number that tells which clips share the state of the track's effects: **for a run** (clips
+/// one right after another that are in the same groups: where a group begins or ends a run does, as it does for the sound) the number of its first clip; **for one instance for the track**
+/// (per track, with windows, or indivisible) the same number for all its clips. (A clip that follows another after a gap begins a run of its own: no layer is kept for the gap, so the state is
+/// not there at the end of it. See section 6.2 of docs/engine-phase-12-design.md.)
+fn runs_of_clips_that_share_the_state_of_a_tracks_effects(
+    project: &Project,
+    group_effects: &HashMap<GroupId, Vec<LayerEffect>>,
+) -> HashMap<ClipId, u64> {
+    use crate::project::TrackSharing;
+    let mut keys = HashMap::new();
+    for track in project.tracks() {
+        match track.sharing().picture {
+            TrackSharing::PerClip => {}
+            TrackSharing::PerTrackWithWindows | TrackSharing::PerTrackIndivisible => {
+                let key = hash_of(("the picture effects of a track", track.id()));
+                keys.extend(track.entries().iter().map(|entry| (entry.id(), key)));
+            }
+            TrackSharing::PerRun => {
+                let mut run: Option<(u64, u64, Vec<GroupId>)> = None;
+                for placement in track.placements() {
+                    // (Only the groups that make a picture of their own are edges: the others are not there, as far as the picture goes.)
+                    let groups: Vec<GroupId> = project
+                        .shapes_round_the_clip_outermost_first(placement.id)
+                        .into_iter()
+                        .filter(|group| group_effects.contains_key(group))
+                        .collect();
+                    let key = match &run {
+                        Some((key, end, in_groups))
+                            if *end == placement.first_timeline_frame.value() && *in_groups == groups =>
+                        {
+                            *key
+                        }
+                        _ => hash_of(("the picture effects of a track", track.id(), placement.id)),
+                    };
+                    keys.insert(placement.id, key);
+                    run = Some((key, placement.end_timeline_frame.value(), groups));
+                }
+            }
+        }
+    }
+    keys
+}
+
 /// Works out the picture at every frame of the project. A video from a file that is not `usable`
 /// has no pictures, as a video has none where its file has no more.
 pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier) -> bool) -> PicturePlan {
@@ -574,6 +626,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
     let animations = project.resolved_animations();
     let applied_effects = project.effects_applied_to_every_clip_by_itself();
     let group_effects = effects_of_the_groups_that_make_pictures(project, &animations);
+    let runs = runs_of_clips_that_share_the_state_of_a_tracks_effects(project, &group_effects);
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
         for placement in track.placements() {
@@ -601,7 +654,14 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
                     .into_iter()
                     .flatten()
                     .filter(|applied| applied.effect.kind().is_installed())
-                    .map(|applied| layer_effect_of(project, &animations, applied))
+                    .map(|applied| {
+                        let mut effect = layer_effect_of(project, &animations, applied);
+                        // (The state of an effect of a track is shared by the clips of its run, or by all the clips of the track.)
+                        if let Member::Track(owner) = applied.owner {
+                            effect.shared_by = runs.get(&placement.id).copied().filter(|_| owner == track.id());
+                        }
+                        effect
+                    })
                     .collect();
                 // (A text clip's text effect makes its picture: it is taken out of what is done to the picture, so that nothing about the places of the others changes.)
                 let text = match placement.clip {

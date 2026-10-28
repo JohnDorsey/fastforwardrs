@@ -204,6 +204,7 @@ fn a_picture_that_is_not_a_video_has_no_run_and_does_not_cut_the_video_under_it(
         animation: Default::default(),
         tables: vec![None; 4],
         tail_length: Default::default(),
+        shared_by: None,
     });
     let plan = plan_of(vec![
         (0, 10, vec![video_layer(0, 1, 0, 10, 1)]),

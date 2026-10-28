@@ -309,6 +309,7 @@ fn a_plugin_effect(tail_length: crate::project::TailLength, pre_roll_samples: us
         tables: Vec::new(),
         state: None,
         tail_length,
+        shared_by: None,
     }
 }
 
