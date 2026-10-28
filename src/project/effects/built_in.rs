@@ -61,6 +61,7 @@ pub(super) static TEXT: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Generators"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: false,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[
         ParameterDescriptor {
             id: Cow::Borrowed("text"),
@@ -127,6 +128,7 @@ pub(super) static HUE_SHIFT: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Colour"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: true,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
         id: Cow::Borrowed("degrees"),
         name: Cow::Borrowed("hue shift"),
@@ -154,6 +156,7 @@ pub(super) static SATURATION: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Colour"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: true,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
         id: Cow::Borrowed("amount"),
         name: Cow::Borrowed("saturation"),
@@ -182,6 +185,7 @@ pub(super) static BRIGHTNESS_AND_CONTRAST: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Light"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: true,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[
         ParameterDescriptor {
             id: Cow::Borrowed("brightness"),
@@ -225,6 +229,7 @@ pub(super) static EXPOSURE: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Light"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: true,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
         id: Cow::Borrowed("stops"),
         name: Cow::Borrowed("exposure"),
@@ -252,6 +257,7 @@ pub(super) static OPACITY: EffectDescriptor = EffectDescriptor {
     domain: EffectDomain::Picture,
     // (It is not done to each pixel by itself: it changes how clear a pixel is. Since phase 5 that does not decide what a group can have: the engine makes the picture of a group.)
     changes_each_pixel_by_itself: false,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
         id: Cow::Borrowed("opacity"),
         name: Cow::Borrowed("opacity"),
@@ -282,6 +288,7 @@ pub(super) static BLUR: EffectDescriptor = EffectDescriptor {
     domain: EffectDomain::Picture,
     // (Not done to each pixel by itself: it mixes a pixel with the ones round it, so on a group it would not be what it is done to the picture the members make together.)
     changes_each_pixel_by_itself: false,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[ParameterDescriptor {
         id: Cow::Borrowed("radius"),
         name: Cow::Borrowed("blur"),
@@ -309,6 +316,7 @@ pub(super) static CROP: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Transform"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: false,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[
         ParameterDescriptor {
             id: Cow::Borrowed("left"),
@@ -450,6 +458,7 @@ pub(super) static LUT: EffectDescriptor = EffectDescriptor {
     category: Cow::Borrowed("Looks"),
     domain: EffectDomain::Picture,
     changes_each_pixel_by_itself: true,
+    makes_sound_from_notes: false,
     parameters: Cow::Borrowed(&[
         ParameterDescriptor {
             id: Cow::Borrowed("table"),

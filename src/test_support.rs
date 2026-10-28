@@ -81,6 +81,7 @@ pub fn the_descriptor_of_an_effect_the_program_does_not_have(
         category: Cow::Borrowed(""),
         domain: EffectDomain::Picture,
         changes_each_pixel_by_itself: true,
+        makes_sound_from_notes: false,
         parameters: Cow::Owned(
             values
                 .iter()

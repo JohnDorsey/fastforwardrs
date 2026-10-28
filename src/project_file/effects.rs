@@ -48,6 +48,9 @@ pub(super) struct PluginDocument {
     /// Whether it changes each pixel of a picture by itself, whatever the pixels round it are. Left out when it does not.
     #[serde(default, skip_serializing_if = "is_false")]
     pub changes_each_pixel_by_itself: bool,
+    /// Whether it is a synthesizer (phase 13): it makes sound from notes. Left out when it is not, and in files that were written before it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub makes_sound_from_notes: bool,
     /// Its values, in the order they are kept and shown in. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<ParameterDocument>,
@@ -312,6 +315,7 @@ fn descriptor_from_document(document: PluginDocument) -> Result<EffectDescriptor
             DomainDocument::Sound => EffectDomain::Sound,
         },
         changes_each_pixel_by_itself: document.changes_each_pixel_by_itself,
+        makes_sound_from_notes: document.makes_sound_from_notes,
         parameters: parameters.into(),
         unknown_fields: UnknownFields::new(unknown),
     })
@@ -568,6 +572,7 @@ fn plugin_document_of(descriptor: &EffectDescriptor) -> PluginDocument {
             EffectDomain::Sound => DomainDocument::Sound,
         },
         changes_each_pixel_by_itself: descriptor.changes_each_pixel_by_itself,
+        makes_sound_from_notes: descriptor.makes_sound_from_notes,
         params: descriptor.parameters.iter().map(parameter_document_of).collect(),
         shader: descriptor.shader.as_ref().map(|shader| {
             let mut object = serde_json::json!({

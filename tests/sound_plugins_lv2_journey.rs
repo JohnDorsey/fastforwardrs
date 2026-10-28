@@ -89,8 +89,8 @@ fn lv2_plugins_found_in_the_background_are_offered_put_on_a_clip_saved_and_kept_
     );
     assert_eq!(
         EffectKind::installed_plugin_kinds().len(),
-        7,
-        "seven of the nine test plugins can be effects (not the one that requires log:log, and not the one that gives nothing)"
+        8,
+        "eight of the ten test plugins can be effects (the instrument is a synthesizer; not the one that requires log:log, and not the one that gives nothing)"
     );
     assert!(
         EffectKind::installed_plugin_kinds()

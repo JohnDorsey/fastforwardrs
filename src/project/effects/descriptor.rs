@@ -283,6 +283,9 @@ pub struct EffectDescriptor {
     /// not). An effect that does can be put on a clip group or a track group, which is done to each of its members for now instead of to
     /// the picture they make together, which is only the same picture for such an effect (see `project::groups::effects_of_groups`).
     pub changes_each_pixel_by_itself: bool,
+    /// Whether it is a synthesizer: **it makes sound from the notes that reach it** (a plugin with no audio input and a note input; phase 13) and not from sound that it is given. The sound that
+    /// reaches it passes by, and what it makes is added to it. A sound effect only.
+    pub makes_sound_from_notes: bool,
     /// The values that it has, in the order they are kept and shown in.
     pub parameters: Cow<'static, [ParameterDescriptor]>,
     /// What a file said of it that this version does not know.
@@ -365,6 +368,7 @@ impl EffectDescriptor {
         self.key == snapshot.key
             && self.version.0 == snapshot.version.0
             && self.domain == snapshot.domain
+            && self.makes_sound_from_notes == snapshot.makes_sound_from_notes
             && snapshot.parameters.iter().all(|wanted| {
                 self.parameters
                     .iter()

@@ -441,6 +441,13 @@ impl Instrument {
 }
 
 impl Plugin for Instrument {
+    fn activate(&mut self) {
+        // (Activating a synthesizer again, which is how a host makes it forget, lets go of its voices and of the wheel and the pedal.)
+        self.held.clear();
+        self.wheel = 8192;
+        self.sustain = 0;
+    }
+
     fn connect(&mut self, port: u32, data: *mut c_void) {
         match port {
             0 => self.events_in = data.cast(),

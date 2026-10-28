@@ -25,6 +25,7 @@ mod gain;
 mod graph;
 mod insertions;
 mod lookahead;
+mod note_events;
 mod plugins;
 mod position;
 
@@ -34,11 +35,14 @@ pub use gain::GainCurve;
 pub use graph::SoundGraph;
 pub use insertions::{BlockProcessor, BusRequest, GroupRequest, Insertions, NoInsertions};
 pub use lookahead::{ClipSpawner, LookAheadFeeds, MOST_FEEDS_OPEN, SECONDS_OF_LOOK_AHEAD};
+pub use note_events::{NoteEvent, NoteEventKind};
 pub use plugins::{Notes, PluginInsertions, PluginRunner};
 pub use position::{pre_roll_samples_of, sample_at_frame};
 
 /// How many samples the preview and the export ask the graph for at a time. (The graph gives the same sound for any number: this is a size, not a rule.)
 pub const BLOCK_SAMPLES: usize = 512;
 
+#[cfg(test)]
+mod note_events_tests;
 #[cfg(test)]
 mod tests;

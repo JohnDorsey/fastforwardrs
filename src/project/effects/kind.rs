@@ -117,6 +117,11 @@ impl EffectKind {
         self.0
     }
 
+    /// Whether it is a synthesizer: it makes sound from the notes that reach it (phase 13).
+    pub fn makes_sound_from_notes(self) -> bool {
+        self.0.makes_sound_from_notes
+    }
+
     /// What names the type of effect: a namespace, a colon and an id (`builtin:hue_shift`).
     pub fn key(self) -> &'static str {
         &self.0.key

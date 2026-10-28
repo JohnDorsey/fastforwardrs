@@ -32,6 +32,8 @@ const LV2: &str = "http://lv2plug.in/ns/lv2core#";
 const DOAP: &str = "http://usefulinc.com/ns/doap#";
 const FOAF: &str = "http://xmlns.com/foaf/0.1/";
 const ATOM: &str = "http://lv2plug.in/ns/ext/atom#";
+/// The kind of event that a MIDI input says it supports.
+const MIDI_EVENT: &str = "http://lv2plug.in/ns/ext/midi#MidiEvent";
 const UI: &str = "http://lv2plug.in/ns/extensions/ui#";
 const PPROP: &str = "http://lv2plug.in/ns/ext/port-props#";
 const UNITS: &str = "http://lv2plug.in/ns/extensions/units#";
@@ -175,6 +177,20 @@ pub struct PluginDescription {
     /// The URIs of what its `extension_data` function answers for.
     pub extension_data: Vec<String>,
     pub user_interfaces: Vec<UiDescription>,
+}
+
+impl PluginDescription {
+    /// Whether the plugin has an input that takes MIDI events (an atom input that says it supports `midi:MidiEvent`): what a synthesizer is played by.
+    pub fn takes_midi(&self) -> bool {
+        self.ports.iter().any(|port| {
+            port.kind == PortKind::Atom
+                && port.direction == PortDirection::Input
+                && port
+                    .atom
+                    .as_ref()
+                    .is_some_and(|atom| atom.supports.iter().any(|kind| kind == MIDI_EVENT))
+        })
+    }
 }
 
 /// A preset that a bundle says (`pset:Preset`): numbers for the control ports of a plugin, by their symbols. A preset may be in the bundle of its plugin or in a bundle of its own

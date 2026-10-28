@@ -147,7 +147,7 @@ fn the_plugins_of_a_bundle_that_work_are_effects_and_the_others_say_why_not() {
         .map(|effect| effect.descriptor.key.to_string())
         .collect();
     keys.sort();
-    // (The plugins that have an audio input and an audio output and were made and run: the gain, the controls, the latency, the atoms, the options, the worker, the state.)
+    // (The plugins that have an audio input and an audio output and were made and run: the gain, the controls, the latency, the atoms, the options, the worker, the state; and the instrument, which has a MIDI input and no audio input.)
     let mut expected: Vec<String> = [
         GAIN,
         CONTROLS,
@@ -156,6 +156,7 @@ fn the_plugins_of_a_bundle_that_work_are_effects_and_the_others_say_why_not() {
         lv2_test_plugins::OPTIONS,
         lv2_test_plugins::WORKER,
         STATE,
+        lv2_test_plugins::INSTRUMENT,
     ]
     .iter()
     .map(|uri| key_of_an_lv2_plugin(uri))
@@ -163,15 +164,27 @@ fn the_plugins_of_a_bundle_that_work_are_effects_and_the_others_say_why_not() {
     expected.sort();
     assert_eq!(keys, expected);
     let reasons: Vec<&str> = found.not_used.iter().map(|not_used| not_used.reason.as_str()).collect();
-    assert_eq!(reasons.len(), 3, "{reasons:?}");
+    assert_eq!(reasons.len(), 2, "{reasons:?}");
     assert!(reasons.iter().any(|reason| reason.contains("log#log")), "{reasons:?}");
     assert!(
         reasons.iter().any(|reason| reason.contains("gave nothing")),
         "{reasons:?}"
     );
-    assert!(
-        reasons.iter().any(|reason| reason.contains("no audio input")),
-        "the instrument is not an effect yet: {reasons:?}"
+    let instrument = found
+        .effects
+        .iter()
+        .find(|effect| effect.descriptor.key == key_of_an_lv2_plugin(lv2_test_plugins::INSTRUMENT))
+        .expect("the instrument is an effect");
+    assert!(instrument.descriptor.makes_sound_from_notes);
+    assert_eq!((instrument.audio_inputs, instrument.audio_outputs), (0, 2));
+    assert_eq!(
+        found
+            .effects
+            .iter()
+            .filter(|effect| effect.descriptor.makes_sound_from_notes)
+            .count(),
+        1,
+        "no other plugin of the bundle is a synthesizer (the atoms plugin has a MIDI input and an audio input)"
     );
 }
 

@@ -929,6 +929,10 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
             memory.fill(0.0);
         }
         self.position = 0;
+        // (A synthesizer that is reset lets go of its voices and of the wheel and the pedal.)
+        self.held.clear();
+        self.wheel = 8192;
+        self.sustain = 0;
     }
 }
 

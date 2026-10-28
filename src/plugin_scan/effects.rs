@@ -249,6 +249,7 @@ pub fn effect_of_a_plugin(library: &Path, plugin: &ScannedPlugin) -> Result<Inst
         }),
         domain: EffectDomain::Sound,
         changes_each_pixel_by_itself: false,
+        makes_sound_from_notes: false,
         parameters: Cow::Owned(parameters),
         unknown_fields: UnknownFields::none(),
     };
@@ -426,15 +427,25 @@ pub fn effect_of_a_clap_plugin(
         return Err(format!("it could not be made or run: {problem}"));
     }
     let description = &plugin.description;
-    let Some(input) = plugin.audio_inputs.first() else {
-        return Err(
-            "it has no audio input: it makes sound and does not change any (a generator is not used yet)".to_owned(),
-        );
+    // (A plugin with no audio input and a note input is played, and makes sound from the notes: a synthesizer. One that has an audio input is an effect even if it has a note input too.)
+    let is_a_synthesizer = plugin.audio_inputs.is_empty()
+        && plugin
+            .note_inputs
+            .iter()
+            .any(|port| port.takes_clap_notes() || port.takes_midi());
+    let inputs = match plugin.audio_inputs.first() {
+        Some(input) => channels_of_a_main_port(input, "input")?,
+        None if is_a_synthesizer => 0,
+        None => {
+            return Err(
+                "it has no audio input and no note input: it makes sound by itself and does not change any (a generator is not used yet)"
+                    .to_owned(),
+            );
+        }
     };
     let Some(output) = plugin.audio_outputs.first() else {
         return Err("it has no audio output".to_owned());
     };
-    let inputs = channels_of_a_main_port(input, "input")?;
     let outputs = channels_of_a_main_port(output, "output")?;
     let mut parameters = Vec::new();
     let mut value_handles = Vec::new();
@@ -473,6 +484,7 @@ pub fn effect_of_a_clap_plugin(
         }),
         domain: EffectDomain::Sound,
         changes_each_pixel_by_itself: false,
+        makes_sound_from_notes: is_a_synthesizer,
         parameters: Cow::Owned(parameters),
         unknown_fields: UnknownFields::none(),
     };
@@ -707,14 +719,22 @@ pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) 
         count(lv2_host::PortDirection::Input),
         count(lv2_host::PortDirection::Output),
     );
+    // (An instrument: no audio input and a MIDI input. One that has an audio input is an effect even if it has a MIDI input too.)
+    let is_a_synthesizer = inputs == 0 && description.takes_midi();
     match (inputs, outputs) {
-        (0, _) => {
+        (0, 1 | 2) if is_a_synthesizer => {}
+        (0, _) if !is_a_synthesizer => {
             return Err(
-                "it has no audio input: it makes sound and does not change any (a generator or an instrument is not used yet)"
+                "it has no audio input and no MIDI input: it makes sound by itself and does not change any (a generator is not used yet)"
                     .to_owned(),
             );
         }
         (_, 0) => return Err("it has no audio output".to_owned()),
+        (0, outputs) => {
+            return Err(format!(
+                "it is an instrument with {outputs} audio outputs, and a synthesizer here has one or two"
+            ));
+        }
         (1, 1) | (2, 2) | (1, 2) | (2, 1) => {}
         (inputs, outputs) => {
             return Err(format!(
@@ -761,6 +781,7 @@ pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) 
         }),
         domain: EffectDomain::Sound,
         changes_each_pixel_by_itself: false,
+        makes_sound_from_notes: is_a_synthesizer,
         parameters: Cow::Owned(parameters),
         unknown_fields: UnknownFields::none(),
     };

@@ -112,18 +112,31 @@ fn a_sample_is_in_the_frame_that_its_time_is_in_counted_from_the_frame_the_clip_
 }
 
 #[test]
-fn the_layouts_that_can_be_effects_are_four_and_each_says_how_many_instances_it_needs() {
+fn the_layouts_that_can_be_effects_are_four_and_the_two_of_a_synthesizer_and_each_says_how_many_instances_it_needs() {
     assert_eq!(Layout::of(1, 1), Some(Layout::EachChannelOnItsOwn));
     assert_eq!(Layout::of(2, 2), Some(Layout::Stereo));
     assert_eq!(Layout::of(1, 2), Some(Layout::MonoToStereo));
     assert_eq!(Layout::of(2, 1), Some(Layout::StereoToMono));
-    for (inputs, outputs) in [(0, 1), (1, 0), (3, 3), (2, 3)] {
+    assert_eq!(Layout::of(0, 1), Some(Layout::MonoSource));
+    assert_eq!(Layout::of(0, 2), Some(Layout::StereoSource));
+    for (inputs, outputs) in [(0, 0), (0, 3), (1, 0), (3, 3), (2, 3)] {
         assert_eq!(Layout::of(inputs, outputs), None);
     }
     assert_eq!(Layout::EachChannelOnItsOwn.instances(), 2);
     assert_eq!(Layout::Stereo.instances(), 1);
     assert_eq!(Layout::MonoToStereo.instances(), 1);
     assert_eq!(Layout::StereoToMono.instances(), 1);
+    assert_eq!(Layout::MonoSource.instances(), 1);
+    assert_eq!(Layout::StereoSource.instances(), 1);
+    for layout in [
+        Layout::EachChannelOnItsOwn,
+        Layout::Stereo,
+        Layout::MonoToStereo,
+        Layout::StereoToMono,
+    ] {
+        assert!(!layout.is_a_source(), "{layout:?} changes the sound it is given");
+    }
+    assert!(Layout::MonoSource.is_a_source() && Layout::StereoSource.is_a_source());
 }
 
 #[test]

@@ -195,6 +195,7 @@ pub fn descriptor_with_images_of(
         domain: EffectDomain::Picture,
         // (A shader can do anything to the opacity of a pixel and to the pixels round it.)
         changes_each_pixel_by_itself: false,
+        makes_sound_from_notes: false,
         parameters: Cow::Owned(parameters),
         unknown_fields: UnknownFields::none(),
         shader: Some(ShaderSource {

@@ -370,7 +370,7 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
         .iter()
         .map(|effect| effect.descriptor.key.as_ref())
         .collect();
-    assert_eq!(keys.len(), 15, "{keys:?}");
+    assert_eq!(keys.len(), 17, "{keys:?}");
     assert!(keys.iter().all(|key| key.starts_with("clap:org.fastforwardrs.test.")));
     assert!(found.effects.iter().all(|effect| effect.library == library));
     let reason_of = |id: &str| {
@@ -382,9 +382,25 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
             .reason
             .clone()
     };
-    assert_eq!(found.not_used.len(), 5, "{:?}", found.not_used);
-    assert!(reason_of(clap_test_plugins::INSTRUMENT).contains("no audio input"));
-    assert!(reason_of(clap_test_plugins::INSTRUMENT_MIDI).contains("no audio input"));
+    assert_eq!(found.not_used.len(), 3, "{:?}", found.not_used);
+    // (The two instruments are effects since phase 13: synthesizers, with no audio input, one stereo output, and the flag that says they are played by notes.)
+    for id in [clap_test_plugins::INSTRUMENT, clap_test_plugins::INSTRUMENT_MIDI] {
+        let synthesizer = found
+            .effects
+            .iter()
+            .find(|effect| effect.descriptor.key == format!("clap:{id}"))
+            .unwrap_or_else(|| panic!("{id} is not an effect"));
+        assert!(synthesizer.descriptor.makes_sound_from_notes, "{id}");
+        assert_eq!((synthesizer.audio_inputs, synthesizer.audio_outputs), (0, 2), "{id}");
+    }
+    assert!(
+        found
+            .effects
+            .iter()
+            .filter(|effect| effect.descriptor.makes_sound_from_notes)
+            .count()
+            == 2
+    );
     assert!(reason_of(FAILS_TO_ACTIVATE).contains("could not be made or run"));
     assert!(reason_of(clap_test_plugins::FAILS_TO_PROCESS).contains("could not be made or run"));
     assert!(reason_of(clap_test_plugins::PANICS).contains("could not be made or run"));

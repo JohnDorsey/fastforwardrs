@@ -43,6 +43,7 @@ fn the_descriptor_of_the_hue_shift_is_what_it_was_in_its_first_version_and_the_o
         description: Cow::Borrowed("Turns the colours round the wheel of colours"),
         domain: EffectDomain::Picture,
         changes_each_pixel_by_itself: true,
+        makes_sound_from_notes: false,
         parameters: Cow::Owned(vec![ParameterDescriptor {
             id: Cow::Borrowed("degrees"),
             name: Cow::Borrowed("hue shift"),

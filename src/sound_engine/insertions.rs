@@ -26,6 +26,10 @@ pub trait BlockProcessor: Send {
     /// Said once, before the first sample, to an effect of a clip whose feed begins with `samples` of sound from before the clip (see `pre_roll_frames_of`): they are given to
     /// it and what comes out is thrown away, and they are not samples of the clip, so the keyframes of its values are those of the clip's first moment while it hears them.
     fn about_to_be_given_sound_from_before_the_clip(&mut self, _samples: usize) {}
+
+    /// Said before a call of [`Self::process`]: the notes that reach it in the block that it is about to be given, each at the sample of the block that it is at (phase 13). A synthesizer plays
+    /// them; **any other effect lets them go** (it does not hear them). The notes are not kept after the block.
+    fn give_notes(&mut self, _notes: &[crate::sound_engine::NoteEvent]) {}
 }
 
 /// What gives the graph the effects of a clip, of a track and of a group. **A clip's are applied to its sound before its volume**, the way an insert comes before the fader of a

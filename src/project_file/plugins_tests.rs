@@ -1010,3 +1010,106 @@ fn a_clap_effect_whose_plugin_kind_of_value_changed_is_another_plugin_too() {
     assert!(!effect.kind().is_installed());
     assert_eq!(saved(&loaded), text, "byte for byte");
 }
+
+// --- synthesizers (phase 13, piece 13.2): the snapshot says that a plugin makes sound from notes ---
+
+/// An installed synthesizer: a plugin with no audio input, one value, that makes sound from notes.
+fn an_installed_synthesizer(key: &str) -> crate::project::InstalledPlugin {
+    use crate::test_support::an_installed_sound_plugin;
+    let mut plugin = an_installed_sound_plugin(key, "A Maker", &[("gain", 1.0, Some((0.0, 4.0)))]);
+    plugin.descriptor.makes_sound_from_notes = true;
+    plugin.audio_inputs = 0;
+    plugin.audio_outputs = 2;
+    plugin
+}
+
+#[test]
+fn a_synthesizer_on_a_clip_has_a_snapshot_that_says_so_and_an_effect_does_not_say_it_is_not() {
+    use crate::project::{AnimationTarget, set_installed_plugins};
+    use crate::test_support::{an_installed_sound_plugin, put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    set_installed_plugins(vec![
+        an_installed_synthesizer("clap:com.example.synth"),
+        an_installed_sound_plugin("clap:com.example.reverb", "A Maker", &[("mix", 0.5, None)]),
+    ]);
+    let kinds = EffectKind::installed_plugin_kinds();
+    let (synthesizer, reverb) = (kinds[0], kinds[1]);
+    assert!(synthesizer.makes_sound_from_notes() && !reverb.makes_sound_from_notes());
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    put_an_effect_on(&mut project, video, synthesizer, &[PropertyValue::Number(1.5)]);
+    put_an_effect_on(&mut project, video, reverb, &[PropertyValue::Number(0.25)]);
+
+    let file = as_json(&saved(&project));
+
+    let snapshot = |key: &str| {
+        file["plugins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|snapshot| snapshot["key"] == key)
+            .unwrap_or_else(|| panic!("no snapshot of {key}"))
+            .clone()
+    };
+    assert_eq!(snapshot("clap:com.example.synth")["makes_sound_from_notes"], true);
+    assert!(
+        snapshot("clap:com.example.reverb")
+            .get("makes_sound_from_notes")
+            .is_none(),
+        "it is left out when it is not so, as the other flags are"
+    );
+}
+
+#[test]
+fn a_synthesizer_that_is_not_installed_where_a_file_is_read_is_still_a_synthesizer_and_the_file_is_written_back_as_it_was()
+ {
+    use crate::project::{AnimationTarget, set_installed_plugins};
+    use crate::test_support::{put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    set_installed_plugins(vec![an_installed_synthesizer("clap:com.example.synth")]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let instance = put_an_effect_on(&mut project, video, kind, &[PropertyValue::Number(1.5)]);
+    let text = saved(&project);
+
+    set_installed_plugins(Vec::new());
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let there = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let effect = loaded.effects_of(there).unwrap().instance(instance).unwrap();
+    assert!(!effect.kind().is_installed());
+    assert!(
+        effect.kind().makes_sound_from_notes(),
+        "the snapshot is what says so, with no plugin"
+    );
+    assert_eq!(as_json(&saved(&loaded)), as_json(&text));
+}
+
+#[test]
+fn a_snapshot_that_does_not_say_it_is_a_synthesizer_is_not_one_and_a_synthesizer_cannot_stand_in_for_it() {
+    use crate::project::{AnimationTarget, set_installed_plugins};
+    use crate::test_support::{put_an_effect_on, the_installed_plugins_to_myself};
+
+    let _alone = the_installed_plugins_to_myself();
+    set_installed_plugins(vec![an_installed_synthesizer("clap:com.example.synth")]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let video = AnimationTarget::Clip(project.tracks()[2].entries()[0].id());
+    let instance = put_an_effect_on(&mut project, video, kind, &[PropertyValue::Number(1.5)]);
+    let mut file = as_json(&saved(&project));
+    for snapshot in file["plugins"].as_array_mut().unwrap() {
+        snapshot.as_object_mut().unwrap().remove("makes_sound_from_notes");
+    }
+
+    // (The synthesizer is installed, and the file says that the effect is of a plugin that is not one: it is not the same plugin, and the effect is kept whole.)
+    let loaded = project_from_json_text(&file.to_string()).unwrap();
+
+    let there = AnimationTarget::Clip(loaded.tracks()[2].entries()[0].id());
+    let effect = loaded.effects_of(there).unwrap().instance(instance).unwrap();
+    assert!(!effect.kind().makes_sound_from_notes());
+    assert!(!effect.kind().is_installed());
+    assert_eq!(effect.values(), [PropertyValue::Number(1.5)]);
+}

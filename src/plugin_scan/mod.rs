@@ -51,4 +51,6 @@ mod effects_tests;
 #[cfg(test)]
 mod lv2_effects_tests;
 #[cfg(test)]
+mod synthesizer_tests;
+#[cfg(test)]
 mod tests;

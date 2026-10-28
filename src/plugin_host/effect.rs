@@ -17,7 +17,7 @@ use std::time::Instant;
 use super::instance::{PluginInstance, places_to_look_in};
 use crate::composition::LayerEffect;
 use crate::project::{FrameRate, InstalledPlugin};
-use crate::sound_engine::{BlockProcessor, Notes, SAMPLE_RATE};
+use crate::sound_engine::{BlockProcessor, NoteEvent, Notes, SAMPLE_RATE};
 
 /// How many samples apart the values of an effect that is animated are looked at (32 is 0.67 milliseconds at 48000 a second).
 pub const SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED: usize = 32;
@@ -48,6 +48,10 @@ pub enum Layout {
     MonoToStereo,
     /// Two inputs and one output (which is both channels).
     StereoToMono,
+    /// **No input, one output** (a synthesizer, phase 13): what it makes is added to both channels.
+    MonoSource,
+    /// **No input, two outputs** (a synthesizer): what it makes is added to the channels.
+    StereoSource,
 }
 
 impl Layout {
@@ -58,6 +62,8 @@ impl Layout {
             (2, 2) => Some(Self::Stereo),
             (1, 2) => Some(Self::MonoToStereo),
             (2, 1) => Some(Self::StereoToMono),
+            (0, 1) => Some(Self::MonoSource),
+            (0, 2) => Some(Self::StereoSource),
             _ => None,
         }
     }
@@ -66,8 +72,13 @@ impl Layout {
     pub fn instances(self) -> usize {
         match self {
             Self::EachChannelOnItsOwn => 2,
-            Self::Stereo | Self::MonoToStereo | Self::StereoToMono => 1,
+            Self::Stereo | Self::MonoToStereo | Self::StereoToMono | Self::MonoSource | Self::StereoSource => 1,
         }
+    }
+
+    /// Whether the plugin makes sound from notes and not from the sound it is given (which passes by, with what the plugin makes added to it).
+    pub fn is_a_source(self) -> bool {
+        matches!(self, Self::MonoSource | Self::StereoSource)
     }
 }
 
@@ -138,6 +149,8 @@ pub struct PluginEffect {
     /// Whether the warning that the plugin's start is unreliable (if it has one) has been said.
     has_said_its_start_is_unreliable: bool,
     notes: Notes,
+    /// The notes that reach the plugin in the block that is being made (see `BlockProcessor::give_notes`); only a synthesizer keeps them.
+    notes_of_the_block: Vec<NoteEvent>,
     /// Where a plugin that is left out says why, for the window.
     problems: Option<ProblemBoard>,
     /// Where the control outputs of the plugin are said after each block, if anyone looks at them.
@@ -178,6 +191,7 @@ impl PluginEffect {
             has_said_it_gave_too_much: false,
             has_said_its_start_is_unreliable: false,
             notes,
+            notes_of_the_block: Vec::new(),
             problems: None,
             meters: None,
         })
@@ -283,9 +297,16 @@ impl PluginEffect {
         self.given = wanted;
     }
 
-    /// Runs the plugin on the sound in `left` and `right` (as long as each other), which are the sound as it is until it is changed.
-    fn run_on(&mut self, left: &mut [f32], right: &mut [f32]) {
+    /// Runs the plugin on the sound in `left` and `right` (as long as each other), which are the sound as it is until it is changed. They are the samples of the block from `from` on: the
+    /// notes of the block that are in them are given to a synthesizer, each at its sample of the piece.
+    fn run_on(&mut self, left: &mut [f32], right: &mut [f32], from: usize) {
         let length = left.len();
+        let notes: Vec<NoteEvent> = self
+            .notes_of_the_block
+            .iter()
+            .filter(|note| (note.time as usize) >= from && (note.time as usize) < from + length)
+            .filter_map(|note| note.earlier_by(from))
+            .collect();
         for buffer in self.input.iter_mut().chain(self.output.iter_mut()) {
             buffer.clear();
             buffer.resize(length, 0.0);
@@ -341,6 +362,18 @@ impl PluginEffect {
                 output_right.copy_from_slice(output_left);
                 result
             }
+            Layout::MonoSource => {
+                let result =
+                    self.instances[0].run_with_notes(&mut [], &mut [output_left.as_mut_slice()], length, &notes);
+                output_right.copy_from_slice(output_left);
+                result
+            }
+            Layout::StereoSource => self.instances[0].run_with_notes(
+                &mut [],
+                &mut [output_left.as_mut_slice(), output_right.as_mut_slice()],
+                length,
+                &notes,
+            ),
         };
         if let Err(error) = result {
             self.left_out = true;
@@ -355,13 +388,16 @@ impl PluginEffect {
         // (A sample that is not a number, or is louder than any sound should be, is silence in its place.)
         let is_fit = |sample: f32| sample.is_finite() && sample.abs() <= MOST_A_PLUGIN_MAY_GIVE;
         let mut was_unfit = false;
+        // (A synthesizer's sound is added to the sound that passes by it; an effect's replaces it.)
+        let adds = self.layout.is_a_source();
         for (sound, made) in left
             .iter_mut()
             .zip(output_left.iter())
             .chain(right.iter_mut().zip(output_right.iter()))
         {
             was_unfit |= !is_fit(*made);
-            *sound = if is_fit(*made) { *made } else { 0.0 };
+            let made = if is_fit(*made) { *made } else { 0.0 };
+            *sound = if adds { *sound + made } else { made };
         }
         if was_unfit && !self.has_said_it_gave_too_much {
             self.has_said_it_gave_too_much = true;
@@ -407,7 +443,11 @@ impl PluginEffect {
                 let frame = frame_of_a_sample(self.frame_rate, self.first_timeline_frame, first_sample + place as u64);
                 self.give_the_values_at(frame, place);
             }
-            self.run_on(&mut left[piece_start..piece_end], &mut right[piece_start..piece_end]);
+            self.run_on(
+                &mut left[piece_start..piece_end],
+                &mut right[piece_start..piece_end],
+                piece_start,
+            );
             piece_start = piece_end;
         }
     }
@@ -418,6 +458,7 @@ impl BlockProcessor for PluginEffect {
         let total = left.len().min(right.len());
         if total == 0 || self.left_out {
             self.samples_done += total as u64;
+            self.notes_of_the_block.clear();
             return;
         }
         let began = Instant::now();
@@ -449,11 +490,12 @@ impl BlockProcessor for PluginEffect {
                     self.sample_of_the_clip(at as u64),
                 );
                 self.give_the_values_at(frame, 0);
-                self.run_on(&mut left[at..end], &mut right[at..end]);
+                self.run_on(&mut left[at..end], &mut right[at..end], at);
                 at = end;
             }
         }
         self.samples_done += total as u64;
+        self.notes_of_the_block.clear();
         self.publish_the_meters();
         if let Some(guard) = &mut self.guard {
             let block_seconds = total as f64 / f64::from(SAMPLE_RATE);
@@ -479,6 +521,13 @@ impl BlockProcessor for PluginEffect {
 
     fn about_to_be_given_sound_from_before_the_clip(&mut self, samples: usize) {
         self.samples_before_the_clip = samples as u64;
+    }
+
+    fn give_notes(&mut self, notes: &[NoteEvent]) {
+        // (Only a synthesizer hears notes: an effect lets them go.)
+        if self.layout.is_a_source() {
+            self.notes_of_the_block = notes.to_vec();
+        }
     }
 
     fn latency(&self) -> usize {

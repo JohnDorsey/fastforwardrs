@@ -26,4 +26,6 @@ pub use instance::{
 pub use needs::folders_the_sound_of_a_project_needs;
 
 #[cfg(test)]
+mod synthesizer_tests;
+#[cfg(test)]
 mod tests;

@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::effect::SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED;
-use crate::sound_engine::SAMPLE_RATE;
+use crate::sound_engine::{NoteEvent, SAMPLE_RATE};
 
 /// How many frames a CLAP plugin is activated for at most, and so how many it is given in one call (a block of the sound engine is no more than this; a longer stretch is
 /// given in pieces).
@@ -29,6 +29,17 @@ pub trait PluginInstance: Send {
 
     /// Runs the plugin on `frames` samples: the channels of its main input and of its main output, each as long as `frames`.
     fn run(&mut self, inputs: &mut [&mut [f32]], outputs: &mut [&mut [f32]], frames: usize) -> Result<(), String>;
+
+    /// [`Self::run`] with notes (a synthesizer): `notes` are in order of time, each at a sample of this run. A plugin that takes no notes is given none (this is [`Self::run`]).
+    fn run_with_notes(
+        &mut self,
+        inputs: &mut [&mut [f32]],
+        outputs: &mut [&mut [f32]],
+        frames: usize,
+        _notes: &[NoteEvent],
+    ) -> Result<(), String> {
+        self.run(inputs, outputs, frames)
+    }
 
     /// Makes the plugin forget what it has heard (the values it was given are kept).
     fn reset(&mut self);
@@ -79,6 +90,19 @@ impl PluginInstance for Lv2Copy {
 
     fn run(&mut self, inputs: &mut [&mut [f32]], outputs: &mut [&mut [f32]], frames: usize) -> Result<(), String> {
         self.0.run(inputs, outputs, frames).map_err(|error| error.to_string())
+    }
+
+    fn run_with_notes(
+        &mut self,
+        inputs: &mut [&mut [f32]],
+        outputs: &mut [&mut [f32]],
+        frames: usize,
+        notes: &[NoteEvent],
+    ) -> Result<(), String> {
+        let notes: Vec<lv2_host::NoteEvent> = notes.iter().map(|note| (*note).into()).collect();
+        self.0
+            .run_with_notes(inputs, outputs, frames, &notes)
+            .map_err(|error| error.to_string())
     }
 
     fn reset(&mut self) {
@@ -269,6 +293,19 @@ impl PluginInstance for ClapCopy {
 
     fn run(&mut self, inputs: &mut [&mut [f32]], outputs: &mut [&mut [f32]], _frames: usize) -> Result<(), String> {
         let result = self.instance.run(inputs, outputs, &self.pending);
+        self.pending.clear();
+        result.map(|_| ()).map_err(|error| error.to_string())
+    }
+
+    fn run_with_notes(
+        &mut self,
+        inputs: &mut [&mut [f32]],
+        outputs: &mut [&mut [f32]],
+        _frames: usize,
+        notes: &[NoteEvent],
+    ) -> Result<(), String> {
+        let notes: Vec<clap_host::NoteEvent> = notes.iter().map(|note| (*note).into()).collect();
+        let result = self.instance.run_with_notes(inputs, outputs, &self.pending, &notes);
         self.pending.clear();
         result.map(|_| ()).map_err(|error| error.to_string())
     }
