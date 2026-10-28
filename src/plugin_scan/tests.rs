@@ -825,6 +825,7 @@ fn a_clap_scan() -> clap_host::scan::LibraryScan {
                 is_main: true,
             }],
             audio_outputs: Vec::new(),
+            note_inputs: Vec::new(),
             parameters: Vec::new(),
             latency: 64,
             tail: Some(1000),

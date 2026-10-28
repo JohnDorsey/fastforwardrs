@@ -913,6 +913,7 @@ fn the_window_tells_of_a_clap_plugin_whose_start_depends_on_memory_it_did_not_wr
         },
         audio_inputs: Vec::new(),
         audio_outputs: Vec::new(),
+        note_inputs: Vec::new(),
         parameters: Vec::new(),
         latency: 0,
         tail: None,

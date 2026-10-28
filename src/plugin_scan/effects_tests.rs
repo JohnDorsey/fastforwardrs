@@ -668,6 +668,7 @@ fn a_clap_plugin(id: &str, parameters: Vec<Parameter>) -> ScannedClapPlugin {
         },
         audio_inputs: vec![a_port(2, Some("stereo"))],
         audio_outputs: vec![a_port(2, Some("stereo"))],
+        note_inputs: Vec::new(),
         parameters,
         latency: 0,
         tail: None,

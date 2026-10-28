@@ -30,6 +30,33 @@ pub struct AudioPort {
     pub is_main: bool,
 }
 
+/// A note port of a plugin: where it takes notes (`clap.note-ports`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotePort {
+    pub id: u32,
+    pub name: String,
+    /// The `CLAP_NOTE_DIALECT_*` bits of the kinds of events the port understands.
+    pub supported_dialects: u32,
+    /// The `CLAP_NOTE_DIALECT_*` bit the plugin would rather be given (`0`: it says nothing).
+    pub preferred_dialect: u32,
+}
+
+/// The `CLAP_NOTE_DIALECT_*` bits (`ext/note-ports.h`).
+pub const NOTE_DIALECT_CLAP: u32 = 1 << 0;
+pub const NOTE_DIALECT_MIDI: u32 = 1 << 1;
+
+impl NotePort {
+    /// Whether it understands the note events of CLAP (`NOTE_ON`, `NOTE_OFF`...).
+    pub fn takes_clap_notes(&self) -> bool {
+        self.supported_dialects & NOTE_DIALECT_CLAP != 0
+    }
+
+    /// Whether it understands the MIDI events of the first kind (three bytes).
+    pub fn takes_midi(&self) -> bool {
+        self.supported_dialects & NOTE_DIALECT_MIDI != 0
+    }
+}
+
 /// A parameter of a plugin.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
@@ -87,6 +114,9 @@ pub struct ScannedPlugin {
     pub description: PluginDescription,
     pub audio_inputs: Vec<AudioPort>,
     pub audio_outputs: Vec<AudioPort>,
+    /// Where the plugin takes notes (an instrument has one; an effect has none). A scan from before this was known says none.
+    #[serde(default)]
+    pub note_inputs: Vec<NotePort>,
     pub parameters: Vec<Parameter>,
     pub latency: u32,
     /// `Some` if the plugin says how long its tail is.
@@ -154,6 +184,7 @@ fn probe(
         description,
         audio_inputs: Vec::new(),
         audio_outputs: Vec::new(),
+        note_inputs: Vec::new(),
         parameters: Vec::new(),
         latency: 0,
         tail: None,
@@ -177,6 +208,7 @@ fn probe(
     };
     scanned.audio_inputs = instance.audio_inputs().to_vec();
     scanned.audio_outputs = instance.audio_outputs().to_vec();
+    scanned.note_inputs = instance.note_inputs().to_vec();
     scanned.parameters = instance.parameters().to_vec();
     scanned.latency = instance.latency();
     scanned.has_state = instance.has_state();

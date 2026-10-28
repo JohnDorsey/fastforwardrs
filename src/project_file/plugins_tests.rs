@@ -817,6 +817,7 @@ fn a_clap_plugin_with_a_value_of_each_kind(parameter_ids: [u32; 4]) -> crate::pr
         },
         audio_inputs: vec![port.clone()],
         audio_outputs: vec![port],
+        note_inputs: Vec::new(),
         parameters: vec![
             parameter(parameter_ids[0], "Cutoff", 20.0, 20_000.0, 1_000.0, 0, &[]),
             parameter(parameter_ids[1], "Voices", 1.0, 8.0, 2.0, STEPPED, &[]),

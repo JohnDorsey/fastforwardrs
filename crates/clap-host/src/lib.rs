@@ -22,11 +22,13 @@ pub mod scan;
 pub mod start_check;
 
 pub use editor::{Editor, EditorError, EditorEvent, ParameterEdit, WindowSize};
-pub use instance::{Instance, InstanceError, ParameterChange, ProcessOutcome, RunError};
+pub use instance::{Instance, InstanceError, NoteEvent, NoteEventKind, ParameterChange, ProcessOutcome, RunError};
 pub use library::{Library, LibraryDescription, OpenError, PluginDescription};
 pub use main_thread::MainThread;
 
 #[cfg(test)]
 mod editor_tests;
+#[cfg(test)]
+mod note_tests;
 #[cfg(test)]
 mod tests;

@@ -13,7 +13,8 @@
 //! | `org.fastforwardrs.test.latency` | stereo; says it has a latency of 64 samples and delays the sound by 64 samples |
 //! | `org.fastforwardrs.test.tail` | stereo; says it has a tail of 1000 samples; an echo that rings |
 //! | `org.fastforwardrs.test.choice` | stereo; a stepped parameter (`Steps`, 0 to 3, id 1) and an enum (`Mode`, 0 to 2, id 2, with texts); the sound times (steps + 1) times (mode + 1) |
-//! | `org.fastforwardrs.test.instrument` | no audio input (a generator), a note port: not an effect |
+//! | `org.fastforwardrs.test.instrument` | no audio input (a generator), a note port that takes the notes of CLAP and MIDI (it likes CLAP's): **a note makes sound**, see [`INSTRUMENT`] |
+//! | `org.fastforwardrs.test.instrument_midi` | the same, with a note port that takes **MIDI only**, see [`INSTRUMENT_MIDI`] |
 //! | `org.fastforwardrs.test.threads` | stereo; **checks the thread it is called on** (the host's `thread-check`) and gives the sound as it is if every call was on the right thread, and with the sign changed if one was not |
 //!
 //! | `…fails_to_activate`, `…fails_to_process`, `…panics` | stereo; misbehave on purpose: `activate` says no, `process` says it failed, `process` panics |
@@ -29,6 +30,9 @@ use clack_extensions::audio_ports::{
 };
 use clack_extensions::gui::{GuiConfiguration, GuiSize, HostGui, PluginGui, PluginGuiImpl, Window};
 use clack_extensions::latency::{HostLatency, PluginLatency, PluginLatencyImpl};
+use clack_extensions::note_ports::{
+    NoteDialect, NoteDialects, NotePortInfo, NotePortInfoWriter, PluginNotePorts, PluginNotePortsImpl,
+};
 use clack_extensions::params::{HostParams, ParamRescanFlags};
 use clack_extensions::params::{
     ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter, PluginAudioProcessorParams, PluginMainThreadParams,
@@ -52,7 +56,13 @@ pub const MONO_HALF: &str = "org.fastforwardrs.test.mono_half";
 pub const LATENCY: &str = "org.fastforwardrs.test.latency";
 pub const TAIL: &str = "org.fastforwardrs.test.tail";
 pub const CHOICE: &str = "org.fastforwardrs.test.choice";
+/// An instrument (no audio input; one stereo output; a note port that takes the notes of CLAP and MIDI, and likes CLAP's). **It makes sound that is plain arithmetic**: while notes are held, every sample
+/// of both channels is the sum, over the held notes, of `velocity * key / 100`, plus nothing else (a note off silences it at once: no release). A choke silences every note, and so does the MIDI all sound off (controller 120) **of its own channel**. It has the parameter `Gain` (id 1, 0 to 4, 1 at first) that the sound is multiplied by. It is deaf to controllers, to the
+/// pitch wheel and to the MIDI all sound off (they come as MIDI events, which this port takes, but it reads only the notes in them): **a choke can only reach it as CLAP's own event**.
 pub const INSTRUMENT: &str = "org.fastforwardrs.test.instrument";
+/// The same instrument with a note port that takes **MIDI events only** (a note on is three bytes, `0x90 | channel`, the key, the velocity of seven bits). It reads the pitch wheel too: every sample is
+/// also given `(wheel - 8192) / 8192 * 0.5` (the wheel is 8192 at the start), and a controller 64 (the sustain pedal) is added as `value / 127 * 0.25` while any note is held.
+pub const INSTRUMENT_MIDI: &str = "org.fastforwardrs.test.instrument_midi";
 pub const THREADS: &str = "org.fastforwardrs.test.threads";
 /// Plugins that misbehave, for the tests of what a host does about it: `activate` says no, `process` says it failed, `process` panics.
 pub const FAILS_TO_ACTIVATE: &str = "org.fastforwardrs.test.fails_to_activate";
@@ -138,12 +148,13 @@ const KIND_LATENCY_CHANGES: u8 = 15;
 const KIND_SINGLE_INSTANCE: u8 = 16;
 const KIND_READS_GARBAGE: u8 = 17;
 const KIND_EDITOR: u8 = 18;
+const KIND_INSTRUMENT_MIDI: u8 = 19;
 
 /// How many `single_instance` plugins are alive.
 static SINGLE_INSTANCES_ALIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The ids of the plugins, in the order of the kinds.
-const IDS: [&str; 19] = [
+const IDS: [&str; 20] = [
     GAIN,
     SWAP,
     MONO_HALF,
@@ -163,8 +174,9 @@ const IDS: [&str; 19] = [
     SINGLE_INSTANCE,
     READS_GARBAGE,
     EDITOR,
+    INSTRUMENT_MIDI,
 ];
-const NAMES: [&str; 19] = [
+const NAMES: [&str; 20] = [
     "Gain",
     "Swap",
     "Mono half",
@@ -184,6 +196,7 @@ const NAMES: [&str; 19] = [
     "Single instance",
     "Reads garbage",
     "Editor",
+    "Instrument MIDI",
 ];
 
 /// What the parameters of a plugin are, as `(id, name, minimum, maximum, default, flags)`.
@@ -211,7 +224,7 @@ fn parameters_of(kind: u8) -> &'static [(u32, &'static str, f64, f64, f64, Param
         ),
     ];
     match kind {
-        KIND_GAIN | KIND_CALLBACKS | KIND_EDITOR => &GAIN_PARAMETER,
+        KIND_GAIN | KIND_CALLBACKS | KIND_EDITOR | KIND_INSTRUMENT | KIND_INSTRUMENT_MIDI => &GAIN_PARAMETER,
         KIND_CHOICE => &CHOICE_PARAMETERS,
         _ => &[],
     }
@@ -326,6 +339,9 @@ impl<const KIND: u8> Plugin for TestPlugin<KIND> {
 
     fn declare_extensions(builder: &mut PluginExtensions<Self>, _shared: Option<&Self::Shared<'_>>) {
         builder.register::<PluginAudioPorts>();
+        if is_an_instrument(KIND) {
+            builder.register::<PluginNotePorts>();
+        }
         if !parameters_of(KIND).is_empty() {
             builder.register::<PluginParams>();
         }
@@ -385,17 +401,49 @@ impl<'a, const KIND: u8> PluginMainThread<'a, Shared> for Main<'a, KIND> {
     }
 }
 
+/// Whether the plugin is one of the two instruments.
+const fn is_an_instrument(kind: u8) -> bool {
+    kind == KIND_INSTRUMENT || kind == KIND_INSTRUMENT_MIDI
+}
+
+impl<const KIND: u8> PluginNotePortsImpl for Main<'_, KIND> {
+    fn count(&self, is_input: bool) -> u32 {
+        u32::from(is_input && is_an_instrument(KIND))
+    }
+
+    fn get(&self, index: u32, is_input: bool, writer: &mut NotePortInfoWriter) {
+        if index != 0 || !is_input || !is_an_instrument(KIND) {
+            return;
+        }
+        let midi_only = KIND == KIND_INSTRUMENT_MIDI;
+        writer.set(&NotePortInfo {
+            id: ClapId::new(0),
+            name: b"Notes",
+            supported_dialects: if midi_only {
+                NoteDialects::MIDI
+            } else {
+                NoteDialects::CLAP | NoteDialects::MIDI
+            },
+            preferred_dialect: Some(if midi_only {
+                NoteDialect::Midi
+            } else {
+                NoteDialect::Clap
+            }),
+        });
+    }
+}
+
 impl<const KIND: u8> PluginAudioPortsImpl for Main<'_, KIND> {
     fn count(&self, is_input: bool) -> u32 {
         match (is_input, KIND) {
-            (true, KIND_INSTRUMENT) => 0,
+            (true, KIND_INSTRUMENT | KIND_INSTRUMENT_MIDI) => 0,
             (true, KIND_SIDE_CHAIN) => 2,
             _ => 1,
         }
     }
 
     fn get(&self, index: u32, is_input: bool, writer: &mut AudioPortInfoWriter) {
-        if (is_input && KIND == KIND_INSTRUMENT) || index > u32::from(is_input && KIND == KIND_SIDE_CHAIN) {
+        if (is_input && is_an_instrument(KIND)) || index > u32::from(is_input && KIND == KIND_SIDE_CHAIN) {
             return;
         }
         let is_side_chain = index == 1;
@@ -702,6 +750,11 @@ pub struct Processor<'a, const KIND: u8> {
     /// What the plugin has said, the last `LATENCY_SAMPLES` samples of each channel (`latency`), or the last `ECHO_SAMPLES` samples of what it gave (`tail`).
     memory: [Vec<f32>; 2],
     position: usize,
+    /// The notes that are held, for the instruments: `(channel, key, velocity)`.
+    held: Vec<(u16, u16, f32)>,
+    /// The pitch wheel and the sustain pedal, for the MIDI instrument.
+    wheel: u16,
+    sustain: u8,
 }
 
 impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Processor<'a, KIND> {
@@ -743,6 +796,9 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
             values: [shared.get(0), shared.get(1)],
             memory: [vec![0.0; length], vec![0.0; length]],
             position: 0,
+            held: Vec::new(),
+            wheel: 8192,
+            sustain: 0,
         })
     }
 
@@ -784,21 +840,72 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
         }
         let frames = audio.frames_count() as usize;
         let mut done = 0;
-        let mut pending: Vec<(usize, u32, f64)> = Vec::new();
+        let mut pending: Vec<(usize, Change)> = Vec::new();
         for event in events.input {
-            if let Some(CoreEventSpace::ParamValue(change)) = event.as_core_event()
-                && let Some(id) = change.param_id()
-            {
-                pending.push((change.header().time() as usize, id.get(), change.value()));
+            let time = event.header().time() as usize;
+            match event.as_core_event() {
+                Some(CoreEventSpace::ParamValue(change)) => {
+                    if let Some(id) = change.param_id() {
+                        pending.push((time, Change::Parameter(id.get(), change.value())));
+                    }
+                }
+                Some(CoreEventSpace::NoteOn(note)) if is_an_instrument(KIND) => {
+                    if let (Some(&channel), Some(&key)) = (note.channel().as_specific(), note.key().as_specific()) {
+                        pending.push((time, Change::NoteOn(channel, key, note.velocity() as f32)));
+                    }
+                }
+                Some(CoreEventSpace::NoteOff(note)) if is_an_instrument(KIND) => {
+                    if let (Some(&channel), Some(&key)) = (note.channel().as_specific(), note.key().as_specific()) {
+                        pending.push((time, Change::NoteOff(channel, key)));
+                    }
+                }
+                Some(CoreEventSpace::NoteChoke(_)) if is_an_instrument(KIND) => {
+                    pending.push((time, Change::Choke(None)))
+                }
+                Some(CoreEventSpace::Midi(midi)) if is_an_instrument(KIND) => {
+                    // (Only the MIDI instrument reads more than notes in MIDI events.)
+                    let reads_more = KIND == KIND_INSTRUMENT_MIDI;
+                    let [status, one, two] = midi.data();
+                    let channel = u16::from(status & 15);
+                    match status & 0xF0 {
+                        0x90 if two > 0 => {
+                            pending.push((time, Change::NoteOn(channel, u16::from(one), f32::from(two) / 127.0)))
+                        }
+                        0x90 | 0x80 => pending.push((time, Change::NoteOff(channel, u16::from(one)))),
+                        0xB0 if reads_more && (one == 120 || one == 123) => {
+                            pending.push((time, Change::Choke(Some(channel))))
+                        }
+                        0xB0 if reads_more && one == 64 => pending.push((time, Change::Sustain(two))),
+                        0xE0 if reads_more => {
+                            pending.push((time, Change::Wheel(u16::from(one) | (u16::from(two) << 7))))
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
         }
         let mut next_event = 0;
         while done < frames {
             while next_event < pending.len() && pending[next_event].0 <= done {
-                let (_, id, value) = pending[next_event];
-                if let Some(number) = parameters_of(KIND).iter().position(|parameter| parameter.0 == id) {
-                    self.values[number] = value;
-                    self.shared.set(number, value);
+                match pending[next_event].1 {
+                    Change::Parameter(id, value) => {
+                        if let Some(number) = parameters_of(KIND).iter().position(|parameter| parameter.0 == id) {
+                            self.values[number] = value;
+                            self.shared.set(number, value);
+                        }
+                    }
+                    Change::NoteOn(channel, key, velocity) => self.held.push((channel, key, velocity)),
+                    Change::NoteOff(channel, key) => {
+                        if let Some(place) = self.held.iter().position(|note| note.0 == channel && note.1 == key) {
+                            self.held.remove(place);
+                        }
+                    }
+                    Change::Choke(channel) => self
+                        .held
+                        .retain(|note| channel.is_some_and(|channel| note.0 != channel)),
+                    Change::Sustain(value) => self.sustain = value,
+                    Change::Wheel(value) => self.wheel = value,
                 }
                 next_event += 1;
             }
@@ -892,7 +999,7 @@ impl<const KIND: u8> Processor<'_, KIND> {
                         inputs.push(buffer[from..to].to_vec());
                         outputs.push(&mut buffer[from..to]);
                     }
-                    ChannelPair::OutputOnly(buffer) => buffer[from..to].fill(0.0),
+                    ChannelPair::OutputOnly(buffer) => buffer[from..to].fill(self.level_of_the_instrument()),
                     ChannelPair::InputOnly(_) => {}
                 }
                 channel_number += 1;
@@ -901,6 +1008,28 @@ impl<const KIND: u8> Processor<'_, KIND> {
             self.make(&inputs, &mut outputs, multiplier, &side);
         }
         Ok(())
+    }
+
+    /// The sound of an instrument now: what the held notes (and, for the MIDI instrument, the wheel and the pedal) make of it. Zero for a plugin that is not one.
+    fn level_of_the_instrument(&self) -> f32 {
+        if !is_an_instrument(KIND) {
+            return 0.0;
+        }
+        let notes: f32 = self
+            .held
+            .iter()
+            .map(|&(_, key, velocity)| velocity * f32::from(key) / 100.0)
+            .sum();
+        if KIND != KIND_INSTRUMENT_MIDI {
+            return notes * self.values[0] as f32;
+        }
+        let wheel = (f32::from(self.wheel) - 8192.0) / 8192.0 * 0.5;
+        let pedal = if self.held.is_empty() {
+            0.0
+        } else {
+            f32::from(self.sustain) / 127.0 * 0.25
+        };
+        (notes + wheel + pedal) * self.values[0] as f32
     }
 
     fn make(&mut self, inputs: &[Vec<f32>], outputs: &mut [&mut [f32]], multiplier: f32, side: &[f32]) {
@@ -933,6 +1062,18 @@ impl<const KIND: u8> Processor<'_, KIND> {
         }
         self.position += outputs.first().map_or(0, |output| output.len());
     }
+}
+
+/// What an event of a block changes in the plugin, at its time.
+#[derive(Clone, Copy)]
+enum Change {
+    Parameter(u32, f64),
+    NoteOn(u16, u16, f32),
+    NoteOff(u16, u16),
+    /// Every note of a channel, or of all (`None`).
+    Choke(Option<u16>),
+    Sustain(u8),
+    Wheel(u16),
 }
 
 /// The plugins of the library.
@@ -984,6 +1125,7 @@ impl PluginFactoryImpl for Factory {
             KIND_TAIL => made!(KIND_TAIL),
             KIND_CHOICE => made!(KIND_CHOICE),
             KIND_INSTRUMENT => made!(KIND_INSTRUMENT),
+            KIND_INSTRUMENT_MIDI => made!(KIND_INSTRUMENT_MIDI),
             KIND_THREADS => made!(KIND_THREADS),
             KIND_FAILS_TO_ACTIVATE => made!(KIND_FAILS_TO_ACTIVATE),
             KIND_FAILS_TO_PROCESS => made!(KIND_FAILS_TO_PROCESS),

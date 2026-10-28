@@ -9,10 +9,11 @@ use std::sync::{Arc, Mutex};
 
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
 use clack_extensions::latency::PluginLatency;
+use clack_extensions::note_ports::{NotePortInfoBuffer, PluginNotePorts};
 use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
 use clack_extensions::state::PluginState;
 use clack_extensions::tail::{PluginTail, TailLength};
-use clack_host::events::event_types::ParamValueEvent;
+use clack_host::events::event_types::{MidiEvent, NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamValueEvent};
 use clack_host::prelude::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -20,7 +21,7 @@ use thiserror::Error;
 use crate::host::{Host, MainThreadPart, Requests, Shared, Threads};
 use crate::library::Library;
 use crate::main_thread::MainThread;
-use crate::scan::{AudioPort, Parameter};
+use crate::scan::{AudioPort, NotePort, Parameter};
 
 /// Why a plugin could not be made.
 #[derive(Debug, Error)]
@@ -59,6 +60,38 @@ pub struct ParameterChange {
     pub value: f64,
 }
 
+/// A note, or what goes with notes, at the sample `time` of the block (what a synthesizer is given: [`Instance::run_with_notes`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoteEvent {
+    pub time: u32,
+    pub what: NoteEventKind,
+}
+
+/// What a [`NoteEvent`] says. Channels are `0..=15`, keys and controller numbers `0..=127`, velocities `0.0..=1.0`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NoteEventKind {
+    /// A key is pressed. `id` tells this note from another on the same key and channel (`0..i32::MAX`), and is given again by its [`Self::Off`].
+    On {
+        channel: u8,
+        key: u8,
+        velocity: f32,
+        id: u32,
+    },
+    /// A key is let go.
+    Off {
+        channel: u8,
+        key: u8,
+        velocity: f32,
+        id: u32,
+    },
+    /// A controller (the sustain pedal is 64, the modulation wheel 1). **Only a plugin that takes MIDI events is given it.**
+    Controller { channel: u8, number: u8, value: u8 },
+    /// The pitch wheel, `0..=16383` with 8192 in the middle. **Only a plugin that takes MIDI events is given it.**
+    PitchBend { channel: u8, value: u16 },
+    /// Every voice is silenced at once (a choke, not a release): for the end of a window that cuts, and for a seek.
+    AllOff,
+}
+
 /// What `process` said about how it wants to go on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessOutcome {
@@ -72,6 +105,7 @@ pub enum ProcessOutcome {
 pub(crate) struct Gathered {
     pub(crate) inputs: Vec<AudioPort>,
     pub(crate) outputs: Vec<AudioPort>,
+    pub(crate) note_inputs: Vec<NotePort>,
     pub(crate) parameters: Vec<Parameter>,
     pub(crate) latency: u32,
     pub(crate) has_state: bool,
@@ -195,6 +229,11 @@ impl Instance {
         &self.gathered.outputs
     }
 
+    /// The note ports the plugin takes notes in (an instrument has some, an effect has none), in order (the first is the one that [`Self::run_with_notes`] gives its notes to).
+    pub fn note_inputs(&self) -> &[NotePort] {
+        &self.gathered.note_inputs
+    }
+
     pub fn parameters(&self) -> &[Parameter] {
         &self.gathered.parameters
     }
@@ -288,6 +327,22 @@ impl Instance {
         outputs: &mut [&mut [f32]],
         changes: &[ParameterChange],
     ) -> Result<ProcessOutcome, RunError> {
+        self.run_with_notes(inputs, outputs, changes, &[])
+    }
+
+    /// [`Self::run`] with notes: `notes` are in order of time, and are given to the first of the plugin's note ports **in the kind of event it prefers** (the events of CLAP if it takes them, else
+    /// MIDI); a plugin with no note port is given none. A parameter change and a note at the same sample: the change comes first.
+    pub fn run_with_notes(
+        &mut self,
+        inputs: &mut [&mut [f32]],
+        outputs: &mut [&mut [f32]],
+        changes: &[ParameterChange],
+        notes: &[NoteEvent],
+    ) -> Result<ProcessOutcome, RunError> {
+        debug_assert!(
+            notes.windows(2).all(|pair| pair[0].time <= pair[1].time),
+            "notes are in order of time"
+        );
         let frames = outputs.first().map_or(0, |channel| channel.len());
         if let Some(wrong) = self.channels_are_wrong(inputs, outputs, frames) {
             return Err(RunError::WrongBuffers(wrong));
@@ -308,11 +363,18 @@ impl Instance {
         }
         self.input_events.clear();
         self.output_events.clear();
+        let mut notes_left = notes.iter().peekable();
         for change in changes {
+            while let Some(note) = notes_left.next_if(|note| note.time < change.time) {
+                push_a_note(&mut self.input_events, self.gathered.note_inputs.first(), note);
+            }
             if let Some(id) = ClapId::from_raw(change.id) {
                 self.input_events
                     .push(&ParamValueEvent::new(change.time, id, Pckn::match_all(), change.value));
             }
+        }
+        for note in notes_left {
+            push_a_note(&mut self.input_events, self.gathered.note_inputs.first(), note);
         }
 
         // The ports that are not the main ones are given silence.
@@ -462,11 +524,86 @@ impl Drop for Instance {
     }
 }
 
+/// Puts a note in the events of the block, in the kind of event that the plugin's first note port takes.
+fn push_a_note(events: &mut EventBuffer, port: Option<&NotePort>, note: &NoteEvent) {
+    let Some(port) = port else {
+        return;
+    };
+    let (clap, midi) = (port.takes_clap_notes(), port.takes_midi());
+    let time = note.time;
+    // (A velocity of a note on is never 0 in MIDI, where that means a note off.)
+    let seven_bits = |velocity: f32, least: u8| ((velocity.clamp(0.0, 1.0) * 127.0).round() as u8).max(least);
+    match note.what {
+        NoteEventKind::On {
+            channel,
+            key,
+            velocity,
+            id,
+        } if clap => {
+            let pckn = Pckn::new(0u16, u16::from(channel), u16::from(key), id);
+            events.push(&NoteOnEvent::new(time, pckn, f64::from(velocity.clamp(0.0, 1.0))));
+        }
+        NoteEventKind::Off {
+            channel,
+            key,
+            velocity,
+            id,
+        } if clap => {
+            let pckn = Pckn::new(0u16, u16::from(channel), u16::from(key), id);
+            events.push(&NoteOffEvent::new(time, pckn, f64::from(velocity.clamp(0.0, 1.0))));
+        }
+        NoteEventKind::AllOff if clap => {
+            events.push(&NoteChokeEvent::new(time, Pckn::match_all()));
+        }
+        NoteEventKind::On {
+            channel, key, velocity, ..
+        } if midi => {
+            events.push(&MidiEvent::new(
+                time,
+                0,
+                [0x90 | (channel & 15), key & 127, seven_bits(velocity, 1)],
+            ));
+        }
+        NoteEventKind::Off {
+            channel, key, velocity, ..
+        } if midi => {
+            events.push(&MidiEvent::new(
+                time,
+                0,
+                [0x80 | (channel & 15), key & 127, seven_bits(velocity, 0)],
+            ));
+        }
+        NoteEventKind::AllOff if midi => {
+            // (All sound off, on every channel.)
+            for channel in 0..16u8 {
+                events.push(&MidiEvent::new(time, 0, [0xB0 | channel, 120, 0]));
+            }
+        }
+        NoteEventKind::Controller { channel, number, value } if midi => {
+            events.push(&MidiEvent::new(
+                time,
+                0,
+                [0xB0 | (channel & 15), number & 127, value & 127],
+            ));
+        }
+        NoteEventKind::PitchBend { channel, value } if midi => {
+            let value = value.min(16383);
+            events.push(&MidiEvent::new(
+                time,
+                0,
+                [0xE0 | (channel & 15), (value & 127) as u8, (value >> 7) as u8],
+            ));
+        }
+        _ => {}
+    }
+}
+
 /// Asks an instance that is active what it has: ports, parameters, latency, state. (On the main thread.)
 pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>, active: bool) -> Gathered {
     let mut gathered = Gathered {
         inputs: Vec::new(),
         outputs: Vec::new(),
+        note_inputs: Vec::new(),
         parameters: Vec::new(),
         latency: 0,
         has_state: false,
@@ -474,6 +611,19 @@ pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>, active: 
         has_tail: false,
     };
     let handle = instance.plugin_handle();
+    if let Some(ports) = handle.get_extension::<PluginNotePorts>() {
+        let mut buffer = NotePortInfoBuffer::new();
+        for index in 0..ports.count(&handle, true) {
+            if let Some(info) = ports.get(&handle, index, true, &mut buffer) {
+                gathered.note_inputs.push(NotePort {
+                    id: info.id.get(),
+                    name: String::from_utf8_lossy(info.name).into_owned(),
+                    supported_dialects: info.supported_dialects.bits(),
+                    preferred_dialect: info.preferred_dialect.map_or(0, |dialect| dialect as u32),
+                });
+            }
+        }
+    }
     if let Some(ports) = handle.get_extension::<PluginAudioPorts>() {
         let mut buffer = AudioPortInfoBuffer::new();
         for is_input in [true, false] {

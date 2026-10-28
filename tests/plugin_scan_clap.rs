@@ -17,7 +17,7 @@ use fastforwardrs::plugin_scan::{
 const SCANNER: &str = env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan");
 const MISBEHAVE: &str = "FFRS_TEST_PLUGIN";
 /// How many plugins the test library has.
-const PLUGINS: usize = 19;
+const PLUGINS: usize = 20;
 
 /// A copy of the good test library, named as a CLAP library is, in a folder of its own.
 fn good_library_in(folder: &Path) -> PathBuf {
@@ -382,8 +382,9 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
             .reason
             .clone()
     };
-    assert_eq!(found.not_used.len(), 4, "{:?}", found.not_used);
+    assert_eq!(found.not_used.len(), 5, "{:?}", found.not_used);
     assert!(reason_of(clap_test_plugins::INSTRUMENT).contains("no audio input"));
+    assert!(reason_of(clap_test_plugins::INSTRUMENT_MIDI).contains("no audio input"));
     assert!(reason_of(FAILS_TO_ACTIVATE).contains("could not be made or run"));
     assert!(reason_of(clap_test_plugins::FAILS_TO_PROCESS).contains("could not be made or run"));
     assert!(reason_of(clap_test_plugins::PANICS).contains("could not be made or run"));

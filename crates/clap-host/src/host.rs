@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use clack_extensions::latency::{HostLatency, HostLatencyImpl};
+use clack_extensions::note_ports::{HostNotePorts, HostNotePortsImpl, NoteDialects, NotePortRescanFlags};
 use clack_extensions::params::{
     HostParams, HostParamsImplMainThread, HostParamsImplShared, ParamClearFlags, ParamRescanFlags,
 };
@@ -96,6 +97,15 @@ impl HostParamsImplMainThread for MainThreadPart<'_> {
     fn clear(&self, _param_id: ClapId, _flags: ParamClearFlags) {}
 }
 
+impl HostNotePortsImpl for MainThreadPart<'_> {
+    fn supported_dialects(&self) -> NoteDialects {
+        // (The notes of CLAP, and MIDI of the first kind: what `Instance::run_with_notes` can give.)
+        NoteDialects::CLAP | NoteDialects::MIDI
+    }
+
+    fn rescan(&self, _flags: NotePortRescanFlags) {}
+}
+
 impl HostLatencyImpl for MainThreadPart<'_> {
     fn changed(&self) {
         // The latency can change only in `activate`; if the plugin is active it has to be restarted for the new one.
@@ -115,6 +125,7 @@ impl HostHandlers for Host {
         builder
             .register::<HostThreadCheck>()
             .register::<HostParams>()
-            .register::<HostLatency>();
+            .register::<HostLatency>()
+            .register::<HostNotePorts>();
     }
 }
