@@ -13,6 +13,8 @@ use std::collections::BTreeSet;
 
 use std::collections::HashMap;
 
+use self::tail_routes::{Emitter, GroupGeometry, tail_routes_of};
+pub use self::tail_routes::{TailDestination, TailRoute};
 use super::pictures::{LayerEffect, layer_effect_of};
 use crate::project::tracks::{ClipId, ClipPlacement, Gain, MediaClip, Track, TrackId};
 use crate::project::{
@@ -93,6 +95,9 @@ pub struct SoundClip {
     /// the groups that have sound effects (`SoundPlan::groups`: the clip groups it is in, one in another, and then the track groups of its track), or, if it is inside none, into
     /// the sum of all the sound.
     pub sent_to: Option<usize>,
+    /// Where the sound that its effects go on making after it ends goes, from some frame on (phase 12, piece 12.3d: the tail policies of the clip and of the groups it is in; see
+    /// `tail_routes`). Empty: it goes where the clip does. Only for a clip that is not heard by an instance of its track's effects (the instance has the routes then, see `SoundBus`).
+    pub tail_routes: Vec<TailRoute>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -138,6 +143,9 @@ pub struct SoundBus {
     pub last_item: usize,
     /// The effects of the track, one after another, with their values and the keyframes of them (the frames of which are frames of the timeline).
     pub effects: Vec<LayerEffect>,
+    /// Where the sound that the instance goes on making after its last clip goes, from some frame on: the policy of the last clip of the run and of the groups it is in (the tail of a run
+    /// is its last clip's). Empty: it goes where the clips go.
+    pub tail_routes: Vec<TailRoute>,
 }
 
 impl SoundStrip {
@@ -252,7 +260,7 @@ pub fn plan_sound(
     let animations = project.resolved_animations();
     // The effects of a clip by itself (its own, its track's, its tags'): the effects of the groups it is in are done to the sum that the group's members make (see `SoundGroup`).
     let effects = project.effects_applied_to_every_clip_by_itself();
-    let (groups, sent_to) = sound_groups_of(project, &animations);
+    let groups_of_the_sound = sound_groups_of(project, &animations);
     // The plan begins before the place the sound is wanted from by as much as the effects ring on for: what is made of that is not heard, and the effects have heard what leads up to it.
     // (The sound of a clip goes through the effects of its groups too, one after another, and they ring on after it.)
     let lead_in_frames = lead_in_frames_before(project, &project.effects_applied_to_every_clip(), wanted_from);
@@ -261,22 +269,40 @@ pub fn plan_sound(
     let strips = project
         .tracks()
         .iter()
-        .filter_map(|track| strip_of(project, &animations, &effects, &sent_to, track, from, &is_usable))
+        .filter_map(|track| {
+            strip_of(
+                project,
+                &animations,
+                &effects,
+                &groups_of_the_sound,
+                track,
+                from,
+                &is_usable,
+            )
+        })
         .collect();
     SoundPlan {
         frame_rate: project.frame_rate(),
         total_frame_count,
         lead_in_frames,
         strips,
-        groups,
+        groups: groups_of_the_sound.nodes,
     }
+}
+
+/// The groups of the sound, where each clip goes, and what the tail policies need to know of each group.
+struct GroupsOfTheSound {
+    nodes: Vec<SoundGroup>,
+    sent_to: HashMap<ClipId, usize>,
+    geometry: Vec<GroupGeometry>,
 }
 
 /// The clip groups and track groups that have a sound effect that is installed (the others are pass-through), with where the sum of each goes, and for each clip that is inside
 /// one of them the one it is sent to: the nearest of those round it (the clip groups it is in, one in another, and then the track groups of its track).
-fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> (Vec<SoundGroup>, HashMap<ClipId, usize>) {
+fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> GroupsOfTheSound {
     let mut places: HashMap<GroupId, usize> = HashMap::new();
     let mut groups: Vec<SoundGroup> = Vec::new();
+    let mut geometry: Vec<GroupGeometry> = Vec::new();
     for group in project.groups().iter().filter(|group| group.kind().is_a_shape()) {
         let effects: Vec<LayerEffect> = project
             .effects_applied_to_the_group(group.id())
@@ -291,11 +317,26 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> (Vec<S
                 effects,
                 parent: None,
             });
+            geometry.push(GroupGeometry {
+                rectangle: project
+                    .rectangle_of_the_group(group.id())
+                    .unwrap_or(crate::project::Rectangle {
+                        first_frame: 0,
+                        end_frame: 0,
+                        first_track: 0,
+                        last_track: 0,
+                    }),
+                tail_edge: group.tail_policy().edge,
+            });
         }
     }
     let mut sent_to = HashMap::new();
     if groups.is_empty() {
-        return (groups, sent_to);
+        return GroupsOfTheSound {
+            nodes: groups,
+            sent_to,
+            geometry,
+        };
     }
     for track in project.tracks() {
         for entry in track.entries() {
@@ -313,7 +354,11 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> (Vec<S
             }
         }
     }
-    (groups, sent_to)
+    GroupsOfTheSound {
+        nodes: groups,
+        sent_to,
+        geometry,
+    }
 }
 
 /// Feeds everything that is heard of the sound effects of the clips of `project` into `hasher`, so that a number made from it is different whenever it is: for each clip that
@@ -356,13 +401,43 @@ pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::has
             }
         }
     }
+    if !applied
+        .values()
+        .flatten()
+        .any(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
+    {
+        return;
+    }
+    // What the tail policies say of where the ring of a clip goes depends on where the groups are and on what each says: a change of them is heard.
+    for group in project.groups().iter().filter(|group| group.kind().is_a_shape()) {
+        let Some(rectangle) = project.rectangle_of_the_group(group.id()) else {
+            continue;
+        };
+        group.id().hash(hasher);
+        group.tail_policy().edge.hash(hasher);
+        (
+            rectangle.first_frame,
+            rectangle.end_frame,
+            rectangle.first_track,
+            rectangle.last_track,
+        )
+            .hash(hasher);
+    }
+    for track in project.tracks() {
+        for entry in track.entries() {
+            if applied.get(&entry.id()).is_some_and(|effects| !effects.is_empty()) {
+                entry.id().hash(hasher);
+                entry.tail_policy().edge.hash(hasher);
+            }
+        }
+    }
 }
 
 fn strip_of(
     project: &Project,
     animations: &ResolvedAnimations,
     effects: &HashMap<ClipId, Vec<AppliedEffect<'_>>>,
-    sent_to: &HashMap<ClipId, usize>,
+    groups: &GroupsOfTheSound,
     track: &Track,
     from: u64,
     is_usable: &impl Fn(SourceMediaIdentifier) -> bool,
@@ -399,7 +474,7 @@ fn strip_of(
                         media,
                         stretch.first_frame,
                         stretch.end_frame,
-                        sent_to.get(&placement.id).copied(),
+                        groups.sent_to.get(&placement.id).copied(),
                     )));
                     shared_effects.push(shared);
                 } else {
@@ -419,7 +494,8 @@ fn strip_of(
     }
     shared_effects.truncate(items.len());
     shared_effects.resize(items.len(), None);
-    let buses = runs_of_clips_that_share_the_effects_of_the_track(&items, &shared_effects, project.frame_rate());
+    let mut buses = runs_of_clips_that_share_the_effects_of_the_track(&items, &shared_effects, project.frame_rate());
+    give_the_rings_their_routes(project, groups, track, &mut items, &mut buses);
     let strip_frames: u64 = items.iter().map(SoundItem::timeline_frame_count).sum();
     let muted = muted_stretches_of_the_track(animations, track, from, from + strip_frames);
     // (A track that is muted all the way through makes no sound whatever its effects remember: it has no strip.)
@@ -431,6 +507,79 @@ fn strip_of(
         items,
         buses,
     })
+}
+
+/// Says where the ring of each clip that is not heard by an instance of its track's effects, and of each instance, goes: see `tail_routes`.
+fn give_the_rings_their_routes(
+    project: &Project,
+    groups: &GroupsOfTheSound,
+    track: &Track,
+    items: &mut [SoundItem],
+    buses: &mut [SoundBus],
+) {
+    if groups.nodes.is_empty() {
+        return;
+    }
+    let Some(row) = project.track_position(track.id()) else {
+        return;
+    };
+    let frame_rate = project.frame_rate();
+    let policy_of = |clip: ClipId| {
+        project
+            .clip_tail_policy(clip)
+            .map_or(crate::project::ClipTailEdge::Around, |policy| policy.edge)
+    };
+    let mut heard_by_a_bus = vec![false; items.len()];
+    for bus in buses.iter_mut() {
+        heard_by_a_bus[bus.first_item..=bus.last_item].fill(true);
+        let clips: Vec<&SoundClip> = items[bus.first_item..=bus.last_item]
+            .iter()
+            .filter_map(|item| match item {
+                SoundItem::Clip(clip) => Some(clip),
+                SoundItem::Silence { .. } => None,
+            })
+            .collect();
+        let Some(last) = clips.last() else {
+            continue;
+        };
+        // (What rings on after the last clip: the longest of the rings of the clips, which are in the instance, and the tail of its effects.)
+        let ring_samples = clips
+            .iter()
+            .map(|clip| tail_samples_of_a_chain(&clip.effects))
+            .max()
+            .unwrap_or(0)
+            + tail_samples_of_a_chain(&bus.effects);
+        bus.tail_routes = tail_routes_of(
+            &groups.nodes,
+            &groups.geometry,
+            &Emitter {
+                row,
+                ring_from: last.first_timeline_frame + last.timeline_frame_count,
+                ring_frames: frames_that_reach(frame_rate, ring_samples),
+                sent_to: last.sent_to,
+                policy: policy_of(last.clip),
+            },
+        );
+    }
+    for (place, item) in items.iter_mut().enumerate() {
+        let SoundItem::Clip(clip) = item else {
+            continue;
+        };
+        if heard_by_a_bus[place] {
+            continue;
+        }
+        clip.tail_routes = tail_routes_of(
+            &groups.nodes,
+            &groups.geometry,
+            &Emitter {
+                row,
+                ring_from: clip.first_timeline_frame + clip.timeline_frame_count,
+                ring_frames: frames_that_reach(frame_rate, tail_samples_of_a_chain(&clip.effects)),
+                sent_to: clip.sent_to,
+                policy: policy_of(clip.clip),
+            },
+        );
+    }
 }
 
 /// The runs of clips that share the effects of their track: clips that have the effects of the track at the end of their chain, one after another, **with no more silence between two
@@ -460,6 +609,7 @@ fn runs_of_clips_that_share_the_effects_of_the_track(
                 first_item: place,
                 last_item: place,
                 effects: effects.clone(),
+                tail_routes: Vec::new(),
             }),
         }
     }
@@ -594,6 +744,7 @@ fn sound_clip_over(
         loudness: loudness_over(animations, placement, media, first_frame, end_frame),
         effects,
         sent_to,
+        tail_routes: Vec::new(),
     }
 }
 
@@ -704,6 +855,8 @@ fn push_silence(items: &mut Vec<SoundItem>, frame_count: u64) {
     }
 }
 
+mod tail_routes;
+
 #[cfg(test)]
 mod animation_tests;
 #[cfg(test)]
@@ -712,6 +865,8 @@ mod buses_tests;
 mod effects_tests;
 #[cfg(test)]
 mod groups_tests;
+#[cfg(test)]
+mod tail_routes_tests;
 #[cfg(test)]
 mod tails_as_they_are_tests;
 #[cfg(test)]

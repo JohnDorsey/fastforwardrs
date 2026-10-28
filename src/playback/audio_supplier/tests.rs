@@ -299,6 +299,7 @@ impl Bench {
             project: &self.project,
             source_locations: &self.source_locations,
             sped_up_clip_sound: self.sped_up_clip_sound,
+            edge_fade: Default::default(),
         };
         self.supplier
             .update(Some(content), Self::clock_at(seconds, is_playing), self.now);
@@ -425,6 +426,7 @@ fn playing_starts_a_stream_from_the_playhead_in_the_speakers_format() {
             frames_of_the_clip_before: 20, // (the playhead is 20 frames into the clip: they were not heard, and are the most sound from before that a plugin that remembers is given)
             effects: Vec::new(),
             sent_to: None,
+            tail_routes: Vec::new(),
         })]
     );
     assert_eq!(request.sound.sped_up_clip_sound, SpedUpClipSound::Mute);
@@ -1347,6 +1349,7 @@ fn without_any_speakers_given_there_is_no_sound_and_no_complaint() {
         project: &project,
         source_locations: &source_locations,
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
+        edge_fade: Default::default(),
     };
     supplier.update(Some(content), Bench::clock_at(1.0, true), Instant::now());
     assert_eq!(starter.attempts.get(), 0);

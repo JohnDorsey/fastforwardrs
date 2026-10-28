@@ -24,6 +24,7 @@ fn clip(first: u64, end: u64, factor: u32) -> SoundClipToExport {
         frames_of_the_clip_before: 0,
         effects: Vec::new(),
         sent_to: None,
+        tail_routes: Vec::new(),
     }
 }
 
@@ -57,6 +58,7 @@ fn specification(strips: Vec<SoundStripToExport>) -> SoundGraphSpecification {
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     }
 }
 

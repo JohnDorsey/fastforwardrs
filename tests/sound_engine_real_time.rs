@@ -43,6 +43,7 @@ fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_neve
                 frames_of_the_clip_before: 0,
                 effects: Vec::new(),
                 sent_to: None,
+                tail_routes: Vec::new(),
             })
         })
         .collect();
@@ -58,6 +59,7 @@ fn a_project_of_two_hundred_short_clips_is_made_faster_than_it_is_heard_and_neve
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     };
     let request = AudioStreamRequest {
         source_files: sources.iter().map(|path| path.clone().into()).collect(),

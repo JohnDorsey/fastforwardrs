@@ -36,6 +36,7 @@ fn clip_of_the_long_file(frames: u64) -> SoundItemToExport {
         frames_of_the_clip_before: 0,
         effects: Vec::new(),
         sent_to: None,
+        tail_routes: Vec::new(),
     })
 }
 
@@ -66,6 +67,7 @@ fn programs_running_just_after_dropping_the_stream(format: AudioFormat) -> Optio
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     };
     let request = AudioStreamRequest {
         source_files: sources.iter().map(|path| path.clone().into()).collect(),
@@ -136,6 +138,7 @@ fn a_stream_that_was_read_to_its_end_is_dropped_with_no_program_left() {
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
             lead_in_frames: 0,
             groups: Vec::new(),
+            edge_fade_milliseconds: 10,
         },
         format: AudioFormat {
             sample_rate: 48_000,

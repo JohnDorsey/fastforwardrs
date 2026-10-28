@@ -68,6 +68,7 @@ pub fn sound_graph_specification(
                             frames_of_the_clip_before: clip.frames_of_the_clip_before,
                             effects: clip.effects.clone(),
                             sent_to: clip.sent_to,
+                            tail_routes: clip.tail_routes.clone(),
                         }),
                     })
                     .collect(),
@@ -85,6 +86,7 @@ pub fn sound_graph_specification(
                         first_item: bus.first_item,
                         last_item: bus.last_item,
                         effects: bus.effects.clone(),
+                        tail_routes: bus.tail_routes.clone(),
                     })
                     .collect(),
             })
@@ -97,6 +99,7 @@ pub fn sound_graph_specification(
                 parent: group.parent,
             })
             .collect(),
+        edge_fade_milliseconds: crate::project::EdgeFade::default().milliseconds(),
         sped_up_clip_sound,
         lead_in_frames: plan.lead_in_frames,
     }

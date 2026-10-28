@@ -80,6 +80,9 @@ pub struct SoundClipToExport {
     /// Where the sound of the clip goes once its effects, its volume and the effects of its track have done what they do (phase 12, piece 12.3): into the sum of this group of
     /// `SoundGraphSpecification::groups`, or, if none, into the sum of all the sound.
     pub sent_to: Option<usize>,
+    /// Where the sound that the effects of the clip go on making after it ends goes, from some frame on (phase 12, piece 12.3d; see `crate::composition::TailRoute`). Empty: it
+    /// goes where the clip does. Only for a clip that is not heard by an instance of its track's effects (the instance has the routes then).
+    pub tail_routes: Vec<crate::composition::TailRoute>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,6 +110,8 @@ pub struct SoundBusToExport {
     pub last_item: usize,
     /// The effects, one after another, with their values and keyframes (whose frames are frames of the timeline).
     pub effects: Vec<crate::composition::LayerEffect>,
+    /// Where the sound that the instance goes on making after its last clip goes, from some frame on (see `SoundClipToExport::tail_routes`). Empty: it goes where the clips do.
+    pub tail_routes: Vec<crate::composition::TailRoute>,
 }
 
 /// A clip group or a track group that has sound effects (phase 12, piece 12.3; docs/engine-phase-12-design.md): what its members make is **added together** and given to its effects,

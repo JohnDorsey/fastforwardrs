@@ -64,6 +64,7 @@ fn a_clip_at(first_timeline_frame: u64, effects: Vec<LayerEffect>) -> SoundClipT
         frames_of_the_clip_before: 0,
         effects,
         sent_to: None,
+        tail_routes: Vec::new(),
     }
 }
 
@@ -669,6 +670,7 @@ fn sound_of(
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     };
     let mut graph = SoundGraph::new(
         specification,
@@ -707,6 +709,7 @@ fn the_clip(
         frames_of_the_clip_before: 0,
         effects,
         sent_to: None,
+        tail_routes: Vec::new(),
     }
 }
 

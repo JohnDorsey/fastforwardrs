@@ -31,7 +31,7 @@ fn specification_with_groups(
 }
 
 /// Multiplies every sample by a number.
-struct Scales(f32);
+pub(super) struct Scales(pub(super) f32);
 
 impl BlockProcessor for Scales {
     fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
@@ -67,15 +67,15 @@ impl Drop for Counted {
 }
 
 /// Gives the effects that `for_group` makes for the group it is told, and `for_buses` for every bus, and counts the instances that are made and are alive.
-struct GroupInsertions {
+pub(super) struct GroupInsertions {
     for_group: Box<dyn FnMut(usize) -> Vec<Box<dyn BlockProcessor>> + Send>,
-    for_buses: fn() -> Vec<Box<dyn BlockProcessor>>,
-    made: Arc<AtomicUsize>,
-    alive: Arc<AtomicUsize>,
+    pub(super) for_buses: fn() -> Vec<Box<dyn BlockProcessor>>,
+    pub(super) made: Arc<AtomicUsize>,
+    pub(super) alive: Arc<AtomicUsize>,
 }
 
 impl GroupInsertions {
-    fn new(for_group: impl FnMut(usize) -> Vec<Box<dyn BlockProcessor>> + Send + 'static) -> Self {
+    pub(super) fn new(for_group: impl FnMut(usize) -> Vec<Box<dyn BlockProcessor>> + Send + 'static) -> Self {
         Self {
             for_group: Box::new(for_group),
             for_buses: Vec::new,

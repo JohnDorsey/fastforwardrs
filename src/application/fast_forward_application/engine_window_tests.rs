@@ -5,6 +5,8 @@
 //! shown is the engine's, everything the window draws to show where things are and what the mouse can take hold of is as it was, a window that is not changing
 //! is not asking for frames, and a window whose engine stops makes its preview the old way.
 
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
 use egui::{Modifiers, Rect, vec2};
 use egui_kittest::kittest::Queryable;
 
@@ -1248,7 +1250,11 @@ const FRAMES_OF_THE_SLOW_PROJECT: u64 = 40;
 /// which the software adapter makes a frame in with a great deal of time to spare even when the computer is busy: these tests play in real time, and the machines that run them are not all
 /// as fast as the one they were written on (at ten frames a second a frame took about the time that a frame lasts, and a chase caught up with the playhead only after the project had stopped). A chase that
 /// has to catch up with a playhead needs the engine to make more than one frame for each that the playhead moves, and a second is a long time for it.
-fn a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() -> Option<Window> {
+fn a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() -> Option<(Window, MutexGuard<'static, ()>)> {
+    // (The tests that play this window in real time take turns: each needs the engine to make more frames a second than the playhead moves, and three of them at once, with the
+    // other tests of the program, were too many for the runners of the CI, which failed about one run in three with a chase that did not catch up in time.)
+    static TURNS: Mutex<()> = Mutex::new(());
+    let turn = TURNS.lock().unwrap_or_else(PoisonError::into_inner);
     let mut window = a_window_whose_picture_has_the_effect(COUNTS_THE_FRAMES_IN_A_CYCLE, true)?;
     window.do_this(Command::SetProjectFrameRate(
         crate::project::FrameRate::from_whole_frames_per_second(1).unwrap(),
@@ -1263,7 +1269,7 @@ fn a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() -> Option<Wi
         FRAMES_OF_THE_SLOW_PROJECT,
         "a premise: forty seconds of picture at one frame a second"
     );
-    Some(window)
+    Some((window, turn))
 }
 
 /// The red of the picture of each of the frames 0 to 15 of the effect when it is made in order, which is what the red of the picture of any frame is, modulo 16, when the picture is exact.
@@ -1301,7 +1307,7 @@ fn play_to_and_then_jump_while_playing(window: &mut Window, frame: u64, to: u64)
 #[test]
 fn a_jump_while_the_project_plays_is_made_exact_by_a_chase_that_catches_up_with_the_playhead_and_the_pictures_after_it_are_those_that_playing_makes()
  {
-    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
+    let Some((mut window, _turn)) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
         return;
     };
     let reds = the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
@@ -1351,7 +1357,7 @@ fn a_jump_while_the_project_plays_is_made_exact_by_a_chase_that_catches_up_with_
 #[test]
 fn a_chase_that_the_project_is_paused_during_catches_up_with_the_frame_that_stays_and_the_picture_is_exact_when_it_does()
  {
-    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
+    let Some((mut window, _turn)) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
         return;
     };
     let reds = the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);
@@ -1381,7 +1387,7 @@ fn a_chase_that_the_project_is_paused_during_catches_up_with_the_frame_that_stay
 
 #[test]
 fn with_the_checkbox_off_a_jump_while_the_project_plays_makes_no_chase() {
-    let Some(mut window) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
+    let Some((mut window, _turn)) = a_window_whose_picture_counts_in_a_cycle_at_one_frame_a_second() else {
         return;
     };
     the_reds_of_the_picture_by_the_frame_of_the_effect_modulo_16(&mut window);

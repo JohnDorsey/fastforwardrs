@@ -114,6 +114,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 frames_of_the_clip_before: 0,
                 effects,
                 sent_to: None,
+                tail_routes: Vec::new(),
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -122,6 +123,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     }
 }
 

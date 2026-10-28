@@ -43,11 +43,22 @@ pub struct SoundGraphSpecification {
     /// The clip groups and track groups that have sound effects (phase 12, piece 12.3): where their members' sound is added together and given to the effects. Empty: every clip goes
     /// into the sum of all the sound.
     pub groups: Vec<SoundGroupToExport>,
+    /// How long, in thousandths of a second, the fade is where a ring of sound leaves a group, goes into one, or ends at an edge (the setting `EdgeFade`: see `crate::composition::TailRoute`).
+    pub edge_fade_milliseconds: u32,
     pub sped_up_clip_sound: SpedUpClipSound,
     /// How many frames at the start of the sound are **made and not heard** (phase 12, piece 12.2d): the sound begins that many frames before the place it is wanted from, so that effects that
     /// remember (a reverb, a filter) have been given what they would have heard on the way there, and what comes out of the graph is the sound from where it is wanted. They are part
     /// of `total_frame_count`; the filter graph of ffmpeg, which does not run the effects, cuts them off the front. 0 for sound that is wanted from its start.
     pub lead_in_frames: u64,
+}
+
+impl SoundGraphSpecification {
+    /// The same, with the fade at the edges of groups that the setting says.
+    #[must_use]
+    pub fn with_the_edge_fade(mut self, fade: crate::project::EdgeFade) -> Self {
+        self.edge_fade_milliseconds = fade.milliseconds();
+        self
+    }
 }
 
 /// A filter graph that makes only sound: the sound of the finished video and of the live preview.
@@ -111,6 +122,7 @@ mod tests {
             frames_of_the_clip_before: 0,
             effects: Vec::new(),
             sent_to: None,
+            tail_routes: Vec::new(),
         })
     }
 
@@ -133,6 +145,7 @@ mod tests {
             sped_up_clip_sound,
             lead_in_frames: 0,
             groups: Vec::new(),
+            edge_fade_milliseconds: 10,
         }
     }
 

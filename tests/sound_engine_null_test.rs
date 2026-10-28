@@ -249,6 +249,7 @@ fn a_specification(
                         frames_of_the_clip_before: 0,
                         effects: Vec::new(),
                         sent_to: None,
+                        tail_routes: Vec::new(),
                     })
                 })
                 .collect();
@@ -268,6 +269,7 @@ fn a_specification(
         sped_up_clip_sound,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     }
 }
 
@@ -405,6 +407,7 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
                 frames_of_the_clip_before: 0,
                 effects: Vec::new(),
                 sent_to: None,
+                tail_routes: Vec::new(),
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -413,6 +416,7 @@ fn the_filter_graph_changes_the_volume_in_steps_of_a_chunk_of_sound_and_the_bloc
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     };
     let sources = [steady];
     let oracle = by_the_filter_graph(&toolchain, &specification, &sources);
@@ -633,6 +637,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     frames_of_the_clip_before: 0,
                     effects: Vec::new(),
                     sent_to: None,
+                    tail_routes: Vec::new(),
                 }),
                 SoundItemToExport::Clip(SoundClipToExport {
                     source_input: 1,
@@ -645,6 +650,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
                     frames_of_the_clip_before: 0,
                     effects: Vec::new(),
                     sent_to: None,
+                    tail_routes: Vec::new(),
                 }),
             ],
             buses: Vec::new(),
@@ -654,6 +660,7 @@ fn a_clip_whose_file_cannot_be_read_is_silence_and_the_sound_says_so_when_it_end
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     };
     let request = AudioStreamRequest {
         source_files: sources.iter().map(|path| path.clone().into()).collect(),
@@ -872,6 +879,7 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
                 frames_of_the_clip_before: 0,
                 effects: Vec::new(),
                 sent_to: None,
+                tail_routes: Vec::new(),
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -880,6 +888,7 @@ fn an_export_that_is_stopped_while_the_sound_of_a_clip_never_comes_is_stopped_at
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     };
     let began = Instant::now();
     let result = render_sound_to_file(

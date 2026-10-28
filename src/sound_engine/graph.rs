@@ -3,11 +3,12 @@
 
 //! The block graph itself.
 
+use super::SAMPLE_RATE;
 use super::feed::{ClipFeed, ClipFeeds, ClipRequest};
 use super::gain::GainCurve;
 use super::insertions::{BlockProcessor, BusRequest, GroupRequest, Insertions};
 use super::position::{pre_roll_samples_of, sample_at_frame};
-use crate::composition::tail_samples_of_a_chain;
+use crate::composition::{TailDestination, TailRoute, tail_samples_of_a_chain};
 use crate::media::export::{SoundGraphSpecification, SoundItemToExport};
 
 /// The sound of a project, made a block at a time (see the top of this module's parent for what it does). It is given the specification once, and asked for the sound from its
@@ -62,6 +63,155 @@ impl Scratch {
     }
 }
 
+/// From the sample `from` on, the sound of something that rings goes to `to`: a group, or the sum of all the sound (`Some(None)`), or nowhere (`None`).
+#[derive(Clone, Copy)]
+struct Segment {
+    from: u64,
+    to: Option<Option<usize>>,
+}
+
+/// Where the sound of an item or of an instance of a track's effects goes, when it does not all go to one place (phase 12, piece 12.3d: the tail policies): stretch after stretch, and over
+/// the edge fade after the beginning of a stretch the sound goes to both the one before it and this one, less and less to the one before and more and more to this.
+struct Routes {
+    segments: Vec<Segment>,
+    /// How many samples the crossfade between two stretches lasts.
+    fade: u64,
+}
+
+impl Routes {
+    fn new(
+        start: u64,
+        sent_to: Option<usize>,
+        routes: &[TailRoute],
+        frame_rate: crate::project::FrameRate,
+        fade: u64,
+    ) -> Self {
+        let mut segments = vec![Segment {
+            from: start,
+            to: Some(sent_to),
+        }];
+        segments.extend(routes.iter().map(|route| Segment {
+            from: sample_at_frame(frame_rate, route.from_frame),
+            to: match route.to {
+                TailDestination::Group(group) => Some(Some(group)),
+                TailDestination::Sum => Some(None),
+                TailDestination::Cut => None,
+            },
+        }));
+        Self { segments, fade }
+    }
+
+    /// Whether any of the sound goes to `destination`.
+    fn goes_to(&self, destination: Option<usize>) -> bool {
+        self.segments.iter().any(|segment| segment.to == Some(destination))
+    }
+
+    /// The sample at which the sound is cut off, if it is.
+    fn is_cut_at(&self) -> Option<u64> {
+        self.segments
+            .iter()
+            .find(|segment| segment.to.is_none())
+            .map(|segment| segment.from)
+    }
+
+    /// How much of the sound at sample `at` goes to `destination`: 0 where it does not go, 1 where it all does, and between over the fade at the edge of a stretch.
+    fn weight(&self, destination: Option<usize>, at: u64) -> f32 {
+        let mut total = 0.0;
+        for (number, segment) in self.segments.iter().enumerate() {
+            if segment.to != Some(destination) || at < segment.from {
+                continue;
+            }
+            let coming_in = if number == 0 || self.fade == 0 || at >= segment.from + self.fade {
+                1.0
+            } else {
+                (at - segment.from) as f32 / self.fade as f32
+            };
+            let going_out = match self.segments.get(number + 1) {
+                Some(next) if at >= next.from => {
+                    if self.fade == 0 || at >= next.from + self.fade {
+                        0.0
+                    } else {
+                        1.0 - (at - next.from) as f32 / self.fade as f32
+                    }
+                }
+                _ => 1.0,
+            };
+            total += coming_in * going_out;
+        }
+        total
+    }
+
+    /// The sample after the last at which any of the sound goes anywhere: where the last stretch that is a cut has faded out.
+    fn the_end_of_what_goes_anywhere(&self) -> Option<u64> {
+        self.is_cut_at().map(|at| at + self.fade)
+    }
+}
+
+/// What an item or an instance with routes has made, which is kept until every place it goes to has taken what it takes of it: the sound from sample `first` on.
+#[derive(Default)]
+struct Cache {
+    first: u64,
+    left: Vec<f32>,
+    right: Vec<f32>,
+}
+
+impl Cache {
+    /// The sample after the last one that is kept (the first, if none is).
+    fn end(&self) -> u64 {
+        self.first + self.left.len() as u64
+    }
+
+    fn append(&mut self, first: u64, left: &[f32], right: &[f32]) {
+        if self.left.is_empty() {
+            self.first = first;
+        }
+        assert_eq!(self.end(), first, "what is made is made in order");
+        self.left.extend_from_slice(left);
+        self.right.extend_from_slice(right);
+    }
+
+    /// Lets go of what is before `sample`.
+    fn drop_before(&mut self, sample: u64) {
+        let count = (sample.saturating_sub(self.first) as usize).min(self.left.len());
+        if count > 0 {
+            self.left.drain(..count);
+            self.right.drain(..count);
+            self.first += count as u64;
+        }
+    }
+
+    /// Adds what goes to `destination` according to `routes` of the samples from `from` up to `to` to the start of `part`.
+    fn add_what_goes_to(
+        &self,
+        routes: &Routes,
+        destination: Option<usize>,
+        (from, to): (u64, u64),
+        part: &mut Scratch,
+    ) {
+        for at in from.max(self.first)..to.min(self.end()) {
+            let weight = routes.weight(destination, at);
+            if weight > 0.0 {
+                let (place, kept) = ((at - from) as usize, (at - self.first) as usize);
+                part.left[place] += self.left[kept] * weight;
+                part.right[place] += self.right[kept] * weight;
+            }
+        }
+    }
+}
+
+/// An item or an instance whose sound does not all go to one place.
+struct Routed {
+    routes: Routes,
+    cache: Cache,
+}
+
+impl Routed {
+    /// The sample from which what is kept is not looked at again: nothing before `block_start` is, because everything that asks for sound asks for it from the start of the block on at the earliest.
+    fn is_not_needed_before(&mut self, block_start: u64) {
+        self.cache.drop_before(block_start);
+    }
+}
+
 struct Strip {
     items: Vec<Item>,
     /// The first item that has not ended yet at the start of the block that is being made.
@@ -87,6 +237,8 @@ struct Bus {
     state: BusState,
     /// The sound of the items, put together, while a block is made, before the effects are given it.
     input: Scratch,
+    /// Where what it makes goes, if it does not all go to `sent_to`.
+    routed: Option<Routed>,
 }
 
 enum BusState {
@@ -127,6 +279,8 @@ struct Item {
     /// How many samples its effects go on making sound after it (phase 12: the tails of its own effects, added up).
     tail: u64,
     kind: ItemKind,
+    /// Where what it makes goes, if it does not all go to `sent_to`.
+    routed: Option<Routed>,
 }
 
 impl Item {
@@ -223,6 +377,7 @@ impl SoundGraph {
     ) -> Self {
         let frame_rate = specification.frame_rate;
         let group_count = specification.groups.len();
+        let fade = u64::from(specification.edge_fade_milliseconds) * u64::from(SAMPLE_RATE) / 1000;
         let strips: Vec<Strip> = specification
             .strips
             .iter()
@@ -239,12 +394,19 @@ impl SoundGraph {
                         let start = sample_at_frame(frame_rate, frames_before);
                         frames_before += frames;
                         let end = sample_at_frame(frame_rate, frames_before);
-                        let (kind, tail, sent_to) = match item {
-                            SoundItemToExport::Silence { .. } => (ItemKind::Silence, 0, None),
+                        let (kind, mut tail, sent_to, routes) = match item {
+                            SoundItemToExport::Silence { .. } => (ItemKind::Silence, 0, None, &[][..]),
                             SoundItemToExport::Clip(clip) => {
                                 assert!(
                                     clip.sent_to.is_none_or(|group| group < group_count),
                                     "a clip is sent to a group that is there"
+                                );
+                                assert!(
+                                    clip.tail_routes.iter().all(|route| match route.to {
+                                        TailDestination::Group(group) => group < group_count,
+                                        TailDestination::Sum | TailDestination::Cut => true,
+                                    }),
+                                    "the ring of a clip goes to a group that is there"
                                 );
                                 (
                                     ItemKind::Clip {
@@ -253,15 +415,28 @@ impl SoundGraph {
                                     },
                                     tail_samples_of_a_chain(&clip.effects),
                                     clip.sent_to,
+                                    &clip.tail_routes[..],
                                 )
                             }
                         };
+                        let routed = (!routes.is_empty()).then(|| Routed {
+                            routes: Routes::new(start, sent_to, routes, frame_rate, fade),
+                            cache: Cache::default(),
+                        });
+                        // (A ring that is cut ends where the cut has faded out: its effects are not kept for the rest of their tail.)
+                        if let Some(cut_off) = routed
+                            .as_ref()
+                            .and_then(|routed| routed.routes.the_end_of_what_goes_anywhere())
+                        {
+                            tail = tail.min(cut_off.saturating_sub(end));
+                        }
                         Item {
                             start,
                             end,
                             sent_to,
                             tail,
                             kind,
+                            routed,
                         }
                     })
                     .collect();
@@ -296,14 +471,27 @@ impl SoundGraph {
                             sent_to_by_its_clips.all(|other| other == sent_to),
                             "the clips that a bus hears are sent to the same place"
                         );
+                        let start = items[bus.first_item].start;
+                        let mut end = rings_on_until + tail_samples_of_a_chain(&bus.effects);
+                        let routed = (!bus.tail_routes.is_empty()).then(|| Routed {
+                            routes: Routes::new(start, sent_to, &bus.tail_routes, frame_rate, fade),
+                            cache: Cache::default(),
+                        });
+                        if let Some(cut_off) = routed
+                            .as_ref()
+                            .and_then(|routed| routed.routes.the_end_of_what_goes_anywhere())
+                        {
+                            end = end.min(cut_off);
+                        }
                         Bus {
                             first_item: bus.first_item,
                             last_item: bus.last_item,
                             sent_to,
-                            start: items[bus.first_item].start,
-                            end: rings_on_until + tail_samples_of_a_chain(&bus.effects),
+                            start,
+                            end,
                             state: BusState::Waiting,
                             input: Scratch::default(),
+                            routed,
                         }
                     })
                     .collect();
@@ -386,6 +574,19 @@ impl SoundGraph {
             *sum += *sample;
         }
         self.give_back(mix);
+        // (What the items and instances with routes made is not asked for from before the end of this block again.)
+        for strip in &mut self.strips {
+            for item in &mut strip.items {
+                if let Some(routed) = &mut item.routed {
+                    routed.is_not_needed_before(to);
+                }
+            }
+            for bus in &mut strip.buses {
+                if let Some(routed) = &mut bus.routed {
+                    routed.is_not_needed_before(to);
+                }
+            }
+        }
         self.position = to;
         count
     }
@@ -528,115 +729,162 @@ impl SoundGraph {
         } = self;
         let strip = &mut strips[strip_number];
         let mut made_any = false;
+        let mut everything = Everything {
+            specification,
+            feeds,
+            insertions,
+            work,
+            spare,
+        };
         // The instances of the effects of the track that are first heard in this block are made, and given the sound that makes up for their latency.
         for bus_number in 0..strip.buses.len() {
             let bus = &strip.buses[bus_number];
-            if bus.sent_to == destination && matches!(bus.state, BusState::Waiting) && bus.start < to && from < bus.end
+            if bus.routed.is_none()
+                && bus.sent_to == destination
+                && matches!(bus.state, BusState::Waiting)
+                && bus.start < to
+                && from < bus.end
             {
-                let specification_of_the_bus = &specification.strips[strip_number].buses[bus_number];
-                let first_clip = (bus.first_item..=bus.last_item).find_map(|place| {
-                    match &specification.strips[strip_number].items[place] {
-                        SoundItemToExport::Clip(clip) => Some(clip),
-                        SoundItemToExport::Silence { .. } => None,
-                    }
-                });
-                let processors = match first_clip {
-                    Some(first_clip) => insertions.for_bus(&BusRequest {
-                        strip: strip_number,
-                        bus: bus_number,
-                        first_clip,
-                        effects: &specification_of_the_bus.effects,
-                    }),
-                    None => Vec::new(),
-                };
-                let ahead: usize = processors.iter().map(|processor| processor.latency()).sum();
-                let mut running = RunningEffects {
-                    processors,
-                    ahead: ahead as u64,
-                };
-                let first = from.max(bus.start);
-                if ahead > 0 {
-                    // (What the effects are given before they make the first sample that is heard: the sound that comes out of them from then on is where it is.)
-                    let mut input = spare.pop().unwrap_or_default();
-                    input.silent_for(ahead);
-                    render_the_items_of_a_bus(
-                        strip_number,
-                        &mut strip.items,
-                        (bus.first_item, bus.last_item),
-                        specification,
-                        feeds,
-                        insertions,
-                        (first, first + ahead as u64),
-                        (&mut input, work),
-                    );
-                    for processor in &mut running.processors {
-                        processor.process(&mut input.left[..ahead], &mut input.right[..ahead]);
-                    }
-                    spare.push(input);
-                }
-                strip.buses[bus_number].state = BusState::Running(running);
+                start_the_bus(strip, strip_number, bus_number, from.max(bus.start), &mut everything);
             }
         }
         // The items that no instance hears, made where they are.
         let mut number = strip.current;
         while number < strip.items.len() && strip.items[number].start < to {
             let item = &mut strip.items[number];
-            let (first, last) = (item.start.max(from), item.rings_until().min(to));
-            if strip.bus_of_item[number].is_none() && item.sent_to == destination && first < last {
-                let offset = (first - from) as usize;
-                let length = (last - first) as usize;
-                render_the_item(
-                    strip_number,
-                    number,
-                    item,
-                    specification,
-                    feeds,
-                    insertions,
-                    (first, last),
-                    work,
-                    &mut part.left[offset..offset + length],
-                    &mut part.right[offset..offset + length],
-                );
-                made_any = true;
+            if strip.bus_of_item[number].is_none() {
+                if item.routed.is_none() {
+                    let (first, last) = (item.start.max(from), item.rings_until().min(to));
+                    if item.sent_to == destination && first < last {
+                        let offset = (first - from) as usize;
+                        let length = (last - first) as usize;
+                        render_the_item(
+                            strip_number,
+                            number,
+                            item,
+                            everything.specification,
+                            everything.feeds,
+                            everything.insertions,
+                            (first, last),
+                            everything.work,
+                            &mut part.left[offset..offset + length],
+                            &mut part.right[offset..offset + length],
+                        );
+                        made_any = true;
+                    }
+                } else if item
+                    .routed
+                    .as_ref()
+                    .is_some_and(|routed| routed.routes.goes_to(destination))
+                {
+                    // An item whose sound goes to several places is made once, in order, as far as anyone asks, and what is made is kept for each place to take its share.
+                    let rendered_to = item.routed.as_ref().map_or(0, |routed| routed.cache.end());
+                    let (first, last) = (item.start.max(rendered_to), item.rings_until().min(to));
+                    if first < last {
+                        let length = (last - first) as usize;
+                        let mut made = everything.spare.pop().unwrap_or_default();
+                        made.silent_for(length);
+                        render_the_item(
+                            strip_number,
+                            number,
+                            item,
+                            everything.specification,
+                            everything.feeds,
+                            everything.insertions,
+                            (first, last),
+                            everything.work,
+                            &mut made.left[..length],
+                            &mut made.right[..length],
+                        );
+                        if let Some(routed) = &mut item.routed {
+                            routed.cache.append(first, &made.left[..length], &made.right[..length]);
+                        }
+                        everything.spare.push(made);
+                    }
+                    if let Some(routed) = &item.routed {
+                        routed
+                            .cache
+                            .add_what_goes_to(&routed.routes, destination, (from, to), part);
+                        made_any = true;
+                    }
+                }
             }
             number += 1;
         }
         // The items that an instance hears: put together, given to the effects, and added.
         for bus_number in 0..strip.buses.len() {
-            let (first_item, last_item, start, end, sent_to) = {
+            let (start, end, sent_to) = {
                 let bus = &strip.buses[bus_number];
-                (bus.first_item, bus.last_item, bus.start, bus.end, bus.sent_to)
+                (bus.start, bus.end, bus.sent_to)
             };
-            if sent_to != destination {
-                continue;
-            }
-            let (first, last) = (from.max(start), to.min(end));
-            if first < last {
-                let length = (last - first) as usize;
-                let mut input = std::mem::take(&mut strip.buses[bus_number].input);
-                if let BusState::Running(running) = &mut strip.buses[bus_number].state {
-                    input.silent_for(length);
-                    // (The sound that goes in is `ahead` samples later than the sound that comes out is: see `RunningEffects`.)
-                    render_the_items_of_a_bus(
-                        strip_number,
-                        &mut strip.items,
-                        (first_item, last_item),
-                        specification,
-                        feeds,
-                        insertions,
-                        (first + running.ahead, last + running.ahead),
-                        (&mut input, work),
+            if strip.buses[bus_number].routed.is_none() {
+                if sent_to != destination {
+                    continue;
+                }
+                let (first, last) = (from.max(start), to.min(end));
+                if first < last {
+                    let length = (last - first) as usize;
+                    let offset = (first - from) as usize;
+                    let (left, right) = (
+                        &mut part.left[offset..offset + length],
+                        &mut part.right[offset..offset + length],
                     );
-                    for processor in &mut running.processors {
-                        processor.process(&mut input.left[..length], &mut input.right[..length]);
+                    if run_the_bus(
+                        strip,
+                        strip_number,
+                        bus_number,
+                        (first, last),
+                        &mut everything,
+                        left,
+                        right,
+                    ) {
+                        made_any = true;
                     }
-                    part.add_at((first - from) as usize, &input, length);
+                }
+                if to >= end {
+                    strip.buses[bus_number].state = BusState::Done;
+                }
+            } else if strip.buses[bus_number]
+                .routed
+                .as_ref()
+                .is_some_and(|routed| routed.routes.goes_to(destination))
+            {
+                // An instance whose sound goes to several places is made once, in order, as far as anyone asks, and what is made is kept for each place to take its share.
+                let rendered_to = strip.buses[bus_number]
+                    .routed
+                    .as_ref()
+                    .map_or(0, |routed| routed.cache.end());
+                let (first, last) = (start.max(rendered_to), end.min(to));
+                if first < last {
+                    if matches!(strip.buses[bus_number].state, BusState::Waiting) {
+                        start_the_bus(strip, strip_number, bus_number, first, &mut everything);
+                    }
+                    let length = (last - first) as usize;
+                    let mut made = everything.spare.pop().unwrap_or_default();
+                    made.silent_for(length);
+                    run_the_bus(
+                        strip,
+                        strip_number,
+                        bus_number,
+                        (first, last),
+                        &mut everything,
+                        &mut made.left[..length],
+                        &mut made.right[..length],
+                    );
+                    if let Some(routed) = &mut strip.buses[bus_number].routed {
+                        routed.cache.append(first, &made.left[..length], &made.right[..length]);
+                    }
+                    everything.spare.push(made);
+                    if last >= end {
+                        strip.buses[bus_number].state = BusState::Done;
+                    }
+                }
+                if let Some(routed) = &strip.buses[bus_number].routed {
+                    routed
+                        .cache
+                        .add_what_goes_to(&routed.routes, destination, (from, to), part);
                     made_any = true;
                 }
-                strip.buses[bus_number].input = input;
-            }
-            if to >= end {
-                strip.buses[bus_number].state = BusState::Done;
             }
         }
         made_any
@@ -656,6 +904,111 @@ impl SoundGraph {
             right.extend_from_slice(&block_right[..count]);
         }
     }
+}
+
+/// What making sound needs that the strips do not have.
+struct Everything<'graph> {
+    specification: &'graph SoundGraphSpecification,
+    feeds: &'graph mut Box<dyn ClipFeeds + Send>,
+    insertions: &'graph mut Box<dyn Insertions + Send>,
+    work: &'graph mut Scratch,
+    spare: &'graph mut Vec<Scratch>,
+}
+
+/// Makes the effects of bus `bus_number` of `strip` (strip number `strip_number`), whose first sound is at sample `first`, and gives them the sound that makes up for their latency: the
+/// sound that comes out of them from then on is where it is.
+fn start_the_bus(
+    strip: &mut Strip,
+    strip_number: usize,
+    bus_number: usize,
+    first: u64,
+    everything: &mut Everything<'_>,
+) {
+    let bus = &strip.buses[bus_number];
+    let specification_of_the_bus = &everything.specification.strips[strip_number].buses[bus_number];
+    let first_clip = (bus.first_item..=bus.last_item).find_map(|place| {
+        match &everything.specification.strips[strip_number].items[place] {
+            SoundItemToExport::Clip(clip) => Some(clip),
+            SoundItemToExport::Silence { .. } => None,
+        }
+    });
+    let processors = match first_clip {
+        Some(first_clip) => everything.insertions.for_bus(&BusRequest {
+            strip: strip_number,
+            bus: bus_number,
+            first_clip,
+            effects: &specification_of_the_bus.effects,
+        }),
+        None => Vec::new(),
+    };
+    let ahead: usize = processors.iter().map(|processor| processor.latency()).sum();
+    let mut running = RunningEffects {
+        processors,
+        ahead: ahead as u64,
+    };
+    if ahead > 0 {
+        // (What the effects are given before they make the first sample that is heard: the sound that comes out of them from then on is where it is.)
+        let mut input = everything.spare.pop().unwrap_or_default();
+        input.silent_for(ahead);
+        render_the_items_of_a_bus(
+            strip_number,
+            &mut strip.items,
+            (bus.first_item, bus.last_item),
+            everything.specification,
+            everything.feeds,
+            everything.insertions,
+            (first, first + ahead as u64),
+            (&mut input, everything.work),
+        );
+        for processor in &mut running.processors {
+            processor.process(&mut input.left[..ahead], &mut input.right[..ahead]);
+        }
+        everything.spare.push(input);
+    }
+    strip.buses[bus_number].state = BusState::Running(running);
+}
+
+/// Makes the sound of bus `bus_number` of `strip` from sample `window.0` to sample `window.1` (not including it), its items put together and given to its effects, and **adds** it to
+/// `left` and `right`. Says whether the instance was there to make any (it has been made, and not let go of).
+fn run_the_bus(
+    strip: &mut Strip,
+    strip_number: usize,
+    bus_number: usize,
+    (first, last): (u64, u64),
+    everything: &mut Everything<'_>,
+    left: &mut [f32],
+    right: &mut [f32],
+) -> bool {
+    let (first_item, last_item) = (strip.buses[bus_number].first_item, strip.buses[bus_number].last_item);
+    let length = (last - first) as usize;
+    let mut input = std::mem::take(&mut strip.buses[bus_number].input);
+    let mut made_any = false;
+    if let BusState::Running(running) = &mut strip.buses[bus_number].state {
+        input.silent_for(length);
+        // (The sound that goes in is `ahead` samples later than the sound that comes out is: see `RunningEffects`.)
+        render_the_items_of_a_bus(
+            strip_number,
+            &mut strip.items,
+            (first_item, last_item),
+            everything.specification,
+            everything.feeds,
+            everything.insertions,
+            (first + running.ahead, last + running.ahead),
+            (&mut input, everything.work),
+        );
+        for processor in &mut running.processors {
+            processor.process(&mut input.left[..length], &mut input.right[..length]);
+        }
+        for (sum, sample) in left.iter_mut().zip(&input.left[..length]) {
+            *sum += *sample;
+        }
+        for (sum, sample) in right.iter_mut().zip(&input.right[..length]) {
+            *sum += *sample;
+        }
+        made_any = true;
+    }
+    strip.buses[bus_number].input = input;
+    made_any
 }
 
 /// The groups of the specification as the graph has them: where each hears from and until, and the first clip it hears.
@@ -689,31 +1042,51 @@ fn groups_of(specification: &SoundGraphSpecification, strips: &[Strip]) -> Vec<G
     for (strip_number, strip) in strips.iter().enumerate() {
         for (item_number, item) in strip.items.iter().enumerate() {
             if strip.bus_of_item[item_number].is_none()
-                && let (ItemKind::Clip { .. }, Some(group)) = (&item.kind, item.sent_to)
+                && let ItemKind::Clip { .. } = &item.kind
             {
-                widen(&mut extents[group], item.start, item.rings_until());
+                widen_by_where_the_sound_goes(
+                    &mut extents,
+                    item.routed.as_ref(),
+                    item.sent_to,
+                    item.start,
+                    item.rings_until(),
+                    &widen,
+                );
             }
-            let (ItemKind::Clip { .. }, Some(mut group)) = (&item.kind, item.sent_to) else {
+            let ItemKind::Clip { .. } = &item.kind else {
                 continue;
             };
-            // (It is the first clip of the group it is sent to, and of the groups round that.)
-            loop {
-                let is_earlier =
-                    first_clips[group].is_none_or(|(strip, other)| item.start < strips[strip].items[other].start);
-                if is_earlier {
-                    first_clips[group] = Some((strip_number, item_number));
-                }
-                match specification.groups[group].parent {
-                    Some(parent) => group = parent,
-                    None => break,
+            // (It is the first clip of the groups its sound goes to, and of the groups round those.)
+            let routed_here = item.routed.as_ref().or_else(|| {
+                strip.bus_of_item[item_number].and_then(|bus_number| strip.buses[bus_number].routed.as_ref())
+            });
+            let destinations = item.sent_to.into_iter().chain(
+                routed_here
+                    .into_iter()
+                    .flat_map(|routed| routed.routes.segments.iter().filter_map(|segment| segment.to.flatten())),
+            );
+            for mut group in destinations {
+                loop {
+                    let is_earlier =
+                        first_clips[group].is_none_or(|(strip, other)| item.start < strips[strip].items[other].start);
+                    if is_earlier {
+                        first_clips[group] = Some((strip_number, item_number));
+                    }
+                    match specification.groups[group].parent {
+                        Some(parent) => group = parent,
+                        None => break,
+                    }
                 }
             }
         }
-        for bus in strip.buses.iter().filter(|bus| bus.sent_to.is_some()) {
-            widen(
-                &mut extents[bus.sent_to.expect("it is sent to one")],
+        for bus in &strip.buses {
+            widen_by_where_the_sound_goes(
+                &mut extents,
+                bus.routed.as_ref(),
+                bus.sent_to,
                 bus.start,
                 bus.end,
+                &widen,
             );
         }
     }
@@ -742,6 +1115,36 @@ fn groups_of(specification: &SoundGraphSpecification, strips: &[Strip]) -> Vec<G
         }
     }
     nodes
+}
+
+/// Widens the extents of the groups that something that makes sound from sample `start` to sample `end` sends it to: the whole of it to the group it is sent to, or each stretch of it
+/// to the group it goes to, over the fade after it.
+fn widen_by_where_the_sound_goes(
+    extents: &mut [Option<(u64, u64)>],
+    routed: Option<&Routed>,
+    sent_to: Option<usize>,
+    start: u64,
+    end: u64,
+    widen: &impl Fn(&mut Option<(u64, u64)>, u64, u64),
+) {
+    let Some(routed) = routed else {
+        if let Some(group) = sent_to {
+            widen(&mut extents[group], start, end);
+        }
+        return;
+    };
+    let segments = &routed.routes.segments;
+    for (number, segment) in segments.iter().enumerate() {
+        let Some(Some(group)) = segment.to else {
+            continue;
+        };
+        let stretch_ends = segments
+            .get(number + 1)
+            .map_or(end, |next| (next.from + routed.routes.fade).min(end));
+        if segment.from.max(start) < stretch_ends {
+            widen(&mut extents[group], segment.from.max(start), stretch_ends);
+        }
+    }
 }
 
 /// Makes the sound of item `number` of strip `strip_number` from sample `first` to sample `last` (not including it), which is in the item **or in the time its effects ring on after

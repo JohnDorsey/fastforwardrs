@@ -232,7 +232,8 @@ pub fn plan_export_of_the_files_that_can_be_read(
     let sound_files: Vec<SourceMediaIdentifier> = sound_sources.into_iter().collect();
     let has_audio = !sound.strips.is_empty();
     let sound = has_audio.then(|| SoundToExport {
-        specification: sound_graph_specification(&sound, &sound_files, settings.sped_up_clip_sound),
+        specification: sound_graph_specification(&sound, &sound_files, settings.sped_up_clip_sound)
+            .with_the_edge_fade(settings.edge_fade),
         source_files: sound_files,
     });
     Ok(ExportPlan {

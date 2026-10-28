@@ -17,6 +17,7 @@ use crate::project::{FrameRate, SpedUpClipSound, SpeedFactor};
 use crate::test_support::check_every_case_at_once;
 
 mod groups;
+mod routes;
 
 fn thirty() -> FrameRate {
     FrameRate::new(30, 1).unwrap()
@@ -34,6 +35,7 @@ fn clip(frames: u64, loudness: LoudnessToExport) -> SoundItemToExport {
         frames_of_the_clip_before: 0,
         effects: Vec::new(),
         sent_to: None,
+        tail_routes: Vec::new(),
     })
 }
 
@@ -61,6 +63,7 @@ fn specification(
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     }
 }
 
@@ -1337,6 +1340,7 @@ fn clip_that_has_sound_from_before(
             tail_length: Default::default(),
         }],
         sent_to: None,
+        tail_routes: Vec::new(),
     })
 }
 
@@ -1469,6 +1473,7 @@ fn specification_with_buses(
                         first_item,
                         last_item,
                         effects: Vec::new(),
+                        tail_routes: Vec::new(),
                     })
                     .collect(),
                 loudness: Default::default(),
@@ -1478,6 +1483,7 @@ fn specification_with_buses(
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     }
 }
 

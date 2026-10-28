@@ -115,6 +115,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
                 frames_of_the_clip_before: 0,
                 effects,
                 sent_to: None,
+                tail_routes: Vec::new(),
             })],
             buses: Vec::new(),
             loudness: Default::default(),
@@ -123,6 +124,7 @@ fn specification_of_frames_with(frames: u64, effects: Vec<LayerEffect>) -> Sound
         sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
         lead_in_frames: 0,
         groups: Vec::new(),
+        edge_fade_milliseconds: 10,
     }
 }
 
@@ -754,6 +756,7 @@ fn the_clips_of_a_run_are_heard_by_one_echo_so_two_clips_that_follow_each_other_
         first_item: 0,
         last_item: 1,
         effects: vec![an_echo()],
+        tail_routes: Vec::new(),
     }];
 
     let (exported, notes) = by_the_export(&toolchain, &as_a_run_of_one_instance, &sources, host());
@@ -825,6 +828,7 @@ fn an_echo_for_each_clip_that_rings_on_and_one_echo_for_the_run_sound_the_same_b
         first_item: 0,
         last_item: 1,
         effects: vec![a_long_ringing_echo()],
+        tail_routes: Vec::new(),
     }];
     let mut a_copy_for_each_clip = run;
     for item in &mut a_copy_for_each_clip.strips[0].items {
@@ -987,4 +991,90 @@ fn the_echo_of_a_group_hears_the_sum_of_its_members_so_it_sounds_as_an_echo_for_
         difference_from_plain > 0.05,
         "the echo was done: {difference_from_plain}"
     );
+}
+
+// --- Phase 12.3d: the tail policies of groups, with real plugins ---
+
+#[test]
+fn the_ring_of_a_clip_that_its_group_releases_is_not_done_to_by_the_effects_of_the_group_from_the_edge_on_in_the_export_and_in_the_preview()
+ {
+    use fastforwardrs::composition::{TailDestination, TailRoute};
+    use fastforwardrs::media::export::SoundGroupToExport;
+
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let host = || Some(a_host_that_runs_everything());
+    // The clip is a second of noise with the echo, which rings on for 200 milliseconds (a tail long enough to be most of what it is) after it; the group halves what it is given.
+    let long_echo = LayerEffect {
+        tail_length: fastforwardrs::project::TailLength::Milliseconds(200),
+        ..an_echo()
+    };
+    let halving = a_gain(the_kind_of(clap_test_plugins::GAIN), 0.5);
+    let in_the_group = |routes: Vec<TailRoute>| {
+        let mut specification = specification_of_frames_with(45, vec![long_echo.clone()]);
+        let SoundItemToExport::Clip(clip) = &mut specification.strips[0].items[0] else {
+            unreachable!("one clip");
+        };
+        // (The clip is the first second of a clip of a second and a half, which has silence after it for the ring.)
+        clip.timeline_frame_count = 30;
+        clip.end_source_frame = 30;
+        clip.sent_to = Some(0);
+        clip.tail_routes = routes;
+        specification.groups = vec![SoundGroupToExport {
+            effects: vec![halving.clone()],
+            parent: None,
+        }];
+        specification.edge_fade_milliseconds = 0;
+        specification
+    };
+    // What the clip makes with nothing round it: its echo, and after it the ring.
+    let mut alone = specification_of_frames_with(45, vec![long_echo.clone()]);
+    let SoundItemToExport::Clip(clip) = &mut alone.strips[0].items[0] else {
+        unreachable!("one clip");
+    };
+    clip.timeline_frame_count = 30;
+    clip.end_source_frame = 30;
+    let (the_clip_by_itself, _) = by_the_export(&toolchain, &alone, &sources, host());
+
+    let released = in_the_group(vec![TailRoute {
+        from_frame: 30,
+        to: TailDestination::Sum,
+    }]);
+    let (exported, notes) = by_the_export(&toolchain, &released, &sources, host());
+    let (previewed, _) = by_the_preview(&toolchain, &released, &sources, host());
+    let (kept_alive, _) = by_the_export(&toolchain, &in_the_group(Vec::new()), &sources, host());
+
+    let edge = 30 * SAMPLES_IN_A_FRAME;
+    assert_eq!(exported.len(), the_clip_by_itself.len());
+    let worst = |made: &[f32], expected: &dyn Fn(usize) -> f32, range: std::ops::Range<usize>| {
+        range
+            .map(|index| (made[index] - expected(index)).abs())
+            .fold(0.0_f32, f32::max)
+    };
+    assert!(
+        worst(&exported, &|index| the_clip_by_itself[index] * 0.5, 0..edge) < 1e-6,
+        "up to the edge the group halves what the clip makes"
+    );
+    assert!(
+        worst(&exported, &|index| the_clip_by_itself[index], edge..edge + 2 * 9600) < 1e-6,
+        "from the edge on the ring is the clip's own, not halved"
+    );
+    assert!(
+        the_clip_by_itself[edge..edge + 2000]
+            .iter()
+            .any(|sample| sample.abs() > 0.01),
+        "(a premise: there is a ring to be not halved)"
+    );
+    assert!(
+        worst(
+            &kept_alive,
+            &|index| the_clip_by_itself[index] * 0.5,
+            0..edge + 2 * 9600
+        ) < 1e-6,
+        "(the control: kept alive, which is what a group does if nobody says otherwise, the ring is halved too)"
+    );
+    assert_eq!(previewed, exported, "the preview makes what the export makes");
+    assert!(notes.is_empty(), "{notes:?}");
 }

@@ -256,6 +256,8 @@ pub struct AudioContent<'a> {
     /// Where each source file is that can be used. The sound of a file that is not here is left out.
     pub source_locations: &'a HashMap<SourceMediaIdentifier, MediaLocation>,
     pub sped_up_clip_sound: SpedUpClipSound,
+    /// How long the fade is where a ring of sound leaves a group, goes into one, or ends at an edge.
+    pub edge_fade: crate::project::EdgeFade,
 }
 
 impl AudioContent<'_> {
@@ -266,6 +268,7 @@ impl AudioContent<'_> {
     fn signature(&self, plugins_generation: u64) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.sped_up_clip_sound.hash(&mut hasher);
+        self.edge_fade.hash(&mut hasher);
         // (Which plugins may be run: a plugin begins to be heard when a person says yes to its folder.)
         plugins_generation.hash(&mut hasher);
         hash_the_sound_effects_into(self.project, &mut hasher);
@@ -546,7 +549,8 @@ impl<Starter: AudioStreamStarter> AudioSupplier<Starter> {
                 .iter()
                 .map(|identifier| content.source_locations[identifier].clone())
                 .collect(),
-            sound: sound_graph_specification(&plan, &source_identifiers, content.sped_up_clip_sound),
+            sound: sound_graph_specification(&plan, &source_identifiers, content.sped_up_clip_sound)
+                .with_the_edge_fade(content.edge_fade),
             format: sink.format(),
         };
         match self.starter.start(&request) {

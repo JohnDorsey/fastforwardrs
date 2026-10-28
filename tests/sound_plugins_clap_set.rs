@@ -188,6 +188,7 @@ fn one_clap_plugin_of_a_library_on_a_clip_for_the_driver() {
                     frames_of_the_clip_before: 0,
                     effects,
                     sent_to: None,
+                    tail_routes: Vec::new(),
                 })],
                 buses: Vec::new(),
                 loudness: Default::default(),
@@ -196,6 +197,7 @@ fn one_clap_plugin_of_a_library_on_a_clip_for_the_driver() {
             sped_up_clip_sound: SpedUpClipSound::MaintainPitch,
             lead_in_frames: 0,
             groups: Vec::new(),
+            edge_fade_milliseconds: 10,
         };
     let specification = |effects: Vec<LayerEffect>| specification_from(0, 30, effects);
     let scratch = scratch_directory();

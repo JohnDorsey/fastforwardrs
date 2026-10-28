@@ -701,13 +701,17 @@ impl FastForwardApplication {
     /// Starts, keeps in step, or stops the sound of the preview: it plays while the video plays.
     fn update_the_sound(&mut self, now: Instant, total_frames: u64) {
         let clock = self.playback.reading(now, total_frames);
-        let sped_up_clip_sound = self.effective_settings().sped_up_clip_sound;
+        let (sped_up_clip_sound, edge_fade) = {
+            let settings = self.effective_settings();
+            (settings.sped_up_clip_sound, settings.edge_fade)
+        };
         let source_locations = self.sources.available_locations();
         // There is sound to play when some file that can be read is there to make it from.
         let content = (!source_locations.is_empty()).then_some(AudioContent {
             project: &self.document.project,
             source_locations: &source_locations,
             sped_up_clip_sound,
+            edge_fade,
         });
         self.playback.audio_supplier.update(content, clock, now);
     }
