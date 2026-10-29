@@ -219,6 +219,9 @@ impl Fetcher for Curl {
         on_bytes: &mut dyn FnMut(u64),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), String> {
+        if let Some(why) = why_curl_cannot_write(to) {
+            return Err(why);
+        }
         let arguments = [std::ffi::OsString::from("--output"), to.into(), "--".into(), url.into()];
         self.run(&arguments, &[to], on_bytes, cancelled, &|said| {
             format!(
@@ -237,6 +240,9 @@ impl Fetcher for Curl {
         let Some((_, first)) = items.first() else {
             return Ok(());
         };
+        if let Some(why) = items.iter().find_map(|(_, to)| why_curl_cannot_write(to)) {
+            return Err(why);
+        }
         let configuration = first
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -375,7 +381,8 @@ fn fetch_the_sets(
         let archive = if let Some((_, path)) = downloaded.iter().find(|(sha, _)| *sha == build.sha256) {
             path.clone()
         } else {
-            let path = temporary.join(format!("{}-{}", build.sha256, file_name_of(&build.url)));
+            let path = place_of_a_download(temporary, &build.sha256, file_name_of(&build.url));
+            make_the_folder_of(&path)?;
             let before = finished;
             report(&Progress {
                 step: format!("Downloading {step}"),
@@ -454,7 +461,8 @@ fn build_the_set(
         }
     }
     for text in &set.licence_texts {
-        let path = temporary.join(format!("{}-{}", text.sha256, text.name));
+        let path = place_of_a_download(temporary, &text.sha256, &text.name);
+        make_the_folder_of(&path)?;
         fetcher.fetch(&text.url, &path, &mut |_| {}, cancelled)?;
         check_the_checksum(&path, &text.sha256, &text.url)?;
         fs::copy(&path, building.join(&text.name))
@@ -496,7 +504,32 @@ pub(super) fn check_the_checksum(path: &Path, wanted: &str, url: &str) -> Result
     }
 }
 
-fn file_name_of(url: &str) -> &str {
+/// Where the download of the file `name` whose checksum is `sha256` is put, under `temporary`: in a folder of the first 16 characters of the checksum (two files with one name do not meet;
+/// 64 bits are enough for the few files of a manifest, whose checksums are checked after), **so that the path is short**: curl on Windows writes no file whose path has 260 characters
+/// or more, whatever the setting for long paths is, and the whole checksum before the name made a folder of 148 characters one that nothing could be downloaded in.
+pub(super) fn place_of_a_download(temporary: &Path, sha256: &str, name: &str) -> PathBuf {
+    temporary.join(sha256.get(..16).unwrap_or(sha256)).join(name)
+}
+
+/// What curl on Windows cannot do: it says "URL using bad/illegal format" (and nothing of the path) for a file to write whose path has 260 characters or more (measured with curl 8.13:
+/// 259 is written, 260 is not, with `LongPathsEnabled` set; a `\\?\` in front of the path got past that check and then failed to write, once, and a name relative to a folder that is
+/// itself that long is refused by curl too, so there is no way round it that was found). Gives what to tell a person instead, if `to` is such a path.
+pub(super) fn why_curl_cannot_write(to: &Path) -> Option<String> {
+    let length = to.to_string_lossy().chars().count();
+    (cfg!(windows) && length >= 260).then(|| {
+        format!(
+            "{} cannot be written by curl: its path has {length} characters, and curl on Windows writes no file whose path has 260 or more, whatever the setting for long paths is (choose a folder with a shorter path)",
+            to.display()
+        )
+    })
+}
+
+fn make_the_folder_of(path: &Path) -> Result<(), String> {
+    let folder = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(folder).map_err(|error| format!("{} could not be made: {error}", folder.display()))
+}
+
+pub(super) fn file_name_of(url: &str) -> &str {
     url.rsplit('/').next().unwrap_or("download")
 }
 

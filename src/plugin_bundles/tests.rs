@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use super::test_support::{FakeFetcher, Fixture, a_fixture, a_zip};
+use super::download::{file_name_of, place_of_a_download};
 use super::*;
 
 // --- the manifest ---
@@ -809,6 +810,131 @@ fn a_download_that_is_cancelled_while_it_goes_on_is_stopped_at_once_and_leaves_n
     assert_eq!(error, CANCELLED);
     assert!(began.elapsed() < Duration::from_secs(10), "{:?}", began.elapsed());
     assert!(!to.exists());
+}
+
+// --- the paths that curl is given (Windows' curl writes no file whose path has 260 characters or more) ---
+
+/// Says where each file it is asked to make is, and then does what a `FakeFetcher` does.
+struct FetcherThatSaysWhere {
+    inner: FakeFetcher,
+    made: std::sync::Mutex<Vec<PathBuf>>,
+}
+
+impl Fetcher for FetcherThatSaysWhere {
+    fn fetch(
+        &self,
+        url: &str,
+        to: &Path,
+        on_bytes: &mut dyn FnMut(u64),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), String> {
+        self.made.lock().unwrap().push(to.to_owned());
+        self.inner.fetch(url, to, on_bytes, cancelled)
+    }
+}
+
+#[test]
+fn every_file_that_is_downloaded_is_in_a_folder_of_the_start_of_its_checksum_under_dot_downloading_with_the_name_in_its_address() {
+    let fixture = a_fixture();
+    let fetcher = FetcherThatSaysWhere {
+        inner: FakeFetcher::new(fixture.files.clone()),
+        made: std::sync::Mutex::new(Vec::new()),
+    };
+    let folder = tempfile::tempdir().unwrap();
+
+    fetch_plugins(&fixture.manifest, "windows-x86_64", folder.path(), &fetcher, &mut |_| {}, &|| false).unwrap();
+
+    let mut expected: Vec<String> = Vec::new();
+    for set in &fixture.manifest.sets {
+        if let Some(build) = set.platforms.get("windows-x86_64") {
+            expected.push(format!(".downloading/{}/{}", &build.sha256[..16], file_name_of(&build.url)));
+        }
+        for text in &set.licence_texts {
+            expected.push(format!(".downloading/{}/{}", &text.sha256[..16], text.name));
+        }
+    }
+    expected.sort();
+    expected.dedup();
+    let mut got: Vec<String> = fetcher
+        .made
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|path| path.strip_prefix(folder.path()).unwrap().to_string_lossy().replace('\\', "/"))
+        .collect();
+    got.sort();
+    got.dedup();
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn a_download_of_the_real_manifest_adds_at_most_100_characters_to_the_folder_it_is_made_in() {
+    // (The folder of the plugins can be as long as a person makes it, and curl on Windows writes no path of 260 characters or more: 100 leaves a folder of 159. It was 112 when the
+    // whole checksum began the name of the file, and a folder of 148 characters was one that no download could be made in.)
+    let manifest = Manifest::embedded();
+    let mut longest = (0, String::new());
+    for set in &manifest.sets {
+        for (platform, build) in &set.platforms {
+            let relative = place_of_a_download(Path::new(""), &build.sha256, file_name_of(&build.url));
+            let length = relative.to_string_lossy().chars().count();
+            if length > longest.0 {
+                longest = (length, format!("{} for {platform}", set.id));
+            }
+        }
+        for text in &set.licence_texts {
+            let relative = place_of_a_download(Path::new(""), &text.sha256, &text.name);
+            longest = longest.max((relative.to_string_lossy().chars().count(), format!("the licence {} of {}", text.name, set.id)));
+        }
+    }
+    // (The folder name is joined to an empty path: `.downloading` is joined by the caller, so its 13 characters and a separator are added here.)
+    let added = longest.0 + ".downloading/".len();
+    assert!(added <= 100, "{} adds {added}", longest.1);
+}
+
+/// A path of exactly `length` characters, in folders made under `base` (each of at most 50 characters), ending in a file name; the folders are made, the file is not.
+fn a_path_of_length(base: &Path, length: usize) -> PathBuf {
+    let mut folder = base.to_owned();
+    let mut left = length - base.to_string_lossy().chars().count();
+    // (a separator, then a name; the last name is the file's, of at least one character)
+    while left > 52 {
+        folder.push("d".repeat(50));
+        left -= 51;
+    }
+    let path = folder.join("f".repeat(left - 1));
+    std::fs::create_dir_all(&folder).unwrap();
+    assert_eq!(path.to_string_lossy().chars().count(), length);
+    path
+}
+
+#[cfg(windows)]
+#[test]
+fn curl_on_windows_writes_a_file_of_a_path_of_259_characters_and_is_not_started_for_one_of_260_which_it_would_refuse_whatever_the_setting_for_long_paths_is() {
+    if !curl_is_there() {
+        eprintln!("SKIPPED: there is no curl");
+        return;
+    }
+    let server = a_server_here(b"the plugin, in bytes");
+    let folder = tempfile::tempdir().unwrap();
+
+    let fits = a_path_of_length(folder.path(), 259);
+    Curl::for_a_test_on_this_computer()
+        .fetch(&format!("{server}/ok"), &fits, &mut |_| {}, &|| false)
+        .unwrap();
+    assert_eq!(std::fs::read(&fits).unwrap(), b"the plugin, in bytes");
+
+    let too_long = a_path_of_length(folder.path(), 260);
+    let error = Curl::for_a_test_on_this_computer()
+        .fetch(&format!("{server}/ok"), &too_long, &mut |_| {}, &|| false)
+        .unwrap_err();
+    assert!(
+        error.contains("260") && error.contains("shorter") && !error.contains("bad/illegal"),
+        "{error}"
+    );
+    assert!(!too_long.exists());
+    let many = Curl::for_a_test_on_this_computer()
+        .fetch_many(&[(&format!("{server}/ok"), &too_long)], &mut |_| {}, &|| false)
+        .unwrap_err();
+    assert!(many.contains("260") && many.contains("shorter"), "{many}");
 }
 
 // --- the real network (by hand) ---
