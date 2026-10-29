@@ -14,7 +14,7 @@ use std::thread;
 use super::FastForwardApplication;
 use crate::application::plugin_manager_bundles::{BundleKind, BundleRow, BundleState, size_in_words};
 use crate::plugin_bundles::{
-    CANCELLED, Curl, Fetcher, Manifest, Outcome, Progress, ShaderManifest, ShaderOutcome, bytes_to_download,
+    CANCELLED, Curl, Fetcher, Manifest, Outcome, Progress, SetKind, ShaderManifest, ShaderOutcome, bytes_to_download,
     fetch_plugins, fetch_shaders, fetched_plugins_folder, fetched_shaders_folder, is_fetched, shader_bytes_to_download,
     shaders_are_fetched, this_platform,
 };
@@ -54,6 +54,8 @@ enum Message {
 pub(super) struct Bundles {
     /// The download of the sound plugins.
     pub(super) download: BundleDownload,
+    /// The download of the data that plugins use (their own, not waiting for the plugins').
+    pub(super) data_download: BundleDownload,
     /// The download of the shaders.
     pub(super) shader_download: BundleDownload,
     /// What fetches (`None`: the system's `curl`, which refuses what is not https).
@@ -74,6 +76,7 @@ impl Bundles {
     fn download_of(&mut self, kind: BundleKind) -> &mut BundleDownload {
         match kind {
             BundleKind::SoundPlugins => &mut self.download,
+            BundleKind::PluginData => &mut self.data_download,
             BundleKind::Shaders => &mut self.shader_download,
         }
     }
@@ -81,6 +84,7 @@ impl Bundles {
     fn the_download_of(&self, kind: BundleKind) -> &BundleDownload {
         match kind {
             BundleKind::SoundPlugins => &self.download,
+            BundleKind::PluginData => &self.data_download,
             BundleKind::Shaders => &self.shader_download,
         }
     }
@@ -100,7 +104,17 @@ fn hosts_of<'a>(addresses: impl Iterator<Item = &'a String>) -> String {
 }
 
 impl FastForwardApplication {
+    /// The sets of plugins of the manifest (the data that plugins use has a section of its own).
     fn manifest_of_the_bundles(&self) -> Manifest {
+        self.whole_manifest_of_the_bundles().only(SetKind::Plugins)
+    }
+
+    /// The sets of data of the manifest.
+    fn manifest_of_the_data_bundles(&self) -> Manifest {
+        self.whole_manifest_of_the_bundles().only(SetKind::Data)
+    }
+
+    fn whole_manifest_of_the_bundles(&self) -> Manifest {
         self.environment
             .plugin_search
             .bundles
@@ -145,7 +159,8 @@ impl FastForwardApplication {
     /// Where what is fetched of this kind is put.
     pub(super) fn folder_of_the_bundles_of(&self, kind: BundleKind) -> Option<PathBuf> {
         match kind {
-            BundleKind::SoundPlugins => self.folder_of_the_bundles(),
+            // (The data is put beside the folders of the plugins that look for it, in the same folder.)
+            BundleKind::SoundPlugins | BundleKind::PluginData => self.folder_of_the_bundles(),
             BundleKind::Shaders => self.folder_of_the_shader_bundles(),
         }
     }
@@ -153,13 +168,20 @@ impl FastForwardApplication {
     /// What the *Bundles* tab shows of one kind: each set, whether it is fetched, how big the download is, and where it comes from.
     pub(super) fn what_the_bundles_tab_shows(&self, kind: BundleKind) -> (Vec<BundleRow>, bool, u64, String) {
         match kind {
-            BundleKind::SoundPlugins => self.what_the_bundles_tab_shows_of_plugins(),
+            BundleKind::SoundPlugins => self.what_the_bundles_tab_shows_of_sets(self.manifest_of_the_bundles(), kind),
+            BundleKind::PluginData => {
+                self.what_the_bundles_tab_shows_of_sets(self.manifest_of_the_data_bundles(), kind)
+            }
             BundleKind::Shaders => self.what_the_bundles_tab_shows_of_shaders(),
         }
     }
 
-    fn what_the_bundles_tab_shows_of_plugins(&self) -> (Vec<BundleRow>, bool, u64, String) {
-        let manifest = self.manifest_of_the_bundles();
+    /// The same of the sets of a manifest of plugins or of data (`kind` says which).
+    fn what_the_bundles_tab_shows_of_sets(
+        &self,
+        manifest: Manifest,
+        kind: BundleKind,
+    ) -> (Vec<BundleRow>, bool, u64, String) {
         let platform = self.platform_of_the_bundles();
         let folder = self.folder_of_the_bundles();
         let rows: Vec<BundleRow> = manifest
@@ -169,7 +191,12 @@ impl FastForwardApplication {
                 name: set.name.clone(),
                 version: set.version.clone(),
                 contents: set.plugins.join(", "),
-                count: set.plugins.len(),
+                // (A set of data is counted as one: the question says "1 set of data", and not how many kinds of files it has.)
+                count: if kind == BundleKind::PluginData {
+                    1
+                } else {
+                    set.plugins.len()
+                },
                 authors: set.authors.join(", "),
                 licence: set.licence.clone(),
                 source: set.source.url.clone(),
@@ -284,13 +311,18 @@ impl FastForwardApplication {
             Shaders(ShaderManifest),
         }
         let (job, total) = match kind {
-            BundleKind::SoundPlugins => {
+            BundleKind::SoundPlugins | BundleKind::PluginData => {
                 let Some(platform) = self.platform_of_the_bundles() else {
-                    self.environment.plugin_search.bundles.download =
-                        BundleDownload::Failed("there are no builds of the plugins for this computer".to_owned());
+                    *self.environment.plugin_search.bundles.download_of(kind) = BundleDownload::Failed(
+                        "there are no builds of what is fetched here for this computer".to_owned(),
+                    );
                     return;
                 };
-                let manifest = self.manifest_of_the_bundles();
+                let manifest = if kind == BundleKind::PluginData {
+                    self.manifest_of_the_data_bundles()
+                } else {
+                    self.manifest_of_the_bundles()
+                };
                 let total = bytes_to_download(&manifest, platform);
                 (Job::Plugins(manifest, platform), total)
             }
@@ -309,6 +341,7 @@ impl FastForwardApplication {
             .name(
                 match kind {
                     BundleKind::SoundPlugins => "fetching plugins",
+                    BundleKind::PluginData => "fetching data",
                     BundleKind::Shaders => "fetching shaders",
                 }
                 .to_owned(),
@@ -365,6 +398,15 @@ impl FastForwardApplication {
         )
     }
 
+    /// Whether a download of data is begun and not over.
+    #[cfg(test)]
+    pub(super) fn data_download_is_going_on(&self) -> bool {
+        matches!(
+            self.environment.plugin_search.bundles.data_download,
+            BundleDownload::Running(_)
+        )
+    }
+
     /// Whether a download of shaders is begun and not over.
     #[cfg(test)]
     pub(super) fn shader_download_is_going_on(&self) -> bool {
@@ -390,7 +432,7 @@ impl FastForwardApplication {
 
     /// Takes what the downloads have said since the last frame; when one is over, what it fetched is found.
     pub(super) fn take_what_the_download_of_the_bundles_said(&mut self) {
-        for kind in [BundleKind::SoundPlugins, BundleKind::Shaders] {
+        for kind in [BundleKind::SoundPlugins, BundleKind::PluginData, BundleKind::Shaders] {
             self.take_what_the_download_of_a_kind_said(kind);
         }
     }
@@ -418,15 +460,22 @@ impl FastForwardApplication {
         };
         let after = match result {
             Ok(made) => {
-                // (A plugin is code, and what the program fetched itself is trusted as its own; a shader is data, and nothing is trusted.)
-                if matches!(made, Made::Plugins(_))
+                // (A plugin is code, and what the program fetched itself is trusted as its own; a shader, and the data that a plugin finds beside itself, are data, and nothing is trusted.)
+                if kind == BundleKind::SoundPlugins
                     && let Some(folder) = self.folder_of_the_bundles_of(kind)
                 {
                     self.trust_the_plugins_bundled_in(&folder);
                 }
-                self.start_scanning_plugins();
+                // (Data changes nothing that is looked for: a plugin finds it when it is started.)
+                if kind != BundleKind::PluginData {
+                    self.start_scanning_plugins();
+                }
                 let size = size_in_words(self.what_the_bundles_tab_shows(kind).2);
                 BundleDownload::Done(match made {
+                    Made::Plugins(outcome) if kind == BundleKind::PluginData => format!(
+                        "Fetched {size} of data: {}. The plugins that use it (such as Surge XT) find it when they are started; one that is open now has it after it is closed and opened again.",
+                        outcome.sets.join(", "),
+                    ),
                     Made::Plugins(outcome) => format!(
                         "Fetched {} plugin{} ({size}): {}. They are looked for now, and are in the menu of the + button once they are found.",
                         outcome.plugin_files.len(),

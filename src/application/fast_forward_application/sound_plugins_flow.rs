@@ -630,6 +630,8 @@ impl FastForwardApplication {
         let bundled_folder = bundled_plugins_folder();
         let fetched_shaders_folder = crate::plugin_bundles::fetched_shaders_folder();
         let (rows, has_builds, total_bytes, hosts) = self.what_the_bundles_tab_shows(BundleKind::SoundPlugins);
+        let (data_rows, data_has_builds, data_bytes, data_hosts) =
+            self.what_the_bundles_tab_shows(BundleKind::PluginData);
         let (shader_rows, shaders_have_builds, shader_bytes, shader_hosts) =
             self.what_the_bundles_tab_shows(BundleKind::Shaders);
         let fetched_folder = self.folder_of_the_bundles();
@@ -644,6 +646,15 @@ impl FastForwardApplication {
             hosts: &hosts,
             folder: fetched_folder.as_deref(),
             state: super::plugin_bundles_flow::state_of(&search.bundles.download),
+        };
+        let data_bundles = BundlesView {
+            kind: BundleKind::PluginData,
+            rows: &data_rows,
+            has_builds: data_has_builds,
+            total_bytes: data_bytes,
+            hosts: &data_hosts,
+            folder: fetched_folder.as_deref(),
+            state: super::plugin_bundles_flow::state_of(&search.bundles.data_download),
         };
         let shader_bundles = BundlesView {
             kind: BundleKind::Shaders,
@@ -662,6 +673,7 @@ impl FastForwardApplication {
             fetched_shaders_folder: fetched_shaders_folder.as_deref(),
             tab: self.interface.plugin_manager_tab,
             bundles,
+            data_bundles,
             shader_bundles,
             is_scanning: search.running.is_some(),
             has_scanned: search.has_scanned,

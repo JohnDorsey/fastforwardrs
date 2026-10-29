@@ -123,7 +123,7 @@ class TheRealManifest(unittest.TestCase):
         self.assertEqual(fetcher.check_manifest(THE_REAL_MANIFEST), [])
 
     def test_it_has_what_the_maintainer_chose_and_not_what_the_maintainer_did_not(self):
-        clap_sets = [s for s in THE_REAL_MANIFEST["sets"] if not s["id"].endswith("-lv2")]
+        clap_sets = [s for s in THE_REAL_MANIFEST["sets"] if not s["id"].endswith("-lv2") and s.get("kind", "plugins") == "plugins"]
         names = [plugin for plugin_set in clap_sets for plugin in plugin_set["plugins"]]
         self.assertEqual(
             names,
@@ -177,6 +177,25 @@ class TheRealManifest(unittest.TestCase):
             )
         self.assertNotIn("surge-xt-synthesizer-lv2", by_id)
 
+    def test_the_data_of_surge_xt_is_one_folder_put_beside_the_plugins_without_what_may_not_ship(self):
+        data_sets = [s for s in THE_REAL_MANIFEST["sets"] if s.get("kind") == "data"]
+        self.assertEqual([s["id"] for s in data_sets], ["surge-xt-data"])
+        data = data_sets[0]
+        self.assertEqual((data["folder"], data["licence"], data["version"]), ("SurgeXTData", "GPL-3.0-only", "1.3.4"))
+        # (Surge looks for a folder called SurgeXTData in the folders above its own file: the data is put in the folder that has the folders of the plugins.)
+        self.assertEqual(sorted(data["platforms"]), ["linux-x86_64", "windows-x86_64"])
+        builds = list(data["platforms"].values())
+        self.assertEqual(builds[0], builds[1], "one release file for both systems")
+        self.assertTrue(builds[0]["url"].endswith("/surge-xt-portable-content-1.3.4.tar.gz"))
+        member = builds[0]["members"][0]
+        self.assertEqual((member["from"], member["to"]), ("Surge Synth Team/SurgeXTData/", "."))
+        # (What is left out: the wavetables that are named like the Waldorf Microwave's, and the skin whose fonts are under the OFL, which is not a licence that may ship here.)
+        self.assertEqual(member["leave_out"], ["wavetables/Waldorf/", "skins/Tutorials/10 Adding Fonts.surge-skin/"])
+        self.assertEqual([text["name"] for text in data["licence_texts"]], ["LICENSE.txt", "AUTHORS.txt"])
+        # (The note says where the licence of the data was read, and what was left out and why.)
+        for wanted in ("issue 6741", "CC0", "wavetables/Waldorf", "OFL"):
+            self.assertIn(wanted, data["licence_note"])
+
     def test_the_lv2_sets_are_these_and_hold_what_their_authors_release_as_lv2_bundles(self):
         lv2_sets = {s["id"]: s for s in THE_REAL_MANIFEST["sets"] if s["id"].endswith("-lv2")}
         self.assertEqual(
@@ -211,6 +230,13 @@ class TheRealManifest(unittest.TestCase):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
             # (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
             wanted = {"windows-x86_64", "linux-x86_64"} | (set() if plugin_set["id"] == "wolf-shaper-lv2" else {"macos-universal"})
+            if plugin_set.get("kind") == "data":
+                # (Data has no build for macOS: Surge XT looks for its data there only in the folders of the person's own Library, which the program does not write in. It takes one folder, which
+                # is the folder of the set: what is in it is not counted as plugins.)
+                self.assertEqual(set(plugin_set["platforms"]), {"windows-x86_64", "linux-x86_64"}, plugin_set["id"])
+                for build in plugin_set["platforms"].values():
+                    self.assertEqual(len(build["members"]), 1, plugin_set["id"])
+                continue
             self.assertEqual(set(plugin_set["platforms"]), wanted, plugin_set["id"])
             for build in plugin_set["platforms"].values():
                 self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), plugin_set["id"])
@@ -541,6 +567,165 @@ class AssemblingTheFolder(unittest.TestCase):
         THE_REAL_MANIFEST_BAD["sets"][0]["licence"] = "AGPL-3.0-only"
         path.write_text(json.dumps(THE_REAL_MANIFEST_BAD), encoding="utf8")
         self.assertEqual(fetcher.main(["--manifest", str(path), "--check"]), 1)
+
+
+class ASetOfData(unittest.TestCase):
+    """A set of data (Surge XT's patches and wavetables): a folder of a tar that is put as the folder of the set, with what the manifest leaves out taken away."""
+
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.scratch.name)
+        self.tar_path = self.root / "content.tar.gz"
+        files = {
+            "Some Team/TheData/patches/Factory/\u00b5computer.fxp": b"a patch with a name that is not ASCII",
+            "Some Team/TheData/patches/b.fxp": b"another patch",
+            "Some Team/TheData/wavetables/Free/x.wt": b"a free wavetable",
+            "Some Team/TheData/wavetables/Maybe/y.wt": b"a wavetable that may not ship",
+            "Some Team/TheData/skins/plain/skin.xml": b"a skin",
+            "Some Team/TheData/skins/plain/font.ttf": b"a font that may not ship",
+            "Some Team/README.txt": b"outside the folder",
+        }
+        with tarfile.open(self.tar_path, "w:gz") as archive:
+            for name, data in files.items():
+                info = tarfile.TarInfo("./" + name)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        self.licence_path = self.root / "LICENSE"
+        self.licence_path.write_bytes(b"GNU GENERAL PUBLIC LICENSE, a copy")
+        self.source_path = self.root / "src.tar.gz"
+        self.source_path.write_bytes(b"the source")
+        self.out = self.root / "plugins"
+        self.cache = self.root / "cache"
+
+    def tearDown(self):
+        self.scratch.cleanup()
+
+    def manifest(self, leave_out=("wavetables/Maybe/", "skins/plain/font.ttf")) -> dict:
+        return {
+            "format": 1,
+            "sets": [
+                {
+                    "id": "the-data",
+                    "name": "The data",
+                    "version": "1.0",
+                    "authors": ["Someone"],
+                    "licence": "GPL-3.0-only",
+                    "licence_note": "as its authors distribute it",
+                    "homepage": "https://example.org/data",
+                    "kind": "data",
+                    "folder": "TheData",
+                    "plugins": ["patches", "wavetables", "skins"],
+                    "licence_texts": [{"name": "LICENSE.txt", "url": self.licence_path.as_uri(), "sha256": sha256(self.licence_path.read_bytes())}],
+                    "source": {"url": self.source_path.as_uri(), "sha256": sha256(self.source_path.read_bytes())},
+                    "platforms": {
+                        "linux-x86_64": {
+                            "url": self.tar_path.as_uri(),
+                            "sha256": sha256(self.tar_path.read_bytes()),
+                            "members": [{"from": "Some Team/TheData/", "to": ".", "leave_out": list(leave_out)}],
+                        }
+                    },
+                }
+            ],
+        }
+
+    def assemble(self, manifest=None, **more):
+        return fetcher.assemble(manifest or self.manifest(), "linux-x86_64", self.out, self.cache, allow_local_addresses=True, **more)
+
+    def test_the_folder_of_the_tar_is_the_folder_of_the_set_without_what_the_manifest_leaves_out(self):
+        made = self.assemble()
+
+        data = self.out / "TheData"
+        self.assertEqual(made, [], "data is not a plugin file")
+        self.assertEqual((data / "patches" / "b.fxp").read_bytes(), b"another patch")
+        self.assertEqual((data / "patches" / "Factory" / "\u00b5computer.fxp").read_bytes(), b"a patch with a name that is not ASCII")
+        self.assertEqual((data / "wavetables" / "Free" / "x.wt").read_bytes(), b"a free wavetable")
+        self.assertEqual((data / "skins" / "plain" / "skin.xml").read_bytes(), b"a skin")
+        self.assertFalse((data / "wavetables" / "Maybe").exists(), "a folder that is left out")
+        self.assertFalse((data / "skins" / "plain" / "font.ttf").exists(), "a file that is left out")
+        self.assertFalse((data / "README.txt").exists(), "what is outside the folder")
+        self.assertEqual((data / "LICENSE.txt").read_bytes(), b"GNU GENERAL PUBLIC LICENSE, a copy")
+        notice = (data / "NOTICE.txt").read_text(encoding="utf8")
+        self.assertIn("what the manifest says is not kept was left out", notice)
+        self.assertNotIn("is the plugin as its authors released it", notice)
+        self.assertEqual(sorted(path.name for path in self.out.iterdir()), ["README.txt", "TheData"], "no folder that was used is left, and the folder is called as the manifest says")
+
+    def test_something_that_is_left_out_and_is_not_in_the_archive_is_said_and_nothing_is_left_half_made(self):
+        manifest = self.manifest(leave_out=("wavetables/Moved/",))
+        (self.out / "TheData").mkdir(parents=True)
+        (self.out / "TheData" / "old.txt").write_bytes(b"old")
+
+        with self.assertRaises(fetcher.FetchError) as raised:
+            self.assemble(manifest)
+
+        self.assertIn("wavetables/Moved/", str(raised.exception))
+        self.assertEqual(sorted(path.name for path in self.out.iterdir()), ["TheData"])
+        self.assertEqual((self.out / "TheData" / "old.txt").read_bytes(), b"old", "what was there is kept")
+
+    def test_the_readme_names_data_and_the_manifest_is_fit(self):
+        self.assertEqual(fetcher.check_manifest(self.manifest(), allow_local_addresses=True), [])
+        self.assemble()
+        self.assertIn("The data 1.0 (GPL-3.0-only)", (self.out / "README.txt").read_text(encoding="utf8"))
+
+    def test_without_data_a_release_that_does_not_carry_it_leaves_it_out(self):
+        manifest = self.manifest()
+        manifest["sets"].append(copy.deepcopy(AFolderOfFixtures(self.root).manifest()["sets"][0]))
+
+        made = fetcher.assemble(manifest, "linux-x86_64", self.out, self.cache, allow_local_addresses=True, with_data=False)
+
+        self.assertEqual(made, [self.out / "pack" / "Reverb.clap"])
+        self.assertFalse((self.out / "TheData").exists())
+
+
+class WhatIsWrongWithASetOfData(unittest.TestCase):
+    def setUp(self):
+        self.manifest = copy.deepcopy(THE_REAL_MANIFEST)
+        self.data = next(plugin_set for plugin_set in self.manifest["sets"] if plugin_set.get("kind") == "data")
+        self.build = next(iter(self.data["platforms"].values()))
+
+    def problems(self) -> str:
+        return "\n".join(fetcher.check_manifest(self.manifest))
+
+    def test_a_manifest_with_the_set_of_data_is_fit(self):
+        self.assertEqual(self.problems(), "")
+
+    def test_the_member_is_put_as_the_folder_of_the_set_and_is_a_folder(self):
+        self.build["members"][0]["to"] = "Data"
+        self.assertIn("is put as the folder of the set", self.problems())
+        self.build["members"][0]["to"] = "."
+        self.build["members"][0]["from"] = "Surge Synth Team/SurgeXTData"
+        self.assertIn("must end with /", self.problems())
+
+    def test_a_set_of_data_takes_one_folder(self):
+        self.build["members"].append(dict(self.build["members"][0]))
+        self.assertIn("takes one folder of the archive", self.problems())
+
+    def test_what_is_left_out_is_a_path_inside_the_folder(self):
+        for bad in ("", "/etc", "../up", "a/../../up", "a\\b"):
+            self.build["members"][0]["leave_out"] = [bad]
+            self.assertIn("is not a path inside the folder", self.problems(), repr(bad))
+
+    def test_the_folder_is_a_plain_name_that_no_other_set_has(self):
+        for bad in ("", ".", "..", "a/b", "a\\b", ".hidden"):
+            self.data["folder"] = bad
+            self.assertIn("the folder is not a plain name of a folder", self.problems(), repr(bad))
+        self.data["folder"] = self.manifest["sets"][0]["id"]
+        self.assertIn("is the folder of another set too", self.problems())
+
+    def test_plugins_have_no_folder_of_their_own_and_leave_nothing_out(self):
+        first = next(plugin_set for plugin_set in self.manifest["sets"] if plugin_set.get("kind", "plugins") == "plugins")
+        first["folder"] = "Elsewhere"
+        self.assertIn("only data has a folder of its own", self.problems())
+        del first["folder"]
+        next(iter(first["platforms"].values()))["members"][0]["leave_out"] = ["x"]
+        self.assertIn("only data leaves anything out", self.problems())
+
+    def test_an_unknown_kind_is_said(self):
+        self.data["kind"] = "music"
+        self.assertIn("is not a kind of set", self.problems())
+
+    def test_a_set_of_data_still_needs_a_licence_that_may_ship(self):
+        self.data["licence"] = "AGPL-3.0-only"
+        self.assertIn("is not one that may ship", self.problems())
 
 
 if __name__ == "__main__":

@@ -15,14 +15,16 @@ pub use download::{
     fetched_shaders_folder, is_fetched, notice_of,
 };
 pub use manifest::{
-    ALLOWED_LICENCES, Build, BundleSet, EMBEDDED_MANIFEST, LicenceText, Manifest, Member, Source, licence_is_allowed,
-    this_platform,
+    ALLOWED_LICENCES, Build, BundleSet, EMBEDDED_MANIFEST, LicenceText, Manifest, Member, SetKind, Source,
+    licence_is_allowed, this_platform,
 };
 pub use shaders::{
     EMBEDDED_SHADER_MANIFEST, ShaderEntry, ShaderManifest, ShaderOutcome, ShaderSet, fetch_shaders,
     folder_of_a_shader_set, notice_of_a_shader_set, shader_bytes_to_download, shaders_are_fetched,
 };
 
+#[cfg(test)]
+mod data_tests;
 #[cfg(test)]
 mod macos_tests;
 #[cfg(test)]

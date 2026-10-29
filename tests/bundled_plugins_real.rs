@@ -26,15 +26,17 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
         serde_json::from_str(&std::fs::read_to_string(manifest_file()).expect("the manifest is read"))
             .expect("the manifest is JSON");
     let platform = fastforwardrs::plugin_bundles::this_platform().expect("builds for this system");
-    // (The sets that have a build for this system: Wolf Shaper has none for macOS.)
+    // (The sets that have a build for this system: Wolf Shaper has none for macOS, and the data of Surge XT has none for macOS either.)
     let sets_here: Vec<&serde_json::Value> = manifest["sets"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|set| set["platforms"][platform].is_object())
         .collect();
+    // (The plugins among them: a set of data is a folder of files that nothing runs.)
     let wanted_files: Vec<String> = sets_here
         .iter()
+        .filter(|set| set["kind"] != "data")
         .flat_map(|set| {
             // (The files the script takes for this system: the names are the same on every system.)
             set["platforms"][platform]["members"]
@@ -92,7 +94,8 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
     assert_eq!(found.effects.len(), wanted_files.len(), "{:?}", found.not_used);
     // Every folder of the set has its licence text and its notice.
     for set in sets_here {
-        let set_folder = folder.join(set["id"].as_str().unwrap());
+        // (A set of data is in the folder that it says, and not in one called after its id.)
+        let set_folder = folder.join(set["folder"].as_str().unwrap_or_else(|| set["id"].as_str().unwrap()));
         assert!(
             set_folder.join("NOTICE.txt").is_file(),
             "{set_folder:?} has no NOTICE.txt"
@@ -102,6 +105,82 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
             assert!(set_folder.join(name).is_file(), "{set_folder:?} has no {name}");
         }
     }
+}
+
+#[test]
+#[ignore = "needs the folder of bundled plugins that tools/bundled_plugins/fetch_bundled_plugins.py makes (FFRS_BUNDLED_PLUGINS)"]
+fn the_data_of_surge_xt_is_beside_the_plugins_whole_and_without_what_may_not_ship() {
+    let folder = bundled_plugins_folder().expect("FFRS_BUNDLED_PLUGINS names the folder that the script made");
+    let platform = fastforwardrs::plugin_bundles::this_platform().expect("builds for this system");
+    if platform == "macos-universal" {
+        eprintln!("SKIPPED: the data of Surge XT has no build for macOS");
+        return;
+    }
+    let data = folder.join("SurgeXTData");
+
+    let count = |sub: &str, extension: &str| -> usize {
+        fn walk(folder: &std::path::Path, extension: &str) -> usize {
+            std::fs::read_dir(folder)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .map(|entry| {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                walk(&path, extension)
+                            } else {
+                                usize::from(
+                                    path.extension()
+                                        .is_some_and(|found| found.eq_ignore_ascii_case(extension)),
+                                )
+                            }
+                        })
+                        .sum()
+                })
+                .unwrap_or(0)
+        }
+        walk(&data.join(sub), extension)
+    };
+    // (The numbers of release 1.3.4 of Surge XT: 4549 files in all, 3008 of them patches; the Waldorf wavetables, which are left out, were 51 files.)
+    assert_eq!(count("patches_factory", "fxp"), 637, "the factory patches");
+    assert_eq!(count("patches_3rdparty", "fxp"), 2_371, "the third-party patches");
+    assert_eq!(count("fx_presets", "srgfx"), 291, "the presets of the effects");
+    assert_eq!(
+        count("modulator_presets", "modpreset"),
+        100,
+        "the presets of the modulators"
+    );
+    // (The wavetables of the folder `wavetables` are 179 `.wt` files in release 1.3.4, 51 of them the Waldorf ones that are left out; the third-party ones that are `.wav` files are 382.)
+    assert_eq!(
+        count("wavetables", "wt"),
+        179 - 51,
+        "the wavetables, without the Waldorf ones"
+    );
+    assert_eq!(
+        count("wavetables_3rdparty", "wav"),
+        382,
+        "the third-party wavetables that are .wav files"
+    );
+    assert!(data.join("tuning_library").is_dir() && data.join("skins").is_dir());
+    // (What may not ship is not there; what a download writes with the data is.)
+    assert!(!data.join("wavetables").join("Waldorf").exists());
+    assert!(
+        !data
+            .join("skins")
+            .join("Tutorials")
+            .join("10 Adding Fonts.surge-skin")
+            .exists()
+    );
+    for name in ["LICENSE.txt", "AUTHORS.txt", "NOTICE.txt"] {
+        assert!(data.join(name).is_file(), "{name}");
+    }
+    // (Names that are not ASCII were written by the program that took the folder out of the archive.)
+    assert!(
+        data.join("patches_factory")
+            .join("Leads")
+            .join("\u{b5}computer.fxp")
+            .is_file()
+    );
 }
 
 fn manifest_file() -> PathBuf {

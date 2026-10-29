@@ -40,6 +40,15 @@ pub struct Manifest {
     pub sets: Vec<BundleSet>,
 }
 
+/// What a set holds: plugins (code, which the program runs), or data that plugins use (patches, wavetables: files, which nothing runs).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SetKind {
+    #[default]
+    Plugins,
+    Data,
+}
+
 /// One set of plugins from one author: one folder when it is fetched.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct BundleSet {
@@ -52,7 +61,14 @@ pub struct BundleSet {
     #[serde(default)]
     pub licence_note: Option<String>,
     pub homepage: String,
-    /// The names of the plugins in it, for a person.
+    /// Plugins, or data that plugins use (which has a section of its own in the tab: a person who wants the plugins is not made to fetch the data, which is bigger).
+    #[serde(default)]
+    pub kind: SetKind,
+    /// For data: the name of the folder in the folder of fetched plugins that the set is put in, which is the name that the plugin looks for (Surge XT looks for `SurgeXTData` in the folders
+    /// above its own file, so the set is put beside the folders of the plugins). Plugins are in a folder called after the id of the set.
+    #[serde(default)]
+    pub folder: Option<String>,
+    /// The names of the plugins in it, for a person (for data: what is in it).
     pub plugins: Vec<String>,
     pub licence_texts: Vec<LicenceText>,
     pub source: Source,
@@ -98,11 +114,36 @@ pub struct Build {
 pub struct Member {
     /// Its name inside the archive.
     pub from: String,
-    /// The name it is given in the set's folder: a plain name of a `.clap` file, or of an `.lv2` bundle (a folder).
+    /// The name it is given in the set's folder: a plain name of a `.clap` file, or of an `.lv2` bundle (a folder). **For data it is `.`**: what is in the folder `from` is the set's folder.
     pub to: String,
+    /// For data: paths inside the folder that are **not** kept (each a path with `/` between its parts, relative to the folder, and a folder ends with `/`), because they may not ship (what the
+    /// licence policy does not allow, or whose licence is not known). One that is not in the archive is an error: the manifest would be out of date.
+    #[serde(default)]
+    pub leave_out: Vec<String>,
+}
+
+impl BundleSet {
+    /// The name of the folder of this set in the folder of fetched plugins.
+    pub fn folder_name(&self) -> &str {
+        self.folder.as_deref().unwrap_or(&self.id)
+    }
+
+    /// Whether this is data that plugins use, and not plugins.
+    pub fn is_data(&self) -> bool {
+        self.kind == SetKind::Data
+    }
 }
 
 impl Manifest {
+    /// The same manifest with only the sets of one kind (the tab has a section for each).
+    #[must_use]
+    pub fn only(&self, kind: SetKind) -> Self {
+        Self {
+            format: self.format,
+            sets: self.sets.iter().filter(|set| set.kind == kind).cloned().collect(),
+        }
+    }
+
     /// The manifest that is kept in the program.
     ///
     /// # Panics
@@ -124,6 +165,8 @@ impl Manifest {
             return vec!["the manifest has no sets".to_owned()];
         }
         let mut seen: Vec<&str> = Vec::new();
+        // (The folders that the sets are put in: two sets may not be put in one, and a folder of data may not be the folder of a set of plugins.)
+        let mut folders: Vec<&str> = Vec::new();
         for set in &self.sets {
             let name = &set.id;
             if !is_a_plain_id(&set.id) {
@@ -135,6 +178,25 @@ impl Manifest {
                 problems.push(format!("set {name}: the id is used twice"));
             }
             seen.push(&set.id);
+            match (&set.folder, set.kind) {
+                (None, _) => {}
+                (Some(folder), SetKind::Data) if is_a_plain_file_name(folder) && !folder.starts_with('.') => {}
+                (Some(_), SetKind::Data) => {
+                    problems.push(format!("set {name}: the folder is not a plain name of a folder"));
+                }
+                (Some(_), SetKind::Plugins) => {
+                    problems.push(format!(
+                        "set {name}: only data has a folder of its own (plugins are in a folder called after the id)"
+                    ));
+                }
+            }
+            if folders.contains(&set.folder_name()) {
+                problems.push(format!(
+                    "set {name}: the folder {:?} is the folder of another set too",
+                    set.folder_name()
+                ));
+            }
+            folders.push(set.folder_name());
             if set.name.is_empty() || set.version.is_empty() || set.authors.is_empty() || set.plugins.is_empty() {
                 problems.push(format!("set {name}: a name, a version, authors and plugins are needed"));
             }
@@ -189,6 +251,13 @@ impl Manifest {
                     if member.from.is_empty() || member.from.starts_with(['/', '\\']) || climbs {
                         problems.push(format!("{there}: {:?} is not a name inside the archive", member.from));
                     }
+                    if set.is_data() {
+                        problems.extend(problems_of_a_member_of_data(&there, member, build.members.len()));
+                        continue;
+                    }
+                    if !member.leave_out.is_empty() {
+                        problems.push(format!("{there}: only data leaves anything out"));
+                    }
                     let lower = member.to.to_ascii_lowercase();
                     if !(is_a_plain_file_name(&member.to) && (lower.ends_with(".clap") || lower.ends_with(".lv2"))) {
                         problems.push(format!(
@@ -212,6 +281,36 @@ impl Manifest {
         }
         problems
     }
+}
+
+/// What is wrong with the one member of a set of data: it is a folder of the archive (its name ends with `/`) whose contents are the folder of the set (`to` is `.`), and what it leaves out are
+/// paths inside it that do not go out of it.
+fn problems_of_a_member_of_data(there: &str, member: &Member, how_many_members: usize) -> Vec<String> {
+    let mut problems = Vec::new();
+    if how_many_members != 1 {
+        problems.push(format!("{there}: a set of data takes one folder of the archive"));
+    }
+    if member.to != "." {
+        problems.push(format!(
+            "{there}: the member of a set of data is put as the folder of the set, and its name is \".\", not {:?}",
+            member.to
+        ));
+    }
+    if !member.from.ends_with('/') {
+        problems.push(format!(
+            "{there}: {:?} is the folder of a set of data, and its name inside the archive must end with /",
+            member.from
+        ));
+    }
+    for left_out in &member.leave_out {
+        let climbs = left_out.split('/').any(|part| part == "..");
+        if left_out.is_empty() || left_out.starts_with('/') || left_out.contains('\\') || climbs {
+            problems.push(format!(
+                "{there}: {left_out:?} is not a path inside the folder (parts with / between them, none going up)"
+            ));
+        }
+    }
+    problems
 }
 
 /// Whether an SPDX expression may ship: every part joined by AND must be allowed, and at least one part joined by OR. (Parentheses are not used, and a name with one in it is not an

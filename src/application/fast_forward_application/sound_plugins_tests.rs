@@ -845,6 +845,15 @@ fn the_view<'a>(
             folder: None,
             state: crate::application::plugin_manager_bundles::BundleState::Idle,
         },
+        data_bundles: crate::application::plugin_manager_bundles::BundlesView {
+            kind: crate::application::plugin_manager_bundles::BundleKind::PluginData,
+            rows: &[],
+            has_builds: false,
+            total_bytes: 0,
+            hosts: "",
+            folder: None,
+            state: crate::application::plugin_manager_bundles::BundleState::Idle,
+        },
         shader_bundles: crate::application::plugin_manager_bundles::BundlesView {
             kind: crate::application::plugin_manager_bundles::BundleKind::Shaders,
             rows: &[],

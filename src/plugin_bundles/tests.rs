@@ -20,7 +20,8 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
     let manifest = Manifest::embedded();
 
     assert_eq!(manifest.problems(), Vec::<String>::new());
-    let names: Vec<&str> = manifest
+    let plugin_sets = manifest.only(SetKind::Plugins);
+    let names: Vec<&str> = plugin_sets
         .sets
         .iter()
         .flat_map(|set| set.plugins.iter().map(String::as_str))
@@ -55,7 +56,7 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
         ]
     );
     // (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
-    for set in &manifest.sets {
+    for set in &manifest.only(SetKind::Plugins).sets {
         let is_lv2 = set.id.ends_with("-lv2");
         for platform in ["windows-x86_64", "linux-x86_64"] {
             assert!(set.platforms.contains_key(platform), "{} for {platform}", set.id);
@@ -73,6 +74,65 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             }
         }
     }
+}
+
+#[test]
+fn the_data_of_surge_xt_in_the_manifest_is_one_folder_for_windows_and_linux_without_what_may_not_ship() {
+    let manifest = Manifest::embedded();
+
+    let data = manifest.only(SetKind::Data);
+
+    assert_eq!(data.sets.len(), 1);
+    let set = &data.sets[0];
+    assert_eq!(
+        (
+            set.id.as_str(),
+            set.folder_name(),
+            set.licence.as_str(),
+            set.version.as_str()
+        ),
+        ("surge-xt-data", "SurgeXTData", "GPL-3.0-only", "1.3.4")
+    );
+    // (Windows and Linux: on macOS Surge XT looks for its data only in the folders of the person's own Library, which the program does not write in.)
+    assert_eq!(
+        set.platforms.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["linux-x86_64", "windows-x86_64"]
+    );
+    assert_eq!(
+        set.platforms["linux-x86_64"], set.platforms["windows-x86_64"],
+        "one release file"
+    );
+    let build = &set.platforms["windows-x86_64"];
+    assert!(build.url.ends_with("/surge-xt-portable-content-1.3.4.tar.gz"));
+    assert_eq!(build.members.len(), 1);
+    assert_eq!(
+        (build.members[0].from.as_str(), build.members[0].to.as_str()),
+        ("Surge Synth Team/SurgeXTData/", ".")
+    );
+    // (The wavetables that are named like the Waldorf Microwave's, and the skin whose fonts are under the OFL, which is not a licence that may ship here.)
+    assert_eq!(
+        build.members[0].leave_out,
+        ["wavetables/Waldorf/", "skins/Tutorials/10 Adding Fonts.surge-skin/"]
+    );
+    assert_eq!(
+        set.licence_texts
+            .iter()
+            .map(|text| text.name.as_str())
+            .collect::<Vec<_>>(),
+        ["LICENSE.txt", "AUTHORS.txt"]
+    );
+    let note = set.licence_note.as_deref().unwrap();
+    for wanted in ["issue 6741", "CC0", "wavetables/Waldorf", "OFL"] {
+        assert!(note.contains(wanted), "{wanted}: {note}");
+    }
+    // (Its folder is the one that the plugins' folders are beside, and no set of plugins has that name.)
+    assert!(
+        manifest
+            .only(SetKind::Plugins)
+            .sets
+            .iter()
+            .all(|set| set.folder_name() != "SurgeXTData")
+    );
 }
 
 #[test]
@@ -226,7 +286,7 @@ fn fetch(fixture: &Fixture, fetcher: &FakeFetcher, folder: &Path) -> Result<Outc
     )
 }
 
-fn names_in(folder: &Path) -> Vec<String> {
+pub(super) fn names_in(folder: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(folder)
         .map(|entries| {
             entries
@@ -579,10 +639,12 @@ fn a_tar_archive_gives_its_files_with_the_names_inside_it_with_or_without_dot_sl
                 Member {
                     from: "pack/A.clap".to_owned(),
                     to: "A.clap".to_owned(),
+                    leave_out: Vec::new(),
                 },
                 Member {
                     from: "Top.clap".to_owned(),
                     to: "Top.clap".to_owned(),
+                    leave_out: Vec::new(),
                 },
             ],
             installer: None,
@@ -801,17 +863,20 @@ fn fetch_the_real_plugins_from_the_network_and_find_every_file_the_manifest_name
     assert_eq!(outcome.sets.len(), sets_with_a_build.len());
     for set in sets_with_a_build {
         for member in &set.platforms[platform].members {
-            let file = folder.join(&set.id).join(&member.to);
-            if member.to.ends_with(".lv2") {
+            let file = folder.join(set.folder_name()).join(&member.to);
+            if set.is_data() {
+                // (The data of Surge XT: the patches and the wavetables are most of its 378 MB.)
+                assert!(size_of_a_file_or_a_folder(&file) > 300_000_000, "{file:?}");
+            } else if member.to.ends_with(".lv2") {
                 assert!(file.join("manifest.ttl").is_file(), "{file:?} is a bundle");
                 assert!(size_of_a_file_or_a_folder(&file) > 10_000, "{file:?}");
             } else {
                 assert!(size_of_a_file_or_a_folder(&file) > 100_000, "{file:?}");
             }
         }
-        assert!(folder.join(&set.id).join("NOTICE.txt").is_file());
+        assert!(folder.join(set.folder_name()).join("NOTICE.txt").is_file());
         for text in &set.licence_texts {
-            assert!(folder.join(&set.id).join(&text.name).is_file());
+            assert!(folder.join(set.folder_name()).join(&text.name).is_file());
         }
         assert!(is_fetched(set, platform, folder));
     }
@@ -883,6 +948,7 @@ fn a_fixture_with_an_lv2_bundle() -> Fixture {
     build.members = vec![Member {
         from: "pack/Thing.lv2/".to_owned(),
         to: "Thing.lv2".to_owned(),
+        leave_out: Vec::new(),
     }];
     fixture.manifest.sets = vec![set];
     fixture
@@ -945,6 +1011,7 @@ fn a_manifest_that_takes_a_folder_of(release_file: &[u8], file: &str, from: &str
             members: vec![Member {
                 from: from.to_owned(),
                 to: to.to_owned(),
+                leave_out: Vec::new(),
             }],
             installer: None,
         },
@@ -1042,6 +1109,7 @@ fn an_lv2_member_is_a_name_of_a_folder_and_what_is_not_is_said() {
             m.sets[0].platforms.get_mut(platform).unwrap().members[0] = Member {
                 from: from.to_owned(),
                 to: to.to_owned(),
+                leave_out: Vec::new(),
             };
         })
     };

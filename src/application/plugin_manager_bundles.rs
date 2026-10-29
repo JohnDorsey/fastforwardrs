@@ -16,7 +16,9 @@ use crate::plugin_bundles::Progress;
 /// What the tab says.
 pub const INTRO: &str = "Plugins that other people made. They are fetched from the release pages of their authors, and nothing is downloaded until you ask.";
 pub const SHADERS_INTRO: &str = "Shaders (ISF) that other people made. They are fetched from the page of their authors' repository, each file at a fixed version, and nothing is downloaded until you ask.";
+pub const DATA_INTRO: &str = "Patches, wavetables and presets that plugins use, such as Surge XT's. They are fetched from the release page of their authors, kept beside the plugins, and found by the plugins when they start; nothing is downloaded until you ask.";
 pub const SOUND_PLUGINS_HEADING: &str = "Sound plugins";
+pub const DATA_HEADING: &str = "Data for plugins";
 pub const SHADERS_HEADING: &str = "Shaders";
 pub const NO_BUILDS_NOTE: &str = "There are no builds of these plugins for this computer yet.";
 pub const ASK_YES_LABEL: &str = "Download";
@@ -27,10 +29,12 @@ pub const FETCHED_NOTE: &str = "fetched";
 pub const NOT_FETCHED_NOTE: &str = "not fetched yet";
 pub const NO_BUILD_FOR_THIS_COMPUTER_NOTE: &str = "no build for this computer";
 
-/// The two kinds of what can be fetched: each has a section of its own in the tab.
+/// The kinds of what can be fetched: each has a section of its own in the tab (the data is big, and a person who wants the plugins is not made to fetch it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BundleKind {
     SoundPlugins,
+    /// Patches, wavetables and presets that plugins find beside themselves.
+    PluginData,
     Shaders,
 }
 
@@ -39,6 +43,7 @@ impl BundleKind {
     pub const fn heading(self) -> &'static str {
         match self {
             Self::SoundPlugins => SOUND_PLUGINS_HEADING,
+            Self::PluginData => DATA_HEADING,
             Self::Shaders => SHADERS_HEADING,
         }
     }
@@ -47,17 +52,19 @@ impl BundleKind {
     pub const fn intro(self) -> &'static str {
         match self {
             Self::SoundPlugins => INTRO,
+            Self::PluginData => DATA_INTRO,
             Self::Shaders => SHADERS_INTRO,
         }
     }
 
-    /// What one of them is called, and several: `1 plugin`, `4 plugins`.
+    /// What one of them is called, and several: `1 plugin`, `4 plugins`, `1 set of data`.
     pub fn counted(self, count: usize) -> String {
-        let noun = match self {
-            Self::SoundPlugins => "plugin",
-            Self::Shaders => "shader",
+        let (one, several) = match self {
+            Self::SoundPlugins => ("plugin", "plugins"),
+            Self::PluginData => ("set of data", "sets of data"),
+            Self::Shaders => ("shader", "shaders"),
         };
-        format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+        format!("{count} {}", if count == 1 { one } else { several })
     }
 }
 
@@ -120,6 +127,7 @@ pub fn size_in_words(bytes: u64) -> String {
 pub fn download_button_label(view: &BundlesView<'_>) -> String {
     match view.kind {
         BundleKind::SoundPlugins => format!("Download all ({})...", size_in_words(view.total_bytes)),
+        BundleKind::PluginData => format!("Download all data ({})...", size_in_words(view.total_bytes)),
         BundleKind::Shaders => format!("Download all shaders ({})...", size_in_words(view.total_bytes)),
     }
 }

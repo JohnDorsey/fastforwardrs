@@ -291,10 +291,10 @@ pub fn fetched_shaders_folder() -> Option<PathBuf> {
 /// Whether every plugin of `set` for `platform` is in its folder in `folder` (a file, or on macOS a bundle, which is a folder).
 pub fn is_fetched(set: &BundleSet, platform: &str, folder: &Path) -> bool {
     set.platforms.get(platform).is_some_and(|build| {
-        build
-            .members
-            .iter()
-            .all(|member| folder.join(&set.id).join(&member.to).exists())
+        let place = folder.join(set.folder_name());
+        // (A set of data is its folder, and a folder that was made by a download has the notice, which is written last: a folder that a person made with the name is not taken for it.)
+        build.members.iter().all(|member| place.join(&member.to).exists())
+            && (!set.is_data() || place.join("NOTICE.txt").is_file())
     })
 }
 
@@ -416,14 +416,16 @@ fn fetch_the_sets(
             let _ = fs::remove_dir_all(&building);
             return Err(error);
         }
-        let place = folder.join(&set.id);
+        let place = folder.join(set.folder_name());
         let _ = fs::remove_dir_all(&place);
         fs::rename(&building, &place)
             .map_err(|error| format!("{} could not be put in place: {error}", place.display()))?;
         outcome.sets.push(set.name.clone());
-        outcome
-            .plugin_files
-            .extend(build.members.iter().map(|member| place.join(&member.to)));
+        if !set.is_data() {
+            outcome
+                .plugin_files
+                .extend(build.members.iter().map(|member| place.join(&member.to)));
+        }
     }
     report(&Progress {
         step: "Done".to_owned(),
@@ -446,7 +448,9 @@ fn build_the_set(
     {
         let mut opened = super::archive::open(archive, build.installer.as_deref(), temporary)?;
         for member in &build.members {
-            opened.take(&member.from, &building.join(&member.to))?;
+            let taken = building.join(&member.to);
+            opened.take(&member.from, &taken)?;
+            leave_out(&member.from, &taken, &member.leave_out)?;
         }
     }
     for text in &set.licence_texts {
@@ -458,6 +462,25 @@ fn build_the_set(
     }
     fs::write(building.join("NOTICE.txt"), notice_of(set))
         .map_err(|error| format!("NOTICE.txt could not be written: {error}"))
+}
+
+/// Takes away from what was taken (`taken`) the paths that the manifest says are not kept: the parts of a set of data that may not ship. **One that is not there is an error**: it means that
+/// the release file is not the one that the manifest was made for, and what it leaves out may now be somewhere else.
+fn leave_out(from: &str, taken: &Path, paths: &[String]) -> Result<(), String> {
+    for path in paths {
+        let wanted = taken.join(path.trim_end_matches('/'));
+        let removed = if wanted.is_dir() {
+            fs::remove_dir_all(&wanted)
+        } else if wanted.is_file() && !path.ends_with('/') {
+            fs::remove_file(&wanted)
+        } else {
+            return Err(format!(
+                "{path:?} is not in {from:?}, and the manifest says that it is left out: the release file is not the one that the manifest was made for, so nothing of it was used"
+            ));
+        };
+        removed.map_err(|error| format!("{path:?} could not be left out: {error}"))?;
+    }
+    Ok(())
 }
 
 pub(super) fn check_the_checksum(path: &Path, wanted: &str, url: &str) -> Result<(), String> {
@@ -485,11 +508,17 @@ pub fn notice_of(set: &BundleSet) -> String {
         format!(
             "Licence: {}{}",
             set.licence,
-            set.licence_note.as_ref().map_or_else(String::new, |note| format!(" ({note})"))
+            set.licence_note
+                .as_ref()
+                .map_or_else(String::new, |note| format!(" ({note})"))
         ),
         format!("Home page: {}", set.homepage),
         String::new(),
-        "These files are the plugins as their authors released them, unaltered, fetched by fastforwardrs from the address of the release, and they are used under their own licence (the text is in this folder).".to_owned(),
+        if set.is_data() {
+            "These files are as their authors released them, fetched by fastforwardrs from the address of the release (what the manifest says is not kept was left out), and they are used under their own licence (the text is in this folder).".to_owned()
+        } else {
+            "These files are the plugins as their authors released them, unaltered, fetched by fastforwardrs from the address of the release, and they are used under their own licence (the text is in this folder).".to_owned()
+        },
         String::new(),
         format!("The corresponding source of this version is at: {}", set.source.url),
     ];

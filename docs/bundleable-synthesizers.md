@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 John Dorsey
 SPDX-License-Identifier: GPL-3.0-or-later
 -->
 
-# Synthesizers that the Bundles tab fetches (2026-10-29)
+# Synthesizers, and the data of Surge XT, that the Bundles tab fetches (2026-10-29)
 
 The maintainer asked (2026-10-29): "find some synthesizers (LV2 and CLAP) that we can legally bundle with this project, and make them downloadable from the plugin manager ... I have tried Surge XT before and I like it, so please make it a priority if its license is compatible with ours." This is what was added, what was left out and why, what trying them found, and what is still open. **[V]** = I ran it or read it myself today; **[B]** = I believe it from reading, and could not check it.
 
@@ -22,6 +22,44 @@ All five come out of release files that the Bundles tab fetches already for the 
 **Surge XT is licence-compatible and is in**, as the maintainer asked (GPL-3.0; 1.3.4 is the newest release, 2024-08-11 [V]). **LV2 synthesizers are Kars and Nekobi**; Surge XT's LV2 bundle exists for Linux only and the program cannot use it yet (see *Left out*).
 
 **A correction of mine about Nekobi.** `bundleable-clap-plugins.md` said Nekobi is "GPL-2.0 only" and left it out; the maintainer's decision of 2026-10-20 repeated that. **I had read the table of the DPF-Plugins pack, which says only `GPL-2.0`, and not the source files.** Today **[V]**: every source file of Nekobi that has a notice (`DistrhoPluginNekobi.hpp`, `DistrhoUINekobi.*`, `NekoWidget.hpp`, `nekobee_synth.c`, `nekobee_voice.c`, `nekobee_voice.h`, `minblep_tables.c`, `nekobee_types.h`) says "either version 2 of the License, or (at your option) any later version", which is **GPL-2.0-or-later and is allowed by LG-02**. Two files have no notice (`nekobee_voice_render.c`, and `DistrhoArtworkNekobi.cpp`, which is the picture of the plugin as numbers: "Auto-generated binary data file"), and `nekobee_synth.h` mentions the LGPL v2.1 for a part that came from alsa-lib (compatible). **That is a reading, not a certainty**: the pack's own licence table and the text kept in the plugin's folder (the text of version 2) do not say "or later", so if you read the pack's table as the final word, Nekobi is out. **The manifest says so in the `licence_note` of both sets; taking Nekobi out is deleting two sets** (and the names in two tests).
+
+## Surge XT's patches, wavetables and presets (the maintainer's second request, the same day)
+
+The maintainer then asked for **"as many of Surge XT's factory patches and wavetables and other presets as we can legally bundle"**. The answer is a **sixth set, `surge-xt-data`, which is a set of a new kind: data** (a folder of files that nothing runs, that a plugin finds beside itself). It is **4,492 files, 383 MB on disk, from a release file of 252.8 MB**, and it has **a section of its own in the Bundles tab (*Data for plugins*), with its own button, size and question**, so that a person who wants the plugins is not made to fetch it (the button of the plugins is still 151.5 MB on Windows).
+
+| What | Files | MB | Where it comes from |
+|---|---:|---:|---|
+| factory patches (17 folders: Basses, Brass, Chords, FX, Keys, Leads, MPE, Pads, Percussion, Plucks, Polysynths, Sequences, Splits, Templates, Tutorials, Vocoder, Winds) | 637 | 23.9 | Claes Johanson (Vember Audio) and the Surge Synth Team |
+| third-party patches (32 folders, one for each author, from A.Liv to Zoozither) | 2,371 | 193.2 | contributed by their authors, see below |
+| wavetables | 139 | 5.7 | the Surge Synth Team |
+| third-party wavetables (9 folders: A.Liv, Damon Armani, Emu, Emu VSCO, Layzer, Philippe Favre, Qonundrai, TNMG, Venus Theory) | 573 | 150.0 | contributed by their authors |
+| presets of the effects, presets of the modulators | 291 + 100 | 0.3 | the Surge Synth Team |
+| skins | 180 | 8.2 | the Surge Synth Team |
+| tuning files (`.scl` and `.kbm`, with their notes) | 200 | 1.5 | contributed (Jacky Ligon among them **[B]**) |
+
+**Left out: 57 files.** `wavetables/Waldorf` (51 files, **named like the Waldorf Microwave's factory wavetables: `microwave1`, `MW E-Pian`, `vs1`, `JSMITH`, `WETFONE`... which are not the Surge Synth Team's** and have no statement of any licence that I found), and the skin `10 Adding Fonts` (6 files: its four fonts are under the SIL Open Font Licence, which is not on the list of the licences that may ship here: `LG-02`). Both are `leave_out` lines of the manifest, and **a pack that a maintainer would rather not ship is one more line**.
+
+### Why it may ship, and what that rests on
+
+* **[V] The team says the data is GPL-3.0.** Issue 6741 of the Surge repository (opened by a member of the team, still open): "GPLv3 is a poor fit for the type of material in our factory data", and it proposes to re-license it later "with the permission of all IP owners". The release is built from the repository, whose `LICENSE` is GPL-3.0, and the data is in the repository (`resources/data`) and in the source archive that the manifest names. The set is therefore `GPL-3.0-only`, which `LG-02` allows, with the licence text, the list of authors (`AUTHORS`), a notice and the corresponding source.
+* **[V] Some of it says CC0 in its own metadata**: the 15 factory *Templates*, which the team re-licensed explicitly in 1.x (its issue 6743: "Replace the original set of Templates with some that are CC0-licensed"), and 78 patches in all.
+* **[V] What I looked for and did not find.** I read the metadata of **all 3,008 patches**: 78 say CC0, 174 have an empty licence field, 2,756 have none, and **none says anything stricter**; and I searched every text file, the metadata of every patch and the ends of the audio files for "copyright", "all rights reserved", "non-commercial", "do not redistribute", "permission" and the like: **no hit** (the three PDFs are compressed and were not read **[B]**).
+* **[V] The manual says** the third-party patches "were contributed by users and the Surge Synth Team". A contribution to a GPL-3.0 repository is made under it.
+* **[B] What is not known.** **Nothing in the data states that each third-party author agreed to the GPL**: that rests on the team's statement and on the contribution. If an author never agreed, the team's statement is what the program relies on, as every packager of Surge does (Debian does not package Surge: **[V]** the pool answers 404; so there is no outside audit). I cannot do better from here; a maintainer who wants to be stricter has the per-folder `leave_out` lines, and the authors' folders are named in `NOTICE.txt`.
+
+### How Surge finds it, and what the program does
+
+* **Where.** The data is put in **`SurgeXTData` in the folder of the fetched plugins**, beside the folders of the plugins. On **Windows and Linux** Surge XT looks for a folder of that name **in the folders above its own file** (`SurgeStorage.cpp` of 1.3.4, which I read), so both the synthesizer and the effects plugin find it. **On macOS it does not**: Surge looks there only in the person's own `~/Library/Application Support/Surge XT`, which the program does not write in, so **the data has no build for macOS** (the tab says "no build for this computer"). A person can still set `SURGE_DATA_HOME`.
+* **A fault found by the real archive, and fixed: the program now reads a `.tar.gz` itself.** The first fetch put **three names wrong** (`Café` came out `Caf├⌐`, `µcomputer` came out `┬╡computer`, `Wavetextures™` came out `WavetexturesΓäó`): **the `tar` of Windows reads the names of a tar that was made on Linux by the code page of the console.** The test that I had written for names that are not ASCII had passed, because the archive in it was made and read by the same `tar`. `archive.rs` now reads a gzipped tar itself (GNU and pax formats, long names, `./` in front of the names, a refusal of a name that goes out of the folder), with `flate2`, which the program has already; a test builds the archive byte by byte, as the real file's are, with the names as UTF-8. The `.tar.xz` files (the plugins for Linux) are still given to the system's `tar`, whose names are all ASCII.
+* **The notice.** The notice, the text of the GPL and `AUTHORS.txt` are in `SurgeXTData` itself, where they go with the data.
+
+### What was checked
+
+* **[V] The program's own downloader**, on Windows (404.3 MB in 97 s and in 104 s) and in Ubuntu (367.2 MB in 104 s), fetched every set including the data, every checksum right. **The real checks then passed with exact counts**: 637 factory patches, 2,371 third-party ones, 291 and 100 presets, 128 `.wt` wavetables in the folder `wavetables` (179 minus the 51 Waldorf ones) and 382 `.wav` third-party ones, no `Waldorf` folder, no skin `10`, and **`µcomputer.fxp` where it has to be**.
+* **[V] The Python script** (`tools/bundled_plugins/fetch_bundled_plugins.py`, which a release uses) makes **the same tree, file for file and byte for byte** (4,495 files; only the wording of `NOTICE.txt` differs, as it always did).
+* **[V] A photograph of the real window of Surge XT, from the fetched folder**: with the data absent it opened on the patch *Init*; **with it, it opens on *Init Saw* (category *Templates*, by the Surge Synth Team, CC0), and its patch browser lists the 16 categories of factory patches and the 32 folders of third-party ones**, with *Tutorials*.
+* **[V] 24 mistakes planted in the new code** (the reader of a gzipped tar: the check of the header, the `./`, long names, pax headers, the prefix of a POSIX name, the padding, a name that goes up, a folder that only begins with the name; the rules of the manifest for data; what is left out; the place of the set; the section of the tab): **every one was noticed**. (A first run of the campaign stopped at the eleventh, because the tests of a mistake that gave the archive back to the system's `tar` printed names that my script could not decode; it was run again from there.)
+* **[B] Not done**: nobody chose a factory patch in the window and played it; whether a patch that uses a wavetable from `wavetables_3rdparty` finds it is not tried (Surge keeps a wavetable of the patch in the patch's own state, so I expect it does).
 
 ## What trying them found (two faults of the program, now fixed)
 
@@ -45,7 +83,7 @@ Both have tests that fail without them: a test instrument in `clap-test-plugins`
 
 ## Limits you should know about
 
-* **Surge XT's factory patches and wavetables are not fetched.** Surge looks for its data in a folder (`SurgeXTData` beside the plugin, or `SURGE_DATA_HOME`, or its installer's folder), and the program's plugin release file has none: **a person gets the Init patch (a sawtooth) and the oscillators that need no file, and the patch browser lists only Init** [V]. The data is a separate release file of 252 MB (`surge-xt-portable-content-1.3.4.tar.gz`), and **its licences were not read** (the Init patch says CC0; the factory set has third-party patches **[B]**). Fetching it would need a new kind of member in the manifest (a folder of data, not a plugin). It is the first thing I would do next if the maintainer wants Surge with its patches.
+* **Surge XT's patches and wavetables are a separate download** (the section *Data for plugins* of the tab, 252.8 MB), **and are not there for macOS** (see above). Without them a person gets the Init patch (a sawtooth) and the oscillators that need no file, and the patch browser lists only *Init* [V].
 * **The start check does not run for instruments** (it needs audio to feed: a plugin with no main input is `NotChecked`, as the test instruments were), so whether Surge's, Kars's or Nekobi's sound at the start depends on old memory (the fault that made Aura Lite unreliable) was **not tested** for them. Nothing was run for them as it was for the reverbs (800 checks each).
 * **Nothing is distributed yet** (no release has been made); the sets are fetched by the Bundles tab from their authors' pages, as before.
 

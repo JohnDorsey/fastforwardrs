@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{
-    Build, BundleSet, CANCELLED, Fetcher, LicenceText, Manifest, Member, ShaderEntry, ShaderManifest, ShaderSet, Source,
+    Build, BundleSet, CANCELLED, Fetcher, LicenceText, Manifest, Member, SetKind, ShaderEntry, ShaderManifest,
+    ShaderSet, Source,
 };
 use crate::digest::Sha256Digest;
 
@@ -108,6 +109,8 @@ pub(crate) fn a_fixture() -> Fixture {
         licence: "GPL-3.0-or-later".to_owned(),
         licence_note: None,
         homepage: "https://example.org/".to_owned(),
+        kind: SetKind::Plugins,
+        folder: None,
         plugins: plugins.iter().map(|name| (*name).to_owned()).collect(),
         licence_texts: vec![LicenceText {
             name: "LICENSE.txt".to_owned(),
@@ -131,6 +134,7 @@ pub(crate) fn a_fixture() -> Fixture {
                     .map(|(from, to)| Member {
                         from: (*from).to_owned(),
                         to: (*to).to_owned(),
+                        leave_out: Vec::new(),
                     })
                     .collect(),
                 installer: None,
@@ -173,6 +177,50 @@ pub(crate) fn a_fixture() -> Fixture {
         manifest: Manifest { format: 1, sets },
         files,
     }
+}
+
+/// The folder of the data inside the zip.
+pub(crate) const INSIDE: &str = "Pack/Data/";
+
+/// A fixture of the plugin sets of `a_fixture`, and one set of data (`data`, put in the folder `TheData`) from a zip of its own: patches, two folders of wavetables (one of them is left out), a skin,
+/// and a font that is left out.
+pub(crate) fn a_fixture_with_data() -> Fixture {
+    let mut fixture = a_fixture();
+    let zip = a_zip(&[
+        ("Pack/Data/patches/a.fxp", b"a patch"),
+        ("Pack/Data/patches/Factory/b.fxp", b"another patch"),
+        ("Pack/Data/wavetables/Free/x.wt", b"a free wavetable"),
+        ("Pack/Data/wavetables/Maybe/y.wt", b"a wavetable that may not ship"),
+        ("Pack/Data/skins/plain/skin.xml", b"a skin"),
+        ("Pack/Data/skins/plain/font.ttf", b"a font that may not ship"),
+        ("Pack/Data/skins/readme.txt", b"kept"),
+        ("Pack/Other/not-taken.txt", b"another folder of the zip"),
+    ]);
+    fixture
+        .files
+        .insert("https://example.org/data.zip".to_owned(), zip.clone());
+    let mut set = fixture.manifest.sets.remove(0);
+    set.id = "data".to_owned();
+    set.name = "THE DATA".to_owned();
+    set.kind = SetKind::Data;
+    set.folder = Some("TheData".to_owned());
+    set.plugins = vec!["patches".to_owned(), "wavetables".to_owned(), "skins".to_owned()];
+    set.platforms = BTreeMap::from([(
+        "windows-x86_64".to_owned(),
+        Build {
+            url: "https://example.org/data.zip".to_owned(),
+            sha256: sha(&zip),
+            size: zip.len() as u64,
+            members: vec![Member {
+                from: INSIDE.to_owned(),
+                to: ".".to_owned(),
+                leave_out: vec!["wavetables/Maybe/".to_owned(), "skins/plain/font.ttf".to_owned()],
+            }],
+            installer: None,
+        },
+    )]);
+    fixture.manifest.sets.insert(0, set);
+    fixture
 }
 
 /// What a fixture of shaders has: a manifest of two sets, and the bytes that every address in it serves.

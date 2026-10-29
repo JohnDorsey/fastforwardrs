@@ -52,6 +52,7 @@ fn a_manifest_with_one_build(
             members: vec![Member {
                 from: member_from.to_owned(),
                 to: "Reverb.clap".to_owned(),
+                leave_out: Vec::new(),
             }],
             installer: installer.map(str::to_owned),
         },

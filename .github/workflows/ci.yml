@@ -174,6 +174,20 @@ jobs:
           FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The synthesizers of the fetched bundled plugins failed on macOS" cargo test --release --test bundled_synthesizers_real --no-fail-fast -- --ignored --nocapture --test-threads=1
           echo "::notice title=Fetched bundled plugins (macOS)::$(find "$fetched" -maxdepth 2 | sed "s|$fetched/||" | tr '\n' '|')"
 
+      # The same on Linux, with the data of Surge XT (the 253 MB of patches and wavetables, which a tar.gz holds with names that are not ASCII): the real fetch by the program's own downloader
+      # (about 370 MB), what it fetched scanned and played, and the data counted. A failure is a WARNING that says what failed, and does not make the build red.
+      - name: Fetch the bundled plugins and the data and try them (Linux; failures are warnings)
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 25
+        continue-on-error: true
+        shell: bash
+        run: |
+          fetched="$RUNNER_TEMP/fetched-plugins"
+          mkdir -p "$fetched"
+          FFRS_FETCH_INTO="$fetched" bash tools/ci/run_tests_and_report.sh warning "The real fetch of the bundled plugins and data failed on Linux" cargo test --lib --no-fail-fast fetch_the_real_plugins -- --ignored --nocapture
+          FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The scan of the fetched bundled plugins and the count of the data failed on Linux" cargo test --test bundled_plugins_real --no-fail-fast -- --ignored --nocapture --test-threads=1
+          FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The synthesizers of the fetched bundled plugins failed on Linux" cargo test --test bundled_synthesizers_real --no-fail-fast -- --ignored --nocapture --test-threads=1
+
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
       # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.
       - name: Show the graphics adapters

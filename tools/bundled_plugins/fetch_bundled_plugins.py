@@ -58,6 +58,8 @@ ALLOWED = PERMISSIVE | COPYLEFT
 
 THE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 THE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# What a set holds: plugins (code), or data that plugins find beside themselves (Surge XT's patches and wavetables: files).
+THE_KINDS = ("plugins", "data")
 
 
 def licence_is_allowed(expression: str) -> bool:
@@ -85,6 +87,8 @@ def check_manifest(manifest: dict, allow_local_addresses: bool = False) -> list[
     if not isinstance(sets, list) or not sets:
         return ["the manifest has no sets"]
     seen_ids: set[str] = set()
+    # (The folders that the sets are put in: two sets may not be put in one, and a folder of data may not be the folder of a set of plugins.)
+    seen_folders: set[str] = set()
     for number, plugin_set in enumerate(sets):
         name = plugin_set.get("id", f"#{number}")
         where = f"set {name}"
@@ -93,6 +97,19 @@ def check_manifest(manifest: dict, allow_local_addresses: bool = False) -> list[
         elif plugin_set["id"] in seen_ids:
             problems.append(f"{where}: the id is used twice")
         seen_ids.add(str(plugin_set.get("id")))
+        kind = plugin_set.get("kind", "plugins")
+        if kind not in THE_KINDS:
+            problems.append(f"{where}: {kind!r} is not a kind of set ({', '.join(THE_KINDS)})")
+        is_data = kind == "data"
+        folder_name = set_folder_name(plugin_set)
+        if "folder" in plugin_set:
+            if not is_data:
+                problems.append(f"{where}: only data has a folder of its own (plugins are in a folder called after the id)")
+            elif not _is_a_plain_file_name(plugin_set["folder"]) or plugin_set["folder"].startswith("."):
+                problems.append(f"{where}: the folder is not a plain name of a folder")
+        if folder_name in seen_folders:
+            problems.append(f"{where}: the folder {folder_name!r} is the folder of another set too")
+        seen_folders.add(str(folder_name))
         for field in ("name", "version", "homepage"):
             if not plugin_set.get(field):
                 problems.append(f"{where}: no {field}")
@@ -140,6 +157,11 @@ def check_manifest(manifest: dict, allow_local_addresses: bool = False) -> list[
                 taken, kept = member.get("from", ""), member.get("to", "")
                 if not taken or taken.startswith(("/", "\\")) or ".." in re.split(r"[\\/]", taken):
                     problems.append(f"{there}: the file {taken!r} is not a name inside the archive")
+                if is_data:
+                    problems.extend(_problems_of_a_member_of_data(there, member, len(members)))
+                    continue
+                if member.get("leave_out"):
+                    problems.append(f"{there}: only data leaves anything out")
                 if not (_is_a_plain_file_name(kept) and kept.lower().endswith((".clap", ".lv2"))):
                     problems.append(f"{there}: {kept!r} is not a plain name of a .clap file or an .lv2 folder")
                 # (An LV2 bundle is a folder: out of a zip or a tar it is taken by the name of the folder with a `/` at the end, and without it only one file would be taken.)
@@ -148,6 +170,26 @@ def check_manifest(manifest: dict, allow_local_addresses: bool = False) -> list[
                 if kept in targets:
                     problems.append(f"{there}: {kept!r} is taken twice")
                 targets.add(kept)
+    return problems
+
+
+def set_folder_name(plugin_set: dict) -> str:
+    """The name of the folder of a set in the folder of the plugins: the id, unless a set of data says another (the name that a plugin looks for)."""
+    return plugin_set.get("folder") if isinstance(plugin_set.get("folder"), str) else str(plugin_set.get("id"))
+
+
+def _problems_of_a_member_of_data(there: str, member: dict, how_many: int) -> list[str]:
+    """What is wrong with the one member of a set of data: a folder of the archive (its name ends with `/`) whose contents are the folder of the set (`to` is `.`), and what it leaves out are paths inside it."""
+    problems: list[str] = []
+    if how_many != 1:
+        problems.append(f"{there}: a set of data takes one folder of the archive")
+    if member.get("to") != ".":
+        problems.append(f"{there}: the member of a set of data is put as the folder of the set, and its name is \".\", not {member.get('to')!r}")
+    if not str(member.get("from", "")).endswith("/"):
+        problems.append(f"{there}: {member.get('from')!r} is the folder of a set of data, and its name inside the archive must end with /")
+    for left_out in member.get("leave_out") or []:
+        if not isinstance(left_out, str) or not left_out or left_out.startswith("/") or "\\" in left_out or ".." in left_out.split("/"):
+            problems.append(f"{there}: {left_out!r} is not a path inside the folder (parts with / between them, none going up)")
     return problems
 
 
@@ -302,6 +344,18 @@ def _take_from_an_expanded_installer(expanded: pathlib.Path, wanted: str, to: pa
         shutil.copy2(source, to)
 
 
+def _leave_out(taken: pathlib.Path, paths: list[str], from_name: str) -> None:
+    """Takes away from what was taken the paths that the manifest says are not kept (the parts of a set of data that may not ship). One that is not there is an error: the release file is not the one the manifest was made for."""
+    for path in paths:
+        wanted = taken / path.rstrip("/")
+        if wanted.is_dir():
+            shutil.rmtree(wanted)
+        elif wanted.is_file() and not path.endswith("/"):
+            wanted.unlink()
+        else:
+            raise FetchError(f"{path!r} is not in {from_name!r}, and the manifest says that it is left out: the release file is not the one that the manifest was made for, so nothing of it was used")
+
+
 def _take_the_members(archive_path: pathlib.Path, archive: dict, building: pathlib.Path) -> None:
     """Puts the files the manifest names for this build in `building`: from a zip or a tar (a name that ends with `/` is a folder), or from the installer in a disk image."""
     members = archive["members"]
@@ -309,6 +363,7 @@ def _take_the_members(archive_path: pathlib.Path, archive: dict, building: pathl
         with tempfile.TemporaryDirectory() as work, _expanded_installer(archive_path, archive["installer"], pathlib.Path(work)) as expanded:
             for member in members:
                 _take_from_an_expanded_installer(expanded, member["from"], building / member["to"])
+                _leave_out(building / member["to"], member.get("leave_out") or [], member["from"])
         return
     for member in members:
         if member["from"].endswith("/") and zipfile.is_zipfile(archive_path):
@@ -317,6 +372,7 @@ def _take_the_members(archive_path: pathlib.Path, archive: dict, building: pathl
             _take_a_folder_from_a_tar(archive_path, member["from"], building / member["to"])
         else:
             (building / member["to"]).write_bytes(_member_bytes(archive_path, member["from"]))
+        _leave_out(building / member["to"], member.get("leave_out") or [], member["from"])
 
 
 def assemble(
@@ -326,19 +382,26 @@ def assemble(
     cache: pathlib.Path,
     with_source: bool = False,
     allow_local_addresses: bool = False,
+    with_data: bool = True,
 ) -> list[pathlib.Path]:
-    """Puts the plugins of the manifest for `platform_name` in `out`, one folder for each set, and gives the plugin files. A set whose files cannot all be had is not left half made."""
+    """Puts the plugins of the manifest for `platform_name` in `out`, one folder for each set, and gives the plugin files (the sets of data, which are put in too unless `with_data` is false, are not plugin
+    files). A set whose files cannot all be had is not left half made."""
     problems = check_manifest(manifest, allow_local_addresses)
     if problems:
         raise FetchError("the manifest is not fit:\n  " + "\n  ".join(problems))
     made: list[pathlib.Path] = []
     out.mkdir(parents=True, exist_ok=True)
+    kept_sets = []
     for plugin_set in manifest["sets"]:
+        is_data = plugin_set.get("kind", "plugins") == "data"
+        if is_data and not with_data:
+            continue
+        kept_sets.append(plugin_set)
         archive = plugin_set["platforms"].get(platform_name)
         if archive is None:
             print(f"{plugin_set['id']}: no build for {platform_name}, left out", file=sys.stderr)
             continue
-        folder = out / plugin_set["id"]
+        folder = out / set_folder_name(plugin_set)
         building = out / (plugin_set["id"] + ".building")
         shutil.rmtree(building, ignore_errors=True)
         building.mkdir()
@@ -358,8 +421,9 @@ def assemble(
             raise
         shutil.rmtree(folder, ignore_errors=True)
         building.rename(folder)
-        made.extend(folder / member["to"] for member in archive["members"])
-    (out / "README.txt").write_text(readme_of(manifest, with_source), encoding="utf8")
+        if not is_data:
+            made.extend(folder / member["to"] for member in archive["members"])
+    (out / "README.txt").write_text(readme_of({**manifest, "sets": kept_sets}, with_source), encoding="utf8")
     return made
 
 
@@ -371,7 +435,11 @@ def notice_of(plugin_set: dict, with_source: bool) -> str:
         f"Licence: {plugin_set['licence']}" + (f" ({plugin_set['licence_note']})" if plugin_set.get("licence_note") else ""),
         f"Home page: {plugin_set['homepage']}",
         "",
-        "This is the plugin as its authors released it, unaltered, and it is bundled with fastforwardrs under its own licence (the text is in this folder).",
+        (
+            "This is data as its authors released it (what the manifest says is not kept was left out), and it is bundled with fastforwardrs under its own licence (the text is in this folder)."
+            if plugin_set.get("kind", "plugins") == "data"
+            else "This is the plugin as its authors released it, unaltered, and it is bundled with fastforwardrs under its own licence (the text is in this folder)."
+        ),
         "",
         f"The corresponding source of this version is {'in the folder `source` here and also ' if with_source else ''}at: {source['url']}",
     ]
@@ -411,6 +479,7 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument("--out", type=pathlib.Path, help="the folder to make (it is called `plugins` and put beside the program)")
     parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path(tempfile.gettempdir()) / "fastforwardrs-bundled-plugin-cache")
     parser.add_argument("--with-source", action="store_true", help="also put the source archives in the folders")
+    parser.add_argument("--without-data", action="store_true", help="leave out the sets of data (patches and wavetables that plugins use), which are the biggest download")
     parser.add_argument("--check", action="store_true", help="only check the manifest against the policy (no network)")
     given = parser.parse_args(arguments)
     manifest = json.loads(given.manifest.read_text(encoding="utf8"))
@@ -424,7 +493,7 @@ def main(arguments: list[str] | None = None) -> int:
     if given.out is None:
         parser.error("--out is needed (or --check)")
     try:
-        made = assemble(manifest, given.platform, given.out, given.cache, given.with_source)
+        made = assemble(manifest, given.platform, given.out, given.cache, given.with_source, with_data=not given.without_data)
     except FetchError as error:
         print(error, file=sys.stderr)
         return 1

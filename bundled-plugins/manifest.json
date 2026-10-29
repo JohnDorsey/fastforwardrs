@@ -1095,6 +1095,80 @@
           ]
         }
       }
+    },
+    {
+      "id": "surge-xt-data",
+      "name": "Surge XT patches and wavetables",
+      "version": "1.3.4",
+      "authors": [
+        "Claes Johanson (Vember Audio) and the Surge Synth Team",
+        "and the authors of the third-party patches and wavetables, who are named in NOTICE.txt and AUTHORS.txt"
+      ],
+      "licence": "GPL-3.0-only",
+      "licence_note": "The Surge Synth Team distributes this data with Surge XT under the GPLv3 of its repository (its issue 6741 says so: \"GPLv3 is a poor fit for the type of material in our factory data\", and asks for permission to re-license it later); the Templates and some patches say CC0 in their own metadata, and no patch says anything stricter. The third-party patches and wavetables were contributed to that repository by their authors (the folders are called after them): A.Liv, Altenberg, Argitoth, Bluelight, Cybersoda, Damon Armani, Dan Maurer, Databroth, The Emu (J Riley Hill), Giana Brotherz (Sola), Inigo Kennedy, Jacky Ligon, John Valentine, Kinsey Dulcet, Kuniklo, Kyurumi, Landosonic, Roger Linn and thoughtForm (LinnStrument MPE), Luna, Malfunction, Nick Moritz, Noisegeek, Psiome Send Sound, Rare Earth (Leonard Bowman), Rozzer, Slowboat, Stefan Singer, The Nerdy Music Guy (TNMG), Vincent Zauhar, Vospi, Xenofish and Polyslax (Zoozither) for patches; Layzer, Philippe Favre, Qonundrai, Venus Theory, Emu (VSCO), A.Liv, Damon Armani and TNMG for wavetables. Left out, because their licence is not known or may not ship here: wavetables/Waldorf (named like the Waldorf Microwave wavetables, which are not the Surge Synth Team's) and the skin 10 Adding Fonts (its fonts are under the OFL). A person who knows better than this note should say so: the data is easy to leave out.",
+      "homepage": "https://surge-synthesizer.github.io/",
+      "kind": "data",
+      "folder": "SurgeXTData",
+      "plugins": [
+        "factory patches",
+        "third-party patches",
+        "wavetables",
+        "third-party wavetables",
+        "effect presets",
+        "modulator presets",
+        "skins",
+        "tuning files"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/surge-synthesizer/surge/release_xt_1.3.4/LICENSE",
+          "sha256": "d4c0fe570b3750d909691ce5f494c9cd11ee047bbbedda9a5d75cc548e4df06b"
+        },
+        {
+          "name": "AUTHORS.txt",
+          "url": "https://raw.githubusercontent.com/surge-synthesizer/surge/release_xt_1.3.4/AUTHORS",
+          "sha256": "1a868e0945b8a589fddddc12e67d1d15a5f733f06095813061d9f9be30518677"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-src-1.3.4.tar.gz",
+        "sha256": null,
+        "md5": "b2eff6a09829756bcb48d193313e445e",
+        "note": "the data is the folder resources/data of this source archive (and of the release file it is fetched from); the md5 is the one the Surge project publishes in md5sum.txt of the release"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-portable-content-1.3.4.tar.gz",
+          "sha256": "7ed24822eab69f73101d8558222979b1bceb4882a780292bb7087309b7b101bd",
+          "size": 252763750,
+          "members": [
+            {
+              "from": "Surge Synth Team/SurgeXTData/",
+              "to": ".",
+              "leave_out": [
+                "wavetables/Waldorf/",
+                "skins/Tutorials/10 Adding Fonts.surge-skin/"
+              ]
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-portable-content-1.3.4.tar.gz",
+          "sha256": "7ed24822eab69f73101d8558222979b1bceb4882a780292bb7087309b7b101bd",
+          "size": 252763750,
+          "members": [
+            {
+              "from": "Surge Synth Team/SurgeXTData/",
+              "to": ".",
+              "leave_out": [
+                "wavetables/Waldorf/",
+                "skins/Tutorials/10 Adding Fonts.surge-skin/"
+              ]
+            }
+          ]
+        }
+      }
     }
   ]
 }

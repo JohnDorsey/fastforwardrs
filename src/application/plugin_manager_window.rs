@@ -94,8 +94,10 @@ pub struct PluginManagerView<'a> {
     /// The folder that the *Bundles* tab fetches shaders into (it is one of those too).
     pub fetched_shaders_folder: Option<&'a Path>,
     pub tab: PluginManagerTab,
-    /// The section of the *Bundles* tab for the sound plugins, and the one for the shaders (which is not shown if the program has no shaders to fetch).
+    /// The section of the *Bundles* tab for the sound plugins, the one for the data that plugins use, and the one for the shaders (each of the last two is not shown if the program has
+    /// nothing of its kind to fetch).
     pub bundles: BundlesView<'a>,
+    pub data_bundles: BundlesView<'a>,
     pub shader_bundles: BundlesView<'a>,
     pub is_scanning: bool,
     pub has_scanned: bool,
@@ -145,6 +147,11 @@ fn show_contents(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mut Vec<C
         PluginManagerTab::Plugins => show_the_plugins_tab(ui, view, commands),
         PluginManagerTab::Bundles => {
             show_bundles(ui, &view.bundles, commands);
+            if !view.data_bundles.rows.is_empty() {
+                ui.add_space(10.0);
+                ui.separator();
+                show_bundles(ui, &view.data_bundles, commands);
+            }
             if !view.shader_bundles.rows.is_empty() {
                 ui.add_space(10.0);
                 ui.separator();
