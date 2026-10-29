@@ -60,7 +60,8 @@ The maintainer then asked for **"as many of Surge XT's factory patches and wavet
 * **[V] A photograph of the real window of Surge XT, from the fetched folder**: with the data absent it opened on the patch *Init*; **with it, it opens on *Init Saw* (category *Templates*, by the Surge Synth Team, CC0), and its patch browser lists the 16 categories of factory patches and the 32 folders of third-party ones**, with *Tutorials*.
 * **[V] 24 mistakes planted in the new code** (the reader of a gzipped tar: the check of the header, the `./`, long names, pax headers, the prefix of a POSIX name, the padding, a name that goes up, a folder that only begins with the name; the rules of the manifest for data; what is left out; the place of the set; the section of the tab): **every one was noticed**. (A first run of the campaign stopped at the eleventh, because the tests of a mistake that gave the archive back to the system's `tar` printed names that my script could not decode; it was run again from there.)
 * **[V] CI, run 163 (`d64a79d`), green on all five jobs**, and the new step of the Ubuntu job (a warning if it fails) ran for real on GitHub's machine: the program's own downloader fetched everything including the data in 38 s, the scan and the count of the data passed (4 tests, none skipped), and the synthesizers were played (2 tests). On the Mac the same step fetched, scanned and played (the data is not there for macOS, and its test says so and is skipped).
-* **[B] Not done**: nobody chose a factory patch in the window and played it; whether a patch that uses a wavetable from `wavetables_3rdparty` finds it is not tried (Surge keeps a wavetable of the patch in the patch's own state, so I expect it does).
+* **[V] Played since (see *Playing the patches*)**: all 637 factory patches and 1,736 third-party ones were played through the plugin host and made sound (20 did not, mostly for reasons that are not faults); **and Surge XT crashes at random when a patch is loaded and notes are played**.
+* **[B] Not done**: a wavetable *file* from `wavetables_3rdparty` or `wavetables` was never chosen (the patches carry the wavetable they use, so the sweeps do not touch the files; choosing one is a thing for the window).
 
 ## What trying them found (two faults of the program, now fixed)
 
@@ -71,6 +72,32 @@ Trying a real synthesizer found what the test instruments could not. Both are in
 
 Both have tests that fail without them: a test instrument in `clap-test-plugins` that is made like Surge XT (one input that is not the main one, and a default that says 0 while it starts at 1), tested in the CLAP host, in the scan and **through the plugin host into sound**. **12 mistakes planted in the new code** (the rule for the main input in the scan, the host's run and its check of channels, the reading of the starting value and its use): **every one was noticed** (two of the twelve were the same mistake written twice, so eleven different ones).
 
+## Playing the patches (the same day): 2,373 of 3,008 heard, and a crash that is not explained
+
+**How:** the chunk of each `.fxp` (what follows its 60-byte header) was given to Surge XT as the state of a plugin, through the plugin host, as the program gives a project's state to an effect; then middle C, held for one second, in three seconds. **[V] Surge takes it**: the sound changes with the patch (Acidofil has 117 zero crossings where Init Saw has 471), and the state that Surge itself saves of the same patch is larger (50,809 bytes against 30,501), so the chunk is not the form it saves. **The values of the project come after the state and win** (a rule of the host): given every parameter's default next to a state, the patch is lost [V: the same Acidofil sounds like Init Saw]. The window of a plugin saves values and state together, so a project made through the window should not do this **[B: not tried in the program]**; the sweeps gave no values.
+
+**What was heard [V]** (the results of every run put together; a run stops where the crash below stops it): **2,373 patches: all 637 factory ones and 1,736 of the 2,371 third-party ones** (26 of the 32 authors' folders). **No sample that is not a number**, and **2,364 different sounds among the 2,373** (the nine that are the same are probably copies, such as *Tom L* and *Tom R*). 635 third-party patches were not heard, **only because the crash got in the way**.
+
+* **20 are silent while the note is held** (0.1 to 1 s): seven are the *Audio In* templates and the vocoder patches, which need a sound to process and were given none **[B: from their names]**; seven are short percussive sounds (shakers, hats, a ticking clock) **[B]**; *Twisted Nimbus* and *Dispell* have a slow attack (Nimbus is clearly heard on keys 36 and 60 given 8 seconds, and not on 84; Dispell's peak is 0.003 to 0.005 **[V]**); *Talking Synth (Alien)* is almost silent (peak 0.003 on three keys **[V]**) **[B: Talking Synth patches may want a controller]**; and **Ghost Glass Harmonium (two copies, in Keys and in Pads) is silent on keys 36, 60 and 84 for 8 seconds, and why is not known**.
+* **Loud ones:** eight patches reach a peak of 4.5 or more in the merged results, four of them exactly 8.0 (which looks like a ceiling). The first full run had three factory ones (*Banjo Remains* 4.7, *Cottage* 7.4, *Moody Statement* 8.0) that were lower in a later run: a patch's level varies from run to run **[B: random starting phases]**. The test of a single note says `peak < 8.0`, which is not a promise that patches keep.
+
+**A crash [V, measured]: Surge XT dies, at random, when a patch is loaded as state and notes are played.** The process ends with an access violation **inside `Surge XT.clap`** (a read of a heap address; the two crashes that were looked at are in the same routine, `+0x479ccd` and `+0x479ee8`), or it hangs in the block that plays. The rates:
+
+| What was played | Crashes |
+|---|---|
+| the default patch, no state (many hundreds in a row, and 2,404 in one run) | none, in more than 4,000 plays |
+| *Init Saw* given as state | none in 1,500 |
+| any patch as state, **no notes** | none in 1,500 |
+| any patch as state, **with notes** | *Quiz* died within 70 to 270 plays in 5 of 6 runs (and in 3 of 3 with Surge's own saved state); *Toms 1* within 40 plays in 5 of 10 runs; *Bass Sawari* in 2 of 2; **every full sweep died, after 79 to 1,857 patches** |
+
+**What did not remove it** (each tried): waiting 100 ms between making the plugin and playing; **Surge's own saved state** instead of the chunk; **one silent block, or twenty, before the first note** (it lowered the rate, the sweeps reaching 1,857 and 1,329 patches, and did not end it); **giving the state before the plugin is activated** instead of after (79 patches; taken out again, since it changed nothing); **keeping the plugins alive** instead of letting them go (it died either way); a **new library for each patch** (died either way). **Not the restart path** of the host (a debug line showed no restart was asked, with or without a state).
+
+**Not known: whether the fault is Surge's or the host's.** Nothing in the code of the host points at it, and Surge is made to be run many times in a program; but the crash needs the patch's state and a note together, which is how the program plays a clip.
+
+**Why it matters [B, not tried in the program]:** the program makes a plugin with its saved state at each start of play and each seek, and a note in its first block (or one held across the seek) is what the sweeps did. If it happens there, **it takes the whole editor down**, since the sound plugins run in the editor's process. A robust answer is to run instruments (or all sound plugins) in a process of their own, as the scan and the windows already are: **a decision for the maintainer**, and not a small piece of work.
+
+**A mistake of mine on the way, so that it is not repeated:** the first sweeps made a new plugin host for each patch; a library that is loaded and let go **546 times cannot be loaded again** on this machine (`LoadLibraryExW failed`), which looked like "every patch after the 546th fails" and is the test's own way of using it, not the program's (it keeps one host). Later runs used one host, as the program does.
+
 ## What was checked
 
 * **[V] The files, on Windows and in Ubuntu (WSL):** the real script `tools/bundled_plugins/fetch_bundled_plugins.py` made the folder for the five sets from the real release files (every checksum right), on both systems.
@@ -80,7 +107,7 @@ Both have tests that fail without them: a test instrument in `clap-test-plugins`
 * **[V] CI:** run 161 (`72c8880`, which has `0261271` under it) passed on all five jobs: macOS, Windows, Ubuntu, the Python tools, and the licences.
 * **[V] The manifest:** 15 sets, checked by the policy (no AGPL, no GPL-2.0-only, https, checksums); the tests of the manifest, of the tab and of the script pass.
 * **[V by the CI, on a Mac (macOS 26, arm64), run 161, commit `72c8880`]:** the members of the five sets on macOS were written by the pattern of MVerb (`dpf-DPF-Plugins-clapbundles.pkg/Payload/Kars.clap`, `...lv2bundles.pkg/Payload/Kars.lv2`, and `Surge XT.clap/` in Surge's zip), and **the real fetch of all 15 sets by the program's own downloader passed on the Mac (94 s), the scan of what it fetched passed (3 tests), and the test of the synthesizers passed (2 tests: a note through the host, and a MIDI clip through the whole engine, for all five)**. Nobody has heard them or seen their windows on a Mac. (The Intel half of the universal bundles is not run by that runner.)
-* **Not checked:** listening; the windows of Kars (it has none) and Nekobi with a mouse; Surge XT with a patch other than Init (see below); the plugins in a real project through the editor (what is proven is the host, the scan and the sound of one note).
+* **Not checked:** listening; the windows of Kars (it has none) and Nekobi with a mouse; Surge XT with a patch other than Init **by ear** (it was played, and measured; see *Playing the patches*, with the crash); the plugins in a real project through the editor (what is proven is the host, the scan and the sound of one note).
 
 ## Limits you should know about
 
