@@ -41,6 +41,13 @@ pub struct NotePort {
     pub preferred_dialect: u32,
 }
 
+/// The main audio input of a plugin that has the audio inputs `inputs` and the note inputs `note_inputs`: **the first port, if it says it is the main one** (CLAP: "main port must be at
+/// index 0"), **or if the plugin takes no notes**. A plugin that takes notes and whose first input is not flagged main has **no main input**: it is an instrument, and the input it has is a
+/// side chain, as Surge XT's is (one stereo input called "Sidechain" that says it is not the main one). An effect that does not flag its ports at all still has its first as the main one.
+pub fn main_audio_input_of<'a>(inputs: &'a [AudioPort], note_inputs: &[NotePort]) -> Option<&'a AudioPort> {
+    inputs.first().filter(|port| port.is_main || note_inputs.is_empty())
+}
+
 /// The `CLAP_NOTE_DIALECT_*` bits (`ext/note-ports.h`).
 pub const NOTE_DIALECT_CLAP: u32 = 1 << 0;
 pub const NOTE_DIALECT_MIDI: u32 = 1 << 1;
@@ -67,7 +74,11 @@ pub struct Parameter {
     pub module: String,
     pub minimum: f64,
     pub maximum: f64,
+    /// The default that the plugin says. **Some say 0 for every parameter** (Surge XT's 775), so [`Self::initial_value`] is what a new plugin really has.
     pub default: f64,
+    /// The value that the parameter has in a plugin that was just made (`clap.params` `get_value`), if the plugin said. A scan from before this was read says nothing.
+    #[serde(default)]
+    pub initial_value: Option<f64>,
     /// The `CLAP_PARAM_*` flags.
     pub flags: u32,
     /// For an enum: the text of each value from the minimum up.
@@ -130,6 +141,13 @@ pub struct ScannedPlugin {
     pub start: StartCheck,
     /// Why the plugin cannot be used, if it cannot be made or run.
     pub problem: Option<String>,
+}
+
+impl ScannedPlugin {
+    /// The audio input that is fed with the sound that the plugin changes, if it has one: see [`main_audio_input_of`]. The other inputs are given silence.
+    pub fn main_audio_input(&self) -> Option<&AudioPort> {
+        main_audio_input_of(&self.audio_inputs, &self.note_inputs)
+    }
 }
 
 /// What the scan of a library found.
@@ -217,10 +235,7 @@ fn probe(
         "running the plugin {} on {PROBE_BLOCK_FRAMES} frames of silence",
         scanned.description.id
     ));
-    let main_in = scanned
-        .audio_inputs
-        .first()
-        .map_or(0, |port| port.channel_count as usize);
+    let main_in = scanned.main_audio_input().map_or(0, |port| port.channel_count as usize);
     let main_out = scanned
         .audio_outputs
         .first()

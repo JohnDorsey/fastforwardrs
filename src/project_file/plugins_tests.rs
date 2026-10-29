@@ -802,6 +802,7 @@ fn a_clap_plugin_with_a_value_of_each_kind(parameter_ids: [u32; 4]) -> crate::pr
             minimum,
             maximum,
             default,
+            initial_value: None,
             flags,
             texts: texts.iter().map(|text| (*text).to_owned()).collect(),
         };

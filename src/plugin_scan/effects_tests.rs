@@ -651,6 +651,7 @@ fn a_parameter(id: u32, name: &str, minimum: f64, maximum: f64, default: f64, fl
         minimum,
         maximum,
         default,
+        initial_value: None,
         flags,
         texts: Vec::new(),
     }
@@ -1098,4 +1099,44 @@ fn a_clap_plugin_whose_start_depends_on_memory_it_did_not_write_carries_the_warn
         .start_warning
         .expect("the warning goes with the effect");
     assert_eq!(Some(warning), plugin.start.warning());
+}
+
+#[test]
+fn the_default_of_a_clap_value_is_what_a_new_plugin_has_and_not_the_default_that_the_plugin_says() {
+    // (Surge XT says 0 for every one of its 775 parameters, and a host that gave them all 0 would silence it.)
+    let mut level = a_parameter(1, "Level", 0.0, 1.0, 0.0, AUTOMATABLE);
+    level.initial_value = Some(0.8);
+    let mut said_nothing = a_parameter(2, "Said nothing", 0.0, 4.0, 1.5, AUTOMATABLE);
+    said_nothing.initial_value = None;
+    let mut not_a_number = a_parameter(3, "Not a number", 0.0, 4.0, 2.0, AUTOMATABLE);
+    not_a_number.initial_value = Some(f64::NAN);
+    let mut past_the_range = a_parameter(4, "Past the range", 0.0, 4.0, 2.0, AUTOMATABLE);
+    past_the_range.initial_value = Some(9.0);
+    let mut a_choice = a_parameter(5, "Mode", 1.0, 3.0, 1.0, AUTOMATABLE | STEPPED | ENUM);
+    a_choice.initial_value = Some(3.0);
+    a_choice.texts = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+    let plugin = a_clap_plugin(
+        "com.example.says_zero",
+        vec![level, said_nothing, not_a_number, past_the_range, a_choice],
+    );
+
+    let parameters = the_effect(&plugin).descriptor.parameters.into_owned();
+
+    assert_eq!(parameters[0].default, PropertyValue::Number(0.8));
+    assert_eq!(
+        parameters[1].default,
+        PropertyValue::Number(1.5),
+        "a plugin that does not say what it has is taken at its word"
+    );
+    assert_eq!(
+        parameters[2].default,
+        PropertyValue::Number(2.0),
+        "what is not a number is not a start"
+    );
+    assert_eq!(
+        parameters[3].default,
+        PropertyValue::Number(4.0),
+        "a start past the range is the most"
+    );
+    assert_eq!(parameters[4].default, PropertyValue::Words("3".to_owned()));
 }

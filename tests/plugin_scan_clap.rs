@@ -17,7 +17,7 @@ use fastforwardrs::plugin_scan::{
 const SCANNER: &str = env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan");
 const MISBEHAVE: &str = "FFRS_TEST_PLUGIN";
 /// How many plugins the test library has.
-const PLUGINS: usize = 20;
+const PLUGINS: usize = 21;
 
 /// A copy of the good test library, named as a CLAP library is, in a folder of its own.
 fn good_library_in(folder: &Path) -> PathBuf {
@@ -370,7 +370,7 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
         .iter()
         .map(|effect| effect.descriptor.key.as_ref())
         .collect();
-    assert_eq!(keys.len(), 17, "{keys:?}");
+    assert_eq!(keys.len(), 18, "{keys:?}");
     assert!(keys.iter().all(|key| key.starts_with("clap:org.fastforwardrs.test.")));
     assert!(found.effects.iter().all(|effect| effect.library == library));
     let reason_of = |id: &str| {
@@ -383,8 +383,13 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
             .clone()
     };
     assert_eq!(found.not_used.len(), 3, "{:?}", found.not_used);
-    // (The two instruments are effects since phase 13: synthesizers, with no audio input, one stereo output, and the flag that says they are played by notes.)
-    for id in [clap_test_plugins::INSTRUMENT, clap_test_plugins::INSTRUMENT_MIDI] {
+    // (The three instruments are effects since phase 13: synthesizers, with no main audio input, one stereo output, and the flag that says they are played by notes. The third has an input that
+    // is a side chain and not the main one, as Surge XT has: it is a synthesizer all the same.)
+    for id in [
+        clap_test_plugins::INSTRUMENT,
+        clap_test_plugins::INSTRUMENT_MIDI,
+        clap_test_plugins::INSTRUMENT_WITH_A_SIDE_CHAIN,
+    ] {
         let synthesizer = found
             .effects
             .iter()
@@ -399,7 +404,7 @@ fn the_plugins_of_the_test_library_that_can_be_effects_are_found_and_the_others_
             .iter()
             .filter(|effect| effect.descriptor.makes_sound_from_notes)
             .count()
-            == 2
+            == 3
     );
     assert!(reason_of(FAILS_TO_ACTIVATE).contains("could not be made or run"));
     assert!(reason_of(clap_test_plugins::FAILS_TO_PROCESS).contains("could not be made or run"));

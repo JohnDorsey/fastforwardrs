@@ -134,6 +134,42 @@ fn a_clap_plugin_with_an_audio_input_is_an_effect_even_if_it_has_a_note_input() 
 }
 
 #[test]
+fn a_clap_plugin_whose_only_audio_input_is_a_side_chain_is_a_synthesizer_and_has_no_input_that_is_fed() {
+    // (Surge XT: a note input, one stereo audio input that says it is not the main one, and a main output.)
+    let mut plugin = a_clap_plugin(&[2], &[2], vec![a_note_port(NOTE_DIALECT_CLAP | NOTE_DIALECT_MIDI)]);
+    plugin.audio_inputs[0].is_main = false;
+    plugin.audio_inputs[0].name = "Sidechain".to_owned();
+
+    let effect = clap_effect(&plugin).expect("a synthesizer can be an effect");
+
+    assert_eq!((effect.audio_inputs, effect.audio_outputs), (0, 2));
+    assert!(effect.descriptor.makes_sound_from_notes);
+}
+
+#[test]
+fn a_clap_plugin_with_notes_and_a_main_input_that_also_has_a_side_chain_is_still_an_effect() {
+    let mut plugin = a_clap_plugin(&[2, 2], &[2], vec![a_note_port(NOTE_DIALECT_CLAP)]);
+    plugin.audio_inputs[1].is_main = false;
+
+    let effect = clap_effect(&plugin).unwrap();
+
+    assert_eq!((effect.audio_inputs, effect.audio_outputs), (2, 2));
+    assert!(!effect.descriptor.makes_sound_from_notes);
+}
+
+#[test]
+fn a_clap_effect_that_does_not_say_which_of_its_ports_is_main_still_has_its_first_as_the_main_one() {
+    // (No note input: nothing says it is an instrument, so it is an effect as before.)
+    let mut plugin = a_clap_plugin(&[2], &[2], Vec::new());
+    plugin.audio_inputs[0].is_main = false;
+
+    let effect = clap_effect(&plugin).unwrap();
+
+    assert_eq!((effect.audio_inputs, effect.audio_outputs), (2, 2));
+    assert!(!effect.descriptor.makes_sound_from_notes);
+}
+
+#[test]
 fn a_clap_synthesizer_needs_an_output_that_is_mono_or_stereo_and_one_that_can_be_run() {
     let no_output = a_clap_plugin(&[], &[], vec![a_note_port(NOTE_DIALECT_CLAP)]);
     assert!(clap_effect(&no_output).unwrap_err().contains("no audio output"));

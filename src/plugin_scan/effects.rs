@@ -305,8 +305,13 @@ fn value_of_a_clap_parameter(parameter: &clap_host::scan::Parameter) -> Result<O
             parameter.name
         ));
     }
-    let default = if parameter.default.is_finite() {
-        parameter.default.clamp(least, most)
+    // (What a new plugin has, if it said, and not what the plugin says its default is: some say 0 for every parameter, and a host that gave them all 0 would silence them. See `Parameter::default`.)
+    let wanted = parameter
+        .initial_value
+        .filter(|initial| initial.is_finite())
+        .unwrap_or(parameter.default);
+    let default = if wanted.is_finite() {
+        wanted.clamp(least, most)
     } else {
         least
     };
@@ -427,13 +432,15 @@ pub fn effect_of_a_clap_plugin(
         return Err(format!("it could not be made or run: {problem}"));
     }
     let description = &plugin.description;
-    // (A plugin with no audio input and a note input is played, and makes sound from the notes: a synthesizer. One that has an audio input is an effect even if it has a note input too.)
-    let is_a_synthesizer = plugin.audio_inputs.is_empty()
+    // (A plugin with no main audio input and a note input is played, and makes sound from the notes: a synthesizer. One that has a main audio input is an effect even if it has a note input too. An input
+    // that is not the main one is a side chain, which an instrument may have: Surge XT's only input is one, and it is not an effect for that. See `main_audio_input_of`.)
+    let main_input = plugin.main_audio_input();
+    let is_a_synthesizer = main_input.is_none()
         && plugin
             .note_inputs
             .iter()
             .any(|port| port.takes_clap_notes() || port.takes_midi());
-    let inputs = match plugin.audio_inputs.first() {
+    let inputs = match main_input {
         Some(input) => channels_of_a_main_port(input, "input")?,
         None if is_a_synthesizer => 0,
         None => {

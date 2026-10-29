@@ -220,9 +220,15 @@ impl Instance {
         })
     }
 
-    /// The audio input ports the plugin has, in order (the main one first).
+    /// The audio input ports the plugin has, in order (the main one first, if it has one).
     pub fn audio_inputs(&self) -> &[AudioPort] {
         &self.gathered.inputs
+    }
+
+    /// The input port that [`Self::run`] gives its `inputs` to, if the plugin has one (see [`crate::scan::main_audio_input_of`]): **an instrument whose only input is a side chain has none**, and
+    /// every input it has is given silence.
+    pub fn main_audio_input(&self) -> Option<&AudioPort> {
+        crate::scan::main_audio_input_of(&self.gathered.inputs, &self.gathered.note_inputs)
     }
 
     pub fn audio_outputs(&self) -> &[AudioPort] {
@@ -379,11 +385,13 @@ impl Instance {
 
         // The ports that are not the main ones are given silence.
         let mut scratch = self.scratch.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let has_a_main_input =
+            crate::scan::main_audio_input_of(&self.gathered.inputs, &self.gathered.note_inputs).is_some();
         let extra_channels: usize = self
             .gathered
             .inputs
             .iter()
-            .skip(1)
+            .skip(usize::from(has_a_main_input))
             .chain(self.gathered.outputs.iter().skip(1))
             .map(|port| port.channel_count as usize)
             .sum();
@@ -397,7 +405,7 @@ impl Instance {
         let mut output_buffers: Vec<Vec<&mut [f32]>> = Vec::new();
         let (mut main_inputs, mut main_outputs) = (Some(inputs), Some(outputs));
         for (number, port) in self.gathered.inputs.iter().enumerate() {
-            if number == 0 {
+            if number == 0 && has_a_main_input {
                 input_buffers.push(
                     main_inputs
                         .take()
@@ -481,18 +489,21 @@ impl Instance {
     }
 
     fn channels_are_wrong(&self, inputs: &[&mut [f32]], outputs: &[&mut [f32]], frames: usize) -> Option<String> {
-        let wanted = |ports: &[AudioPort]| ports.first().map_or(0, |port| port.channel_count as usize);
-        if inputs.len() != wanted(&self.gathered.inputs) {
+        let wanted_in = self.main_audio_input().map_or(0, |port| port.channel_count as usize);
+        let wanted_out = self
+            .gathered
+            .outputs
+            .first()
+            .map_or(0, |port| port.channel_count as usize);
+        if inputs.len() != wanted_in {
             return Some(format!(
-                "the plugin has {} channels in its main input, and {} were given",
-                wanted(&self.gathered.inputs),
+                "the plugin has {wanted_in} channels in its main input, and {} were given",
                 inputs.len()
             ));
         }
-        if outputs.len() != wanted(&self.gathered.outputs) {
+        if outputs.len() != wanted_out {
             return Some(format!(
-                "the plugin has {} channels in its main output, and {} were given",
-                wanted(&self.gathered.outputs),
+                "the plugin has {wanted_out} channels in its main output, and {} were given",
                 outputs.len()
             ));
         }
@@ -671,6 +682,7 @@ pub(crate) fn gather<H: HostHandlers>(instance: &mut PluginInstance<H>, active: 
                     minimum: info.min_value,
                     maximum: info.max_value,
                     default: info.default_value,
+                    initial_value: params.get_value(&handle, info.id),
                     flags: info.flags.bits(),
                     texts,
                 });

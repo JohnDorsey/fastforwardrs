@@ -734,9 +734,11 @@ impl PluginHost {
 /// Whether what the library gave for the CLAP plugin is the plugin that was scanned: the main ports have the channels that were scanned, and the plugin has every parameter that a
 /// value of the effect is the value of (it may have more).
 fn this_clap_plugin_is_the_one_that_was_scanned(instance: &clap_host::Instance, plugin: &InstalledPlugin) -> bool {
-    let channels = |ports: &[clap_host::scan::AudioPort]| ports.first().map_or(0, |port| port.channel_count as usize);
-    (channels(instance.audio_inputs()), channels(instance.audio_outputs()))
-        == (plugin.audio_inputs, plugin.audio_outputs)
+    let channels = |port: Option<&clap_host::scan::AudioPort>| port.map_or(0, |port| port.channel_count as usize);
+    (
+        channels(instance.main_audio_input()),
+        channels(instance.audio_outputs().first()),
+    ) == (plugin.audio_inputs, plugin.audio_outputs)
         && plugin
             .value_handles
             .iter()

@@ -4,7 +4,7 @@
 //! Tests of the notes that a host gives to an instrument (phase 13, piece 13.1), with the two test instruments of `crates/clap-test-plugins`: one takes the notes of CLAP and MIDI, the other MIDI
 //! only. What they make is plain arithmetic (see the documentation of [`clap_test_plugins::INSTRUMENT`]): while notes are held every sample is the sum of `velocity * key / 100`.
 
-use clap_test_plugins::{GAIN, INSTRUMENT, INSTRUMENT_MIDI};
+use clap_test_plugins::{GAIN, INSTRUMENT, INSTRUMENT_MIDI, INSTRUMENT_WITH_A_SIDE_CHAIN};
 
 use crate::scan::{NOTE_DIALECT_CLAP, NOTE_DIALECT_MIDI, scan_library};
 use crate::{Instance, Library, MainThread, NoteEvent, NoteEventKind, ParameterChange};
@@ -428,4 +428,95 @@ fn a_gain_set_before_the_notes_is_heard_in_them() {
         .expect("the block is run");
 
     close(&left, &stretch(0.8, 4));
+}
+
+#[test]
+fn an_instrument_whose_only_audio_input_is_a_side_chain_has_no_main_input_and_is_run_with_the_side_chain_silent() {
+    // (This is how Surge XT is: one stereo input that says it is not the main one. The sound of the test instrument has a thousand added to it if the host gives that port anything but two channels.)
+    let scan = scan_library(&clap_test_plugins::library_file_for_tests(), |_| {}).expect("the library is scanned");
+    let plugin = scan
+        .plugins
+        .iter()
+        .find(|plugin| plugin.description.id == INSTRUMENT_WITH_A_SIDE_CHAIN)
+        .unwrap();
+    assert_eq!(plugin.audio_inputs.len(), 1);
+    assert!(!plugin.audio_inputs[0].is_main);
+    assert_eq!(plugin.audio_inputs[0].channel_count, 2);
+    assert!(
+        plugin.main_audio_input().is_none(),
+        "the only input is not the main one"
+    );
+    assert_eq!(plugin.problem, None);
+
+    let mut instrument = made(INSTRUMENT_WITH_A_SIDE_CHAIN);
+    assert!(instrument.main_audio_input().is_none());
+    let heard = run_instrument(&mut instrument, 16, &[on(4, 50, 1.0), off(12, 50)]);
+
+    let mut wanted = stretch(0.0, 4);
+    wanted.extend(stretch(0.5, 8));
+    wanted.extend(stretch(0.0, 4));
+    close(&heard, &wanted);
+}
+
+#[test]
+fn the_main_input_of_a_plugin_is_its_first_port_if_that_is_flagged_main_or_if_it_takes_no_notes() {
+    let scan = scan_library(&clap_test_plugins::library_file_for_tests(), |_| {}).expect("the library is scanned");
+    let plugin = |id: &str| scan.plugins.iter().find(|plugin| plugin.description.id == id).unwrap();
+
+    assert!(plugin(GAIN).main_audio_input().is_some_and(|port| port.is_main));
+    assert!(
+        plugin(INSTRUMENT).main_audio_input().is_none(),
+        "no input at all: no main one"
+    );
+    let mut unflagged = plugin(GAIN).clone();
+    unflagged.audio_inputs[0].is_main = false;
+    assert!(
+        unflagged.main_audio_input().is_some(),
+        "an effect that does not say which port is main still has its first port as the main one"
+    );
+    unflagged.note_inputs = plugin(INSTRUMENT).note_inputs.clone();
+    assert!(
+        unflagged.main_audio_input().is_none(),
+        "but one that takes notes and does not flag its first input as main is an instrument with a side chain"
+    );
+}
+
+#[test]
+fn the_scan_says_what_value_each_parameter_has_in_a_new_plugin_whatever_default_the_plugin_says() {
+    let scan = scan_library(&clap_test_plugins::library_file_for_tests(), |_| {}).expect("the library is scanned");
+    let gain_of = |id: &str| {
+        scan.plugins
+            .iter()
+            .find(|plugin| plugin.description.id == id)
+            .unwrap()
+            .parameters[0]
+            .clone()
+    };
+
+    // (A plugin that says what it starts at: the two are the same.)
+    let honest = gain_of(INSTRUMENT);
+    assert_eq!((honest.default, honest.initial_value), (1.0, Some(1.0)));
+    // (The instrument made like Surge XT says 0 and starts at 1.)
+    let like_surge = gain_of(INSTRUMENT_WITH_A_SIDE_CHAIN);
+    assert_eq!((like_surge.default, like_surge.initial_value), (0.0, Some(1.0)));
+}
+
+#[test]
+fn a_scan_that_was_made_before_the_starting_value_was_read_is_read_as_one_that_does_not_say() {
+    let scan = scan_library(&clap_test_plugins::library_file_for_tests(), |_| {}).expect("the library is scanned");
+    let mut as_text: serde_json::Value = serde_json::to_value(&scan).unwrap();
+    for plugin in as_text["plugins"].as_array_mut().unwrap() {
+        for parameter in plugin["parameters"].as_array_mut().unwrap() {
+            assert!(parameter.as_object_mut().unwrap().remove("initial_value").is_some());
+        }
+    }
+
+    let old: crate::scan::LibraryScan = serde_json::from_value(as_text).expect("an older scan is read");
+
+    assert!(
+        old.plugins
+            .iter()
+            .flat_map(|plugin| &plugin.parameters)
+            .all(|parameter| parameter.initial_value.is_none())
+    );
 }

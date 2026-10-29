@@ -40,8 +40,8 @@ pub fn build_id_in(output: &str) -> Option<String> {
 }
 
 /// What is in the cache of scans as well as on the wire. **Raise it when the scan finds something it did not (or means something else by what it finds)**, so that the answers
-/// that were kept are not believed any more. (2: the scan reads CLAP libraries too. 3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4: the scan says whether a CLAP plugin has a window. 5: the scan reads LV2 bundles too. 6: what an LV2 plugin's bundle says of its windows (the features and the extension data of an interface). 7: the presets that an LV2 bundle says. 8: the note ports of a CLAP plugin, so that an instrument can be told from an effect.)
-pub const SCAN_FORMAT: u32 = 8;
+/// that were kept are not believed any more. (2: the scan reads CLAP libraries too. 3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4: the scan says whether a CLAP plugin has a window. 5: the scan reads LV2 bundles too. 6: what an LV2 plugin's bundle says of its windows (the features and the extension data of an interface). 7: the presets that an LV2 bundle says. 8: the note ports of a CLAP plugin, so that an instrument can be told from an effect. 9: the value that each parameter of a CLAP plugin has when the plugin is new, because some plugins say 0 for every default: Surge XT would be given all its levels at 0.)
+pub const SCAN_FORMAT: u32 = 9;
 
 /// The answer of the scan program.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use clap_test_plugins::{INSTRUMENT, INSTRUMENT_MIDI, library_file_for_tests};
+use clap_test_plugins::{INSTRUMENT, INSTRUMENT_MIDI, INSTRUMENT_WITH_A_SIDE_CHAIN, library_file_for_tests};
 use fastforwardrs::composition::LayerEffect;
 use fastforwardrs::media::export::{LoudnessToExport, SoundClipToExport};
 use fastforwardrs::plugin_host::PluginHost;
@@ -163,6 +163,24 @@ fn a_clap_instrument_plays_the_notes_it_is_given_at_their_samples_and_the_sound_
     let mut processor = the_processor_of(&an_effect(kind, vec![PropertyValue::Number(1.0)]));
 
     // (Key 50 at full velocity is 0.5: from sample 4 to sample 12.)
+    let (left, right) = block(&mut *processor, &[on(4, 0, 50, 1.0), off(12, 0, 50)], 16, (0.25, -0.25));
+
+    let made = stretches(&[(0.0, 4), (0.5, 8), (0.0, 4)]);
+    close(&left, &passing_by(0.25, made.clone()));
+    close(&right, &passing_by(-0.25, made));
+}
+
+#[test]
+fn a_clap_instrument_that_has_only_a_side_chain_input_is_a_synthesizer_and_is_played_like_any_other() {
+    // (Surge XT is built like this: the test instrument adds a thousand to its sound if the host does not give two silent channels to the side chain.)
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_clap_kind_of(INSTRUMENT_WITH_A_SIDE_CHAIN);
+    assert!(kind.makes_sound_from_notes(), "it is a synthesizer and not an effect");
+    // (With the values it has when it is put on: the plugin says that its gain is 0 by default and starts at 1, and what is heard says which of them the program took.)
+    let values = kind.default_values();
+    assert_eq!(values, vec![PropertyValue::Number(1.0)]);
+    let mut processor = the_processor_of(&an_effect(kind, values));
+
     let (left, right) = block(&mut *processor, &[on(4, 0, 50, 1.0), off(12, 0, 50)], 16, (0.25, -0.25));
 
     let made = stretches(&[(0.0, 4), (0.5, 8), (0.0, 4)]);

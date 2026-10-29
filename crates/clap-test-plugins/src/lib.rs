@@ -63,6 +63,10 @@ pub const INSTRUMENT: &str = "org.fastforwardrs.test.instrument";
 /// The same instrument with a note port that takes **MIDI events only** (a note on is three bytes, `0x90 | channel`, the key, the velocity of seven bits). It reads the pitch wheel too: every sample is
 /// also given `(wheel - 8192) / 8192 * 0.5` (the wheel is 8192 at the start), and a controller 64 (the sustain pedal) is added as `value / 127 * 0.25` while any note is held.
 pub const INSTRUMENT_MIDI: &str = "org.fastforwardrs.test.instrument_midi";
+/// The instrument as **Surge XT has it**: its only audio input is a stereo port that is **not the main one** (a side chain: `is_main` is false and it is at index 0, where a main port would be), and
+/// it has no main input at all. **Its parameter `Gain` says that its default is 0, and it starts at 1** (Surge XT's 775 parameters all say 0). It makes the sound of [`INSTRUMENT`] and ignores what comes in the side chain, **except that it adds a thousand to every sample if a host gives that port anything
+/// but two channels** (so that a host that leaves the port out, or gives it the channels of the main input, is heard).
+pub const INSTRUMENT_WITH_A_SIDE_CHAIN: &str = "org.fastforwardrs.test.instrument_with_a_side_chain";
 pub const THREADS: &str = "org.fastforwardrs.test.threads";
 /// Plugins that misbehave, for the tests of what a host does about it: `activate` says no, `process` says it failed, `process` panics.
 pub const FAILS_TO_ACTIVATE: &str = "org.fastforwardrs.test.fails_to_activate";
@@ -149,12 +153,13 @@ const KIND_SINGLE_INSTANCE: u8 = 16;
 const KIND_READS_GARBAGE: u8 = 17;
 const KIND_EDITOR: u8 = 18;
 const KIND_INSTRUMENT_MIDI: u8 = 19;
+const KIND_INSTRUMENT_WITH_A_SIDE_CHAIN: u8 = 20;
 
 /// How many `single_instance` plugins are alive.
 static SINGLE_INSTANCES_ALIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The ids of the plugins, in the order of the kinds.
-const IDS: [&str; 20] = [
+const IDS: [&str; 21] = [
     GAIN,
     SWAP,
     MONO_HALF,
@@ -175,8 +180,9 @@ const IDS: [&str; 20] = [
     READS_GARBAGE,
     EDITOR,
     INSTRUMENT_MIDI,
+    INSTRUMENT_WITH_A_SIDE_CHAIN,
 ];
-const NAMES: [&str; 20] = [
+const NAMES: [&str; 21] = [
     "Gain",
     "Swap",
     "Mono half",
@@ -197,12 +203,16 @@ const NAMES: [&str; 20] = [
     "Reads garbage",
     "Editor",
     "Instrument MIDI",
+    "Instrument with a side chain",
 ];
 
 /// What the parameters of a plugin are, as `(id, name, minimum, maximum, default, flags)`.
 fn parameters_of(kind: u8) -> &'static [(u32, &'static str, f64, f64, f64, ParamInfoFlags)] {
     const GAIN_PARAMETER: [(u32, &str, f64, f64, f64, ParamInfoFlags); 1] =
         [(1, "Gain", 0.0, 4.0, 1.0, ParamInfoFlags::IS_AUTOMATABLE)];
+    // (What Surge XT does: its parameters all say that their default is 0, and a new plugin has other values. See [`INSTRUMENT_WITH_A_SIDE_CHAIN`] and `Shared::new`.)
+    const GAIN_PARAMETER_THAT_SAYS_ZERO: [(u32, &str, f64, f64, f64, ParamInfoFlags); 1] =
+        [(1, "Gain", 0.0, 4.0, 0.0, ParamInfoFlags::IS_AUTOMATABLE)];
     const CHOICE_PARAMETERS: [(u32, &str, f64, f64, f64, ParamInfoFlags); 2] = [
         (
             1,
@@ -225,6 +235,7 @@ fn parameters_of(kind: u8) -> &'static [(u32, &'static str, f64, f64, f64, Param
     ];
     match kind {
         KIND_GAIN | KIND_CALLBACKS | KIND_EDITOR | KIND_INSTRUMENT | KIND_INSTRUMENT_MIDI => &GAIN_PARAMETER,
+        KIND_INSTRUMENT_WITH_A_SIDE_CHAIN => &GAIN_PARAMETER_THAT_SAYS_ZERO,
         KIND_CHOICE => &CHOICE_PARAMETERS,
         _ => &[],
     }
@@ -282,7 +293,16 @@ pub const EDITOR_ASKED_SIZE: (u32, u32) = (410, 310);
 impl Shared {
     fn new(kind: u8) -> Self {
         let defaults = parameters_of(kind);
-        let value = |number: usize| AtomicU64::new(defaults.get(number).map_or(0.0, |parameter| parameter.4).to_bits());
+        // (The value a new plugin has is the default that it says, except for the instrument that is made like Surge XT: it says 0 and starts at 1, the gain of the other instruments.)
+        let value = |number: usize| {
+            let declared = defaults.get(number).map_or(0.0, |parameter| parameter.4);
+            let starts_at = if kind == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN && number == 0 {
+                1.0
+            } else {
+                declared
+            };
+            AtomicU64::new(starts_at.to_bits())
+        };
         let window = WindowLog::default();
         window.width.store(EDITOR_SIZE.0, Ordering::SeqCst);
         window.height.store(EDITOR_SIZE.1, Ordering::SeqCst);
@@ -401,9 +421,9 @@ impl<'a, const KIND: u8> PluginMainThread<'a, Shared> for Main<'a, KIND> {
     }
 }
 
-/// Whether the plugin is one of the two instruments.
+/// Whether the plugin is one of the instruments.
 const fn is_an_instrument(kind: u8) -> bool {
-    kind == KIND_INSTRUMENT || kind == KIND_INSTRUMENT_MIDI
+    kind == KIND_INSTRUMENT || kind == KIND_INSTRUMENT_MIDI || kind == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN
 }
 
 impl<const KIND: u8> PluginNotePortsImpl for Main<'_, KIND> {
@@ -443,10 +463,14 @@ impl<const KIND: u8> PluginAudioPortsImpl for Main<'_, KIND> {
     }
 
     fn get(&self, index: u32, is_input: bool, writer: &mut AudioPortInfoWriter) {
-        if (is_input && is_an_instrument(KIND)) || index > u32::from(is_input && KIND == KIND_SIDE_CHAIN) {
+        let has_only_a_side_chain = KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN;
+        if (is_input && is_an_instrument(KIND) && !has_only_a_side_chain)
+            || index > u32::from(is_input && KIND == KIND_SIDE_CHAIN)
+        {
             return;
         }
-        let is_side_chain = index == 1;
+        // (The side chain of the plugin that has a main input is its second input; the one of an instrument that has only a side chain is the first, where a main input would be.)
+        let is_side_chain = index == 1 || (is_input && has_only_a_side_chain);
         let mono = KIND == KIND_MONO_HALF;
         writer.set(&AudioPortInfo {
             id: ClapId::new(match (is_input, is_side_chain) {
@@ -967,17 +991,26 @@ impl<const KIND: u8> Processor<'_, KIND> {
         // The side chain (the first channel of an input that has no output beside it) is read first.
         let mut side = vec![0.0_f32; to - from];
         let mut side_channels = 0;
-        if KIND == KIND_SIDE_CHAIN {
+        if KIND == KIND_SIDE_CHAIN || KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN {
             for mut pair in &mut *audio {
                 let Some(channels) = pair.channels()?.into_f32() else {
                     continue;
                 };
                 for channel in channels {
-                    if let ChannelPair::InputOnly(input) = channel {
-                        if side_channels == 0 {
-                            side.copy_from_slice(&input[from..to]);
+                    match channel {
+                        ChannelPair::InputOnly(input) => {
+                            if side_channels == 0 {
+                                side.copy_from_slice(&input[from..to]);
+                            }
+                            side_channels += 1;
                         }
-                        side_channels += 1;
+                        // (The side chain of the instrument that has only that input is paired with its output, port by port: its channels come as pairs.)
+                        ChannelPair::InputOutput(..) | ChannelPair::InPlace(_)
+                            if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN =>
+                        {
+                            side_channels += 1;
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -986,6 +1019,13 @@ impl<const KIND: u8> Processor<'_, KIND> {
                 side.fill(1000.0);
             }
         }
+        // (The instrument that has only a side chain: its output is paired with that input, so the sound is made here and not from what comes in.)
+        let heard_in_the_side_chain_of_an_instrument =
+            if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN && side_channels != 2 {
+                1000.0
+            } else {
+                0.0
+            };
         for mut pair in &mut *audio {
             let Some(channels) = pair.channels()?.into_f32() else {
                 continue;
@@ -995,6 +1035,9 @@ impl<const KIND: u8> Processor<'_, KIND> {
             let mut outputs: Vec<&mut [f32]> = Vec::new();
             for channel in channels {
                 match channel {
+                    ChannelPair::InputOutput(_, output) if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN => {
+                        output[from..to].fill(self.level_of_the_instrument() + heard_in_the_side_chain_of_an_instrument)
+                    }
                     ChannelPair::InputOutput(input, output) => {
                         inputs.push(input[from..to].to_vec());
                         outputs.push(&mut output[from..to]);
@@ -1003,7 +1046,9 @@ impl<const KIND: u8> Processor<'_, KIND> {
                         inputs.push(buffer[from..to].to_vec());
                         outputs.push(&mut buffer[from..to]);
                     }
-                    ChannelPair::OutputOnly(buffer) => buffer[from..to].fill(self.level_of_the_instrument()),
+                    ChannelPair::OutputOnly(buffer) => {
+                        buffer[from..to].fill(self.level_of_the_instrument() + heard_in_the_side_chain_of_an_instrument)
+                    }
                     ChannelPair::InputOnly(_) => {}
                 }
                 channel_number += 1;
@@ -1130,6 +1175,7 @@ impl PluginFactoryImpl for Factory {
             KIND_CHOICE => made!(KIND_CHOICE),
             KIND_INSTRUMENT => made!(KIND_INSTRUMENT),
             KIND_INSTRUMENT_MIDI => made!(KIND_INSTRUMENT_MIDI),
+            KIND_INSTRUMENT_WITH_A_SIDE_CHAIN => made!(KIND_INSTRUMENT_WITH_A_SIDE_CHAIN),
             KIND_THREADS => made!(KIND_THREADS),
             KIND_FAILS_TO_ACTIVATE => made!(KIND_FAILS_TO_ACTIVATE),
             KIND_FAILS_TO_PROCESS => made!(KIND_FAILS_TO_PROCESS),

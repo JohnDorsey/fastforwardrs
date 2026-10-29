@@ -41,7 +41,7 @@ fn the_check_finds_the_plugin_that_reads_memory_it_did_not_write_and_no_other_of
         } else if id == SINGLE_INSTANCE {
             // (It gives its sound with the sign changed while another of it is alive; it is made one at a time here, so it is steady.)
             assert_eq!(plugin.start, StartCheck::Steady, "{id}");
-        } else if plugin.problem.is_some() || plugin.audio_inputs.is_empty() {
+        } else if plugin.problem.is_some() || plugin.main_audio_input().is_none() {
             assert_eq!(
                 plugin.start,
                 StartCheck::NotChecked,
