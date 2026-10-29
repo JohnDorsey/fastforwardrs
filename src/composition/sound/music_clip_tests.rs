@@ -704,6 +704,38 @@ fn a_synthesizer_that_is_not_installed_passes_the_notes_on_if_it_is_set_to() {
     assert_eq!(consumers(&project), vec![NoteConsumer::Clip, NoteConsumer::Bus]);
 }
 
+/// **The two ways of asking whether a MIDI clip has anyone to play it must agree**: the window asks the project (`has_a_synthesizer_on_the_road`, for the marker on the clip), the sound asks the
+/// plan (`consumers`). A self-check that turns a difference between them into a failure.
+#[test]
+fn the_window_and_the_plan_agree_on_whether_a_midi_clip_has_a_synthesizer_on_its_road() {
+    let _alone = the_installed_plugins_to_myself();
+    let (synthesizer, _) = the_kinds();
+    for switched_off in 0..8_u8 {
+        let mut road = a_road_with_three_synthesizers(synthesizer);
+        let track = Member::Track(road.the_track());
+        let which = [
+            (Member::Clip(road.clip), road.clip_synthesizer),
+            (track, road.track_synthesizer),
+            (Member::Group(road.group), road.group_synthesizer),
+        ];
+        for (number, (owner, instance)) in which.into_iter().enumerate() {
+            if switched_off & (1 << number) != 0 {
+                road.project.set_effect_enabled(owner, instance, false).unwrap();
+            }
+        }
+
+        let plan_says = !road.consumers().is_empty();
+        let window_says = road.project.has_a_synthesizer_on_the_road(road.clip);
+
+        assert_eq!(plan_says, window_says, "switched off: {switched_off:03b}");
+        assert_eq!(
+            plan_says,
+            switched_off != 0b111,
+            "only when all three are off is there none"
+        );
+    }
+}
+
 // --- the stretches of a clip ---
 
 #[test]

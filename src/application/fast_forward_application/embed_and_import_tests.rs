@@ -87,8 +87,8 @@ fn the_file_menu_offers_both_ways_to_import_and_each_asks_for_what_it_is() {
     assert_eq!(
         titles,
         [
-            "Choose a video, a sound or a picture to embed",
-            "Choose a video, a sound or a picture"
+            "Choose a video, a sound, a picture or a MIDI file to embed",
+            "Choose a video, a sound, a picture or a MIDI file"
         ]
     );
 }
@@ -417,7 +417,10 @@ fn agreeing_saves_the_project_as_an_archive_and_then_asks_for_the_file() {
         "only the kind of project file that can have files in it"
     );
     assert!(!asked[1].saving);
-    assert_eq!(asked[1].title, "Choose a video, a sound or a picture to embed");
+    assert_eq!(
+        asked[1].title,
+        "Choose a video, a sound, a picture or a MIDI file to embed"
+    );
     assert_eq!(
         fixture.window.application().project_file_path(),
         Some(destination.as_path())

@@ -30,12 +30,21 @@ use crate::shader_files::{
     ShaderScan, scan_folders as scan_the_folders_for_shaders, usual_folders as usual_folders_of_shaders,
 };
 
+/// How many of the plugins that can be put on a clip are synthesizers (phase 13): the plugin manager says so.
+pub(super) fn how_many_are_synthesizers(effects: &[crate::project::InstalledPlugin]) -> usize {
+    effects
+        .iter()
+        .filter(|plugin| plugin.descriptor.makes_sound_from_notes)
+        .count()
+}
+
 /// What a scan found, for the window to show.
 #[derive(Default)]
 pub(super) struct ScanResult {
     pub(super) libraries: Vec<LibraryReport>,
     pub(super) not_used: Vec<NotUsed>,
     pub(super) effect_count: usize,
+    pub(super) synthesizer_count: usize,
     pub(super) problems: Vec<String>,
     /// The shaders that were found in the folders, each with what became of it (the usable ones are the installed shaders).
     pub(super) shaders: ShaderScan,
@@ -507,6 +516,7 @@ impl FastForwardApplication {
         let found = plugins_found_in(&reports);
         search.result.not_used = found.not_used;
         search.result.effect_count = found.effects.len();
+        search.result.synthesizer_count = how_many_are_synthesizers(&found.effects);
         // (What the host read of the bundles before is what they said then: a bundle may have changed, and the scan that has just ended is what says.)
         self.environment.plugin_host.forget_what_the_bundles_said();
         set_installed_plugins(found.effects);
@@ -658,6 +668,7 @@ impl FastForwardApplication {
             libraries: &search.result.libraries,
             not_used: &search.result.not_used,
             effect_count: search.result.effect_count,
+            synthesizer_count: search.result.synthesizer_count,
             problems: &problems,
             shaders: &search.result.shaders,
         };

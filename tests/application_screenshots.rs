@@ -1369,3 +1369,77 @@ fn write_screenshots_of_the_sound_plugins_window_and_a_plugin_on_a_clip() {
     journey.harness.get_by_label("Plugin manager...").click();
     save(&mut journey, &folder, "10_sound_plugins_window");
 }
+
+/// A Standard MIDI File of two tracks after the tempo track, a melody and a bass, 8 seconds long, a tick a millisecond.
+fn a_two_track_tune(folder: &Path) -> PathBuf {
+    fn track(notes: &[(u32, u32, u8)]) -> Vec<u8> {
+        let mut events: Vec<(u32, u8, [u8; 3])> = Vec::new();
+        for &(start, end, key) in notes {
+            events.push((start, 1, [0x90, key, 100]));
+            events.push((end, 0, [0x80, key, 64]));
+        }
+        events.sort();
+        let mut body = Vec::new();
+        let mut tick = 0_u32;
+        for (at, _, bytes) in events {
+            let mut delta = at - tick;
+            tick = at;
+            let mut number = vec![(delta & 0x7F) as u8];
+            delta >>= 7;
+            while delta > 0 {
+                number.push((delta & 0x7F) as u8 | 0x80);
+                delta >>= 7;
+            }
+            number.reverse();
+            body.extend(number);
+            body.extend_from_slice(&bytes);
+        }
+        body.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
+        let mut chunk = b"MTrk".to_vec();
+        chunk.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
+        chunk.extend(body);
+        chunk
+    }
+    let melody: Vec<(u32, u32, u8)> = (0..16)
+        .map(|n| {
+            (
+                n * 500,
+                n * 500 + 400,
+                [72, 74, 76, 79, 76, 74, 72, 67][(n % 8) as usize],
+            )
+        })
+        .collect();
+    let bass: Vec<(u32, u32, u8)> = (0..4)
+        .map(|n| (n * 2000, n * 2000 + 1900, [36, 43, 41, 43][n as usize]))
+        .collect();
+    let mut file = b"MThd\0\0\0\x06\0\x01\0\x03\x03\xE8".to_vec();
+    let mut tempo_track = b"MTrk".to_vec();
+    let body = [0x00, 0xFF, 0x51, 0x03, 0x0F, 0x42, 0x40, 0x00, 0xFF, 0x2F, 0x00];
+    tempo_track.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
+    tempo_track.extend_from_slice(&body);
+    file.extend(tempo_track);
+    file.extend(track(&melody));
+    file.extend(track(&bass));
+    let path = folder.join("two_track_tune.mid");
+    std::fs::write(&path, file).unwrap();
+    path
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_midi_file_imported() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let tune = a_two_track_tune(&folder);
+    let mut journey = Journey::start(&toolchain);
+
+    journey.application_mut().link_and_import_file_from(tune);
+    journey.settle();
+
+    save(
+        &mut journey,
+        &folder,
+        "40_a_midi_file_imported_two_clips_without_a_synthesizer",
+    );
+}

@@ -103,6 +103,8 @@ pub struct PluginManagerView<'a> {
     pub not_used: &'a [NotUsed],
     /// How many plugins are effects that can be put on a clip.
     pub effect_count: usize,
+    /// How many of those are synthesizers, which are played by notes (phase 13).
+    pub synthesizer_count: usize,
     /// What went wrong that was not a library's doing.
     pub problems: &'a [String],
     /// The shaders that were found, with what became of each.
@@ -219,6 +221,12 @@ pub fn summary(view: &PluginManagerView<'_>) -> String {
         "1 plugin can be put on a clip".to_owned()
     } else {
         format!("{} plugins can be put on a clip", view.effect_count)
+    };
+    // (Said only where there are some: the synthesizers are among those that can be put on a clip, and are played by the notes of MIDI clips.)
+    let effects = match view.synthesizer_count {
+        0 => effects,
+        1 => format!("{effects}, 1 of them a synthesizer"),
+        count => format!("{effects}, {count} of them synthesizers"),
     };
     let shaders = summary_of_the_shaders(view.shaders);
     let libraries = if view.libraries.len() == 1 {

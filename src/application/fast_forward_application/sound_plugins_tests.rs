@@ -859,6 +859,7 @@ fn the_view<'a>(
         libraries: &[],
         not_used: &[],
         effect_count: 1,
+        synthesizer_count: 0,
         problems: &[],
         shaders: &NO_SHADERS_FOUND,
     }
@@ -1013,4 +1014,44 @@ fn the_window_calls_the_bundled_folder_bundled_and_the_others_usual() {
         "{} (usual)",
         std::path::Path::new("/the/program/plugins").display()
     )));
+}
+
+#[test]
+fn the_summary_of_the_plugin_manager_says_how_many_of_the_plugins_are_synthesizers_where_there_are_some() {
+    let settings = crate::plugin_scan::PluginSearchSettings::default();
+    let summary = |effects: usize, synthesizers: usize| {
+        let mut view = the_view(&settings, false, true);
+        view.effect_count = effects;
+        view.synthesizer_count = synthesizers;
+        crate::application::plugin_manager_window::summary(&view)
+    };
+
+    assert_eq!(summary(5, 0), "0 libraries found; 5 plugins can be put on a clip.");
+    assert_eq!(
+        summary(5, 1),
+        "0 libraries found; 5 plugins can be put on a clip, 1 of them a synthesizer."
+    );
+    assert_eq!(
+        summary(5, 2),
+        "0 libraries found; 5 plugins can be put on a clip, 2 of them synthesizers."
+    );
+    assert_eq!(
+        summary(1, 1),
+        "0 libraries found; 1 plugin can be put on a clip, 1 of them a synthesizer."
+    );
+}
+
+#[test]
+fn the_synthesizers_among_the_plugins_that_were_found_are_counted() {
+    use crate::test_support::{an_installed_sound_plugin, an_installed_synthesizer};
+    let found = [
+        an_installed_sound_plugin("clap:test:effect", "Maker", &[]),
+        an_installed_synthesizer("clap:test:one"),
+        an_installed_sound_plugin("clap:test:other", "Maker", &[]),
+        an_installed_synthesizer("clap:test:two"),
+    ];
+
+    assert_eq!(super::sound_plugins_flow::how_many_are_synthesizers(&found), 2);
+    assert_eq!(super::sound_plugins_flow::how_many_are_synthesizers(&found[..1]), 0);
+    assert_eq!(super::sound_plugins_flow::how_many_are_synthesizers(&[]), 0);
 }

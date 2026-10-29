@@ -152,6 +152,49 @@ pub fn a_midi_file_with_notes(notes: &[(u32, u32, u8)]) -> std::sync::Arc<[u8]> 
     std::sync::Arc::from(file)
 }
 
+/// A Standard MIDI File of format 1 whose first track has only the tempo (a conductor's track, with no notes, as many files have) and then one track for each of `tracks`, with these notes
+/// (each `(start in milliseconds, end in milliseconds, key)`, on the first channel, at the velocity 100: a tick is a millisecond, as for [`a_midi_file_with_notes`]). A track of no notes has none.
+pub fn a_midi_file_with_tracks(tracks: &[&[(u32, u32, u8)]]) -> std::sync::Arc<[u8]> {
+    fn chunk(body: &[u8]) -> Vec<u8> {
+        let mut chunk = b"MTrk".to_vec();
+        chunk.extend_from_slice(&u32::try_from(body.len()).expect("a short track").to_be_bytes());
+        chunk.extend_from_slice(body);
+        chunk
+    }
+    let mut file = b"MThd\0\0\0\x06\0\x01".to_vec();
+    file.extend_from_slice(&u16::try_from(tracks.len() + 1).expect("few tracks").to_be_bytes());
+    file.extend_from_slice(&[0x03, 0xE8]);
+    file.extend(chunk(&[
+        0x00, 0xFF, 0x51, 0x03, 0x0F, 0x42, 0x40, 0x00, 0xFF, 0x2F, 0x00,
+    ]));
+    for notes in tracks {
+        let mut events: Vec<(u32, u8, [u8; 3])> = Vec::new();
+        for &(start, end, key) in *notes {
+            events.push((start, 1, [0x90, key, 100]));
+            events.push((end, 0, [0x80, key, 64]));
+        }
+        events.sort();
+        let mut body = Vec::new();
+        let mut tick = 0_u32;
+        for (at, _, bytes) in events {
+            let mut delta = at - tick;
+            tick = at;
+            let mut number = vec![(delta & 0x7F) as u8];
+            delta >>= 7;
+            while delta > 0 {
+                number.push((delta & 0x7F) as u8 | 0x80);
+                delta >>= 7;
+            }
+            number.reverse();
+            body.extend(number);
+            body.extend_from_slice(&bytes);
+        }
+        body.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
+        file.extend(chunk(&body));
+    }
+    std::sync::Arc::from(file)
+}
+
 /// A Standard MIDI File like [`a_midi_file`] whose track has the name `name` (a name of at most 127 bytes).
 pub fn a_midi_file_whose_track_is_called(name: &str) -> std::sync::Arc<[u8]> {
     let mut body = vec![0x00, 0xFF, 0x03, u8::try_from(name.len()).expect("a short name")];

@@ -4,9 +4,17 @@
 //! The switch that makes a synthesizer pass on the notes that reach it (phase 13, piece 13.5; see docs/engine-phase-13-midi-design.md). It is off when the synthesizer is put on: a synthesizer
 //! consumes the notes that reach it.
 
-use super::{ClipEditError, EditError, EffectInstanceId, Member, Project};
+use super::{ClipEditError, ClipId, EditError, EffectInstanceId, Member, Project};
 
 impl Project {
+    /// Whether a synthesizer that is switched on is on the road of the notes of the clip `clip`: among its own effects, those of its track, those of a tag it is in, or those of a group it is in (see
+    /// docs/engine-phase-13-midi-design.md, 13.4). **If not, a MIDI clip is silent** (the window says so on it). `false` if there is no such clip.
+    pub fn has_a_synthesizer_on_the_road(&self, clip: ClipId) -> bool {
+        self.effects_applied_to_the_clip(clip)
+            .iter()
+            .any(|applied| applied.effect.kind().makes_sound_from_notes())
+    }
+
     /// Says whether the synthesizer that is named `instance` in the chain of `owner` (a clip, a track or a group) passes on the notes that reach it, to the next synthesizer on their road. It is an
     /// error, and nothing is changed, if there is no such thing as `owner`, if its chain has no such effect, or if the effect is not a synthesizer (an effect that is not has no notes to pass).
     pub fn set_effect_passes_notes_on(

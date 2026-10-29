@@ -188,7 +188,7 @@ impl FastForwardApplication {
     }
 
     fn ask_for_a_file_to_embed(&mut self) {
-        if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound or a picture to embed") {
+        if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound, a picture or a MIDI file to embed") {
             self.start_opening(OpeningPurpose::ImportNewSourceAndEmbedIt, vec![path]);
         }
     }

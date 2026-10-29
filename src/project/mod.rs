@@ -22,6 +22,7 @@ mod frame_index;
 mod frame_rate;
 pub(crate) mod groups;
 mod keyframe_copying;
+mod midi_import;
 mod note_editing;
 mod plugin_libraries;
 mod rack_editing;
@@ -67,6 +68,7 @@ pub use groups::{
     GroupKind, GroupProblem, Member, Rectangle,
 };
 pub use keyframe_copying::TimeDirection;
+pub use midi_import::{MidiImport, MidiImportError};
 pub use plugin_libraries::{
     EmbeddedBuild, LinkedLibrary, MOST_BUILDS_OF_A_LIBRARY, MOST_BYTES_OF_A_BUILD, MOST_BYTES_OF_ALL_BUILDS,
     MOST_PLUGIN_LIBRARIES, PluginLibraries, PluginLibrary, PluginLibraryKind, PluginLibraryProblem,

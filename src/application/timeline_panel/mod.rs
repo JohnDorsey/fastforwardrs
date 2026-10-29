@@ -33,6 +33,7 @@ mod group_outlines;
 mod group_title_bars;
 mod header;
 mod item_dragging;
+mod midi_notes;
 mod playhead;
 mod rack_dragging;
 mod rack_look;

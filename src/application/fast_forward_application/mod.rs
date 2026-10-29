@@ -106,6 +106,9 @@ mod lead_up_flow_tests;
 mod losing_keyframes;
 #[cfg(test)]
 mod midi_clip_tests;
+mod midi_import_flow;
+#[cfg(test)]
+mod midi_import_tests;
 #[cfg(test)]
 mod navigation_key_tests;
 #[cfg(test)]

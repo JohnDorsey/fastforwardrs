@@ -31,6 +31,8 @@ use crate::project::{
 use crate::project_file::archive::entry_place;
 use crate::project_file::relative_path_between;
 
+use super::midi_import_flow::is_a_midi_file;
+
 /// The kinds of file offered first in the dialog that asks for a video.
 const VIDEO_FILE_EXTENSIONS: [&str; 12] = [
     "mp4", "mkv", "mov", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg", "ts", "mts",
@@ -44,6 +46,9 @@ const SOUND_FILE_EXTENSIONS: [&str; 10] = ["mp3", "wav", "flac", "ogg", "oga", "
 
 /// ...and for a picture. (A GIF is not one: ffprobe says it is a video, and so does the program.)
 const PICTURE_FILE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"];
+
+/// ...and for a MIDI file (phase 13): it is not opened by ffmpeg, but read by the program, and each of its tracks that has notes becomes a clip (see `midi_import_flow`).
+pub(super) const MIDI_FILE_EXTENSIONS: [&str; 2] = ["mid", "midi"];
 
 /// Finds out how the pictures of a video are stored with ffprobe, if there is any (if not, it says nothing, and the pictures stay RGBA made by
 /// ffmpeg, which is no better off for it than it was).
@@ -62,7 +67,7 @@ impl FastForwardApplication {
     /// The project remembers where the file is, and does not hold it.
     pub(super) fn link_and_import_file(&mut self) {
         self.pause_playback_for_dialog();
-        if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound or a picture") {
+        if let Some(path) = self.ask_for_a_media_file("Choose a video, a sound, a picture or a MIDI file") {
             self.start_opening(OpeningPurpose::ImportNewSource, vec![path]);
         }
     }
@@ -136,6 +141,17 @@ impl FastForwardApplication {
 
     /// Starts trying `candidates`, in order, in the background.
     pub(super) fn start_opening(&mut self, purpose: OpeningPurpose, candidates: Vec<PathBuf>) {
+        // (A MIDI file is read by the program, at once, and needs no ffmpeg.)
+        if let [path] = candidates.as_slice()
+            && is_a_midi_file(path)
+            && matches!(
+                purpose,
+                OpeningPurpose::ImportNewSource | OpeningPurpose::ImportNewSourceAndEmbedIt
+            )
+        {
+            self.import_a_midi_file_from(path, matches!(purpose, OpeningPurpose::ImportNewSourceAndEmbedIt));
+            return;
+        }
         #[cfg(test)]
         self.sources.opening_purposes_started.push(purpose);
         let Some(toolchain) = self.environment.toolchain.clone() else {
@@ -674,6 +690,7 @@ impl FastForwardApplication {
             .iter()
             .chain(SOUND_FILE_EXTENSIONS.iter())
             .chain(PICTURE_FILE_EXTENSIONS.iter())
+            .chain(MIDI_FILE_EXTENSIONS.iter())
             .copied()
             .collect();
         self.environment.file_chooser.choose_a_file_to_open(&FileQuestion {
@@ -682,7 +699,7 @@ impl FastForwardApplication {
             starting_directory: None,
             kinds: &[
                 FileKind {
-                    name: "Video, sound and picture files",
+                    name: "Video, sound, picture and MIDI files",
                     extensions: &everything_we_know,
                 },
                 FileKind {
@@ -696,6 +713,10 @@ impl FastForwardApplication {
                 FileKind {
                     name: "Picture files",
                     extensions: &PICTURE_FILE_EXTENSIONS,
+                },
+                FileKind {
+                    name: "MIDI files",
+                    extensions: &MIDI_FILE_EXTENSIONS,
                 },
                 FileKind {
                     name: "All files",

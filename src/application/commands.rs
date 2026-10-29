@@ -24,11 +24,11 @@ pub enum Command {
     /// Save the project to a file chosen now, which is the project's file from then on.
     SaveProjectAs,
     NewProject,
-    /// Choose a video, a sound or a picture and put all of it on the timeline, at the current frame, and put it in the project file
+    /// Choose a video, a sound, a picture or a MIDI file and put all of it on the timeline, at the current frame, and put it in the project file
     /// too, so that the project file holds it (the project file has to be a `.ffrs` file: if it is not one, the user is asked to
     /// save it as one first).
     EmbedAndImportFile,
-    /// Choose a video, a sound or a picture and put all of it on the timeline, at the current frame, where it stays the file that it
+    /// Choose a video, a sound, a picture or a MIDI file and put all of it on the timeline, at the current frame, where it stays the file that it
     /// is: the project remembers where it is, and does not hold it.
     LinkAndImportFile,
     ExportVideo,

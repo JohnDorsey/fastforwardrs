@@ -161,6 +161,9 @@ pub(super) fn items_for_where_the_tables_are_kept(project: &Project, effect: &Ef
 /// first effect is offered in.
 const CATEGORIES_IN_ORDER: [&str; 5] = ["Colour", "Light", "Blur and sharpen", "Transform", "Looks"];
 
+/// The heading of the menu of effects that the synthesizers are under, whoever made them (phase 13): they are played by notes, which is what sets them apart from the effects of the same maker.
+pub const SYNTHESIZERS_HEADING: &str = "Synthesizers";
+
 /// The effects among `kinds` that match what was typed in the search field of the menu (nothing typed matches all): those whose name, description or category has it in it,
 /// whatever the case of the letters, in the order they are in.
 pub(super) fn effects_that_match(kinds: &[EffectKind], typed: &str) -> Vec<EffectKind> {
@@ -173,6 +176,7 @@ pub(super) fn effects_that_match(kinds: &[EffectKind], typed: &str) -> Vec<Effec
                 || kind.name().to_lowercase().contains(&needle)
                 || kind.description().to_lowercase().contains(&needle)
                 || kind.descriptor().category.to_lowercase().contains(&needle)
+                || (kind.makes_sound_from_notes() && SYNTHESIZERS_HEADING.to_lowercase().contains(&needle))
         })
         .collect()
 }
@@ -213,7 +217,11 @@ pub(super) fn grouped_by_source(kinds: &[EffectKind]) -> Vec<(String, Vec<Effect
 pub(super) fn grouped_by_category(kinds: &[EffectKind]) -> Vec<(String, Vec<EffectKind>)> {
     let mut groups: Vec<(String, Vec<EffectKind>)> = Vec::new();
     for kind in kinds {
-        let category = kind.descriptor().category.to_string();
+        let category = if kind.makes_sound_from_notes() {
+            SYNTHESIZERS_HEADING.to_owned()
+        } else {
+            kind.descriptor().category.to_string()
+        };
         match groups.iter_mut().find(|(heading, _)| *heading == category) {
             Some((_, members)) => members.push(*kind),
             None => groups.push((category, vec![*kind])),
@@ -592,6 +600,39 @@ mod tests {
             ]
         );
         assert!(grouped_by_source(&[]).is_empty());
+    }
+
+    #[test]
+    fn synthesizers_are_a_group_of_their_own_whoever_made_them_and_are_found_by_searching_for_synth() {
+        let _alone = crate::test_support::the_installed_plugins_to_myself();
+        let effect = crate::test_support::an_installed_sound_plugin("clap:test:effect", "Acme", &[]);
+        let synthesizer = crate::test_support::an_installed_synthesizer("clap:test:synth");
+        crate::project::set_installed_plugins(vec![effect, synthesizer]);
+        let kinds = EffectKind::installed_plugin_kinds();
+        assert_eq!(kinds[0].descriptor().category, "Acme");
+        assert_eq!(
+            kinds[1].descriptor().category,
+            "Maker",
+            "what the plugin says; it is not what groups a synthesizer"
+        );
+
+        let groups = grouped_by_category(&[kinds[1], kinds[0], EffectKind::HUE_SHIFT]);
+
+        assert_eq!(
+            groups,
+            [
+                ("Colour".to_owned(), vec![EffectKind::HUE_SHIFT]),
+                ("Synthesizers".to_owned(), vec![kinds[1]]),
+                ("Acme".to_owned(), vec![kinds[0]]),
+            ],
+            "the synthesizer is not with the effects of its maker"
+        );
+        assert_eq!(
+            effects_that_match(&kinds, "synthesizer"),
+            vec![kinds[1]],
+            "the word of the heading finds it"
+        );
+        assert_eq!(effects_that_match(&kinds, "acme"), vec![kinds[0]]);
     }
 
     #[test]

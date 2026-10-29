@@ -35,7 +35,7 @@ fn extensions_of<'a>(question: &'a AskedQuestion, kind: &str) -> &'a [String] {
 }
 
 #[test]
-fn importing_asks_for_a_video_a_sound_or_a_picture_with_all_of_those_offered_first() {
+fn importing_asks_for_a_video_a_sound_a_picture_or_a_midi_file_with_all_of_those_offered_first() {
     let chooser = ScriptedFileChooser::default();
     chooser.will_answer(None);
     let mut window = window_that_asks(&chooser);
@@ -45,30 +45,34 @@ fn importing_asks_for_a_video_a_sound_or_a_picture_with_all_of_those_offered_fir
     let asked = chooser.questions_asked();
     assert_eq!(asked.len(), 1, "one question");
     assert!(!asked[0].saving, "which file to open");
-    assert_eq!(asked[0].title, "Choose a video, a sound or a picture");
+    assert_eq!(asked[0].title, "Choose a video, a sound, a picture or a MIDI file");
     assert_eq!(
         names_of_the_kinds(&asked[0]),
         [
-            "Video, sound and picture files",
+            "Video, sound, picture and MIDI files",
             "Video files",
             "Sound files",
             "Picture files",
+            "MIDI files",
             "All files"
         ]
     );
     let videos = extensions_of(&asked[0], "Video files");
     let sounds = extensions_of(&asked[0], "Sound files");
     let pictures = extensions_of(&asked[0], "Picture files");
+    let midi = extensions_of(&asked[0], "MIDI files");
+    assert_eq!(midi, ["mid", "midi"]);
     assert!(videos.contains(&"mp4".to_owned()) && sounds.contains(&"mp3".to_owned()));
     assert!(pictures.contains(&"png".to_owned()) && pictures.contains(&"jpg".to_owned()));
-    let everything = extensions_of(&asked[0], "Video, sound and picture files");
+    let everything = extensions_of(&asked[0], "Video, sound, picture and MIDI files");
     assert!(
         videos
             .iter()
             .chain(sounds)
             .chain(pictures)
+            .chain(midi)
             .all(|extension| everything.contains(extension)),
-        "the first kind has every ending that the next three have"
+        "the first kind has every ending that the next four have"
     );
     assert_eq!(extensions_of(&asked[0], "All files"), ["*"]);
 }

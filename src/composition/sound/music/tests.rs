@@ -26,6 +26,7 @@ fn track_of(notes: Vec<MidiNote>, controls: Vec<crate::midi_file::MidiControl>) 
         notes,
         controls,
         end_us: 0,
+        key_range: None,
     }
 }
 

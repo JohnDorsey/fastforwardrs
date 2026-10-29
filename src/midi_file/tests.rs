@@ -863,3 +863,18 @@ fn a_meta_event_ends_running_status_as_a_system_message_does() {
     assert_eq!(file.problems.len(), 1, "{:?}", file.problems);
     assert_eq!(file.tracks[0].notes.len(), 1);
 }
+
+#[test]
+fn a_track_knows_its_lowest_and_highest_key_and_one_with_no_notes_has_none() {
+    let bytes = crate::test_support::a_midi_file_with_tracks(&[
+        &[(0, 100, 64), (100, 200, 72), (200, 300, 60), (300, 400, 72)],
+        &[],
+        &[(0, 50, 36)],
+    ]);
+
+    let file = parse_midi_file(&bytes).unwrap();
+
+    // (The conductor's track is the first, with the tempo only.)
+    let ranges: Vec<Option<(u8, u8)>> = file.tracks.iter().map(|track| track.key_range).collect();
+    assert_eq!(ranges, vec![None, Some((60, 72)), None, Some((36, 36))]);
+}

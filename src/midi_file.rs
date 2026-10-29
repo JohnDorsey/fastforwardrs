@@ -89,6 +89,8 @@ pub struct MidiTrack {
     pub controls: Vec<MidiControl>,
     /// Where the track ends: the time of its last event of any kind, or of the end of its last note, whichever is later.
     pub end_us: u64,
+    /// The lowest and the highest key of its notes, found once when it is read (the piano roll on the timeline is drawn from them at every frame); `None` for a track with no notes.
+    pub key_range: Option<(u8, u8)>,
 }
 
 /// A Standard MIDI File, read.
@@ -510,11 +512,18 @@ fn make_the_track(raw: &RawTrack, map: &TempoMap) -> Result<MidiTrack, MidiFileP
         }
     }
     let last_note_end = notes.iter().map(|note| note.end_us).max().unwrap_or(0);
+    let key_range = notes
+        .iter()
+        .map(|note| note.key)
+        .fold(None, |range: Option<(u8, u8)>, key| {
+            Some(range.map_or((key, key), |(lowest, highest)| (lowest.min(key), highest.max(key))))
+        });
     Ok(MidiTrack {
         name: raw.name.clone(),
         notes,
         controls,
         end_us: end_us.max(last_note_end),
+        key_range,
     })
 }
 

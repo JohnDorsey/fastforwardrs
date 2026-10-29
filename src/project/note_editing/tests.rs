@@ -203,3 +203,56 @@ fn the_switch_does_not_change_the_values_of_the_effect_or_anything_else_about_it
         "a value that is set does not undo the switch"
     );
 }
+
+#[test]
+fn a_clip_has_a_synthesizer_on_its_road_where_one_of_its_own_effects_its_tracks_or_a_groups_is_one_and_switched_on() {
+    let _alone = the_installed_plugins_to_myself();
+    let (synthesizer, effect) = the_kinds();
+    let mut laid = lay_out();
+    let clip = laid.clips[0];
+    assert!(!laid.project.has_a_synthesizer_on_the_road(clip), "nothing");
+    laid.project.add_effect(AnimationTarget::Clip(clip), effect).unwrap();
+    assert!(
+        !laid.project.has_a_synthesizer_on_the_road(clip),
+        "an effect that changes sound is not one"
+    );
+
+    let on_the_clip = laid
+        .project
+        .add_effect(AnimationTarget::Clip(clip), synthesizer)
+        .unwrap();
+    assert!(laid.project.has_a_synthesizer_on_the_road(clip), "its own");
+    assert!(
+        !laid.project.has_a_synthesizer_on_the_road(laid.clips[1]),
+        "the other clip has none of its own"
+    );
+    laid.project
+        .set_effect_enabled(Member::Clip(clip), on_the_clip, false)
+        .unwrap();
+    assert!(
+        !laid.project.has_a_synthesizer_on_the_road(clip),
+        "switched off: it is not done"
+    );
+
+    laid.project
+        .add_effect(AnimationTarget::Track(laid.tracks[1]), synthesizer)
+        .unwrap();
+    assert!(laid.project.has_a_synthesizer_on_the_road(laid.clips[1]), "its track's");
+    assert!(
+        !laid.project.has_a_synthesizer_on_the_road(clip),
+        "another track's is not on its road"
+    );
+
+    let group = laid
+        .project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(clip), Member::Clip(laid.clips[1])])
+        .unwrap();
+    laid.project.add_effect_to_the_group(group, synthesizer).unwrap();
+    assert!(laid.project.has_a_synthesizer_on_the_road(clip), "its group's");
+    assert!(
+        !laid
+            .project
+            .has_a_synthesizer_on_the_road(ClipId::new(TrackId::new(999), 0)),
+        "no such clip"
+    );
+}

@@ -261,10 +261,29 @@ pub(super) fn draw_clips(
             }
             Clip::Midi(midi) => {
                 painter.rect_filled(rectangles.whole, corner_radius, theme::MIDI_CLIP_BACKGROUND);
+                // (The notes of its track of the file, as a small piano roll under the label.)
+                if let Some(file) = content
+                    .project
+                    .resources()
+                    .get(midi.resource())
+                    .and_then(|resource| resource.midi_file().ok())
+                    && let Some(track) = file.tracks.get(usize::from(midi.midi_track()))
+                    && let Some(key_range) = track.key_range
+                {
+                    super::midi_notes::draw_midi_notes(
+                        painter,
+                        rectangles,
+                        &track.notes,
+                        key_range,
+                        content.project.frame_rate(),
+                        midi.first_source_frame().value(),
+                        midi.end_source_frame().value(),
+                    );
+                }
                 draw_label(
                     painter,
                     rectangles,
-                    &label_of_a_midi_clip(content.project, midi),
+                    &label_of_a_placed_midi_clip(content.project, placement.id, midi),
                     theme::MIDI_CLIP_TEXT,
                 );
             }
@@ -281,8 +300,25 @@ pub(super) fn draw_clips(
     }
 }
 
-/// What a MIDI clip says of itself on the timeline: the name of its file and, if the track has one, the name of its track.
-fn label_of_a_midi_clip(project: &crate::project::Project, midi: &crate::project::MidiClip) -> String {
+/// What the MIDI clip `clip`, which is on the timeline, says of itself (see [`label_of_a_midi_clip`]): whether it has a synthesizer on its road is asked of the project.
+fn label_of_a_placed_midi_clip(
+    project: &crate::project::Project,
+    clip: crate::project::ClipId,
+    midi: &crate::project::MidiClip,
+) -> String {
+    label_of_a_midi_clip(project, midi, project.has_a_synthesizer_on_the_road(clip))
+}
+
+/// What a MIDI clip says on the timeline when no synthesizer is on its road, so that nothing plays its notes (phase 13).
+pub const NO_SYNTHESIZER_MARK: &str = "no synthesizer";
+
+/// What a MIDI clip says of itself on the timeline: the name of its file and, if the track has one, the name of its track; **and that it has no synthesizer on its road**, if it has none, because it
+/// is silent then.
+fn label_of_a_midi_clip(
+    project: &crate::project::Project,
+    midi: &crate::project::MidiClip,
+    has_a_synthesizer: bool,
+) -> String {
     let track_name = project
         .resources()
         .get(midi.resource())
@@ -293,9 +329,14 @@ fn label_of_a_midi_clip(project: &crate::project::Project, midi: &crate::project
                 .map(|track| track.name.clone())
         })
         .filter(|name| !name.is_empty());
-    match track_name {
+    let label = match track_name {
         Some(name) => format!("{} \u{b7} {name}", midi.resource()),
         None => midi.resource().to_owned(),
+    };
+    if has_a_synthesizer {
+        label
+    } else {
+        format!("{label} \u{b7} {NO_SYNTHESIZER_MARK}")
     }
 }
 
@@ -620,13 +661,55 @@ mod tests {
         let (unnamed, same_clip) = project_with_music(a_midi_file(), 0);
         let (other_track, beyond) = project_with_music(a_midi_file_whose_track_is_called("Melody"), 5);
 
-        assert_eq!(label_of_a_midi_clip(&named, &clip), "tune.mid \u{b7} Melody");
-        assert_eq!(label_of_a_midi_clip(&unnamed, &same_clip), "tune.mid");
+        assert_eq!(label_of_a_midi_clip(&named, &clip, true), "tune.mid \u{b7} Melody");
+        assert_eq!(label_of_a_midi_clip(&unnamed, &same_clip, true), "tune.mid");
         assert_eq!(
-            label_of_a_midi_clip(&other_track, &beyond),
+            label_of_a_midi_clip(&other_track, &beyond, true),
             "tune.mid",
             "a track that the file has not"
         );
+    }
+
+    #[test]
+    fn a_midi_clip_that_has_no_synthesizer_on_its_road_says_so_in_its_label_and_one_that_has_does_not() {
+        use crate::test_support::a_midi_file_whose_track_is_called;
+
+        let (project, clip) = project_with_music(a_midi_file_whose_track_is_called("Melody"), 0);
+
+        assert_eq!(
+            label_of_a_midi_clip(&project, &clip, false),
+            "tune.mid \u{b7} Melody \u{b7} no synthesizer"
+        );
+        assert_eq!(label_of_a_midi_clip(&project, &clip, true), "tune.mid \u{b7} Melody");
+        let (without_a_name, other) = project_with_music(crate::test_support::a_midi_file(), 0);
+        assert_eq!(
+            label_of_a_midi_clip(&without_a_name, &other, false),
+            "tune.mid \u{b7} no synthesizer"
+        );
+    }
+
+    #[test]
+    fn the_label_of_a_midi_clip_on_the_timeline_has_the_mark_until_a_synthesizer_is_on_its_road() {
+        use crate::project::{AnimationTarget, EffectKind, TimelineFrameIndex, set_installed_plugins};
+        let _alone = crate::test_support::the_installed_plugins_to_myself();
+        set_installed_plugins(vec![crate::test_support::an_installed_synthesizer(
+            "clap:com.example.synth",
+        )]);
+        let (mut project, midi) = project_with_music(crate::test_support::a_midi_file(), 0);
+        let track = project.add_track_in_front();
+        let clip = project
+            .try_insert_midi_clip(track, TimelineFrameIndex::new(0), midi.clone())
+            .unwrap();
+        assert_eq!(
+            label_of_a_placed_midi_clip(&project, clip, &midi),
+            "tune.mid \u{b7} no synthesizer"
+        );
+
+        project
+            .add_effect(AnimationTarget::Clip(clip), EffectKind::installed_plugin_kinds()[0])
+            .unwrap();
+
+        assert_eq!(label_of_a_placed_midi_clip(&project, clip, &midi), "tune.mid");
     }
 
     #[test]
@@ -635,12 +718,12 @@ mod tests {
         let nothing = crate::project::Project::empty();
 
         assert_eq!(
-            label_of_a_midi_clip(&without, &clip),
+            label_of_a_midi_clip(&without, &clip, true),
             "tune.mid",
             "the bytes are not music"
         );
         assert_eq!(
-            label_of_a_midi_clip(&nothing, &clip),
+            label_of_a_midi_clip(&nothing, &clip, true),
             "tune.mid",
             "the project has no such file"
         );
