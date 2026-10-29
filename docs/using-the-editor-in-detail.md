@@ -27,6 +27,13 @@ Everything the editor does, control by control, with the rules behind each. The 
     for the file to embed; *Cancel* (or no place chosen) changes nothing. If the file cannot be put in the project file
     after all (the project file cannot be written), it is on the timeline all the same, linked, and a message says why.
     *New project* asks for a file by *Link and import*.
+  * **A MIDI file** (`.mid` or `.midi`) can be chosen in the same two items (*Video, sound, picture and MIDI files* in the list of kinds, and
+    *MIDI files* of its own). It is read by the program at once (ffmpeg is not needed), and **each of its tracks that has notes becomes a
+    MIDI clip of all of it, on a track of its own, at the current frame**, one above the other in the order the file has them (the track
+    that only has the tempo is left out); all of it is **one step of undo**. A file that is not music, or has no notes, is refused with the
+    reason and nothing changes. A MIDI clip has no sound of its own: **a synthesizer plays its notes** (see *Synthesizers and MIDI clips* in `plugins-and-trust.md`), and the
+    clip says *no synthesizer* in its label while none is on its road. It shows its notes inside it as a small piano roll (read-only: the notes
+    come from the file, and there is no note editor yet).
   * *Export* asks where to save the finished video (`.mp4`, `.mkv` or `.mov`) and shows its progress, with a
     Cancel button. If the project has effects that the program does not have (a project file brought them), it first says
     which, because the video would not have what they do, and asks whether to export anyway (*Export anyway* or *Cancel*).

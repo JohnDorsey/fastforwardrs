@@ -1,4 +1,4 @@
-# Engine phase 13: MIDI clips and synthesizer effects (design, draft 1, 2026-10-28)
+# Engine phase 13: MIDI clips and synthesizer effects (design, draft 1, 2026-10-28; built through 13.6, see the report)
 
 *Draft written before any code. Labels: [V] = I looked at the code or ran it; [B] = I believe it from reading or from memory of a standard; **Q1..Q4** = questions only the maintainer can answer (asked in the chat), each with the answer I would choose. Nothing in this file is built.*
 
